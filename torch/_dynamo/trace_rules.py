@@ -3365,7 +3365,6 @@ MOD_SKIPLIST = [
     "torch._functorch",
     "torch._guards",
     "torch._higher_order_ops.effects",
-    "torch._higher_order_ops.map",
     "torch._higher_order_ops.torchbind",
     "torch._higher_order_ops.wrap",
     "torch._inductor",
