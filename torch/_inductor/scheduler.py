@@ -28,7 +28,7 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
-from torch.fx.experimental.symbolic_shapes import free_symbols, free_unbacked_symbols
+from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
@@ -39,8 +39,8 @@ from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .exc import GPUTooOldForTriton, TritonMissing
+from .fx_utils import count_flops_fx, countable_fx
 from .ir import (
-    ComputedBuffer,
     get_device_type,
     GraphPartitionSignature,
     MultiOutput,
@@ -784,6 +784,22 @@ class BaseSchedulerNode:
         return buf_byte_accesses
 
     @cache_on_self
+    def estimate_flops(self) -> int | None:
+        if self.node is None:
+            return None
+        fx_node = self.node.get_origin_node()
+        if fx_node is None:
+            return None
+        if not countable_fx(fx_node):
+            return None
+
+        flops = count_flops_fx(fx_node)
+
+        resolved_flops = V.graph.sizevars.size_hints((flops,), fallback=0)[0]
+        counters["inductor"]["flop_count"] += resolved_flops
+        return resolved_flops
+
+    @cache_on_self
     def get_estimated_runtime(self) -> float:
         """
         Returns estimated op runtime in nanoseconds (ns)
@@ -823,57 +839,21 @@ class BaseSchedulerNode:
         except Exception:
             return 0
 
-        if isinstance(self, ExternKernelSchedulerNode):
-            assert isinstance(self.node, ir.ExternKernel), f"{type(self.node)=}"
-            op = kernel_name_to_op.get(
-                getattr(self.node, "python_kernel_name", ""), None
-            )
+        flops_est = self.estimate_flops()
 
-            # if there is a resolved op, dry-run using fake mode and record flop count
-            if op is not None:
-                from torch._subclasses.fake_tensor import FakeTensorMode
-                from torch.utils.flop_counter import FlopCounterMode
-
-                if any(
-                    len(free_unbacked_symbols(n.get_numel())) > 0
-                    for n in self.node.inputs
-                ):
-                    # Tensor has unbacked symints, we don't know how to estimate
-                    # runtime for that today
-                    return 0
-
-                with (
-                    FakeTensorMode() as fake_mode,
-                    FlopCounterMode(display=False) as flop_counter_mode,
-                    V.set_current_node(self.node.fx_node),
-                    V.set_fake_mode(fake_mode),
-                ):
-                    from .ir import ir_node_to_tensor
-
-                    fake_inputs = [
-                        ir_node_to_tensor(input, guard_shape=False)
-                        for input in self.node.inputs
-                    ]
-                    cls = self.node.__class__
-                    cls.process_kernel(op, *fake_inputs, **self.node.kwargs)
-
-                    # TODO(xmfan): find a better heuristic to model FLOPS/latency relationship
-                    factor = 1.0
-                    counted_flops = flop_counter_mode.get_total_flops()
-                    counted_bytes = self.get_read_write_buffers_sizes()
-                    compute_time = (factor * counted_flops / gpu_flops) * 1e9
-                    transfer_time = counted_bytes / gpu_memory_bandwidth
-
-                    # Return estimated runtime in nanoseconds
-                    return max(compute_time, transfer_time)
-
-        elif isinstance(self, FusedSchedulerNode) or isinstance(
-            self.node, ComputedBuffer
-        ):
-            # Return estimated runtime in nanoseconds (bytes / gbps)
+        if flops_est == 0 or flops_est is None:
+            # no flops estimate, so fall back to memory estimate
             return self.get_read_write_buffers_sizes() / gpu_memory_bandwidth
 
-        return 0
+        # TODO(xmfan): find a better heuristic to model FLOPS/latency relationship
+        factor = 1.0
+        counted_bytes = self.get_read_write_buffers_sizes()
+        counted_bytes = 0 if counted_bytes is None else counted_bytes
+        compute_time = (factor * flops_est / gpu_flops) * 1e9
+        transfer_time = counted_bytes / gpu_memory_bandwidth
+
+        # Return estimated runtime in nanoseconds
+        return max(compute_time, transfer_time)
 
     def get_template_node(self) -> Optional[ir.TemplateBuffer]:
         return None
@@ -985,17 +965,6 @@ def _prune_redundant_deps(
     if deps_to_prune:
         node.unmet_dependencies = node.unmet_dependencies - deps_to_prune
         node.set_read_writes(node.read_writes.remove_reads(deps_to_prune))
-
-
-# TODO(xmfan): reuse: an existing mapping for this if it exists, or formalize this into ir.py:ExternKernel
-kernel_name_to_op = {
-    "extern_kernels.convolution": torch.ops.aten.convolution,
-    "extern_kernels.mm": torch.ops.aten.mm,
-    "extern_kernels.bmm": torch.ops.aten.bmm,
-    "extern_kernels.addmm": torch.ops.aten.addmm,
-    "extern_kernels._scaled_mm": torch.ops.aten._scaled_mm,
-    "extern_kernels._scaled_grouped_mm": torch.ops.aten._scaled_grouped_mm,
-}
 
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
@@ -1361,6 +1330,24 @@ class FusedSchedulerNode(BaseSchedulerNode):
             assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
         nodes = list(itertools.chain(node1.get_nodes(), node2.get_nodes()))
         return cls(node1.scheduler, nodes)
+
+    @cache_on_self
+    def estimate_flops(self) -> int | None:
+        # don't increment counters in fused methods so we don't double count
+        fps = list(
+            filter(
+                None,
+                (
+                    node.estimate_flops()
+                    for node in self.get_nodes()
+                    if node.is_template() or node.is_extern()
+                ),
+            )
+        )
+        if len(fps) == 0:
+            return None
+        ret = sum(fps)
+        return ret
 
     def reorder_loops_by_dep_pair(
         self, self_dep: MemoryDep, other_dep: MemoryDep
@@ -1908,6 +1895,24 @@ class GroupedSchedulerNode(BaseSchedulerNode):
             result.extend(node.get_outputs())
         return result
 
+    @cache_on_self
+    def estimate_flops(self) -> int | None:
+        # don't increment counters in fused methods so we don't double count
+        fps = list(
+            filter(
+                None,
+                (
+                    node.estimate_flops()
+                    for node in self.get_nodes()
+                    if node.is_template() or node.is_extern()
+                ),
+            )
+        )
+        if len(fps) == 0:
+            return None
+        ret = sum(fps)
+        return ret
+
     def get_nodes(self) -> Sequence[BaseSchedulerNode]:
         return self.snodes
 
@@ -2298,6 +2303,13 @@ class Scheduler:
             if isinstance(val, sympy.Expr):
                 for fs in val.free_symbols:
                     unbacked_symbol_to_origin_node[fs] = None
+            elif isinstance(val, ir.TensorBox):
+                # We also need to add symbols from input size as well because
+                # AOTI doesn't lift the unbacked symints to inputs
+                sym_size = [s for s in val.get_size() if isinstance(s, sympy.Expr)]
+                for s in sym_size:
+                    for fs in s.free_symbols:
+                        unbacked_symbol_to_origin_node[fs] = None
 
         for node in self.nodes:
             log.debug("scheduling %s", node.node)
@@ -4223,8 +4235,17 @@ class Scheduler:
             read_writes = dependencies.ReadWrites.merge_list(
                 [node.read_writes for node in partition]
             )
+
+            # WeakDep is fake dependency on unused buffer. It should not appear
+            # in partition_input_names for inputs that are actually read or written.
             partition_input_names = (
-                OrderedSet([x.name for x in read_writes.reads | read_writes.writes])
+                OrderedSet(
+                    [
+                        x.name
+                        for x in read_writes.reads | read_writes.writes
+                        if not isinstance(x, WeakDep)
+                    ]
+                )
                 - output_names
             )
 
@@ -4294,17 +4315,19 @@ class Scheduler:
         change relative orders of two cudagraphable nodes, nor the
         relative order of two non_cudagraphable nodes.
         """
+        import heapq
+
         node_to_indegree: dict[BaseSchedulerNode, int] = dict()
-        cudagraphable_nodes: collections.deque[BaseSchedulerNode] = collections.deque()
-        non_cudagraphable_nodes: collections.deque[BaseSchedulerNode] = (
-            collections.deque()
-        )
+        cudagraphable_nodes: list[tuple[int, BaseSchedulerNode]] = []
+        non_cudagraphable_nodes: list[tuple[int, BaseSchedulerNode]] = []
+        node_to_index = {node: idx for idx, node in enumerate(nodes)}
 
         def insert_pending_nodes(node: BaseSchedulerNode) -> None:
+            node_with_index = (node_to_index[node], node)
             if self.should_partition(node):
-                non_cudagraphable_nodes.append(node)
+                heapq.heappush(non_cudagraphable_nodes, node_with_index)
             else:
-                cudagraphable_nodes.append(node)
+                heapq.heappush(cudagraphable_nodes, node_with_index)
 
         def update_indegree(node: BaseSchedulerNode) -> None:
             for succ_node in node.mpi_node.succ_nodes:
@@ -4324,12 +4347,12 @@ class Scheduler:
             non_cudagraphable_nodes or cudagraphable_nodes
         ):
             while non_cudagraphable_nodes:
-                node = non_cudagraphable_nodes.popleft()
+                _, node = heapq.heappop(non_cudagraphable_nodes)
                 schedule.append(node)
                 update_indegree(node)
 
             while cudagraphable_nodes:
-                node = cudagraphable_nodes.popleft()
+                _, node = heapq.heappop(cudagraphable_nodes)
                 schedule.append(node)
                 update_indegree(node)
 
