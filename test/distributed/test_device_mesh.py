@@ -5,7 +5,6 @@ import os
 import torch
 import torch.distributed._functional_collectives as funcol
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import (
     _get_default_group,
@@ -17,6 +16,7 @@ from torch.distributed.distributed_c10d import (
     new_group,
     ProcessGroup,
 )
+from torch.distributed.tensor import DTensor
 from torch.distributed.tensor._collective_utils import (
     mesh_broadcast,
     mesh_scatter,
