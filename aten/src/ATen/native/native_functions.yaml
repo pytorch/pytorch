@@ -3510,8 +3510,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: log_out
-    MPS: log_out_mps
+    CPU, CUDA, MPS: log_out
   tags: pointwise
 
 - func: log10(Tensor self) -> Tensor

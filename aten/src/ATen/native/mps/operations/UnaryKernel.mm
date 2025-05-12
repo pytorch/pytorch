@@ -3,7 +3,7 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
-
+#include <iostream>
 #include <fmt/format.h>
 
 namespace at::native {
@@ -50,6 +50,10 @@ static void exp2_kernel_mps(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "exp2");
 }
 
+static void log_kernel_mps(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "log");
+}
+
 static void sqrt_kernel_mps(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "sqrt");
 }
@@ -64,8 +68,9 @@ static void neg_kernel_mps(TensorIteratorBase& iter) {
 
 static void bitwise_not_kernel_mps(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "bitwise_not");
-}
+} // BOP
 
+REGISTER_DISPATCH(log_stub, log_kernel_mps);
 REGISTER_DISPATCH(exp_stub, exp_kernel);
 REGISTER_DISPATCH(erfinv_stub, erfinv_kernel);
 REGISTER_DISPATCH(sinc_stub, sinc_kernel);
