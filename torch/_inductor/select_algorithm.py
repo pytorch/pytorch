@@ -1884,151 +1884,6 @@ class AlgorithmSelectorCache(PersistentCache):
 
         inputs_key = create_inputs_key(input_nodes)
 
-        def precompile(choices) -> Callable[[], None]:
-            log.debug("Starting precompilation")
-
-            def no_op(*args, **kwargs):
-                return
-
-            if (
-                precompilation_timeout_seconds is None
-                or precompilation_timeout_seconds <= 0
-            ):
-                log.debug("Precompilation timeout is None or <= 0, returning no_op")
-                return no_op
-
-            num_workers = min(get_num_workers(), len(choices))
-
-            if num_workers <= 0:
-                return no_op
-
-            # https://github.com/python/cpython/issues/106905
-            if (
-                sys.version_info.major == 3
-                and sys.version_info.minor == 11
-                and sys.version_info.micro <= 8
-            ):
-                return no_op
-
-            # check local and global cache before precompiling
-            timings = self.lookup(
-                choices,
-                name,
-                inputs_key,
-                benchmark=None,
-            )
-
-            if timings and len(timings) == len(choices):
-                # compilation in precompile stage is much cheaper than that in
-                # autotuning stage
-                log.debug(
-                    "Found all %d timings in cache, returning no_op", len(timings)
-                )
-                return no_op
-
-            if config.search_autotune_cache and not (
-                config.max_autotune or config.max_autotune_gemm
-            ):
-                return no_op
-
-            precompile_key = create_precompile_key(name, inputs_key, choices)
-            if precompile_func := self.precompile_cache.get(precompile_key):
-                log.debug("Precompile function found in cache, returning it")
-                return precompile_func
-
-            log.info(
-                "Multithreaded precompilation for %d choices using %d worker threads",
-                len(choices),
-                num_workers,
-            )
-
-            # In rare circumstances, because python threads inherit global state,
-            # thread pool executor can race and leave stdout/stderr in a state
-            # different than the original values. we explicitly restore the state
-            # here to avoid this issue.
-
-            def precompile_with_captured_stdout(choice) -> tuple[None, int]:
-                log.debug("Precompiling choice with captured stdout: %s", choice)
-                start_ns = time.time_ns()
-                with restore_stdout_stderr():
-                    choice.precompile()
-                elapsed_ns = time.time_ns() - start_ns
-                # Return tuple as triton async compile (_worker_compile_triton)
-                # returns tuple[CachingAutotuner, int]
-                return None, elapsed_ns // 1000
-
-            def on_complete(future):
-                _, precompile_elapsed_us = future.result()
-                elapsed_seconds = precompile_elapsed_us / 1e6
-                elapsed_times[future] = elapsed_seconds
-                log.debug(
-                    "Precompilation complete for future: %s, elapsed time: %.02fs",
-                    future,
-                    elapsed_seconds,
-                )
-
-            executor = ThreadPoolExecutor(max_workers=num_workers)
-            async_compile = torch._inductor.async_compile.AsyncCompile()
-
-            futures: dict[concurrent.futures.Future[Any], ChoiceCaller] = {}
-            elapsed_times: dict[concurrent.futures.Future[Any], float] = {}
-
-            # Some choices only differ in runtime arguments, so we
-            # skip a choice if it has the same hash as a previously seen choice
-            seen_choices: OrderedSet[ChoiceCaller] = OrderedSet()
-            for c in choices:
-                # Skip choices which we have already issued a precompile
-                if c.hash_key() in seen_choices:
-                    log.debug("Skipping already seen choice: %s", c)
-                    continue
-                else:
-                    seen_choices.add(c.hash_key())
-
-                if hasattr(c, "precompile"):
-                    triton_cuda_choice = isinstance(
-                        c, TritonTemplateCaller
-                    ) and isinstance(c.bmreq, TritonGPUBenchmarkRequest)
-                    if triton_cuda_choice and async_compile.use_process_pool():
-                        with open(c.bmreq.module_path) as file:
-                            source_code = file.read()
-                        future = async_compile.triton(
-                            kernel_name=c.bmreq.kernel_name, source_code=source_code
-                        ).future
-                        log.debug("Submitted triton async compile for choice: %s", c)
-                    else:
-                        future = executor.submit(precompile_with_captured_stdout, c)
-                        log.debug("Submitted precompile for choice: %s", c)
-
-                    future.add_done_callback(on_complete)
-                    futures[future] = c
-
-            @functools.lru_cache(None)
-            @restore_stdout_stderr()
-            def wait_on_futures():
-                log.debug("Waiting on futures")
-                counters["inductor"]["select_algorithm_precompile"] += 1
-                for future in as_completed(
-                    futures,
-                    timeout=precompilation_timeout_seconds,
-                ):
-                    if e := future.exception():
-                        log.error(
-                            "Exception %s for benchmark choice %s", e, futures[future]
-                        )
-                    else:
-                        counters["inductor"]["select_algorithm_num_precompiles"] += 1
-                        log.info(
-                            "Precompiling benchmark choice %s took %.02fs",
-                            futures[future],
-                            elapsed_times[future],
-                        )
-
-                executor.shutdown(wait=True)
-
-            self.precompile_cache[precompile_key] = wait_on_futures
-
-            return wait_on_futures
-
         def autotune(choices):
             log.debug("Starting autotuning")
             with dynamo_timed(
@@ -2085,7 +1940,12 @@ class AlgorithmSelectorCache(PersistentCache):
 
             return timings
 
-        precompile_fn = precompile(choices)
+        precompile_fn = self.make_precompile_fn(
+            choices,
+            name,
+            inputs_key,
+            precompilation_timeout_seconds=precompilation_timeout_seconds,
+        )
 
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
 
@@ -2134,6 +1994,158 @@ class AlgorithmSelectorCache(PersistentCache):
         selected_choice = selected_key.output_node()
         log.debug("selected choice: %s", str(selected_choice))
         return selected_choice
+
+    def make_precompile_fn(
+        self,
+        choices,
+        name: str,
+        inputs_key: str,
+        precompilation_timeout_seconds: Optional[int] = 60 * 60,
+    ) -> Callable[[], None]:
+        """
+        Returns a function that precompiles the given choices.
+        """
+        log.debug("Starting precompilation")
+
+        def no_op(*args, **kwargs):
+            return
+
+        if (
+            precompilation_timeout_seconds is None
+            or precompilation_timeout_seconds <= 0
+        ):
+            log.debug("Precompilation timeout is None or <= 0, returning no_op")
+            return no_op
+
+        num_workers = min(get_num_workers(), len(choices))
+
+        if num_workers <= 0:
+            return no_op
+
+        # https://github.com/python/cpython/issues/106905
+        if (
+            sys.version_info.major == 3
+            and sys.version_info.minor == 11
+            and sys.version_info.micro <= 8
+        ):
+            return no_op
+
+        # check local and global cache before precompiling
+        timings = self.lookup(
+            choices,
+            name,
+            inputs_key,
+            benchmark=None,
+        )
+
+        if timings and len(timings) == len(choices):
+            # compilation in precompile stage is much cheaper than that in
+            # autotuning stage
+            log.debug("Found all %d timings in cache, returning no_op", len(timings))
+            return no_op
+
+        if config.search_autotune_cache and not (
+            config.max_autotune or config.max_autotune_gemm
+        ):
+            return no_op
+
+        precompile_key = create_precompile_key(name, inputs_key, choices)
+        if precompile_func := self.precompile_cache.get(precompile_key):
+            log.debug("Precompile function found in cache, returning it")
+            return precompile_func
+
+        log.info(
+            "Multithreaded precompilation for %d choices using %d worker threads",
+            len(choices),
+            num_workers,
+        )
+
+        # In rare circumstances, because python threads inherit global state,
+        # thread pool executor can race and leave stdout/stderr in a state
+        # different than the original values. we explicitly restore the state
+        # here to avoid this issue.
+
+        def precompile_with_captured_stdout(choice) -> tuple[None, int]:
+            log.debug("Precompiling choice with captured stdout: %s", choice)
+            start_ns = time.time_ns()
+            with restore_stdout_stderr():
+                choice.precompile()
+            elapsed_ns = time.time_ns() - start_ns
+            # Return tuple as triton async compile (_worker_compile_triton)
+            # returns tuple[CachingAutotuner, int]
+            return None, elapsed_ns // 1000
+
+        def on_complete(future):
+            _, precompile_elapsed_us = future.result()
+            elapsed_seconds = precompile_elapsed_us / 1e6
+            elapsed_times[future] = elapsed_seconds
+            log.debug(
+                "Precompilation complete for future: %s, elapsed time: %.02fs",
+                future,
+                elapsed_seconds,
+            )
+
+        executor = ThreadPoolExecutor(max_workers=num_workers)
+        async_compile = torch._inductor.async_compile.AsyncCompile()
+
+        futures: dict[concurrent.futures.Future[Any], ChoiceCaller] = {}
+        elapsed_times: dict[concurrent.futures.Future[Any], float] = {}
+
+        # Some choices only differ in runtime arguments, so we
+        # skip a choice if it has the same hash as a previously seen choice
+        seen_choices: OrderedSet[str] = OrderedSet()
+        for c in choices:
+            # Skip choices which we have already issued a precompile
+            if c.hash_key() in seen_choices:
+                log.debug("Skipping already seen choice: %s", c)
+                continue
+            else:
+                seen_choices.add(c.hash_key())
+
+            if hasattr(c, "precompile"):
+                triton_cuda_choice = isinstance(c, TritonTemplateCaller) and isinstance(
+                    c.bmreq, TritonGPUBenchmarkRequest
+                )
+                if triton_cuda_choice and async_compile.use_process_pool():
+                    with open(c.bmreq.module_path) as file:
+                        source_code = file.read()
+                    future = async_compile.triton(
+                        kernel_name=c.bmreq.kernel_name, source_code=source_code
+                    ).future
+                    log.debug("Submitted triton async compile for choice: %s", c)
+                else:
+                    future = executor.submit(precompile_with_captured_stdout, c)
+                    log.debug("Submitted precompile for choice: %s", c)
+
+                future.add_done_callback(on_complete)
+                futures[future] = c
+
+        @functools.lru_cache(None)
+        @restore_stdout_stderr()
+        def wait_on_futures():
+            log.debug("Waiting on futures")
+            counters["inductor"]["select_algorithm_precompile"] += 1
+            for future in as_completed(
+                futures,
+                timeout=precompilation_timeout_seconds,
+            ):
+                if e := future.exception():
+                    log.error(
+                        "Exception %s for benchmark choice %s", e, futures[future]
+                    )
+                else:
+                    counters["inductor"]["select_algorithm_num_precompiles"] += 1
+                    log.info(
+                        "Precompiling benchmark choice %s took %.02fs",
+                        futures[future],
+                        elapsed_times[future],
+                    )
+
+            executor.shutdown(wait=True)
+
+        self.precompile_cache[precompile_key] = wait_on_futures
+
+        return wait_on_futures
 
     @classmethod
     def get_inputs(
