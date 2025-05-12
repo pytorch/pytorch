@@ -110,7 +110,7 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
   you can always `uninstall` with `timeout` or in a loop if you're feeling
   lazy.)
 
-   ```bash
+  ```bash
   conda uninstall pytorch -y
   yes | pip uninstall torch
   ```
