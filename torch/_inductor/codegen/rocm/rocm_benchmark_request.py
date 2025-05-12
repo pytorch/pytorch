@@ -55,11 +55,14 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         log.debug("Done precompiling %s", self)
 
     def make_run_fn(
-        self, *input_tensors: torch.Tensor, out: torch.Tensor
+        self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
     ) -> Callable[[], None]:
         self.ensure_dll_loaded()
         self.update_workspace_size()
-        args = [c_void_p(tensor.data_ptr()) for tensor in list(input_tensors) + [out]]
+        args = [
+            c_void_p(tensor.data_ptr())
+            for tensor in list(input_tensors) + [output_tensor]
+        ]
         size_args = [c_int(arg) for arg in self.extra_args]
         log.debug(
             "make_run_fn: self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",
@@ -77,7 +80,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             self.workspace = torch.zeros(
                 (self.workspace_size + 7) // 8,
                 dtype=torch.float64,
-                device=out.device,
+                device=output_tensor.device,
             )
             workspace_ptr = c_void_p(self.workspace.data_ptr())
 
