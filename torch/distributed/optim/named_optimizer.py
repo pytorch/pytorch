@@ -192,6 +192,8 @@ class _NamedOptimizer(optim.Optimizer):
             By doing this, we can validate the optim ``state_dict`` to be loaded.
         """
         new_state_dict = self._optimizer.state_dict()
+        if not isinstance(state_dict, dict):
+            state_dict = dict(state_dict)
         state_dict = self._pre_load_state_dict(state_dict)
         state = state_dict["state"]
         new_state = new_state_dict["state"]
