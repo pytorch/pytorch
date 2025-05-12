@@ -602,9 +602,7 @@ class SetItemKeySource(ChainedSource):
         codegen.extend_output(create_call_function(2, False))
 
     def name(self):
-        # The list creation will be CSE'd by PyExprCSEPass
         # The dict gives a order which we can rely on
-        # return f"list(dict.keys(dict({self.base.name()})))[{self.index!r}]"
         return f"list(dict.fromkeys({self.base.name()}).keys())[{self.index!r}]"
 
     def is_dict_key(self):
