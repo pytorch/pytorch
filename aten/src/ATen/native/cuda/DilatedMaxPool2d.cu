@@ -146,7 +146,7 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
       if (kernel_h<=MAXh &&
           kernel_w<=MAXw &&
           channels<=MAXc*(blockDim.x*kernel_stride_C)) {
-        scalar_t val [MAXh][MAXw][MAXc] = {0};
+        scalar_t val [MAXh][MAXw][MAXc] = {{0}};
         for (int ih = 0; ih < MAXh; ih++) {
           int ih_ = ih*dilation_h+hstart;
           for (int iw = 0; iw < MAXw; iw++) {

@@ -61,12 +61,12 @@ class GraphRegionTrackerTests(TestCase):
             return z
 
         def fn(x, y):
-            o0 = inner_fn(x, y)
+            _o0 = inner_fn(x, y)
             o1 = torch.sin(y)
             o2 = inner_fn(x, o1)
             o3 = inner_fn(x, y)
             o4 = o3 * o3
-            return o2 * o4 + o0
+            return o2 * o4
 
         self.assertExpectedInline(
             self.get_result(
