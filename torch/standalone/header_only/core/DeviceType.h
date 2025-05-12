@@ -112,25 +112,35 @@ static_assert(
 //     device name. We could re-use the same mutex, but reading the atomic will
 //     be much faster.
 //
-// Use C10_EXPORT instead of C10_API to make sure the following global varibles
-// are defined as exported symbols. Otherwise, Windows build will complain that
-// the global variables can not be imported.
-inline C10_EXPORT std::atomic<bool> privateuse1_backend_name_set;
-inline C10_EXPORT std::string privateuse1_backend_name;
-inline C10_EXPORT std::mutex privateuse1_lock{};
-
-inline TORCH_API bool is_privateuse1_backend_registered() {
-  return privateuse1_backend_name_set.load(std::memory_order_acquire);
+// Note: Can not directly use inline to declar a global variable here,
+//       because it doesn't work for fbobjc build.
+inline std::atomic<bool>& privateuse1_backend_name_set() {
+  static std::atomic<bool> privateuse1_backend_name_set_(false);
+  return privateuse1_backend_name_set_;
 }
 
-inline TORCH_API void register_privateuse1_backend(
+inline std::string& privateuse1_backend_name() {
+  static std::string privateuse1_backend_name_;
+  return privateuse1_backend_name_;
+}
+
+inline std::mutex& privateuse1_lock() {
+  static std::mutex privateuse1_lock_;
+  return privateuse1_lock_;
+}
+
+inline bool is_privateuse1_backend_registered() {
+  return privateuse1_backend_name_set().load(std::memory_order_acquire);
+}
+
+inline void register_privateuse1_backend(
     const std::string& backend_name) {
-  std::lock_guard<std::mutex> guard(privateuse1_lock);
+  std::lock_guard<std::mutex> guard(privateuse1_lock());
   TORCH_CHECK(
       !is_privateuse1_backend_registered() ||
-          privateuse1_backend_name == backend_name,
+          privateuse1_backend_name() == backend_name,
       "torch.register_privateuse1_backend() has already been set! Current backend: ",
-      privateuse1_backend_name);
+      privateuse1_backend_name());
 
   static const std::array<std::string, 6> types = {
       "cpu", "cuda", "hip", "mps", "xpu", "mtia"};
@@ -139,19 +149,19 @@ inline TORCH_API void register_privateuse1_backend(
       "Cannot register privateuse1 backend with in-tree device name: ",
       backend_name);
 
-  privateuse1_backend_name = backend_name;
+  privateuse1_backend_name() = backend_name;
   // Invariant: once this flag is set, privateuse1_backend_name is NEVER written
   // to.
-  privateuse1_backend_name_set.store(true, std::memory_order_release);
+  privateuse1_backend_name_set().store(true, std::memory_order_release);
 }
 
-inline TORCH_API std::string get_privateuse1_backend(bool lower_case = true) {
+inline std::string get_privateuse1_backend(bool lower_case = true) {
   // Applying the same atomic read memory ordering logic as in Note [Memory
   // ordering on Python interpreter tag].
   // Guaranteed that if the flag is set, then privateuse1_backend_name has been
   // set, and will never be written to.
   std::string backend_name = is_privateuse1_backend_registered()
-      ? privateuse1_backend_name
+      ? privateuse1_backend_name()
       : "privateuseone";
   auto op_case = lower_case ? ::tolower : ::toupper;
   std::transform(
@@ -159,7 +169,7 @@ inline TORCH_API std::string get_privateuse1_backend(bool lower_case = true) {
   return backend_name;
 }
 
-inline TORCH_API std::string DeviceTypeName(
+inline std::string DeviceTypeName(
     DeviceType d,
     bool lower_case = false) {
   switch (d) {
@@ -228,7 +238,7 @@ inline TORCH_API std::string DeviceTypeName(
 // the caller is allowed to cast a possibly invalid int16_t to DeviceType and
 // then pass it to this function.  (I considered making this function take an
 // int16_t directly, but that just seemed weird.)
-inline TORCH_API bool isValidDeviceType(DeviceType d) {
+inline bool isValidDeviceType(DeviceType d) {
   switch (d) {
     case DeviceType::CPU:
     case DeviceType::CUDA:
@@ -257,7 +267,7 @@ inline TORCH_API bool isValidDeviceType(DeviceType d) {
   }
 }
 
-inline TORCH_API std::ostream& operator<<(
+inline std::ostream& operator<<(
     std::ostream& stream,
     DeviceType type) {
   stream << DeviceTypeName(type, /* lower case */ true);
