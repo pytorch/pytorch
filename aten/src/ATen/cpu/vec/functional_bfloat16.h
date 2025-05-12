@@ -25,12 +25,6 @@ template <typename scalar_t>
 using vec_scalar_t = typename VecScalarType<scalar_t>::type;
 
 // Vector conversion between float and bfloat16/half
-template <
-    typename scalar_t,
-    typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
-inline std::tuple<Vectorized<float>, Vectorized<float>> convert_to_float(
-    const Vectorized<scalar_t>&);
-
 template <>
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_to_float<
     BFloat16>(const Vectorized<BFloat16>& a) {
@@ -42,13 +36,6 @@ inline std::tuple<Vectorized<float>, Vectorized<float>> convert_to_float<Half>(
     const Vectorized<Half>& a) {
   return convert_half_float(a);
 }
-
-template <
-    typename scalar_t,
-    typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
-inline Vectorized<scalar_t> convert_from_float(
-    const Vectorized<float>&,
-    const Vectorized<float>&);
 
 template <>
 inline Vectorized<BFloat16> convert_from_float<BFloat16>(
