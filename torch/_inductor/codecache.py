@@ -98,6 +98,7 @@ from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .triton_bundler import TritonBundler
+from .virtualized import V
 
 
 if config.is_fbcode():
@@ -1603,6 +1604,12 @@ class AotCodeCompiler:
             extra=cpp_command,
             specified_dir=specified_output_path,
         )
+
+        # Log the AOTInductor wrapper and kernel code, if needed.
+        with tempfile.NamedTemporaryFile("w+") as t:
+            t.writelines((wrapper_code, "\n", kernel_code, "\n"))
+            t.flush()
+            V.debug.output_code(t.name, extension="cpp")
 
         if config.aot_inductor.package:
             generated_files.append(wrapper_path)
