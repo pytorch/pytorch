@@ -161,10 +161,85 @@ static inline uint8_t fp32_to_fp8e4m3_scalar(float val) {
   return static_cast<std::uint8_t>(_mm_cvtsi128_si32(o));
 }
 
+static inline void cvtfp8e5m2_fp32(const __m128i& a, __m512& o) {
+  __m256i a_256 = _mm256_castsi128_si256(a);
+  __m512i a_512 = _mm512_cvtepu8_epi16(a_256);
+  a_512 = _mm512_slli_epi16(a_512, 8);
+  a_256 = _mm512_castsi512_si256(a_512);
+  cvtfp16_fp32(a_256, o);
+}
+
+static inline __m128i cvtfp32_fp8e5m2(const __m512& src) {
+    constexpr uint32_t fp32_inf = UINT32_C(255) << 23;
+    constexpr uint32_t fp8_max = UINT32_C(143) << 23;
+    constexpr uint32_t denorm_mask = UINT32_C(134) << 23;
+
+    // Cvt to bits
+    __m512i input_bits = _mm512_castps_si512(src);
+    __m512i result = _mm512_setzero_si512();
+
+    // Get the sign
+    __m512i sign = _mm512_and_si512(input_bits, _mm512_set1_epi32(0x80000000));
+
+    // Get the unsigned input
+    input_bits = _mm512_xor_si512(input_bits, sign);
+
+    // Calculate the mask for inf, nan and denorm
+    __mmask16 greater_than_fp8_max = _mm512_cmpge_epi32_mask(input_bits, _mm512_set1_epi32(fp8_max));
+    __mmask16 greater_than_fp32_inf = _mm512_cmpgt_epi32_mask(input_bits, _mm512_set1_epi32(fp32_inf));
+    __mmask16 less_than_normal = _mm512_cmpgt_epi32_mask(_mm512_set1_epi32((UINT32_C(113) << 23)), input_bits);
+    __m512i temp_bits_for_denorm = _mm512_setzero_si512();
+    if (less_than_normal) {
+      __m512i denorm_mask_512i = _mm512_set1_epi32(denorm_mask);
+      temp_bits_for_denorm = _mm512_castps_si512(
+        _mm512_add_ps(_mm512_castsi512_ps(input_bits), _mm512_castsi512_ps(denorm_mask_512i))
+      );
+      temp_bits_for_denorm = _mm512_sub_epi32(temp_bits_for_denorm, denorm_mask_512i);
+    }
+
+    // Step 1: Norm Val
+    __m512i mant_odd_mask = _mm512_and_epi32(_mm512_srli_epi32(input_bits, 21), _mm512_set1_epi32(1));
+    input_bits = _mm512_add_epi32(input_bits, _mm512_set1_epi32(((uint32_t)(15 - 127) << 23) + 0xFFFFF));
+    input_bits = _mm512_add_epi32(input_bits, mant_odd_mask);
+    result = _mm512_srli_epi32(input_bits, 21);
+
+    // Step 2: INF and NAN
+    if (greater_than_fp8_max) {
+      result = _mm512_mask_mov_epi32(result, greater_than_fp8_max, _mm512_set1_epi8(0x7C));
+      if (greater_than_fp32_inf) {
+        result = _mm512_mask_mov_epi32(result, greater_than_fp32_inf, _mm512_set1_epi8(0x7F));
+      }
+    }
+
+    // Step 3: Denorm val
+    if (less_than_normal) {
+      result = _mm512_mask_mov_epi32(result, less_than_normal, temp_bits_for_denorm);
+    }
+
+    // Step 4: restore sign
+    result = _mm512_or_si512(result, _mm512_srli_epi32(sign, 24));
+
+    return _mm512_cvtepi32_epi8(result);
+}
+
+static inline float fp8e5m2_to_fp32_scalar(uint8_t val) {
+  __m512i v = _mm512_set1_epi8(val);
+  __m128i v_128 = _mm512_castsi512_si128(v);
+  __m512 o;
+  cvtfp8e5m2_fp32(v_128, o);
+  return _mm512_cvtss_f32(o);
+}
+
+static inline uint8_t fp32_to_fp8e5m2_scalar(float val) {
+  __m512 v = _mm512_set1_ps(val);
+  __m128i o = cvtfp32_fp8e5m2(v);
+  return static_cast<std::uint8_t>(_mm_cvtsi128_si32(o));
+}
+
 template <typename T>
 class Vectorizedf8 {
 static_assert(
-  std::integral_constant<bool, std::is_same_v<T, at::Float8_e4m3fn>>::value,
+  std::integral_constant<bool, std::is_same_v<T, at::Float8_e4m3fn> || std::is_same_v<T, at::Float8_e5m2>>::value,
   "Support only float8 e4m3.");
 private:
   __m512i values;
@@ -173,24 +248,42 @@ private:
     __m512 a0, a1, a2, a3;
     __m512 b0, b1, b2, b3;
     __m512 o0, o1, o2, o3;
-    cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(values, 0), a0);
-    cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(b.values, 0), b0);
-    cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(values, 1), a1);
-    cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(b.values, 1), b1);
-    cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(values, 2), a2);
-    cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(b.values, 2), b2);
-    cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(values, 3), a3);
-    cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(b.values, 3), b3);
+    if constexpr (std::is_same_v<T, c10::Float8_e4m3fn>) {
+      cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(values, 0), a0);
+      cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(b.values, 0), b0);
+      cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(values, 1), a1);
+      cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(b.values, 1), b1);
+      cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(values, 2), a2);
+      cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(b.values, 2), b2);
+      cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(values, 3), a3);
+      cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(b.values, 3), b3);
+    } else {
+      cvtfp8e5m2_fp32(_mm512_extracti32x4_epi32(values, 0), a0);
+      cvtfp8e5m2_fp32(_mm512_extracti32x4_epi32(b.values, 0), b0);
+      cvtfp8e5m2_fp32(_mm512_extracti32x4_epi32(values, 1), a1);
+      cvtfp8e5m2_fp32(_mm512_extracti32x4_epi32(b.values, 1), b1);
+      cvtfp8e5m2_fp32(_mm512_extracti32x4_epi32(values, 2), a2);
+      cvtfp8e5m2_fp32(_mm512_extracti32x4_epi32(b.values, 2), b2);
+      cvtfp8e5m2_fp32(_mm512_extracti32x4_epi32(values, 3), a3);
+      cvtfp8e5m2_fp32(_mm512_extracti32x4_epi32(b.values, 3), b3);
+    }
 
     o0 = op(a0, b0);
     o1 = op(a1, b1);
     o2 = op(a2, b2);
     o3 = op(a3, b3);
     __m128i o128_0, o128_1, o128_2, o128_3;
-    o128_0 = cvtfp32_fp8e4m3(o0);
-    o128_1 = cvtfp32_fp8e4m3(o1);
-    o128_2 = cvtfp32_fp8e4m3(o2);
-    o128_3 = cvtfp32_fp8e4m3(o3);
+    if constexpr (std::is_same_v<T, c10::Float8_e4m3fn>) {
+      o128_0 = cvtfp32_fp8e4m3(o0);
+      o128_1 = cvtfp32_fp8e4m3(o1);
+      o128_2 = cvtfp32_fp8e4m3(o2);
+      o128_3 = cvtfp32_fp8e4m3(o3);
+    } else {
+      o128_0 = cvtfp32_fp8e5m2(o0);
+      o128_1 = cvtfp32_fp8e5m2(o1);
+      o128_2 = cvtfp32_fp8e5m2(o2);
+      o128_3 = cvtfp32_fp8e5m2(o3);
+    }
 
     __m512i result = _mm512_setzero_si512();
     result = _mm512_inserti32x4(result, o128_0, 0);
@@ -315,29 +408,47 @@ public:
   Vectorized<Float8_e4m3fn> le(const Vectorized<Float8_e4m3fn>& other) const;
 };
 
-template<typename T, typename Op>
+template<typename T, typename Op, std::enable_if_t<std::is_same_v<T, c10::Float8_e4m3fn> || std::is_same_v<T, c10::Float8_e5m2>, int> =0>
 static inline Vectorized<T> binary_fp8_op_as_fp32(const Vectorized<T>& a, const Vectorized<T>& b, Op op) {
   __m512 a0, a1, a2, a3;
   __m512 b0, b1, b2, b3;
   __m512 o0, o1, o2, o3;
-  cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(a, 0), a0);
-  cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(b, 0), b0);
-  cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(a, 1), a1);
-  cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(b, 1), b1);
-  cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(a, 2), a2);
-  cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(b, 2), b2);
-  cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(a, 3), a3);
-  cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(b, 3), b3);
+  if constexpr (std::is_same_v<T, c10::Float8_e4m3fn>) {
+    cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(a, 0), a0);
+    cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(b, 0), b0);
+    cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(a, 1), a1);
+    cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(b, 1), b1);
+    cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(a, 2), a2);
+    cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(b, 2), b2);
+    cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(a, 3), a3);
+    cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(b, 3), b3);
+  } else {
+    cvtfp8e5m2_fp32(_mm512_extracti32x4_epi32(a, 0), a0);
+    cvtfp8e5m2_fp32(_mm512_extracti32x4_epi32(b, 0), b0);
+    cvtfp8e5m2_fp32(_mm512_extracti32x4_epi32(a, 1), a1);
+    cvtfp8e5m2_fp32(_mm512_extracti32x4_epi32(b, 1), b1);
+    cvtfp8e5m2_fp32(_mm512_extracti32x4_epi32(a, 2), a2);
+    cvtfp8e5m2_fp32(_mm512_extracti32x4_epi32(b, 2), b2);
+    cvtfp8e5m2_fp32(_mm512_extracti32x4_epi32(a, 3), a3);
+    cvtfp8e5m2_fp32(_mm512_extracti32x4_epi32(b, 3), b3);
+  }
   o0 = op(a0, b0);
   o1 = op(a1, b1);
   o2 = op(a2, b2);
   o3 = op(a3, b3);
 
   __m128i o128_0, o128_1, o128_2, o128_3;
-  o128_0 = cvtfp32_fp8e4m3(o0);
-  o128_1 = cvtfp32_fp8e4m3(o1);
-  o128_2 = cvtfp32_fp8e4m3(o2);
-  o128_3 = cvtfp32_fp8e4m3(o3);
+  if constexpr (std::is_same_v<T, c10::Float8_e4m3fn>) {
+    o128_0 = cvtfp32_fp8e4m3(o0);
+    o128_1 = cvtfp32_fp8e4m3(o1);
+    o128_2 = cvtfp32_fp8e4m3(o2);
+    o128_3 = cvtfp32_fp8e4m3(o3);
+  } else {
+    o128_0 = cvtfp32_fp8e5m2(o0);
+    o128_1 = cvtfp32_fp8e5m2(o1);
+    o128_2 = cvtfp32_fp8e5m2(o2);
+    o128_3 = cvtfp32_fp8e5m2(o3);
+  }
 
   __m512i result = _mm512_setzero_si512();
   result = _mm512_inserti32x4(result, o128_0, 0);
@@ -390,6 +501,65 @@ inline Vectorized<Float8_e4m3fn> Vectorized<Float8_e4m3fn>::lt(const Vectorized<
 
 inline Vectorized<Float8_e4m3fn> Vectorized<Float8_e4m3fn>::le(const Vectorized<Float8_e4m3fn>& other) const {
   return (*this <= other) & Vectorized<Float8_e4m3fn>(1.0f);
+}
+
+template <>
+class Vectorized<Float8_e5m2>: public Vectorizedf8<Float8_e5m2> {
+public:
+  using Vectorizedf8::Vectorizedf8;
+
+  using value_type = Float8_e5m2;
+
+  Vectorized<Float8_e5m2> eq(const Vectorized<Float8_e5m2>& other) const;
+  Vectorized<Float8_e5m2> ne(const Vectorized<Float8_e5m2>& other) const;
+  Vectorized<Float8_e5m2> gt(const Vectorized<Float8_e5m2>& other) const;
+  Vectorized<Float8_e5m2> ge(const Vectorized<Float8_e5m2>& other) const;
+  Vectorized<Float8_e5m2> lt(const Vectorized<Float8_e5m2>& other) const;
+  Vectorized<Float8_e5m2> le(const Vectorized<Float8_e5m2>& other) const;
+};
+
+Vectorized<Float8_e5m2> inline operator+(const Vectorized<Float8_e5m2>& a, const Vectorized<Float8_e5m2>& b) {
+  return binary_fp8_op_as_fp32(a, b, [](const __m512& x, const __m512& y) { return _mm512_add_ps(x, y); });
+}
+
+Vectorized<Float8_e5m2> inline operator-(const Vectorized<Float8_e5m2>& a, const Vectorized<Float8_e5m2>& b) {
+  return binary_fp8_op_as_fp32(a, b, [](const __m512& x, const __m512& y) { return _mm512_sub_ps(x, y); });
+}
+
+Vectorized<Float8_e5m2> inline operator*(const Vectorized<Float8_e5m2>& a, const Vectorized<Float8_e5m2>& b) {
+  return binary_fp8_op_as_fp32(a, b, [](const __m512& x, const __m512& y) { return _mm512_mul_ps(x, y); });
+}
+
+Vectorized<Float8_e5m2> inline operator/(const Vectorized<Float8_e5m2>& a, const Vectorized<Float8_e5m2>& b) {
+  return binary_fp8_op_as_fp32(a, b, [](const __m512& x, const __m512& y) { return _mm512_div_ps(x, y); });
+}
+
+Vectorized<Float8_e5m2> inline operator&(const Vectorized<Float8_e5m2>& a, const Vectorized<Float8_e5m2>& b) {
+  return _mm512_and_si512(a, b);
+}
+
+inline Vectorized<Float8_e5m2> Vectorized<Float8_e5m2>::eq(const Vectorized<Float8_e5m2>& other) const {
+  return (*this == other) & Vectorized<Float8_e5m2>(1.0f);
+}
+
+inline Vectorized<Float8_e5m2> Vectorized<Float8_e5m2>::ne(const Vectorized<Float8_e5m2>& other) const {
+  return (*this == other) & Vectorized<Float8_e5m2>(1.0f);
+}
+
+inline Vectorized<Float8_e5m2> Vectorized<Float8_e5m2>::gt(const Vectorized<Float8_e5m2>& other) const {
+  return (*this > other) & Vectorized<Float8_e5m2>(1.0f);
+}
+
+inline Vectorized<Float8_e5m2> Vectorized<Float8_e5m2>::ge(const Vectorized<Float8_e5m2>& other) const {
+  return (*this >= other) & Vectorized<Float8_e5m2>(1.0f);
+}
+
+inline Vectorized<Float8_e5m2> Vectorized<Float8_e5m2>::lt(const Vectorized<Float8_e5m2>& other) const {
+  return (*this < other) & Vectorized<Float8_e5m2>(1.0f);
+}
+
+inline Vectorized<Float8_e5m2> Vectorized<Float8_e5m2>::le(const Vectorized<Float8_e5m2>& other) const {
+  return (*this <= other) & Vectorized<Float8_e5m2>(1.0f);
 }
 
 #endif
