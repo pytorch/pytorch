@@ -3217,11 +3217,11 @@ def strip_local_scope(s: str) -> str:
     return re.sub(pattern, r"\1", s)
 
 
-def _format_reasons_for_shape_guards(compile_id: CompileId, reasons: list[str], scope: dict[str, object]) -> str:
+def _format_reasons_for_shape_guards(code_reasons: list[str], fail_reasons: list[str], compile_id: CompileId, scope: dict[str, object]) -> str:
     has_parameter = False
     shape_sources = OrderedSet()
     pattern = r"tensor '(.*)' size mismatch at index .* expected (\d+), actual (\d+).*"
-    for reason in reasons:
+    for reason in fail_reasons:
         if (match := re.search(pattern, reason)) is not None:
             name, size_orig, size_new = match.groups()
             tensor = eval(name, scope)
@@ -3231,7 +3231,11 @@ def _format_reasons_for_shape_guards(compile_id: CompileId, reasons: list[str], 
                     has_parameter = True
                 shape_sources.add(name)
 
-    reason_str = strip_local_scope(f"{compile_id}: " + "; ".join(reasons[:1]))
+    if is_recompiles_verbose_enabled():
+        reason_str = strip_local_scope(f"{compile_id}: " + "; ".join(code_reasons + fail_reasons))
+    else:
+        reason_str = strip_local_scope(f"{compile_id}: {code_reasons[0] if code_reasons else fail_reasons[0]}")
+
     if shape_sources:
         reason_str += "\n"
         if len(shape_sources) > 1:
@@ -3256,57 +3260,34 @@ def get_guard_fail_reason_helper(
     """
     Return the reason why `guard_manager` failed.
     Updates `guard_failures` with the generated reason.
-    Only the first failed check of guard_manager is reported.
+    Only the first failed check of guard_manager is reported,
+    unless TORCH_LOGS="recompiles_verbose" is specified.
     """
     scope = {"L": f_locals, "G": guard_manager.global_scope["G"]}
     scope.update(guard_manager.closure_vars)
-    reasons: list[str] = []
+    code_reasons: list[str] = []
 
     no_tensor_aliasing_check_failed = False
 
+    failure_reasons: list[str] = []
     verbose_code_parts: list[str] = []
     guard_debug_info = guard_manager.check_verbose(f_locals)  # type: ignore[attr-defined]
     # For test_export_with_map_cond, the check_verbose fail even without the
     # C++ guard manager. We need to fix the issue to remove the comment.
     # assert not guard_debug_info.result
 
-    """
-    before:
-    verbose_code_parts:
-    - if string reason, len(1). maybe no_tensor_aliasing_check
-    - if code parts, list.
-        -> eval to see what was the issue
-    if recompiles_verbose:
-    - return multiple failing eval guards
-    
-    after:
-    verbose_code_parts & failure_reasons
-    - if verbose_code_parts:
-        -> do same eval, return 1st reason or more (if verbose)
-        -> append failure reasons too (?)
-        -> go through reasons, suggest whitelist
-    - if empty:
-        -> return failure reasons
-        -> suggest whitelist
-    """
-
     if not guard_debug_info.result:
         verbose_code_parts = guard_debug_info.verbose_code_parts
-        print(verbose_code_parts)
-        breakpoint()
-        # verbose_code_parts is either the actual reason (e.g. in case of
-        # TENSOR_MATCH) or it could be a list of verbose_code_part that we
+        failure_reasons = guard_debug_info.failure_reasons
+        # verbose_code_parts is a list of verbose_code_part that we
         # passed to the leaf guard at construction time. If its a list, we
         # walk through this list and find the guard that failed. This is
         # very important for symbolic shape guards which are currently
         # installed as a lambda guard and can encompass a long list of code_parts.
+        # failure_reasons is a list of generated strings explaining the failure reasons.
 
-        if len(verbose_code_parts) == 1:
-            if any("Duplicate tensor found" in part for part in verbose_code_parts):
-                no_tensor_aliasing_check_failed = True
-            else:
-                reasons = verbose_code_parts
-                verbose_code_parts = []
+        if any("Duplicate tensor found" in reason for reason in failure_reasons):
+            no_tensor_aliasing_check_failed = True
 
     if no_tensor_aliasing_check_failed:
         reasons = recompilation_reason_for_no_tensor_aliasing_guard(
@@ -3330,11 +3311,9 @@ def get_guard_fail_reason_helper(
             if isinstance(fail_reason, bool) and not fail_reason:
                 fail_reason = part
             if isinstance(fail_reason, str):
-                reasons.append(fail_reason)
-                if not is_recompiles_verbose_enabled():
-                    break
+                code_reasons.append(fail_reason)
 
-    return _format_reasons_for_shape_guards(compile_id, reasons, scope)
+    return _format_reasons_for_shape_guards(code_reasons, failure_reasons, compile_id, scope)
 
 
 def get_guard_fail_reason(
