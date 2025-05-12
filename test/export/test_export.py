@@ -10248,7 +10248,7 @@ graph():
     def test_partial_patched_forward(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
-                return x + 2 
+                return x + 2
 
         def fancy_forward(x, y):
             return x + 2 + y
