@@ -70,7 +70,7 @@ inline bool is_thp_alloc(size_t nbytes) {
 }
 
 #elif !defined(__ANDROID__) && !defined(_MSC_VER)
-constexpr size_t c10_compute_alignment([[maybe_unused]] size_t nbytes) {
+constexpr size_t c10_compute_alignment(size_t /*nbytes*/) {
   return gAlignment;
 }
 

@@ -28,6 +28,8 @@ from torch.testing._internal.common_distributed import (
     init_multigpu_helper,
     MultiProcContinousTest,
     requires_nccl,
+    requires_nccl_version,
+    sm_is_or_higher_than,
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
@@ -243,6 +245,24 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
             with self.assertRaisesRegex(ValueError, "Cannot use " + err + " with NCCL"):
                 allreduce(tensors, op)
 
+    @requires_nccl_version((2, 24), "Need NCCL 2.24+ for Float8")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_allreduce_float8(self):
+        device = torch.device("cuda", self.rank_to_GPU[self.rank][0])
+        if not sm_is_or_higher_than(device, 9, 0):
+            self.skipTest("Float8 requires sm >= 90")
+
+        numel = 1024
+        tensor = torch.ones(numel, dtype=torch.float32, device=device).to(
+            torch.float8_e4m3fn
+        )
+        dist.all_reduce(tensor)
+
+        expected = (
+            torch.empty_like(tensor).fill_(self.world_size).to(torch.float8_e4m3fn)
+        )
+        torch.testing.assert_close(tensor, expected)
+
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_alltoall_ops_with_cudafree_race(self):
@@ -271,28 +291,32 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_allreduce_in_cudagraph(self):
-        pg = self.pg
         local_device_idx = self.rank_to_GPU[self.rank][0]
-        with torch.cuda.device(local_device_idx):
-            xs = [torch.FloatTensor([1]).cuda(local_device_idx)]
+        # This device setting is needed by the CUDAGraph API to understand on
+        # which device to find the current stream
+        torch.cuda.set_device(local_device_idx)
+        xs = torch.FloatTensor([1]).cuda(local_device_idx)
 
-            # single warmup
-            pg.allreduce(xs).wait()
-            # 1 + 1 + ...  = world_size
-            expected_val = self.world_size
-            self.assertEqual(xs[0].item(), expected_val)
+        # single warmup
+        c10d.all_reduce(xs, group=self.pg)
+        # 1 + 1 + ...  = world_size
+        expected_val = self.world_size
+        self.assertEqual(xs.item(), expected_val)
 
+        # Use a loop to test re-capture
+        for _ in range(2):
             graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(graph):
-                pg.allreduce(xs).wait()
+                c10d.all_reduce(xs, group=self.pg)
+                c10d.broadcast(xs, src=0, group=self.pg)
             # Graph capture should not change the tensor value
-            self.assertEqual(xs[0].item(), expected_val)
+            self.assertEqual(xs.item(), expected_val)
 
             graph.replay()
             expected_val *= self.world_size
             graph.replay()
             expected_val *= self.world_size
-            self.assertEqual(xs[0].item(), expected_val)
+            self.assertEqual(xs.item(), expected_val)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -891,6 +915,27 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
 
         # Verification
         self.assertEqual(output_t[0], self.rank * self.world_size)
+
+    @requires_nccl_version((2, 24), "Need NCCL 2.24+ for Float8")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_reduce_scatter_float8(self):
+        device = torch.device("cuda", self.rank_to_GPU[self.rank][0])
+        if not sm_is_or_higher_than(device, 9, 0):
+            self.skipTest("Float8 requires sm >= 90")
+
+        numel = 1024
+        output_tensor = torch.zeros(numel, dtype=torch.float32, device=device).to(
+            torch.float8_e5m2
+        )
+        input_tensor = torch.ones(
+            self.world_size * numel, dtype=torch.float32, device=device
+        ).to(torch.float8_e5m2)
+        dist.reduce_scatter_tensor(output_tensor, input_tensor)
+
+        expected = (
+            torch.empty_like(output_tensor).fill_(self.world_size).to(torch.float8_e5m2)
+        )
+        torch.testing.assert_close(output_tensor, expected)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
