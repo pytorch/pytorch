@@ -1487,6 +1487,7 @@ class LeafGuard {
       PyObject* value) { // borrowed ref
     bool result = check_nopybind(value);
     if (!result) {
+      std::cout << "leafguard failed: " << py::str(value) << std::endl;
       return GuardDebugInfo(result, _verbose_code_parts, 0);
     }
     return GuardDebugInfo(true, 0);
@@ -2621,8 +2622,11 @@ class GuardManager {
       num_guards_executed++;
       if (!debug_info.result) {
         guards_failed = true;
-        if (debug_info.verbose_code_parts && !verbose_code_parts) {
-          verbose_code_parts = verbose_code_parts;
+        std::cout << "verbose_code_parts: " << debug_info.verbose_code_parts.size() << std::endl;
+        std::cout << "failure_reasons: " << debug_info.failure_reasons.size() << std::endl;
+        if (!debug_info.verbose_code_parts.empty() && verbose_code_parts.empty()) {
+          std::cout << "found verbose_code_parts: " << debug_info.verbose_code_parts.size() << std::endl;
+          verbose_code_parts = debug_info.verbose_code_parts;
         }
         if (debug_info.failure_reasons) {
           guard_fail_reasons += debug_info.failure_reasons;
@@ -2630,6 +2634,8 @@ class GuardManager {
       }
     }
     if (guards_failed) {
+      std::cout << "(guards_failed) verbose_code_parts: " << verbose_code_parts.size() << std::endl;
+      std::cout << "(guards_failed) failure_reasons: " << guard_fail_reasons.size() << std::endl;
       return GuardDebugInfo(
         false, verbose_code_parts, guard_fail_reasons, num_guards_executed);
     }
@@ -2650,13 +2656,17 @@ class GuardManager {
       num_guards_executed += debug_info.num_guards_executed;
       if (!debug_info.result) {
         guards_failed = true;
-        if (debug_info.verbose_code_parts.size() > 0) {
+        std::cout << "verbose_code_parts: " << debug_info.verbose_code_parts.size() << std::endl;
+        std::cout << "failure_reasons: " << debug_info.failure_reasons.size() << std::endl;
+        if (!debug_info.verbose_code_parts.empty() && verbose_code_parts.empty()) {
+          std::cout << "found verbose_code_parts: " << debug_info.verbose_code_parts.size() << ", " << verbose_code_parts.size() << std::endl;
           verbose_code_parts = debug_info.verbose_code_parts;
         }
         guard_fail_reasons += debug_info.failure_reasons;
       }
     }
     if (guards_failed) {
+      std::cout << "guard_failed: " << verbose_code_parts.size() << ", " << guard_fail_reasons.size() << std::endl;
       return GuardDebugInfo(
         false, verbose_code_parts, guard_fail_reasons, num_guards_executed);
     }

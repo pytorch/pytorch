@@ -3292,6 +3292,7 @@ def get_guard_fail_reason_helper(
 
     if not guard_debug_info.result:
         verbose_code_parts = guard_debug_info.verbose_code_parts
+        print(verbose_code_parts)
         breakpoint()
         # verbose_code_parts is either the actual reason (e.g. in case of
         # TENSOR_MATCH) or it could be a list of verbose_code_part that we
