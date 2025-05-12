@@ -192,20 +192,24 @@ class TestHfStorage(TestCase):
 
     def test_read_metadata_when_metadata_file_does_not_exist(self) -> None:
         mock_module = MagicMock()
-        sys.modules["safetensors.torch"] = mock_module
         sys.modules["huggingface_hub"] = mock_module
+
         with tempfile.TemporaryDirectory() as path:
             reader = _HuggingFaceStorageReader(path=path)
             reader.fs = FileSystem()
             # there is one safetensor file, but no metadata file,
             # so we create metadata from the safetensor file
-            file_name = "test.safetensors"
-            open(os.path.join(path, file_name), "w").close()
-
             keys = ["tensor_0", "tensor_1"]
-            mock_module.safe_open.return_value.__enter__.return_value.keys.return_value = (
-                keys
-            )
+            file_name = "test.safetensors"
+            with open(os.path.join(path, file_name), "wb") as f:
+                # write metadata the same way it would be in safetensors file
+                metadata_contents = json.dumps(
+                    {"tensor_0": "value_0", "tensor_1": "value_1"}
+                )
+                metadata_bytes = metadata_contents.encode("utf-8")
+
+                f.write(len(metadata_bytes).to_bytes(8, byteorder="little"))
+                f.write(metadata_bytes)
 
             metadata = reader.read_metadata()
 

@@ -1,3 +1,27 @@
+[project]
+name = "torch"
+requires-python = ">=3.9"
+license = {text = "BSD-3-Clause"}
+dynamic = [
+  "authors",
+  "classifiers",
+  "entry-points",
+  "dependencies",
+  "description",
+  "keywords",
+  "optional-dependencies",
+  "readme",
+  "scripts",
+  "version",
+]
+
+[project.urls]
+Homepage = "https://pytorch.org/"
+Documentation = "https://pytorch.org/docs/"
+Source = "https://github.com/pytorch/pytorch"
+Forum = "https://discuss.pytorch.org/"
+
+
 [build-system]
 requires = [
     # After 75.8.2 dropped dep disttools API. Please fix
@@ -18,8 +42,6 @@ build-backend = "setuptools.build_meta:__legacy__"
 
 [tool.black]
 line-length = 88
-target-version = ["py38"]
-
 
 [tool.isort]
 src_paths = ["caffe2", "torch", "torchgen", "functorch", "test"]
@@ -42,7 +64,6 @@ standard_library = ["typing_extensions"]
 
 
 [tool.ruff]
-target-version = "py39"
 line-length = 88
 src = ["caffe2", "torch", "torchgen", "functorch", "test"]
 
