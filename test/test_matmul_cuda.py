@@ -24,6 +24,7 @@ from torch.testing._internal.common_cuda import (
     SM89OrLater,
     SM90OrLater,
     xfailIfSM100OrLater,
+    xfailIfSM120OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
@@ -267,8 +268,9 @@ class TestMatmulCuda(TestCase):
             out_ref = torch.mm(a, b.t())
             out_ref.backward(gO)
             self.assertEqual(out, out_ref)
-            self.assertEqual(agrad, a.grad)
-            self.assertEqual(bgrad, b.grad)
+            if agrad is not None:
+                self.assertEqual(agrad, a.grad)
+                self.assertEqual(bgrad, b.grad)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM100OrLater
@@ -337,22 +339,28 @@ class TestMatmulCuda(TestCase):
         self.assertTrue(a_contig.is_contiguous() is not strided)
         b_contig = b if b_row_major else b.transpose(-2, -1)
         self.assertTrue(b_contig.is_contiguous() is not strided)
-        offs = torch.arange(m, n_groups * m + 1, m, device="cuda", dtype=torch.int32)
-
-        out = torch._grouped_mm(a, b.transpose(-2, -1), offs=offs,
-                                out_dtype=torch.bfloat16)
-        gO = torch.rand_like(out)
-        out.backward(gO)
-        offs_cpu = offs.cpu()
-        alist, agradlist, gOlist, outlist = [], [], [], []
-        start = 0
-        for i in range(n_groups):
-            alist.append(a[start:offs_cpu[i]])
-            agradlist.append(a.grad[start:offs_cpu[i]])
-            outlist.append(out[start:offs_cpu[i]])
-            gOlist.append(gO[start:offs_cpu[i]])
-            start = offs_cpu[i]
-        self.grouped_mm_helper(alist, b, gOlist, agradlist, b.grad, outlist)
+        for check_zero_size in (False, True):
+            a.grad = None
+            b.grad = None
+            offs = torch.arange(m, n_groups * m + 1, m, device="cuda", dtype=torch.int32)
+            if check_zero_size:
+                offs[0] = offs[1]
+            out = torch._grouped_mm(a, b.transpose(-2, -1), offs=offs,
+                                    out_dtype=torch.bfloat16)
+            gO = torch.rand_like(out)
+            if not check_zero_size:
+                out.backward(gO)
+            offs_cpu = offs.cpu()
+            alist, agradlist, gOlist, outlist = [], [], [], []
+            bgradlist = [None] * n_groups if check_zero_size else b.grad
+            start = 0
+            for i in range(n_groups):
+                alist.append(a[start:offs_cpu[i]])
+                agradlist.append(None if check_zero_size else a.grad[start:offs_cpu[i]])
+                outlist.append(out[start:offs_cpu[i]])
+                gOlist.append(gO[start:offs_cpu[i]])
+                start = offs_cpu[i]
+            self.grouped_mm_helper(alist, b, gOlist, agradlist, bgradlist, outlist)
 
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
@@ -417,21 +425,26 @@ class TestMatmulCuda(TestCase):
         self.assertTrue(a_contig.is_contiguous() is not strided)
         b_contig = b if b_row_major else b.transpose(-2, -1)
         self.assertTrue(b_contig.is_contiguous() is not strided)
-        offs = torch.arange(n, n_groups * n + 1, n, device="cuda", dtype=torch.int32)
-        out = torch._grouped_mm(a, b.transpose(-2, -1), offs=offs,
-                                out_dtype=torch.bfloat16)
-        gO = torch.rand_like(out)
-        out.backward(gO)
-        offs_cpu = offs.cpu()
-        blist, outlist, bgradlist, gOlist = [], [], [], []
-        start = 0
-        for i in range(n_groups):
-            blist.append(b[start:offs_cpu[i]])
-            bgradlist.append(b.grad[start:offs_cpu[i]])
-            outlist.append(out[:, start:offs_cpu[i]])
-            gOlist.append(gO[:, start:offs_cpu[i]])
-            start = offs_cpu[i]
-        self.grouped_mm_helper(a, blist, gOlist, a.grad, bgradlist, outlist)
+        for check_zero_size in (False, True):
+            offs = torch.arange(n, n_groups * n + 1, n, device="cuda", dtype=torch.int32)
+            if check_zero_size:
+                offs[0] = offs[1]
+            out = torch._grouped_mm(a, b.transpose(-2, -1), offs=offs,
+                                    out_dtype=torch.bfloat16)
+            gO = torch.rand_like(out)
+            if not check_zero_size:
+                out.backward(gO)
+            offs_cpu = offs.cpu()
+            blist, outlist, bgradlist, gOlist = [], [], [], []
+            agradlist = [None] * n_groups if check_zero_size else a.grad
+            start = 0
+            for i in range(n_groups):
+                blist.append(b[start:offs_cpu[i]])
+                bgradlist.append(b.grad[start:offs_cpu[i]])
+                outlist.append(out[:, start:offs_cpu[i]])
+                gOlist.append(gO[:, start:offs_cpu[i]])
+                start = offs_cpu[i]
+            self.grouped_mm_helper(a, blist, gOlist, agradlist, bgradlist, outlist)
 
 
     @onlyCUDA
@@ -930,6 +943,7 @@ class TestFP8Matmul(TestCase):
 
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
+    @onlyCUDA
     def test_float8_bias(self, device) -> None:
         if device != "cpu" and torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
@@ -947,6 +961,7 @@ class TestFP8Matmul(TestCase):
         difference = torch.abs(out_fp32 - outb_fp32)
         self.assertEqual(difference, torch.tensor(4.0, device=device).expand_as(out_fp32))
 
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("bias", [True, False])
     def test_non_divisible_leading_dim(self, device, bias: bool) -> None:
@@ -959,6 +974,7 @@ class TestFP8Matmul(TestCase):
             input_bias = torch.rand((16,), device=device).to(torch.half)
         _ = torch._scaled_mm(x, y, scale_a, scale_b, bias=input_bias)
 
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_bias_relu_edgecase(self, device) -> None:
         (k, l, m) = (16, 48, 32)
@@ -971,6 +987,7 @@ class TestFP8Matmul(TestCase):
         outb_fp32 = outb_fp8.to(torch.float32)
         self.assertEqual(outb_fp32, torch.tensor(-3.0, device=device).expand_as(outb_fp32))
 
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float32_output_errors_with_bias(self, device) -> None:
         (k, l, m) = (16, 48, 32)
@@ -985,6 +1002,7 @@ class TestFP8Matmul(TestCase):
             lambda: torch._scaled_mm(x, y, scale_a, scale_b, bias=bias, out_dtype=torch.float32),
         )
 
+    @onlyCUDA
     @unittest.skipIf(PLATFORM_SUPPORTS_FP8 or not torch.cuda.is_available(), f8_msg)
     def test_error_message_fp8_pre_sm89(self, device) -> None:
         (k, l, m) = (16, 48, 32)
@@ -1012,8 +1030,10 @@ class TestFP8Matmul(TestCase):
         out_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b, use_fast_accum=True)
         self.assertEqual(out_fp8, out_fp8_s)
 
+    @onlyCUDA
+    @xfailIfSM120OrLater
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89+ specific")
+    @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("use_fast_accum", [True, False])
     def test_float8_rowwise_scaling_sanity(self, device, use_fast_accum: bool) -> None:
         M, K, N = (1024, 512, 2048)
@@ -1039,6 +1059,7 @@ class TestFP8Matmul(TestCase):
             out_fp8.to(torch.float32), torch.full((M, N), K * (fill_value**2), device=device)
         )
 
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     def test_float8_error_messages(self, device) -> None:
         M, K, N = (1024, 512, 2048)
@@ -1117,8 +1138,9 @@ class TestFP8Matmul(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
+    @xfailIfSM120OrLater
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89+ specific")
+    @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("base_dtype", [torch.bfloat16])
     def test_scaled_mm_vs_emulated_row_wise(self, base_dtype):
         torch.manual_seed(42)
@@ -1474,7 +1496,7 @@ class TestFP8Matmul(TestCase):
             sqnr = compute_error(C_ref, C)
             assert sqnr.item() > approx_match_sqnr_target
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     @parametrize("recipe", ["mxfp8", "nvfp4"])
     def test_blockwise_mxfp8_nvfp4_error_messages(self, device, recipe) -> None:
         M, K, N = (1024, 512, 2048)
@@ -1601,24 +1623,27 @@ class TestFP8Matmul(TestCase):
         b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
         self.assertTrue(a.is_contiguous() is not strided)
         self.assertTrue(b.is_contiguous() is not strided)
-        offs = torch.arange(m, n_groups * m + 1, m, device="cuda", dtype=torch.int32)
-        scale_a = torch.arange(n_groups * m, device="cuda", dtype=torch.float32)
-        scale_b = torch.ones(n_groups * n, device="cuda", dtype=torch.float32).view(n_groups, n)
+        for check_zero_size in (True, False):
+            offs = torch.arange(m, n_groups * m + 1, m, device="cuda", dtype=torch.int32)
+            if check_zero_size:
+                offs[0] = offs[1]
+            scale_a = torch.arange(n_groups * m, device="cuda", dtype=torch.float32)
+            scale_b = torch.ones(n_groups * n, device="cuda", dtype=torch.float32).view(n_groups, n)
 
-        f = torch._scaled_grouped_mm
-        f = torch.compile(f) if use_torch_compile else f
-        out = f(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
-                out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
+            f = torch._scaled_grouped_mm
+            f = torch.compile(f, dynamic=False) if use_torch_compile else f
+            out = f(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
+                    out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
 
-        offs_cpu = offs.cpu()
-        alist, ascalelist, outlist = [], [], []
-        start = 0
-        for i in range(n_groups):
-            alist.append(a[start:offs_cpu[i]])
-            ascalelist.append(scale_a[start:offs_cpu[i]])
-            outlist.append(out[start:offs_cpu[i]])
-            start = offs_cpu[i]
-        self.scaled_grouped_mm_helper(alist, b, ascalelist, scale_b, outlist, fast_accum)
+            offs_cpu = offs.cpu()
+            alist, ascalelist, outlist = [], [], []
+            start = 0
+            for i in range(n_groups):
+                alist.append(a[start:offs_cpu[i]])
+                ascalelist.append(scale_a[start:offs_cpu[i]])
+                outlist.append(out[start:offs_cpu[i]])
+                start = offs_cpu[i]
+            self.scaled_grouped_mm_helper(alist, b, ascalelist, scale_b, outlist, fast_accum)
 
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
@@ -1662,21 +1687,24 @@ class TestFP8Matmul(TestCase):
         self.assertTrue(b.is_contiguous() is not strided)
         scale_a = torch.arange(n_groups * m, device="cuda", dtype=torch.float32).view(n_groups, m)
         scale_b = torch.arange(n_groups * n, device="cuda", dtype=torch.float32)
-        offs = torch.arange(n, n_groups * n + 1, n, device="cuda", dtype=torch.int32)
+        for check_zero_size in (True, False):
+            offs = torch.arange(n, n_groups * n + 1, n, device="cuda", dtype=torch.int32)
+            if check_zero_size:
+                offs[0] = offs[1]
 
-        f = torch._scaled_grouped_mm
-        f = torch.compile(f) if use_torch_compile else f
-        out = f(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
-                out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
-        offs_cpu = offs.cpu()
-        blist, bscalelist, outlist = [], [], []
-        start = 0
-        for i in range(n_groups):
-            blist.append(b[start:offs_cpu[i]])
-            bscalelist.append(scale_b[start:offs_cpu[i]])
-            outlist.append(out[:, start:offs_cpu[i]])
-            start = offs_cpu[i]
-        self.scaled_grouped_mm_helper(a, blist, scale_a, bscalelist, outlist, fast_accum)
+            f = torch._scaled_grouped_mm
+            f = torch.compile(f) if use_torch_compile else f
+            out = f(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
+                    out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
+            offs_cpu = offs.cpu()
+            blist, bscalelist, outlist = [], [], []
+            start = 0
+            for i in range(n_groups):
+                blist.append(b[start:offs_cpu[i]])
+                bscalelist.append(scale_b[start:offs_cpu[i]])
+                outlist.append(out[:, start:offs_cpu[i]])
+                start = offs_cpu[i]
+            self.scaled_grouped_mm_helper(a, blist, scale_a, bscalelist, outlist, fast_accum)
 
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
@@ -1859,7 +1887,7 @@ class TestMixedDtypesLinearCuda(TestCase):
 
 instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu")
 instantiate_device_type_tests(TestMixedDtypesLinearCuda, globals(), except_for="cpu")
-instantiate_device_type_tests(TestFP8Matmul, globals())
+instantiate_device_type_tests(TestFP8Matmul, globals(), except_for="cpu")
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
