@@ -112,7 +112,7 @@ except ModuleNotFoundError:
 try:
     import torch._logging
     import torch._numpy as tnp
-    from torch._guards import detect_fake_mode  # noqa: F401n
+    from torch._guards import detect_fake_mode  # noqa: F401
     from torch._logging import LazyString
 
     from . import config
