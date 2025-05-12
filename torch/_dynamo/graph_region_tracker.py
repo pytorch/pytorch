@@ -151,9 +151,6 @@ class BackwardBfsArgIter:
     def create(origin: Node) -> "BackwardBfsArgIter":
         it = BackwardBfsArgIter(origin)
         it.add_children(origin)
-        # pop the origin node, since it is the origin of
-        # the region and does not need to be considered for addition
-        assert it.next()
         return it
 
     def next(self) -> Optional[Node]:
@@ -168,10 +165,16 @@ class BackwardBfsArgIter:
         return self._cur
 
     def add_children(self, node: Node) -> None:
-        flat_args = _get_flat_args_unique(node, {})
+        arg: Any
+        flat_args, _ = tree_flatten(node.args)
         for arg in flat_args:
             if isinstance(arg, Node):
                 self._append(arg)
+
+        flat_kwargs, _ = tree_flatten(node.kwargs)
+        for kwarg in flat_kwargs:
+            if isinstance(kwarg, Node):
+                self._append(kwarg)
 
     def _append(self, arg: Node) -> None:
         if self._cur is None:
@@ -325,38 +328,6 @@ class GraphRegionTracker:
         return f"GraphRegionTracker(hash_to_duplicates={self.hash_to_duplicates}, node_to_duplicates={self.node_to_duplicates})"
 
 
-class RegionWrapper:
-    """Holds state for regions e.g. ancestors and new candidate nodes for consideration"""
-
-    def __init__(
-        self, region: Region, node_to_recursive_ancestors: dict[Node, set[Node]]
-    ) -> None:
-        assert len(region) == 1, "all regions should start with one node"
-        node = region[0]
-        self.node_to_recursive_ancestors = node_to_recursive_ancestors
-        self.iter = BackwardBfsArgIter.create(node)
-        self.nodes_unique = OrderedSet([node])
-        self.ancestors = set(node_to_recursive_ancestors[node])
-        self.region = region
-
-    def next_candidate(self) -> Optional[Node]:
-        return self.iter.next()
-
-    def will_inclusion_create_cycle(self, node: Node) -> bool:
-        external_users = [user for user in node.users if user not in self.nodes_unique]
-        for user in external_users:
-            if user in self.ancestors:
-                return True
-
-        return False
-
-    def add(self, node: Node) -> None:
-        self.nodes_unique.add(node)
-        self.region.append(node)
-        self.iter.add_children(node)
-        self.ancestors.update(self.node_to_recursive_ancestors[node])
-
-
 def fully_expand_region_group(
     regions: list[Region],
     seen_nodes: set[Node],
@@ -368,12 +339,20 @@ def fully_expand_region_group(
 
     # All regions should start with 1 node
     assert all(len(region) == 1 for region in regions)
-    region_wrappers = [
-        RegionWrapper(region, node_to_recursive_ancestors) for region in regions
-    ]
+    region_iters = []
+    for region in regions:
+        (origin,) = region  # Only works for 1 element sets
+        region_iters.append(BackwardBfsArgIter.create(origin))
 
-    nodes_to_add = OrderedSet[Node]()
-    current_node = region_wrappers[0].next_candidate()
+    nodes_to_add: list[Node] = []
+
+    # we already have the origin node in each region
+    for region_it in region_iters:
+        node = region_it.next()
+        assert node
+        region_it.add_children(node)
+
+    current_node = region_iters[0].next()
 
     # No children
     if current_node is None:
@@ -383,51 +362,46 @@ def fully_expand_region_group(
     # regions are only expanded if the node to add is valid
     # for ALL regions
     while current_node:
-        add_to_all_regions = not region_wrappers[0].will_inclusion_create_cycle(
-            current_node
+        add_node = not _will_create_cycle(
+            current_node, regions[0], node_to_recursive_ancestors
         )
         nodes_to_add.clear()
-        nodes_to_add.add(current_node)
-        for region_wrapper in region_wrappers[1:]:
-            candidate = region_wrapper.next_candidate()
+        nodes_to_add.append(current_node)
+        nodes_to_add_set = set(nodes_to_add)
+        for ind, region_it in enumerate(region_iters[1:]):
+            ind += 1  # compensate for the 0th region
+            node = region_it.next()
 
             debug_log("--------------------")
-            debug_log(
-                "considering candidate: %s, cur_node: %s", candidate, current_node
-            )
+            debug_log("considering adding: %s, cur_node: %s", node, current_node)
+            debug_log("previously claimed nodes: %s", node in seen_nodes)
+            if node:
+                debug_log("is_identical: %s", is_identical_fn(node, current_node))
+                add_node &= (
+                    node not in seen_nodes
+                    and node not in nodes_to_add_set
+                    and node.op != "placeholder"
+                    and is_identical_fn(node, current_node)
+                    and not _will_create_cycle(
+                        node, regions[ind], node_to_recursive_ancestors
+                    )
+                )
+                nodes_to_add.append(node)
+                nodes_to_add_set.add(node)
+            else:
+                add_node = False
 
-            if not candidate or not add_to_all_regions:
-                add_to_all_regions = False
-                continue
-
-            debug_log(
-                "candidate in previously claimed nodes?: %s", candidate in seen_nodes
-            )
-            debug_log("is_identical: %s", is_identical_fn(candidate, current_node))
-
-            add_to_all_regions &= (
-                candidate not in seen_nodes
-                and candidate not in nodes_to_add
-                and candidate.op != "placeholder"
-                and is_identical_fn(candidate, current_node)
-                and not region_wrapper.will_inclusion_create_cycle(candidate)
-            )
-            nodes_to_add.add(candidate)
-
-            debug_log(f"add_to_all_regions: {add_to_all_regions}")
             debug_log("--------------------")
 
-        if add_to_all_regions:
-            assert len(region_wrappers) == len(nodes_to_add), (
-                "Numer of nodes to add must equal the number of regions"
-            )
-            for region_wrapper, node in zip(region_wrappers, nodes_to_add):
-                region_wrapper.add(node)
+        if add_node:
+            for region, region_it, node in zip(regions, region_iters, nodes_to_add):
+                region.append(node)
                 debug_log("adding %s's children", node)
                 debug_log("%s %s", node.args, list(node.kwargs.items()))
+                region_it.add_children(node)
                 seen_nodes.add(node)
 
-        current_node = region_wrappers[0].next_candidate()
+        current_node = region_iters[0].next()
 
     # Ensure regions are sorted in topological order
     for region in regions:
@@ -450,3 +424,20 @@ def _populate_recursive_ancestor_map(graph: torch.fx.Graph) -> dict[Node, set[No
                 )
                 node_to_recursive_ancestors[node].add(arg)
     return node_to_recursive_ancestors
+
+
+def _will_create_cycle(
+    node_to_add: Node,
+    region: Region,
+    node_to_recursive_ancestors: dict[Node, set[Node]],
+) -> bool:
+    region_set: set[Node] = set(region)
+    region_ancestors: set[Node] = set(
+        tree_flatten([list(node_to_recursive_ancestors[node]) for node in region])[0]
+    )
+    external_users = [user for user in node_to_add.users if user not in region_set]
+    for user in external_users:
+        if user in region_ancestors:
+            return True
+
+    return False

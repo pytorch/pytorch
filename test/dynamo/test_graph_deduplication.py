@@ -1025,12 +1025,12 @@ def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
     o1 = x0_1.view((10, 10));  x0_1 = None
     add_ = l_x_.add_(l_x_);  add_ = None
     add_2 = o0 + o1;  o0 = o1 = None
-    invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_)
+    invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', (l_x_, l_y_))
     mul_ = l_y_.mul_(l_y_);  mul_ = None
     getitem = invoke_subgraph[0];  invoke_subgraph = None
     sum_5 = getitem.sum();  getitem = None
     add_3 = add_2 + sum_5;  add_2 = sum_5 = None
-    invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_);  subgraph_0 = l_x_ = l_y_ = None
+    invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', (l_x_, l_y_));  subgraph_0 = l_x_ = l_y_ = None
     getitem_1 = invoke_subgraph_1[0];  invoke_subgraph_1 = None
     sum_6 = getitem_1.sum();  getitem_1 = None
     add_4 = add_3 + sum_6;  add_3 = sum_6 = None
@@ -1063,11 +1063,11 @@ def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
     mul_ = l_y_.mul_(l_y_);  mul_ = None
     add_2 = o0 + o1;  o0 = o1 = None
     add_ = l_x_.add_(l_x_);  add_ = None
-    invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_)
+    invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', (l_x_, l_y_))
     getitem = invoke_subgraph[0];  invoke_subgraph = None
     sum_5 = getitem.sum();  getitem = None
     add_3 = add_2 + sum_5;  add_2 = sum_5 = None
-    invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_);  subgraph_0 = l_x_ = l_y_ = None
+    invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', (l_x_, l_y_));  subgraph_0 = l_x_ = l_y_ = None
     getitem_1 = invoke_subgraph_1[0];  invoke_subgraph_1 = None
     sum_6 = getitem_1.sum();  getitem_1 = None
     add_4 = add_3 + sum_6;  add_3 = sum_6 = None
@@ -1093,12 +1093,12 @@ def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
     o1 = x0_1.view((10, 10));  x0_1 = None
     add_2 = o0 + o1;  o0 = o1 = None
     add_ = l_x_.add_(l_x_);  add_ = None
-    invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_)
+    invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', (l_x_, l_y_))
     mul_ = l_y_.mul_(l_y_);  mul_ = None
     getitem = invoke_subgraph[0];  invoke_subgraph = None
     sum_5 = getitem.sum();  getitem = None
     add_3 = add_2 + sum_5;  add_2 = sum_5 = None
-    invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_);  subgraph_0 = l_x_ = l_y_ = None
+    invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', (l_x_, l_y_));  subgraph_0 = l_x_ = l_y_ = None
     getitem_1 = invoke_subgraph_1[0];  invoke_subgraph_1 = None
     sum_6 = getitem_1.sum();  getitem_1 = None
     add_4 = add_3 + sum_6;  add_3 = sum_6 = None
