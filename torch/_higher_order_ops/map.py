@@ -6,7 +6,6 @@ from typing_extensions import TypeVarTuple
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._dispatch.python import suspend_functionalization
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
@@ -16,22 +15,17 @@ from torch._higher_order_ops.utils import (
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
-    make_fx,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
 
 from .utils import (
-    _from_fun,
     _stack_pytree,
     _unstack_pytree,
-    clone_outputs_aliasing_inputs,
     create_bw_fn,
     materialize_as_graph,
-    prepare_fw_with_masks,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
     split_into_chunks,
@@ -120,7 +114,7 @@ def map(
             #             f"Got types {[type(out) for out in pytree.tree_leaves(outs)]}."
             #         )
             # return outs
-            
+
             return f(xs, *args)
 
         inner_f = functools.partial(
@@ -135,6 +129,7 @@ def map(
     from torch._higher_order_ops.utils import _maybe_compile_and_run_fn
 
     return _maybe_compile_and_run_fn(run_flattened_map, f, flat_xs, flat_args)
+
 
 class MapAutogradOp(torch.autograd.Function):
     @staticmethod
@@ -237,12 +232,12 @@ def map_dense(f, xs, pos_args):
     pytrees = [f(*inp, *pos_args) for inp in _unstack_pytree(xs)]
     outs_flatten = pytree.tree_leaves(pytrees)
     if any(
-            not isinstance(out, torch.Tensor) for out in outs_flatten if out is not None
-        ):
-            raise RuntimeError(
-                "Expect outputs of map only contains tensors or None. "
-                f"Got types {[type(out) for out in outs_flatten]}."
-            )
+        not isinstance(out, torch.Tensor) for out in outs_flatten if out is not None
+    ):
+        raise RuntimeError(
+            "Expect outputs of map only contains tensors or None. "
+            f"Got types {[type(out) for out in outs_flatten]}."
+        )
     return _stack_pytree(pytrees)
 
 
