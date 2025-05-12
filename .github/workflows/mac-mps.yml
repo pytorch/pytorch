@@ -36,7 +36,7 @@ jobs:
 
   macos-py3-arm64-mps-test:
     name: macos-py3-arm64-mps
-    uses: ./.github/workflows/_mac-test-mps.yml
+    uses: ./.github/workflows/_mac-test.yml
     needs: macos-py3-arm64-build
     with:
       sync-tag: macos-py3-arm64-mps-test
