@@ -572,7 +572,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   // }
 
   // Then define for each sparse dim the number of reps for each nnz index/value
-  // due to broadcasting. Repetitions do not take into accout the current value
+  // due to broadcasting. Repetitions do not take into account the current value
   // of nnz - this will be taken care of later {
   auto nnz_repeats = c10::DimVector(res_sparse_dim);
   nnz_repeats.back() = res_sparse_dim_broadcast_mask.back();
@@ -3366,7 +3366,7 @@ static std::vector<Tensor> _pad_chunk(
     std::vector<int64_t> view_sizes(
         tensor_size.begin(), tensor_size.begin() + dim);
     view_sizes.insert(view_sizes.end(), {num_chunks, -1});
-    padded_tensors.push_back(padded_tensor.view(view_sizes));
+    padded_tensors.push_back(padded_tensor.reshape(view_sizes));
   }
   return padded_tensors;
 }
@@ -3601,7 +3601,7 @@ Tensor& transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
   // in-place operations. For other sparse formats, the in-place
   // transpose would not be possible without shuffling the specified
   // values. So we don't support this as it would defeat the purpose
-  // of in-place opreations of being memory-efficient.
+  // of in-place operations of being memory-efficient.
   if (self.is_sparse()) {
     return sparse_transpose_(self, dim0, dim1);
   }
@@ -4201,8 +4201,7 @@ static inline void handle_unflatten_exception(
     const std::runtime_error& e,
     const Tensor& self,
     int64_t dim,
-    SymIntArrayRef sizes,
-    std::optional<DimnameList> names) {
+    SymIntArrayRef sizes) {
   if (!strstr(e.what(), "is invalid for input of size")) {
     TORCH_CHECK(false, "unflatten got an unexpected error:\n", e.what());
   }
@@ -4256,7 +4255,7 @@ static Tensor unflatten_impl(
     // at::infer_size would throw std::runtime_error for invalid size,
     // catch the runtime_error and display the error message in a more
     // user-friendly way for both tensors and named tensors
-    handle_unflatten_exception(e, self, dim, sizes, names);
+    handle_unflatten_exception(e, self, dim, sizes);
   }
 
   SymDimVector shape(self.sym_sizes().begin(), self.sym_sizes().end());

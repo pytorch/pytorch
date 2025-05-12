@@ -25,7 +25,17 @@ StableIValue from(T val) {
   static_assert(
       sizeof(T) <= sizeof(StableIValue),
       "StableLibrary stack does not support parameter types larger than 64 bits.");
-  return *reinterpret_cast<StableIValue*>(&val);
+  static_assert(std::is_trivially_copyable_v<T>);
+  // Initialization should be cheap enough; let's give people well-specified
+  // reproducible behavior.
+  StableIValue result = 0;
+  // NOTE [-Wclass-memaccess ]: reinterpret_cast to suppress
+  // overzealous -Wclass-memaccess. (see
+  // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=107361) We have a
+  // static_assert above that T is trivially copyable, which should be
+  // enough.
+  std::memcpy(&result, reinterpret_cast<void*>(&val), sizeof(val));
+  return result;
 }
 
 // Specialization for std::nullopt_t
@@ -76,7 +86,19 @@ template <
     typename T,
     std::enable_if_t<!detail::is_optional<T>::value, bool> = true>
 T to(StableIValue val) {
-  return *reinterpret_cast<T*>(&val);
+  static_assert(std::is_trivially_copyable_v<T>);
+  // T may not have a default constructor. (For example, it might be
+  // c10::Device.) However, std::memcpy implicitly creates a T at the
+  // destination. So, we can use a union to work around this lack of
+  // default constructor.
+  union Result {
+    Result() {}
+    T t;
+  };
+  Result result;
+  // See NOTE[ -Wclass-memaccess ] above.
+  std::memcpy(reinterpret_cast<void*>(&result.t), &val, sizeof(result));
+  return result.t;
 }
 
 template <

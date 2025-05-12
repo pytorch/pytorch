@@ -100,7 +100,10 @@ from ..source import (
     GetItemSource,
     GradSource,
     is_constant_source,
+    is_from_global_source,
+    is_from_nonlocal_source,
     is_from_optimizer_source,
+    is_from_unspecialized_nn_module_source,
     ListGetItemSource,
     LocalSource,
     NumpyTensorSource,
@@ -154,6 +157,7 @@ from .base import (
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
+    DynamoConfigPatchVariable,
     EventVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
@@ -551,9 +555,9 @@ class VariableBuilder:
             source_key = k
 
             source_value = GetItemSource(self.get_source(), source_key)
-            value = LazyVariableTracker.create(v, source_value)
+            res_value = LazyVariableTracker.create(v, source_value)
 
-            return key, value
+            return key, res_value
 
         items = dict(build_key_value(k, v) for k, v in value.items())
 
@@ -593,6 +597,8 @@ class VariableBuilder:
     def _wrap(self, value):
         # import here to avoid circular dependencies
         from torch.utils._triton import has_triton, has_triton_tma
+
+        from ..decorators import DynamoConfigPatchProxy
 
         if has_triton():
             from triton.runtime.autotuner import Autotuner
@@ -669,7 +675,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
 
-            # For all_const, we dont have to guard on anything yet. We guard on
+            # For all_const, we don't have to guard on anything yet. We guard on
             # keys lazily by adding a dict_getitem entry for each accessed key.
             # For cases where we need to guard on all keys, we lazily put guards
             # during the dict call_method (check dicts.py)
@@ -690,22 +696,22 @@ class VariableBuilder:
                 # So, instead we guard on the key order. While guarding on key
                 # order, we just save the indices and use it to access keys and
                 # values. Indices are cheap to save.
-                self.tx.output.guard_on_key_order.add(self.source.name())
+                self.tx.output.guard_on_key_order.add(self.source)
 
             # We need all the keys to be hashable. We do this within the
             # _HashableTracker class in dicts.py
             def build_key_value(i, k, v):
+                base = self.get_source()
                 if all_const:
                     key = ConstantVariable.create(k)
                     source_key = k
                 else:
-                    source_key = ConstDictKeySource(self.get_source(), i)
+                    source_key = ConstDictKeySource(base, i)
                     key = LazyVariableTracker.create(k, source_key)
+                source_value = DictGetItemSource(base, source_key)
+                res_value = LazyVariableTracker.create(v, source_value)
 
-                source_value = DictGetItemSource(self.get_source(), source_key)
-                value = LazyVariableTracker.create(v, source_value)
-
-                return key, value
+                return key, res_value
 
             # Ensure that we call dict.keys and not value.keys (which can call
             # overridden keys method). In the C++ guards, we relied on
@@ -911,6 +917,8 @@ class VariableBuilder:
                     {},
                 )
             )
+        elif isinstance(value, DynamoConfigPatchProxy):
+            return DynamoConfigPatchVariable(value.changes)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
@@ -1329,18 +1337,19 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
             # Guard on the key order
-            self.tx.output.guard_on_key_order.add(self.source.name())
+            self.tx.output.guard_on_key_order.add(self.source)
 
             # We need all the keys to be hashable. We do this within the
             # _HashableTracker class in dicts.py
             def build_key_value(i, k, v):
-                source_key = ConstDictKeySource(self.get_source(), i)
+                base = self.get_source()
+                source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
 
-                source_value = DictGetItemSource(self.get_source(), source_key)
-                value = LazyVariableTracker.create(v, source_value)
+                source_value = DictGetItemSource(base, source_key)
+                res_value = LazyVariableTracker.create(v, source_value)
 
-                return key, value
+                return key, res_value
 
             # Ensure that we call dict.keys and not value.keys (which can call
             # overridden keys method). In the C++ guards, we relied on
@@ -1447,6 +1456,15 @@ class VariableBuilder:
         return self.tx.output.side_effects.track_object_existing(value, result)
 
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
+        for item in value:
+            if item is value:
+                unimplemented_v2(
+                    gb_type="list elements are pointing to the list itself",
+                    context="",
+                    explanation="Dynamo does not support lists whose items reference to itself",
+                    hints=["Avoid using self referential list"],
+                )
+
         if config.specialize_int and type(value) is torch.Size:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value)
@@ -1718,14 +1736,19 @@ class VariableBuilder:
             )
 
     def wrap_literal(self, value):
-        if not config.specialize_int and type(value) is int:
-            # unspecializing int by default, but still
-            # specialize for the following conditions
-            if is_int_specialization_case(value, self.source):
-                self.install_guards(GuardBuilder.CONSTANT_MATCH)
-                return ConstantVariable.create(value=value, source=self.source)
-            else:
-                return self.wrap_symint(value)
+        if type(value) is int:
+            # allowlist has higher precedence over specialization control.
+            if is_dynamic_source(self.source.name()):
+                return self.wrap_symint(value, True)
+
+            if not config.specialize_int:
+                # unspecializing int by default, but still
+                # specialize for the following conditions
+                if is_int_specialization_case(value, self.source):
+                    self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                    return ConstantVariable.create(value=value, source=self.source)
+
+            return self.wrap_symint(value)
         elif not config.specialize_float and type(value) is float:
             return self.wrap_symfloat(value)
         else:
@@ -1764,15 +1787,26 @@ class VariableBuilder:
             self.mark_static_input(value, guard=is_parameter_freezing())
             is_static_input = True
 
+        # Install any tensors which are "free" variables; that is:
+        # 1. Globals
+        # 2. NonLocals
+        # 3. tensors that are attributes of nn module
+        should_install_free_tensor = config.install_free_tensors and (
+            is_from_global_source(source)
+            or is_from_nonlocal_source(source)
+            or is_from_unspecialized_nn_module_source(source)
+        )
+
         make_graph_attribute = is_static_input and (
             not config.inline_inbuilt_nn_modules
             or is_parameter_freezing()
             or torch._dynamo.config.prepare_freezing
         )
 
-        if (
-            source.guard_source().is_specialized_nn_module() or make_graph_attribute
-        ) and not source.guard_source().is_fsdp_module():
+        if should_install_free_tensor or (
+            (source.guard_source().is_specialized_nn_module() or make_graph_attribute)
+            and not source.guard_source().is_fsdp_module()
+        ):
             self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
                 value, self.name, source=source
@@ -2052,7 +2086,7 @@ class VariableBuilder:
 
         return numpy_ndarray_variable
 
-    def wrap_symint(self, value):
+    def wrap_symint(self, value, is_forced_allow_list_dynamic=False):
         assert type(value) is int
 
         if self.name in self.tx.output.unspec_variable_map:
@@ -2096,7 +2130,7 @@ class VariableBuilder:
             if isinstance(base_source, ChainedSource):
                 base_source = base_source.get_base()
 
-            if self.source.name() in get_dynamic_sources():
+            if is_forced_allow_list_dynamic:
                 log.debug("%s marked dynamic via source whitelist", self.source.name())
                 dynamic_dim = DimDynamic.DYNAMIC
             elif (
@@ -2382,9 +2416,8 @@ def _dataclasses_fields_lambda(obj):
     for field in dataclasses.fields(value):
         source = None
         if obj.source:
-            source = DictGetItemSource(
-                AttrSource(obj.source, "__dataclass_fields__"), field.name
-            )
+            base_src = AttrSource(obj.source, "__dataclass_fields__")
+            source = DictGetItemSource(base_src, field.name)
         items.append(UserDefinedObjectVariable(field, source=source))
     return TupleVariable(items)
 
@@ -2833,18 +2866,40 @@ def get_automatic_dynamic_shapes_mark_as():
 
 
 _DYNAMIC_SOURCES: Optional[set[str]] = None
+_DYNAMIC_SOURCES_CONFIG_HASH: Optional[int] = None
 
 
 def get_dynamic_sources() -> set[str]:
-    global _DYNAMIC_SOURCES
-    if _DYNAMIC_SOURCES is not None:
+    global _DYNAMIC_SOURCES, _DYNAMIC_SOURCES_CONFIG_HASH
+
+    current_hash = hash(torch.compiler.config.dynamic_sources)
+
+    # If we have already calculated the sources and the config hasn't changed, return cached result
+    if _DYNAMIC_SOURCES is not None and _DYNAMIC_SOURCES_CONFIG_HASH == current_hash:
         return _DYNAMIC_SOURCES
 
-    _DYNAMIC_SOURCES = set(
-        torch.compiler.config.dynamic_sources.replace(" ", "").split(",")
-    )
+    # Config has changed or first time, (re)calculate the sources
+    _DYNAMIC_SOURCES = {
+        s
+        for s in torch.compiler.config.dynamic_sources.replace(" ", "").split(",")
+        if s
+    }
+    _DYNAMIC_SOURCES_CONFIG_HASH = current_hash
 
     return _DYNAMIC_SOURCES
+
+
+def is_dynamic_source(source_name: str) -> bool:
+    dynamic_sources = get_dynamic_sources()
+    for pattern in dynamic_sources:
+        if pattern == source_name or re.match(pattern, source_name):
+            log.debug(
+                "%s was marked dynamic due to dynamic source allowlist pattern: %s",
+                source_name,
+                pattern,
+            )
+            return True
+    return False
 
 
 # Tracks the sources of all fake tensors we wrap in Dynamo.
@@ -2881,7 +2936,6 @@ def _automatic_dynamic(
         )
 
     name = source.name()
-    dynamic_sources = get_dynamic_sources()
     prior_policy = tx.output.tracing_context.tensor_to_context.get(e, None)
     shape_env_to_source_to_symbol_cache = (
         prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else None
@@ -2920,7 +2974,7 @@ def _automatic_dynamic(
             inner_contexts=inner_contexts,
         )
 
-    if static_shapes and name not in dynamic_sources:
+    if static_shapes and not is_dynamic_source(name):
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
@@ -3051,7 +3105,7 @@ def _automatic_dynamic(
             config.automatic_dynamic_shapes and frame_state_entry.is_stride_dynamic(i)
         )
 
-        if name in dynamic_sources:
+        if is_dynamic_source(name):
             log.debug("%s marked dynamic via source whitelist", name)
             automatic_dynamic_size = True
             automatic_dynamic_stride = True
@@ -3324,6 +3378,12 @@ class SourcelessBuilder:
             )
         elif isinstance(value, types.GenericAlias):
             return TypingVariable(value)
+        elif is_namedtuple(value):
+            output = [
+                SourcelessBuilder.create(tx, getattr(value, name))
+                for name in namedtuple_fields(type(value))
+            ]
+            return NamedTupleVariable(output, tuple_cls=type(value))
         unimplemented_v2(
             gb_type="Unexpected type in sourceless builder",
             context=f"{value_type.__module__}.{value_type.__qualname__}",

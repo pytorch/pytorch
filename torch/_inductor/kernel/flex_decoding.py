@@ -20,6 +20,7 @@ from .flex_attention import (
     create_indices_fake,
     create_num_blocks_fake_generator,
     get_bounded_indices_func,
+    get_fwd_subgraph_outputs,
     load_checked_2d,
     load_checked_block,
     maybe_realize,
@@ -522,6 +523,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
     # We do need to explicitly pass it in for autotuning though.
+
+    # Default config for warp specialization
+    num_consumer_groups, num_buffers_warp_spec = 0, 0
+
     for BLOCK_N, num_warps, num_stages in configs:
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0:
             continue
@@ -539,6 +544,12 @@ def create_flex_decoding_kernel(*args, **kwargs):
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
         cur_kernel_options.setdefault("num_warps", num_warps)
         cur_kernel_options.setdefault("num_stages", num_stages)
+
+        if cur_kernel_options.get("num_consumer_groups", False):
+            cur_kernel_options.setdefault("num_consumer_groups", num_consumer_groups)
+            cur_kernel_options.setdefault(
+                "num_buffers_warp_spec", num_buffers_warp_spec
+            )
 
         flex_decoding_template.maybe_append_choice(
             choices=choices,
@@ -592,6 +603,14 @@ def create_flex_decoding_kernel(*args, **kwargs):
         inputs_for_flex_decoding,
         layout_acc,
         input_gen_fns=input_gen_fns,
+    )
+
+    # need subgraph inputs and outputs to analyze all symints used in flex attention
+    buf_ACC.data.data.subgraph_inps = list(score_mod_other_buffers) + list(
+        mask_mod_other_buffers
+    )
+    buf_ACC.data.data.subgraph_outs = get_fwd_subgraph_outputs(
+        score_mod_subgraph, mask_mod_subgraph
     )
 
     # Reduction
