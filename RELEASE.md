@@ -221,7 +221,7 @@ Release candidates are currently stored in the following places:
 
 * Wheels: https://download.pytorch.org/whl/test/
 * Conda: https://anaconda.org/pytorch-test
-* Libtorch: https://download.pytorch.org/libtorch/test
+* Libtorch: https://download.pytorch.org/libtorch/test <!-- @lint-ignore -->
 
 Backups are stored in a non-public S3 bucket at [`s3://pytorch-backup`](https://s3.console.aws.amazon.com/s3/buckets/pytorch-backup?region=us-east-1&tab=objects)
 
@@ -322,7 +322,7 @@ Promotion should occur in two steps:
 * Promote S3 artifacts (wheels, libtorch) and Conda packages
 * Promote S3 wheels to PyPI
 
-**NOTE**: The promotion of wheels to PyPI can only be done once so take caution when attempting to promote wheels to PyPI, (see https://github.com/pypa/warehouse/issues/726 for a discussion on potential draft releases within PyPI)
+**NOTE**: The promotion of wheels to PyPI can only be done once so take caution when attempting to promote wheels to PyPI, (see https://github.com/pypi/warehouse/issues/726 for a discussion on potential draft releases within PyPI)
 
 ## Additional Steps to prepare for release day
 
