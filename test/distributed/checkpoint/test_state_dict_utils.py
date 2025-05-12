@@ -13,12 +13,8 @@ from torch.distributed._state_dict_utils import (
     _gather_state_dict,
     _offload_state_dict_to_cpu,
 )
-from torch.distributed._tensor import (
-    distribute_tensor,
-    DTensor,
-    init_device_mesh,
-    Shard,
-)
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import distribute_tensor, DTensor, Shard
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,

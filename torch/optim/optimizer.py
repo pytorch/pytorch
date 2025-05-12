@@ -1004,7 +1004,7 @@ class Optimizer:
                         torch._foreach_zero_(grads)
 
     @overload
-    def step(self, closure: None = ...) -> None:
+    def step(self, closure: None = None) -> None:
         ...
 
     @overload
