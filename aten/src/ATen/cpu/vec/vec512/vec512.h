@@ -8,6 +8,7 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec512/vec512_float.h>
 #include <ATen/cpu/vec/vec512/vec512_bfloat16.h>
+#include <ATen/cpu/vec/vec512/vec512_float8.h>
 #include <ATen/cpu/vec/vec512/vec512_double.h>
 #include <ATen/cpu/vec/vec512/vec512_int.h>
 #include <ATen/cpu/vec/vec512/vec512_qint.h>
