@@ -1332,6 +1332,9 @@ class cuda:
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4]
 
+    # Whether to use CUTLASS EVT for epilogue fusion
+    cutlass_epilogue_fusion_enabled = False
+
     # Path to CUDA NVCC.
     # NVCC search order:
     # 1) cuda_cxx set in this config
@@ -1552,6 +1555,8 @@ _save_config_ignore: list[str] = [
     "pre_grad_custom_pass",
     "aot_inductor.repro_level",
     "aot_inductor.dump_aoti_minifier",
+    "post_grad_custom_pre_pass",
+    "post_grad_custom_post_pass",
 ]
 
 _cache_config_ignore_prefix: list[str] = [
