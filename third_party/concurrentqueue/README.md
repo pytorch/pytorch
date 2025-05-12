@@ -9,8 +9,8 @@ cd third_party/concurrentqueue
 
 ## Why not a submodule
 
-We didn’t want to deal with license issues from the test/ directory so we decided on a non-submodule approach. 
-This script allows us to keep the moodycamel directory up-to-date with the latest files from the concurrentqueue 
+We didn’t want to deal with license issues from the test/ directory so we decided on a non-submodule approach.
+This script allows us to keep the moodycamel directory up-to-date with the latest files from the concurrentqueue
 repository without having to worry about submodule complexities.
 
 ## Original source

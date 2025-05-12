@@ -3185,7 +3185,7 @@ static int mz_stat64(const char *path, struct __stat64 *buffer)
 #define MZ_FTELL64 _ftelli64
 #define MZ_FSEEK64 _fseeki64
 #define MZ_FILE_STAT_STRUCT _stat64
-#define MZ_FILE_STAT mz_stat64 
+#define MZ_FILE_STAT mz_stat64
 #define MZ_FFLUSH fflush
 #define MZ_FREOPEN mz_freopen
 #define MZ_DELETE_FILE remove
@@ -5546,7 +5546,7 @@ mz_bool mz_zip_validate_file(mz_zip_archive *pZip, mz_uint file_index, mz_uint f
                 mz_zip_set_error(pZip, MZ_ZIP_INVALID_HEADER_OR_CORRUPTED);
                 goto handle_failure;
             }
-            
+
             // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
             field_id = MZ_READ_LE16(pExtra_data);
             field_data_size = MZ_READ_LE16(pExtra_data + sizeof(mz_uint16));
@@ -6969,7 +6969,7 @@ mz_bool mz_zip_writer_add_read_buf_callback(mz_zip_archive *pZip, const char *pA
 
         if (!mz_zip_writer_create_local_dir_header(pZip, local_dir_header,
                                                    (mz_uint16)archive_name_size, (mz_uint16)(extra_size + user_extra_data_len),
-                                                   (max_size >= MZ_UINT32_MAX) ? MZ_UINT32_MAX : uncomp_size, 
+                                                   (max_size >= MZ_UINT32_MAX) ? MZ_UINT32_MAX : uncomp_size,
                                                     (max_size >= MZ_UINT32_MAX) ? MZ_UINT32_MAX : comp_size,
                                                    uncomp_crc32, method, gen_flags, dos_time, dos_date))
             return mz_zip_set_error(pZip, MZ_ZIP_INTERNAL_ERROR);

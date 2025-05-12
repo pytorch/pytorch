@@ -1,4 +1,4 @@
-The PyTorch repository and source distributions bundle several libraries that are 
+The PyTorch repository and source distributions bundle several libraries that are
 compatibly licensed.  We list these here.
 
 Name: DCGM

@@ -1346,7 +1346,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         name = "ukernels_neon_aarch64",
         srcs = select({
             "DEFAULT": [],
-            "ovr_config//cpu:arm64": prod_srcs_for_arch_wrapper("neon_aarch64"), 
+            "ovr_config//cpu:arm64": prod_srcs_for_arch_wrapper("neon_aarch64"),
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",

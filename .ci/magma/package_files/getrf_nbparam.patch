@@ -10,7 +10,7 @@ index 4ec57306..912f8608 100644
 +    *recnb = 16;
      return;
  }
- 
+
 @@ -127,7 +127,7 @@ void magma_get_zgetrf_batched_nbparam(magma_int_t n, magma_int_t *nb, magma_int_
  void magma_get_cgetrf_batched_nbparam(magma_int_t n, magma_int_t *nb, magma_int_t *recnb)
  {
@@ -19,7 +19,7 @@ index 4ec57306..912f8608 100644
 +    *recnb =  16;
      return;
  }
- 
+
 @@ -135,7 +135,7 @@ void magma_get_cgetrf_batched_nbparam(magma_int_t n, magma_int_t *nb, magma_int_
  void magma_get_dgetrf_batched_nbparam(magma_int_t n, magma_int_t *nb, magma_int_t *recnb)
  {
@@ -28,7 +28,7 @@ index 4ec57306..912f8608 100644
 +    *recnb =  16;
      return;
  }
- 
+
 @@ -143,7 +143,7 @@ void magma_get_dgetrf_batched_nbparam(magma_int_t n, magma_int_t *nb, magma_int_
  void magma_get_sgetrf_batched_nbparam(magma_int_t n, magma_int_t *nb, magma_int_t *recnb)
  {
@@ -37,4 +37,3 @@ index 4ec57306..912f8608 100644
 +    *recnb =  16;
      return;
  }
- 

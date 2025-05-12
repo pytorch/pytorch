@@ -7,7 +7,7 @@ index ba992fc..e4e8364 100644
      "write_builtin_include_directory_paths",
  )
 +load("@rules_cuda//cuda:toolchain.bzl", "cuda_compiler_deps")
- 
+
  def _field(name, value):
      """Returns properly indented top level crosstool field."""
 @@ -397,7 +398,7 @@ def configure_unix_toolchain(repository_ctx, cpu_value, overriden_tools):
@@ -18,7 +18,7 @@ index ba992fc..e4e8364 100644
 +        "-std=c++17",
          False,
      ), ":")
- 
+
 @@ -463,7 +464,7 @@ def configure_unix_toolchain(repository_ctx, cpu_value, overriden_tools):
              )),
              "%{cc_compiler_deps}": get_starlark_list([":builtin_include_directory_paths"] + (
@@ -37,7 +37,7 @@ index c3cf3ba..1744eb4 100644
      "with_feature_set",
  )
 +load("@rules_cuda//cuda:toolchain.bzl", "cuda_toolchain_config")
- 
+
  all_compile_actions = [
      ACTION_NAMES.c_compile,
 @@ -580,7 +581,8 @@ def _impl(ctx):
@@ -53,7 +53,7 @@ index c3cf3ba..1744eb4 100644
 @@ -1152,10 +1154,15 @@ def _impl(ctx):
              unfiltered_compile_flags_feature,
          ]
- 
+
 +    cuda = cuda_toolchain_config(
 +        cuda_toolchain_info = ctx.attr._cuda_toolchain_info,
 +        compiler_path = ctx.attr.tool_paths["gcc"],

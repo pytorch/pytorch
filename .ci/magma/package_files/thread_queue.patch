@@ -8,7 +8,7 @@
 +        // throw std::exception();
      }
  }
- 
+
 @@ -172,7 +172,7 @@
      check( pthread_mutex_lock( &mutex ));
      if ( quit_flag ) {

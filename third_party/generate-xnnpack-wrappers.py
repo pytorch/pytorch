@@ -112,7 +112,7 @@ def update_sources(xnnpack_path, cmakefile = "XNNPACK/CMakeLists.txt"):
         i = 0
         while i < len(lines):
             line = lines[i]
-            
+
             if lines[i].startswith("INCLUDE"):
                 file, _ = handle_singleline_parse(line)
                 if file.startswith("cmake/gen/"):
