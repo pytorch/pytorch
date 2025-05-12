@@ -564,6 +564,7 @@ class ProcessGroupGloo(Backend):
         devices: list[ProcessGroupGloo.Device]
         threads: int
         global_ranks_in_group: list[int]
+        group_name: str
 
         def __init__(self): ...
 

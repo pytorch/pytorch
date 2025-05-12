@@ -842,11 +842,14 @@ ProcessGroupGloo::ProcessGroupGloo(
   for (const auto i : c10::irange(threads_.size())) {
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this, i);
   }
+  this->setGroupUid(options_->group_name);
 
   // TODO: If gloo has version, we also need to log gloo version into FR.
   FlightRecorder<c10::Event>::get()->record_pg_ranks(
       std::make_tuple(pg_uid_, pg_desc_), groupRanks());
   init();
+
+  // TODO: Add configs print like ProcessGroupNCCL.
 }
 
 ProcessGroupGloo::~ProcessGroupGloo() {
@@ -896,6 +899,11 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
     AsyncWork::execute(work);
     // TODO: Need to find a way to calculate the difference of duration of two
     // c10d::Event
+    pgStatus_->lastCompletedSeq = static_cast<int64_t>(work->seq_);
+    pgStatus_->lastCompletedWorkName = opTypeToString(work->opType_);
+    // TODO: We need to have numel of tensors for gloo as well.
+    pgStatus_->lastCompletedNumelIn = 0;
+    pgStatus_->lastCompletedNumelOut = 0;
     FlightRecorder<c10::Event>::get()->retire_id(work->trace_id_, false);
     lock.lock();
     workInProgress_[workerIndex].reset();
@@ -913,9 +921,13 @@ const std::vector<uint64_t>& ProcessGroupGloo::groupRanks() const {
 
 void ProcessGroupGloo::enqueue(c10::intrusive_ptr<AsyncWork> work) {
   std::unique_lock<std::mutex> lock(workMutex_);
-  workQueue_.push_back(std::move(work));
-  lock.unlock();
+  pgStatus_->lastEnqueuedSeq = static_cast<int64_t>(work->seq_);
+  pgStatus_->lastEnqueuedWorkName = opTypeToString(work->opType_);
+  // TODO: We need to have numel of tensors for gloo as well.
+  pgStatus_->lastEnqueuedNumelIn = 0;
+  pgStatus_->lastEnqueuedNumelOut = 0;
   // using c10d::FlightRecorder;
+  // TODO: We need to have a way to use c10::Event inside gloo as well.
   work->trace_id_ = FlightRecorder<c10::Event>::get()->record(
       local_id_,
       std::make_tuple(pg_uid_, pg_desc_),
@@ -926,11 +938,13 @@ void ProcessGroupGloo::enqueue(c10::intrusive_ptr<AsyncWork> work) {
       work->getProfilerTitle(),
       work->getInputTensors(),
       work->getOutputTensors(),
-      nullptr, // We ignore cuda event entry for now.
+      nullptr,
       nullptr,
       work->getTimeout(),
       pgStatus_,
       false);
+  workQueue_.push_back(std::move(work));
+  lock.unlock();
 
   // Notify after releasing the lock so that the waiter
   // does not immediately block.

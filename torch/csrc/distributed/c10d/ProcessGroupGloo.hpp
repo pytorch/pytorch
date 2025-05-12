@@ -250,6 +250,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
     }
 
     std::vector<uint64_t> global_ranks_in_group;
+    std::string group_name;
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
     int threads;
   };

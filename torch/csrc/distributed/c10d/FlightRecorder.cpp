@@ -726,6 +726,28 @@ std::atomic<bool> DebugInfoWriter::hasWriterRegistered_(false);
 // avoid linking errors.
 template struct FlightRecorder<c10::Event>;
 
+std::string dump_fr_trace(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive) {
+  return FlightRecorder<c10::Event>::get()->dump(
+      std::unordered_map<
+          std::string,
+          std::unordered_map<std::string, std::string>>{},
+      includeCollectives,
+      includeStackTraces,
+      onlyActive);
+}
+
+std::string dump_fr_trace_json(bool includeCollectives, bool onlyActive) {
+  return FlightRecorder<c10::Event>::get()->dump_json(
+      std::unordered_map<
+          std::string,
+          std::unordered_map<std::string, std::string>>{},
+      includeCollectives,
+      onlyActive);
+}
+
 #ifdef USE_C10D_NCCL
 template struct FlightRecorder<at::cuda::CUDAEvent>;
 #endif // USE_C10D_NCCL
