@@ -2,7 +2,7 @@ import collections
 from typing import Any, Union
 
 import torch
-from torch.types import Device
+#from torch.types import Device
 
 from . import _get_device_index, is_initialized
 
