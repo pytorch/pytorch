@@ -3093,12 +3093,11 @@ class TestGuardsExpressions(TestCase):
         )
         with ctx():
             make_non_contiguous_tensor_and_test(4)
-        aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[3:]).strip()
+        aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
         self.assertExpectedInline(
             aot_graphs,
             """\
-/home/lsakka/pytorch/torch/fx/_lazy_graph_module.py class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", arg3_1: "i64[u1][s7]cpu"):
+def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", arg3_1: "i64[u1][s7]cpu"):
         ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
@@ -3133,18 +3132,19 @@ class TestGuardsExpressions(TestCase):
             self.assertEqual(compiled_result, eager_result)
             self.assertEqual(cnt.frame_count, 2)
 
-        aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[3:]).strip()
+        aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
         self.assertExpectedInline(
             aot_graphs,
             """\
-/home/lsakka/pytorch/torch/fx/_lazy_graph_module.py class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(s77)", arg2_1: "i64[s77][1]cpu"):
+def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]cpu"):
+        ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0
+        _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
-        ge_1: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
+        ge_3: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_1 = None
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
-        eq: "Sym(Eq(s77, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s77, u0**2) on node 'eq'");  eq = _assert_scalar_1 = None
+        eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
         view: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense])
         view_1: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None
         mul_4: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
@@ -3194,18 +3194,15 @@ class TestGuardsExpressions(TestCase):
             self.assertEqual(result_compiled, result_eager)
             self.assertEqual(cnt.frame_count, 1)
 
-        aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[3:]).strip()
+        aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
         self.assertExpectedInline(
             aot_graphs,
             """\
-/home/lsakka/pytorch/torch/fx/_lazy_graph_module.py class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", arg3_1: "f32[u2, u3][1, u2]cpu"):
-         # File: /home/lsakka/pytorch/test/test_dynamic_shapes.py:3174 in func, code: result1 = torch.reshape(x, (u0, u1))
+def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", arg3_1: "f32[u2, u3][1, u2]cpu"):
         ge_1: "Sym(u2 >= 0)" = arg1_1 >= 0
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u2 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
         ge_3: "Sym(u3 >= 0)" = arg2_1 >= 0
         _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u3 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_1 = None
-
         select: "i64[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 0)
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(select);  select = None
         ge_5: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
@@ -3214,15 +3211,12 @@ class TestGuardsExpressions(TestCase):
         _local_scalar_dense_1: "Sym(u1)" = torch.ops.aten._local_scalar_dense.default(select_1);  select_1 = None
         ge_7: "Sym(u1 >= 0)" = _local_scalar_dense_1 >= 0
         _assert_scalar_3 = torch.ops.aten._assert_scalar.default(ge_7, "Runtime assertion failed for expression u1 >= 0 on node 'ge_3'");  ge_7 = _assert_scalar_3 = None
-
         mul: "Sym(u2*u3)" = arg1_1 * arg2_1;  arg1_1 = arg2_1 = None
         mul_1: "Sym(u0*u1)" = _local_scalar_dense * _local_scalar_dense_1
         eq: "Sym(Eq(u2*u3, u0*u1))" = mul == mul_1;  mul = mul_1 = None
         _assert_scalar_4 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u2*u3, u0*u1) on node 'eq'");  eq = _assert_scalar_4 = None
-
         clone: "f32[u2, u3][Max(1, u3), 1]cpu" = torch.ops.aten.clone.default(arg3_1, memory_format = torch.contiguous_format);  arg3_1 = None
         view: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.view.default(clone, [_local_scalar_dense, _local_scalar_dense_1]);  clone = _local_scalar_dense = _local_scalar_dense_1 = None
-
         mul_16: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
         return (mul_16,)""",  # noqa: B950
             ignore_comments=True,
