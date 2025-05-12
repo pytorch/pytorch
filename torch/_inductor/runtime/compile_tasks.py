@@ -54,9 +54,9 @@ def _worker_compile_triton(
 ) -> tuple[CachingAutotuner, int]:
     _set_triton_ptxas_path()
     os.environ.update(extra_env)
-    import torch
+    from torch._inductor import config
 
-    with torch._inductor.config.patch(extra_config):
+    with config.patch(extra_config):
         start_ns = time.time_ns()
         kernel = load_kernel()
         kernel.precompile(warm_cache_only=True)
