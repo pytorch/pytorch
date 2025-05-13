@@ -4310,6 +4310,19 @@ known_graph_breaks_tests = {
     "test_multi_grad_any_hooks",  # register_multi_grad_hook
     "test_saved_variable_packing_unpacking_did_not_save_original_with_hooks",  # register_hooks
     "test_graph_save_on_cpu",  # dynamo disabled
+    "test_nested_checkpoint_early_stop_False",  # dynamo disable
+    "test_nested_checkpoint_early_stop_True",  # dynamo disable
+    "test_nested_checkpoint_kwargs_early_stop_False",  # dynamo disable
+    "test_nested_checkpoint_kwargs_early_stop_True",  # dynamo disable
+    "test_nested_checkpoint_non_tensor_inputs_and_outputs_early_stop_False",  # dynamo disable
+    "test_nested_checkpoint_non_tensor_inputs_and_outputs_early_stop_True",  # dynamo disable
+    "test_nested_checkpoint_reentrant_backwards_early_stop_False",  # dynamo disable
+    "test_nested_checkpoint_reentrant_backwards_early_stop_True",  # dynamo disable
+    "test_nested_checkpoint_same_graph_early_stop_False",  # dynamo disable
+    "test_nested_checkpoint_same_graph_early_stop_True",  # dynamo disable
+    "test_nested_checkpoint_set_early_stop",  # dynamo disable
+    "test_nested_checkpoint_two_children_early_stop_False",  # dynamo disable
+    "test_nested_checkpoint_two_children_early_stop_True",  # dynamo disable
 }
 
 test_contexts = {
@@ -4334,6 +4347,7 @@ xfail_by_backend = {
         "test_current_graph_task_execution_order",  # nodes are already freed by the time dynamo traces the lifted hook
         "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
         "test_current_node",  # TorchDispatchMode not yet implemented for compiled autograd
+        "test_nested_checkpoint_set_early_stop_no_recompution_needed",  # TorchDispatchMode not yet implemented
         "test_post_accumulate_grad_hook_ordering",  # accuracy error
         "test_current_graph_task_id",  # autograd state already cleared once dynamo is called
         "test_custom_function_forward_mode_forward_is_no_op",  # forward AD
@@ -4367,6 +4381,10 @@ xfail_by_backend = {
         "test_return_duplicate_inplace",  # batched gradients
         "test_naughty_autograd_function_stashing_ctx",  # error not raised
         "test_unrelated_inputs",  # batched gradients
+        "test_nested_checkpoint_early_stop_False",  # unpack hook grad_fn semantics
+        "test_nested_checkpoint_early_stop_True",  # unpack hook grad_fn semantics
+        "test_nested_checkpoint_two_children_early_stop_False",  # unpack hook grad_fn semantics
+        "test_nested_checkpoint_two_children_early_stop_True",  # unpack hook grad_fn semantics
     },
     "eager": {  # will be run without torch.compiling the CA graph
         "test_setup_context_when_forward_has_default_args",  # autograd.Function with class methods
@@ -4382,6 +4400,7 @@ xfail_by_backend = {
         "test_unwrap_async_collective_tensor_tangent",  # AttributeError: 'PlainTensorMeta' object has no attribute 'attrs'
         "test_graph_save_on_cpu",  # torch.save should no-op and be recorded in the graph
         "test_saving_variable_to_disk",  # torch.save should no-op and be recorded in the graph
+        "test_nested_checkpoint_early_stop_False",  # AOT backward higher order gradients
     },
     "aot_eager": {  # will be run with torch.compile(backend="eager")
         # Category: FakeTensor
@@ -4423,6 +4442,9 @@ test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
 
 TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
+TestNestedCheckpointWithCompiledAutograd = wrap_test_class(
+    test_autograd.TestNestedCheckpoint
+)
 TestCustomOpWithCompiledAutograd = wrap_test_class(test_custom_ops.TestCustomOp)
 if torch.distributed.is_available() and HAS_CUDA:
     test_dtensor = load_test_module("distributed/tensor/test_dtensor_compile")
