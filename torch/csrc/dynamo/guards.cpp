@@ -1088,11 +1088,6 @@ bool is_immutable_object(py::handle example_value) {
       (is_tensor_immutable && THPVariable_Check(example_value.ptr()));
 }
 
-bool is_parameter(py::handle tensor) {
-  py::object parameter = py::module::import("torch.nn").attr("Parameter");
-  return py::isinstance(tensor, parameter);
-}
-
 /**
  * Dispatches metadata functions to the methods that return integer values,
  * i.e. used whenever static shapes are being used.
@@ -1408,21 +1403,27 @@ class GuardDebugInfo {
   GuardDebugInfo(
       bool result,
       py::list verbose_code_parts,
+      py::list failure_reasons,
       int num_guards_executed)
       : result(result),
         verbose_code_parts(std::move(verbose_code_parts)),
+        failure_reasons(std::move(failure_reasons)),
         num_guards_executed(num_guards_executed) {}
 
   // This constructor is used when guard succeeds.
   GuardDebugInfo(bool result, int num_guards_executed)
       : result(result), num_guards_executed(num_guards_executed) {}
 
+  // This constructor is used for evaluable code parts only.
+  GuardDebugInfo(bool result, py::list code_parts, int num_guards_executed)
+      : result(result), verbose_code_parts(std::move(code_parts)), num_guards_executed(num_guards_executed) {}
+
   GuardDebugInfo(
       bool result,
       const std::string& failed_reason,
       int num_guards_executed)
       : GuardDebugInfo(result, num_guards_executed) {
-    verbose_code_parts.append(failed_reason);
+    failure_reasons.append(failed_reason);
   }
 
   std::string to_string() {
@@ -1430,6 +1431,7 @@ class GuardDebugInfo {
     ss << "GuardDebugInfo(\n"
        << "result=" << result << ",\n"
        << "verbose_code_parts=" << verbose_code_parts << ",\n"
+       << "failure_reasons=" << failure_reasons << ",\n"
        << "num_guards_executed=" << num_guards_executed << ")\n";
     return ss.str();
   }
@@ -1442,6 +1444,9 @@ class GuardDebugInfo {
   // Python side can iterate over this list and eval each string to pinpoint the
   // exact code part that failed.
   py::list verbose_code_parts;
+
+  // List of reasons for guard failures in plain english.
+  py::list failure_reasons;
 
   // Total number of executed guards so far. This is helpful in debugging if
   // shuffling is working.
@@ -2607,15 +2612,25 @@ class GuardManager {
       PyObject* value,
       int& num_guards_executed) {
     // Iterate over leaf guards
+    bool guards_failed = false;
+    py::list verbose_code_parts;
+    py::list guard_fail_reasons;
     for (const auto& guard : _leaf_guards) {
       const GuardDebugInfo& debug_info = guard->check_verbose_nopybind(value);
       num_guards_executed++;
       if (!debug_info.result) {
-        return GuardDebugInfo(
-            false, debug_info.verbose_code_parts, num_guards_executed);
+        guards_failed = true;
+        if (!debug_info.verbose_code_parts.empty() && verbose_code_parts.empty()) {
+          verbose_code_parts = debug_info.verbose_code_parts;
+        }
+        guard_fail_reasons += debug_info.failure_reasons;
       }
     }
 
+    if (guards_failed) {
+      return GuardDebugInfo(
+        false, verbose_code_parts, guard_fail_reasons, num_guards_executed);
+    }
     return GuardDebugInfo(true, num_guards_executed);
   }
 
@@ -2623,16 +2638,26 @@ class GuardManager {
       PyObject* value,
       int& num_guards_executed) {
     // Iterate over accessors
+    bool guards_failed = false;
+    py::list verbose_code_parts;
+    py::list guard_fail_reasons;
     for (const auto& accessor : _accessors) {
       const GuardDebugInfo& debug_info =
           accessor->check_verbose_nopybind(value);
       num_guards_executed += debug_info.num_guards_executed;
       if (!debug_info.result) {
-        return GuardDebugInfo(
-            false, debug_info.verbose_code_parts, num_guards_executed);
+        guards_failed = true;
+        if (!debug_info.verbose_code_parts.empty() && verbose_code_parts.empty()) {
+          verbose_code_parts = debug_info.verbose_code_parts;
+        }
+        guard_fail_reasons += debug_info.failure_reasons;
       }
     }
 
+    if (guards_failed) {
+      return GuardDebugInfo(
+        false, verbose_code_parts, guard_fail_reasons, num_guards_executed);
+    }
     return GuardDebugInfo(true, num_guards_executed);
   }
 
@@ -3523,12 +3548,6 @@ class TENSOR_MATCH : public LeafGuard {
         _tensor_name);
 
     if (!fail_reason.empty()) {
-      if (is_parameter(py::handle(value))) {
-        fail_reason += ". Guard failed on a parameter, consider using ";
-        fail_reason +=
-            "torch._dynamo.config.force_parameter_static_shapes = False ";
-        fail_reason += "to allow dynamism on parameters.";
-      }
       return GuardDebugInfo(false, fail_reason, 0);
     }
     return GuardDebugInfo(true, 1);
@@ -5396,6 +5415,7 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("__str__", &GuardDebugInfo::to_string)
       .def_readonly("result", &GuardDebugInfo::result)
       .def_readonly("verbose_code_parts", &GuardDebugInfo::verbose_code_parts)
+      .def_readonly("failure_reasons", &GuardDebugInfo::failure_reasons)
       .def_readonly(
           "num_guards_executed", &GuardDebugInfo::num_guards_executed);
 

@@ -31,6 +31,7 @@ import io
 import logging
 import math
 import pickle
+import re
 import sys
 import textwrap
 import types
@@ -3265,6 +3266,46 @@ def strip_local_scope(s: str) -> str:
     return re.sub(pattern, r"\1", s)
 
 
+def _format_reasons_for_shape_guards(code_reasons: list[str], fail_reasons: list[str], compile_id: CompileId, scope: dict[str, object]) -> str:
+    """
+    Takes in guard failure reasons (code_reasons: eval-able code parts, fail_reasons: plain english reasons), and returns the formatted output.
+    Goes through dynamic shape recompilation reasons in fail_reasons, and suggests a dynamic source whitelist env var, to dynamically compile
+    to start and avoid this recompilation in future. Also suggests force_parameter_static_shapes if a parameter shape recompilation is found.
+    """
+    has_parameter = False
+    shape_sources = OrderedSet()
+    pattern = r"tensor '(.*)' size mismatch at index .* expected (\d+), actual (\d+).*"
+    for reason in fail_reasons:
+        if (match := re.search(pattern, reason)) is not None:
+            name, size_orig, size_new = match.groups()
+            tensor = eval(name, scope)
+            size_orig, size_new = int(size_orig), int(size_new)
+            if size_orig >= 2 and size_new >= 2:  # these suggestions won't help for 0/1 specialization.
+                if isinstance(tensor, torch.nn.Parameter):
+                    has_parameter = True
+                shape_sources.add(name)
+
+    if is_recompiles_verbose_enabled():
+        reason_str = strip_local_scope(f"{compile_id}: " + "; ".join(code_reasons + fail_reasons))
+    else:
+        reason_str = strip_local_scope(f"{compile_id}: " + "; ".join(code_reasons[:1] if code_reasons else fail_reasons[:1]))
+
+    if shape_sources:
+        reason_str += "\n"
+        if len(shape_sources) > 1:
+            reason_str += "Multiple size mismatches found. "
+        reason_str += (
+            f"The following environment variable would enable dynamic compilation to start, avoiding this recompile: "
+            + f"TORCH_COMPILE_DYNAMIC_SOURCES=\"{','.join(shape_sources)}\""
+        )
+    if has_parameter:
+        reason_str += (
+            "\nSize guard failed on a parameter, consider using torch._dynamo.config.force_parameter_static_shapes = False "
+            + "to allow dynamism on parameters."
+        )
+    return reason_str
+
+
 def get_guard_fail_reason_helper(
     guard_manager: GuardFn,
     f_locals: dict[str, object],
@@ -3273,14 +3314,16 @@ def get_guard_fail_reason_helper(
     """
     Return the reason why `guard_manager` failed.
     Updates `guard_failures` with the generated reason.
-    Only the first failed check of guard_manager is reported.
+    Only the first failed check of guard_manager is reported,
+    unless TORCH_LOGS="recompiles_verbose" is specified.
     """
     scope = {"L": f_locals, "G": guard_manager.global_scope["G"]}
     scope.update(guard_manager.closure_vars)
-    reasons: list[str] = []
+    code_reasons: list[str] = []
 
     no_tensor_aliasing_check_failed = False
 
+    failure_reasons: list[str] = []
     verbose_code_parts: list[str] = []
     guard_debug_info = guard_manager.check_verbose(f_locals)  # type: ignore[attr-defined]
     # For test_export_with_map_cond, the check_verbose fail even without the
@@ -3288,22 +3331,19 @@ def get_guard_fail_reason_helper(
     # assert not guard_debug_info.result
     if not guard_debug_info.result:
         verbose_code_parts = guard_debug_info.verbose_code_parts
-        # verbose_code_parts is either the actual reason (e.g. in case of
-        # TENSOR_MATCH) or it could be a list of verbose_code_part that we
+        failure_reasons = guard_debug_info.failure_reasons
+        # verbose_code_parts is a list of verbose_code_part that we
         # passed to the leaf guard at construction time. If its a list, we
         # walk through this list and find the guard that failed. This is
         # very important for symbolic shape guards which are currently
         # installed as a lambda guard and can encompass a long list of code_parts.
+        # failure_reasons is a list of non-eval-able strings in plain english.
 
-        if len(verbose_code_parts) == 1:
-            if "Duplicate tensor found" in verbose_code_parts[0]:
-                no_tensor_aliasing_check_failed = True
-            else:
-                reasons = verbose_code_parts
-                verbose_code_parts = []
+        if any("Duplicate tensor found" in reason for reason in failure_reasons):
+            no_tensor_aliasing_check_failed = True
 
     if no_tensor_aliasing_check_failed:
-        reasons = recompilation_reason_for_no_tensor_aliasing_guard(
+        failure_reasons = recompilation_reason_for_no_tensor_aliasing_guard(
             guard_manager, scope
         )
     else:
@@ -3324,12 +3364,9 @@ def get_guard_fail_reason_helper(
             if isinstance(fail_reason, bool) and not fail_reason:
                 fail_reason = part
             if isinstance(fail_reason, str):
-                reasons.append(fail_reason)
-                if not is_recompiles_verbose_enabled():
-                    break
+                code_reasons.append(fail_reason)
 
-    reason_str = f"{compile_id}: " + "; ".join(reasons)
-    return strip_local_scope(reason_str)
+    return _format_reasons_for_shape_guards(code_reasons, failure_reasons, compile_id, scope)
 
 
 def get_guard_fail_reason(
