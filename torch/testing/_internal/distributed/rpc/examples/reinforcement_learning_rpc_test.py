@@ -11,15 +11,18 @@ import torch.distributed.rpc as rpc
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.distributed.rpc import RRef, rpc_sync, rpc_async, remote
+from torch.distributed.rpc import remote, rpc_async, rpc_sync, RRef
 from torch.distributions import Categorical
-
 from torch.testing._internal.dist_utils import dist_init, worker_name
-from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
+from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
+    RpcAgentTestFixture,
+)
+
 
 TOTAL_EPISODE_STEP = 5000
 GAMMA = 0.1
 SEED = 543
+
 
 def _call_method(method, rref, *args, **kwargs):
     r"""
@@ -43,6 +46,7 @@ class Policy(nn.Module):
     Copying the code to make these two examples independent.
     See https://github.com/pytorch/examples/tree/master/reinforcement_learning
     """
+
     def __init__(self) -> None:
         super().__init__()
         self.affine1 = nn.Linear(4, 128)
@@ -67,6 +71,7 @@ class DummyEnv:
     tests in this file. It is designed to run for a set max number of iterations,
     returning random states and rewards at each step.
     """
+
     def __init__(self, state_dim=4, num_iters=10, reward_threshold=475.0):
         self.state_dim = state_dim
         self.num_iters = num_iters
@@ -96,6 +101,7 @@ class Observer:
     select an action. Then, the observer applies the action to its environment
     and reports the reward to the agent.
     """
+
     def __init__(self) -> None:
         self.id = rpc.get_worker_info().id
         self.env = DummyEnv()
@@ -171,8 +177,9 @@ class Agent:
             rpc_async(
                 ob_rref.owner(),
                 _call_method,
-                args=(Observer.run_episode, ob_rref, self.agent_rref, n_steps)
-            ) for ob_rref in self.ob_rrefs
+                args=(Observer.run_episode, ob_rref, self.agent_rref, n_steps),
+            )
+            for ob_rref in self.ob_rrefs
         ]
 
         # wait until all observers have finished this episode
