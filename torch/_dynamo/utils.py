@@ -3770,7 +3770,12 @@ def is_utils_checkpoint(obj):
 
     return obj is torch.utils.checkpoint.checkpoint
 
+
 def is_wrap_generic_fn(obj):
+    if not callable(obj):
+        # "obj in x" on symbolic vals triggers guards
+        # short ciruit before that happens
+        return False
     try:
         return obj in torch._dynamo.config._hopify_generic_wrap_fn_kwarg_keys
     except TypeError:
