@@ -1,8 +1,8 @@
 from collections import deque
 from typing import Any
 
-from torch.fx import Graph, map_arg, Node
-from torch.utils._ordered_set import OrderedSet
+from torch.fx import Graph, Node
+from torch.utils._pytree import tree_flatten
 
 
 # flattens with support for slices
@@ -10,24 +10,23 @@ from torch.utils._ordered_set import OrderedSet
 # be register/unregister slices as pytree nodes
 # but there is no unregister API in the pytorch
 # pytree impl
-def _get_flat_args(
-    node: Node, node_to_additional_deps: dict[Node, OrderedSet[Node]]
-) -> list[Node]:
-    args = list[Any]()
-    map_arg((node.args, node.kwargs), args.append)
-    if node in node_to_additional_deps:
-        args.extend(node_to_additional_deps[node])
-    return args
+def _flatten_args_kwargs(args: Any) -> list[Node]:
+    fully_flattened = []
 
+    def flatten(args: Any) -> None:
+        flattened, _ = tree_flatten(args)
+        for arg in flattened:
+            if isinstance(arg, slice):
+                start = arg.start
+                stop = arg.stop
+                step = arg.step
+                flatten((start, stop, step))
+            else:
+                fully_flattened.append(arg)
 
-def _get_flat_args_unique(
-    node: Node, node_to_additional_deps: dict[Node, OrderedSet[Node]]
-) -> OrderedSet[Node]:
-    args = OrderedSet[Node]()
-    map_arg((node.args, node.kwargs), args.add)
-    if node in node_to_additional_deps:
-        args.update(node_to_additional_deps[node])
-    return args
+    flatten(args)
+
+    return fully_flattened
 
 
 def _detect_cycles(graph: Graph) -> str:
