@@ -492,7 +492,10 @@ else:
                 # env variable from launchers, we use it to set the device.
                 if "LOCAL_RANK" in os.environ:
                     local_rank = int(os.environ["LOCAL_RANK"])
-                    logger.info(f"Setting default device for the current process based on LOCAL_RANK={local_rank}")
+                    logger.info(
+                        "Setting default device for the current process based on LOCAL_RANK=%s",
+                        local_rank,
+                    )
                     device_handle.set_device(local_rank)
                 else:
                     warnings.warn(

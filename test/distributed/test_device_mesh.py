@@ -113,8 +113,7 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
             rank=self.rank,
         )
         with self.assertWarnsRegex(
-            UserWarning,
-            "It seems like you did not set/select the default device"
+            UserWarning, "It seems like you did not set/select the default device"
         ):
             DeviceMesh(self.device_type, mesh_tensor)
         self.assertTrue(is_initialized())
