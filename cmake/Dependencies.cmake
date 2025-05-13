@@ -1217,6 +1217,10 @@ if(USE_GLOO)
     set(GLOO_INSTALL OFF CACHE BOOL "" FORCE)
     set(GLOO_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
+    if(USE_GLOO_IBVERBS)
+      set(USE_IBVERBS ON)
+    endif()
+
     # Temporarily override variables to avoid building Gloo tests/benchmarks
     set(__BUILD_TEST ${BUILD_TEST})
     set(__BUILD_BENCHMARK ${BUILD_BENCHMARK})

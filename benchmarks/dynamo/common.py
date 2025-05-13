@@ -1383,12 +1383,11 @@ def _produce_dynamic_shapes_for_export(path, x):
 
 
 class AOTInductorModelCache:
-    cache = {}
+    cache: dict[weakref.ref, tuple[Any, float]] = {}
 
     @classmethod
     def load(cls, model, example_inputs, mode):
         import torch._inductor
-        import torch.export._trace
         from torch.export.dynamic_shapes import _combine_args, _tree_map_with_path
 
         key = weakref.ref(model)
@@ -1419,16 +1418,40 @@ class AOTInductorModelCache:
             # delete example_outputs and reset memory stats here
             del example_outputs
             if current_device == "cuda":
-                torch.cuda.reset_peak_memory_stats()
                 empty_gpu_cache(current_device)
+                torch.cuda.reset_peak_memory_stats()
+                pre_clone_memory_used = torch.cuda.max_memory_allocated()
             elif current_device == "hpu":
                 torch.hpu.reset_peak_memory_stats()
+                pre_clone_memory_used = torch.hpu.max_memory_allocated()
+
+            # Clone the model pre-exporting.  This prevents scenarios observed in a few
+            # models, where the forward pass modifies model state while exporting, and
+            # FakeTensors are thus saved as model data members.  This invalidates model
+            # reuse in eager mode, so it's safest to export a model clone.
+            model_clone = copy.deepcopy(model)
+
+            # Since CPU doesn't monitor max memory allocation, anything measuring peak
+            # memory will miss our transient model clone on CPU anyway.
+            #
+            # The justification for tracking this value (in order to remove it from the
+            # AOTInductor memory measurements) is that normal usage of AOTInductor would
+            # not clone the model, since the eager model would be unused post-export.
+            clone_memory_used = 0.0
+            if current_device == "cuda":
+                clone_memory_used = (
+                    torch.cuda.max_memory_allocated() - pre_clone_memory_used
+                ) / 1e9
+            elif current_device == "hpu":
+                clone_memory_used = (
+                    torch.hpu.max_memory_allocated() - pre_clone_memory_used
+                ) / 1e9
 
             inductor_configs = {}
             if mode == "max-autotune":
                 inductor_configs["max_autotune"] = True
             ep = torch.export.export(
-                model,
+                model_clone,
                 example_args,
                 example_kwargs,
                 dynamic_shapes=dynamic_shapes,
@@ -1439,9 +1462,16 @@ class AOTInductorModelCache:
                     ep, inductor_configs=inductor_configs
                 )  # type: ignore[arg-type]
 
-            cls.cache[key] = torch._inductor.aoti_load_package(package_path)
+            cls.cache[key] = (
+                torch._inductor.aoti_load_package(package_path),
+                clone_memory_used,
+            )
 
-        return cls.cache[key]
+        return cls.cache[key][0]
+
+    @classmethod
+    def get_excess_memory(cls, model) -> float:
+        return cls.cache.get(weakref.ref(model), (None, 0.0))[1]
 
 
 def export(model, example_inputs):
@@ -1456,6 +1486,9 @@ def export(model, example_inputs):
         _produce_dynamic_shapes_for_export, combined_args
     )
 
+    # NOTE: if args.export is ever enabled for --performance mode (rather than solely
+    # --accuracy), we'll need to clone the model and subtract out extra memory usage, as
+    # done in AOTInductorModelCache.
     ep = torch.export.export(
         model, example_args, example_kwargs, dynamic_shapes=dynamic_shapes, strict=True
     )
@@ -2468,6 +2501,11 @@ class BenchmarkRunner:
                         "dynamo",
                         niters=1,
                     )
+                # If we use warm peak memory, the AOT model loading transient memory
+                # won't be present on the warm measurement.  We only have to account for
+                # it when using cold memory.
+                elif self.args.export_aot_inductor:
+                    dynamo_peak_mem -= AOTInductorModelCache.get_excess_memory(model)
 
             if self.args.profile_dynamo_cache_lookup:
                 with torch.profiler.profile(
@@ -2616,6 +2654,11 @@ class BenchmarkRunner:
                         "dynamo",
                         niters=1,
                     )
+                # If we use warm peak memory, the AOT model loading transient memory
+                # won't be present on the warm measurement.  We only have to account for
+                # it when using cold memory.
+                elif self.args.export_aot_inductor:
+                    dynamo_peak_mem -= AOTInductorModelCache.get_excess_memory(model)
 
             if self.args.profile_dynamo_cache_lookup:
                 with torch.profiler.profile(
