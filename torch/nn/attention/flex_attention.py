@@ -1189,6 +1189,7 @@ def _enforce_mem_layouts(
     gemm_precision = query.dtype
     is_sm100_or_greater = (
         torch.cuda.is_available()
+        and torch.version.cuda is not None
         and torch.cuda.get_device_capability("cuda") >= (10, 0)
     )
     if gemm_precision not in fp8_dtypes or not is_sm100_or_greater:
