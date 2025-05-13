@@ -415,8 +415,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     @skip_if_lt_x_gpu(1)
     def test_strict(self) -> None:
         self.run_subtests(
-            {"parallelism": ["DDP", "fully_shard"],
-             "full_state_dict": [True, False]},
+            {"parallelism": ["DDP", "fully_shard"], "full_state_dict": [True, False]},
             self._test_strict,
         )
 
