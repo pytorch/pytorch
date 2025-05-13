@@ -258,7 +258,6 @@ case "$tag" in
     VISION=yes
     ROCM_VERSION=6.3
     NINJA_VERSION=1.9.0
-    CONDA_CMAKE=yes
     TRITON=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
