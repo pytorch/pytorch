@@ -86,6 +86,13 @@ def op_count(gm):
     return result
 
 
+def my_hop_fn(fn, x, k=1):
+    out = fn(x)
+    if isinstance(out, tuple):
+        return (out[0] + k,)
+    return out + k
+
+
 # Checks that a dict matches a dict with "regex keys". That is,
 # the keys are regex expressions.
 def assert_dict_matches_regex(self, dct, dct_with_regex_keys):
@@ -3156,6 +3163,23 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
         ones = torch.ones(1)
         self.assertEqual(fn(zeros, ones, ones), torch.tensor([2.0]))
         self.assertEqual(fn(ones, ones, ones), torch.tensor([3.0]))
+
+    @torch._dynamo.config.patch(
+        "_hopify_generic_wrap_fn_kwarg_keys", {my_hop_fn: ("k",)}
+    )
+    def test_hopify_generic_wrap(self):
+        def gn(x):
+            return x.sin()
+
+        def fn(x):
+            out = my_hop_fn(gn, x, k=2)
+            return out
+
+        a = torch.rand((4, 4), requires_grad=True)
+        compiled_fn = torch.compile(
+            fn, backend="aot_eager_decomp_partition", fullgraph=True
+        )
+        self.assertEqual(compiled_fn(a), fn(a))
 
     def test_hints_wrapper(self):
         def ref_fn(x, y):
