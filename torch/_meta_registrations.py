@@ -255,7 +255,7 @@ def _reshape_view_meta(a, shape):
     )
 
 
-@register_meta([aten.view.default])
+@register_meta([aten.view.default, aten._unsafe_view.default])
 def view_meta(a, *shape):
     return _reshape_view_meta(a, *shape)
 
