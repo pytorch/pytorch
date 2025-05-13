@@ -90,7 +90,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
 
-from . import config, convert_frame, exc, mutation_guard
+from . import config, convert_frame, exc
 from .eval_frame import set_guard_error_hook
 from .source import (
     AttrProxySource,
@@ -1740,6 +1740,9 @@ class GuardBuilder(GuardBuilderBase):
             self.EQUALS_MATCH(guard)
 
     def NN_MODULE(self, guard: Guard):
+        # don't support this in serialization because it uses unsupported ID_MATCH
+        if self.serialization_mode == "save":
+            raise RuntimeError("NN_MODULE guard cannot be serialized.")
         self.ID_MATCH(guard)
         val = self.get(guard.name)
         if hasattr(val, "training"):
@@ -1758,10 +1761,16 @@ class GuardBuilder(GuardBuilderBase):
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
+        # don't support this in serialization because it uses unsupported ID_MATCH
+        if self.serialization_mode == "save":
+            raise RuntimeError("FUNCTION_MATCH guard cannot be serialized.")
         return self.ID_MATCH(guard)
 
     def CLOSURE_MATCH(self, guard: Guard):
         """matches a closure by __code__ id."""
+        # don't support this in serialization because it uses unsupported FUNCTION_MATCH
+        if self.serialization_mode == "save":
+            raise RuntimeError("CLOSURE_MATCH guard cannot be serialized.")
         val = self.get(guard.name)
         # Strictly only want user-defined functions
         if type(val) == types.FunctionType and hasattr(val, "__code__"):
@@ -1771,9 +1780,6 @@ class GuardBuilder(GuardBuilderBase):
             self.FUNCTION_MATCH(guard)
 
     def BUILTIN_MATCH(self, guard: Guard):
-        return self.FUNCTION_MATCH(guard)
-
-    def PYMODULE_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
 
     def SEQUENCE_LENGTH(self, guard):
@@ -1916,9 +1922,6 @@ class GuardBuilder(GuardBuilderBase):
             # This is unsafe if you add/remove a hook on nn module variable
             return
         self.SEQUENCE_LENGTH(guard)
-
-    def OBJECT_MUTATION(self, guard: Guard):
-        mutation_guard.watch(self.get(guard.name), self.check_fn_manager)
 
     def GRAD_MODE(self, guard: Guard):
         pass  # we always guard on this via GlobalStateGuard()

@@ -1456,6 +1456,15 @@ class VariableBuilder:
         return self.tx.output.side_effects.track_object_existing(value, result)
 
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
+        for item in value:
+            if item is value:
+                unimplemented_v2(
+                    gb_type="list elements are pointing to the list itself",
+                    context="",
+                    explanation="Dynamo does not support lists whose items reference to itself",
+                    hints=["Avoid using self referential list"],
+                )
+
         if config.specialize_int and type(value) is torch.Size:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value)
