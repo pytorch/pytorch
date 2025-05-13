@@ -59,7 +59,11 @@ def disable_if_config_true(func):
     @functools.wraps(func)
     def fsdp_hook_wrapper(*args, **kwargs):
         if torch._dynamo.config.skip_fsdp_hooks:
-            return torch._dynamo.disable(func, recursive=True)(*args, **kwargs)
+            return torch._dynamo.disable(
+                func,
+                recursive=True,
+                reason="skipping FSDP hooks since torch._dynamo.config.skip_fsdp_hooks is set",
+            )(*args, **kwargs)
         else:
             return func(*args, **kwargs)
 
@@ -127,7 +131,13 @@ class FSDPState(_State):
                 current_stream = self._device_handle.current_stream()
                 self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
                 self._comm_ctx.all_gather_stream.wait_stream(current_stream)
-            if self._device.type in ["cuda", "hpu", "xpu", "mtia"]:
+            if self._device.type in [
+                "cuda",
+                "hpu",
+                "xpu",
+                "mtia",
+                torch._C._get_privateuse1_backend_name(),
+            ]:
                 with torch.profiler.record_function("FSDP::inputs_to_device"):
                     args_tuple, kwargs_tuple = _to_kwargs(
                         args, kwargs, self._device, False

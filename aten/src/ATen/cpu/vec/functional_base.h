@@ -29,16 +29,21 @@ inline scalar_t vec_reduce_all(
 
 template <typename scalar_t, typename Op>
 struct VecReduceAllSIMD {
-  static inline scalar_t apply(const Op& vec_fun, const Vectorized<scalar_t>& acc_vec) {
+  static inline scalar_t apply(
+      const Op& vec_fun,
+      const Vectorized<scalar_t>& acc_vec) {
     return vec_reduce_all(vec_fun, acc_vec, Vectorized<scalar_t>::size());
   }
 };
 
-#if defined(__GNUC__) && (__GNUC__ > 5) && !defined(_MSC_VER) && !defined(C10_MOBILE)
+#if defined(__GNUC__) && (__GNUC__ > 5) && !defined(_MSC_VER) && \
+    !defined(C10_MOBILE)
 #if defined(CPU_CAPABILITY_AVX2)
 template <typename Op>
 struct VecReduceAllSIMD<float, Op> {
-  static inline float apply(const Op& vec_fun, const Vectorized<float>& acc_vec) {
+  static inline float apply(
+      const Op& vec_fun,
+      const Vectorized<float>& acc_vec) {
     using Vec = Vectorized<float>;
     Vec v = acc_vec;
     // 128-bit shuffle
@@ -57,7 +62,9 @@ struct VecReduceAllSIMD<float, Op> {
 #if defined(CPU_CAPABILITY_AVX512)
 template <typename Op>
 struct VecReduceAllSIMD<float, Op> {
-  static inline float apply(const Op& vec_fun, const Vectorized<float>& acc_vec) {
+  static inline float apply(
+      const Op& vec_fun,
+      const Vectorized<float>& acc_vec) {
     using Vec = Vectorized<float>;
     Vec v = acc_vec;
     // 256-bit shuffle
@@ -76,25 +83,33 @@ struct VecReduceAllSIMD<float, Op> {
   }
 };
 #endif // defined(CPU_CAPABILITY_AVX512)
-#endif // defined(__GNUC__) && (__GNUC__ > 5) && !defined(_MSC_VER) && !defined(C10_MOBILE)
+#endif // defined(__GNUC__) && (__GNUC__ > 5) && !defined(_MSC_VER) &&
+       // !defined(C10_MOBILE)
 
-#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && !defined(CPU_CAPABILITY_SVE)
+#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && \
+    !defined(CPU_CAPABILITY_SVE)
 template <typename Op>
 struct VecReduceAllSIMD<float, Op> {
-  static inline float apply(const Op& vec_fun, const Vectorized<float>& acc_vec) {
+  static inline float apply(
+      const Op& vec_fun,
+      const Vectorized<float>& acc_vec) {
     using Vec = Vectorized<float>;
     Vec v = acc_vec;
 
-    // 64-bit shuffle: [a1+a5, a2+a6, a3+a7, a4+a8, -, -, -, -] -> [a3+a7, a4+a8, a1+a5, a2+a6, -, -, -, -]
+    // 64-bit shuffle: [a1+a5, a2+a6, a3+a7, a4+a8, -, -, -, -] -> [a3+a7,
+    // a4+a8, a1+a5, a2+a6, -, -, -, -]
     float32x4_t v1_1 = vextq_f32(v, v, 2);
     Vec v1 = v1_1;
     // [a1+a3+a5+a7, a2+a4+a6+a8, a1+a3+a5+a7, a2+a4+a6+a8, -, -, -, -]
     v = vec_fun(v, v1);
 
-    // 32-bit shuffle: [a1+a3+a5+a7, a2+a4+a6+a8, a1+a3+a5+a7, a2+a4+a6+a8, -, -, -, -] -> [a2+a4+a6+a8, a1+a3+a5+a7, a2+a4+a6+a8, a1+a3+a5+a7, -, -, -, -]
+    // 32-bit shuffle: [a1+a3+a5+a7, a2+a4+a6+a8, a1+a3+a5+a7, a2+a4+a6+a8, -,
+    // -, -, -] -> [a2+a4+a6+a8, a1+a3+a5+a7, a2+a4+a6+a8, a1+a3+a5+a7, -, -, -,
+    // -]
     v1_1 = vrev64q_f32(v);
     v1 = v1_1;
-    // [a1+a2+a3+a4+a5+a6+a7+a8, a1+a2+a3+a4+a5+a6+a7+a8, a1+a2+a3+a4+a5+a6+a7+a8, a1+a2+a3+a4+a5+a6+a7+a8, -, -, -, -]
+    // [a1+a2+a3+a4+a5+a6+a7+a8, a1+a2+a3+a4+a5+a6+a7+a8,
+    // a1+a2+a3+a4+a5+a6+a7+a8, a1+a2+a3+a4+a5+a6+a7+a8, -, -, -, -]
     v = vec_fun(v, v1);
 
     return v[0];
@@ -102,10 +117,13 @@ struct VecReduceAllSIMD<float, Op> {
 };
 #endif // defined(__aarch64__)
 
-#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && defined(CPU_CAPABILITY_SVE256)
+#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && \
+    defined(CPU_CAPABILITY_SVE256)
 template <typename Op>
 struct VecReduceAllSIMD<float, Op> {
-  static inline float apply(const Op& vec_fun, const Vectorized<float>& acc_vec) {
+  static inline float apply(
+      const Op& vec_fun,
+      const Vectorized<float>& acc_vec) {
     using Vec = Vectorized<float>;
     Vec v = acc_vec;
     // 128-bit shuffle
@@ -125,15 +143,21 @@ struct VecReduceAllSIMD<float, Op> {
 };
 #endif // defined(__aarch64__)
 
-
 template <typename scalar_t, typename Op>
-inline scalar_t vec_reduce_all(const Op& vec_fun, const Vectorized<scalar_t>& acc_vec) {
+inline scalar_t vec_reduce_all(
+    const Op& vec_fun,
+    const Vectorized<scalar_t>& acc_vec) {
   return VecReduceAllSIMD<scalar_t, Op>::apply(vec_fun, acc_vec);
 }
 
-template <typename scalar_t, typename Op,
-          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
-inline scalar_t reduce_all(const Op& vec_fun, const scalar_t* data, int64_t size) {
+template <
+    typename scalar_t,
+    typename Op,
+    typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
+inline scalar_t reduce_all(
+    const Op& vec_fun,
+    const scalar_t* data,
+    int64_t size) {
   using Vec = vec::Vectorized<scalar_t>;
   if (size < Vec::size())
     return vec_reduce_all(vec_fun, Vec::loadu(data, size), size);
@@ -151,16 +175,22 @@ inline scalar_t reduce_all(const Op& vec_fun, const scalar_t* data, int64_t size
 }
 
 // similar to reduce_all, but reduces into two outputs
-template <typename scalar_t, typename Op1, typename Op2,
-          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
-inline std::pair<scalar_t, scalar_t> reduce2_all(const Op1& vec_fun1, const Op2& vec_fun2,
-    const scalar_t* data, int64_t size) {
+template <
+    typename scalar_t,
+    typename Op1,
+    typename Op2,
+    typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
+inline std::pair<scalar_t, scalar_t> reduce2_all(
+    const Op1& vec_fun1,
+    const Op2& vec_fun2,
+    const scalar_t* data,
+    int64_t size) {
   using Vec = vec::Vectorized<scalar_t>;
   if (size < Vec::size()) {
     auto loaded_data = Vec::loadu(data, size);
     return std::pair<scalar_t, scalar_t>(
-      vec_reduce_all(vec_fun1, loaded_data, size),
-      vec_reduce_all(vec_fun2, loaded_data, size));
+        vec_reduce_all(vec_fun1, loaded_data, size),
+        vec_reduce_all(vec_fun2, loaded_data, size));
   }
   int64_t d = Vec::size();
   Vec acc_vec1 = Vec::loadu(data);
@@ -176,12 +206,14 @@ inline std::pair<scalar_t, scalar_t> reduce2_all(const Op1& vec_fun1, const Op2&
     acc_vec2 = Vec::set(acc_vec2, vec_fun2(acc_vec2, data_vec), size - d);
   }
   return std::pair<scalar_t, scalar_t>(
-    vec_reduce_all(vec_fun1, acc_vec1),
-    vec_reduce_all(vec_fun2, acc_vec2));
+      vec_reduce_all(vec_fun1, acc_vec1), vec_reduce_all(vec_fun2, acc_vec2));
 }
 
-template <typename scalar_t, typename MapOp, typename ReduceOp,
-          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
+template <
+    typename scalar_t,
+    typename MapOp,
+    typename ReduceOp,
+    typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline scalar_t map_reduce_all(
     const MapOp& map_fun,
     const ReduceOp& red_fun,
@@ -205,8 +237,11 @@ inline scalar_t map_reduce_all(
   return vec_reduce_all(red_fun, acc_vec);
 }
 
-template <typename scalar_t, typename MapOp, typename ReduceOp,
-          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
+template <
+    typename scalar_t,
+    typename MapOp,
+    typename ReduceOp,
+    typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline scalar_t map2_reduce_all(
     const MapOp& map_fun,
     const ReduceOp& red_fun,
@@ -237,8 +272,11 @@ inline scalar_t map2_reduce_all(
   return vec_reduce_all(red_fun, acc_vec);
 }
 
-template <typename scalar_t, typename MapOp, typename ReduceOp,
-          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
+template <
+    typename scalar_t,
+    typename MapOp,
+    typename ReduceOp,
+    typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline scalar_t map3_reduce_all(
     const MapOp& map_fun,
     const ReduceOp& red_fun,
@@ -274,8 +312,10 @@ inline scalar_t map3_reduce_all(
   return vec_reduce_all(red_fun, acc_vec);
 }
 
-template <typename scalar_t, typename Op,
-          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
+template <
+    typename scalar_t,
+    typename Op,
+    typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline void map(
     const Op& vec_fun,
     scalar_t* output_data,
@@ -293,8 +333,10 @@ inline void map(
   }
 }
 
-template <typename scalar_t, typename Op,
-          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
+template <
+    typename scalar_t,
+    typename Op,
+    typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline void map2(
     const Op& vec_fun,
     scalar_t* output_data,
@@ -317,8 +359,10 @@ inline void map2(
   }
 }
 
-template <typename scalar_t, typename Op,
-          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
+template <
+    typename scalar_t,
+    typename Op,
+    typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline void map3(
     const Op& vec_fun,
     scalar_t* output_data,
@@ -344,8 +388,10 @@ inline void map3(
   }
 }
 
-template <typename scalar_t, typename Op,
-          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
+template <
+    typename scalar_t,
+    typename Op,
+    typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline void map4(
     const Op& vec_fun,
     scalar_t* output_data,

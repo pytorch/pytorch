@@ -2,7 +2,6 @@
 # ruff: noqa: F841
 
 import collections
-import contextlib
 import copy
 import itertools
 import os
@@ -1173,7 +1172,6 @@ def make_test(fn, expected_ops=None):
     return test_fn
 
 
-@contextlib.contextmanager
 def temporary_tensor_subclass(torch_function=None):
     class TensorProxy(torch.Tensor):
         @classmethod
@@ -1182,11 +1180,7 @@ def temporary_tensor_subclass(torch_function=None):
                 torch_function()
             return super().__torch_function__(func, types, args, kwargs)
 
-    torch._dynamo.config.traceable_tensor_subclasses.add(TensorProxy)
-    try:
-        yield TensorProxy
-    finally:
-        torch._dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
+    return TensorProxy
 
 
 class NNModuleTests(torch._dynamo.test_case.TestCase):
@@ -1377,15 +1371,15 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             x = x.sigmoid()
             return x
 
-        with temporary_tensor_subclass() as TensorProxy:
-            x = torch.randn(1).as_subclass(TensorProxy)
-            cnt = torch._dynamo.testing.CompileCounter()
-            out1 = foo(x)
-            opt_foo = torch.compile(foo, backend=cnt, fullgraph=True)
-            out2 = opt_foo(x)
+        TensorProxy = temporary_tensor_subclass()
+        x = torch.randn(1).as_subclass(TensorProxy)
+        cnt = torch._dynamo.testing.CompileCounter()
+        out1 = foo(x)
+        opt_foo = torch.compile(foo, backend=cnt, fullgraph=True)
+        out2 = opt_foo(x)
 
-            self.assertEqual(cnt.op_count, 4)
-            self.assertTrue(torch._dynamo.testing.same(out1, out2))
+        self.assertEqual(cnt.op_count, 4)
+        self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
     def test_torch_function_with_closure(self):
         def run():
@@ -1406,16 +1400,16 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
                 # TODO(future PR): support writes as well
                 counter + 1
 
-            with temporary_tensor_subclass(function) as TensorProxy:
-                x = torch.randn(1).as_subclass(TensorProxy)
-                x = torch.randn(1)
-                cnt = torch._dynamo.testing.CompileCounter()
-                out1 = foo(x)
-                opt_foo = torch.compile(foo, backend=cnt, fullgraph=True)
-                out2 = opt_foo(x)
+            TensorProxy = temporary_tensor_subclass(function)
+            x = torch.randn(1).as_subclass(TensorProxy)
+            x = torch.randn(1)
+            cnt = torch._dynamo.testing.CompileCounter()
+            out1 = foo(x)
+            opt_foo = torch.compile(foo, backend=cnt, fullgraph=True)
+            out2 = opt_foo(x)
 
-                self.assertEqual(cnt.op_count, 4)
-                self.assertTrue(torch._dynamo.testing.same(out1, out2))
+            self.assertEqual(cnt.op_count, 4)
+            self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
         run()
 
@@ -1437,36 +1431,36 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             return x
 
         try:
-            with temporary_tensor_subclass() as TensorProxy:
-                x = torch.randn(1).as_subclass(TensorProxy)
-                x1 = one_break(x)
+            TensorProxy = temporary_tensor_subclass()
+            x = torch.randn(1).as_subclass(TensorProxy)
+            x1 = one_break(x)
 
-                cnt = torch._dynamo.testing.CompileCounter()
-                opt_one_break = torch.compile(one_break, backend=cnt)
-                x2 = opt_one_break(x)
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt_one_break = torch.compile(one_break, backend=cnt)
+            x2 = opt_one_break(x)
 
-                self.assertTrue(torch._dynamo.testing.same(x1, x2))
-                self.assertEqual(cnt.frame_count, 2)
-                self.assertEqual(cnt.op_count, 2)
+            self.assertTrue(torch._dynamo.testing.same(x1, x2))
+            self.assertEqual(cnt.frame_count, 2)
+            self.assertEqual(cnt.op_count, 2)
 
-                compile_ids = set()
-                for r in results:
-                    # A mangled classname looks like __subclass_TensorProxy_94524181138240_c0
-                    # where the last segment contains the compile_id.
-                    prefix = "__subclass_TensorProxy_"
-                    before, sep, after = r.partition(prefix)
-                    self.assertEqual(before, "")
-                    self.assertEqual(sep, prefix)
+            compile_ids = set()
+            for r in results:
+                # A mangled classname looks like __subclass_TensorProxy_94524181138240_c0
+                # where the last segment contains the compile_id.
+                prefix = "__subclass_TensorProxy_"
+                before, sep, after = r.partition(prefix)
+                self.assertEqual(before, "")
+                self.assertEqual(sep, prefix)
 
-                    class_type_id, compile_id = after.split("_")
-                    self.assertTrue(class_type_id.isnumeric())
-                    self.assertTrue(compile_id.startswith("c"))
+                class_type_id, compile_id = after.split("_")
+                self.assertTrue(class_type_id.isnumeric())
+                self.assertTrue(compile_id.startswith("c"))
 
-                    cid = compile_id[1:]
-                    self.assertTrue(cid.isnumeric())
-                    compile_ids.add(cid)
+                cid = compile_id[1:]
+                self.assertTrue(cid.isnumeric())
+                compile_ids.add(cid)
 
-                self.assertEqual(len(compile_ids), 3)
+            self.assertEqual(len(compile_ids), 3)
 
         finally:
             TensorWithTFOverrideVariable.global_mangled_class_name = original
@@ -3311,6 +3305,46 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, x + 1)
         # Make sure Dynamo actually traced the method.
         self.assertEqual(cache.bool_invoked, 1)
+
+    def test_patch_module(self):
+        def set_attrs_from_orig_model(cls_instance, mod, *func_names):
+            cls_instance.__dict__.update(mod.__dict__)
+            if func_names is not None:
+                for func in func_names:
+                    setattr(cls_instance, func, getattr(mod, func))
+
+        class PatchedMyModule(torch.nn.Module):
+            def __init__(self, mod):
+                super().__init__()
+                set_attrs_from_orig_model(self, mod, "resolve_input")
+
+            def forward(self, x):
+                x = self.resolve_input(x)
+                return x
+
+        class MyModule(torch.nn.Module):
+            def __init__(self, input_dim, output_dim):
+                super().__init__()
+                self.linear = torch.nn.Linear(
+                    in_features=input_dim, out_features=output_dim
+                )
+
+            def resolve_input(self, x):
+                x = self.linear(x)
+                return x
+
+            def forward(self, x):
+                x = self.linear(x)
+                return x
+
+        module = MyModule(input_dim=1, output_dim=1)
+        patched_module = PatchedMyModule(module)
+        compiled_module = torch.compile(patched_module, backend="eager", fullgraph=True)
+
+        input_tensor = torch.tensor([1.0], dtype=torch.float)
+        ref = module(input_tensor)
+        res = compiled_module(input_tensor)
+        self.assertEqual(ref, res)
 
 
 devices = ["cuda", "hpu"]

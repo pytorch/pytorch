@@ -133,6 +133,10 @@
 #include <callgrind.h>
 #endif
 
+#ifdef USE_ITT
+#include <torch/csrc/itt.h>
+#endif
+
 namespace py = pybind11;
 
 static PyObject* module;
@@ -965,10 +969,14 @@ static PyObject* THPModule_setAllowTF32OneDNN(
 static PyObject* THPModule_allowTF32OneDNN(
     PyObject* _unused,
     PyObject* noargs) {
+#ifdef USE_XPU
   if (at::globalContext().allowTF32OneDNN())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
+#else
+  Py_RETURN_NONE;
+#endif
 }
 
 static PyObject* THPModule_deterministicAlgorithms(
@@ -1751,12 +1759,6 @@ void THXPEvent_init(PyObject* module);
 namespace torch::xpu {
 void initModule(PyObject* module);
 } // namespace torch::xpu
-#endif
-
-#ifdef USE_ITT
-namespace torch::profiler {
-void initIttBindings(PyObject* module);
-} // namespace torch::profiler
 #endif
 
 static std::vector<PyMethodDef> methods;

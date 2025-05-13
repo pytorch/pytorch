@@ -19,7 +19,6 @@
 #include <c10/util/TypeIndex.h>
 #include <c10/util/TypeTraits.h>
 #include <c10/util/irange.h>
-#include <c10/util/string_view.h>
 
 #include <c10/core/ScalarType.h>
 
@@ -477,7 +476,7 @@ class C10_API TypeMeta final {
   /**
    * convert TypeMeta handles to ScalarType enum values
    */
-  inline ScalarType toScalarType() {
+  inline ScalarType toScalarType() const {
     if (C10_LIKELY(isScalarType())) {
       return static_cast<ScalarType>(index_);
     }

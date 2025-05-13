@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
 import sys
-import traceback
 import unittest
 from contextlib import contextmanager
 
@@ -16,7 +15,6 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTIO
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    TEST_WITH_ROCM,
 )
 
 
@@ -30,6 +28,16 @@ _variable = 0
 _variable1 = 0
 z_glb = 0
 k_glb = 0
+
+
+@contextlib.contextmanager
+def set_default_dtype(dtype):
+    old_dtype = torch.get_default_dtype()
+    try:
+        torch.set_default_dtype(dtype)
+        yield
+    finally:
+        torch.set_default_dtype(old_dtype)
 
 
 class CustomizedCtxManager:
@@ -659,7 +667,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION or TEST_WITH_ROCM,
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Can't run fused SDPA on this platform",
     )
     def test_autocast_sdpa(self):
@@ -1745,10 +1753,13 @@ class GraphModule(torch.nn.Module):
 class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
         self._prev = torch._dynamo.config.enable_trace_contextlib
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_contextlib = True
+        torch._dynamo.config.enable_trace_unittest = True
 
     def tearDown(self):
         torch._dynamo.config.enable_trace_contextlib = self._prev
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
 
     def test_ctx_basic0(self):
         @contextlib.contextmanager
@@ -2690,333 +2701,6 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         y = fn(t)
         self.assertEqual(y, t.sin())
-
-
-class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
-    # Tests taken from CPython source code in cpython/Lib/test/test_contextlib.py
-    # https://github.com/python/cpython/blob/d48cc82ed25e26b02eb97c6263d95dcaa1e9111b/Lib/test/test_contextlib.py#L70
-
-    def test_contextmanager_plain(self):
-        state = []
-
-        @contextmanager
-        def woohoo():
-            state.append(1)
-            yield 42
-            state.append(999)
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            y = t.sum()
-            with woohoo() as x:
-                assert state == [1]
-                assert x == 42
-                self.assertEqual(state, [1])
-                self.assertEqual(x, 42)
-                state.append(x)
-                y += x
-            return y
-
-        t = torch.randn(2, 3)
-        y = fn(t)
-        self.assertEqual(state, [1, 42, 999])
-        self.assertEqual(y, t.sum() + 42)
-
-    @unittest.expectedFailure
-    def test_contextmanager_finally(self):
-        state = []
-
-        @contextmanager
-        def woohoo():
-            state.append(1)
-            try:
-                yield 42
-            finally:
-                state.append(999)
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            _y = t.sum()
-            with self.assertRaises(ZeroDivisionError):
-                with woohoo() as x:
-                    self.assertEqual(state, [1])
-                    self.assertEqual(x, 42)
-                    state.append(x)
-                    raise ZeroDivisionError
-
-        fn(torch.randn(2, 3))
-        self.assertEqual(state, [1, 42, 999])
-
-    @unittest.expectedFailure
-    def test_contextmanager_traceback(self):
-        @contextmanager
-        def f():
-            yield
-
-        frames = []
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            nonlocal frames
-            _y = t.sum()
-            try:
-                with f():
-                    1 / 0
-            except ZeroDivisionError as e:
-                frames = traceback.extract_tb(e.__traceback__)
-
-        fn(torch.randn(2, 3))
-        self.assertEqual(len(frames), 1)
-        self.assertEqual(frames[0].name, "test_contextmanager_traceback")
-        self.assertEqual(frames[0].line, "1 / 0")
-
-    @unittest.expectedFailure
-    def test_contextmanager_traceback2(self):
-        @contextmanager
-        def f():
-            yield
-
-        # Repeat with RuntimeError (which goes through a different code path)
-        class RuntimeErrorSubclass(RuntimeError):
-            pass
-
-        frames = []
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            nonlocal frames
-            _y = t.sum()
-            try:
-                with f():
-                    raise RuntimeErrorSubclass(42)
-            except RuntimeErrorSubclass as e:
-                frames = traceback.extract_tb(e.__traceback__)
-
-        fn(torch.randn(2, 3))
-        self.assertEqual(len(frames), 1)
-        self.assertEqual(frames[0].name, "test_contextmanager_traceback")
-        self.assertEqual(frames[0].line, "raise RuntimeErrorSubclass(42)")
-
-    @unittest.expectedFailure
-    def test_contextmanager_traceback3(self):
-        @contextmanager
-        def f():
-            yield
-
-        frames = []
-
-        class StopIterationSubclass(StopIteration):
-            pass
-
-        for stop_exc in (
-            StopIteration("spam"),
-            StopIterationSubclass("spam"),
-        ):
-            with self.subTest(type=type(stop_exc)):
-
-                @torch.compile(backend="eager", fullgraph=True)
-                def fn(t):
-                    nonlocal frames
-                    _y = t.sum()
-                    try:
-                        with f():
-                            raise stop_exc
-                    except type(stop_exc) as e:
-                        self.assertIs(e, stop_exc)
-                        frames = traceback.extract_tb(e.__traceback__)
-                    else:
-                        self.fail(f"{stop_exc} was suppressed")
-
-                fn(torch.randn(2, 3))
-                self.assertEqual(len(frames), 1)
-                self.assertEqual(frames[0].name, "test_contextmanager_traceback")
-                self.assertEqual(frames[0].line, "raise stop_exc")
-
-    @unittest.expectedFailure
-    def test_contextmanager_no_reraise(self):
-        @contextmanager
-        def whee():
-            yield
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            ctx = whee()
-            ctx.__enter__()
-            # Calling __exit__ should not result in an exception
-            self.assertFalse(ctx.__exit__(TypeError, TypeError("foo"), None))
-            return t.sum()
-
-        fn(torch.randn(2, 3))
-
-    @unittest.expectedFailure
-    def test_contextmanager_trap_yield_after_throw(self):
-        @contextmanager
-        def whoo():
-            try:
-                yield
-            except Exception:
-                yield
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            ctx = whoo()
-            ctx.__enter__()
-            with self.assertRaises(RuntimeError):
-                ctx.__exit__(TypeError, TypeError("foo"), None)
-            return t.sum()
-
-        fn(torch.randn(2, 3))
-
-    @unittest.expectedFailure
-    def test_contextmanager_trap_no_yield(self):
-        @contextmanager
-        def whoo():
-            if False:
-                yield
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            ctx = whoo()
-            with self.assertRaises(RuntimeError):
-                ctx.__enter__()
-            return t.sum()
-
-        fn(torch.randn(2, 3))
-
-    @unittest.expectedFailure
-    def test_contextmanager_trap_second_yield(self):
-        @contextmanager
-        def whoo():
-            yield
-            yield
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def f(t):
-            ctx = whoo()
-            ctx.__enter__()
-            with self.assertRaises(RuntimeError):
-                ctx.__exit__(None, None, None)
-
-        f(torch.randn(2))
-
-    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
-    def test_contextmanager_except(self):
-        state = []
-
-        @contextmanager
-        def woohoo():
-            state.append(1)
-            try:
-                yield 42
-            except ZeroDivisionError as e:
-                state.append(e.args[0])
-                self.assertEqual(state, [1, 42, 999])
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            with woohoo() as x:
-                self.assertEqual(state, [1])
-                self.assertEqual(x, 42)
-                state.append(x)
-                raise ZeroDivisionError(999)
-
-        fn(torch.randn(2, 3))
-        self.assertEqual(state, [1, 42, 999])
-
-    @unittest.expectedFailure
-    def test_contextmanager_do_not_unchain_non_stopiteration_exceptions(self):
-        @contextmanager
-        def test_issue29692():
-            try:
-                yield
-            except Exception as exc:
-                raise RuntimeError("issue29692:Chained") from exc
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def f(t):
-            try:
-                with test_issue29692():
-                    raise ZeroDivisionError
-            except Exception as ex:
-                self.assertIs(type(ex), RuntimeError)
-                self.assertEqual(ex.args[0], "issue29692:Chained")
-                self.assertIsInstance(ex.__cause__, ZeroDivisionError)
-
-            try:
-                with test_issue29692():
-                    raise StopIteration("issue29692:Unchained")
-            except Exception as ex:
-                self.assertIs(type(ex), StopIteration)
-                self.assertEqual(ex.args[0], "issue29692:Unchained")
-                self.assertIsNone(ex.__cause__)
-
-        f(torch.randn(2))
-
-    @unittest.expectedFailure
-    def test_contextmanager_wrap_runtimeerror(self):
-        @contextmanager
-        def woohoo():
-            try:
-                yield
-            except Exception as exc:
-                raise RuntimeError(f"caught {exc}") from exc
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            with self.assertRaises(RuntimeError):
-                with woohoo():
-                    1 / 0
-
-        fn(torch.randn(2, 3))
-
-        # If the context manager wrapped StopIteration in a RuntimeError,
-        # we also unwrap it, because we can't tell whether the wrapping was
-        # done by the generator machinery or by the generator itself.
-        with self.assertRaises(StopIteration):
-            with woohoo():
-                raise StopIteration
-
-    def test_keywords(self):
-        # Ensure no keyword arguments are inhibited
-        @contextmanager
-        def woohoo(self, func, args, kwds):
-            yield (self, func, args, kwds)
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            with woohoo(self=11, func=22, args=33, kwds=44) as target:
-                self.assertEqual(target, (11, 22, 33, 44))
-
-        fn(torch.randn(2, 3))
-
-    def test_recursive(self):
-        depth = 0
-        ncols = 0
-
-        @contextmanager
-        def woohoo():
-            nonlocal ncols
-            ncols += 1
-            nonlocal depth
-            before = depth
-            depth += 1
-            yield
-            depth -= 1
-            self.assertEqual(depth, before)
-
-        @woohoo()
-        def recursive():
-            if depth < 10:
-                recursive()
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            recursive()
-
-        fn(torch.randn(2, 3))
-
-        self.assertEqual(ncols, 10)
-        self.assertEqual(depth, 0)
 
 
 instantiate_parametrized_tests(CtxManagerTests)

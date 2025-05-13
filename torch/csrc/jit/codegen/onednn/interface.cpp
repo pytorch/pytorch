@@ -104,7 +104,7 @@ static Operation createLlgaKernel(const Node* node) {
   };
 }
 
-RegisterOperators oneDNNFusionGroupOp({
+static RegisterOperators oneDNNFusionGroupOp({
     torch::jit::Operator(
         prim::oneDNNFusionGroup,
         createLlgaKernel,
@@ -169,7 +169,7 @@ static Operation createLlgaGuardKernel(const Node* node) {
   };
 }
 
-RegisterOperators oneDNNGuardOp({
+static RegisterOperators oneDNNGuardOp({
     torch::jit::Operator(
         prim::oneDNNFusionGuard,
         createLlgaGuardKernel,
