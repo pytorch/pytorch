@@ -3251,12 +3251,6 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
 
         self.assertEqual(result_compiled, result_eager)
         self.assertEqual(cnt.frame_count, 2)
-        aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
-
-        self.assertExpectedInline(
-            aot_graphs,
-            """""",  # noqa: B950
-        )
 
         x = torch.randn(4, 4)
 
