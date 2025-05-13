@@ -1399,10 +1399,11 @@ class _InProcessFxCompile(FxCompile):
                                 compiled_module, "runner", None
                             )
 
-                    num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
-                    metrics.num_bytes_accessed += num_bytes
-                    metrics.node_runtimes += node_runtimes
-                    metrics.nodes_num_elem += nodes_num_elem
+                    if config._metrics_log_runtime:
+                        num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
+                        metrics.num_bytes_accessed += num_bytes
+                        metrics.node_runtimes += node_runtimes
+                        metrics.nodes_num_elem += nodes_num_elem
 
                     if (
                         cudagraphs

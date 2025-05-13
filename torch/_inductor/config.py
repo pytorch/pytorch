@@ -547,6 +547,10 @@ loop_ordering_after_fusion: bool = (
     os.environ.get("TORCHINDUCTOR_LOOP_ORDERING_AFTER_FUSION", "0") == "1"
 )
 
+# Logging the runtime is a bit expensive in compile time, so put it behind a flag for now
+# TODO Long term, I think we should move these to tlparse.
+_metrics_log_runtime = False
+
 # If fusing two nodes only save less then score_fusion_memory_threshold memory,
 # we should not bother fusing the nodes.
 #
