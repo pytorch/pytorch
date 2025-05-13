@@ -76,118 +76,6 @@ class FailChoiceCaller(ChoiceCaller):
 
 @instantiate_parametrized_tests
 class TestMaxAutotune(TestCase):
-    def _create_buffer(self, name, shape):
-        return Buffer(
-            name=name,
-            layout=FixedLayout(
-                torch.device(f"{GPU_TYPE}:0"), dtype=torch.float32, size=shape
-            ),
-        )
-
-    # XPU have not support multiprocessing reduction in torch/multiprocessing/reductions.py
-    @skipIfXpu
-    def test_benchmark_choice_in_subproc(self):
-        gm = make_fx(
-            lambda: torch.zeros(2, 3)
-        )()  # a dummy graph to construct the GraphLowering
-        graph = GraphLowering(gm)
-
-        # the graph handler is neede to create benchmark example value below
-        with V.set_graph_handler(graph):
-            buf1 = self._create_buffer("mat1", (2, 3))
-            buf2 = self._create_buffer("mat2", (3, 2))
-            buf3 = self._create_buffer("mat3", (2, 3))
-            buf4 = self._create_buffer("mat4", (3, 2))
-
-            layout = FixedLayout(torch.device(f"{GPU_TYPE}:0"), torch.float32, (2, 2))
-
-            mat1 = AlgorithmSelectorCache.benchmark_example_value(buf1)
-            mat2 = AlgorithmSelectorCache.benchmark_example_value(buf2)
-            mat3 = AlgorithmSelectorCache.benchmark_example_value(buf3)
-            mat4 = AlgorithmSelectorCache.benchmark_example_value(buf4)
-
-            out = AlgorithmSelectorCache.benchmark_example_value(layout)
-            # expected_out = (mat1 @ mat2) + (mat3 @ mat4)
-            expected_out = None
-
-            choice = aten_mm_plus_mm.bind((buf1, buf2, buf3, buf4), layout)
-            # use a tensor since the mutation to a python list in a sub process
-            # is not synced back to the parent process
-            timings = torch.zeros(3, dtype=torch.float32)
-            ctx = mp.get_context("spawn")
-            child = ctx.Process(
-                target=benchmark_choice,
-                args=(choice, (mat1, mat2, mat3, mat4), out, expected_out, timings),
-            )
-            child.start()
-            child.join()
-            self.assertEqual(0, child.exitcode)
-            print(f"timings is {timings}, out {out}, expected_out {expected_out}")
-
-    # XPU have not support multiprocessing reduction in torch/multiprocessing/reductions.py
-    @skipIfXpu
-    def test_benchmark_choice_fail_in_subproc(self):
-        gm = make_fx(
-            lambda: torch.zeros(2, 3)
-        )()  # a dummy graph to construct the GraphLowering
-        graph = GraphLowering(gm)
-
-        # the graph handler is neede to create benchmark example value below
-        with V.set_graph_handler(graph):
-            buf1 = self._create_buffer("mat1", (2, 3))
-            buf2 = self._create_buffer("mat2", (3, 2))
-            buf3 = self._create_buffer("mat3", (2, 3))
-            buf4 = self._create_buffer("mat4", (3, 2))
-
-            layout = FixedLayout(torch.device(f"{GPU_TYPE}:0"), torch.float32, (2, 2))
-
-            mat1 = AlgorithmSelectorCache.benchmark_example_value(buf1)
-            mat2 = AlgorithmSelectorCache.benchmark_example_value(buf2)
-            mat3 = AlgorithmSelectorCache.benchmark_example_value(buf3)
-            mat4 = AlgorithmSelectorCache.benchmark_example_value(buf4)
-
-            out = AlgorithmSelectorCache.benchmark_example_value(layout)
-            expected_out = (mat1 @ mat2) + (mat3 @ mat4)
-
-            choice = FailChoiceCaller("fail_choice_caller", [], None, description="")
-
-            # use a tensor since python list is not synced back
-            timings = torch.zeros(3, dtype=torch.float32)
-            ctx = mp.get_context("spawn")
-            child = ctx.Process(
-                target=benchmark_choice,
-                args=(choice, (mat1, mat2, mat3, mat4), out, expected_out, timings),
-            )
-            child.start()
-            child.join()
-            self.assertNotEqual(0, child.exitcode)
-
-    @parametrize("autotune_in_subproc", (True, False))
-    @parametrize("autotune_multi_device", (True, False))
-    def test_max_autotune_mm_plus_mm(self, autotune_in_subproc, autotune_multi_device):
-        """
-        This crash previously due to a triton issue: https://github.com/triton-lang/triton/issues/1298 .
-        With autotuning in subprocess, we don't crash anymore.
-        """
-        m, n, k = 2048, 1536, 64
-
-        def mm_plus_mm(a, b, c, d):
-            return a @ b + c @ d
-
-        a = torch.randn(m, k).to(GPU_TYPE)
-        b = torch.randn(k, n).to(GPU_TYPE)
-        c = torch.randn(m, k).to(GPU_TYPE)
-        d = torch.randn(k, n).to(GPU_TYPE)
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": autotune_in_subproc,
-                "autotune_multi_device": autotune_multi_device,
-            }
-        ):
-            torch.compile(mm_plus_mm)(a, b, c, d)
-
     @parametrize("dynamic", (False, True))
     def test_max_autotune_mm_plus_mm_zero_size_input(self, dynamic):
         """
@@ -205,22 +93,6 @@ class TestMaxAutotune(TestCase):
 
         with config.patch({"max_autotune": True}):
             torch.compile(mm_plus_mm, dynamic=dynamic)(a, b, c, d)
-
-    @parametrize("dynamic", (False, True))
-    def test_max_autotune_regular_mm(self, dynamic: bool):
-        """
-        Make sure autotuning mm in sub processes work without crashes.
-        """
-
-        def mm(a, b):
-            a = torch.sin(a)
-            return a @ b
-
-        a = torch.randn(100, 10).to(GPU_TYPE)
-        b = torch.randn(10, 100).to(GPU_TYPE)
-
-        with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
-            torch.compile(mm, dynamic=dynamic)(a, b)
 
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
@@ -339,93 +211,6 @@ class TestMaxAutotune(TestCase):
 
         with config.patch({"max_autotune": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
-
-    def test_precompilation_threads(self):
-        import threading
-        from typing import Any
-        from unittest.mock import Mock, patch
-
-        class FakeChoiceCaller(ChoiceCaller):
-            def __init__(self) -> None:
-                super().__init__("none", [], Mock(), description="")
-                self.thread_id = None
-
-            def precompile(self):
-                self.thread_id = threading.get_ident()
-
-            def call_name(self) -> str:
-                return None
-
-            def to_callable(self):
-                return None
-
-            def hash_key(self) -> str:
-                return str(hash(self))
-
-            def output_node(self) -> "TensorBox":  # noqa: F821
-                return None
-
-        fake_choices = [FakeChoiceCaller() for i in range(10)]
-        fake_lookup_result = dict.fromkeys(fake_choices, 0.123)
-
-        def no_lookup(
-            choices: list[ChoiceCaller],
-            op: str,
-            inputs: str,
-            benchmark: Callable[[Any], dict[ChoiceCaller, float]],
-        ) -> Optional[dict[ChoiceCaller, float]]:
-            if benchmark is not None:
-                return benchmark(choices)
-
-        asc = AlgorithmSelectorCache()
-
-        def fake_benchmark_fn(*args, **kwargs):
-            return fake_lookup_result
-
-        main_thread_id = threading.get_ident()
-        mock_debug_handler = Mock()
-        old_debug_handler = V.debug
-        try:
-            V.set_debug_handler(mock_debug_handler)
-            with patch.object(asc, "lookup", new=no_lookup):
-                with patch.object(
-                    asc, "make_benchmark_fn", return_value=fake_benchmark_fn
-                ):
-                    with config.patch(
-                        {
-                            "autotune_in_subproc": False,
-                            "compile_threads": len(fake_choices),
-                        }
-                    ):
-                        asc("test_call", fake_choices, [], Mock())
-            for fake_choice in fake_choices:
-                assert (
-                    fake_choice.thread_id is not None
-                ), "Expected all ChoiceCaller's precompile method to have been called"
-                assert (
-                    fake_choice.thread_id != main_thread_id
-                ), "Expected all ChoiceCaller's precompile method to have been called on separate thread"
-        finally:
-            V.set_debug_handler(old_debug_handler)
-
-    @parametrize("dynamic", (False, True))
-    def test_max_autotune_addmm(self, dynamic=False):
-        """
-        Make sure autotuning addmm in sub processes work without crashes.
-        """
-
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-
-        def addmm(x, a, b):
-            return torch.addmm(x, a, b)
-
-        x = torch.randn(100).to(GPU_TYPE)
-        a = torch.randn(100, 10).to(GPU_TYPE)
-        b = torch.randn(10, 100).to(GPU_TYPE)
-        with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
-            Y_compiled = torch.compile(addmm, dynamic=dynamic)(x, a, b)
-            Y = addmm(x, a, b)
-            torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
@@ -680,39 +465,6 @@ class TestMaxAutotune(TestCase):
             FileCheck().check_not("extern_kernels.convolution").run(code[0])
             self.assertEqual(conv1x1(input_tensor), out, atol=1e-2, rtol=0)
 
-    def test_filled_cache_precompile(self):
-        def fn(a, b, c):
-            a = (a @ b) @ c
-            a, b, c = (t.to(torch.float16) for t in [a, b, c])
-            return (a @ b) @ c
-
-        fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
-        inputs = [torch.rand([256, 256], device=GPU_TYPE) for _ in range(3)]
-        from torch._dynamo.utils import counters
-
-        self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
-
-        torch._dynamo.reset()
-        counters.clear()
-
-        fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
-        self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
-
-    @fresh_inductor_cache()
-    @config.patch(search_autotune_cache=True)
-    def test_search_autotune_cache(self):
-        def fn(a, b, c):
-            a = (a @ b) @ c
-            a, b, c = (t.to(torch.float16) for t in [a, b, c])
-            return (a @ b) @ c
-
-        fn_c = torch.compile()(fn)
-        inputs = [torch.rand([256, 256], device=GPU_TYPE) for _ in range(3)]
-        from torch._dynamo.utils import counters
-
-        self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
-        self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
-
     @fresh_inductor_cache()
     @config.patch(max_autotune=True, max_fusion_size=2)
     def test_jit_fusion_matches_aot_fusion(self):
@@ -735,23 +487,6 @@ class TestMaxAutotune(TestCase):
             torch.tensor(3, device=GPU_TYPE),
         )
         torch._export.aot_compile(fn, args=inputs)
-
-    @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
-    @runOnRocmArch(MI300_ARCH)
-    def test_precompilations(self):
-        def fn(a, b, c):
-            a = (a @ b) @ c
-            a, b, c = (t.to(torch.float16) for t in [a, b, c])
-            return (a @ b) @ c
-
-        fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
-        inputs = [torch.rand([256, 256], device=GPU_TYPE) for _ in range(3)]
-
-        torch.testing.assert_close(fn_c(*inputs), fn(*inputs), atol=1e-2, rtol=1e-2)
-
-        from torch._dynamo.utils import counters
-
-        self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 2)
 
     def test_cat_addmm(self):
         def fn(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor):
@@ -777,48 +512,6 @@ class TestMaxAutotune(TestCase):
             expected = fn(*args)
             actual = torch.compile(fn)(*args)
             torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
-
-    def test_triton_template_with_epilogues_and_dynamic_shape(self):
-        def fn(
-            x: torch.Tensor, w: torch.Tensor, bias: torch.Tensor, mul: torch.Tensor
-        ) -> torch.Tensor:
-            return (
-                torch.nn.functional.relu(
-                    torch.matmul(torch.transpose(x, 0, 1), torch.transpose(w, 0, 1))
-                    + bias
-                )
-                * mul
-            )
-
-        M0 = 5
-        M1 = 8
-        K = 4
-        N = 3
-        w = torch.rand(N, K).to(GPU_TYPE).half()
-        b = torch.rand(N).to(GPU_TYPE).half()
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": "Triton",
-            }
-        ):
-            compiled_fn = torch.compile(
-                fn, fullgraph=True, dynamic=True, mode="max-autotune-no-cudagraphs"
-            )
-
-            x0 = torch.rand(K, M0).to(GPU_TYPE).half()
-            mul0 = torch.rand(M0, N).to(GPU_TYPE).half()
-            y0 = compiled_fn(x0, w, b, mul0)
-            y0_expected = fn(x0, w, b, mul0)
-            torch.testing.assert_close(y0, y0_expected)
-
-            x1 = torch.rand(K, M1).to(GPU_TYPE).half()
-            mul1 = torch.rand(M1, N).to(GPU_TYPE).half()
-            y1 = compiled_fn(x1, w, b, mul1)
-            y1_expected = fn(x1, w, b, mul1)
-            torch.testing.assert_close(y1, y1_expected)
 
     @config.patch(
         benchmark_kernel=True,
@@ -1299,6 +992,318 @@ class TestMaxAutotune(TestCase):
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
             bf16_red_setting
         )
+
+
+class TestMaxAutotunePrecompile(TestCase):
+    def test_precompilation_threads(self):
+        import threading
+        from typing import Any
+        from unittest.mock import Mock, patch
+
+        class FakeChoiceCaller(ChoiceCaller):
+            def __init__(self) -> None:
+                super().__init__("none", [], Mock(), description="")
+                self.thread_id = None
+
+            def precompile(self):
+                self.thread_id = threading.get_ident()
+
+            def call_name(self) -> str:
+                return None
+
+            def to_callable(self):
+                return None
+
+            def hash_key(self) -> str:
+                return str(hash(self))
+
+            def output_node(self) -> "TensorBox":  # noqa: F821
+                return None
+
+        fake_choices = [FakeChoiceCaller() for i in range(10)]
+        fake_lookup_result = dict.fromkeys(fake_choices, 0.123)
+
+        def no_lookup(
+            choices: list[ChoiceCaller],
+            op: str,
+            inputs: str,
+            benchmark: Callable[[Any], dict[ChoiceCaller, float]],
+        ) -> Optional[dict[ChoiceCaller, float]]:
+            if benchmark is not None:
+                return benchmark(choices)
+
+        asc = AlgorithmSelectorCache()
+
+        def fake_benchmark_fn(*args, **kwargs):
+            return fake_lookup_result
+
+        main_thread_id = threading.get_ident()
+        mock_debug_handler = Mock()
+        old_debug_handler = V.debug
+        try:
+            V.set_debug_handler(mock_debug_handler)
+            with patch.object(asc, "lookup", new=no_lookup):
+                with patch.object(
+                    asc, "make_benchmark_fn", return_value=fake_benchmark_fn
+                ):
+                    with config.patch(
+                        {
+                            "autotune_in_subproc": False,
+                            "compile_threads": len(fake_choices),
+                        }
+                    ):
+                        asc("test_call", fake_choices, [], Mock())
+            for fake_choice in fake_choices:
+                assert (
+                    fake_choice.thread_id is not None
+                ), "Expected all ChoiceCaller's precompile method to have been called"
+                assert (
+                    fake_choice.thread_id != main_thread_id
+                ), "Expected all ChoiceCaller's precompile method to have been called on separate thread"
+        finally:
+            V.set_debug_handler(old_debug_handler)
+
+    def test_filled_cache_precompile(self):
+        def fn(a, b, c):
+            a = (a @ b) @ c
+            a, b, c = (t.to(torch.float16) for t in [a, b, c])
+            return (a @ b) @ c
+
+        fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
+        inputs = [torch.rand([256, 256], device=GPU_TYPE) for _ in range(3)]
+        from torch._dynamo.utils import counters
+
+        self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
+        self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
+
+    @fresh_inductor_cache()
+    @config.patch(search_autotune_cache=True)
+    def test_search_autotune_cache(self):
+        def fn(a, b, c):
+            a = (a @ b) @ c
+            a, b, c = (t.to(torch.float16) for t in [a, b, c])
+            return (a @ b) @ c
+
+        fn_c = torch.compile()(fn)
+        inputs = [torch.rand([256, 256], device=GPU_TYPE) for _ in range(3)]
+        from torch._dynamo.utils import counters
+
+        self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
+        self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
+
+    @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
+    @runOnRocmArch(MI300_ARCH)
+    def test_precompilations(self):
+        def fn(a, b, c):
+            a = (a @ b) @ c
+            a, b, c = (t.to(torch.float16) for t in [a, b, c])
+            return (a @ b) @ c
+
+        fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
+        inputs = [torch.rand([256, 256], device=GPU_TYPE) for _ in range(3)]
+
+        torch.testing.assert_close(fn_c(*inputs), fn(*inputs), atol=1e-2, rtol=1e-2)
+
+        from torch._dynamo.utils import counters
+
+        self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 2)
+
+
+@instantiate_parametrized_tests
+class TestMaxAutotuneSubproc(TestCase):
+    def _create_buffer(self, name, shape):
+        return Buffer(
+            name=name,
+            layout=FixedLayout(
+                torch.device(f"{GPU_TYPE}:0"), dtype=torch.float32, size=shape
+            ),
+        )
+
+    # XPU have not support multiprocessing reduction in torch/multiprocessing/reductions.py
+    @skipIfXpu
+    def test_benchmark_choice_in_subproc(self):
+        gm = make_fx(
+            lambda: torch.zeros(2, 3)
+        )()  # a dummy graph to construct the GraphLowering
+        graph = GraphLowering(gm)
+
+        # the graph handler is neede to create benchmark example value below
+        with V.set_graph_handler(graph):
+            buf1 = self._create_buffer("mat1", (2, 3))
+            buf2 = self._create_buffer("mat2", (3, 2))
+            buf3 = self._create_buffer("mat3", (2, 3))
+            buf4 = self._create_buffer("mat4", (3, 2))
+
+            layout = FixedLayout(torch.device(f"{GPU_TYPE}:0"), torch.float32, (2, 2))
+
+            mat1 = AlgorithmSelectorCache.benchmark_example_value(buf1)
+            mat2 = AlgorithmSelectorCache.benchmark_example_value(buf2)
+            mat3 = AlgorithmSelectorCache.benchmark_example_value(buf3)
+            mat4 = AlgorithmSelectorCache.benchmark_example_value(buf4)
+
+            out = AlgorithmSelectorCache.benchmark_example_value(layout)
+            # expected_out = (mat1 @ mat2) + (mat3 @ mat4)
+            expected_out = None
+
+            choice = aten_mm_plus_mm.bind((buf1, buf2, buf3, buf4), layout)
+            # use a tensor since the mutation to a python list in a sub process
+            # is not synced back to the parent process
+            timings = torch.zeros(3, dtype=torch.float32)
+            ctx = mp.get_context("spawn")
+            child = ctx.Process(
+                target=benchmark_choice,
+                args=(choice, (mat1, mat2, mat3, mat4), out, expected_out, timings),
+            )
+            child.start()
+            child.join()
+            self.assertEqual(0, child.exitcode)
+            print(f"timings is {timings}, out {out}, expected_out {expected_out}")
+
+    # XPU have not support multiprocessing reduction in torch/multiprocessing/reductions.py
+    @skipIfXpu
+    def test_benchmark_choice_fail_in_subproc(self):
+        gm = make_fx(
+            lambda: torch.zeros(2, 3)
+        )()  # a dummy graph to construct the GraphLowering
+        graph = GraphLowering(gm)
+
+        # the graph handler is neede to create benchmark example value below
+        with V.set_graph_handler(graph):
+            buf1 = self._create_buffer("mat1", (2, 3))
+            buf2 = self._create_buffer("mat2", (3, 2))
+            buf3 = self._create_buffer("mat3", (2, 3))
+            buf4 = self._create_buffer("mat4", (3, 2))
+
+            layout = FixedLayout(torch.device(f"{GPU_TYPE}:0"), torch.float32, (2, 2))
+
+            mat1 = AlgorithmSelectorCache.benchmark_example_value(buf1)
+            mat2 = AlgorithmSelectorCache.benchmark_example_value(buf2)
+            mat3 = AlgorithmSelectorCache.benchmark_example_value(buf3)
+            mat4 = AlgorithmSelectorCache.benchmark_example_value(buf4)
+
+            out = AlgorithmSelectorCache.benchmark_example_value(layout)
+            expected_out = (mat1 @ mat2) + (mat3 @ mat4)
+
+            choice = FailChoiceCaller("fail_choice_caller", [], None, description="")
+
+            # use a tensor since python list is not synced back
+            timings = torch.zeros(3, dtype=torch.float32)
+            ctx = mp.get_context("spawn")
+            child = ctx.Process(
+                target=benchmark_choice,
+                args=(choice, (mat1, mat2, mat3, mat4), out, expected_out, timings),
+            )
+            child.start()
+            child.join()
+            self.assertNotEqual(0, child.exitcode)
+
+    @parametrize("autotune_in_subproc", (True, False))
+    @parametrize("autotune_multi_device", (True, False))
+    def test_max_autotune_mm_plus_mm(self, autotune_in_subproc, autotune_multi_device):
+        """
+        This crash previously due to a triton issue: https://github.com/triton-lang/triton/issues/1298 .
+        With autotuning in subprocess, we don't crash anymore.
+        """
+        m, n, k = 2048, 1536, 64
+
+        def mm_plus_mm(a, b, c, d):
+            return a @ b + c @ d
+
+        a = torch.randn(m, k).to(GPU_TYPE)
+        b = torch.randn(k, n).to(GPU_TYPE)
+        c = torch.randn(m, k).to(GPU_TYPE)
+        d = torch.randn(k, n).to(GPU_TYPE)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": autotune_in_subproc,
+                "autotune_multi_device": autotune_multi_device,
+            }
+        ):
+            torch.compile(mm_plus_mm)(a, b, c, d)
+
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_regular_mm(self, dynamic: bool):
+        """
+        Make sure autotuning mm in sub processes work without crashes.
+        """
+
+        def mm(a, b):
+            a = torch.sin(a)
+            return a @ b
+
+        a = torch.randn(100, 10).to(GPU_TYPE)
+        b = torch.randn(10, 100).to(GPU_TYPE)
+
+        with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
+            torch.compile(mm, dynamic=dynamic)(a, b)
+
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_addmm(self, dynamic=False):
+        """
+        Make sure autotuning addmm in sub processes work without crashes.
+        """
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def addmm(x, a, b):
+            return torch.addmm(x, a, b)
+
+        x = torch.randn(100).to(GPU_TYPE)
+        a = torch.randn(100, 10).to(GPU_TYPE)
+        b = torch.randn(10, 100).to(GPU_TYPE)
+        with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
+            Y_compiled = torch.compile(addmm, dynamic=dynamic)(x, a, b)
+            Y = addmm(x, a, b)
+            torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
+
+    def test_triton_template_with_epilogues_and_dynamic_shape(self):
+        def fn(
+            x: torch.Tensor, w: torch.Tensor, bias: torch.Tensor, mul: torch.Tensor
+        ) -> torch.Tensor:
+            return (
+                torch.nn.functional.relu(
+                    torch.matmul(torch.transpose(x, 0, 1), torch.transpose(w, 0, 1))
+                    + bias
+                )
+                * mul
+            )
+
+        M0 = 5
+        M1 = 8
+        K = 4
+        N = 3
+        w = torch.rand(N, K).to(GPU_TYPE).half()
+        b = torch.rand(N).to(GPU_TYPE).half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": "Triton",
+            }
+        ):
+            compiled_fn = torch.compile(
+                fn, fullgraph=True, dynamic=True, mode="max-autotune-no-cudagraphs"
+            )
+
+            x0 = torch.rand(K, M0).to(GPU_TYPE).half()
+            mul0 = torch.rand(M0, N).to(GPU_TYPE).half()
+            y0 = compiled_fn(x0, w, b, mul0)
+            y0_expected = fn(x0, w, b, mul0)
+            torch.testing.assert_close(y0, y0_expected)
+
+            x1 = torch.rand(K, M1).to(GPU_TYPE).half()
+            mul1 = torch.rand(M1, N).to(GPU_TYPE).half()
+            y1 = compiled_fn(x1, w, b, mul1)
+            y1_expected = fn(x1, w, b, mul1)
+            torch.testing.assert_close(y1, y1_expected)
 
 
 @instantiate_parametrized_tests
