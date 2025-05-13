@@ -331,6 +331,7 @@ def is_channels_last_contiguous_2d(a: Tensor) -> bool:
     return True
 
 
+# similar to is_channels_last_contiguous_2d but return false on data dependency.
 def is_known_channels_last_contiguous_2d(a: Tensor) -> bool:
     # NHWC or not channels last 2D contiguous
     if a.ndim != 4:
@@ -375,6 +376,7 @@ def is_channels_last_contiguous_3d(a: Tensor) -> bool:
     return True
 
 
+# similar to is_channels_last_contiguous_3d but return false on data dependency.
 def is_known_channels_last_contiguous_3d(a: Tensor) -> bool:
     # NDHWC or not channels last 3D contiguous
     if a.ndim != 5:
@@ -430,6 +432,7 @@ def is_contiguous_for_memory_format(  # type: ignore[return]
     )
 
 
+# similar to is_contiguous_for_memory_format but return false on data dependency.
 def is_known_contiguous_for_memory_format(  # type: ignore[return]
     a: Tensor, *, memory_format: torch.memory_format
 ) -> bool:
@@ -465,7 +468,7 @@ def is_channels_last_contiguous(a: Tensor) -> bool:
     return is_channels_last_contiguous_2d(a) or is_channels_last_contiguous_3d(a)
 
 
-# NOTE: that tensors with no elements and channels last is ???
+# similar to is_channels_last_contiguous but return false on data dependency.
 def is_known_channels_last_contiguous(a: Tensor) -> bool:
     return is_known_channels_last_contiguous_2d(
         a
