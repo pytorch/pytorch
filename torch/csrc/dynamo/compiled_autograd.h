@@ -367,6 +367,8 @@ struct AutogradCompilerCall {
   // pynode -> backward and backward state idx
   std::unordered_map<const Node*, std::pair<size_t, std::optional<size_t>>>
       pynode_objs;
+  // C++ reducer state
+
 };
 
 class CompiledNodeArgs {
@@ -611,6 +613,7 @@ class CompiledNodeArgs {
 #undef COLLECT_AS_BYTES
 
   void collect_hooks_from(Node* fn) {
+    std::cout << "collecting hooks from " << fn->name() << "(" << fn << ")" << std::endl;
     for (auto& i : fn->tensor_pre_hooks()) {
       i->compiled_args(*this);
     }
@@ -621,6 +624,7 @@ class CompiledNodeArgs {
       i->compiled_args(*this);
     }
     for (auto& i : fn->post_hooks()) {
+      std::cout << "found post hook" << std::endl;
       i->compiled_args(*this);
     }
     collect_size(_node_call.tensor_pre_hooks.size());

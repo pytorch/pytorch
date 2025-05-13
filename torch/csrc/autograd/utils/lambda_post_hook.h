@@ -10,7 +10,9 @@ class LambdaPostHook : public torch::autograd::FunctionPostHook {
   using variable_list = std::vector<torch::autograd::Variable>;
   using fn_type =
       std::function<variable_list(const variable_list&, const variable_list&)>;
-  using compiled_fn_type = std::function<void(CompiledNodeArgs&)>;
+  using compiled_args_fn_type = std::function<void(CompiledNodeArgs&)>;
+  using compiled_apply_fn_type =
+      std::function<void(Variable&, SwapSavedVariables&)>;
 
  public:
   // The lambda function takes as arguments the outputs and inputs of the
@@ -18,8 +20,13 @@ class LambdaPostHook : public torch::autograd::FunctionPostHook {
   // returning a new output if needed.
   /* implicit */ LambdaPostHook(fn_type fn) : fn_(std::move(fn)) {}
 
-  LambdaPostHook(fn_type fn, compiled_fn_type compiled_fn)
-      : fn_(std::move(fn)), compiled_fn_(std::move(compiled_fn)) {}
+  LambdaPostHook(
+      fn_type fn,
+      compiled_args_fn_type compiled_args_fn,
+      compiled_apply_fn_type compiled_apply_fn)
+      : fn_(std::move(fn)),
+        compiled_args_fn_(std::move(compiled_args_fn)),
+        compiled_apply_fn_(std::move(compiled_apply_fn)) {}
 
   variable_list operator()(
       const variable_list& outputs,
@@ -28,15 +35,24 @@ class LambdaPostHook : public torch::autograd::FunctionPostHook {
   }
 
   void compiled_args(CompiledNodeArgs& args) const override {
-    if (compiled_fn_ != nullptr) {
-      return compiled_fn_(args);
+    if (compiled_args_fn_ != nullptr) {
+      return compiled_args_fn_(args);
     }
     return FunctionPostHook::compiled_args(args);
   }
 
+  void apply_with_saved(Variable& inputs, SwapSavedVariables& saved)
+      const override {
+    if (compiled_apply_fn_ != nullptr) {
+      return compiled_apply_fn_(inputs, saved);
+    }
+    return FunctionPostHook::apply_with_saved(inputs, saved);
+  }
+
  protected:
   std::function<variable_list(const variable_list&, const variable_list&)> fn_;
-  compiled_fn_type compiled_fn_{};
+  compiled_args_fn_type compiled_args_fn_{};
+  compiled_apply_fn_type compiled_apply_fn_{};
 };
 
 } // namespace torch::autograd::utils

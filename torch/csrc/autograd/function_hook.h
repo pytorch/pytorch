@@ -42,6 +42,14 @@ struct TORCH_API FunctionPostHook {
         std::string("compiled_args nyi, see [Note: Compiled Autograd] ") +
         typeid(*this).name());
   }
+
+  virtual void apply_with_saved(
+      Variable& tensor,
+      torch::dynamo::autograd::SwapSavedVariables& saved) const {
+    throw std::runtime_error(
+        std::string("compiled_args nyi, see [Note: Compiled Autograd] ") +
+        typeid(*this).name());
+  }
 };
 
 struct TORCH_API PostAccumulateGradHook {

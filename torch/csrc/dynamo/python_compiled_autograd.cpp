@@ -1053,6 +1053,7 @@ static CacheNode* _compiled_autograd_impl(
       }
 
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
+      std::cout << call.node->name() << " has post hooks before apply_with_saved? " << (!call.post_hooks.empty()) << std::endl;
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
       saved.debug_asserts();
       saved.before(call.node->next_edges());
@@ -1104,6 +1105,7 @@ static CacheNode* _compiled_autograd_impl(
       saved.after(call.node->next_edges());
       saved.debug_asserts();
 
+      std::cout << call.node->name() << " has post hooks after apply_with_saved? " << (!call.post_hooks.empty()) << std::endl;
       if (!call.post_hooks.empty()) {
         THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
         THPObjectPtr pyoutputs(THPVariable_WrapList(outputs));

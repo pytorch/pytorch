@@ -779,6 +779,7 @@ class AutogradCompilerInstance:
         return inputs
 
     def post_hook(self, outputs, inputs, hook_id):
+        breakpoint()
         assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
         proxies = self.proxy_call_hook(

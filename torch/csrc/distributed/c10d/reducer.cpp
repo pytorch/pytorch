@@ -126,7 +126,7 @@ Reducer::Reducer(
       use_python_reducer_(use_python_reducer) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_INTERNAL_ASSERT(!params_.empty(), "Expected at least one parameter.");
-
+  std::cout << "hello from c++ reducer" << std::endl;
   if (ddp_debug_level_ != c10d::DebugLevel::Off) {
     LOG(INFO) << "Reducer initialized with bucket_bytes_cap: "
               << bucket_bytes_cap_
@@ -174,6 +174,7 @@ Reducer::Reducer(
   // can be marked as ready for reduction.
   {
     const auto variable_count = params_.size();
+    std::cout << "reducer found " << variable_count << " variables" << std::endl;
     grad_accumulators_.resize(variable_count);
     for (const auto variable_index : c10::irange(variable_count)) {
       auto& variable = params_[variable_index];
@@ -187,6 +188,7 @@ Reducer::Reducer(
       using torch::distributed::autograd::ThreadLocalDistAutogradContext;
 #endif
       // Hook to execute after the gradient accumulator has executed.
+      std::cout << "registering the post hook"  << std::endl;
       hooks_.emplace_back(
           grad_accumulator->add_post_hook(std::make_unique<
                                           torch::autograd::utils::
@@ -201,12 +203,41 @@ Reducer::Reducer(
                 this->autograd_hook(variable_index);
                 return outputs;
               },
-              [this](torch::autograd::CompiledNodeArgs& args) {
-                TORCH_CHECK(
-                    this->use_python_reducer_,
-                    "Compiled autograd is not compatible with C++ DDP Reducer, please use torch._dynamo.config.optimize_ddp=\"python_reducer\".");
+              [this, variable_index](torch::autograd::CompiledNodeArgs& args) {
+                std::cout << "collecting the post hook on variable_index=" << variable_index << std::endl;
+                if (this->use_python_reducer_) {
+                  return;
+                }
+
+                // filters out unsupported DDP arguments
+                auto str =
+                    "Compiled autograd is not compatible with C++ DDP Reducer, please use torch._dynamo.config.optimize_ddp=\"python_reducer\".";
+                TORCH_CHECK(!mixed_precision_param_dtype_.has_value(), str);
+                TORCH_CHECK(!find_unused_parameters_, str);
+                TORCH_CHECK(ddp_debug_level_ == c10d::DebugLevel::Off, str);
+                TORCH_CHECK(rpc_context_.context_ptr.load() == nullptr, str);
+                if (static_graph_) {
+                  TORCH_WARN_ONCE(
+                      "static_graph ignored, compiled autograd always rebuilds buckets when param ready order changes.");
+                }
+
+                // Attempt to trace C++ Reducer
+                args.collect(variable_index);
+                // args.cpp_post_hook();
+                // at::Tensor& param = get_param_from_index(variable_index);
+              },
+              [this, variable_index](
+                  torch::autograd::Variable& variable,
+                  torch::autograd::SwapSavedVariables& saved) {
+                // update bucketing state in tracker
+                // saved.compiler_call.update_reducer_state
+                // issue bucketing op with the correct tensors
+                // pycompiler.call_ddp_autograd_hook(bucket: List[Tensor])
+                //   then bucket and issue collective
+                return;
               })),
           grad_accumulator);
+      std::cout << "registered post hook on " << &(*grad_accumulator) << std::endl;
 
       // Map raw function pointer to parameter index.
       // This is used later on when the autograd graph is traversed
@@ -2401,6 +2432,7 @@ void verify_params_across_processes(
 }
 
 void Reducer::remove_autograd_hooks() {
+  std::cout << "===========================REMOVING AUTOGRAD HOOKS======================" << std::endl;
   // Remove all hooks on variables registered by this Reducer. This is necessary
   // to make DDP failure recoverable. Otherwise, multiple Reducer instances
   // (from recoveries) will add their hooks to the original model, and those
