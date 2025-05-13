@@ -95,6 +95,7 @@ using AOTIProxyExecutorHandle = AOTIProxyExecutorOpaque*;
 using AOTITorchError = int32_t;
 #define AOTI_TORCH_SUCCESS 0
 #define AOTI_TORCH_FAILURE 1
+#define AOTI_TORCH_CUDA_STICKY_ERROR 2
 
 // Getter functions for retrieving various constants from the runtime, that
 // can subsequently be passed to other aoti_* functions.  By hiding these
