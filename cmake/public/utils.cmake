@@ -363,6 +363,10 @@ function(torch_compile_options libname)
       set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /permissive-" PARENT_SCOPE)
     endif()
 
+    if(${MSVC_TOOLSET_VERSION} GREATER_EQUAL 143)
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /d2implyavx512upperregs-" PARENT_SCOPE)
+    endif()
+
     target_compile_options(${libname} PUBLIC
       $<$<COMPILE_LANGUAGE:CXX>:
         ${MSVC_RUNTIME_LIBRARY_OPTION}
