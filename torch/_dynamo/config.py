@@ -449,6 +449,14 @@ allow_empty_graphs = False
 # torch._dynamo.utilsCompileTimeInstructionCounter.
 record_compile_time_instruction_count = False
 
+# Allows out of tree functions of the form:
+#   wrapper(fn, *fn_args, **fn_kwarg, wrapper_kwarg_1=..., wrapper_kwarg_2=...)
+# To be converted into HOPs during compilation.
+#
+# Add the kwarg keys that are passed to the wrapper function to this dict with
+# the function as the key and the kwarg key as the value.
+_hopify_generic_wrap_fn_kwarg_keys: dict[Callable[[Any], Any], tuple[str, ...]] = dict()
+
 
 def default_debug_dir_root():
     # [@compile_ignored: debug]
