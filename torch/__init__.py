@@ -36,7 +36,7 @@ from typing_extensions import ParamSpec as _ParamSpec
 
 
 if TYPE_CHECKING:
-    from .types import IntLikeType
+    from .types import Device, IntLikeType
 
 
 # multipy/deploy is setting this import before importing torch, this is the most
@@ -357,6 +357,7 @@ def _load_global_deps() -> None:
             "cusolver": "libcusolver.so.*[0-9]",
             "nccl": "libnccl.so.*[0-9]",
             "nvtx": "libnvToolsExt.so.*[0-9]",
+            "nvshmem": "libnvshmem_host.so.*[0-9]",
         }
         # cufiile is only available on cuda 12+
         # TODO: Remove once CUDA 11.8 binaries are deprecated
@@ -1154,9 +1155,7 @@ def get_default_device() -> "torch.device":
         return torch.device("cpu")
 
 
-def set_default_device(
-    device: _Optional[_Union["torch.device", str, builtins.int]],
-) -> None:
+def set_default_device(device: "Device") -> None:
     """Sets the default ``torch.Tensor`` to be allocated on ``device``.  This
     does not affect factory function calls which are called with an explicit
     ``device`` argument.  Factory calls will be performed as if they
