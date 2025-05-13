@@ -77,12 +77,16 @@ if not hasattr(torch._C, "_MemPool"):
     torch._C.__dict__["_cuda_beginAllocateToPool"] = _dummy_type(
         "_cuda_beginAllocateToPool"
     )
+    torch._C.__dict__["_cuda_beginAllocateCurrentThreadToPool"] = _dummy_type(
+        "_cuda_beginAllocateCurrentThreadToPool"
+    )
     torch._C.__dict__["_cuda_endAllocateToPool"] = _dummy_type(
         "_cuda_endAllocateToPool"
     )
     torch._C.__dict__["_cuda_releasePool"] = _dummy_type("_cuda_releasePool")
 
 from torch._C import (  # noqa: F401
+    _cuda_beginAllocateCurrentThreadToPool,
     _cuda_beginAllocateToPool,
     _cuda_CUDAAllocator,
     _cuda_endAllocateToPool,
@@ -845,6 +849,7 @@ def _record_memory_history_legacy(
     device: "Device" = None,
     record_context_cpp=False,
     clear_history=False,
+    compile_context=False,
 ):
     _C._cuda_record_memory_history_legacy(
         enabled,
@@ -853,6 +858,7 @@ def _record_memory_history_legacy(
         trace_alloc_record_context,
         record_context_cpp,
         clear_history,
+        compile_context,
     )
 
 
@@ -908,8 +914,11 @@ def _record_memory_history_impl(
     max_entries: int = sys.maxsize,
     device: "Device" = None,
     clear_history: bool = False,
+    compile_context: bool = False,
 ):
-    _C._cuda_record_memory_history(enabled, context, stacks, max_entries, clear_history)
+    _C._cuda_record_memory_history(
+        enabled, context, stacks, max_entries, clear_history, compile_context
+    )
 
 
 _record_memory_history.__signature__ = signature(_record_memory_history_impl)  # type: ignore[attr-defined]
@@ -1187,12 +1196,17 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
             the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
 
+    .. note::
+        This context manager makes only current thread's allocations route to
+        the given pool. If a new thread is spawned inside the context manager
+        (e.g. by calling backward) the allocations in that thread will not
+        route to the given pool.
     """
     ctx = MemPoolContext(pool)
     device_index = (
         torch.cuda.current_device() if device is None else _get_device_index(device)
     )
-    _cuda_beginAllocateToPool(device_index, pool.id)
+    _cuda_beginAllocateCurrentThreadToPool(device_index, pool.id)
     try:
         yield
     finally:
