@@ -995,6 +995,10 @@ class TestInductorOpInfo(TestCase):
         device_type = torch.device(device).type
 
         assert device_type in (GPU_TYPE, "cpu")
+        if device_type == "xpu" and op.name == "asin" and dtype == f32:
+            raise unittest.SkipTest(
+                "[XPU]: https://github.com/intel/intel-xpu-backend-for-triton/issues/4142"
+            )
 
         torch._dynamo.reset()
         with torch.no_grad():

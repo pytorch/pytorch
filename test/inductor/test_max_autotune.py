@@ -1815,6 +1815,10 @@ class TestPrologueFusion(TestCase):
 
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_multiple_inputs(self, sizes):
+        if GPU_TYPE == "xpu" and sizes == (63, 120, 250):
+            raise unittest.SkipTest(
+                "[XPU]: https://github.com/intel/intel-xpu-backend-for-triton/issues/4142"
+            )
         M, K, N = sizes
 
         def foo(x, y, z):

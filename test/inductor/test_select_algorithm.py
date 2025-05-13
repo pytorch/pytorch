@@ -85,6 +85,9 @@ class TestSelectAlgorithm(TestCase):
 
     @patch.object(select_algorithm, "VERIFY", dict(atol=5e-2, rtol=5e-2))
     @patches
+    @skipIfXpu(
+        msg="[XPU]: https://github.com/intel/intel-xpu-backend-for-triton/issues/4142"
+    )
     def test_addmm_fp16(self):
         @torch.compile
         def foo(input, weight, bias):
