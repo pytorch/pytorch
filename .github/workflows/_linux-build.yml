@@ -80,6 +80,18 @@ on:
         required: false
         type: boolean
         default: false
+      monitor-log-interval:
+        description: |
+          Set the interval for the monitor script to log utilization.
+        required: false
+        type: number
+        default: 5
+      monitor-data-collect-interval:
+        description: |
+          Set the interval for the monitor script to collect data.
+        required: false
+        type: number
+        default: 1
 
     secrets:
       HUGGING_FACE_HUB_TOKEN:
@@ -191,15 +203,16 @@ jobs:
           JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
           WORKFLOW_NAME: ${{ github.workflow }}
-          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          WORKFLOW_RUN_ID: ${{github.run_id}}
+          MONITOR_LOG_INTERVAL: ${{ inputs.monitor-log-interval }}
+          MONITOR_DATA_COLLECT_INTERVAL: ${{ inputs.monitor-data-collect-interval }}
         run: |
           echo "test" > usage_log_test.txt
           echo "test" > usage_log.json
           echo "usage_log_build_${JOB_ID}.txt"
           echo $(pwd)
-
-          python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7
-          python3 -m tools.stats.monitor > "usage_log_build_${JOB_ID}.txt" 2>&1 &
+          python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7 nvidia-ml-py==11.525.84
+          python3 -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download pytest cache
@@ -335,26 +348,6 @@ jobs:
           ls ./*.txt
           ls ./*.json
 
-      - name: Start monitoring script
-        id: monitor-script
-        if: ${{ !inputs.disable-monitor }}
-        shell: bash
-        continue-on-error: true
-        env:
-          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
-          JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
-          WORKFLOW_NAME: ${{ github.workflow }}
-          WORKFLOW_RUN_ID: ${{ github.run_id }}
-        run: |
-          echo "test" > usage_log_test.txt
-          echo "test" > usage_log.json
-          echo "usage_log_build_${JOB_ID}.txt"
-          echo $(pwd)
-
-          python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7
-          python3 -m tools.stats.monitor > "usage_log_build_test.txt" 2>&1 &
-          echo "monitor-script-pid2=${!}" >> "${GITHUB_OUTPUT}"
-
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
         run: |
@@ -393,15 +386,6 @@ jobs:
           if-no-files-found: error
           path: artifacts.zip
 
-      - name: Stop monitoring script
-        if: ${{ always() && steps.monitor-script.outputs.monitor-script-pid }}
-        shell: bash
-        continue-on-error: true
-        env:
-          MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid2 }}
-        run: |
-          kill "$MONITOR_SCRIPT_PID"
-
       - name: Check all txt
         shell: bash
         run: |
@@ -425,7 +409,7 @@ jobs:
           build-time: ${{ steps.build.outputs.build_time }}
 
       - name: Upload utilization stats
-        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
+        if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && !inputs.disable-monitor }}
         continue-on-error: true
         uses: ./.github/actions/upload-utilization-stats
         with:
@@ -434,7 +418,6 @@ jobs:
           workflow_name: ${{ github.workflow }}
           workflow_run_id: ${{github.run_id}}
           workflow_attempt: ${{github.run_attempt}}
-          artifact_prefix: usage_log_build
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
