@@ -38,7 +38,7 @@ jobs:
 
   linux-jammy-rocm-py3_10-build:
     if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
-    name: linux-jammy-rocm-py3.10
+    name: linux-jammy-rocm-py3.10-mi300
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
@@ -61,7 +61,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    name: linux-jammy-rocm-py3.10
+    name: linux-jammy-rocm-py3.10-mi300
     uses: ./.github/workflows/_rocm-test.yml
     needs:
       - linux-jammy-rocm-py3_10-build
