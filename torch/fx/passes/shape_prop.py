@@ -33,6 +33,10 @@ class TensorMetadata(NamedTuple):
     qparams: dict[str, Any]
 
 
+# When include_contiguity is True, we will set contiguity when its always true for the tensor.
+# some tensors can rerepsent both contiguous and non contiguous tensors. Ex (u0, u1) with (u2, u3).
+# In such situation contiguity is not set. We could also make it a tri-state.
+# known_contiguous, known_not_contiguous, and unknown.
 def _extract_tensor_metadata(
     result: torch.Tensor, include_contiguity=True
 ) -> TensorMetadata:
@@ -52,11 +56,6 @@ def _extract_tensor_metadata(
             torch.channels_last,
             torch.channels_last_3d,
         }
-        # When the shape has unbacked symbols, it could be general enough such that
-        # it represent both contiguous and non contiguous tensors.
-        # ex: size(u0, u1) and strides(u2, u3)! In that case is_contiguous will throw
-        # a data dependent error. Since we only store memory_format when is_contiguous return
-        # true calling is_known_contiguous is appropriate here.
         for query_format in memory_formats:
             if is_known_contiguous_for_memory_format(
                 result, memory_format=query_format
