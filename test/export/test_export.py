@@ -701,6 +701,35 @@ graph():
     return (add,)""",
         )
 
+    def test_int_shape_specialization(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                ori_size = (
+                    int(x.shape[-2] / 1),
+                    int(x.shape[-1] / 1),
+                )
+                x = F.interpolate(x, size=ori_size, mode="bilinear")
+                return x
+
+        input1 = (torch.rand(1, 3, 28, 28),)
+        input2 = (torch.rand(1, 3, 56, 56),)
+        inputs = [input1, input2]
+        model = M()
+        dynamic_shapes = {
+            "x": {2: torch.export.Dim.DYNAMIC, 3: torch.export.Dim.DYNAMIC},
+        }
+        with self.assertRaisesRegex(
+            (
+                torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
+                torch._dynamo.exc.UserError,
+            ),
+            (
+                r"your code specialized it to be a constant \(28\)(.*\n)*.*"
+                r"your code specialized it to be a constant \(28\)(.*\n)*.*"
+            ),
+        ):
+            export(model, input1, dynamic_shapes=dynamic_shapes, strict=False)
+
     def test_external_call_non_strict_real_tensor(self):
         class ExternalMethod:
             def add(self, x):
