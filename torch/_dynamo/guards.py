@@ -460,6 +460,19 @@ def _get_closure_vars():
             "torch": torch,
             "inspect": inspect,
         }
+    if torch.distributed.is_available():
+        from torch.distributed.device_mesh import DeviceMesh
+        from torch.distributed.tensor.placement_types import (
+            Partial,
+            Replicate,
+            Shard,
+        )
+        _CLOSURE_VARS.update({
+            "Shard": Shard,
+            "Replicate": Replicate,
+            "Partial": Partial,
+            "DeviceMesh": DeviceMesh,
+        })
     return _CLOSURE_VARS
 
 
@@ -1616,6 +1629,7 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def TENSOR_SUBCLASS_METADATA_MATCH(self, guard: Guard):
+        ref = self.arg_ref(guard)
         value = self.get(guard.name)
         original_metadata = deepcopy(self.get(guard.name).__tensor_flatten__()[1])
         if hasattr(value, "__metadata_guard__"):
@@ -1626,15 +1640,19 @@ class GuardBuilder(GuardBuilderBase):
                     original_metadata, x.__tensor_flatten__()[1]
                 )
 
+            code_part = f"{ref}.__metadata_guard__({original_metadata}, {ref}.__tensor_flatten__()[1])"
+            self.get_guard_manager(guard).add_lambda_guard(
+                metadata_checker, get_verbose_code_parts(code_part, guard)
+            )
         else:
 
             def metadata_checker(x):
                 return x.__tensor_flatten__()[1] == original_metadata
 
-        global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
-        self.get_guard_manager(guard).add_lambda_guard(
-            metadata_checker, get_verbose_code_parts(global_name, guard)
-        )
+            code_part = f"{ref}.__tensor_flatten__()[1] == {original_metadata}"
+            self.get_guard_manager(guard).add_lambda_guard(
+                metadata_checker, get_verbose_code_parts(code_part, guard)
+            )
 
     def EQUALS_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
@@ -3367,6 +3385,7 @@ def _extract_recompiled_dynamic_sources(fail_reasons: list[str], frame_locals: d
     Returns a list of sources, and a boolean indicating whether a parameter was included.
     """
     scope = {"L": frame_locals, "G": guard_manager.global_scope["G"]}
+    scope.update(guard_manager.closure_vars)
     has_parameter = False
     shape_sources = OrderedSet()
     pattern = r"tensor '(.*)' size mismatch at index .* expected (\d+), actual (\d+).*"
@@ -3423,9 +3442,10 @@ def get_and_maybe_log_recompilation_reasons(
         )
         if reason:
             reasons.append(reason)
-            new_dynamic_sources, dynamic_param = _extract_recompiled_dynamic_sources(fail_reasons, frame.f_locals, cache_entry.guard_manager)
-            dynamic_sources.update(new_dynamic_sources)
-            has_dynamic_parameter |= dynamic_param
+            if not isinstance(cache_entry.guard_manager, DeletedGuardManagerWrapper):
+                new_dynamic_sources, dynamic_param = _extract_recompiled_dynamic_sources(fail_reasons, frame.f_locals, cache_entry.guard_manager)
+                dynamic_sources.update(new_dynamic_sources)
+                has_dynamic_parameter |= dynamic_param
         cache_entry = cache_entry.next
 
     code = frame.f_code
