@@ -1,0 +1,31 @@
+name: Reuse old wheel if possible
+
+description:
+  Reuse old wheel if possible
+
+inputs:
+  build-environment:
+    description: Build environment
+    required: true
+  workflow-id:
+    description: Workflow ID
+    required: true
+
+outputs:
+  changes:
+    description: Whether the wheel is reused or not
+    value: ${{ steps.check-file-changes.outputs.changes }}
+
+runs:
+  using: composite
+
+  steps:
+    # Check out pytorch with fetch depth 0
+    - name: Check file changes
+      id: check-file-changes
+      run: |
+        set -x
+        python .github/actions/check-old-whl/check_old_whl.py --build-environment "${{ inputs.build-environment }}" --workflow-id "${{ inputs.workflow-id }}"
+        if [ $? -ne 0 ]; then
+          echo "changes=true" >> "$GITHUB_OUTPUT"
+        fi

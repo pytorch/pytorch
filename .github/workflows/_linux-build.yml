@@ -132,16 +132,20 @@ jobs:
           role-session-name: gha-linux-build
           aws-region: us-east-1
 
+      - name: Check if can use old whl build
+        id: use-old-whl
+        uses: pytorch/pytorch/.github/actions/check-old-whl@main
+
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && steps.use-old-whl.outputs.use-old-whl.changes != 'true'
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
 
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && steps.use-old-whl.outputs.use-old-whl.changes != 'true'
         env:
           ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         shell: bash
@@ -151,7 +155,7 @@ jobs:
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && steps.use-old-whl.outputs.use-old-whl.changes != 'true'
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -179,14 +183,14 @@ jobs:
       - name: Download pytest cache
         uses: ./.github/actions/pytest-cache-download
         continue-on-error: true
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && steps.use-old-whl.outputs.use-old-whl.changes != 'true'
         with:
           cache_dir: .pytest_cache
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
           s3_bucket: ${{ inputs.s3-bucket }}
 
       - name: Build
-        if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
+        if: (steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == '') && steps.use-old-whl.outputs.use-old-whl.changes != 'true'
         id: build
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
@@ -281,7 +285,7 @@ jobs:
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
 
       - name: Archive artifacts into zip
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && steps.use-old-whl.outputs.use-old-whl.changes != 'true'
         run: |
           zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .additional_ci_files
 
@@ -305,7 +309,7 @@ jobs:
           path: artifacts.zip
 
       - name: Upload sccache stats
-        if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel' && steps.use-old-whl.outputs.use-old-whl.changes != 'true'
         uses: ./.github/actions/upload-sccache-stats
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
