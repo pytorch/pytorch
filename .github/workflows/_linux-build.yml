@@ -208,12 +208,12 @@ jobs:
           MONITOR_DATA_COLLECT_INTERVAL: ${{ inputs.monitor-data-collect-interval }}
         run: |
           echo "test" > usage_log_test.txt
-          echo "test" > usage_log.json
           echo "usage_log_build_${JOB_ID}.txt"
           echo "Monitor script started in $(pwd)"
           echo $(pwd)
+          mkdir -p ../../usage_logs
           python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7 nvidia-ml-py==11.525.84
-          python3 -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
+          python3 -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > ../../usage_logs/usage_log_build_${JOB_ID}.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download pytest cache
@@ -403,7 +403,7 @@ jobs:
             ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
           retention-days: 14
           if-no-files-found: warn
-          path: usage_log_build_*.txt
+          path: ../../usage_logs/usage_log_build_*.txt
 
       - name: Upload sccache stats
         if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
