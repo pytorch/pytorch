@@ -24,7 +24,7 @@
 namespace at::native {
 namespace mps {
 
-static string reductionToString(int64_t reduction) {
+static std::string reductionToString(int64_t reduction) {
   switch (reduction) {
     case Reduction::Mean:
       return "Mean";
@@ -59,7 +59,7 @@ static Tensor& mse_loss_backward_out_impl(const Tensor& grad_output,
                                           const Tensor& target,
                                           int64_t reduction,
                                           Tensor& grad_input,
-                                          const string op_name) {
+                                          const std::string& op_name) {
   auto norm = reduction == Reduction::Mean ? 2. / static_cast<double>(input.numel()) : 2.;
 
   if ((input.numel() == 0) || (target.numel() == 0) || (grad_output.numel() == 0)) {
@@ -73,7 +73,7 @@ static Tensor& mse_loss_backward_out_impl(const Tensor& grad_output,
   };
 
   @autoreleasepool {
-    string key = op_name + reductionToString(reduction) + ":" + std::to_string(grad_input.sizes()[1]) +
+    std::string key = op_name + reductionToString(reduction) + ":" + std::to_string(grad_input.sizes()[1]) +
         getTensorsStringKey({input, target, grad_output});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
@@ -200,7 +200,7 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
                                  int64_t reduction,
                                  Tensor& loss,
                                  const std::optional<Tensor>& grad_output_opt,
-                                 const string op_name) {
+                                 const std::string& op_name) {
   // TODO: add sanity check for the elements of input tensor to be within [0..1]
 
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
@@ -216,7 +216,7 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
   Tensor target_squeezed = target.squeeze();
 
   @autoreleasepool {
-    string key =
+    std::string key =
         op_name + reductionToString(reduction) + getTensorsStringKey({input_squeezed, target_squeezed, weight});
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
@@ -331,7 +331,7 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
     grad_output = grad_output_arg.unsqueeze(channel_dim);
   }
   @autoreleasepool {
-    string key = "nllnd_loss_backward" + getTensorsStringKey({input, grad_output, target, weight, total_weight}) +
+    std::string key = "nllnd_loss_backward" + getTensorsStringKey({input, grad_output, target, weight, total_weight}) +
         std::to_string(numClasses) + ":" + std::to_string(ignore_index) + ":" + std::to_string(isWeightsArrayValid) +
         ":" + std::to_string(isTargetCasted) + ":" + reductionToString(reduction);
 
@@ -481,9 +481,10 @@ static void nllnd_loss_forward_impl(Tensor& output,
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
     // TODO: Make the key
-    string key = "nllnd_loss_forward_impl:" + std::to_string(ignore_index) + ":" + std::to_string(isWeightsArrayValid) +
-        ":" + reductionToString(reduction) + ":" + [ns_shape_key UTF8String] + ":" + getMPSTypeString(input) + ":" +
-        getMPSTypeString(target) + ":" + std::to_string(isTargetCasted) + ":" + getMPSTypeString(weight);
+    std::string key = "nllnd_loss_forward_impl:" + std::to_string(ignore_index) + ":" +
+        std::to_string(isWeightsArrayValid) + ":" + reductionToString(reduction) + ":" + [ns_shape_key UTF8String] +
+        ":" + getMPSTypeString(input) + ":" + getMPSTypeString(target) + ":" + std::to_string(isTargetCasted) + ":" +
+        getMPSTypeString(weight);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input), input_shape);
       MPSGraphTensor* targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(target), target_shape);
@@ -621,7 +622,7 @@ static void smooth_l1_loss_impl(const Tensor& input,
     MPSShape* input_shape = getMPSShape(input);
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
-    string key = "smooth_l1_loss_impl:" + reductionToString(reduction) + ":" + [ns_shape_key UTF8String] + ":" +
+    std::string key = "smooth_l1_loss_impl:" + reductionToString(reduction) + ":" + [ns_shape_key UTF8String] + ":" +
         std::to_string(beta) + ":" + getMPSTypeString(input) + ":" + getMPSTypeString(target);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       // smooth_l1_loss_mps:
@@ -760,7 +761,7 @@ static void smooth_l1_loss_backward_impl(const Tensor& grad_output,
   };
 
   @autoreleasepool {
-    string key = "smooth_l1_loss_backward" + getTensorsStringKey({input, grad_output, grad_input, target}) + ":" +
+    std::string key = "smooth_l1_loss_backward" + getTensorsStringKey({input, grad_output, grad_input, target}) + ":" +
         reductionToString(reduction) + ":" + std::to_string(beta);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
@@ -822,7 +823,7 @@ static void smooth_l1_loss_backward_impl(const Tensor& grad_output,
 // HuberLoss
 
 Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t reduction, double delta, Tensor& output) {
-  string op_name = __func__;
+  std::string op_name = __func__;
   using namespace mps;
   TORCH_CHECK(delta > 0, op_name + ": huber_loss does not support non-positive values for delta.")
   TORCH_CHECK(output.is_mps());
@@ -846,7 +847,7 @@ Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t re
   };
 
   @autoreleasepool {
-    string key = op_name + ":" + reductionToString(reduction) + ":" + std::to_string(delta) + ":" +
+    std::string key = op_name + ":" + reductionToString(reduction) + ":" + std::to_string(delta) + ":" +
         getTensorsStringKey({input, target});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
@@ -927,8 +928,8 @@ Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
     MPSShape* input_shape = getMPSShape(input);
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
-    string key = "huber_loss_backward_out_mps:" + reductionToString(reduction) + ":" + std::to_string(delta) + ":" +
-        [ns_shape_key UTF8String] + ":" + getMPSTypeString(input) + ":" + getMPSTypeString(target);
+    std::string key = "huber_loss_backward_out_mps:" + reductionToString(reduction) + ":" + std::to_string(delta) +
+        ":" + [ns_shape_key UTF8String] + ":" + getMPSTypeString(input) + ":" + getMPSTypeString(target);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* gradOutputTensor =
           mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(new_grad_output), getMPSShape(new_grad_output));
@@ -1005,7 +1006,7 @@ Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
 
 // MSELoss
 TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int64_t reduction, const Tensor& output_) {
-  string op_name = "mse_loss_out_mps";
+  std::string op_name = "mse_loss_out_mps";
   using namespace mps;
   if ((input.numel() == 0) || (target.numel() == 0)) {
     reduction == Reduction::Mean ? output_.fill_(std::numeric_limits<float>::quiet_NaN()) : output_.zero_();
@@ -1034,7 +1035,7 @@ TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int
   };
 
   @autoreleasepool {
-    string key = op_name + reductionToString(reduction) + getTensorsStringKey({input, target});
+    std::string key = op_name + reductionToString(reduction) + getTensorsStringKey({input, target});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
       newCachedGraph->targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);

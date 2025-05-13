@@ -1,3 +1,4 @@
+import base64
 import functools
 import itertools
 import logging
@@ -20,6 +21,7 @@ from typing_extensions import Never, ParamSpec
 # justknobs, e.g., in the Triton compiler. For internal, the import installs
 # functionality to destroy singletons before forking and re-enable them after.
 import torch._thread_safe_fork  # noqa: F401
+from torch._inductor.codecache import torch_key
 from torch._inductor.compile_worker.utils import _async_compile_initializer
 from torch._inductor.utils import get_ld_library_path
 
@@ -115,6 +117,7 @@ class SubprocPool:
         read_fd, subproc_write_fd = os.pipe()
         self.write_pipe = os.fdopen(write_fd, "wb")
         self.read_pipe = os.fdopen(read_fd, "rb")
+        torch_key_str = base64.b64encode(torch_key()).decode("utf-8")
 
         cmd = [
             sys.executable,
@@ -125,6 +128,7 @@ class SubprocPool:
             f"--parent={os.getpid()}",
             f"--read-fd={str(subproc_read_fd)}",
             f"--write-fd={str(subproc_write_fd)}",
+            f"--torch-key={torch_key_str}",
         ]
         self.process = subprocess.Popen(
             cmd,

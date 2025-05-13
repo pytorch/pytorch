@@ -112,7 +112,7 @@ except ModuleNotFoundError:
 try:
     import torch._logging
     import torch._numpy as tnp
-    from torch._guards import detect_fake_mode  # noqa: F401n
+    from torch._guards import detect_fake_mode  # noqa: F401
     from torch._logging import LazyString
 
     from . import config
@@ -4531,6 +4531,7 @@ def set_feature_use(feature: str, usage: bool):
 _ddp_optimization_mode: tuple[str, ...] = (
     "ddp_optimizer",
     "python_reducer",  # experimental mode
+    "python_reducer_without_compiled_forward",
     "no_optimization",
 )
 
@@ -4588,3 +4589,7 @@ def maybe_disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
             yield
     else:
         yield
+
+
+def is_node_meta_valid(node: Optional[torch.fx.Node]) -> bool:
+    return node is None or "example_value" in node.meta or "val" in node.meta

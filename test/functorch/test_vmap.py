@@ -4456,9 +4456,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                     fail_fn=lambda sample: MACOS_VERSION < 14,
                 ),
                 xfail(
-                    "copysign", device_type="mps"
-                ),  # AssertionError: Tensor-likes are not close!
-                xfail(
                     "corrcoef", device_type="mps"
                 ),  # AssertionError: Tensor-likes are not close!
                 xfail(
@@ -4480,9 +4477,10 @@ class TestVmapOperatorsOpInfo(TestCase):
                     "gt",
                     device_type="mps",
                 ),
-                xfail(
+                xfailIf(
                     "imag",
                     device_type="mps",
+                    fail_fn=lambda sample: MACOS_VERSION < 14,
                 ),
                 xfail(
                     "index_add",
@@ -4571,6 +4569,14 @@ class TestVmapOperatorsOpInfo(TestCase):
                 ),
                 xfail(
                     "ne",
+                    device_type="mps",
+                ),
+                xfail(
+                    "native_layer_norm",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.layer_norm",
                     device_type="mps",
                 ),
                 xfail(
@@ -4665,12 +4671,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 ),  # AssertionError: Tensor-likes are not close!
                 xfail(
                     "special.polygamma", "special_polygamma_n_0", device_type="mps"
-                ),  # AssertionError: Tensor-likes are not close!
-                xfail(
-                    "special.xlog1py", device_type="mps"
-                ),  # AssertionError: Tensor-likes are not close!
-                xfail(
-                    "special.zeta", device_type="mps"
                 ),  # AssertionError: Tensor-likes are not close!
                 xfail(
                     "svd", device_type="mps"
@@ -4893,9 +4893,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                     fail_fn=lambda sample: MACOS_VERSION < 14,
                 ),
                 xfail(
-                    "copysign", device_type="mps"
-                ),  # AssertionError: Tensor-likes are not close!
-                xfail(
                     "corrcoef", device_type="mps"
                 ),  # AssertionError: Tensor-likes are not close!
                 xfail(
@@ -4917,9 +4914,10 @@ class TestVmapOperatorsOpInfo(TestCase):
                     "gt",
                     device_type="mps",
                 ),
-                xfail(
+                xfailIf(
                     "imag",
                     device_type="mps",
+                    fail_fn=lambda sample: MACOS_VERSION < 14,
                 ),
                 xfail(
                     "index_add",
@@ -5004,6 +5002,14 @@ class TestVmapOperatorsOpInfo(TestCase):
                 ),
                 xfail(
                     "nan_to_num",
+                    device_type="mps",
+                ),
+                xfail(
+                    "native_layer_norm",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.layer_norm",
                     device_type="mps",
                 ),
                 xfail(
@@ -5106,12 +5112,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 ),  # AssertionError: Tensor-likes are not close!
                 xfail(
                     "special.polygamma", "special_polygamma_n_0", device_type="mps"
-                ),  # AssertionError: Tensor-likes are not close!
-                xfail(
-                    "special.xlog1py", device_type="mps"
-                ),  # AssertionError: Tensor-likes are not close!
-                xfail(
-                    "special.zeta", device_type="mps"
                 ),  # AssertionError: Tensor-likes are not close!
                 xfail(
                     "svd", device_type="mps"
@@ -5736,7 +5736,6 @@ class TestVmapOperatorsOpInfo(TestCase):
             xfail("linalg.vecdot"),
             # throws in vmap on CUDA
             # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got -2)
-            # https://github.com/pytorch/pytorch/runs/8110653462?check_suite_focus=true
             # but it passes locally
             xfail("linalg.diagonal"),
             skip("linalg.matrix_norm", ""),
