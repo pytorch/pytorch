@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import functools
 import itertools
 import logging
 from collections import defaultdict
@@ -9,6 +10,8 @@ from sympy import Expr, symbols
 
 from torch import dtype as torch_dtype
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+from torch._inductor.scheduler import BaseSchedulerNode
+from torch._inductor.utils import Placeholder
 
 
 if TYPE_CHECKING:
@@ -234,6 +237,8 @@ class CUDATemplateKernel(CUDAKernel):
         self,
         inputs: list[IRNode],
         outputs: list[IRNode],
+        epilogue_inputs: list[IRNode],
+        epilogue_outputs: list[IRNode],
         names_str: str = "",
         input_reorder: Optional[list[int]] = None,
     ) -> str:
@@ -268,10 +273,24 @@ class CUDATemplateKernel(CUDAKernel):
                 self.named_nodes[name] = node
                 self.args.input_buffers[node.get_name()] = name
 
+        for epilogue_input in epilogue_inputs:
+            if epilogue_input is not None:
+                self.named_nodes[epilogue_input.get_name()] = epilogue_input
+                self.args.input_buffers[epilogue_input.get_name()] = (
+                    epilogue_input.get_name()
+                )
+
         for name, node in zip(names[len(inputs) : len(inputs) + len(outputs)], outputs):
             if node is not None:
                 self.named_nodes[name] = node
                 self.args.output_buffers[node.get_name()] = name
+
+        for epilogue_output in epilogue_outputs:
+            if epilogue_output is not None:
+                self.named_nodes[epilogue_output.get_name()] = epilogue_output
+                self.args.output_buffers[epilogue_output.get_name()] = (
+                    epilogue_output.get_name()
+                )
 
         arg_defs, *_ = self.args.cpp_argdefs()
 
@@ -313,7 +332,7 @@ class CUDATemplateKernel(CUDAKernel):
             wrapper.initialized_kernels[name] = self
             # We always originally initialize name with "KERNEL_NAME". So, we
             # we replace with the real kernel name passed as an arg to this function.
-            self.signature = self.signature.replace("KERNEL_NAME", name)
+            self.signature = self.signature.replace(str(Placeholder.KERNEL_NAME), name)
             _, call_args, arg_types = self.args.cpp_argdefs()
         else:
             _, call_args, _, arg_types = self.args.python_argdefs()
@@ -521,6 +540,12 @@ class CUDATemplateKernel(CUDAKernel):
                 f"At least 1 stride should be 1. Strides: {node.get_stride()=}"
             )
 
+    def store(self, name: str, index: Expr, value: Any, mode: Any = None) -> None:
+        """
+        Mock store function for memory planning to optimize allocations properly.
+        """
+        self.store_buffer_names.add(name)
+
 
 class CUDATemplateCaller(ChoiceCaller):
     """
@@ -540,7 +565,10 @@ class CUDATemplateCaller(ChoiceCaller):
         category: str,
         input_nodes: list[Buffer],
         layout: Layout,
-        make_kernel_render: Callable[[CUDATemplateBuffer, Optional[list[IRNode]]], str],
+        make_kernel_render: Callable[
+            [CUDATemplateBuffer, Optional[list[BaseSchedulerNode]]],
+            tuple[CUDATemplateKernel, functools.partial[str]],
+        ],
         bmreq: CUDABenchmarkRequest,
         template: "CUDATemplate",  # type: ignore[name-defined]
         info_kwargs: Optional[

@@ -371,7 +371,7 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(caller_str, f"TritonTemplateCaller({module_path}, extra)")
 
 
-def make_benchmark_fn(
+def make_remote_benchmark_fn(
     cls,
     _,
     input_nodes,
@@ -399,7 +399,7 @@ class TestSelectAlgorithmRemote(TestSelectAlgorithm):
 
         patcher = patch(
             "torch._inductor.select_algorithm.AlgorithmSelectorCache.make_benchmark_fn",
-            make_benchmark_fn,
+            make_remote_benchmark_fn,
         )
         patcher.start()
         self.addCleanup(patcher.stop)

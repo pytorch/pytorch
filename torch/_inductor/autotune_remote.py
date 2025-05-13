@@ -19,8 +19,6 @@ from torch._inductor.virtualized import V
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    import sympy
-
     from torch._prims_common import ShapeType, StrideType
 
 
@@ -41,7 +39,7 @@ class TensorMeta:
     view_size: ShapeType
     view_stride: StrideType
     view_offset: int
-    allocation_size: Sequence[sympy.Expr]
+    allocation_size: ShapeType
     name: str
     value: Optional[torch.Tensor] = None
 
