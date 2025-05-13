@@ -67,13 +67,13 @@ function pip_install_whl() {
     # Loop through each path and install individually
     for path in "${paths[@]}"; do
       echo "Installing $path"
-      python3 -mpip install --no-index --no-deps "$path"
+      python3 -mpip install "$path"
     done
   else
     # Loop through each argument and install individually
     for path in "${args[@]}"; do
       echo "Installing $path"
-      python3 -mpip install --no-index --no-deps "$path"
+      python3 -mpip install "$path"
     done
   fi
 }
