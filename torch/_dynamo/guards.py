@@ -3266,7 +3266,12 @@ def strip_local_scope(s: str) -> str:
     return re.sub(pattern, r"\1", s)
 
 
-def get_guard_fail_reason_helper(guard_manager: GuardFn, f_locals: dict[str, object], compile_id: CompileId, return_all: bool = False) -> Union[str, tuple[str, list[str], list[str]]]:
+def get_guard_fail_reason_helper(
+    guard_manager: GuardFn,
+    f_locals: dict[str, object],
+    compile_id: CompileId,
+    return_all: bool = False,
+) -> Union[str, tuple[str, list[str], list[str]]]:
     """
     Return the reason why `guard_manager` failed.
     Updates `guard_failures` with the generated reason.
