@@ -3,8 +3,8 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/sve/sve_helper.h>
 #include <ATen/cpu/vec/sve/vec_common_sve.h>
-#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/sve/vec_float.h>
+#include <ATen/cpu/vec/vec_base.h>
 #include <cmath>
 namespace at {
 namespace vec {
@@ -22,10 +22,10 @@ inline namespace CPU_CAPABILITY {
 
 template <>
 class Vectorized<BFloat16> {
-private:
+ private:
   vls_bfloat16_t values;
 
-public:
+ public:
   using value_type = BFloat16;
   using size_type = int;
 
@@ -49,23 +49,28 @@ public:
   operator svbfloat16_t() const {
     return values;
   }
-  static Vectorized<BFloat16> blendv(const Vectorized<BFloat16>& a, const
-  Vectorized<BFloat16>& b, const Vectorized<BFloat16>& mask_) {
-    svbool_t mask = svcmpeq_s16(ptrue, svreinterpret_s16_bf16(mask_),
-                                ALL_S16_TRUE_MASK);
+  static Vectorized<BFloat16> blendv(
+      const Vectorized<BFloat16>& a,
+      const Vectorized<BFloat16>& b,
+      const Vectorized<BFloat16>& mask_) {
+    svbool_t mask =
+        svcmpeq_s16(ptrue, svreinterpret_s16_bf16(mask_), ALL_S16_TRUE_MASK);
     return svsel_bf16(mask, b, a);
   }
-  template<typename step_t>
-  static Vectorized<BFloat16> arange(BFloat16 base = 0.f, step_t step =
-  static_cast<step_t>(1)) {
+  template <typename step_t>
+  static Vectorized<BFloat16> arange(
+      BFloat16 base = 0.f,
+      step_t step = static_cast<step_t>(1)) {
     __at_align__ BFloat16 buffer[size()];
     for (int64_t i = 0; i < size(); i++) {
       buffer[i] = base + i * step;
     }
-    return svld1_bf16(ptrue, reinterpret_cast<bfloat16_t *>(buffer));
+    return svld1_bf16(ptrue, reinterpret_cast<bfloat16_t*>(buffer));
   }
-  static Vectorized<BFloat16> set(const Vectorized<BFloat16>& a, const
-  Vectorized<BFloat16>& b, int64_t count = size()) {
+  static Vectorized<BFloat16> set(
+      const Vectorized<BFloat16>& a,
+      const Vectorized<BFloat16>& b,
+      int64_t count = size()) {
     if (count == 0) {
       return a;
     } else if (count < size()) {
@@ -89,9 +94,9 @@ public:
       svst1_bf16(pg, reinterpret_cast<bfloat16_t*>(tmp), values);
     }
     std::memcpy(
-      reinterpret_cast<bfloat16_t*>(ptr),
-      reinterpret_cast<const bfloat16_t*>(tmp),
-      count * sizeof(bfloat16_t));
+        reinterpret_cast<bfloat16_t*>(ptr),
+        reinterpret_cast<const bfloat16_t*>(tmp),
+        count * sizeof(bfloat16_t));
   }
   const BFloat16& operator[](int idx) const = delete;
   BFloat16& operator[](int idx) = delete;
@@ -101,12 +106,15 @@ public:
     // 1-bit and others are translated to 0-bit int64_t mask = 0;
     __at_align__ int16_t mask_array[size()];
 
-    svbool_t svbool_mask = svcmpeq_f16(ptrue, svreinterpret_f16_bf16(values), ZERO_F16);
-    svst1_s16(ptrue, mask_array, svsel_s16(svbool_mask,
-                                          ALL_S16_TRUE_MASK,
-                                          ALL_S16_FALSE_MASK));
+    svbool_t svbool_mask =
+        svcmpeq_f16(ptrue, svreinterpret_f16_bf16(values), ZERO_F16);
+    svst1_s16(
+        ptrue,
+        mask_array,
+        svsel_s16(svbool_mask, ALL_S16_TRUE_MASK, ALL_S16_FALSE_MASK));
     for (int64_t i = 0; i < size(); ++i) {
-      if (mask_array[i]) mask |= (1ull << i);
+      if (mask_array[i])
+        mask |= (1ull << i);
     }
     return mask;
   }
@@ -141,8 +149,8 @@ public:
   Vectorized<BFloat16> asin() const;
   Vectorized<BFloat16> atan() const;
   Vectorized<BFloat16> atanh() const;
-  Vectorized<BFloat16> atan2(const Vectorized<BFloat16> &b) const;
-  Vectorized<BFloat16> copysign(const Vectorized<BFloat16> &sign) const;
+  Vectorized<BFloat16> atan2(const Vectorized<BFloat16>& b) const;
+  Vectorized<BFloat16> copysign(const Vectorized<BFloat16>& sign) const;
   Vectorized<BFloat16> erf() const;
   Vectorized<BFloat16> erfc() const;
   Vectorized<BFloat16> erfinv() const;
@@ -153,13 +161,13 @@ public:
     return exp();
   }
   Vectorized<BFloat16> fmod(const Vectorized<BFloat16>& q) const;
-  Vectorized<BFloat16> hypot(const Vectorized<BFloat16> &b) const;
+  Vectorized<BFloat16> hypot(const Vectorized<BFloat16>& b) const;
   Vectorized<BFloat16> i0() const;
   Vectorized<BFloat16> i0e() const;
   Vectorized<BFloat16> digamma() const;
-  Vectorized<BFloat16> igamma(const Vectorized<BFloat16> &x) const;
-  Vectorized<BFloat16> igammac(const Vectorized<BFloat16> &x) const;
-  Vectorized<BFloat16> nextafter(const Vectorized<BFloat16> &b) const;
+  Vectorized<BFloat16> igamma(const Vectorized<BFloat16>& x) const;
+  Vectorized<BFloat16> igammac(const Vectorized<BFloat16>& x) const;
+  Vectorized<BFloat16> nextafter(const Vectorized<BFloat16>& b) const;
   Vectorized<BFloat16> log() const;
   Vectorized<BFloat16> log2() const;
   Vectorized<BFloat16> log10() const;
@@ -185,7 +193,7 @@ public:
   Vectorized<BFloat16> sqrt() const;
   Vectorized<BFloat16> reciprocal() const;
   Vectorized<BFloat16> rsqrt() const;
-  Vectorized<BFloat16> pow(const Vectorized<BFloat16> &b) const;
+  Vectorized<BFloat16> pow(const Vectorized<BFloat16>& b) const;
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
   //   `Q`: do not raise if an operand is NaN
@@ -293,9 +301,8 @@ inline Vectorized<BFloat16>::Vectorized(int val) {
   values = convert_float_bfloat16(vals_f, vals_f);
 }
 
-
 inline Vectorized<BFloat16>::Vectorized(BFloat16 val) {
-  auto vals_f = svdup_n_f32((float) val);
+  auto vals_f = svdup_n_f32((float)val);
   values = convert_float_bfloat16(vals_f, vals_f);
 }
 
@@ -308,21 +315,22 @@ Vectorized<BFloat16> inline Vectorized<BFloat16>::frac() const {
   return *this - this->trunc();
 }
 
-#define DEFINE_BF16_FUNC_VIA_FLOAT(func_name) \
-  Vectorized<BFloat16> inline Vectorized<BFloat16>::func_name() const {                                      \
-    auto [v1, v2] = convert_bfloat16_float(*this); \
-    v1 = v1.func_name(); \
-    v2 = v2.func_name(); \
-    return convert_float_bfloat16(v1, v2); \
+#define DEFINE_BF16_FUNC_VIA_FLOAT(func_name)                           \
+  Vectorized<BFloat16> inline Vectorized<BFloat16>::func_name() const { \
+    auto [v1, v2] = convert_bfloat16_float(*this);                      \
+    v1 = v1.func_name();                                                \
+    v2 = v2.func_name();                                                \
+    return convert_float_bfloat16(v1, v2);                              \
   }
 
-#define DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(func_name) \
-  Vectorized<BFloat16> inline Vectorized<BFloat16>::func_name(const Vectorized<BFloat16> &a) const { \
-    auto [v1, v2] = convert_bfloat16_float(*this); \
-    auto [v3, v4] = convert_bfloat16_float(a); \
-    v1 = v1.func_name(v3); \
-    v2 = v2.func_name(v4); \
-    return convert_float_bfloat16(v1, v2); \
+#define DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(func_name)            \
+  Vectorized<BFloat16> inline Vectorized<BFloat16>::func_name( \
+      const Vectorized<BFloat16>& a) const {                   \
+    auto [v1, v2] = convert_bfloat16_float(*this);             \
+    auto [v3, v4] = convert_bfloat16_float(a);                 \
+    v1 = v1.func_name(v3);                                     \
+    v2 = v2.func_name(v4);                                     \
+    return convert_float_bfloat16(v1, v2);                     \
   }
 
 DEFINE_BF16_FUNC_VIA_FLOAT(isnan);
@@ -367,7 +375,8 @@ DEFINE_BF16_FUNC_VIA_FLOAT(reciprocal);
 DEFINE_BF16_FUNC_VIA_FLOAT(rsqrt);
 DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(pow);
 
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator==(const Vectorized<BFloat16>& other) const {
+Vectorized<BFloat16> inline Vectorized<BFloat16>::operator==(
+    const Vectorized<BFloat16>& other) const {
   auto [f1, f2] = convert_bfloat16_float(values);
   auto [f3, f4] = convert_bfloat16_float(other);
   svbool_t mask1 = svcmpeq_f32(ptrue, f1, f3);
@@ -379,7 +388,8 @@ Vectorized<BFloat16> inline Vectorized<BFloat16>::operator==(const Vectorized<BF
   auto bf16_2 = svreinterpret_bf16_f32(res2);
   return svuzp1_bf16(bf16_1, bf16_2);
 }
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator!=(const Vectorized<BFloat16>& other) const {
+Vectorized<BFloat16> inline Vectorized<BFloat16>::operator!=(
+    const Vectorized<BFloat16>& other) const {
   auto [f1, f2] = convert_bfloat16_float(values);
   auto [f3, f4] = convert_bfloat16_float(other);
   svbool_t mask1 = svcmpne_f32(ptrue, f1, f3);
@@ -391,22 +401,26 @@ Vectorized<BFloat16> inline Vectorized<BFloat16>::operator!=(const Vectorized<BF
   auto bf16_2 = svreinterpret_bf16_f32(res2);
   return svuzp1_bf16(bf16_1, bf16_2);
 }
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator>(const Vectorized<BFloat16>& other) const {
+Vectorized<BFloat16> inline Vectorized<BFloat16>::operator>(
+    const Vectorized<BFloat16>& other) const {
   auto [v1, v2] = convert_bfloat16_float(*this);
   auto [v3, v4] = convert_bfloat16_float(other);
   return convert_float_bfloat16(v1 > v3, v2 > v4);
 }
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator>=(const Vectorized<BFloat16>& other) const {
+Vectorized<BFloat16> inline Vectorized<BFloat16>::operator>=(
+    const Vectorized<BFloat16>& other) const {
   auto [v1, v2] = convert_bfloat16_float(*this);
   auto [v3, v4] = convert_bfloat16_float(other);
   return convert_float_bfloat16(v1 >= v3, v2 >= v4);
 }
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator<(const Vectorized<BFloat16>& other) const {
+Vectorized<BFloat16> inline Vectorized<BFloat16>::operator<(
+    const Vectorized<BFloat16>& other) const {
   auto [v1, v2] = convert_bfloat16_float(*this);
   auto [v3, v4] = convert_bfloat16_float(other);
   return convert_float_bfloat16(v1 < v3, v2 < v4);
 }
-Vectorized<BFloat16> inline Vectorized<BFloat16>::operator<=(const Vectorized<BFloat16>& other) const {
+Vectorized<BFloat16> inline Vectorized<BFloat16>::operator<=(
+    const Vectorized<BFloat16>& other) const {
   auto [v1, v2] = convert_bfloat16_float(*this);
   auto [v3, v4] = convert_bfloat16_float(other);
   return convert_float_bfloat16(v1 <= v3, v2 <= v4);
@@ -415,85 +429,110 @@ Vectorized<BFloat16> inline Vectorized<BFloat16>::operator<=(const Vectorized<BF
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
 // either input is a NaN.
 template <>
-Vectorized<BFloat16> inline maximum(const Vectorized<BFloat16>& a, const
-Vectorized<BFloat16>& b) {
-  return binary_operator_via_float(static_cast<Vectorized<float>(*)(const Vectorized<float>&, const Vectorized<float>&)>(&maximum), a, b);
+Vectorized<BFloat16> inline maximum(
+    const Vectorized<BFloat16>& a,
+    const Vectorized<BFloat16>& b) {
+  return binary_operator_via_float(
+      static_cast<Vectorized<float> (*)(
+          const Vectorized<float>&, const Vectorized<float>&)>(&maximum),
+      a,
+      b);
 }
 
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
 // either input is a NaN.
 template <>
-Vectorized<BFloat16> inline minimum(const Vectorized<BFloat16>& a, const
-Vectorized<BFloat16>& b) {
-  return binary_operator_via_float(static_cast<Vectorized<float>(*)(const Vectorized<float>&, const Vectorized<float>&)>(&minimum), a, b);
+Vectorized<BFloat16> inline minimum(
+    const Vectorized<BFloat16>& a,
+    const Vectorized<BFloat16>& b) {
+  return binary_operator_via_float(
+      static_cast<Vectorized<float> (*)(
+          const Vectorized<float>&, const Vectorized<float>&)>(&minimum),
+      a,
+      b);
 }
 
 template <>
-Vectorized<BFloat16> inline clamp_max(const Vectorized<BFloat16>& a, const
-Vectorized<BFloat16>& max) {
-  return binary_operator_via_float(static_cast<Vectorized<float>(*)(const Vectorized<float>&, const Vectorized<float>&)>(&clamp_max), a, max);
+Vectorized<BFloat16> inline clamp_max(
+    const Vectorized<BFloat16>& a,
+    const Vectorized<BFloat16>& max) {
+  return binary_operator_via_float(
+      static_cast<Vectorized<float> (*)(
+          const Vectorized<float>&, const Vectorized<float>&)>(&clamp_max),
+      a,
+      max);
 }
 
 template <>
-Vectorized<BFloat16> inline clamp_min(const Vectorized<BFloat16>& a, const
-Vectorized<BFloat16>& min) {
-  return binary_operator_via_float(static_cast<Vectorized<float>(*)(const Vectorized<float>&, const Vectorized<float>&)>(&clamp_min), a, min);
+Vectorized<BFloat16> inline clamp_min(
+    const Vectorized<BFloat16>& a,
+    const Vectorized<BFloat16>& min) {
+  return binary_operator_via_float(
+      static_cast<Vectorized<float> (*)(
+          const Vectorized<float>&, const Vectorized<float>&)>(&clamp_min),
+      a,
+      min);
 }
 
 template <>
-Vectorized<BFloat16> inline clamp(const Vectorized<BFloat16>& a, const
-Vectorized<BFloat16>& min, const Vectorized<BFloat16>& max) {
+Vectorized<BFloat16> inline clamp(
+    const Vectorized<BFloat16>& a,
+    const Vectorized<BFloat16>& min,
+    const Vectorized<BFloat16>& max) {
   return clamp_min(clamp_max(a, max), min);
 }
 
 template <>
-Vectorized<BFloat16> inline operator&(const Vectorized<BFloat16>& a, const
-Vectorized<BFloat16>& b) {
-  return svreinterpret_bf16_u16(svand_u16_x(ptrue, svreinterpret_u16_bf16(a),
-  svreinterpret_u16_bf16(b)));
+Vectorized<BFloat16> inline operator&(
+    const Vectorized<BFloat16>& a,
+    const Vectorized<BFloat16>& b) {
+  return svreinterpret_bf16_u16(
+      svand_u16_x(ptrue, svreinterpret_u16_bf16(a), svreinterpret_u16_bf16(b)));
 }
 
 template <>
-Vectorized<BFloat16> inline operator|(const Vectorized<BFloat16>& a, const
-Vectorized<BFloat16>& b) {
-  return svreinterpret_bf16_u16(svorr_u16_x(ptrue, svreinterpret_u16_bf16(a),
-  svreinterpret_u16_bf16(b)));
+Vectorized<BFloat16> inline operator|(
+    const Vectorized<BFloat16>& a,
+    const Vectorized<BFloat16>& b) {
+  return svreinterpret_bf16_u16(
+      svorr_u16_x(ptrue, svreinterpret_u16_bf16(a), svreinterpret_u16_bf16(b)));
 }
 
 template <>
-Vectorized<BFloat16> inline operator^(const Vectorized<BFloat16>& a, const
-Vectorized<BFloat16>& b) {
-  return svreinterpret_bf16_u16(sveor_u16_x(ptrue, svreinterpret_u16_bf16(a),
-  svreinterpret_u16_bf16(b)));
+Vectorized<BFloat16> inline operator^(
+    const Vectorized<BFloat16>& a,
+    const Vectorized<BFloat16>& b) {
+  return svreinterpret_bf16_u16(
+      sveor_u16_x(ptrue, svreinterpret_u16_bf16(a), svreinterpret_u16_bf16(b)));
 }
 
-Vectorized<BFloat16> inline Vectorized<BFloat16>::eq(const Vectorized<BFloat16>&
-other) const {
+Vectorized<BFloat16> inline Vectorized<BFloat16>::eq(
+    const Vectorized<BFloat16>& other) const {
   return (*this == other) & Vectorized<BFloat16>(1.0f);
 }
 
-Vectorized<BFloat16> inline Vectorized<BFloat16>::ne(const Vectorized<BFloat16>&
-other) const {
+Vectorized<BFloat16> inline Vectorized<BFloat16>::ne(
+    const Vectorized<BFloat16>& other) const {
   return (*this != other) & Vectorized<BFloat16>(1.0f);
 }
 
-Vectorized<BFloat16> inline Vectorized<BFloat16>::gt(const Vectorized<BFloat16>&
-other) const {
+Vectorized<BFloat16> inline Vectorized<BFloat16>::gt(
+    const Vectorized<BFloat16>& other) const {
   return (*this > other) & Vectorized<BFloat16>(1.0f);
 }
 
-Vectorized<BFloat16> inline Vectorized<BFloat16>::ge(const Vectorized<BFloat16>&
-other) const {
+Vectorized<BFloat16> inline Vectorized<BFloat16>::ge(
+    const Vectorized<BFloat16>& other) const {
   return (*this >= other) & Vectorized<BFloat16>(1.0f);
 }
 
-Vectorized<BFloat16> inline Vectorized<BFloat16>::lt(const Vectorized<BFloat16>&
-other) const {
+Vectorized<BFloat16> inline Vectorized<BFloat16>::lt(
+    const Vectorized<BFloat16>& other) const {
   return (*this < other) & Vectorized<BFloat16>(1.0f);
 }
 
-Vectorized<BFloat16> inline Vectorized<BFloat16>::le(const Vectorized<BFloat16>&
-other) const {
+Vectorized<BFloat16> inline Vectorized<BFloat16>::le(
+    const Vectorized<BFloat16>& other) const {
   return (*this <= other) & Vectorized<BFloat16>(1.0f);
 }
 
@@ -502,18 +541,32 @@ inline void convert(const BFloat16* src, BFloat16* dst, int64_t n) {
   const int64_t fraction = n % Vectorized<BFloat16>::size();
 #pragma unroll
   for (int64_t i = 0; i < n - fraction; i += Vectorized<BFloat16>::size()) {
-    svst1_bf16(ptrue, const_cast<bfloat16_t*>(reinterpret_cast<const bfloat16_t*>(dst)) + i, svldnt1_bf16(ptrue, const_cast<bfloat16_t*>(reinterpret_cast<const bfloat16_t*>(src)) + i));
+    svst1_bf16(
+        ptrue,
+        const_cast<bfloat16_t*>(reinterpret_cast<const bfloat16_t*>(dst)) + i,
+        svldnt1_bf16(
+            ptrue,
+            const_cast<bfloat16_t*>(reinterpret_cast<const bfloat16_t*>(src)) +
+                i));
   }
 #pragma unroll
   for (int64_t i = n - fraction; i < n; i += Vectorized<BFloat16>::size()) {
     svbool_t pg = svwhilelt_b16(i, n);
-    svst1_bf16(pg, const_cast<bfloat16_t*>(reinterpret_cast<const bfloat16_t*>(dst)) + i, svldnt1_bf16(pg, const_cast<bfloat16_t*>(reinterpret_cast<const bfloat16_t*>(src)) + i));
+    svst1_bf16(
+        pg,
+        const_cast<bfloat16_t*>(reinterpret_cast<const bfloat16_t*>(dst)) + i,
+        svldnt1_bf16(
+            pg,
+            const_cast<bfloat16_t*>(reinterpret_cast<const bfloat16_t*>(src)) +
+                i));
   }
 }
 
 template <>
-Vectorized<BFloat16> inline fmadd(const Vectorized<BFloat16>& a, const
-Vectorized<BFloat16>& b, const Vectorized<BFloat16>& c) {
+Vectorized<BFloat16> inline fmadd(
+    const Vectorized<BFloat16>& a,
+    const Vectorized<BFloat16>& b,
+    const Vectorized<BFloat16>& c) {
   return a * b + c;
 }
 
