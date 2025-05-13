@@ -228,10 +228,17 @@ jobs:
       - name: Check all txt
         shell: bash
         run: |
-          echo $(pwd)
-          ls ./*.txt
-          ls ./*.json
-          ps aux | grep monitor
+          echo "Current working directory: $(pwd)"
+          LOG_DIR="$(realpath ../../usage_logs)"
+          echo "Checking logs in: $LOG_DIR"
+
+          if [ -d "$LOG_DIR" ]; then
+            ls -lh "$LOG_DIR"/*.txt || echo "No .txt files found in $LOG_DIR"
+          else
+            echo "Directory $LOG_DIR does not exist."
+          fi
+          echo "Monitor process check:"
+          ps aux | grep 'monitor'
 
 
       - name: Build
