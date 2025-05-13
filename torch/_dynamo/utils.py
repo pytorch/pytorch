@@ -92,8 +92,6 @@ from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
-from .graph_utils import _get_flat_args
-
 
 if typing.TYPE_CHECKING:
     from collections.abc import (
@@ -114,7 +112,7 @@ except ModuleNotFoundError:
 try:
     import torch._logging
     import torch._numpy as tnp
-    from torch._guards import detect_fake_mode  # noqa: F401n
+    from torch._guards import detect_fake_mode  # noqa: F401
     from torch._logging import LazyString
 
     from . import config
@@ -3152,12 +3150,6 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     args, kwargs = get_fake_values_from_nodes(
         tx, (node.args, node.kwargs), allow_non_graph_fake
     )
-    flat_args_kwargs = get_fake_values_from_nodes(
-        tx, _get_flat_args(node, {}), allow_non_graph_fake
-    )
-    id_to_initial_version = {
-        id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
-    }
 
     nnmodule = None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
@@ -3298,17 +3290,6 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         _ = pytree.tree_map_only(
             torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
         )
-
-    if (
-        torch._dynamo.config.use_graph_deduplication
-        or torch._dynamo.config.track_nodes_for_deduplication
-    ):
-        tx.output.region_tracker.track_node_mutations(
-            node,
-            flat_args_kwargs,
-            id_to_initial_version,
-        )
-
     return ret_val
 
 
