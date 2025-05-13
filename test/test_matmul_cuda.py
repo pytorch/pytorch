@@ -1632,8 +1632,8 @@ class TestFP8Matmul(TestCase):
             offs = torch.arange(m, n_groups * m + 1, m, device="cuda", dtype=torch.int32)
             if check_zero_size:
                 offs[0] = offs[1]
-                scale_a = torch.arange(n_groups * m, device="cuda", dtype=torch.float32)
-                scale_b = torch.ones(n_groups * n, device="cuda", dtype=torch.float32).view(n_groups, n)
+            scale_a = torch.arange(n_groups * m, device="cuda", dtype=torch.float32)
+            scale_b = torch.ones(n_groups * n, device="cuda", dtype=torch.float32).view(n_groups, n)
 
             f = torch._scaled_grouped_mm
             f = torch.compile(

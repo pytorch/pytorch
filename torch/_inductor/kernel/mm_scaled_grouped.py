@@ -47,8 +47,8 @@ _NV_CONFIGS = [
         num_warps=num_warps,
     )
     for block_size_m in [64, 128]
-    for block_size_n in [64, 128]
-    for block_size_k in [64, 128]
+    for block_size_n in [64, 128, 256]
+    for block_size_k in [64, 128, 256]
     for num_stages in [3, 4]
     for num_warps in [4, 8]
 ]
