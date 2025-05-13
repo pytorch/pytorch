@@ -1576,7 +1576,7 @@ class OutputGraph(OutputGraphGuardsState):
                             ):
                                 node.meta["grapharg"] = replace(grapharg, _example=arg)
                             dynamo_cache[specialization] = self.call_user_compiler(
-                                gm, specialization=specialization, example_inputs=args
+                                gm, specialization=specialization
                             )
                             return dynamo_cache[specialization](*args, **kwargs)
                     return compiled_fn(*args, **kwargs)
