@@ -36,6 +36,15 @@ pytorch-api
 notes
 ```
 
+```{toctree}
+:glob:
+:hidden:
+:maxdepth: 2
+
+community/index
+C++ <https://docs.pytorch.org/cppdocs/>
+```
+
 ## Indices and tables
 
 * {ref}`genindex`
