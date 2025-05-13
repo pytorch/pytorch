@@ -467,9 +467,9 @@ struct ConvParams {
       // always use cudnn_depthwise for channels_last format
       return true;
     }
-    static long cudnn_version = detail::getCUDAHooks().versionCuDNN();
     // native kernel doesn't support 64-bit non-splittable case
-    if (needs_64bit_indexing_no_split(input, weight) && detail::getCUDAHooks().compiledWithCuDNN() && cudnn_enabled) {
+    if (cudnn_enabled && needs_64bit_indexing_no_split(input, weight)) {
+      static long cudnn_version = detail::getCUDAHooks().versionCuDNN();
       if (!(cudnn_version >= 90300 && at::native::cudnnv8_enabled_check_debug())) {
         TORCH_WARN_ONCE("cuDNN cannot be used for large non-batch-splittable convolutions"
                         " if the V8 API is not enabled or before cuDNN version 9.3+."
