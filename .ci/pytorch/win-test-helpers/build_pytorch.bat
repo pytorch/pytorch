@@ -38,7 +38,7 @@ if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 
 :: Update CMake
-call choco upgrade -y cmake --no-progress --installargs 'ADD_CMAKE_TO_PATH=System' --apply-install-arguments-to-dependencies --version=3.26.6
+call choco upgrade -y cmake --no-progress --installargs 'ADD_CMAKE_TO_PATH=System' --apply-install-arguments-to-dependencies --version=3.27.9
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 
