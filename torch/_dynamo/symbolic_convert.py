@@ -1225,8 +1225,8 @@ class InstructionTranslatorBase(
             self.f_code.co_filename, lineno, self.f_code.co_name
         )
 
+        dump_file(self.f_code.co_filename)
         if self.is_trace_source_log_enabled:
-            dump_file(self.f_code.co_filename)
             trace_source_log.debug("%s", LazyString(self.get_log_starts_line_log_str))
 
     def step(self):
