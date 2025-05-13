@@ -25,6 +25,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 from torch.utils.checkpoint import checkpoint
 
+assert int(os.getenv("WORLD_SIZE", "1")) >= 4, "We need at least 4 devices"
 
 c10d_functional = torch.ops.c10d_functional
 
@@ -41,7 +42,7 @@ class CommDebugModeExample:
     def __init__(self, world_size: int, rank: int) -> None:
         self.world_size = world_size
         self.rank = rank
-        self.device_type = torch.accelerator.current_accelerator().type if torch.accelerator.current_accelerator() and torch.accelerator.device_count() else 'cpu'
+        self.device_type = 'cpu' if not  torch.accelerator.current_accelerator() else torch.accelerator.current_accelerator().type
 
     def _MLP_model_setup(
         self, model_type: type, parallelize_plan: Union[None, dict] = None
