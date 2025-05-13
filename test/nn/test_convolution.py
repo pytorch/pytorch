@@ -1712,34 +1712,31 @@ class TestConvolutionNNDeviceType(NNTestCase):
         actual = F.conv1d(x, y, padding="same", dilation=3)
         self.assertEqual(expect, actual)
 
+    @tf32_on_and_off(0.005)
     @dtypesIfMPS(
         *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
     )  # Complex not supported on MacOS13
     @dtypes(torch.float, torch.cfloat)
     def test_conv2d_same_padding(self, device, dtype):
-        if dtype is torch.cfloat:
-            rtol, atol = 2e-6, 2e-6
-        else:
-            rtol, atol = None, None
         # Compare F.conv2d padding='same' output against manual padding
         # Without strides/dilation
         x = torch.rand(1, 1, 10, 11, device=device, dtype=dtype)
         y = torch.rand(1, 1, 4, 5, device=device, dtype=dtype)
         expect = F.conv2d(x, y, padding=(2, 2))[..., 1:, :]
         actual = F.conv2d(x, y, padding="same")
-        self.assertEqual(expect, actual, rtol=rtol, atol=atol)
+        self.assertEqual(expect, actual)
 
         # With dilation
         y = torch.rand(1, 1, 3, 4, device=device, dtype=dtype)
         expect = F.conv2d(x, y, padding=(2, 3), dilation=2)
         actual = F.conv2d(x, y, padding="same", dilation=2)
-        self.assertEqual(expect, actual, rtol=rtol, atol=atol)
+        self.assertEqual(expect, actual)
 
         # Dilation with asymmetric padding
         y = torch.rand(1, 1, 4, 4, device=device, dtype=dtype)
         expect = F.conv2d(x, y, padding=5, dilation=3)[..., 1:, 1:]
         actual = F.conv2d(x, y, padding="same", dilation=3)
-        self.assertEqual(expect, actual, rtol=rtol, atol=atol)
+        self.assertEqual(expect, actual)
 
     @dtypes(torch.float, torch.cfloat)
     def test_conv3d_same_padding(self, device, dtype):

@@ -1,4 +1,4 @@
-import os  # noqa: C101
+import os
 import sys
 from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 
@@ -92,6 +92,12 @@ bundle_triton_into_fx_graph_cache: Optional[bool] = (
     bundle_triton_into_fx_graph_cache_default()
 )
 
+non_blocking_remote_cache_write: bool = Config(
+    justknob="pytorch/remote_cache:enable_non_blocking_remote_cache_write",
+    env_name_force="TORCHINDUCTOR_NON_BLOCKING_REMOTE_CACHE_WRITE",
+    default=True,
+)
+
 # Enable autotune local cache.
 #
 # See bundled_autotune_remote_cache for the effect this flag has on the bundled
@@ -137,15 +143,6 @@ unsafe_marked_cacheable_functions: list[str] = []
 
 # sleep in inductor for testing
 sleep_sec_TESTING_ONLY: Optional[int] = None
-
-# The default layout constraint for custom operators.
-# This must be the name of one of the layout constraint tags
-# (that is, one of {"needs_fixed_stride_order", "flexible_layout"}),
-# If the custom op does not have a layout constraint tag already
-# then we assume the following applies.
-custom_op_default_layout_constraint: Literal[
-    "needs_fixed_stride_order", "flexible_layout"
-] = "needs_fixed_stride_order"
 
 # The default layout constraint for user-defined triton kernels.
 # See "The default layout constraint for custom operators" for options.
@@ -1335,6 +1332,9 @@ class cuda:
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4]
 
+    # Whether to use CUTLASS EVT for epilogue fusion
+    cutlass_epilogue_fusion_enabled = False
+
     # Path to CUDA NVCC.
     # NVCC search order:
     # 1) cuda_cxx set in this config
@@ -1385,6 +1385,11 @@ class cuda:
     # Format looks like: "0,1,3" for using presets 0, 1, and 3. Presets can be
     # controlled by some cutlass instantiation level flags (e.g. 0, 1111, 2222, ...)
     cutlass_presets: Optional[str] = os.environ.get("TORCHINDUCTOR_CUTLASS_PRESETS")
+
+    # use compile command to create kernel .cu and .so name
+    cutlass_hash_with_compile_cmd: bool = (
+        os.environ.get("TORCHINDUCTOR_CUTLASS_HASH_WITH_COMPILE_CMD", "0") == "1"
+    )
 
 
 class rocm:
@@ -1555,6 +1560,8 @@ _save_config_ignore: list[str] = [
     "pre_grad_custom_pass",
     "aot_inductor.repro_level",
     "aot_inductor.dump_aoti_minifier",
+    "post_grad_custom_pre_pass",
+    "post_grad_custom_post_pass",
 ]
 
 _cache_config_ignore_prefix: list[str] = [
