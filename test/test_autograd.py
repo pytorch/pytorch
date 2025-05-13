@@ -7430,8 +7430,6 @@ for shape in [(1,), ()]:
         self.assertEqual(b_grad, c_grad)
         self.assertEqual(b_grad, d_grad)
 
-    # PYTORCH_TEST_WITH_DYNAMO=1 test fails on CI but can't repro locally
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127115")
     def test_checkpointing_without_reentrant_dataparallel(self):
         """
         Verifies gradient correctness when checkpoint without reentrant autograd
@@ -7489,8 +7487,6 @@ for shape in [(1,), ()]:
         # should only call hook once
         self.assertEqual(count, 1)
 
-    # https://github.com/pytorch/pytorch/issues/127115
-    @xfailIfTorchDynamo
     def test_checkpointing_without_reentrant_arbitrary_input_output(self):
         """
         Ensures checkpointing without reentrant autograd works with functions
@@ -8651,6 +8647,47 @@ for shape in [(1,), ()]:
             RuntimeError, "received a tensor that was not an input."
         ):
             Func.apply(a_clone)
+
+    def test_custom_function_inplace_on_non_default_view(self):
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp):
+                inp.add_(1)
+                ctx.mark_dirty(inp)
+                return inp
+
+            @staticmethod
+            def backward(ctx, gO):
+                pass
+
+        a = torch.tensor([1.0, 2.0], requires_grad=True)
+        a_clone = a.clone()
+        b, c = a.split_with_sizes([1, 1], dim=0)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "output of a function that returns multiple view"
+        ):
+            Func.apply(b)
+
+    def test_custom_function_inplace_on_view_of_leaf(self):
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp):
+                inp.add_(1)
+                ctx.mark_dirty(inp)
+                return inp
+
+            @staticmethod
+            def backward(ctx, gO):
+                pass
+
+        a = torch.tensor([1.0, 2.0], requires_grad=True)
+        b = a.view_as(a)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "a view of a leaf Variable that requires grad"
+        ):
+            Func.apply(b)
 
     def test_named_tensor_for_complex_views(self):
         names = ["batch", "height", "width", "complex"]
@@ -13094,14 +13131,12 @@ class TestAutogradStreamSynchronization(TestCase):
         for _ in range(2):
             test()
 
-    # This fails because we currently sync to the default stream
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
     @skipIfMPS
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
-    @unittest.expectedFailure
     def test_consumer_to_single_producer_case_3_correctness_non_default_ambient_stream(
         self,
     ):
@@ -13275,7 +13310,6 @@ class TestAutogradStreamSynchronization(TestCase):
     # This test may spuriously fail on non-cuda accelerators (since we won't
     # be calling sleep)
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
-    @unittest.expectedFailure
     def test_side_stream_backward_overlap(self):
         # In case 2/3, we would designate the consumer as the accumulation
         # stream and naively, one might have the consumer wait for the producer
