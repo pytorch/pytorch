@@ -61,22 +61,21 @@ Tensor linear_pointwise_binary(
     std::vector<int64_t> output_size(input_size.begin(), input_size.end()-1);
     output_size.push_back(weight_t.size(0));
 
-    auto output = at::empty(output_size, input.options());
-    auto other_reshaped = other_t.contiguous();
+    Tensor output = at::empty(output_size, input.options());
     if(dim != 2){
       // input [m, k], weight [n, k], output [m, n]
       std::vector<int64_t> output_size_reshaped = {
         input_reshaped.size(0), weight_t.size(0)
       };
-      other_reshaped = other_reshaped.reshape(output_size_reshaped);
+      output = output.reshape(output_size_reshaped);
     }else{
-      TORCH_CHECK(output.dim() == other_reshaped.dim(),
+      TORCH_CHECK(output.dim() == other_t.dim(),
         "linear_binary_run expects the dimension of output and other tensor to be the same");
     }
 
     auto bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
     at::native::onednn::matmul(
-        other_reshaped, input_reshaped, weight_t, bias, /*m2_trans*/ false, attr);
+        output, input_reshaped, weight_t, bias, /*m2_trans*/ false, attr);
 
     if(dim != 2){
       output = output.reshape(output_size);
