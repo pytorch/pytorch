@@ -943,6 +943,28 @@ class TestAssertCloseErrorMessage(TestCase):
             with self.assertRaisesRegex(AssertionError, re.escape("Greatest absolute difference: 2 at index (1, 0)")):
                 fn()
 
+    def test_small_float_dtype(self):
+        for dtype in [
+            torch.float8_e4m3fn,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2,
+            torch.float8_e5m2fnuz,
+            torch.float8_e8m0fnu,
+        ]:
+            w = torch.tensor([3.14, 1.0], dtype=dtype)
+            x = torch.tensor([1.0, 3.14], dtype=dtype)
+            y = torch.tensor([3.14, 3.14], dtype=dtype)
+            z = torch.tensor([1.0, 3.14], dtype=dtype)
+            for fn in assert_close_with_inputs(x, y):
+                with self.assertRaisesRegex(AssertionError, re.escape("The first mismatched element is at index 0")):
+                    fn()
+
+            for fn in assert_close_with_inputs(w, y):
+                with self.assertRaisesRegex(AssertionError, re.escape("The first mismatched element is at index 1")):
+                    fn()
+            for fn in assert_close_with_inputs(x, z):
+                fn()
+
     def test_abs_diff_scalar(self):
         actual = 3
         expected = 5
@@ -2330,6 +2352,11 @@ class TestImports(TestCase):
                            "torch.onnx._internal",  # depends on onnx-script
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._inductor.codegen.cuda",  # depends on cutlass
+                           "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
+                           "torch.distributed.examples",  # requires CUDA and torchvision
+                           "torch.distributed.tensor.examples",  # example scripts
+                           "torch.csrc",  # files here are devtools, not part of torch
+                           "torch.include",  # torch include files after install
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
             # Distributed should be importable on Windows(except nn.api.), but not on Mac

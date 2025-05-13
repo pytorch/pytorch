@@ -30,7 +30,7 @@ CUDA_ARCHES_CUDNN_VERSION = {
 }
 
 # NOTE: Also update the ROCm sources in tools/nightly.py when changing this list
-ROCM_ARCHES = ["6.2.4", "6.3"]
+ROCM_ARCHES = ["6.3", "6.4"]
 
 XPU_ARCHES = ["xpu"]
 
@@ -154,41 +154,28 @@ def arch_type(arch_version: str) -> str:
         return "cpu"
 
 
-# This can be updated to the release version when cutting release branch, i.e. 2.1
 DEFAULT_TAG = os.getenv("RELEASE_VERSION_TAG", "main")
 
 WHEEL_CONTAINER_IMAGES = {
+    **{gpu_arch: f"manylinux2_28-builder:cuda{gpu_arch}" for gpu_arch in CUDA_ARCHES},
     **{
-        gpu_arch: f"pytorch/manylinux2_28-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
-        for gpu_arch in CUDA_ARCHES
-    },
-    **{
-        gpu_arch: f"pytorch/manylinuxaarch64-builder:cuda{gpu_arch.replace('-aarch64', '')}-{DEFAULT_TAG}"
+        gpu_arch: f"manylinuxaarch64-builder:cuda{gpu_arch.replace('-aarch64', '')}"
         for gpu_arch in CUDA_AARCH64_ARCHES
     },
-    **{
-        gpu_arch: f"pytorch/manylinux2_28-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
-        for gpu_arch in ROCM_ARCHES
-    },
-    "xpu": f"pytorch/manylinux2_28-builder:xpu-{DEFAULT_TAG}",
-    "cpu": f"pytorch/manylinux2_28-builder:cpu-{DEFAULT_TAG}",
-    "cpu-aarch64": f"pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
-    "cpu-s390x": f"pytorch/manylinuxs390x-builder:cpu-s390x-{DEFAULT_TAG}",
+    **{gpu_arch: f"manylinux2_28-builder:rocm{gpu_arch}" for gpu_arch in ROCM_ARCHES},
+    "xpu": "manylinux2_28-builder:xpu",
+    "cpu": "manylinux2_28-builder:cpu",
+    "cpu-aarch64": "manylinux2_28_aarch64-builder:cpu-aarch64",
+    "cpu-s390x": "pytorch/manylinuxs390x-builder:cpu-s390x",
 }
 
 RELEASE = "release"
 DEBUG = "debug"
 
 LIBTORCH_CONTAINER_IMAGES: dict[str, str] = {
-    **{
-        gpu_arch: f"pytorch/libtorch-cxx11-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
-        for gpu_arch in CUDA_ARCHES
-    },
-    **{
-        gpu_arch: f"pytorch/libtorch-cxx11-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
-        for gpu_arch in ROCM_ARCHES
-    },
-    "cpu": f"pytorch/libtorch-cxx11-builder:cpu-{DEFAULT_TAG}",
+    **{gpu_arch: f"libtorch-cxx11-builder:cuda{gpu_arch}" for gpu_arch in CUDA_ARCHES},
+    **{gpu_arch: f"libtorch-cxx11-builder:rocm{gpu_arch}" for gpu_arch in ROCM_ARCHES},
+    "cpu": "libtorch-cxx11-builder:cpu",
 }
 
 FULL_PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.13t"]
@@ -249,7 +236,12 @@ def generate_libtorch_matrix(
                     "libtorch_config": release_type,
                     "libtorch_variant": libtorch_variant,
                     "container_image": (
-                        LIBTORCH_CONTAINER_IMAGES[arch_version]
+                        LIBTORCH_CONTAINER_IMAGES[arch_version].split(":")[0]
+                        if os not in ("windows", "windows-arm64")
+                        else ""
+                    ),
+                    "container_image_tag_prefix": (
+                        LIBTORCH_CONTAINER_IMAGES[arch_version].split(":")[1]
                         if os not in ("windows", "windows-arm64")
                         else ""
                     ),
@@ -333,7 +325,12 @@ def generate_wheels_matrix(
                         "gpu_arch_version": gpu_arch_version,
                         "desired_cuda": desired_cuda,
                         "use_split_build": "True" if use_split_build else "False",
-                        "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
+                        "container_image": WHEEL_CONTAINER_IMAGES[arch_version].split(
+                            ":"
+                        )[0],
+                        "container_image_tag_prefix": WHEEL_CONTAINER_IMAGES[
+                            arch_version
+                        ].split(":")[1],
                         "package_type": package_type,
                         "pytorch_extra_install_requirements": (
                             PYTORCH_EXTRA_INSTALL_REQUIREMENTS[
@@ -361,7 +358,12 @@ def generate_wheels_matrix(
                                 gpu_arch_type, gpu_arch_version
                             ),
                             "use_split_build": "True" if use_split_build else "False",
-                            "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
+                            "container_image": WHEEL_CONTAINER_IMAGES[
+                                arch_version
+                            ].split(":")[0],
+                            "container_image_tag_prefix": WHEEL_CONTAINER_IMAGES[
+                                arch_version
+                            ].split(":")[1],
                             "package_type": package_type,
                             "pytorch_extra_install_requirements": "",
                             "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}-full".replace(  # noqa: B950
@@ -379,7 +381,12 @@ def generate_wheels_matrix(
                             gpu_arch_type, gpu_arch_version
                         ),
                         "use_split_build": "True" if use_split_build else "False",
-                        "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
+                        "container_image": WHEEL_CONTAINER_IMAGES[arch_version].split(
+                            ":"
+                        )[0],
+                        "container_image_tag_prefix": WHEEL_CONTAINER_IMAGES[
+                            arch_version
+                        ].split(":")[1],
                         "package_type": package_type,
                         "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
                             ".", "_"
@@ -387,8 +394,6 @@ def generate_wheels_matrix(
                         "pytorch_extra_install_requirements": (
                             PYTORCH_EXTRA_INSTALL_REQUIREMENTS["xpu"]
                             if gpu_arch_type == "xpu"
-                            else PYTORCH_EXTRA_INSTALL_REQUIREMENTS[CUDA_STABLE]
-                            if os != "linux"
                             else ""
                         ),
                     }
