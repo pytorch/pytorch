@@ -590,7 +590,7 @@ class CUDATemplateCaller(ChoiceCaller):
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
         return self.bmreq.benchmark(
-            *args, output_tensor=out
+            *args, out=out
         )  # @TODO: Hack for ensuring that Cutlass Kernel is preferred
 
     def __str__(self) -> str:
