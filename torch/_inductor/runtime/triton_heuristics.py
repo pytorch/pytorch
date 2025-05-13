@@ -1078,7 +1078,7 @@ class CachingAutotuner(KernelInterface):
             dict(
                 zip(
                     [
-                        *self.fn.arg_names,
+                        *self.triton_meta["signature"].keys(),
                         *self.inductor_meta.get("extra_launcher_args", ()),
                     ],
                     args,
@@ -2585,8 +2585,6 @@ class GridExpr:
 
     def __post_init__(self) -> None:
         assert self.mode in ("python", "cpp")
-        if self.mode == "python":
-            self.prefix.append("from torch.utils._sympy.functions import FloorDiv")
 
     def generate(self, meta: dict[str, int]) -> None:
         raise NotImplementedError
@@ -2599,9 +2597,7 @@ class GridExpr:
         if isinstance(numel, int) and isinstance(block, int):
             return ceildiv(numel, block)  # constant fold
         if self.mode == "python":
-            # Use FloorDiv instead of // so we can get better sympy expressions for
-            # dynamic shapes.
-            return f"-FloorDiv(({numel}), -({block}))"
+            return f"-(({numel}) // -({block}))"
         # trick above doesn't work in C++ due to rounding differences
         return f"(({numel} + ({block} - 1)) / ({block}))"
 
