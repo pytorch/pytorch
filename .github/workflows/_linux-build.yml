@@ -409,7 +409,7 @@ jobs:
           build-time: ${{ steps.build.outputs.build_time }}
 
       - name: Upload utilization stats
-        if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && !inputs.disable-monitor }}
+        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
         continue-on-error: true
         uses: ./.github/actions/upload-utilization-stats
         with:
@@ -418,6 +418,7 @@ jobs:
           workflow_name: ${{ github.workflow }}
           workflow_run_id: ${{github.run_id}}
           workflow_attempt: ${{github.run_attempt}}
+          artifact_prefix: usage_log_build
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
