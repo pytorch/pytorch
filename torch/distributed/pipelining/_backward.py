@@ -196,11 +196,24 @@ def stage_backward_input(
             torch.ones_like(stage_output) for stage_output in stage_outputs_or_loss
         ]
 
+    # for i, (stage_output, input_value, output_grad) in enumerate(
+    #     zip(stage_outputs_or_loss, input_values, output_grads)
+    # ):
+    #     print (f"IN _backward.py {i=} {stage_output=}, {stage_output.requires_grad} {input_value=} {input_value.shape=}, {output_grad=}")
+    # for input_val in input_values:
+    #     input_val.requires_grad_(True)
+    # input_values = tuple(input_values[0])
+    # Some inputs may not be used or may not require gradients, so we need to filter them out
+    input_values = [inp for inp in input_values if inp.requires_grad]
+    # print(f"IN _backward.py {stage_outputs_or_loss=} {input_values=} {output_grads=}")
+    # print(f"IN _backward.py {[input_values[0]]}")
+
     dinputs = torch.autograd.grad(
         stage_outputs_or_loss,
         inputs=input_values,
         grad_outputs=output_grads,
         retain_graph=True,
+        allow_unused=True,
     )
 
     # update the gradients for inputs
@@ -357,6 +370,7 @@ def stage_backward(
         # Extract gradients wrt the input values
         grad_inputs: list[Optional[torch.Tensor]] = []
         for val in input_values:
+            # print(f"IN _backward.py {val=}")
             if isinstance(val, torch.Tensor):
                 grad_inputs.append(val.grad)
             else:
