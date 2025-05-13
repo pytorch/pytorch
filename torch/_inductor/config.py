@@ -1386,6 +1386,11 @@ class cuda:
     # controlled by some cutlass instantiation level flags (e.g. 0, 1111, 2222, ...)
     cutlass_presets: Optional[str] = os.environ.get("TORCHINDUCTOR_CUTLASS_PRESETS")
 
+    # use compile command to create kernel .cu and .so name
+    cutlass_hash_with_compile_cmd: bool = (
+        os.environ.get("TORCHINDUCTOR_CUTLASS_HASH_WITH_COMPILE_CMD", "0") == "1"
+    )
+
 
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx90a", "gfx942"].
