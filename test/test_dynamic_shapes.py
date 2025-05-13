@@ -3241,8 +3241,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         with ctx():
             # This used to hit could guard on data-dependent expression Eq(10, u3) x.stride[0]==10. and x.size()=[u2, u3].
             # but not anymore since we use is_known_contiguous.
-            # Since we can't tell if its contiguous or not always we will still recompile, we need a way to mark
-            # strides unbacked to avoid the recompilation here.
+            # We need a way to mark trides unbacked to avoid the recompilation here.
             x = torch.randn(10, 10)
             torch._dynamo.decorators.mark_unbacked(x, 0)
             torch._dynamo.decorators.mark_unbacked(x, 1)
