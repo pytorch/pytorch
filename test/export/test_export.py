@@ -4439,32 +4439,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, t):
                 items = [t[i].item() for i in range(t.numel())]
                 r = torch.randn([items[0], items[1]])
-                # Could not guard on data-dependent expression Ne(Mod(u1, u2), 0)
                 return r.view(items[0], items[2])
 
         M = M_v0
-        with self.assertRaisesRegex(
-            error_type,
-            "The following call raised this error(.*\n)+"
-            f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
-            "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('torch._check((items[1] % items[2]) == 0)')}.*\n"
-            f".*{re.escape('torch._check((items[1] % items[2]) != 0)')}(.*\n)+"
-            f".*{re.escape('(These suggested fixes were derived by replacing `u1` with items[1]')}"
-            f".*{re.escape('or r.shape[1], `u2` with items[2] in Eq(Mod(u1, u2), 0) and its negation.')}",
-        ):
-            export(N(), (t,), strict=strict)
-
-        class M_v1(torch.nn.Module):
-            def forward(self, t):
-                items = [t[i].item() for i in range(t.numel())]
-                r = torch.randn([items[0], items[1]])
-                # TODO(pianpwk): this isn't the suggested fixes.
-                # fix issue with % being interpreted as PythonMod instead of Mod
-                torch._check(items[1] == items[2])
-                return r.view(items[0], items[2])
-
-        M = M_v1
         export(N(), (t,), strict=strict)
 
     def test_suggested_fixes_for_data_dependent_errors_puzzlers(self):

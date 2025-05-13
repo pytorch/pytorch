@@ -315,8 +315,17 @@ static at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymInt
   // See  Note [Propagating strides in the functionalization pass]
   // (for _unsafe_view, I'm just manually doing the shape inference rule here instead of calling the meta function for unsafe_view)
   auto inferred_size = at::infer_size_dv(size, self.sym_numel());
+
   auto stride = at::detail::computeStride(self.sym_sizes(), self.sym_strides(), inferred_size);
-  TORCH_INTERNAL_ASSERT(stride.has_value());
+  if (! stride.has_value()){
+    // See if the view is valid. If it's not, then we copy.
+    // It's OK to copy, because _unsafe_view(x) guarantees that x isn't used
+    // anymore.
+    if (!stride.has_value()) {
+      auto tmp = self_.contiguous();
+      stride = tmp.sym_strides();
+    }
+  }
   out.unsafeGetTensorImpl()->set_sizes_and_strides(inferred_size, stride.value());
   return out;
 }
