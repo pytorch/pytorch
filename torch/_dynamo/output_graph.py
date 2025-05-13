@@ -1500,39 +1500,8 @@ class OutputGraph(OutputGraphGuardsState):
                 # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
                 self.tracing_context.fake_mode = backend_fake_mode
 
-            specialization_guards = []
-            dynamo_cache: dict[Specialization, Callable[[Any], Any]] = {}
-            preserved_graphargs = [
-                replace(node.meta["grapharg"], _example=None)
-                for node in self.placeholders
-            ]
             with self.restore_global_state():
                 compiled_fn = self.call_user_compiler(gm)
-                sources = [a.source for a in self.graphargs]
-                for specialization in old_fake_mode.shape_env.specializations:
-                    source_index = sources.index(specialization.source)
-                    check_fn_source = inspect.getsource(specialization.check_fn).strip()
-                    check_fn = guards.LAMBDA_GUARD(  # type: ignore[attr-defined]
-                        specialization.check_fn,
-                        [check_fn_source],
-                    )
-
-                    log.debug(
-                        "Compiling backend specialized graph with specialization=%s",
-                        check_fn_source,
-                    )
-
-                    specialization_guards.append(
-                        (
-                            functools.partial(
-                                lambda idx, args, check_fn=check_fn: check_fn(
-                                    args[idx]
-                                ),
-                                source_index,
-                            ),
-                            specialization,
-                        )
-                    )
 
             from torch.fx._lazy_graph_module import _LazyGraphModule
 
@@ -1563,22 +1532,57 @@ class OutputGraph(OutputGraphGuardsState):
 
             counters["stats"]["unique_graphs"] += 1
             # This is safe because we pre-process name to be unique
-            if specialization_guards:
+            if specializations := old_fake_mode.shape_env.specializations:
+                specialization_guards = []
+                specialization_cache: dict[Specialization, Callable[[Any], Any]] = {}
+                preserved_graphargs = [
+                    replace(node.meta["grapharg"], _example=None)
+                    for node in self.placeholders
+                ]
+                sources = [a.source for a in self.graphargs]
+                for specialization in specializations:
+                    source_index = sources.index(specialization.source)
+                    check_fn_source = inspect.getsource(specialization.check_fn).strip()
+                    check_fn = guards.LAMBDA_GUARD(  # type: ignore[attr-defined]
+                        specialization.check_fn,
+                        [check_fn_source],
+                    )
+
+                    log.debug(
+                        "Compiling backend specialized graph with specialization=%s",
+                        check_fn_source,
+                    )
+
+                    specialization_guards.append(
+                        (
+                            functools.partial(
+                                lambda idx, args, check_fn=check_fn: check_fn(
+                                    args[idx]
+                                ),
+                                source_index,
+                            ),
+                            specialization,
+                        )
+                    )
 
                 @torch._dynamo.disable(reason="do not trace Dynamo-compiled graph")
                 def specialized_dispatch(*args, **kwargs):
                     for check_fn, specialization in specialization_guards:
                         if check_fn(args):
-                            if specialization in dynamo_cache:
-                                return dynamo_cache[specialization](*args, **kwargs)
+                            if specialization in specialization_cache:
+                                return specialization_cache[specialization](
+                                    *args, **kwargs
+                                )
                             for node, grapharg, arg in zip(
                                 self.placeholders, preserved_graphargs, args
                             ):
                                 node.meta["grapharg"] = replace(grapharg, _example=arg)
-                            dynamo_cache[specialization] = self.call_user_compiler(
-                                gm, specialization=specialization
+                            specialization_cache[specialization] = (
+                                self.call_user_compiler(
+                                    gm, specialization=specialization
+                                )
                             )
-                            return dynamo_cache[specialization](*args, **kwargs)
+                            return specialization_cache[specialization](*args, **kwargs)
                     return compiled_fn(*args, **kwargs)
 
                 self.install_global_unsafe(name, specialized_dispatch)

@@ -10495,9 +10495,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         torch._dynamo.decorators.mark_dynamic(
             dynamic_specialized_a,
             0,
-            specialize_on=[
-                lambda x0: x0 == 16
-            ],
+            specialize_on=[lambda x0: x0 == 16],
         )
         torch._dynamo.decorators.mark_dynamic(
             b,
