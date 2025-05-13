@@ -40,6 +40,7 @@ from typing import (
     Any,
     Callable,
     cast,
+    Generic,
     NamedTuple,
     NoReturn,
     Optional,
@@ -47,7 +48,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, TypeAlias, TypeGuard
+from typing_extensions import deprecated, ParamSpec, TypeAlias, TypeGuard
 
 import torch
 import torch.fx
@@ -102,6 +103,7 @@ if TYPE_CHECKING:
     import types
 
     from torch import Tensor
+    from torch._dynamo.source import TensorPropertySource
     from torch._subclasses.fake_tensor import FakeTensor
     from torch.types import BoolLikeType, FloatLikeType, IntLikeType
 
@@ -167,6 +169,7 @@ __all__ = [
     "is_accessor_node",
     "ValueRangesSLoc",
     "SymIntEqByExpr",
+    "Specialization",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -931,6 +934,12 @@ def find_symbol_binding_fx_nodes(
     return r
 
 
+@dataclass(frozen=True)
+class Specialization:
+    source: TensorPropertySource
+    check_fn: Callable
+
+
 # Analogous to ConvertIntSource
 @dataclass(frozen=True)
 class ConvertIntKey:
@@ -1552,7 +1561,7 @@ def constrain_unify(a: torch.SymInt, b: torch.SymInt) -> None:
 # in the unlikely branch.)  (I think expect is a good name; in recent
 # versions of C++, this is replaced with [[likely]], which is weaker
 # and not accurate for this function!)
-def expect_true(a: BoolLikeType, skip: int = 0) -> bool:
+def expect_true(a: BoolLikeType, skip: int = 0, dont_guard: bool = False) -> bool:
     if isinstance(a, SymBool):
         # TODO: check perf implications of this
         frame = inspect.currentframe()
@@ -1561,7 +1570,9 @@ def expect_true(a: BoolLikeType, skip: int = 0) -> bool:
                 break
             frame = frame.f_back
         return a.node.expect_true(
-            frame.f_code.co_filename if frame else "", frame.f_lineno if frame else 0
+            frame.f_code.co_filename if frame else "",
+            frame.f_lineno if frame else 0,
+            dont_guard=dont_guard,
         )
     assert type(a) is bool, a
     return a
@@ -1894,8 +1905,12 @@ class SymIntSymbolicContext(SymbolicContext):
     constraint: DimConstraint
 
 
+_P1 = ParamSpec("_P1")
+_T1 = TypeVar("_T1")
+
+
 @dataclass(frozen=True)
-class StatelessSymbolicContext(SymbolicContext):
+class StatelessSymbolicContext(Generic[_P1, _T1], SymbolicContext):
     """
     Create symbols in ``create_symbolic_sizes_strides_storage_offset`` via
     a symbolic_context determination as given by ``DimDynamic`` and ``DimConstraint``.
@@ -1906,6 +1921,7 @@ class StatelessSymbolicContext(SymbolicContext):
     dynamic_strides: DimList[DimDynamic] = None  # type: ignore[assignment]
     constraint_sizes: DimList[DimConstraint] = None  # type: ignore[assignment]
     constraint_strides: DimList[DimConstraint] = None  # type: ignore[assignment]
+    specialize_on: Optional[list[list[Callable[_P1, _T1]]]] = None
     # If the tensor is a view, this should be populated for the base. It contains
     # information on how to allocate symbols when recursively fakeifying the base
     # during view fake-ification.
@@ -1913,6 +1929,12 @@ class StatelessSymbolicContext(SymbolicContext):
     # TODO: add storage offset and stride symbolic_context
 
     def __post_init__(self) -> None:
+        if self.specialize_on is None:
+            object.__setattr__(
+                self,
+                "specialize_on",
+                [[]] * len(self.dynamic_sizes),
+            )
         if self.dynamic_strides is None:
             object.__setattr__(
                 self,
@@ -3542,6 +3564,8 @@ class ShapeEnv:
 
         self.trace_asserts = trace_asserts
 
+        self.specializations: OrderedSet[Specialization] = OrderedSet()
+
         from torch.fx.experimental.validator import translation_validation_enabled
 
         self._translation_validation_enabled = translation_validation_enabled()
@@ -4026,6 +4050,17 @@ class ShapeEnv:
                 symbolic_context=symbolic_context,
             )
             if (
+                isinstance(symbolic_context, StatelessSymbolicContext)
+                and symbolic_context.specialize_on
+            ):
+                for specialization in symbolic_context.specialize_on[i]:
+                    self.specializations.add(
+                        Specialization(
+                            TensorPropertySource(source, TensorProperty.SIZE, i),
+                            specialization,
+                        )
+                    )
+            if (
                 config.backed_size_oblivious
                 and isinstance(sym, sympy.Symbol)  # could be static
                 and symbol_is_type(sym, SymT.SIZE)
@@ -4123,6 +4158,7 @@ class ShapeEnv:
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
+        specialization: Optional[Specialization] = None,
     ) -> tuple[tuple[IntLikeType, ...], tuple[IntLikeType, ...], IntLikeType,]:
         dim = len(ex_size)
 
@@ -4193,14 +4229,15 @@ class ShapeEnv:
             symbolic_context,
         )
 
-        sym_sizes = [
-            self.create_symintnode(
-                sym,
-                hint=hint,
-                source=TensorPropertySource(source, TensorProperty.SIZE, i),
-            )
-            for i, (sym, hint) in enumerate(zip(size, ex_size))
-        ]
+        sym_sizes = []
+        for i, (sym, hint) in enumerate(zip(size, ex_size)):
+            node_source = TensorPropertySource(source, TensorProperty.SIZE, i)
+            node = self.create_symintnode(sym, hint=hint, source=node_source)
+            sym_sizes.append(node)
+            should_specialize = specialization and specialization.source == node_source
+            if should_specialize:
+                assert specialization  # make mypy happy
+                expect_true(specialization.check_fn(node), dont_guard=True)
         sym_stride = []
         for i, stride_expr in enumerate(stride):
             # NB: Don't duck size the stride; instead use the expression

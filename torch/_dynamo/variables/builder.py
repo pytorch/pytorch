@@ -3053,6 +3053,7 @@ def _automatic_dynamic(
     dynamic_strides = []
     constraint_sizes = []
     constraint_strides = []
+    specialize_on = []
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
         marked_strict_unbacked = i in getattr(
@@ -3062,6 +3063,8 @@ def _automatic_dynamic(
         marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
         marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
         marked_static = i in getattr(e, "_dynamo_static_indices", set())
+
+        specialize_on.append(getattr(e, "_specialize_on", {}).get(i, []))
 
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
@@ -3182,6 +3185,7 @@ def _automatic_dynamic(
         dynamic_strides=dynamic_strides,
         constraint_sizes=constraint_sizes,
         constraint_strides=constraint_strides,
+        specialize_on=specialize_on,
         view_base_context=view_base_context,
         tensor_source=source,
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
