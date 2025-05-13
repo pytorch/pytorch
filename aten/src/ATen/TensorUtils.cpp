@@ -368,7 +368,7 @@ inline static std::optional<ResultVec> computeStride_impl(
   Numel tensor_numel = 1;
   Numel view_numel = 1;
 
- // The usages of TORCH_GUARD_OR_TRUE/TORCH_GUARD_OR_FALSE bellow could result in returning std::nullopt which have an effect of falling
+ // The usages of TORCH_GUARD_OR_TRUE/TORCH_GUARD_OR_FALSE below could result in returning std::nullopt which have an effect of falling
  // back to a clone when unbacked presented. But it will not result in returning different or wrong results.
   for (int64_t tensor_d = oldshape.size() - 1; tensor_d >= 0; tensor_d--) {
     tensor_numel *= oldshape[tensor_d];

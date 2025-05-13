@@ -2642,7 +2642,9 @@ class DimConstraints:
         # a fix for this issue, we delay raising such failures. See solve().
         if orig_reduced == sympy.false:
             self._inconsistencies.append(f"{orig_expr} is inconsistent!")
-        if isinstance(expr, sympy.Ne) or self._has_unsupported_sympy_function(expr):
+        if isinstance(
+            expr, (sympy.Ne, sympy.Or, sympy.And)
+        ) or self._has_unsupported_sympy_function(expr):
             # we're not going to do anything useful with these, so drop them
             return False
         free_symbols = expr.free_symbols
@@ -3538,6 +3540,8 @@ class ShapeEnv:
         # with something like effect token tracking.
         self.unbacked_alloc_order: dict[sympy.Symbol, int] = {}
 
+        self.specialization_stacks: dict[Source, traceback.StackSummary] = {}
+
         self.trace_asserts = trace_asserts
 
         from torch.fx.experimental.validator import translation_validation_enabled
@@ -3620,6 +3624,7 @@ class ShapeEnv:
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
             "_dde_suppressed",
+            "specialization_stacks",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -3934,7 +3939,8 @@ class ShapeEnv:
             node.meta[SHAPEENV_EVENT_KEY] = self._last_event_index()
             node.meta[CURRENT_NODE_KEY] = get_current_node()
 
-    def _suppress_guards_tls(self) -> bool:
+    @staticmethod
+    def _suppress_guards_tls() -> bool:
         return getattr(TLS, "suppress_guards", False)
 
     @record_shapeenv_event()
@@ -5154,10 +5160,16 @@ class ShapeEnv:
                     var_with_range = self._render_range_for_constraint_violation(
                         source, constraint
                     )
+                    user_stack = self.specialization_stacks.get(source, None)
                     msg = (
                         f"You marked {self._debug_name(source)} as dynamic but your code "
                         f"specialized it to be a constant ({val}). Either remove the mark_dynamic "
                         f"or use a less strict API such as maybe_mark_dynamic or Dim.AUTO."
+                        + (
+                            "\n\nUser stack:\n" + "".join(user_stack.format())
+                            if user_stack
+                            else ""
+                        )
                     )
                     record_constraint_violation(
                         constraint.warn_only, self._debug_name(source), msg
@@ -6366,6 +6378,10 @@ class ShapeEnv:
                 },
             )
 
+            for source in self.var_to_sources.get(a, []):
+                if user_tb:
+                    self.specialization_stacks[source] = user_tb
+
             if config.print_specializations:
                 self.log.warning(
                     "Specializing %s to %s", self.var_to_sources[a][0].name(), tgt
@@ -6809,6 +6825,81 @@ class ShapeEnv:
             sym_node.expr, sym_node.hint, sym_node.fx_node, size_oblivious
         )
 
+    def _is_python_assert(self) -> bool:
+        # Check if this boolean is used in an assertion, bytecode pattern for
+        # assertions is pretty stable for Python 3.7--3.13, ported with minimal
+        # changes from torch/fx/proxy.py
+        # Bytecode pattern for `assert` statements:
+        #     TO_BOOL / COMPARE_OP  # Only for Python >= 3.13
+        #     POP_JUMP_IF_TRUE
+        #     LOAD_ASSERTION_ERROR
+        #     RAISE_VARARGS
+        frame = self._get_user_frame()
+        assert frame is not None
+
+        insts = list(dis.get_instructions(frame.f_code))
+        if sys.version_info >= (3, 11):
+            # For Python >= 3.11, instructions can be 2-4 bytes long.
+            from bisect import bisect_left
+
+            cur = bisect_left(insts, frame.f_lasti, key=lambda x: x.offset)
+        else:
+            # For Python <= 3.10, instructions are always 2 bytes.
+            cur = frame.f_lasti // 2
+
+        if sys.version_info >= (3, 13):
+            if insts[cur].opname in ("TO_BOOL", "COMPARE_OP"):
+                # Peek 1 instruction further.
+                cur += 1
+        inst = insts[cur]
+
+        if inst.opname == "POP_JUMP_IF_TRUE" and inst.arg is not None:
+            first = insts[cur + 1]
+
+            starts_with_assert = (
+                first.opname == "LOAD_GLOBAL"
+                and first.argval == "AssertionError"
+                or first.opname == "LOAD_ASSERTION_ERROR"
+            )
+            if starts_with_assert and insts[cur + 2].opname == "RAISE_VARARGS":
+                return True
+        return False
+
+    def _log_real_tensor_propagation(
+        self, orig_expr: sympy.Basic, unsound_result: sympy.Basic
+    ) -> None:
+        log.warning(
+            "propagate_real_tensors evaluate_expr(%s) -> %s",
+            orig_expr,
+            unsound_result,
+        )
+        trace_structured(
+            "propagate_real_tensors",
+            metadata_fn=lambda: {
+                "expr": repr(orig_expr),
+                "result": repr(unsound_result),
+                "stack": structured.from_traceback(
+                    CapturedTraceback.extract(skip=1).summary()
+                ),
+            },
+        )
+        dtrace_structured(
+            "propagate_real_tensors_provenance",
+            metadata_fn=lambda: {
+                "expr": repr(orig_expr),
+                "result": repr(unsound_result),
+                "expr_node_id": self._expr_sym_node_id,
+                "user_stack": structured.get_user_stack(3),
+                "stack": structured.get_framework_stack(3),
+                "symbol_to_sources": {
+                    str(v): k
+                    for k, v in self.source_to_var.items()
+                    if v in orig_expr.free_symbols
+                },
+                "frame_locals": asdict(self._find_frame_locals()),
+            },
+        )
+
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
     def evaluate_expr(
@@ -6819,6 +6910,27 @@ class ShapeEnv:
         size_oblivious: bool = False,
         *,
         forcing_spec: bool = False,
+    ) -> sympy.Basic:
+        """
+        Given an expression, evaluates it, adding guards if necessary
+        """
+
+        # Add extra state that evaluate_expr() depends on.
+        suppress_guards_tls = ShapeEnv._suppress_guards_tls()
+        return self._inner_evaluate_expr(
+            orig_expr, hint, fx_node, size_oblivious, forcing_spec, suppress_guards_tls
+        )
+
+    @lru_cache(256)
+    @record_shapeenv_event(save_tracked_fakes=True, name="evaluate_expr")
+    def _inner_evaluate_expr(
+        self,
+        orig_expr: sympy.Basic,
+        hint: Optional[Union[int, bool, float]],
+        fx_node: Optional[torch.fx.Node],
+        size_oblivious: bool,
+        forcing_spec: bool,
+        _suppress_guards_tls: bool,
     ) -> sympy.Basic:
         try:
             return self._evaluate_expr(
@@ -6850,10 +6962,6 @@ class ShapeEnv:
         *,
         forcing_spec: bool = False,
     ) -> sympy.Basic:
-        """
-        Given an expression, evaluates it, adding guards if necessary
-        """
-
         # TODO: split conjunctions and evaluate them separately
 
         if isinstance(
@@ -6966,17 +7074,16 @@ class ShapeEnv:
                 new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
                 assert new_expr is not None
                 if not (new_expr.free_symbols <= self.var_to_val.keys()):
-                    size_oblivious_result = None
-                    if not size_oblivious:
-                        size_oblivious_result = self._maybe_evaluate_static(
-                            expr, size_oblivious=True
-                        )
-
                     ok = False
 
-                    # Last ditch
+                    # TODO maybe deprecate this feature.
+                    # oblivious_var_to_val will be defined iff we have sizes with DimDynamic.OBLIVIOUS_SIZE type.
+                    # Here we handle falling back to the hint for dimensions of type DimDynamic.OBLIVIOUS_SIZE.
+                    # Those are backed dimentions that are treated as unbacked to avoid specializations, but if
+                    # we fail to bypass with size oblivious reasoning we compute using the actual hint and guard.
                     if (
-                        self.oblivious_var_to_val
+                        not self._dde_suppressed
+                        and self.oblivious_var_to_val
                         and not (
                             correct_hint := orig_expr.xreplace(
                                 self.oblivious_var_to_val
@@ -7002,8 +7109,12 @@ class ShapeEnv:
                         # NB: do NOT transmute into runtime assert
                         ok = True
 
+                    # unbacked_var_to_val is not None iff propagate_real_tensors is on.
+                    # if propagate_real_tensors is on, we check the example values to generate (unsound_result)
+                    # and if they pass we add a runtime assertions and continue.
                     if (
-                        not ok
+                        not self._dde_suppressed
+                        and not ok
                         and self.unbacked_var_to_val
                         and not (
                             unsound_result := orig_expr.xreplace(
@@ -7011,88 +7122,25 @@ class ShapeEnv:
                             ).xreplace(self.var_to_val)
                         ).free_symbols
                     ):
-                        log.warning(
-                            "propagate_real_tensors evaluate_expr(%s) -> %s",
-                            orig_expr,
-                            unsound_result,
-                        )
-                        trace_structured(
-                            "propagate_real_tensors",
-                            metadata_fn=lambda: {
-                                "expr": repr(orig_expr),
-                                "result": repr(unsound_result),
-                                "stack": structured.from_traceback(
-                                    CapturedTraceback.extract(skip=1).summary()
-                                ),
-                            },
-                        )
-                        dtrace_structured(
-                            "propagate_real_tensors_provenance",
-                            metadata_fn=lambda: {
-                                "expr": repr(orig_expr),
-                                "result": repr(unsound_result),
-                                "expr_node_id": self._expr_sym_node_id,
-                                "user_stack": structured.get_user_stack(3),
-                                "stack": structured.get_framework_stack(3),
-                                "symbol_to_sources": {
-                                    str(v): k
-                                    for k, v in self.source_to_var.items()
-                                    if v in orig_expr.free_symbols
-                                },
-                                "frame_locals": asdict(self._find_frame_locals()),
-                            },
-                        )
+                        self._log_real_tensor_propagation(orig_expr, unsound_result)
                         transmute_into_runtime_assert = True
                         concrete_val = unsound_result
                         ok = True
 
-                    if not ok and self.trace_asserts:
-                        # Check if this boolean is used in an assertion, bytecode pattern for
-                        # assertions is pretty stable for Python 3.7--3.13, ported with minimal
-                        # changes from torch/fx/proxy.py
-                        # Bytecode pattern for `assert` statements:
-                        #     TO_BOOL / COMPARE_OP  # Only for Python >= 3.13
-                        #     POP_JUMP_IF_TRUE
-                        #     LOAD_ASSERTION_ERROR
-                        #     RAISE_VARARGS
-                        frame = self._get_user_frame()
-                        assert frame is not None
-
-                        insts = list(dis.get_instructions(frame.f_code))
-                        if sys.version_info >= (3, 11):
-                            # For Python >= 3.11, instructions can be 2-4 bytes long.
-                            from bisect import bisect_left
-
-                            cur = bisect_left(
-                                insts, frame.f_lasti, key=lambda x: x.offset
-                            )
-                        else:
-                            # For Pyhton <= 3.10, instructions are always 2 bytes.
-                            cur = frame.f_lasti // 2
-
-                        if sys.version_info >= (3, 13):
-                            if insts[cur].opname in ("TO_BOOL", "COMPARE_OP"):
-                                # Peek 1 instruction further.
-                                cur += 1
-                        inst = insts[cur]
-
-                        if inst.opname == "POP_JUMP_IF_TRUE" and inst.arg is not None:
-                            first = insts[cur + 1]
-
-                            starts_with_assert = (
-                                first.opname == "LOAD_GLOBAL"
-                                and first.argval == "AssertionError"
-                                or first.opname == "LOAD_ASSERTION_ERROR"
-                            )
-                            if (
-                                starts_with_assert
-                                and insts[cur + 2].opname == "RAISE_VARARGS"
-                            ):
-                                concrete_val = sympy.true
-                                transmute_into_runtime_assert = True
-                                ok = True
+                    # Check if this is coming from a python assert statement, if so, convert it to a runtime assertion
+                    # if instead of failing.
+                    if not ok and self.trace_asserts and self._is_python_assert():
+                        concrete_val = sympy.true
+                        transmute_into_runtime_assert = True
+                        ok = True
 
                     if not ok:
+                        size_oblivious_result = None
+                        # compute size_oblivious_result to suggest it as a fix for the user if it works.
+                        if not size_oblivious and not self._dde_suppressed:
+                            size_oblivious_result = self._maybe_evaluate_static(
+                                expr, size_oblivious=True
+                            )
                         raise self._make_data_dependent_error(
                             expr.xreplace(self.var_to_val),
                             expr,
@@ -7162,25 +7210,25 @@ class ShapeEnv:
             if fresh:
                 self._remove_fx_node(node)
             raise
-        else:
-            if not self._suppress_guards_tls():
-                if guard is not None:  # we might have deferred this to runtime assert
-                    for s in g.free_symbols:
-                        self.symbol_guard_counter[s] += 1
-                        # Forcing_spec to avoid infinite recursion
-                        if (
-                            not forcing_spec
-                            and config.symbol_guard_limit_before_specialize is not None
-                            and self.symbol_guard_counter[s]
-                            > config.symbol_guard_limit_before_specialize
-                        ):
-                            # Force specialization
-                            self.log.info(
-                                "symbol_guard_limit_before_specialize=%s exceeded on %s",
-                                config.symbol_guard_limit_before_specialize,
-                                s,
-                            )
-                            self.evaluate_expr(s, forcing_spec=True)
+
+        if not self._suppress_guards_tls():
+            if guard is not None:  # we might have deferred this to runtime assert
+                for s in g.free_symbols:
+                    self.symbol_guard_counter[s] += 1
+                    # Forcing_spec to avoid infinite recursion
+                    if (
+                        not forcing_spec
+                        and config.symbol_guard_limit_before_specialize is not None
+                        and self.symbol_guard_counter[s]
+                        > config.symbol_guard_limit_before_specialize
+                    ):
+                        # Force specialization
+                        self.log.info(
+                            "symbol_guard_limit_before_specialize=%s exceeded on %s",
+                            config.symbol_guard_limit_before_specialize,
+                            s,
+                        )
+                        self.evaluate_expr(s, forcing_spec=True)
 
         return concrete_val
 

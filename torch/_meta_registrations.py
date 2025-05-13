@@ -1,14 +1,12 @@
 # mypy: allow-untyped-defs
 import math
-import operator
 from collections.abc import Sequence
 from enum import Enum
-from functools import reduce, wraps
+from functools import wraps
 from typing import Callable, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
-import torch._prims as prims
 import torch._prims_common as utils
 from torch import SymBool, SymFloat, Tensor
 from torch._decomp import (
@@ -159,105 +157,6 @@ def meta_linspace_logspace(
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-
-
-# this function is python match of computeStride_impl in TensorUtils.cpp
-def _compute_stride(old_shape, old_stride, new_shape):
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
-
-    if len(old_shape) == 0:
-        return [1] * len(new_shape)
-
-    numel = reduce(operator.mul, old_shape, 1)
-    zero_numel = guard_or_false(numel == 0)
-    if zero_numel and old_shape == new_shape:
-        return old_stride
-
-    new_stride = [0] * len(new_shape)
-
-    if zero_numel:
-        for view_d in range(len(new_shape) - 1, -1, -1):
-            if view_d == len(new_shape) - 1:
-                new_stride[view_d] = 1
-            else:
-                new_stride[view_d] = (
-                    max(new_shape[view_d + 1], 1) * new_stride[view_d + 1]
-                )
-        return new_stride
-
-    view_d = len(new_shape) - 1
-    chunk_base_stride = old_stride[-1]
-    tensor_numel = 1
-    view_numel = 1
-
-    for tensor_d in range(len(old_shape) - 1, -1, -1):
-        tensor_numel *= old_shape[tensor_d]
-
-        if tensor_d == 0 or (
-            guard_or_true(old_shape[tensor_d - 1] != 1)
-            and guard_or_true(
-                old_stride[tensor_d - 1] != tensor_numel * chunk_base_stride
-            )
-        ):
-            while view_d >= 0 and (
-                guard_or_true(view_numel < tensor_numel)
-                or guard_or_false(new_shape[view_d] == 1)
-            ):
-                new_stride[view_d] = view_numel * chunk_base_stride
-                view_numel *= new_shape[view_d]
-                view_d -= 1
-
-            if guard_or_true(view_numel != tensor_numel):
-                return None
-
-            if tensor_d > 0:
-                chunk_base_stride = old_stride[tensor_d - 1]
-                tensor_numel = 1
-                view_numel = 1
-    if view_d != -1:
-        return None
-    return new_stride
-
-
-# if a is contiguous, we can always reshape with as_strided and contiguous_strides.
-# if a is not contiguous and _compute_stride succeed we also use as_strided without clone.
-def _reshape_view_meta(a, shape):
-    from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
-
-    # Creates a valid shape
-    shape = utils.extract_shape_from_varargs(shape, validate=False)
-
-    # Reshape may be given a shape with a -1 length
-    # This indicates that the dimension's length should be inferred
-    shape = utils.infer_size(shape, a.numel())
-
-    # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
-    shape_numel = reduce(operator.mul, shape, 1)
-    torch._check(
-        a.numel() == shape_numel,
-        f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
-    )
-
-    if len(shape) == len(a.shape) and statically_known_true(sym_eq(shape, a.shape)):
-        return prims.view_of(a)
-
-    # if a is contiguous, we can always reshape with as_strided.
-    if a.is_contiguous():
-        return a.as_strided(shape, utils.make_contiguous_strides_for(shape))
-
-    # if a is not contiguous and _compute_stride succeed we also use as_strided.
-    new_strides = _compute_stride(a.size(), a.stride(), shape)
-    if new_strides is not None:
-        return a.as_strided(shape, new_strides)
-
-    raise ValueError(
-        f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!"
-    )
-
-
-@register_meta([aten.view.default])
-def view_meta(a, *shape):
-    return _reshape_view_meta(a, *shape)
 
 
 @register_meta([aten.take.default, aten.take.out])
@@ -2271,7 +2170,8 @@ def meta_baddbmm(self, batch1, batch2, *, beta=1, alpha=1):
     dim1 = batch1.size(0)
     dim2 = batch1.size(1)
     dim3 = batch2.size(2)
-    self = self.expand((dim1, dim2, dim3))
+    if self.shape != (dim1, dim2, dim3):
+        self = self.expand((dim1, dim2, dim3))
     torch._check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor")
     torch._check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
     torch._check(
@@ -7372,6 +7272,30 @@ def sigmoid(self: Tensor) -> Tensor:
     return torch.empty_like(self, dtype=result_dtype)
 
 
+def _compute_grouped_gemm_output_size(mat1, mat2, offs):
+    mat1_is_2d = mat1.dim() == 2
+    mat2_is_2d = mat2.dim() == 2
+
+    if mat1_is_2d:
+        if mat2_is_2d:
+            return offs.size(0), mat1.size(0), mat2.size(1)
+        else:
+            torch._check(
+                offs.size(0) == mat2.size(0), "matrix batch sizes have to match"
+            )
+            return mat1.size(0), mat2.size(-1)
+    else:
+        if mat2_is_2d:
+            torch._check(
+                offs.size(0) == mat1.size(0), "matrix batch sizes have to match"
+            )
+            return mat1.size(1), mat2.size(1)
+        else:
+            # regular bmm
+            torch._check(mat1.size(0) == mat2.size(0), "batched dimension has to match")
+            return mat1.size(0), mat1.size(1), mat2.size(-1)
+
+
 @register_meta(aten._grouped_mm)
 @out_wrapper()
 def grouped_mm(
@@ -7394,33 +7318,134 @@ def grouped_mm(
     out_dtype = out_dtype or mat1.dtype
     torch._check(bias is None, lambda: "bias not supported yet")
 
-    def _compute_grouped_gemm_output_size(mat1, mat2, offs):
-        mat1_is_2d = mat1.dim() == 2
-        mat2_is_2d = mat2.dim() == 2
-
-        if mat1_is_2d:
-            if mat2_is_2d:
-                return offs.size(0), mat1.size(0), mat2.size(1)
-            else:
-                torch._check(
-                    offs.size(0) == mat2.size(0), "matrix batch sizes have to match"
-                )
-                return mat1.size(0), mat2.size(-1)
-        else:
-            if mat2_is_2d:
-                torch._check(
-                    offs.size(0) == mat1.size(0), "matrix batch sizes have to match"
-                )
-                return mat1.size(1), mat2.size(1)
-            else:
-                # regular bmm
-                torch._check(
-                    mat1.size(0) == mat2.size(0), "batched dimension has to match"
-                )
-                return mat1.size(0), mat1.size(1), mat2.size(-1)
-
     out_size = _compute_grouped_gemm_output_size(mat1, mat2, offs)
     out = mat1.new_empty(out_size, dtype=out_dtype)
+
+    return out
+
+
+@register_meta([aten._scaled_grouped_mm.default])
+def meta_scaled_grouped_mm(
+    mat_a: torch.Tensor,
+    mat_b: torch.Tensor,
+    scale_a: torch.Tensor,
+    scale_b: torch.Tensor,
+    offs: Optional[torch.Tensor] = None,
+    bias: Optional[torch.Tensor] = None,
+    scale_result: Optional[torch.Tensor] = None,
+    out_dtype: Optional[torch.dtype] = None,
+    use_fast_accum: bool = False,
+):
+    # Check dimensions
+    torch._check(
+        mat_a.dim() == 2 or mat_a.dim() == 3, lambda: "mat_a has to be 2 or 3d"
+    )
+    torch._check(
+        mat_b.dim() == 2 or mat_b.dim() == 3, lambda: "mat_b has to be 2 or 3d"
+    )
+
+    a_is_2d = mat_a.dim() == 2
+    b_is_2d = mat_b.dim() == 2
+
+    # Check offsets
+    torch._check(
+        (offs is not None) == (a_is_2d or b_is_2d),
+        lambda: "Have to provide offsets if there is a 2d matrix",
+    )
+
+    if offs is not None:
+        torch._check(offs.dim() == 1, lambda: "offs has to be 1D")
+        torch._check(offs.dtype == torch.int, lambda: "Offsets have to be int32")
+
+    # Check matrix sizes
+    torch._check(
+        mat_a.size(-1) % 16 == 0,
+        lambda: f"Expected trailing dimension of mat_a to be divisible by 16 but got mat1 shape: {mat_a.size()}",
+    )
+    torch._check(
+        mat_b.size(-2) % 16 == 0 and mat_b.size(-1) % 16 == 0,
+        lambda: f"Expected mat_b shape to be divisible by 16 but got mat_b shape: {mat_b.size()}",
+    )
+
+    # Check scales
+    torch._check(
+        scale_a.dtype == torch.float and scale_b.dtype == torch.float,
+        lambda: "Both scale_a and scale_b must be float (fp32) tensors.",
+    )
+
+    # Check scale dimensions
+    scale_multiplier = offs.size(0) if (a_is_2d and b_is_2d) else 1  # type: ignore[union-attr]
+
+    if a_is_2d:
+        torch._check(
+            scale_a.dim() == 1,
+            lambda: f"scale must be a 1D tensor for 2D mat_a, but got {scale_a.dim()}D",
+        )
+        torch._check(scale_a.is_contiguous(), lambda: "scale_a must be contiguous")
+        torch._check(
+            scale_a.size(0) == mat_a.size(0) * scale_multiplier,
+            lambda: "scale must have the same length as mat_a",
+        )
+    else:
+        torch._check(
+            scale_a.dim() == 2,
+            lambda: f"scale must be a 2D tensor for 3D mat_a, but got {scale_a.dim()}D",
+        )
+        torch._check(
+            scale_a.stride(1) == 1,
+            lambda: "scale_a must be contiguous in the last dimension",
+        )
+        torch._check(
+            scale_a.size(0) == mat_a.size(0),
+            lambda: "scale must have the same batch dimension as mat_a",
+        )
+        torch._check(
+            scale_a.size(1) == mat_a.size(1),
+            lambda: "scale must have the same first dimension as mat_a",
+        )
+
+    # Similar checks for scale_b
+    if b_is_2d:
+        torch._check(
+            scale_b.dim() == 1,
+            lambda: f"scale must be a 1D tensor for 2D mat_b, but got {scale_b.dim()}D",
+        )
+        torch._check(scale_b.is_contiguous(), lambda: "scale_b must be contiguous")
+        torch._check(
+            scale_b.size(0) == mat_b.size(1) * scale_multiplier,
+            lambda: "scale must have the same length as mat_b",
+        )
+    else:
+        torch._check(
+            scale_b.dim() == 2,
+            lambda: f"scale must be a 2D tensor for 3D mat_b, but got {scale_b.dim()}D",
+        )
+        torch._check(
+            scale_b.stride(1) == 1,
+            lambda: "scale_b must be contiguous in the last dimension",
+        )
+        torch._check(
+            scale_b.size(0) == mat_b.size(0),
+            lambda: "scale must have the same batch dimension as mat_b",
+        )
+        torch._check(
+            scale_b.size(1) == mat_b.size(2),
+            lambda: "scale must have the same last dimension as mat_b",
+        )
+
+    # Check bias
+    torch._check(bias is None, lambda: "Bias not supported yet")
+
+    # Check output dtype
+    out_dtype_ = out_dtype if out_dtype is not None else mat_a.dtype
+    torch._check(
+        out_dtype_ == torch.bfloat16,
+        lambda: "Only bf16 high precision output types are supported for grouped gemm",
+    )
+
+    # Compute output size
+    out_size = _compute_grouped_gemm_output_size(mat_a, mat_b, offs)
+    out = mat_a.new_empty(out_size, dtype=out_dtype)
 
     return out
 

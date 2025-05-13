@@ -13,20 +13,14 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch._C import FileCheck
 from torch._inductor.utils import run_and_get_triton_code
-from torch.distributed._tensor import (
-    DeviceMesh,
-    DTensor,
-    init_device_mesh,
-    Partial,
-    Replicate,
-    Shard,
-)
-from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
     CheckpointImpl,
 )
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.tensor import DeviceMesh, DTensor, Partial, Replicate, Shard
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
