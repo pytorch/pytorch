@@ -59,11 +59,7 @@ if TYPE_CHECKING:
 
     from torch._guards import Source
     from torch._ops import OpOverload
-    from torch.fx.experimental.symbolic_shapes import (
-        ShapeEnv,
-        Specialization,
-        SymbolicContext,
-    )
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
 
 log = logging.getLogger(__name__)
 
@@ -358,7 +354,6 @@ class FakeTensorConverter:
         source: Optional[Source] = None,
         symbolic_context: Optional[SymbolicContext] = None,
         trace: bool = True,
-        specialization: Optional[Specialization] = None,
     ) -> FakeTensor:
         # see note [Tensor Fakification and Symbol Caching]
         if not symbolic_context and not source and shape_env:
@@ -413,7 +408,6 @@ class FakeTensorConverter:
             source=source,
             symbolic_context=symbolic_context,
             trace=trace,
-            specialization=specialization,
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
@@ -2870,7 +2864,6 @@ class FakeTensorMode(TorchDispatchMode):
         source: Optional[Source] = None,
         symbolic_context: Optional[SymbolicContext] = None,
         trace: bool = True,
-        specialization: Optional[Specialization] = None,
     ) -> FakeTensor:
         shape_env: Optional[ShapeEnv] = self.shape_env
         if static_shapes is None:
@@ -2887,7 +2880,6 @@ class FakeTensorMode(TorchDispatchMode):
             source=source,
             symbolic_context=symbolic_context,
             trace=trace,
-            specialization=specialization,
         )
 
 

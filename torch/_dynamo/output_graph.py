@@ -1577,11 +1577,12 @@ class OutputGraph(OutputGraphGuardsState):
                                 self.placeholders, preserved_graphargs, args
                             ):
                                 node.meta["grapharg"] = replace(grapharg, _example=arg)
-                            specialization_cache[specialization] = (
-                                self.call_user_compiler(
-                                    gm, specialization=specialization
+                            with self.shape_env.patch_source_specialization(
+                                specialization.source, specialization.check_fn
+                            ):
+                                specialization_cache[specialization] = (
+                                    self.call_user_compiler(gm)
                                 )
-                            )
                             return specialization_cache[specialization](*args, **kwargs)
                     return compiled_fn(*args, **kwargs)
 
@@ -1601,16 +1602,16 @@ class OutputGraph(OutputGraphGuardsState):
     def graphargs(self) -> list[GraphArg]:
         return [node.meta["grapharg"] for node in self.placeholders]
 
-    def call_user_compiler(self, gm: fx.GraphModule, **kwargs) -> CompiledFn:
+    def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
         with dynamo_timed(
             "OutputGraph.call_user_compiler",
             phase_name="backend_compile",
             log_pt2_compile_event=True,
             dynamo_compile_column_us="aot_autograd_cumulative_compile_time_us",
         ):
-            return self._call_user_compiler(gm, **kwargs)
+            return self._call_user_compiler(gm)
 
-    def _call_user_compiler(self, gm: fx.GraphModule, **kwargs) -> CompiledFn:
+    def _call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
         assert self.compiler_fn is not None
         tot = 0
         placeholders = []
@@ -1640,7 +1641,7 @@ class OutputGraph(OutputGraphGuardsState):
             compiler_fn = self.compiler_fn
             if config.verify_correctness:
                 compiler_fn = WrapperBackend(compiler_fn)
-            compiled_fn = compiler_fn(gm, self.example_inputs(), **kwargs)
+            compiled_fn = compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except (TensorifyScalarRestartAnalysis, ShortenTraceback):

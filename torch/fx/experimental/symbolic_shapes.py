@@ -1561,7 +1561,7 @@ def constrain_unify(a: torch.SymInt, b: torch.SymInt) -> None:
 # in the unlikely branch.)  (I think expect is a good name; in recent
 # versions of C++, this is replaced with [[likely]], which is weaker
 # and not accurate for this function!)
-def expect_true(a: BoolLikeType, skip: int = 0, dont_guard: bool = False) -> bool:
+def expect_true(a: BoolLikeType, skip: int = 0) -> bool:
     if isinstance(a, SymBool):
         # TODO: check perf implications of this
         frame = inspect.currentframe()
@@ -1570,9 +1570,7 @@ def expect_true(a: BoolLikeType, skip: int = 0, dont_guard: bool = False) -> boo
                 break
             frame = frame.f_back
         return a.node.expect_true(
-            frame.f_code.co_filename if frame else "",
-            frame.f_lineno if frame else 0,
-            dont_guard=dont_guard,
+            frame.f_code.co_filename if frame else "", frame.f_lineno if frame else 0
         )
     assert type(a) is bool, a
     return a
@@ -3617,6 +3615,21 @@ class ShapeEnv:
     def allow_complex_guards_as_runtime_asserts(self) -> bool:
         return self.settings.allow_complex_guards_as_runtime_asserts
 
+    @contextmanager
+    def patch_source_specialization(
+        self, source: Source, check_fn: Callable[[sympy.Symbol], sympy.Expr]
+    ) -> Iterator[None]:
+        name = source.name()
+        sym = self.source_to_var[name]
+        expr = check_fn(sym)
+        new_axioms = dict(self.get_implications(self.simplify(expr)))
+        self.axioms.update(new_axioms)
+        try:
+            yield
+        finally:
+            for k in new_axioms:
+                self.axioms.pop(k, None)
+
     def check_equal(self, other: ShapeEnv) -> None:
         """Compare another ShapeEnv for equivalence"""
         # ShapeEnv fields that are not relevant for the outcome of
@@ -4158,7 +4171,6 @@ class ShapeEnv:
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
-        specialization: Optional[Specialization] = None,
     ) -> tuple[tuple[IntLikeType, ...], tuple[IntLikeType, ...], IntLikeType,]:
         dim = len(ex_size)
 
@@ -4229,15 +4241,14 @@ class ShapeEnv:
             symbolic_context,
         )
 
-        sym_sizes = []
-        for i, (sym, hint) in enumerate(zip(size, ex_size)):
-            node_source = TensorPropertySource(source, TensorProperty.SIZE, i)
-            node = self.create_symintnode(sym, hint=hint, source=node_source)
-            sym_sizes.append(node)
-            should_specialize = specialization and specialization.source == node_source
-            if should_specialize:
-                assert specialization  # make mypy happy
-                expect_true(specialization.check_fn(node), dont_guard=True)
+        sym_sizes = [
+            self.create_symintnode(
+                sym,
+                hint=hint,
+                source=TensorPropertySource(source, TensorProperty.SIZE, i),
+            )
+            for i, (sym, hint) in enumerate(zip(size, ex_size))
+        ]
         sym_stride = []
         for i, stride_expr in enumerate(stride):
             # NB: Don't duck size the stride; instead use the expression
