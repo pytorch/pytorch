@@ -2487,8 +2487,9 @@ class WrapGenericHigherOrderVariable(WrapHigherOrderVariable):
         )
 
         gmod.meta["_wrap_generic_fqn"] = fn_fqn
-
-        _, hop_kwargs = proxy_args_kwargs([], hop_kwargs)
+        gmod.meta["_wrap_generic_kwarg_values"] = {
+            k: get_val(v) for k, v in hop_kwargs.items()
+        }
 
         # Store the invocation as a call
         variable = wrap_fx_proxy(
@@ -2497,7 +2498,7 @@ class WrapGenericHigherOrderVariable(WrapHigherOrderVariable):
                 "call_function",
                 self.value,
                 args=tuple(p_args),
-                kwargs=hop_kwargs,
+                kwargs={},
             ),
             example_value=example_value,
         )
