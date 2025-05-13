@@ -1,6 +1,6 @@
 name: upload-utilization-stats
 
-description: Upload utilization stats to artifacts
+description: Upload utilization stats to artifacts.
 
 inputs:
     workflow_run_id:
