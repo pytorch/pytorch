@@ -304,6 +304,7 @@ dispatch_keys = [
     DispatchKey.QuantizedMeta,
     DispatchKey.NestedTensorMeta,
     DispatchKey.ZeroTensor,
+    DispatchKey.MTIA,
 ]
 
 
