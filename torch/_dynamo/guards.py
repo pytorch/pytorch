@@ -3266,51 +3266,7 @@ def strip_local_scope(s: str) -> str:
     return re.sub(pattern, r"\1", s)
 
 
-def _format_reasons_for_shape_guards(code_reasons: list[str], fail_reasons: list[str], compile_id: CompileId, scope: dict[str, object]) -> str:
-    """
-    Takes in guard failure reasons (code_reasons: eval-able code parts, fail_reasons: plain english reasons), and returns the formatted output.
-    Goes through dynamic shape recompilation reasons in fail_reasons, and suggests a dynamic source whitelist env var, to dynamically compile
-    to start and avoid this recompilation in future. Also suggests force_parameter_static_shapes if a parameter shape recompilation is found.
-    """
-    has_parameter = False
-    shape_sources = OrderedSet()
-    pattern = r"tensor '(.*)' size mismatch at index .* expected (\d+), actual (\d+).*"
-    for reason in fail_reasons:
-        if (match := re.search(pattern, reason)) is not None:
-            name, size_orig, size_new = match.groups()
-            tensor = eval(name, scope)
-            size_orig, size_new = int(size_orig), int(size_new)
-            if size_orig >= 2 and size_new >= 2:  # these suggestions won't help for 0/1 specialization.
-                if isinstance(tensor, torch.nn.Parameter):
-                    has_parameter = True
-                shape_sources.add(name)
-
-    if is_recompiles_verbose_enabled():
-        reason_str = strip_local_scope(f"{compile_id}: " + "; ".join(code_reasons + fail_reasons))
-    else:
-        reason_str = strip_local_scope(f"{compile_id}: " + "; ".join(code_reasons[:1] if code_reasons else fail_reasons[:1]))
-
-    if shape_sources:
-        reason_str += "\n"
-        if len(shape_sources) > 1:
-            reason_str += "Multiple size mismatches found. "
-        reason_str += (
-            f"The following environment variable would enable dynamic compilation to start, avoiding this recompile: "
-            + f"TORCH_COMPILE_DYNAMIC_SOURCES=\"{','.join(shape_sources)}\""
-        )
-    if has_parameter:
-        reason_str += (
-            "\nSize guard failed on a parameter, consider using torch._dynamo.config.force_parameter_static_shapes = False "
-            + "to allow dynamism on parameters."
-        )
-    return reason_str
-
-
-def get_guard_fail_reason_helper(
-    guard_manager: GuardFn,
-    f_locals: dict[str, object],
-    compile_id: CompileId,
-) -> str:
+def get_guard_fail_reason_helper(guard_manager: GuardFn, f_locals: dict[str, object], compile_id: CompileId, return_all: bool = False) -> Union[str, tuple[str, list[str], list[str]]]:
     """
     Return the reason why `guard_manager` failed.
     Updates `guard_failures` with the generated reason.
@@ -3366,7 +3322,14 @@ def get_guard_fail_reason_helper(
             if isinstance(fail_reason, str):
                 code_reasons.append(fail_reason)
 
-    return _format_reasons_for_shape_guards(code_reasons, failure_reasons, compile_id, scope)
+    if is_recompiles_verbose_enabled():
+        reason_str = strip_local_scope(f"{compile_id}: " + "; ".join(code_reasons + failure_reasons))
+    else:
+        reason_str = strip_local_scope(f"{compile_id}: " + "; ".join(code_reasons[:1] if code_reasons else failure_reasons[:1]))
+    
+    if return_all:
+        return reason_str, code_reasons, failure_reasons
+    return reason_str
 
 
 def get_guard_fail_reason(
@@ -3374,10 +3337,10 @@ def get_guard_fail_reason(
     code: types.CodeType,
     f_locals: dict[str, object],
     compile_id: CompileId,
-) -> str:
+) -> tuple[str, list[str], list[str]]:
     if isinstance(guard_manager, DeletedGuardManagerWrapper):
-        return f"{compile_id}: {guard_manager.invalidation_reason}"
-    reason_str = get_guard_fail_reason_helper(guard_manager, f_locals, compile_id)
+        return f"{compile_id}: {guard_manager.invalidation_reason}", [], []
+    reason_str, code_reasons, fail_reasons = get_guard_fail_reason_helper(guard_manager, f_locals, compile_id, return_all=True)
     guard_failures[orig_code_map[code]].append(reason_str)
 
     try:
@@ -3390,6 +3353,48 @@ def get_guard_fail_reason(
             "Failure in guard_fail_fn callback - raising here will cause a NULL Error on guard eval",
         )
 
+    return reason_str, code_reasons, fail_reasons
+
+
+def _extract_recompiled_dynamic_sources(fail_reasons: list[str], frame_locals: dict[str, object], guard_manager: GuardFn) -> tuple[list[str], bool]:
+    """
+    Goes through a list of guard failure reasons, and extracts source names for tensors we've dynamically recompiled.
+    Returns a list of sources, and a boolean indicating whether a parameter was included.
+    """
+    scope = {"L": frame_locals, "G": guard_manager.global_scope["G"]}
+    has_parameter = False
+    shape_sources = OrderedSet()
+    pattern = r"tensor '(.*)' size mismatch at index .* expected (\d+), actual (\d+).*"
+    for reason in fail_reasons:
+        if (match := re.search(pattern, reason)) is not None:
+            name, size_orig, size_new = match.groups()
+            tensor = eval(name, scope)
+            size_orig, size_new = int(size_orig), int(size_new)
+            if size_orig >= 2 and size_new >= 2:  # these suggestions won't help for 0/1 specialization.
+                if isinstance(tensor, torch.nn.Parameter):
+                    has_parameter = True
+                shape_sources.add(name)
+    return list(shape_sources), has_parameter
+
+
+def _suggest_dynamic_whitelist(dynamic_sources: OrderedSet, has_dynamic_parameter: bool) -> str:
+    """
+    Adds suggested dynamic whitelist to recompile logging, based on detected sources.
+    """
+    reason_str = ""
+    if dynamic_sources:
+        reason_str += "\n"
+        if len(dynamic_sources) > 1:
+            reason_str += "\nMultiple size mismatches found. "
+        reason_str += (
+            f"The following environment variable would enable dynamic compilation to start, avoiding this recompile: "
+            + f"TORCH_COMPILE_DYNAMIC_SOURCES=\"{','.join(dynamic_sources)}\""
+        )
+    if has_dynamic_parameter:
+        reason_str += (
+            "\nSize guard failed on a parameter, consider using torch._dynamo.config.force_parameter_static_shapes = False "
+            + "to allow dynamism on parameters."
+        )
     return reason_str
 
 
@@ -3402,8 +3407,10 @@ def get_and_maybe_log_recompilation_reasons(
     Raises a RecompileError if `config.error_on_recompile` is enabled.
     """
     reasons = []
+    dynamic_sources = OrderedSet()
+    has_dynamic_parameter = False
     while cache_entry is not None:
-        reason = get_guard_fail_reason(
+        reason, _, fail_reasons = get_guard_fail_reason(
             cache_entry.guard_manager,
             cache_entry.code,
             frame.f_locals,
@@ -3411,6 +3418,9 @@ def get_and_maybe_log_recompilation_reasons(
         )
         if reason:
             reasons.append(reason)
+            new_dynamic_sources, dynamic_param = _extract_recompiled_dynamic_sources(fail_reasons, frame.f_locals, cache_entry.guard_manager)
+            dynamic_sources.update(new_dynamic_sources)
+            has_dynamic_parameter |= dynamic_param
         cache_entry = cache_entry.next
 
     code = frame.f_code
@@ -3429,6 +3439,7 @@ def get_and_maybe_log_recompilation_reasons(
         guard_failure_details = (
             f"triggered by the following guard failure(s):\n{failures}"
         )
+        guard_failure_details += _suggest_dynamic_whitelist(dynamic_sources, has_dynamic_parameter)
         message = (
             f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}\n"
             f"{textwrap.indent(guard_failure_details, '    ')}"
