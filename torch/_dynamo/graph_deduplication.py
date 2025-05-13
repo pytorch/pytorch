@@ -11,7 +11,7 @@ import logging
 import operator
 from collections import defaultdict
 from collections.abc import Generator, Iterable
-from typing import Any
+from typing import Any, Optional
 
 import torch
 import torch.fx
@@ -20,7 +20,7 @@ from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
 from torch.utils._ordered_set import OrderedSet
 
 from .graph_region_tracker import Node, Region
-from .graph_utils import _detect_cycles, _get_flat_args, _get_flat_args_unique
+from .graph_utils import _detect_cycles, _flatten_args_kwargs
 
 
 log = logging.getLogger(__name__)
@@ -92,10 +92,7 @@ when they are created in output_graph.
                 node_to_additional_deps,
             )
 
-    _stable_topological_sort(
-        output_graph.graph,
-        node_to_additional_deps,  # type: ignore[arg-type]
-    )
+    _stable_topological_sort(output_graph.graph, node_to_additional_deps)
     return sub_gms
 
 
@@ -112,7 +109,7 @@ def _replace_region_with_subgraph(
     sub_args = []
     for node_ind, arg_ind in node_ind_arg_ind:
         node = region[node_ind]
-        flattened_args_kwargs = _get_flat_args(node, {})
+        flattened_args_kwargs = _flatten_args_kwargs((node.args, node.kwargs))
         sub_args.append(flattened_args_kwargs[arg_ind])
 
     invoke_args = (get_subgraph_node, subgraph_name, *sub_args)
@@ -165,7 +162,7 @@ def _get_external_inputs(
     external_node_to_indices = dict()
     region_unique = set(region)
     for node_ind, node in enumerate(region):
-        flattened_args_kwargs = _get_flat_args(node, {})
+        flattened_args_kwargs = _flatten_args_kwargs((node.args, node.kwargs))
         for arg_ind, in_node in enumerate(flattened_args_kwargs):
             if (
                 isinstance(in_node, Node)
@@ -240,9 +237,23 @@ def _create_subgraph(
     return subgraph, node_ind_input_inds
 
 
+def _args(
+    n: torch.fx.Node,
+    node_to_additional_deps: Optional[dict[torch.fx.Node, list[torch.fx.Node]]] = None,
+) -> list[torch.fx.node.Argument]:
+    if node_to_additional_deps is None:
+        node_to_additional_deps = {}
+
+    args: list[torch.fx.node.Argument] = []
+    torch.fx.map_arg((n.args, n.kwargs), args.append)
+    if n in node_to_additional_deps:
+        args.extend(node_to_additional_deps[n])
+    return args
+
+
 def _stable_topological_sort(
     graph: torch.fx.Graph,
-    node_to_additional_deps: dict[torch.fx.Node, OrderedSet[torch.fx.Node]],
+    node_to_additional_deps: dict[torch.fx.Node, list[torch.fx.Node]],
 ) -> None:
     # Nodes are in exactly one of these four collections:
 
@@ -272,9 +283,7 @@ def _stable_topological_sort(
             continue
 
         waiting_for = [
-            x
-            for x in _get_flat_args_unique(node, node_to_additional_deps)
-            if x not in ready
+            x for x in _args(node, node_to_additional_deps) if x not in ready
         ]
         if waiting_for:
             # We have unprocessed input nodes. Might as well wait for the last
@@ -319,7 +328,7 @@ def _populate_additional_deps(
             prev_nodes.append(cur_node)
 
     for prev_nodes, cur_node in prev_cur_nodes(all_nodes):
-        args_unique = _get_flat_args_unique(cur_node, {})
+        args_unique = _args(cur_node)
         additional_deps = node_to_additional_deps[cur_node]
         additional_deps.extend(n for n in all_nodes_dep_on if n not in args_unique)
         if cur_node.target in global_state_targets:
