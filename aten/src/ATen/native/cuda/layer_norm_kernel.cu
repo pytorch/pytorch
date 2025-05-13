@@ -1506,6 +1506,21 @@ void LayerNormBackwardKernelImpl(
 
 } // namespace
 
+
+Tensor rms_norm_cuda(
+  const Tensor& input,
+  IntArrayRef normalized_shape,
+  const std::optional<Tensor>& weight_opt /* optional */,
+  std::optional<double> eps){
+
+    double eps_value = 1e-5;
+    if (eps.has_value()) {
+      eps_value = eps.value();
+    }
+    const std::optional<Tensor>& bias_opt = std::nullopt;
+    return std::get<0>(layer_norm_cuda(input, normalized_shape, weight_opt, bias_opt, eps_value));
+}
+
 std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
     const Tensor& input,
     IntArrayRef normalized_shape,
