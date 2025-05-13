@@ -117,6 +117,9 @@ class TestFullyShardMemory(FSDPTest):
         # number is kept much smaller than the actual memory usage, which is on
         # the order of 100-200+ MB)
         buffer_mb = 16
+        # The default workspace for hipblaslt is larger than for cublas/cublaslt
+        # which requires a slight increase to this buffer value.
+        buffer_mb = 16 if torch.version.cuda else 18
         if reshard_after_forward:
             # 3x max unsharded block parameters (current all-gather + copy-out
             # and next all-gather), non-block parameters, and other

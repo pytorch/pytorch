@@ -116,10 +116,7 @@ public:
 
   DictIterator(const DictIterator& rhs): entryRef_(rhs.entryRef_) {}
   DictIterator(DictIterator&& rhs) noexcept: entryRef_(std::move(rhs.entryRef_)) {}
-  DictIterator& operator=(const DictIterator& rhs) {
-    entryRef_ = rhs.entryRef_;
-    return *this;
-  }
+  DictIterator& operator=(const DictIterator& rhs) = default;
   DictIterator& operator=(DictIterator&& rhs) noexcept {
     entryRef_ = std::move(rhs.entryRef_);
     return *this;

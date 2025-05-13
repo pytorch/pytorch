@@ -66,10 +66,12 @@ class Threshold(Module):
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Output: :math:`(*)`, same shape as the input.
 
+    .. image:: ../scripts/activation_images/Threshold.png
+
     Examples::
 
-        >>> m = nn.Threshold(0.1, 20)
-        >>> input = torch.randn(2)
+        >>> m = nn.Threshold(0, 0.5)
+        >>> input = torch.arange(-3, 3)
         >>> output = m(input)
     """
 
@@ -673,6 +675,8 @@ class GLU(Module):
         - Input: :math:`(\ast_1, N, \ast_2)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(\ast_1, M, \ast_2)` where :math:`M=N/2`
+
+    .. image:: ../scripts/activation_images/GLU.png
 
     Examples::
 

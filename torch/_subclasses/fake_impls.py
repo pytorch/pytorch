@@ -559,6 +559,40 @@ def masked_select(fake_mode, func, self, mask):
     return self.new_empty((nnz,))
 
 
+@register_op_impl(torch.ops.aten._assert_tensor_metadata.default)
+def assert_tensor_metadata(
+    fake_mode,
+    func,
+    t,
+    sizes=None,
+    strides=None,
+    dtype=None,
+    *,
+    device=None,
+    layout=None,
+) -> None:
+    if sizes is not None:
+        assert (
+            t.size() == sizes
+        ), f"Tensor sizes mismatch! Expected: {sizes}, Got: {t.size()}"
+    if strides is not None:
+        assert (
+            t.stride() == strides
+        ), f"Tensor strides mismatch! Expected: {strides}, Got: {t.stride()}"
+    if dtype is not None:
+        assert (
+            t.dtype == dtype
+        ), f"Tensor dtype mismatch! Expected: {dtype}, Got: {t.dtype}"
+    if layout is not None:
+        assert (
+            t.layout == layout
+        ), f"Tensor layout mismatch! Expected: {layout}, Got: {t.layout()}"
+    if device is not None:
+        assert (
+            t.device == device
+        ), f"Tensor device mismatch! Expected: {device}, Got: {t.device}"
+
+
 # NB: this must be ordered after local_scalar_dense
 @register_op_impl(lambda func: torch.Tag.data_dependent_output in func.tags)
 def data_dep(fake_mode, func, *args, **kwargs):
@@ -810,7 +844,8 @@ def bincount(fake_mode, func, inputs, weights=None, minlength=0):
 
     from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 
-    _constrain_range_for_size(new_size, min=minlength)
+    _constrain_range_for_size(new_size)
+    torch._check(new_size >= minlength)
     return inputs.new_empty(new_size)
 
 
@@ -854,7 +889,7 @@ def register_fast_op_impl(func: OpOverload):
 
 # infer_size_impl in ExpandUtils
 def infer_size(a, b):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     dimsA = len(a)
     dimsB = len(b)
@@ -879,18 +914,18 @@ def infer_size(a, b):
         # were not the case, we'd need to write this using torch.sym_or() or
         # something like that).
         torch._check(
-            guard_size_oblivious(sizeA == 1)
-            or guard_size_oblivious(sizeB == 1)
-            or sizeA == sizeB,
+            guard_or_false(sizeA == 1) or guard_or_false(sizeB == 1) or sizeA == sizeB,
             lambda: f"The size of tensor a ({sizeA}) "
             f"must match the size of tensor b ({sizeB}) "
             f"at non-singleton dimension {i})",
         )
-        expandedSizes[i] = sizeB if guard_size_oblivious(sizeA == 1) else sizeA
+        expandedSizes[i] = sizeB if guard_or_false(sizeA == 1) else sizeA
     return tuple(expandedSizes)
 
 
-def make_fast_binary_impl(slow_ref):
+def make_fast_binary_impl(
+    slow_ref, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+):
     def fast_binary_impl(mode, *args, **kwargs):
         def slow(msg):
             count_label(f"slow {msg}")
@@ -957,7 +992,7 @@ def make_fast_binary_impl(slow_ref):
             # compute promotion
             # TODO: we don't need the compute type
             _, common_dtype = elementwise_dtypes(
-                *operands, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+                *operands, type_promotion_kind=type_promotion_kind
             )
 
         # check all tensors on same device
@@ -1027,7 +1062,7 @@ def make_fast_binary_impl(slow_ref):
 def fast_detach(fake_mode, x):
     with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
         out = torch.ops.aten.detach.default(x)
-    return FakeTensor(fake_mode, out, x.device)
+    return FakeTensor(fake_mode, out, x.device, real_tensor=x.real_tensor)
 
 
 @functools.lru_cache(None)
@@ -1042,7 +1077,10 @@ def get_fast_op_impls():
     )
     register_fast_op_impl(torch.ops.aten.mul.Tensor)(make_fast_binary_impl(torch._refs.mul))  # type: ignore[has-type]
     register_fast_op_impl(torch.ops.aten.div.Tensor)(
-        make_fast_binary_impl(torch._refs.div)
+        make_fast_binary_impl(
+            torch._refs.div,
+            type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+        )
     )
     register_fast_op_impl(torch.ops.aten.detach.default)(fast_detach)
     return FAST_OP_IMPLEMENTATIONS
