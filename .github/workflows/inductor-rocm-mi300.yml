@@ -37,7 +37,7 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
 
   linux-jammy-rocm-py3_10-inductor-build:
-    name: rocm-py3.10-inductor
+    name: rocm-py3.10-inductor-mi300
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
@@ -55,7 +55,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    name: rocm-py3.10-inductor
+    name: rocm-py3.10-inductor-mi300
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-jammy-rocm-py3_10-inductor-build
     with:
