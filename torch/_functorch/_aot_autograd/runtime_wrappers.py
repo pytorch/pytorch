@@ -8,6 +8,7 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 """
 import builtins
 import collections
+import copy
 import itertools
 import pprint
 from contextlib import nullcontext
@@ -45,6 +46,7 @@ from .logging_utils import describe_input, format_guard_bug_msg, track_graph_com
 from .schemas import (
     AOTConfig,
     InputAliasInfo,
+    MemoryFormatMeta,
     MutationType,
     OutputType,
     PlainTensorMeta,
@@ -246,6 +248,14 @@ def make_output_handler(info, runtime_metadata, trace_joint):
     return handler_type(info, runtime_metadata, trace_joint)
 
 
+# not sure why AOTDispatcher needs to manually set this
+def maybe_mark_dynamic_helper(t: torch.Tensor, dims: set[int]):
+    if hasattr(t, "_dynamo_weak_dynamic_indices"):
+        t._dynamo_weak_dynamic_indices |= dims
+    else:
+        t._dynamo_weak_dynamic_indices = dims.copy()  # type: ignore[attr-defined]
+
+
 def _create_runtime_wrapper(
     compiled_fn,
     *,
@@ -255,7 +265,7 @@ def _create_runtime_wrapper(
     keep_input_mutations: bool,
     disable_amp: bool,
 ):
-    if not hasattr(compiled_fn, "_boxed_call"):
+    if not getattr(compiled_fn, "_boxed_call", False):
         compiled_fn = make_boxed_func(compiled_fn)
 
     # Note [Inputs needed in runtime epilogue after list clearing]
@@ -431,10 +441,7 @@ def _create_runtime_wrapper(
             for t, o in zip(ret_outs, runtime_metadata.output_info):
                 if o.dynamic_dims is None:
                     continue
-                if hasattr(t, "_dynamo_weak_dynamic_indices"):
-                    t._dynamo_weak_dynamic_indices |= o.dynamic_dims
-                else:
-                    t._dynamo_weak_dynamic_indices = o.dynamic_dims.copy()
+                maybe_mark_dynamic_helper(t, o.dynamic_dims)
         if runtime_metadata.grad_enabled_mutation is not None:
             torch._C._set_grad_enabled(runtime_metadata.grad_enabled_mutation)
         return ret_outs
@@ -1439,13 +1446,23 @@ def merge_view_inputs(
         # (2) Metadata telling functionalization how to generate the inner argument list given the outer calling convention.
         #     We post-process it into a list, where meta[i] tells you info about the i'th argument in the inner calling convention.
         args_to_functionalization = base_args + other_args
-        arg_to_old_idx_map = {
-            make_hashable(arg): i for (i, arg) in enumerate(fwd_inputs)
-        }
+
+        # Map each argument into its old index.
+        # There may be some repeated arguments, so we collect their indices in a list.
+        arg_to_old_idx_map = collections.defaultdict(list)
+        for i, arg in enumerate(fwd_inputs):
+            arg_to_old_idx_map[make_hashable(arg)].append(i)
+        # Reverse the list of each argument, so that we can easily pop them one-after-the-other in order.
+        for hashable_arg in arg_to_old_idx_map:
+            arg_to_old_idx_map[hashable_arg] = list(
+                reversed(arg_to_old_idx_map[hashable_arg])
+            )
+
         for i, other_arg in enumerate(other_args):
             new_idx = len(base_args) + i
-            old_idx = arg_to_old_idx_map[make_hashable(other_arg)]
+            old_idx = arg_to_old_idx_map[make_hashable(other_arg)].pop()
             inner_calling_convention_meta[old_idx] = new_idx
+
         # post process into a list
         post_processed_calling_convention_meta: list[
             Union[int, tuple[int, torch.Tensor]]
@@ -1458,6 +1475,13 @@ def merge_view_inputs(
         return args_to_functionalization, post_processed_calling_convention_meta
 
 
+# Note: [Backward graph lazy lowering]
+# After AOTDispatch traces the backward for graphs requiring autograd, we will lower the graph lazily,
+# unless we suspect that inductor might specialize and insert additional guards. When we do lazy
+# lowering, we stash the AOT backward graph (bw_module) in this class.
+#
+# Lowering passes are performed on a deepcopy of this bw_module due to compatbility
+# with compiled autograd. See: https://github.com/pytorch/pytorch/pull/149229#discussion_r2002122645.
 @dataclass
 class AutogradLazyBackwardCompileInfo:
     bw_module: Callable
@@ -1752,6 +1776,39 @@ def _backward_epilogue_functional(
     return out
 
 
+def coerce_to_expected_memory_format(x: torch.Tensor, memory_format: MemoryFormatMeta):
+    if memory_format.memory_format is not None:
+        # Coerce to torch.memory_format
+        if not x.is_contiguous(memory_format=memory_format.memory_format):
+            x = x.contiguous(memory_format=memory_format.memory_format)
+        return x
+
+    expected_size = memory_format.size
+    assert expected_size is not None
+    expected_stride = memory_format.stride
+    assert expected_stride is not None
+    # Expected size and stride are static ints
+    # ok to use == to compare runtime tensor strides and shapes
+
+    if x.shape == expected_size and x.stride() == expected_stride:
+        # Runtime tangent size and stride are the same as expected, no need to coerce
+        return x
+
+    # Empty_strided creates a raw Tensor.
+    # We are guranteed that only raw Tensors has expected size and stride.
+    # Subclasses have only expected memory_format.
+    restrided = torch.empty_strided(
+        size=expected_size,
+        stride=expected_stride,
+        dtype=x.dtype,
+        device=x.device,
+        layout=x.layout,
+        requires_grad=x.requires_grad,
+    )
+    restrided.copy_(x)
+    return restrided
+
+
 # This is wrapped in a class just for namespacing purposes
 # No need to make it into an actual CompilerWrapper because it doesn't fit the abstract as cleanly
 class AOTDispatchAutograd:
@@ -1761,8 +1818,8 @@ class AOTDispatchAutograd:
             return x, [x]
 
         if isinstance(x, FakeTensor):
-            if not x.is_contiguous(memory_format=meta.memory_format):
-                x = x.contiguous(memory_format=meta.memory_format)
+            assert meta.memory_format
+            x = coerce_to_expected_memory_format(x, meta.memory_format)
             return x, [x]
 
         expected_type: Optional[type] = torch.Tensor
@@ -1820,8 +1877,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             )
 
         # Coerce to expected memory format
-        if not x.is_contiguous(memory_format=meta.memory_format):
-            x = x.contiguous(memory_format=meta.memory_format)
+        assert meta.memory_format
+        x = coerce_to_expected_memory_format(x, meta.memory_format)
 
         if not is_traceable_wrapper_subclass(x):
             return x, [x]
@@ -1954,11 +2011,22 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 assert all(
                     isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards
                 )
+
+                def mark_dynamic_activations(activations: list[torch.Tensor]):
+                    for (
+                        idx,
+                        dims,
+                    ) in CompiledFunction.metadata.dynamic_saved_tensors_idxs.items():
+                        maybe_mark_dynamic_helper(activations[idx], dims)
+                    return activations
+
                 # See Note [Detaching saved tensors in AOTAutograd]
                 ctx.save_for_backward(
-                    *(
-                        x.detach() if x._is_view() else x
-                        for x in tensors_saved_for_backwards
+                    *mark_dynamic_activations(
+                        [
+                            x.detach() if x._is_view() else x
+                            for x in tensors_saved_for_backwards
+                        ]
                     )
                 )
                 symint_outs = fw_outs[
@@ -2181,16 +2249,16 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         phase_name="entire_backward_compile",
                         log_pt2_compile_event=True,
                         dynamo_compile_column_us="backward_cumulative_compile_time_us",
+                        log_waitcounter=True,
+                        waitcounter_name_override="entire_backward_compile",
                     ):
                         CompileEventLogger.compilation_metric(is_forward=False)
+                        # See Note: [Backward graph lazy lowering]
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, placeholder_list
+                            copy.deepcopy(bw_module), placeholder_list
                         )
                         # Maybe save cache entry
                         if try_save_cache_entry is not None:
-                            # CompiledFunction.metadata
-                            # CompiledFunction.maybe_subclass_metadata
-                            # bw_module
                             try_save_cache_entry(
                                 CompiledFunction.compiled_bw,
                                 fw_metadata,

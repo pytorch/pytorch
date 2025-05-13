@@ -35,14 +35,15 @@ import torch
 import torch.export.exported_program as ep
 from torch._export.verifier import load_verifier
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
-from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
+from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import treespec_dumps, treespec_loads
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import prefix_str, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
+from torch.utils._traceback import CapturedTraceback
 
 from ..utils import remove_proxy_from_state_dict
 
@@ -183,6 +184,8 @@ _SYM_OPS = {
     operator.gt,
     operator.neg,
     operator.pos,
+    operator.and_,
+    operator.or_,
     math.trunc,
     torch.sym_not,
     operator.mul,
@@ -392,6 +395,8 @@ def _int_to_sympy_int(val: Optional[int], default) -> sympy.Expr:
     # Convert concrete int into simple sympy Integers
     if val is None:
         return default
+    if val in [-int_oo, int_oo]:
+        return val
     if val == math.inf:
         return int_oo
     if val == -math.inf:
@@ -1243,7 +1248,7 @@ class GraphModuleSerializer(metaclass=Final):
         def store_namedtuple_fields(ts):
             if ts.type is None:
                 return
-            if ts.type == namedtuple:
+            if ts.type is namedtuple or pytree.is_namedtuple_class(ts.type):
                 serialized_type_name = pytree.SUPPORTED_SERIALIZED_TYPES[ts.context].serialized_type_name
                 if serialized_type_name in self.treespec_namedtuple_fields:
                     field_names = self.treespec_namedtuple_fields[serialized_type_name].field_names
@@ -1564,9 +1569,7 @@ class ExportedProgramSerializer(metaclass=Final):
         # TODO: Directly serialize exported_program.constants once
         # CustomClassHolders get stored in the ExportedProgram rather than in
         # the graph
-        constants: dict[str, Any] = {}
-        for n, c in gm_serializer.custom_objs.items():
-            constants[n] = c
+        constants: dict[str, Any] = gm_serializer.custom_objs.copy()
         for n, t in exported_program.constants.items():
             assert n not in constants
             constants[n] = t
@@ -1607,7 +1610,7 @@ class GraphModuleDeserializer(metaclass=Final):
         module_call_graph: list[ep.ModuleCallEntry]
         names_to_symbols: dict[str, sympy.Symbol]
         state_dict: dict[str, Union[torch.Tensor, torch.nn.Parameter]]
-        constants: dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]]
+        constants: dict[str, _ConstantAttributeType]
         example_inputs: Optional[tuple[tuple[torch.Tensor, ...], dict[str, Any]]]
 
     def __init__(self) -> None:
@@ -1703,6 +1706,9 @@ class GraphModuleDeserializer(metaclass=Final):
                         compiler_min=vr.lower,  # type: ignore[arg-type]
                         compiler_max=vr.upper,  # type: ignore[arg-type]
                     )
+                # ShapeEnv meta
+                if isinstance(sym, sympy.Symbol):
+                    self.shape_env.var_to_stack[sym] = CapturedTraceback.extract(skip=1)
             return sym
 
         expr = sympy.sympify(
@@ -1863,7 +1869,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 "as_none",
                 "as_string",
             ):
-                node_name = self.signature.input_specs[i].arg.name
+                node_name = self.signature.input_specs[i].arg.name or f"arg{i}"
                 placeholder_node = self.graph.placeholder(node_name)
                 placeholder_node.meta["val"] = self.deserialize_input(input_)
             else:
@@ -1980,8 +1986,12 @@ class GraphModuleDeserializer(metaclass=Final):
             )
             self.deserialize_outputs(serialized_node, fx_node)
         else:
+            _additional_msg = (f"We failed to resolve {target} to an operator. "
+                               + "If it's a custom op/custom triton op, this is usally because the custom op is not registered"
+                               + " when deserializing. Please import the custom op to register it before deserializing."
+                               + " Otherwise, please file an issue on github.") if isinstance(target, str) else ""
             raise SerializeError(
-                f"Unsupported target type for node {serialized_node}: {type(target)}"
+                _additional_msg + f" Unsupported target type for node {serialized_node}: {type(target)}."
             )
 
         fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))

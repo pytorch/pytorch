@@ -94,7 +94,7 @@ def trigger_upload_test_stats_intermediate_workflow() -> None:
     # The GITHUB_TOKEN cannot trigger workflow so this isn't used for now
     print("Triggering upload_test_stats_intermediate workflow")
     x = requests.post(
-        "https://api.github.com/repos/pytorch/pytorch/actions/workflows/upload_test_stats_intermediate.yml/dispatches",
+        "https://api.github.com/repos/pytorch/pytorch/actions/workflows/upload_test_stats_intermediate.yml/dispatches",  # noqa: B950 @lint-ignore
         headers={
             "Accept": "application/vnd.github.v3+json",
             "Authorization": f"Bearer {os.environ.get('GITHUB_TOKEN')}",

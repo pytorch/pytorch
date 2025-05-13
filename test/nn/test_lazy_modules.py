@@ -117,11 +117,14 @@ class TestLazyModules(TestCase):
         self.assertIsInstance(module.weight, UninitializedParameter)
         self.assertIsInstance(module.bias, UninitializedParameter)
         input = torch.ones(5, 5)
-        module(input)
+        output = module(input)
         self.assertIsInstance(module, nn.Linear)
         self.assertNotIsInstance(module, nn.LazyLinear)
         self.assertTrue(module.weight.shape == (10, 5))
         self.assertTrue(module.bias.shape == (10,))
+        self.assertTrue((module.weight != 0).any())
+        self.assertTrue((module.bias != 0).any())
+        self.assertTrue((output != 0).any())
         y = module(input)
         self.assertTrue(
             torch.equal(
@@ -164,6 +167,22 @@ class TestLazyModules(TestCase):
         lazy_module = nn.LazyLinear(10)
         with self.assertRaisesRegex(RuntimeError, "shape of an uninitialized"):
             module.load_state_dict(lazy_module.state_dict())
+
+    @suppress_warnings
+    def test_lazy_linear_state_and_forward(self):
+        module = nn.Linear(5, 10)
+        lazy_module = nn.LazyLinear(10)
+        lazy_module.load_state_dict(module.state_dict())
+        # Parameters have been initialized but the module won't become a full
+        # Linear one until the first iteration. This is due to
+        # limitations on the state_dict loading logic
+        self.assertFalse(lazy_module.has_uninitialized_params())
+        self.assertTrue(isinstance(lazy_module, nn.LazyLinear))
+
+        input = torch.randn(5, 5)
+        lazy_module(input)
+        self.assertFalse(isinstance(lazy_module, nn.LazyLinear))
+        self.assertTrue(lazy_module.in_features == 5)
 
     def _check_lazy_conv(
         self,

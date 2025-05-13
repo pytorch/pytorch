@@ -123,6 +123,13 @@ def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
             SIDE_EFFECTS[op] = _EffectType.ORDERED
             return _EffectType.ORDERED
 
+    for arg in kwargs.values():
+        if isinstance(arg, (torch.ScriptObject, FakeScriptObject)):
+            # Add it to the table so that next time we see the same op we don't
+            # have to parse through the args again
+            SIDE_EFFECTS[op] = _EffectType.ORDERED
+            return _EffectType.ORDERED
+
     return None
 
 
@@ -139,6 +146,12 @@ def with_effects_dense(
 ) -> tuple[torch.Tensor, ...]:
     out = op(*args, **kwargs)
     new_token = new_token_tensor()
+    # [NOTE: with_effects return type]
+    # Note that we should only do *out for tuple type, but not list type.
+    # This is to match the schema of the op.
+    # For tuple output, the length of schema output is the same as the length of out.
+    # For list output, the length of schema output is 1 (e.g. Tensor[]) regardless of the
+    # length of the list.
     if isinstance(out, tuple):
         return (new_token, *out)
     return (new_token, out)
