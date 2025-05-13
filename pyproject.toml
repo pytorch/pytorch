@@ -128,7 +128,6 @@ ignore = [
     "SIM118",
     "UP007", # keep-runtime-typing
     "TC006",
-    "TC007",
 ]
 select = [
     "B",
