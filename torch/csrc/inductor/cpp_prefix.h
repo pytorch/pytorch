@@ -5,8 +5,10 @@
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
 // Because AOTInductor generated code will copy-paste this cpp_prefix.h for
@@ -39,9 +41,6 @@
 #endif
 
 #if INDUCTOR_USE_VECTOR_TYPES()
-#include <limits>
-#include <optional>
-
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #else
@@ -88,7 +87,7 @@ struct WelfordHelper {
   // 2. Save the welford stack, which is used to combine welford reduction
   //    with cascade summation to improve numerical stability.
   static std::vector<typename T::value_type> weight_recps;
-  std::vector<Welford<T>> welford_stk;
+  std::vector<Welford<T>> welford_stk{};
   uint64_t depth{0}; // depth of welford_stk.
   uint64_t num_chunks{0}; // number of chunks stored in welford_stk.
   WelfordHelper() = default;
@@ -1142,9 +1141,11 @@ void mm_get_cache_blocking(
 struct amx_tilecfg {
   uint8_t palette_id{0};
   uint8_t start_row{0};
-  std::array<uint8_t, 14> reserved_0{};
-  std::array<uint16_t, 16> colsb{};
-  std::array<uint8_t, 16> rows{};
+  // NOLINTBEGIN(*-avoid-c-arrays)
+  uint8_t reserved_0[14]{};
+  uint16_t colsb[16]{};
+  uint8_t rows[16]{};
+  // NOLINTEND(*-avoid-c-arrays)
 };
 
 class AMXState {
