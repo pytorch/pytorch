@@ -3792,13 +3792,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         args: list[VariableTracker],
         kwargs,
     ):
-        if isinstance(func, SkipFunctionVariable):
-            unimplemented_v2(
-                gb_type="Attempted to inline function marked as skipped (SkipFunctionVariable)",
-                context=f"Attempted to inline a SkipFunctionVariable {func}",
-                explanation="Attempted to inline a function that was previously determined to be marked as intentionally skipped.",
-                hints=[],
-            )
         assert isinstance(
             func,
             (
@@ -3808,8 +3801,35 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 LocalGeneratorObjectVariable,
             ),
         )
-        result = InliningInstructionTranslator.check_inlineable(func)
-        assert result.skipped is False
+        code: types.CodeType = func.get_code()
+        result = None
+        tracing_ctx = parent.output.tracing_context
+
+        # Check if we have already identified this function to be inline-able.
+        # The exception is dont_skip_tracing flag which affects the inline
+        # behavior. If the flag is True, don't rely on previous results.
+        if not config.dont_skip_tracing and tracing_ctx:
+            if previous_result := tracing_ctx.previously_inlined_functions.get(
+                code, None
+            ):
+                result = previous_result
+
+        if result is None:
+            if isinstance(func, SkipFunctionVariable):
+                unimplemented_v2(
+                    gb_type="Attempted to inline function marked as skipped (SkipFunctionVariable)",
+                    context=f"Attempted to inline a SkipFunctionVariable {func}",
+                    explanation=(
+                        "Attempted to inline a function that was previously determined to be marked as intentionally skipped."
+                    ),
+                    hints=[],
+                )
+            result = InliningInstructionTranslator.check_inlineable(func)
+            assert result.skipped is False
+
+            if not config.dont_skip_tracing and tracing_ctx:
+                tracing_ctx.previously_inlined_functions[code] = result
+
         try:
             sub_locals = func.bind_args(parent, args, kwargs)
         except TypeError as e:
@@ -3832,7 +3852,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     hints=[*graph_break_hints.DYNAMO_BUG],
                 )
 
-        code: types.CodeType = func.get_code()
         if code.co_name in ("__setitem__", "__setattr__") and not (
             args and isinstance(args[0], variables.UserDefinedObjectVariable)
         ):
@@ -3851,9 +3870,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if sys.version_info >= (3, 11):
             cur_inst = parent.current_instruction
             parent_code = parent.f_code
-            header = parent.get_line_of_code_header(lineno=cur_inst.positions.lineno)
 
             def get_trace_call_log_str():
+                header = parent.get_line_of_code_header(
+                    lineno=cur_inst.positions.lineno
+                )
                 line = get_instruction_source_311(parent_code, cur_inst).rstrip()
                 return f"TRACE inlined call {code.co_name} from {header}\n{line}"
 
