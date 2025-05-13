@@ -2290,15 +2290,9 @@ class SubgraphTracer(fx.Tracer):
                     ]
 
         if "stack_trace" not in rv.node.meta:
-            frame_summaries: list[traceback.FrameSummary] = []
-            while tx:
-                # Avoid frame summaries from inside the torch/nn/modules. This ensures that we keep the stack trace of
-                # the user code.
-                if not tx.is_co_filename_from_nn_modules():
-                    frame_summaries.append(tx.frame_summary())
-                tx = getattr(tx, "parent", None)
-            # Reverse the frame_summaries, such that the innermost frame is at the last
-            frame_summaries.reverse()
+            frame_summaries: list[traceback.FrameSummary] = tx.parent_frame_summary + [
+                tx.frame_summary(),
+            ]
 
             # official from_list stub doesn't have new-style type
             msgs = traceback.StackSummary.from_list(frame_summaries).format()

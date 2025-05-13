@@ -185,6 +185,7 @@ compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
     tx, [handle_contains(tx, [*reversed(args)], {})], {}
 )
 
+nn_modules_pattern = re.compile(r".*torch/nn/modules.*")
 
 PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
 
@@ -3148,6 +3149,17 @@ class InstructionTranslatorBase(
             )
         )
 
+    @functools.cached_property
+    def parent_frame_summary(self):
+        summaries: list[traceback.FrameSummary] = []
+        parent_tx = getattr(self, "parent", None)
+        if parent_tx is None:
+            return summaries
+        summaries.extend(parent_tx.parent_frame_summary)
+        if not parent_tx.is_co_filename_from_nn_modules:
+            summaries.append(parent_tx.frame_summary())
+        return summaries
+
     def frame_summary(self):
         return traceback.FrameSummary(
             getattr(self.f_code, "co_filename", "<unknown>"),
@@ -3155,11 +3167,6 @@ class InstructionTranslatorBase(
             getattr(self.f_code, "co_name", "<unknown>"),
             lookup_line=False,
         )
-
-    def is_co_filename_from_nn_modules(self):
-        filename = getattr(self.f_code, "co_filename", "<unknown>")
-        nn_modules_pattern = re.compile(r".*torch/nn/modules.*")
-        return nn_modules_pattern.match(filename) is not None
 
     def store_global_weakref_by_id(self, prefix, value):
         global_name = self.output.install_global_by_id(prefix, weakref.ref(value))
@@ -3284,6 +3291,10 @@ class InstructionTranslatorBase(
         self.inconsistent_side_effects = False
         self._constants_cache: list[Optional[VariableTracker]] = [None] * len(
             f_code.co_consts
+        )
+        filename = getattr(self.f_code, "co_filename", "<unknown>")
+        self.is_co_filename_from_nn_modules = (
+            nn_modules_pattern.match(filename) is not None
         )
         linecache.lazycache(f_code.co_filename, f_globals)
 
