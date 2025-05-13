@@ -10,6 +10,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    is_navi3_arch,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA
@@ -44,6 +45,11 @@ class MyModule3(torch.nn.Module):
         output = torch.mm(input1, input2)
         return output
 
+# We have to increase tolerance for navi3 because all fp16, bf16
+# GEMMs operations have an accuracy issue caused by hardware limitation
+default_atol = 3e-3 if is_navi3_arch() else 1e-3
+default_rtol = 4e-3 if is_navi3_arch() else 1e-3
+
 
 @requires_gpu
 @torch._inductor.config.patch(
@@ -53,7 +59,7 @@ class MyModule3(torch.nn.Module):
 )
 @instantiate_parametrized_tests
 class TestDecomposeMemMM(TestCase):
-    def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
+    def compare_dict_tensors(self, ref_dict, res_dict, rtol=default_rtol, atol=default_atol):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
             return False
         for key1 in ref_dict.keys():
@@ -63,17 +69,17 @@ class TestDecomposeMemMM(TestCase):
                 return False
         return True
 
-    def compare_pred(self, module, traced, input, rtol=1e-3, atol=1e-3):
+    def compare_pred(self, module, traced, input, rtol=default_rtol, atol=default_atol):
         ref = module(*input)
         res = traced(*input)
         self.assertEqual(ref, res, rtol=rtol, atol=atol)
 
-    def compare_parameters(self, module, traced, rtol=1e-3, atol=1e-3):
+    def compare_parameters(self, module, traced, rtol=default_rtol, atol=default_atol):
         ref_params = dict(module.named_parameters())
         res_params = dict(traced.named_parameters())
         self.assertTrue(self.compare_dict_tensors(ref_params, res_params, rtol, atol))
 
-    def compare_gradients(self, module, traced, rtol=1e-3, atol=1e-3):
+    def compare_gradients(self, module, traced, rtol=default_rtol, atol=default_atol):
         ref_grad = {key: param.grad for key, param in module.named_parameters()}
         res_grad = {key: param.grad for key, param in traced.named_parameters()}
         self.assertTrue(
