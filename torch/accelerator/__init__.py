@@ -6,7 +6,6 @@ from typing import Optional
 from typing_extensions import deprecated
 
 import torch
-from torch.types import ExplicitDevice
 
 from ._utils import _device_t, _get_device_index
 
@@ -121,7 +120,7 @@ current_device_idx = deprecated(
 )(current_device_index)
 
 
-def set_device_index(device: ExplicitDevice, /) -> None:
+def set_device_index(device: _device_t, /) -> None:
     r"""Set the current device index to a given device.
 
     Args:
