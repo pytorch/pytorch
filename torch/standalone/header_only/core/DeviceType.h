@@ -18,7 +18,8 @@
 #include <ostream>
 #include <string>
 
-namespace torch::standalone {
+// Keep namespace c10 for backward compatibility
+namespace c10 {
 // These contains all device types that also have a BackendComponent
 // and therefore participate in per-backend functionality dispatch keys.
 // This is most backends except PrivateUse2 and PrivateUse3
@@ -113,8 +114,9 @@ static_assert(
 //     be much faster.
 //
 // Note: Can not directly use inline to declar a global variable here, because
-//       it doesn't work for fbobjc build, error: declaration requires a global destructor
-//       C10_EXPORT is also needed to make sure the variables are visible to all files.
+//       it doesn't work for fbobjc build, error: declaration requires a global
+//       destructor C10_EXPORT is also needed to make sure the variables are
+//       visible to all files.
 inline C10_EXPORT std::atomic<bool>& privateuse1_backend_name_set() {
   static std::atomic<bool> privateuse1_backend_name_set_(false);
   return privateuse1_backend_name_set_;
@@ -134,8 +136,7 @@ inline bool is_privateuse1_backend_registered() {
   return privateuse1_backend_name_set().load(std::memory_order_acquire);
 }
 
-inline void register_privateuse1_backend(
-    const std::string& backend_name) {
+inline void register_privateuse1_backend(const std::string& backend_name) {
   std::lock_guard<std::mutex> guard(privateuse1_lock());
   TORCH_CHECK(
       !is_privateuse1_backend_registered() ||
@@ -170,9 +171,7 @@ inline std::string get_privateuse1_backend(bool lower_case = true) {
   return backend_name;
 }
 
-inline std::string DeviceTypeName(
-    DeviceType d,
-    bool lower_case = false) {
+inline std::string DeviceTypeName(DeviceType d, bool lower_case = false) {
   switch (d) {
     // I considered instead using ctype::tolower to lower-case the strings
     // on the fly, but this seemed a bit much.
@@ -268,24 +267,22 @@ inline bool isValidDeviceType(DeviceType d) {
   }
 }
 
-inline std::ostream& operator<<(
-    std::ostream& stream,
-    DeviceType type) {
+inline std::ostream& operator<<(std::ostream& stream, DeviceType type) {
   stream << DeviceTypeName(type, /* lower case */ true);
   return stream;
 }
-} // namespace torch::standalone
+} // namespace c10
 
 namespace std {
 template <>
-struct hash<torch::standalone::DeviceType> {
-  std::size_t operator()(torch::standalone::DeviceType k) const {
+struct hash<c10::DeviceType> {
+  std::size_t operator()(c10::DeviceType k) const {
     return std::hash<int>()(static_cast<int>(k));
   }
 };
 } // namespace std
 
 namespace torch {
-  // NOLINTNEXTLINE(misc-unused-using-decls)
-  using torch::standalone::DeviceType;
-}
+// NOLINTNEXTLINE(misc-unused-using-decls)
+using c10::DeviceType;
+} // namespace torch
