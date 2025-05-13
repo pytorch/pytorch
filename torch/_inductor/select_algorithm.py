@@ -2397,17 +2397,26 @@ class AlgorithmSelectorCache(PersistentCache):
         sorted_choices = sorted(timings.keys(), key=lambda choice: timings[choice])
         num_to_keep = max(int(math.sqrt(len(choices)) / 4), 8)
 
-        choices_to_prune = OrderedSet(
-            choice.hash_key() for choice in sorted_choices[num_to_keep:]
-        )
+        choices_to_keep = [
+            choice.hash_key()
+            for choice in sorted_choices[:num_to_keep]
+            if timings[choice] != float("inf")
+        ]
         # reopen DLL
-        for choice in sorted_choices[:num_to_keep]:
+        for choice in choices_to_keep:
             if isinstance(choice, CUDATemplateCaller):
                 choice.bmreq.ensure_dll_loaded()
 
+        # prune choices based on prescreening timings
+        choices_to_prune = OrderedSet(
+            choice.hash_key()
+            for pos, choice in enumerate(sorted_choices)
+            if pos > num_to_keep or timings[choice] == float("inf")
+        )
         choices = [
             choice for choice in choices if choice.hash_key() not in choices_to_prune
         ]
+
         log.debug("After pruning using prescreening timings, %d choices", len(choices))
         return choices
 
