@@ -2,6 +2,7 @@
 # flake8: noqa: B950
 import torch
 import torch.fx
+from torch._dynamo.graph_deduplication import _flatten_args_kwargs
 from torch._dynamo.graph_utils import _detect_cycles
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
@@ -580,6 +581,13 @@ class <lambda>(torch.nn.Module):
             add: "f32[]" = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
             return (add,)
 """,
+        )
+
+    def test_flatten_with_slices(self):
+        tree = [{"x": 3}, ["x", slice(1, 2, 3), 1], [4, 5, 6, [slice(3, 4, 5)]]]
+        out = _flatten_args_kwargs(tree)
+        self.assertExpectedInline(
+            str(out), """[3, 'x', 1, 2, 3, 1, 4, 5, 6, 3, 4, 5]"""
         )
 
     def test_cycle_detection_no_cycle(self):
