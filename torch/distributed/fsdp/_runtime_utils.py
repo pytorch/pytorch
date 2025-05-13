@@ -290,6 +290,8 @@ def _unshard(
         ran_pre_unshard = handle.pre_unshard()
     if ran_pre_unshard:
         unshard_stream.wait_stream(pre_unshard_stream)
+        if dist.get_backend() == "mpi":
+            pre_unshard_stream.synchronize()
     if state.limit_all_gathers:
         event = state._free_event_queue.dequeue_if_needed()
         if event:
@@ -423,8 +425,6 @@ def _pre_forward_unshard(
     # `_unshard()` again
     if not handle._prefetched:
         _unshard(state, handle, state._unshard_stream, state._pre_unshard_stream)
-    # Explicitly wait to ensure unshard operation has completed
-    handle.wait_all_gather_work()
     handle._needs_pre_forward_unshard = False
     # Don't wait during trace
     if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
@@ -434,6 +434,8 @@ def _pre_forward_unshard(
             state._unshard_event = None
         else:
             current_stream.wait_stream(state._unshard_stream)
+    # wait for the unshard to complete
+    handle.wait_all_gather_work()
     with torch.profiler.record_function(
         "FullyShardedDataParallel._pre_forward_prefetch"
     ):
@@ -762,6 +764,10 @@ def _post_backward_hook(
             state._post_backward_stream.wait_stream(
                 state._device_handle.current_stream()
             )
+            if dist.get_backend() == "mpi":
+                # wait for the backward computation to complete
+                current_stream = state._device_handle.current_stream()
+                current_stream.synchronize()
 
         with state._device_handle.stream(state._post_backward_stream):
             autograd_computed_grad = flat_param.grad.data
@@ -1584,6 +1590,8 @@ def _wait_for_computation_stream(
     # do not leverage the pre-all-gather stream is tolerable since this only
     # runs once per iteration
     pre_unshard_stream.wait_stream(computation_stream)  # type: ignore[attr-defined]
+    if dist.get_backend() == "mpi":
+        computation_stream.synchronize()
 
 
 def _reset_flat_param_grad_info_if_needed(
