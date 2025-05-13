@@ -343,6 +343,19 @@ class OptimizedModule(torch.nn.Module):
             self._forward = self.forward
             self.forward = self._call_lazy_check
 
+    def __call__(self, *args, **kwargs):
+        if torch.nn.modules.module._has_any_global_hook():
+            warnings.warn(
+                "Using `torch.compile(module)` when there are global hooks on "
+                "modules (e.g., from `register_module_forward_hook`); this will"
+                " cause the hooks to fire an extra time for the "
+                "`OptimizedModule` created by `torch.compile(module)`. If this "
+                "causes undesired behavior, please try using `module.compile()`"
+                ", or use the per-module hooks instead",
+                stacklevel=2,
+            )
+        return super().__call__(*args, **kwargs)
+
     def __reduce__(self):
         return (self.__class__, (self._orig_mod, self.dynamo_ctx))
 
