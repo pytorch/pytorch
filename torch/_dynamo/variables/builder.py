@@ -49,6 +49,7 @@ from torch._dynamo.utils import (
     get_metrics_context,
     is_int_specialization_case,
     is_torch_sym,
+    set_feature_use,
 )
 from torch._guards import TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
@@ -2125,6 +2126,7 @@ class VariableBuilder:
             # know if bare integers are actually going to be sizevars
             # and it is inappropriate to eagerly duck size them with
             # real sizevars
+            print("HIT AUTOMATIC DYANMIC SHAPE CODE")
             normalized_source_name = normalize_source_name(self.source.name())
             base_source = self.source
             if isinstance(base_source, ChainedSource):
@@ -2137,6 +2139,7 @@ class VariableBuilder:
                 config.automatic_dynamic_shapes
                 and frame_state_entry.scalar is auto_dynamic
             ):
+                set_feature_use("dynamo.automatic_dynamic_shapes", True)
                 dynamic_dim = get_automatic_dynamic_shapes_mark_as()
             elif (
                 isinstance(base_source, LocalSource)
@@ -2149,6 +2152,8 @@ class VariableBuilder:
             else:  # assume_static_by_default
                 # TODO: dynamic_dim = DimDynamic.STATIC should work but
                 # for some reason it doesn't
+                if frame_state_entry.scalar is auto_dynamic:
+                    set_feature_use("dynamo.automatic_dynamic_shapes", False)
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value)
 
@@ -3111,6 +3116,10 @@ def _automatic_dynamic(
             automatic_dynamic_stride = True
 
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
+        # Used to filter logs for dynamic features
+        should_be_dynamic = frame_state_entry.is_size_dynamic(
+            i
+        ) or frame_state_entry.is_stride_dynamic(i)
 
         # We will process constraints first, as they will imply that we
         # have a dynamic dimension
@@ -3142,11 +3151,15 @@ def _automatic_dynamic(
             elif marked_strict_unbacked:
                 constraint_size = RelaxedUnspecConstraint(warn_only=False)
             elif not marked_static and automatic_dynamic:
+                set_feature_use("dynamo.automatic_dynamic_shapes", True)
                 if automatic_dynamic_size:
                     constraint_size = RelaxedUnspecConstraint(warn_only=True)
                 if automatic_dynamic_stride:
                     constraint_stride = RelaxedUnspecConstraint(warn_only=True)
             else:
+                if not marked_static and should_be_dynamic:
+                    set_feature_use("dynamo.automatic_dynamic_shapes", False)
+
                 constraint_size = None
                 constraint_stride = None
         else:
