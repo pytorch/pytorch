@@ -42,7 +42,7 @@ float_args,compile_time_instruction_count,439200000,0.015
 
 
 
-sum_floordiv_regression,compile_time_instruction_count,1009000000,0.015
+sum_floordiv_regression,compile_time_instruction_count,1009000001,0.015
 
 
 
