@@ -247,6 +247,11 @@ test_torchbench_smoketest() {
         PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
           --performance --only "$model" --backend "$backend" --inference --devices "$device" "$dtype_arg" \
           --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv" || true
+        if [ "$backend" == "inductor" ]; then
+          PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
+            --accuracy --only "$model" --backend "$backend" --inference --devices "$device" "$dtype_arg" \
+            --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_accuracy.csv" || true
+        fi
       done
     done
 
