@@ -3174,7 +3174,7 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
         self.assertEqual(fn(ones, ones, ones), torch.tensor([3.0]))
 
     @torch._dynamo.config.patch(
-        "_hopify_generic_wrap_fn_kwarg_keys", {my_hop_fn: ("k",)}
+        "_hopify_generic_wrap_fn_kwarg_keys", {my_hop_fn: ("k",), my_hop_fn_2: ("g",)}
     )
     def test_hopify_generic_wrap(self):
         def gn(x, h=1):

@@ -110,11 +110,12 @@ class WrapGeneric(HigherOrderOperator):
         module = importlib.import_module(module_path)
         obj = getattr(module, attribute)
 
+        kwarg_values = gmod.meta["_wrap_generic_kwarg_values"]
+
         is_ctx = "_wrap_generic_arg_values" in gmod.meta
         if is_ctx:
             # Reconstruct the context manager from the meta data
             arg_values = gmod.meta["_wrap_generic_arg_values"]
-            kwarg_values = gmod.meta["_wrap_generic_kwarg_values"]
             ctx = obj(*arg_values, **kwarg_values)
 
         @disable
@@ -123,7 +124,7 @@ class WrapGeneric(HigherOrderOperator):
                 with ctx:
                     return gmod(*args, **kwargs)
             else:
-                return obj(gmod, *args, **kwargs)
+                return obj(gmod, *args, **kwargs, **kwarg_values)
 
         return wrapper()
 
