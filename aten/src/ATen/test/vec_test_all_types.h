@@ -1090,8 +1090,8 @@ void test_binary(
     }
 }
 
-template<typename Op1, typename Op2>
-void test_binary_fp8_e4m3(
+template<typename Op1, typename Op2, typename scalar_t, std::enable_if_t<std::is_same_v<scalar_t, c10::Float8_e4m3fn> || std::is_same_v<scalar_t, c10::Float8_e5m2>, int> =0>
+void test_binary_fp8(
     Op1 ScalarFunction,
     Op2 VecFunction,
     bool is_bit_wise = false) {
@@ -1099,27 +1099,57 @@ void test_binary_fp8_e4m3(
     for (const auto i : c10::irange(10)) {
         float f_val0 = static_cast<float>(i + 0.2);
         float f_val1 = static_cast<float>(i + 0.3);
-        c10::Float8_e4m3fn f8_e4m3_0(f_val0);
-        c10::Float8_e4m3fn f8_e4m3_1(f_val1);
-        at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_vec_0(f8_e4m3_0);
-        at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_vec_1(f8_e4m3_1);
-
-        float ref_res_scalar = ScalarFunction(f8_e4m3_0, f8_e4m3_1);
+        scalar_t f8_0(f_val0);
+        scalar_t f8_1(f_val1);
+        at::vec::Vectorized<scalar_t> f8_vec_0(f8_0);
+        at::vec::Vectorized<scalar_t> f8_vec_1(f8_1);
+        float ref_res_scalar = ScalarFunction(f8_0, f8_1);
         __m512 res_fp32_512;
-        at::vec::Vectorized<c10::Float8_e4m3fn> res = VecFunction(f8_e4m3_vec_0, f8_e4m3_vec_1);
-        at::vec::cvtfp8e4m3_fp32(_mm512_castsi512_si128(res), res_fp32_512);
-        float res_scalar = _mm512_cvtss_f32(res_fp32_512);
-        if (is_bit_wise) {
-            EXPECT_EQ(static_cast<bool>(ref_res_scalar), static_cast<bool>(res_scalar))
-                << "Test failed for input0: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_e4m3_0.x)
-                << " input1: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_e4m3_1.x) << "\n";
+        at::vec::Vectorized<scalar_t> res = VecFunction(f8_vec_0, f8_vec_1);
+
+        if constexpr (std::is_same_v<scalar_t, c10::Float8_e4m3fn>) {
+            at::vec::cvtfp8e4m3_fp32(_mm512_castsi512_si128(res), res_fp32_512);
+            float res_scalar = _mm512_cvtss_f32(res_fp32_512);
+            if (is_bit_wise) {
+                EXPECT_EQ(static_cast<bool>(ref_res_scalar), static_cast<bool>(res_scalar))
+                    << "Test failed for input0: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_0.x)
+                    << " input1: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_1.x) << "\n";
+            } else {
+                EXPECT_EQ(ref_res_scalar, res_scalar)
+                    << "Test failed for input0: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_0.x)
+                    << " input1: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_1.x) << "\n";
+            }
         } else {
-            EXPECT_EQ(ref_res_scalar, res_scalar)
-                << "Test failed for input0: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_e4m3_0.x)
-                << " input1: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_e4m3_1.x) << "\n";
+            at::vec::cvtfp8e5m2_fp32(_mm512_castsi512_si128(res), res_fp32_512);
+            float res_scalar = _mm512_cvtss_f32(res_fp32_512);
+            if (is_bit_wise) {
+                EXPECT_EQ(static_cast<bool>(ref_res_scalar), static_cast<bool>(res_scalar))
+                    << "Test failed for input0: " << c10::detail::fp8e5m2_to_fp32_value(f8_0.x)
+                    << " input1: " << c10::detail::fp8e5m2_to_fp32_value(f8_1.x) << "\n";
+            } else {
+                EXPECT_EQ(ref_res_scalar, res_scalar)
+                    << "Test failed for input0: " << c10::detail::fp8e5m2_to_fp32_value(f8_0.x)
+                    << " input1: " << c10::detail::fp8e5m2_to_fp32_value(f8_1.x) << "\n";
+            }
         }
       }
     #endif
+}
+
+template<typename Op1, typename Op2>
+void test_binary_fp8_e4m3(
+    Op1 ScalarFunction,
+    Op2 VecFunction,
+    bool is_bit_wise = false) {
+    test_binary_fp8<Op1, Op2, c10::Float8_e4m3fn>(ScalarFunction, VecFunction, is_bit_wise);
+}
+
+template<typename Op1, typename Op2>
+void test_binary_fp8_e5m2(
+    Op1 ScalarFunction,
+    Op2 VecFunction,
+    bool is_bit_wise = false) {
+    test_binary_fp8<Op1, Op2, c10::Float8_e5m2>(ScalarFunction, VecFunction, is_bit_wise);
 }
 
 template< typename T, typename Op1, typename Op2, typename Filter = std::nullptr_t>
