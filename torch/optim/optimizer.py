@@ -56,10 +56,11 @@ class _RequiredParameter:
 required = _RequiredParameter()
 
 
-def _use_grad_for_differentiable(func):
-    def _use_grad(self, *args, **kwargs):
+def _use_grad_for_differentiable(func: Callable[_P, _T]) -> Callable[_P, _T]:
+    def _use_grad(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         import torch._dynamo
 
+        self = cast(Optimizer, args[0])  # assume first positional arg is `self`
         prev_grad = torch.is_grad_enabled()
         try:
             # Note on graph break below:
@@ -76,7 +77,7 @@ def _use_grad_for_differentiable(func):
             # see https://github.com/pytorch/pytorch/issues/104053
             torch.set_grad_enabled(self.defaults["differentiable"])
             torch._dynamo.graph_break()
-            ret = func(self, *args, **kwargs)
+            ret = func(*args, **kwargs)
         finally:
             torch._dynamo.graph_break()
             torch.set_grad_enabled(prev_grad)
@@ -1004,7 +1005,7 @@ class Optimizer:
                         torch._foreach_zero_(grads)
 
     @overload
-    def step(self, closure: None = ...) -> None:
+    def step(self, closure: None = None) -> None:
         ...
 
     @overload
