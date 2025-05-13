@@ -759,7 +759,7 @@ class MetalKernel(SIMDKernel):
                 self.body.splice(self.compute)
             self.body.writeline("}")
             # Invalidate variables instantiated inside loop
-            self.cse.invalidate(OrderedSet(self.cse.store_cache.values()))
+            self.cse.invalidate(OrderedSet(self.cse.reduction_cache.values()))
             # And loop codegen
             self.multistage_reduction_entry.cache_clear()
             self.multistage_reduction_entry = None
