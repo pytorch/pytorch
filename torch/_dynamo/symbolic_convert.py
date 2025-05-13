@@ -3788,6 +3788,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         args: list[VariableTracker],
         kwargs,
     ):
+        if isinstance(func, SkipFunctionVariable):
+            unimplemented_v2(
+                gb_type="Attempted to inline function marked as skipped (SkipFunctionVariable)",
+                context=f"Attempted to inline a SkipFunctionVariable {func}",
+                explanation="Attempted to inline a function that was previously determined to be marked as intentionally skipped.",
+                hints=[],
+            )
         assert isinstance(
             func,
             (
@@ -3797,35 +3804,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 LocalGeneratorObjectVariable,
             ),
         )
-        code: types.CodeType = func.get_code()
-        result = None
-        tracing_ctx = parent.output.tracing_context
-
-        # Check if we have already identified this function to be inline-able.
-        # The exception is dont_skip_tracing flag which affects the inline
-        # behavior. If the flag is True, don't rely on previous results.
-        if not config.dont_skip_tracing and tracing_ctx:
-            if previous_result := tracing_ctx.previously_inlined_functions.get(
-                code, None
-            ):
-                result = previous_result
-
-        if result is None:
-            if isinstance(func, SkipFunctionVariable):
-                unimplemented_v2(
-                    gb_type="Attempted to inline function marked as skipped (SkipFunctionVariable)",
-                    context=f"Attempted to inline a SkipFunctionVariable {func}",
-                    explanation=(
-                        "Attempted to inline a function that was previously determined to be marked as intentionally skipped."
-                    ),
-                    hints=[],
-                )
-            result = InliningInstructionTranslator.check_inlineable(func)
-            assert result.skipped is False
-
-            if not config.dont_skip_tracing and tracing_ctx:
-                tracing_ctx.previously_inlined_functions[code] = result
-
+        result = InliningInstructionTranslator.check_inlineable(func)
+        assert result.skipped is False
         try:
             sub_locals = func.bind_args(parent, args, kwargs)
         except TypeError as e:
@@ -3848,6 +3828,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     hints=[*graph_break_hints.DYNAMO_BUG],
                 )
 
+        code: types.CodeType = func.get_code()
         if code.co_name in ("__setitem__", "__setattr__") and not (
             args and isinstance(args[0], variables.UserDefinedObjectVariable)
         ):
@@ -3866,11 +3847,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if sys.version_info >= (3, 11):
             cur_inst = parent.current_instruction
             parent_code = parent.f_code
+            header = parent.get_line_of_code_header(lineno=cur_inst.positions.lineno)
 
             def get_trace_call_log_str():
-                header = parent.get_line_of_code_header(
-                    lineno=cur_inst.positions.lineno
-                )
                 line = get_instruction_source_311(parent_code, cur_inst).rstrip()
                 return f"TRACE inlined call {code.co_name} from {header}\n{line}"
 
@@ -3981,25 +3960,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         f_builtins = f_globals["__builtins__"]
         if not isinstance(f_builtins, dict):
             f_builtins = f_builtins.__dict__
-
-        # Get the cached instructions. These instructions are safe to cache
-        # because we dont mutate them in transform_code_object (those
-        # instructions are for the top most Instruction translator).  Also, we
-        # have to be careful about not using _cached_cleaned_instructions here
-        # because that function is global, while we want the the cache to be
-        # alive only during a compmilation.
-        tracing_ctx = parent.output.tracing_context
-        instructions = None
-        if tracing_ctx:
-            if tracing_ctx.previously_cleaned_instructions.get(code):
-                instructions = tracing_ctx.previously_cleaned_instructions[code]
-
-        if instructions is None:
-            instructions = cleaned_instructions(code)
-            propagate_line_nums(instructions)
-            if tracing_ctx:
-                tracing_ctx.previously_cleaned_instructions[code] = instructions
-
+        instructions = cleaned_instructions(code)
+        propagate_line_nums(instructions)
         super().__init__(
             output=parent.output,
             f_locals={},
