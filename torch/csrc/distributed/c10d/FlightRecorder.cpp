@@ -1,7 +1,8 @@
-// TODO: Make Fligth Recorder device agnostic
 #ifdef USE_C10D_NCCL
-
+#include <ATen/cuda/CUDAEvent.h>
 #include <cuda_runtime.h>
+#endif // USE_C10D_NCCL
+
 #include <nlohmann/json.hpp>
 #include <filesystem>
 #include <fstream>
@@ -11,11 +12,14 @@
 #include <c10/util/WaitCounter.h>
 
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
+#ifdef USE_C10D_NCCL
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#endif // USE_C10D_NCCL
 #include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 
 namespace c10d {
 
+#ifdef USE_C10D_NCCL
 control_plane::RegisterHandler dumpHandler{
     "dump_nccl_trace_pickle",
     [](const control_plane::Request& req, control_plane::Response& res) {
@@ -109,6 +113,21 @@ control_plane::RegisterHandler jsonDumpHandler{
           "application/json");
     }};
 
+/* Helper used by work::getDuration() and nccl flight recorder */
+float getDurationFromEvent(
+    at::cuda::CUDAEvent& ncclStartEvent,
+    at::cuda::CUDAEvent& ncclEndEvent) {
+  TORCH_CHECK(
+      ncclEndEvent.query(),
+      "getDuration can only be called after work is succeeded.")
+  return ncclStartEvent.elapsed_time(ncclEndEvent);
+}
+#endif // USE_C10D_NCCL
+
+float getDurationFromEvent(c10::Event& startEvent, c10::Event& endEvent) {
+  TORCH_CHECK(false, "getDuration not supported by c10::Event.");
+}
+
 void DebugInfoWriter::write(const std::string& trace) {
   // Open a file for writing. The ios::binary flag is used to write data as
   // binary.
@@ -149,7 +168,8 @@ DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
     auto defaultLocation = cacheDirPath / "nccl_trace_rank_";
 
     std::string fileNamePrefix = getCvarString(
-        {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, defaultLocation.c_str());
+        {"TORCH_FR_DUMP_TEMP_FILE", "TORCH_NCCL_DEBUG_INFO_TEMP_FILE"},
+        defaultLocation.c_str());
     // Using std::unique_ptr here to auto-delete the writer object
     // when the pointer itself is destroyed.
     std::unique_ptr<DebugInfoWriter> writerPtr(
@@ -296,17 +316,22 @@ void FlightRecorder<EventType>::record_accelerator_version(
 
 template <typename EventType>
 void FlightRecorder<EventType>::update_state(Entry& r) {
-  if (r.start_ != nullptr) {
-    bool started = r.start_->query();
-    if (started && !r.time_discovered_started_) {
-      r.time_discovered_started_ = c10::getTime();
+  try {
+    if (r.start_ != nullptr) {
+      bool started = r.start_->query();
+      if (started && !r.time_discovered_started_) {
+        r.time_discovered_started_ = c10::getTime();
+      }
     }
-  }
-  if (r.end_ != nullptr) {
-    bool completed = r.end_->query();
-    if (completed && !r.time_discovered_completed_) {
-      r.time_discovered_completed_ = c10::getTime();
+    if (r.end_ != nullptr) {
+      bool completed = r.end_->query();
+      if (completed && !r.time_discovered_completed_) {
+        r.time_discovered_completed_ = c10::getTime();
+      }
     }
+  } catch (std::exception& e) {
+    LOG(ERROR) << "Failed to update state for entry " << r.id_ << ": "
+               << r.profiling_name_ << " with error: " << e.what();
   }
 }
 
@@ -564,14 +589,14 @@ const std::map<std::string, std::map<std::string, std::string>> FlightRecorder<
   return result;
 }
 
+using json = nlohmann::json;
 template <typename EventType>
 std::string FlightRecorder<EventType>::dump_json(
     const std::optional<std::unordered_map<
         std::string,
-        std::unordered_map<std::string, std::string>>>& ncclDumpMap,
+        std::unordered_map<std::string, std::string>>>& extraDumpMap,
     bool includeCollectives,
     bool onlyActive) {
-  using json = nlohmann::json;
   json result;
   result[version_key_str] = version_val_str;
   result[nccl_version_key_str] = nccl_version_;
@@ -650,10 +675,9 @@ std::string FlightRecorder<EventType>::dump_json(
     }
   }
 
-  if (ncclDumpMap.has_value()) {
-    result[nccl_comm_key_str] = ncclDumpMap.value();
+  if (extraDumpMap.has_value()) {
+    result[nccl_comm_key_str] = extraDumpMap.value();
   }
-
   return result.dump();
 }
 
@@ -661,7 +685,7 @@ template <typename EventType>
 std::string FlightRecorder<EventType>::dump(
     const std::optional<std::unordered_map<
         std::string,
-        std::unordered_map<std::string, std::string>>>& ncclDumpMap,
+        std::unordered_map<std::string, std::string>>>& extraDumpMap,
     bool includeCollectives,
     bool includeStackTraces,
     bool onlyActive) {
@@ -678,10 +702,11 @@ std::string FlightRecorder<EventType>::dump(
     result.insert(
         entries_key, getCollectiveTrace(includeStackTraces, onlyActive));
   }
-  // convert ncclDumpMap into a dictionary
+
+  // convert extraDumpMap into a dictionary
   auto per_comm_dict = new_dict();
-  if (ncclDumpMap.has_value()) {
-    for (const auto& [ncclId, ncclDump] : ncclDumpMap.value()) {
+  if (extraDumpMap.has_value()) {
+    for (const auto& [ncclId, ncclDump] : extraDumpMap.value()) {
       auto inner_dict = new_dict();
       for (const auto& [key, value] : ncclDump) {
         inner_dict.insert(key, value);
@@ -695,20 +720,15 @@ std::string FlightRecorder<EventType>::dump(
   return pickle_str(result);
 }
 
-template struct FlightRecorder<at::cuda::CUDAEvent>;
-
 std::unique_ptr<DebugInfoWriter> DebugInfoWriter::writer_ = nullptr;
 std::atomic<bool> DebugInfoWriter::hasWriterRegistered_(false);
 
-float getDurationFromEvent(
-    at::cuda::CUDAEvent& ncclStartEvent,
-    at::cuda::CUDAEvent& ncclEndEvent) {
-  TORCH_CHECK(
-      ncclEndEvent.query(),
-      "getDuration can only be called after work is succeeded.")
-  return ncclStartEvent.elapsed_time(ncclEndEvent);
-}
+// For any third party library that uses the flight recorder, if one wants to
+// use an Event type other than c10::Event, one also needs to registers here to
+// avoid linking errors.
+template struct FlightRecorder<c10::Event>;
 
-} // namespace c10d
-
+#ifdef USE_C10D_NCCL
+template struct FlightRecorder<at::cuda::CUDAEvent>;
 #endif // USE_C10D_NCCL
+} // namespace c10d

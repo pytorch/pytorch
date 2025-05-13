@@ -219,11 +219,10 @@ void FatalSignalHandler::fatalSignalHandler(int signum) {
       if (tid != currentTid) {
         signalReceived = false;
         syscall(SYS_tgkill, pid, tid, SIGUSR2);
-        auto now = std::chrono::system_clock::now();
         using namespace std::chrono_literals;
         // we use wait_until instead of wait because on ROCm there was
         // a single thread that wouldn't receive the SIGUSR2
-        if (std::cv_status::timeout == writingCond.wait_until(ul, now + 2s)) {
+        if (std::cv_status::timeout == writingCond.wait_for(ul, 2s)) {
           if (!signalReceived) {
             std::cerr << "signal lost waiting for stacktrace " << pid << ":"
                       << tid << '\n';
