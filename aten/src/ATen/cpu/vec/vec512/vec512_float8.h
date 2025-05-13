@@ -459,6 +459,8 @@ static inline Vectorized<T> binary_fp8_op_as_fp32(const Vectorized<T>& a, const 
   return result;
 }
 
+// Refer to https://github.com/pytorch/pytorch/pull/153364#discussion_r2086509353
+// FP8 +, -, *, /, planed to be deleted in the future and here is just to make compiler happy
 Vectorized<Float8_e4m3fn> inline operator+(const Vectorized<Float8_e4m3fn>& a, const Vectorized<Float8_e4m3fn>& b) {
   return binary_fp8_op_as_fp32(a, b, [](const __m512& x, const __m512& y) { return _mm512_add_ps(x, y); });
 }
@@ -518,6 +520,8 @@ public:
   Vectorized<Float8_e5m2> le(const Vectorized<Float8_e5m2>& other) const;
 };
 
+// Refer to https://github.com/pytorch/pytorch/pull/153364#discussion_r2086509353
+// FP8 +, -, *, /, planed to be deleted in the future and here is just to make compiler happy
 Vectorized<Float8_e5m2> inline operator+(const Vectorized<Float8_e5m2>& a, const Vectorized<Float8_e5m2>& b) {
   return binary_fp8_op_as_fp32(a, b, [](const __m512& x, const __m512& y) { return _mm512_add_ps(x, y); });
 }
