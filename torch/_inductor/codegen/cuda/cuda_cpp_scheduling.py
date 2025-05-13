@@ -152,9 +152,9 @@ class CUDACPPScheduling(BaseScheduling):
                         node, ComputedBuffer
                     )  # Not sure why we need to do this again
                     node.get_store_function()(CutlassEVTCodegen.get_index_vars(node))
-            src_code = render()
 
         with V.set_kernel_handler(kernel):
+            src_code = render()
             node_schedule = [template_node, *epilogue_nodes]
             kernel_name = self.define_kernel(src_code, node_schedule)
 
@@ -255,6 +255,7 @@ differs from {node_name}'s size: {ir_node_to_fuse.get_size()}"
             CutlassEVTCodegen.ir_to_evt_python_code(
                 cuda_template_buffer.get_name(),
                 existing_epilogue_nodes + [node_to_fuse],
+                OrderedSet(),
             )
 
         except NotImplementedError as e:

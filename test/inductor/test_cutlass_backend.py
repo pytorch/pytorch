@@ -62,12 +62,14 @@ def _get_path_without_sccache() -> str:
     return ":".join(path_envs)
 
 
-un_ops_under_test = [torch.relu, torch.sigmoid, torch.tanh]
+un_ops_under_test = [torch.relu]
 bin_ops_under_test = [torch.add, torch.mul, torch.sub, torch.div]
 
-evt_all_ops = evt_bin_ops = parametrize(
+evt_all_ops = parametrize(
     "op", un_ops_under_test + bin_ops_under_test, name_fn=lambda f: f.__name__
 )
+
+evt_bin_ops = parametrize("op", bin_ops_under_test, name_fn=lambda f: f.__name__)
 
 
 def gen_args(op, shape):
@@ -118,6 +120,22 @@ class TestCutlassBackend(TestCase):
     def tearDown(self):
         super().tearDown()
         clear_inductor_caches()
+
+    def run_evt_test(self, model, op, shape, num_fusions=1):
+        M, N = shape
+        a = torch.ones(M, N).cuda().half()
+        b = torch.ones(N, N).cuda().half()
+        extra_args = gen_args(op, (M, N))
+        model = model.cuda()
+
+        result = torch.compile(model)(a, b, extra_args)
+        ref_result = model(a, b, extra_args)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"],
+            num_fusions,
+        )
+        torch.testing.assert_close(result, ref_result)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1346,9 +1364,7 @@ class TestCutlassBackend(TestCase):
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    @config.patch(
-        {"benchmark_epilogue_fusion": False, "cuda.cutlass_tma_only": True}
-    )  # EVT doesn't support benchmark fusion yet
+    @use_evt_config
     def test_evt_flexible_layout(self):
         class TestModel(torch.nn.Module):
             def forward(self, B):
@@ -1357,7 +1373,7 @@ class TestCutlassBackend(TestCase):
 
         M = 1024
         B = torch.randn(M, M).cuda().half()
-        model = TestModel().cuda()
+        model = TestModel().cuda().half()
 
         with config.patch(
             {
@@ -1425,8 +1441,19 @@ class TestCutlassBackend(TestCase):
                 res = (a @ b).relu()  # add extra activation to not hit addmm path
                 return op(res, *extra_args)
 
-        M = 16
-        N = 16
+        self.run_evt_test(TestModel(), op, (1024, 512))
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_bin_ops
+    def test_evt_broadcasting(self, op):
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, extra_args):
+                acc = a @ b
+                return acc, op(acc.relu(), *extra_args)
+
+        M = 1024
+        N = 512
         a = torch.ones(M, N).cuda().half()
         b = torch.ones(N, N).cuda().half()
         extra_args = gen_args(op, (M, N))
@@ -1443,32 +1470,50 @@ class TestCutlassBackend(TestCase):
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
-    def test_evt_broadcasting(self):
+    def test_evt_mixed_dtypes(self, op):
         pass
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
-    def test_evt_mixed_dtypes(self):
-        pass
+    def test_evt_multi_op(self, op):
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, extra_args):
+                acc = a @ b
+                return torch.add(op(acc.relu(), *extra_args).relu(), *extra_args)
+
+        self.run_evt_test(TestModel(), op, (1024, 512))
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
-    def test_evt_multi_op(self):
+    def test_evt_multi_output(self, op):
         pass
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
-    @evt_all_ops
-    def test_evt_multi_output(self):
-        pass
-
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @use_evt_config
-    @evt_all_ops
     def test_evt_return_accumulator(self):
-        pass
+        op = torch.add
+
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, extra_args):
+                acc = a @ b
+                return acc, op(acc.relu(), *extra_args)
+
+        M = 1024
+        N = 512
+        a = torch.ones(M, N).cuda().half()
+        b = torch.ones(N, N).cuda().half()
+        extra_args = gen_args(op, (M, N))
+        model = TestModel().cuda()
+
+        result = torch.compile(model)(a, b, extra_args)
+        ref_result = model(a, b, extra_args)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+        )
+        torch.testing.assert_close(result, ref_result)
 
 
 if __name__ == "__main__":

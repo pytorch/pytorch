@@ -257,7 +257,7 @@ class CUDATemplateKernel(CUDAKernel):
                            In this case, the `input_reorder` would be [2, 0, 1].
         """
         names = [x.strip() for x in names_str.strip().split(",")]
-        if len(inputs) + len(outputs) != len(names):
+        if len(inputs) + len(epilogue_inputs) + len(outputs) != len(names):
             raise RuntimeError(
                 f"{len(inputs) + len(outputs)=} != {len(names)=}, {inputs=}, {outputs=}, {names=}"
             )

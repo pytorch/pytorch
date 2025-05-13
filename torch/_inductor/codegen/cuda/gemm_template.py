@@ -1065,37 +1065,45 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 should_swap_xw = True
 
         if epilogue_nodes:
-            evt_read_names, evt_write_names, buffer_renames, evt_py_code = (
-                CutlassEVTCodegen.ir_to_evt_python_code(Y.get_name(), epilogue_nodes)
+            (
+                evt_read_names,
+                evt_write_names,
+                var_name_to_buffer_name,
+                evt_py_code,
+            ) = CutlassEVTCodegen.ir_to_evt_python_code(
+                Y.get_name(), epilogue_nodes, V.kernel.removed_buffers
             )
             read_names = OrderedSet(evt_read_names) - OrderedSet(evt_write_names)
             write_names = OrderedSet(evt_write_names)
             assert write_names, "There should be at least one write"
-            output_D_name = next(
-                name for name, rename in buffer_renames.items() if rename == "D"
-            )
+            D_output_name = var_name_to_buffer_name["D"]
             name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
-            output_D = name_to_buffer[output_D_name]
+            D_output_buffer = name_to_buffer[D_output_name]
+            Y = D_output_buffer  # type: ignore[assignment]
+
             evt_name, evt_args, evt_code = self._render_evt(
                 op,
                 evt_py_code,
-                evt_read_names,
-                evt_write_names,
-                buffer_renames,
-                name_to_buffer[output_D_name].get_layout().dtype,
-                Y.get_layout().dtype,
+                var_name_to_buffer_name,
+                D_output_buffer.get_layout().dtype,
+                self.output_node.get_layout().dtype,
             )
 
-            # Don't include implicit accumulator input in epilogue inputs
-            epilogue_inputs = [
-                name_to_buffer[name] for name in read_names if name != Y.get_name()
+            input_names = list(read_names)
+            output_names = list(write_names)
+            epilogue_inputs = [name_to_buffer[name] for name in input_names]
+            epilogue_outputs = [name_to_buffer[name] for name in output_names]
+            inputs = [
+                X,
+                W,
+                Bias,
+                Y,
+                *epilogue_inputs,  # type: ignore[list-item]
+                *extra_inputs,
             ]
-            epilogue_outputs = [name_to_buffer[name] for name in write_names]
-
-            # In the template above, Y is set to D. However in the EVT case, it's possible that
-            # the original accumulator isn't returned, and a different write is assigned to D
-            assert isinstance(output_D, Buffer)
-            Y = output_D
+            names_str = ",".join(
+                ["X", "W", "Bias", "Y", *input_names, *output_names, *extra_names]
+            )
         else:
             evt_name = None
             epilogue_inputs = []
@@ -1106,7 +1114,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         kernel_call_signature = kernel.def_kernel(
             inputs=inputs,  # type: ignore[arg-type]
             outputs=epilogue_outputs,  # type: ignore[arg-type]
-            epilogue_inputs=epilogue_inputs,
+            epilogue_inputs=[],
             names_str=names_str,
             input_reorder=input_reorder,
         )
@@ -1177,8 +1185,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         self,
         op: GemmOperation,
         evt_py_code: str,
-        read_names: list[str],
-        write_names: list[str],
         buffer_renames: dict[str, str],
         output_dtype: torch.dtype,
         accumulator_dtype: torch.dtype,
@@ -1331,9 +1337,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         self,
         op: GemmOperation,
         evt_py_code: str,
-        read_names: list[str],
-        write_names: list[str],
-        buffer_renames: dict[str, str],
+        var_name_to_buffer_name: dict[str, str],
         output_dtype: torch.dtype,
         accumulator_dtype: torch.dtype,
     ) -> tuple[str, str, str]:  # type: ignore[name-defined]  # noqa: F821
@@ -1344,9 +1348,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         acc_dtype = torch_dtype_to_cutlass_type(accumulator_dtype)
         output_dtype = torch_dtype_to_cutlass_type(output_dtype)
         examples = create_example_tensors(
-            read_names,
-            write_names,
-            buffer_renames,
+            var_name_to_buffer_name,
             name_to_buffer,  # type: ignore[arg-type]
         )
         evt_name, evt_args, evt_code = trace(
@@ -1356,7 +1358,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             output_dtype,
             op.tile_description,  # type: ignore[attr-defined]
             op.epilogue_schedule,  # type: ignore[attr-defined]
-            name_to_buffer,  # type: ignore[arg-type]
+            {k: name_to_buffer[v] for k, v in var_name_to_buffer_name.items()},  # type: ignore[arg-type,misc]
         )
 
         return (

@@ -59,13 +59,9 @@ if try_import_cutlass():
     _CUTLASS_C_DTYPES = OrderedSet(dtype2ctype.values())  # type: ignore[var-annotated]
 
     def create_example_tensors(
-        read_names: list[str],
-        write_names: list[str],
-        buffer_renames: dict[str, str],
+        var_name_to_buffer_name: dict[str, str],
         name_to_buffer: dict[str, Buffer],
     ) -> dict[str, CutlassTensor]:
-        example_tensors = {}
-
         def cutlass_tensor_from_buffer(buffer: Buffer) -> CutlassTensor:
             shape = buffer.get_layout().size
             stride = buffer.get_layout().stride
@@ -95,17 +91,10 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
                 element=torch_dtype_to_cutlass_type(buffer.get_layout().dtype),
             )
 
-        for name in read_names + write_names:
-            key = name
-
-            if name in buffer_renames:
-                key = buffer_renames[
-                    name
-                ]  # Need to rewrite some special args (e.g. acc is a required arg name)
-
-            example_tensors[key] = cutlass_tensor_from_buffer(name_to_buffer[name])
-
-        return example_tensors
+        return {
+            key: cutlass_tensor_from_buffer(name_to_buffer[name])
+            for key, name in var_name_to_buffer_name.items()
+        }
 
     def trace(
         fn_src: str,
