@@ -352,6 +352,7 @@ class OptimizedModule(torch.nn.Module):
                 "`OptimizedModule` created by `torch.compile(module)`. If this "
                 "causes undesired behavior, please try using `module.compile()`"
                 ", or use the per-module hooks instead",
+                stacklevel=2,
             )
         return super().__call__(*args, **kwargs)
 
