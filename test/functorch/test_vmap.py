@@ -4477,11 +4477,10 @@ class TestVmapOperatorsOpInfo(TestCase):
                     "gt",
                     device_type="mps",
                 ),
-                xfailIf(
+                xfail(
                     "imag",
                     device_type="mps",
-                    fail_fn=lambda sample: MACOS_VERSION < 14,
-                ),
+                ),  # RuntimeError: repeat(): Not supported for complex yet!
                 xfail(
                     "index_add",
                     device_type="mps",
@@ -4914,11 +4913,10 @@ class TestVmapOperatorsOpInfo(TestCase):
                     "gt",
                     device_type="mps",
                 ),
-                xfailIf(
+                xfail(
                     "imag",
                     device_type="mps",
-                    fail_fn=lambda sample: MACOS_VERSION < 14,
-                ),
+                ),  # RuntimeError: repeat(): Not supported for complex yet!
                 xfail(
                     "index_add",
                     device_type="mps",
