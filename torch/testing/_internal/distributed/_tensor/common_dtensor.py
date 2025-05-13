@@ -64,7 +64,7 @@ else:
 NUM_DEVICES = 4
 
 # We use this as a proxy for "multiple GPUs exist"
-if (TEST_CUDA or TEST_XPU) and DEVICE_COUNT > 1:
+if (TEST_CUDA or TEST_XPU or TEST_HPU) and DEVICE_COUNT > 1:
     # when we actually have multiple GPUs, relax the requirement to smaller counts.
     NUM_DEVICES = min(NUM_DEVICES, DEVICE_COUNT)
 
@@ -395,8 +395,8 @@ def with_comms(eager_init: Union[TestFunc, bool] = False) -> TestFunc:
         def wrapper(
             self, *args: tuple[object], **kwargs: dict[str, Any]  # type: ignore[misc]
         ) -> None:
-            # if enough GPU we can use GPU, otherwise we fallback to CPU
-            if not (TEST_CUDA or TEST_XPU) or torch.accelerator.device_count() < self.world_size:
+            # if enough GPU/XPU/HPU  we can use the device, otherwise we fallback to CPU
+            if not (TEST_CUDA or TEST_XPU or TEST_HPU) or DEVICE_COUNT < self.world_size:
                 self.device_type = "cpu"
             else:
                 self.device_type = DEVICE_TYPE
