@@ -117,7 +117,7 @@ struct log_functor {
     // log(x+yi) = ln(sqrt(x^2 + y^2)) + iarctan(y/x)
     auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
     auto real = ::precise::log(magnitude);
-    auto imag = (x.x == 0 && x.y == 0) ? NAN : ::precise::atan2(x.y, x.x);
+    auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
     return T(real, imag);
   }
 };
