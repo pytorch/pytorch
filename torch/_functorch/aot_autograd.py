@@ -673,7 +673,17 @@ def _create_aot_dispatcher_function(
                     ctx = _detect_attribute_assignment(mod)
                 else:
                     ctx = nullcontext()
-                with ctx:
+
+                if torch._functorch.config.fake_tensor_propagate_real_tensors:
+                    # Running dynamo_timed causes fake tensor issues when
+                    # propagate real tensor is switched on.
+                    dynamo_timed_ctx = nullcontext()
+                else:
+                    dynamo_timed_ctx = dynamo_timed(
+                        "aot_collect_metadata", log_pt2_compile_event=True
+                    )
+
+                with dynamo_timed_ctx, ctx:
                     fw_metadata = run_functionalized_fw_and_collect_metadata(
                         flat_fn,
                         static_input_indices=aot_config.static_input_indices,

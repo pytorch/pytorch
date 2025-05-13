@@ -98,6 +98,7 @@ from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .triton_bundler import TritonBundler
+from .virtualized import V
 
 
 if config.is_fbcode():
@@ -1602,6 +1603,12 @@ class AotCodeCompiler:
             extra=cpp_command,
             specified_dir=specified_output_path,
         )
+
+        # Log the AOTInductor wrapper and kernel code, if needed.
+        with tempfile.NamedTemporaryFile("w+") as t:
+            t.writelines((wrapper_code, "\n", kernel_code, "\n"))
+            t.flush()
+            V.debug.output_code(t.name, extension="cpp")
 
         if config.aot_inductor.package:
             generated_files.append(wrapper_path)
@@ -3320,6 +3327,13 @@ class DLLWrapper:
 
 @clear_on_fresh_inductor_cache
 class CUDACodeCache:
+    """
+    A cache for managing the compilation and loading of CUDA source code specifically for CUTLASS.
+    This class handles writing source code to files, compiling them into shared objects, and caching
+    the results to avoid redundant compilations. It also manages error handling and logging for the
+    compilation process.
+    """
+
     @dataclasses.dataclass
     class CacheEntry:
         input_path: str
@@ -3340,9 +3354,26 @@ class CUDACodeCache:
         cuda_command = repr(
             cuda_compile_command(["dummy_input"], "dummy_output", dst_file_ext)
         )
-        key, input_path = write(
-            source_code, cls._SOURCE_CODE_SUFFIX, extra=cuda_command
-        )
+        if config.cuda.cutlass_hash_with_compile_cmd:
+            extra = cuda_command
+        else:
+            extra = repr(
+                [
+                    # nvcc and cuda hash
+                    _cuda_compiler(),
+                    # cutlass flags and gcc hash
+                    _nvcc_compiler_options(),
+                    # flags
+                    _nvcc_host_compiler_options(),
+                    # cutlass key
+                    cutlass_key(),
+                    # hack to deal with AOTI .o compilation
+                ]
+                + [dst_file_ext]
+                if dst_file_ext == "o"
+                else []
+            )
+        key, input_path = write(source_code, cls._SOURCE_CODE_SUFFIX, extra=extra)
         return key, input_path
 
     @classmethod
