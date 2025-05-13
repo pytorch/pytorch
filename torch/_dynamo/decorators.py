@@ -547,7 +547,7 @@ def mark_unbacked(t, index, strict=False, specialize_on=None):
         if not hasattr(t, "_dynamo_unbacked_indices"):
             t._dynamo_unbacked_indices = set()
 
-        t._specialize_on[index] = specialize_on
+        t._specialize_on[index] = specialize_on if specialize_on is not None else []
         t._dynamo_unbacked_indices.add(index)
         return
 
@@ -586,7 +586,10 @@ def mark_dynamic(t, index, *, min=None, max=None, specialize_on=None):
     At runtime, we will dispatch to a specialized compiled region if the input matches the specialization criteria.
 
     For example:
-        mark_dynamic(..., specialize_on=[8, 16])
+        mark_dynamic(..., specialize_on=[
+            lambda x: x == 8,
+            lambda x: x == 16
+        ])
 
     This approach results in one Dynamo trace and two backend compilations. When the input dimension equals 8 or 16
     at runtime, execution will be directed to the specialized compiled region. Performance measurements indicate
@@ -610,7 +613,7 @@ def mark_dynamic(t, index, *, min=None, max=None, specialize_on=None):
         # TODO(voz): Should we bounds check?
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))
-        t._specialize_on[index] = specialize_on
+        t._specialize_on[index] = specialize_on if specialize_on is not None else []
         return
 
     assert isinstance(index, (list, tuple))

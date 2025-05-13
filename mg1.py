@@ -17,7 +17,8 @@ def inductor_matmul(m, a, b):
     return (m, torch.mm(a, b))
 
 
-for m in [2, 4, 8, 16]:
+# for m in [2, 4, 8, 16]:
+for m in [16]:
     with fresh_inductor_cache():
         print(f"m={m}")
         k = 1280
@@ -28,13 +29,7 @@ for m in [2, 4, 8, 16]:
         torch._dynamo.decorators.mark_dynamic(
             dynamic_a,  # s0
             0,
-            backend_specializations=[
-                # hint, specialization
-                (2, lambda x0: x0 == 2),
-                (4, lambda x0: x0 == 4),
-                (8, lambda x0: x0 == 8),
-                (16, lambda x0: x0 == 16),
-            ],
+            specialize_on=[lambda x: x == 8, lambda x: x == 16],
         )
         torch._dynamo.decorators.mark_dynamic(
             dynamic_b,
