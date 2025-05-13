@@ -3,6 +3,7 @@
 import os
 
 import torch
+import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
@@ -197,7 +198,7 @@ class DeviceMeshTest(DTensorTestBase):
         local_tensor = torch.randn(2, 8)
         global_tensor = funcol.all_gather_tensor(
             local_tensor, gather_dim=0, group=(mesh, 0)
-        )
+        ).wait()
         self.assertEqual(global_tensor.shape, (self.world_size * 2, 8))
 
     @with_comms
@@ -208,7 +209,7 @@ class DeviceMeshTest(DTensorTestBase):
         mesh_pg = ref_global_mesh.get_group()
         global_mesh = DeviceMesh.from_group(mesh_pg, self.device_type)
         self.assertEqual(ref_global_mesh, global_mesh)
-        self.assertEqual(ref_global_mesh._dim_group_infos, global_mesh._dim_group_infos)
+        self.assertEqual(ref_global_mesh._dim_group_names, global_mesh._dim_group_names)
         self.assertEqual(
             ref_global_mesh._coordinate_on_dim, global_mesh._coordinate_on_dim
         )
@@ -217,7 +218,7 @@ class DeviceMeshTest(DTensorTestBase):
             mesh_pg, self.device_type, mesh=torch.arange(self.world_size)
         )
         self.assertEqual(ref_global_mesh, global_mesh)
-        self.assertEqual(ref_global_mesh._dim_group_infos, global_mesh._dim_group_infos)
+        self.assertEqual(ref_global_mesh._dim_group_names, global_mesh._dim_group_names)
         self.assertEqual(
             ref_global_mesh._coordinate_on_dim, global_mesh._coordinate_on_dim
         )
@@ -396,24 +397,20 @@ class DeviceMeshTestNDim(DTensorTestBase):
             mesh_dim_names=("dp_replicate", "dp_shard"),
         )
 
-        ref_mesh_dp_dim_group_infos = ref_mesh._dim_group_infos[:2]
-        for (_, ref_ranks, _), (_, ranks, _) in zip(
-            ref_mesh_dp_dim_group_infos, dp_mesh._dim_group_infos
-        ):
-            self.assertEqual(ref_ranks, ranks)
+        ref_mesh_dp_dim_group_names = ref_mesh._dim_group_names[:2]
+        self.assertEqual(ref_mesh_dp_dim_group_names, dp_mesh._dim_group_names[:2])
         # Cannot check directly for mesh equality since parent meshes are not
         # the same since the ref's parent mesh is 3D
         self.assertEqual(dp_mesh["dp_replicate"].mesh, ref_mesh["dp_replicate"].mesh)
-        for (_, ref_ranks, _), (_, ranks, _) in zip(
-            dp_mesh["dp_replicate"]._dim_group_infos,
-            ref_mesh["dp_replicate"]._dim_group_infos,
-        ):
-            self.assertEqual(ref_ranks, ranks)
+        self.assertEqual(
+            dp_mesh["dp_replicate"]._dim_group_names,
+            ref_mesh["dp_replicate"]._dim_group_names,
+        )
         self.assertEqual(dp_mesh["dp_shard"].mesh, ref_mesh["dp_shard"].mesh)
-        for (_, ref_ranks, _), (_, ranks, _) in zip(
-            dp_mesh["dp_shard"]._dim_group_infos, ref_mesh["dp_shard"]._dim_group_infos
-        ):
-            self.assertEqual(ref_ranks, ranks)
+        self.assertEqual(
+            dp_mesh["dp_shard"]._dim_group_names,
+            ref_mesh["dp_shard"]._dim_group_names,
+        )
 
     @with_comms()
     def test_from_group_with_mesh_shape_2d(self):
@@ -456,12 +453,13 @@ class DeviceMeshTestNDim(DTensorTestBase):
             mesh_dim_names=("dp_replicate", "dp_shard"),
         )
 
-        ref_mesh_dp_dim_group_infos = ref_mesh._dim_group_infos[:2]
-        for (_, ref_ranks, _), (_, ranks, _) in zip(
-            ref_mesh_dp_dim_group_infos, dp_mesh._dim_group_infos
+        # self.assertEqual(ref_mesh._dim_group_names, dp_mesh._dim_group_names)
+        for mesh_dim_group, ref_mesh_dim_group in zip(
+            dp_mesh.get_all_groups(), ref_mesh.get_all_groups()
         ):
-            self.assertEqual(ref_ranks, ranks)
-
+            mesh_dim_group_ranks = dist.get_process_group_ranks(mesh_dim_group)
+            ref_mesh_dim_group_ranks = dist.get_process_group_ranks(ref_mesh_dim_group)
+            self.assertEqual(mesh_dim_group_ranks, ref_mesh_dim_group_ranks)
         # check both the 2d mesh and the submeshes are exactly the same.
         self.assertEqual(dp_mesh, ref_mesh)
         self.assertEqual(dp_mesh["dp_replicate"], ref_mesh["dp_replicate"])
