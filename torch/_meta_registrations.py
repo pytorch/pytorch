@@ -1,14 +1,12 @@
 # mypy: allow-untyped-defs
 import math
-import operator
 from collections.abc import Sequence
 from enum import Enum
-from functools import reduce, wraps
+from functools import wraps
 from typing import Callable, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
-import torch._prims as prims
 import torch._prims_common as utils
 from torch import SymBool, SymFloat, Tensor
 from torch._decomp import (
@@ -159,105 +157,6 @@ def meta_linspace_logspace(
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-
-
-# this function is python match of computeStride_impl in TensorUtils.cpp
-def _compute_stride(old_shape, old_stride, new_shape):
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
-
-    if len(old_shape) == 0:
-        return [1] * len(new_shape)
-
-    numel = reduce(operator.mul, old_shape, 1)
-    zero_numel = guard_or_false(numel == 0)
-    if zero_numel and old_shape == new_shape:
-        return old_stride
-
-    new_stride = [0] * len(new_shape)
-
-    if zero_numel:
-        for view_d in range(len(new_shape) - 1, -1, -1):
-            if view_d == len(new_shape) - 1:
-                new_stride[view_d] = 1
-            else:
-                new_stride[view_d] = (
-                    max(new_shape[view_d + 1], 1) * new_stride[view_d + 1]
-                )
-        return new_stride
-
-    view_d = len(new_shape) - 1
-    chunk_base_stride = old_stride[-1]
-    tensor_numel = 1
-    view_numel = 1
-
-    for tensor_d in range(len(old_shape) - 1, -1, -1):
-        tensor_numel *= old_shape[tensor_d]
-
-        if tensor_d == 0 or (
-            guard_or_true(old_shape[tensor_d - 1] != 1)
-            and guard_or_true(
-                old_stride[tensor_d - 1] != tensor_numel * chunk_base_stride
-            )
-        ):
-            while view_d >= 0 and (
-                guard_or_true(view_numel < tensor_numel)
-                or guard_or_false(new_shape[view_d] == 1)
-            ):
-                new_stride[view_d] = view_numel * chunk_base_stride
-                view_numel *= new_shape[view_d]
-                view_d -= 1
-
-            if guard_or_true(view_numel != tensor_numel):
-                return None
-
-            if tensor_d > 0:
-                chunk_base_stride = old_stride[tensor_d - 1]
-                tensor_numel = 1
-                view_numel = 1
-    if view_d != -1:
-        return None
-    return new_stride
-
-
-# if a is contiguous, we can always reshape with as_strided and contiguous_strides.
-# if a is not contiguous and _compute_stride succeed we also use as_strided without clone.
-def _reshape_view_meta(a, shape):
-    from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
-
-    # Creates a valid shape
-    shape = utils.extract_shape_from_varargs(shape, validate=False)
-
-    # Reshape may be given a shape with a -1 length
-    # This indicates that the dimension's length should be inferred
-    shape = utils.infer_size(shape, a.numel())
-
-    # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
-    shape_numel = reduce(operator.mul, shape, 1)
-    torch._check(
-        a.numel() == shape_numel,
-        f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
-    )
-
-    if len(shape) == len(a.shape) and statically_known_true(sym_eq(shape, a.shape)):
-        return prims.view_of(a)
-
-    # if a is contiguous, we can always reshape with as_strided.
-    if a.is_contiguous():
-        return a.as_strided(shape, utils.make_contiguous_strides_for(shape))
-
-    # if a is not contiguous and _compute_stride succeed we also use as_strided.
-    new_strides = _compute_stride(a.size(), a.stride(), shape)
-    if new_strides is not None:
-        return a.as_strided(shape, new_strides)
-
-    raise ValueError(
-        f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!"
-    )
-
-
-@register_meta([aten.view.default, aten._unsafe_view.default])
-def view_meta(a, *shape):
-    return _reshape_view_meta(a, *shape)
 
 
 @register_meta([aten.take.default, aten.take.out])
