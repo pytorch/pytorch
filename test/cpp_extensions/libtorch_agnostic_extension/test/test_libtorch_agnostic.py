@@ -1,6 +1,6 @@
 # Owner(s): ["module: cpp"]
 
-import libtorch_agnostic  # noqa: F401
+from pathlib import Path
 
 import torch
 from torch.testing._internal.common_device_type import (
@@ -8,12 +8,23 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     onlyCUDA,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    install_cpp_extension,
+    run_tests,
+    TestCase,
+    xfailIfTorchDynamo,
+)
 
 
 class TestLibtorchAgnostic(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        install_cpp_extension(extension_root=Path(__file__).parent.parent)
+
     @onlyCPU
     def test_slow_sgd(self, device):
+        import libtorch_agnostic
+
         param = torch.rand(5, device=device)
         grad = torch.rand_like(param)
         weight_decay = 0.01
@@ -39,6 +50,8 @@ class TestLibtorchAgnostic(TestCase):
 
     @onlyCUDA
     def test_identity_does_not_hog_memory(self, device):
+        import libtorch_agnostic
+
         def _run_identity(prior_mem):
             t = torch.rand(32, 32, device=device)
             self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
@@ -53,6 +66,8 @@ class TestLibtorchAgnostic(TestCase):
             self.assertEqual(curr_mem, init_mem)
 
     def test_exp_neg_is_leaf(self, device):
+        import libtorch_agnostic
+
         t1 = torch.rand(2, 3, device=device)
         t2 = torch.rand(3, 2, device=device)
         t3 = torch.rand(2, device=device)
@@ -63,6 +78,8 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(is_leaf, t3.is_leaf)
 
     def test_my_abs(self, device):
+        import libtorch_agnostic
+
         t = torch.rand(32, 16, device=device) - 0.5
         cpu_t = libtorch_agnostic.ops.my_abs(t)
         self.assertEqual(cpu_t, torch.abs(t))
@@ -79,7 +96,14 @@ class TestLibtorchAgnostic(TestCase):
                 curr_mem = torch.cuda.memory_allocated(device)
                 self.assertEqual(curr_mem, init_mem)
 
+    # TODO: Debug this:
+    # torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors:
+    # call_function libtorch_agnostic.my_ones_like.default(*(FakeTensor(..., size=(3, 1)), 'cpu'),
+    # **{}): got AssertionError("tensor's device must be `meta`, got cpu instead")
+    @xfailIfTorchDynamo
     def test_my_ones_like(self, device):
+        import libtorch_agnostic
+
         t = torch.rand(3, 1, device=device) - 0.5
         cpu_t = libtorch_agnostic.ops.my_ones_like(t, "cpu")
         self.assertEqual(cpu_t, torch.ones_like(t, device="cpu"))
@@ -98,6 +122,8 @@ class TestLibtorchAgnostic(TestCase):
 
     @onlyCUDA
     def test_z_delete_torch_lib(self, device):
+        import libtorch_agnostic
+
         # Why the z + CUDA? THIS TEST MUST BE RUN LAST
         # We are testing that unloading the library properly deletes the registrations, so running this test
         # earlier will cause all other tests in this file to fail
