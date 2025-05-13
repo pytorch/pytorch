@@ -412,7 +412,7 @@ test_inductor_aoti() {
   # Uncomment next line and delete two more  when https://github.com/pytorch/pytorch/issues/153422 is resolved
   # CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference
   build/bin/test_aoti_abi_check
-  LD_LIBRARY_PATH=/opt/conda/envs/py_3.10/lib/:$LD_LIBRARY_PATH bin/test_aoti_inference --gtest_filter='-*Cuda'
+  LD_LIBRARY_PATH=/opt/conda/envs/py_3.10/lib/:${TORCH_LIB_DIR}:$LD_LIBRARY_PATH build/bin/test_aoti_inference
 }
 
 test_inductor_cpp_wrapper_shard() {
