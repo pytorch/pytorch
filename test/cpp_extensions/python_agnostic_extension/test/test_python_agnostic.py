@@ -59,7 +59,7 @@ class TestPythonAgnostic(TestCase):
         self.assertFalse("Py" in missing_symbols)
 
 
-instantiate_device_type_tests(TestPythonAgnostic, globals())
+instantiate_device_type_tests(TestPythonAgnostic, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()

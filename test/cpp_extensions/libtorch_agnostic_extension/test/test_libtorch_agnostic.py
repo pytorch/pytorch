@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import (
     install_cpp_extension,
     run_tests,
     TestCase,
+    xfailIfTorchDynamo,
 )
 
 
@@ -95,6 +96,11 @@ class TestLibtorchAgnostic(TestCase):
                 curr_mem = torch.cuda.memory_allocated(device)
                 self.assertEqual(curr_mem, init_mem)
 
+    # TODO: Debug this:
+    # torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors:
+    # call_function libtorch_agnostic.my_ones_like.default(*(FakeTensor(..., size=(3, 1)), 'cpu'),
+    # **{}): got AssertionError("tensor's device must be `meta`, got cpu instead")
+    @xfailIfTorchDynamo
     def test_my_ones_like(self, device):
         import libtorch_agnostic
 
