@@ -3315,6 +3315,7 @@
 
 - func: rms_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight=None, float? eps=None) -> Tensor
   dispatch:
+    CUDA: rms_norm_cuda
     CompositeImplicitAutograd: rms_norm_symint
 
 - func: _fused_rms_norm(Tensor input, int normalized_shape_ndim, Tensor weight, float eps) -> Tensor
