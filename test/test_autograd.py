@@ -7430,8 +7430,6 @@ for shape in [(1,), ()]:
         self.assertEqual(b_grad, c_grad)
         self.assertEqual(b_grad, d_grad)
 
-    # PYTORCH_TEST_WITH_DYNAMO=1 test fails on CI but can't repro locally
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127115")
     def test_checkpointing_without_reentrant_dataparallel(self):
         """
         Verifies gradient correctness when checkpoint without reentrant autograd
@@ -7489,8 +7487,6 @@ for shape in [(1,), ()]:
         # should only call hook once
         self.assertEqual(count, 1)
 
-    # https://github.com/pytorch/pytorch/issues/127115
-    @xfailIfTorchDynamo
     def test_checkpointing_without_reentrant_arbitrary_input_output(self):
         """
         Ensures checkpointing without reentrant autograd works with functions
