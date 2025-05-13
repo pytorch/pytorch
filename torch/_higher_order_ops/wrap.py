@@ -110,9 +110,11 @@ class WrapGeneric(HigherOrderOperator):
         module = importlib.import_module(module_path)
         obj = getattr(module, attribute)
 
+        kwarg_values = gmod.meta["_wrap_generic_kwarg_values"]
+
         @disable
         def wrapper():
-            return obj(gmod, *args, **kwargs)
+            return obj(gmod, *args, **kwargs, **kwarg_values)
 
         return wrapper()
 
