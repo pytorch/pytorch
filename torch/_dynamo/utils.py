@@ -3150,6 +3150,10 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     args, kwargs = get_fake_values_from_nodes(
         tx, (node.args, node.kwargs), allow_non_graph_fake
     )
+    flat_args_kwargs, _ = pytree.tree_flatten((args, kwargs))
+    id_to_initial_version = {
+        id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
+    }
 
     nnmodule = None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
@@ -3290,6 +3294,17 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         _ = pytree.tree_map_only(
             torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
         )
+
+    if (
+        torch._dynamo.config.use_graph_deduplication
+        or torch._dynamo.config.track_nodes_for_deduplication
+    ):
+        tx.output.region_tracker.track_node_mutations(
+            node,
+            flat_args_kwargs,
+            id_to_initial_version,
+        )
+
     return ret_val
 
 
