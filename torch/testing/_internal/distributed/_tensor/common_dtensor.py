@@ -340,10 +340,7 @@ class DTensorTestBase(MultiProcessTestCase):
     @property
     def device_type(self) -> str:
         # if enough GPU/XPU/HPU we can use those devices, otherwise we fallback to CPU
-        if (
-            not (TEST_CUDA or TEST_XPU or TEST_HPU)
-            or DEVICE_COUNT < self.world_size
-        ):
+        if not (TEST_CUDA or TEST_XPU or TEST_HPU) or DEVICE_COUNT < self.world_size:
             return "cpu"
         else:
             return DEVICE_TYPE
