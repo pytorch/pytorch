@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: LOG015
 
 import json
 import logging

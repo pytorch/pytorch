@@ -52,25 +52,27 @@ from torch.testing._internal.logging_utils import logs_to_string
 def make_compiler_fn(
     fullgraph=True, dynamic=True, backend="inductor", gm_hook=lambda gm: None
 ):
-    assert backend in ["inductor", "aot_eager", "ca_eager"]
+    assert backend in ["inductor", "aot_eager", "eager", "ca_eager"]
 
     def _compiler_fn(gm):
         """Same as torch.compile() but counts number of compiles"""
         gm_hook(gm)
 
+        _backend = backend
         if backend == "ca_eager":
             return gm
+        elif backend != "eager":
 
-        def _inner_compiler(gm_, example_inputs_):
-            counters["compiled_autograd"]["compiles"] += 1
-            if backend == "inductor":
-                return inductor.compile(gm_, example_inputs_)
-            elif backend == "aot_eager":
-                return aot_eager(gm_, example_inputs_)
+            def _inner_compiler(gm_, example_inputs_):
+                counters["compiled_autograd"]["compiles"] += 1
+                if backend == "inductor":
+                    return inductor.compile(gm_, example_inputs_)
+                elif backend == "aot_eager":
+                    return aot_eager(gm_, example_inputs_)
 
-        return torch.compile(
-            gm, backend=_inner_compiler, fullgraph=fullgraph, dynamic=dynamic
-        )
+            _backend = _inner_compiler
+
+        return torch.compile(gm, backend=_backend, fullgraph=fullgraph, dynamic=dynamic)
 
     return _compiler_fn
 
@@ -660,83 +662,72 @@ main()
 
         self.check_output_and_recompiles(fn)
 
-    def test_torch_compile_api_inductor(self):
-        def fn():
-            torch.manual_seed(123)
-            model = torch.nn.Sequential(
-                torch.nn.Linear(4, 4),
-                torch.nn.Sigmoid(),
-            )
+    @parametrize("api", ("compile", "optimize"))
+    @parametrize("backend", ("eager", "aot_eager", "inductor"))
+    def test_compile_api(self, api, backend):
+        def wrap(fn, backend):
+            if api == "compile":
+                return torch.compile(fn, backend=backend)
+            elif api == "optimize":
+                return torch._dynamo.optimize(backend)(fn)
 
+        def fn(model, inputs):
             res = []
-            for _ in range(3):
-                x = torch.randn([1, 4])
-
-                result = model(x).sum()
+            for inp in inputs:
+                result = model(inp).sum()
                 result.backward()
                 res.append(model[0].weight.grad)
                 res.append(model[0].bias.grad)
                 model.zero_grad()
             return res
 
-        expected = fn()
+        torch.manual_seed(123)
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.Sigmoid(),
+        )
+        inputs = [
+            torch.randn([1, 4]),
+            torch.randn([2, 4]),
+            torch.randn([3, 4]),
+        ]
+
+        expected = fn(model, inputs)
         with config.patch(compiled_autograd=True):
-            compiled_fn = torch.compile(fn)
-        actual = compiled_fn()
+            compiled_fn = wrap(fn, backend)
+        actual = compiled_fn(model, inputs)
         self.assertEqual(expected, actual)
-        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 2)
 
-    def test_torch_compile_api_aot_eager(self):
-        def fn():
-            torch.manual_seed(123)
-            model = torch.nn.Sequential(
-                torch.nn.Linear(4, 4),
-                torch.nn.Sigmoid(),
-            )
+    @parametrize("backend", ("eager", "aot_eager", "inductor"))
+    def test_optimize_assert(self, backend):
+        # can be merged into the test above once we support
+        # no graph break on .backward
 
-            res = []
-            for _ in range(3):
-                x = torch.randn([1, 4])
+        def fn(model, inp):
+            # NOTE: not calling .backward in the compiled fn
+            return model(inp).sum()
 
-                result = model(x).sum()
-                result.backward()
-                res.append(model[0].weight.grad)
-                res.append(model[0].bias.grad)
-                model.zero_grad()
-            return res
+        torch.manual_seed(123)
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.Sigmoid(),
+        )
+        inp = torch.randn([1, 4])
 
-        expected = fn()
+        out = fn(model, inp)
+        out.backward()
+        expected = [p.grad for p in model.parameters()]
+        model.zero_grad()
         with config.patch(compiled_autograd=True):
-            compiled_fn = torch.compile(fn, backend="aot_eager")
-        actual = compiled_fn()
+            compiled_fn = torch._dynamo.optimize_assert(backend)(fn)
+
+        # should not error due to undefined `rebuild_ctx`
+        out = compiled_fn(model, inp)
+        out.backward()
+        actual = [p.grad for p in model.parameters()]
         self.assertEqual(expected, actual)
-        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
-
-    def test_torch_compile_api_eager(self):
-        def fn():
-            torch.manual_seed(123)
-            model = torch.nn.Sequential(
-                torch.nn.Linear(4, 4),
-                torch.nn.Sigmoid(),
-            )
-
-            res = []
-            for _ in range(3):
-                x = torch.randn([1, 4])
-
-                result = model(x).sum()
-                result.backward()
-                res.append(model[0].weight.grad)
-                res.append(model[0].bias.grad)
-                model.zero_grad()
-            return res
-
-        expected = fn()
-        with config.patch(compiled_autograd=True):
-            compiled_fn = torch.compile(fn, backend="eager")
-        actual = compiled_fn()
-        self.assertEqual(expected, actual)
-        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 0)
 
     def test_multiple_torch_compile(self):
         model = torch.nn.Sequential(
@@ -4119,6 +4110,57 @@ class CompiledAutograd1(torch.nn.Module):
         ):
             fn()
 
+    def test_higher_order_gradients(self):
+        def f(x):
+            return x**3
+
+        def fn(fwd_compiler, ca_compiler):
+            torch.manual_seed(123)
+            x = torch.tensor(2.0, requires_grad=True)
+            first, second, third, fourth = None, None, None, None
+            try:
+                with compiled_autograd._enable(ca_compiler):
+                    first = torch.autograd.grad(
+                        fwd_compiler(f)(x), x, create_graph=True
+                    )[0]
+                    second = torch.autograd.grad(first, x, create_graph=True)[0]
+                    third = torch.autograd.grad(second, x, create_graph=True)[0]
+                    fourth = torch.autograd.grad(third, x, create_graph=True)[0]
+            except RuntimeError as e:
+                assert "does not currently support higher order gradients" in str(e)
+                return (first, second, third, fourth)
+
+            return (first, second, third, fourth)
+
+        def eager():
+            return torch.compile(backend="eager")
+
+        def aot_eager():
+            return torch.compile(backend="aot_eager")
+
+        # Without AOTAutograd, no problem
+        first, second, third, fourth = fn(eager(), eager())
+        self.assertEqual(counters["compiled_autograd"]["captures"], 4)
+        self.assertEqual(first, 12)  # 3x^2
+        self.assertEqual(second, 12)  # 6x
+        self.assertEqual(third, 6)  # 6
+        self.assertEqual(fourth, 0)
+        # and should cache hit
+        counters.clear()
+        _ = fn(eager(), eager())
+        self.assertEqual(counters["compiled_autograd"]["captures"], 0)
+        torch._dynamo.reset()
+
+        # With AOTAutograd, can't create_graph
+        first, second, third, fourth = fn(aot_eager(), aot_eager())
+        self.assertIsNone(second)
+
+        first, second, third, fourth = fn(aot_eager(), eager())
+        self.assertIsNone(second)
+
+        first, second, third, fourth = fn(eager(), aot_eager())
+        self.assertIsNone(third)
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
@@ -4142,18 +4184,38 @@ def make_wrapped(fn, ctxs):
     return wrapped
 
 
+def lookup_backend(test_name):
+    if test_name in xfail_by_backend["inductor"]:
+        return "aot_eager"
+    elif test_name in xfail_by_backend["aot_eager"]:
+        return "eager"
+    elif test_name in xfail_by_backend["eager"]:
+        return "ca_eager"
+    else:
+        assert test_name not in xfail_by_backend["ca_eager"]
+        return "inductor"
+
+
 def wrap_test_class(orig_cls):
     dct = orig_cls.__dict__.copy()
     for name in list(dct.keys()):
         fn = dct[name]
         if not callable(fn) or name in skipped_tests:
             continue
-        elif known_failures_re.match(name) or name in known_failing_tests:
+        elif (
+            xfail_re.match(name)
+            or name in xfail_by_backend["ca_eager"]
+            or name in xfail_divergence_from_eager
+        ):
             dct[name] = unittest.expectedFailure
         elif name.startswith("test_"):
-            fullgraph = name not in known_graph_breaks_tests
             ctxs = [
-                compiled_autograd._enable(make_compiler_fn(fullgraph=fullgraph)),
+                compiled_autograd._enable(
+                    make_compiler_fn(
+                        backend=lookup_backend(name),
+                        fullgraph=name not in known_graph_breaks_tests,
+                    )
+                ),
                 test_contexts.get(name, contextlib.nullcontext()),
             ]
             dct[name] = make_wrapped(fn, ctxs)
@@ -4238,6 +4300,11 @@ known_graph_breaks_tests = {
     "test_prehook_ordering",  # retains_grad_hooks
     "test_will_engine_execute_node",  # retains_grad_hooks
     "test_backward_to_node",  # retains_grad_hooks
+    "test_backward_with_nonleaf_inputs",  # retains_grad_hook on non-leaf input
+    "test_create_graph_and_full_backward_hook_cycle",  # _pack_with_none
+    "test_full_backward_hook_double_backward",  # _pack_with_none
+    "test_grad_mode_restored_reentrant",  # assertTrue
+    "test_multi_grad_any_hooks",  # register_multi_grad_hook
 }
 
 test_contexts = {
@@ -4248,101 +4315,94 @@ test_contexts = {
 }
 
 # These groups of tests aren't supported yet
-known_failures_re = re.compile(r"^test_(sparse|profiler|gradcheck|named_tensor)")
+xfail_re = re.compile(r"^test_(sparse|profiler|gradcheck|named_tensor)")
 
-# Bugs needing investigation:
-skipped_tests = {
-    "test_callback_propagates_errors_from_device_thread",  # fullgraph for queue_callback, but graph break for RuntimeError
+# Tests fail at different stages, we categorize them wrt to their backends
+# We run only the last passing backend in this order:
+# ca_eager -> eager -> aot_eager -> inductor
+xfail_by_backend = {
+    "ca_eager": {  # xfail
+        "test_callback_propagates_errors_from_device_thread",  # fullgraph for queue_callback, but graph break for RuntimeError
+        "test_reentrant_with_callbacks_both_depths",  # queue_callback
+        "test_reentrant_with_callbacks_depth_0",  # queue_callback
+        "test_reentrant_with_callbacks_depth_1",  # queue_callback
+        "test_current_graph_task_execution_order",  # nodes are already freed by the time dynamo traces the lifted hook
+        "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
+        "test_current_node",  # TorchDispatchMode not yet implemented for compiled autograd
+        "test_post_accumulate_grad_hook_ordering",  # accuracy error
+        "test_current_graph_task_id",  # autograd state already cleared once dynamo is called
+        "test_custom_function_forward_mode_forward_is_no_op",  # forward AD
+        "test_custom_function_forward_mode_inplace_checks",  # forward AD
+        "test_custom_function_forward_mode_view_checks",  # forward AD
+        "test_custom_function_forward_mode_wrong_formula",  # forward AD
+        "test_node_post_hook_registered_during_unpack_hook",  # 'NoneType' object has no attribute 'register_hook'
+        "test_custom_function_error",  # forward AD
+        "test_custom_function_save_for_forward",  # forward AD
+        "test_dont_materialize_grads",  # undefined grad
+        "test_no_grad_copy",  # setting static member in lifted backward
+        "test_no_grad_copy_sparse",  # setting static member in lifted backward
+        "test_node_ordering_when_none_returned",  # torch._dynamo.exc.Unsupported: TypeError <built-in method clone
+        "test_save_output_nr",  # output_nr grad passed as None
+        # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
+        "test_grad_nonleaf_register_hook",
+        "test_backward_twice_without_saved_values",  # https://github.com/pytorch/pytorch/issues/129938
+        # Category: Higher Order Gradients
+        "test_default_saved_tensors_hooks_double_backward",  # wrong when pack hook returns non-leaf
+        "test_saved_variable_packing_unpacking_saved_original_with_hooks",  # wrong when pack hook returns non-leaf
+        "test_nested_anomaly_detect_nan",  # nested anomaly
+        "test_select_sum",  # batched gradients
+        "test_custom_autograd_no_early_free",  # batched gradients
+        "test_grad_batched_grad",  # batched gradients
+        # Uncategorized
+        "test_lobpcg",  # NaNs
+        "test_autograd_simple_views_python",  # gradient is None
+        "test_function_returns_undefined_tensor",  # gradient is None
+        "test_input_buffer_accum",  # add(sparse, dense)
+        "test_return_duplicate",  # batched gradients
+        "test_return_duplicate_inplace",  # batched gradients
+        "test_naughty_autograd_function_stashing_ctx",  # error not raised
+        "test_unrelated_inputs",  # batched gradients
+    },
+    "eager": {  # will be run without torch.compiling the CA graph
+        "test_setup_context_when_forward_has_default_args",  # autograd.Function with class methods
+        "test_accumulate_grad_tensor_reference",  # Out of bounds: frame_state_entry.stride[i] is None
+        "test_custom_function_exception",  # torch.no_grad(), torch._dynamo.exc.Unsupported: missing: WITH_EXCEPT_START
+        "test_to_sparse_backward",  # Out of bounds: frame_state_entry.stride[i] is None
+        "test_custom_function_non_tensor_inputs_outputs",  # gradient batching rule not implemented for aten::sym_size.int
+        "test_setitem",  # CopySlices accuracy error
+        "test_save_on_cpu_and_checkpoint",  # https://github.com/pytorch/pytorch/issues/147565
+        "test_checkpoint_detects_non_determinism",  # different error
+        "test_checkpointing_non_reentrant_autocast_cpu",  # saved != recompute
+        "test_checkpointing_non_reentrant_autocast_gpu",  # saved != recompute
+        "test_checkpointing_without_reentrant_saved_object_identity",  # same as https://github.com/pytorch/pytorch/issues/136193
+        "test_saved_variable_packing_unpacking_did_not_save_original_with_hooks",  # register_hooks multiple times
+        "test_saved_variable_saved_original_inplace_detach",  # RuntimeError not raised
+        "test_access_saved_tensor_twice_without_recomputation_works",  # saved != recompute
+        "test_checkpointing_without_reentrant_dataparallel",  # https://github.com/pytorch/pytorch/issues/127115
+        "test_checkpointing",  # takes very very long
+        "test_checkpointing_without_reentrant_input_requires_grad_False",  # takes very very long
+        "test_checkpointing_without_reentrant_input_requires_grad_True",  # takes very very long
+        "test_checkpointing_without_reentrant_memory_savings",  # takes very very long
+        "test_dtensor_different_gradient_placement",  # Dynamo failed to run FX node with fake tensors
+        "test_dtensor_noncontiguous_output",  # Dynamo failed to run FX node with fake tensors
+        "test_dtensor_partial_placement_graph_output",  # Dynamo failed to run FX node with fake tensors
+        "test_unwrap_async_collective_tensor_tangent",  # AttributeError: 'PlainTensorMeta' object has no attribute 'attrs'
+        "test_graph_save_on_cpu",  # torch.save should no-op and be recorded in the graph
+        "test_saving_variable_to_disk",  # torch.save should no-op and be recorded in the graph
+    },
+    "aot_eager": {  # will be run with torch.compile(backend="eager")
+        # Category: FakeTensor
+        "test_wrapped_number_saved_tensors_hooks",  # Proxy tensor should carryover is_wrapped_number_ of its original
+        "test_scalar_grad_mixed_device",  # Fake Tensors aren't propagating device properly for 0-dim grads
+        "test_grad",  # AOT backward higher order gradients
+        "test_grad_materialize_grads",  # AOT backward higher order gradients
+    },
+    "inductor": {},  # will be run with torch.compile(backend="aot_eager")
+    # tests not present in this dict will be run with torch.compile(backend="inductor")
 }
 
-known_failing_tests = {
-    # Category: Compiled autograd
-    "test_grad_mode_restored_reentrant",  # create_graph
-    "test_reentrant_with_callbacks_both_depths",  # queue_callback
-    "test_reentrant_with_callbacks_depth_0",  # queue_callback
-    "test_reentrant_with_callbacks_depth_1",  # queue_callback
-    "test_current_graph_task_execution_order",  # nodes are already freed by the time dynamo traces the lifted hook
-    "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
-    "test_current_node",  # TorchDispatchMode not yet implemented for compiled autograd
-    "test_post_accumulate_grad_hook_ordering",  # accuracy error
-    "test_accumulate_grad",  # create_graph
-    "test_anomaly_assign_parent_cleanup",  # create_graph
-    "test_backward_create_graph_warns",  # create_graph
-    "test_backward_with_nonleaf_inputs",  # create_graph
-    "test_create_graph_and_full_backward_hook_cycle",  # create_graph
-    "test_current_graph_task_id",  # autograd state already cleared once dynamo is called
-    "test_custom_autograd_repeated_grad_grad",  # create_graph
-    "test_custom_function_forward_mode_forward_is_no_op",  # forward AD
-    "test_custom_function_forward_mode_inplace_checks",  # forward AD
-    "test_custom_function_forward_mode_view_checks",  # forward AD
-    "test_custom_function_forward_mode_wrong_formula",  # forward AD
-    "test_default_saved_tensors_hooks_double_backward",  # create_graph
-    "test_node_post_hook_registered_during_unpack_hook",  # 'NoneType' object has no attribute 'register_hook'
-    "test_full_backward_hook_double_backward",  # create_graph
-    "test_function",  # create_graph
-    "test_grad",  # create_graph
-    "test_grad_materialize_grads",  # create_graph
-    "test_grad_nonleaf",  # create_graph
-    "test_grad_nonleaf_many_outputs",  # create_graph
-    "test_hessian_vector",  # create_graph
-    "test_inplace_on_view_backward",  # create_graph
-    "test_multi_grad_any_hooks",  # register_multi_grad_hook
-    "test_nested_anomaly_detect_nan",  # create_graph
-    "test_nested_anomaly_printstack_cleanup",  # create_graph
-    "test_once_differentiable",  # create_graph
-    "test_saved_variable_packing_unpacking_saved_original_with_hooks",  # create_graph
-    "test_select_sum",  # create_graph, also needs graph breaks
-    "test_custom_autograd_no_early_free",  # create_graph
-    "test_custom_function_error",  # vjp
-    "test_custom_function_save_for_forward",  # vjp
-    "test_dont_materialize_grads",  # undefined grad
-    "test_no_grad_copy",  # setting static member in lifted backward
-    "test_no_grad_copy_sparse",  # setting static member in lifted backward
-    "test_node_ordering_when_none_returned",  # torch._dynamo.exc.Unsupported: TypeError <built-in method clone
-    "test_save_output_nr",  # output_nr grad passed as None
-    "test_setup_context_when_forward_has_default_args",  # autograd.Function with class methods
-    "test_lobpcg",  # create_graph
-    # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
-    "test_grad_nonleaf_register_hook",
-    "test_backward_twice_without_saved_values",  # https://github.com/pytorch/pytorch/issues/129938
-    # Category: Dynamo (pass when directly running CA graph)
-    "test_accumulate_grad_tensor_reference",  # Out of bounds: frame_state_entry.stride[i] is None
-    "test_custom_function_exception",  # torch.no_grad(), torch._dynamo.exc.Unsupported: missing: WITH_EXCEPT_START
-    "test_to_sparse_backward",  # Out of bounds: frame_state_entry.stride[i] is None
-    "test_autograd_simple_views_python",  # gradient is None
-    "test_function_returns_undefined_tensor",  # gradient is None
-    "test_naughty_autograd_function_stashing_ctx",  # bytecode issue
-    "test_unrelated_inputs",  # gradient batching rule not implemented for aten::sym_size.int
-    "test_custom_function_non_tensor_inputs_outputs",  # gradient batching rule not implemented for aten::sym_size.int
-    "test_return_duplicate",  # gradient batching rule not implemented for aten::sym_size.int
-    "test_return_duplicate_inplace",  # gradient batching rule not implemented for aten::sym_size.int
-    "test_setitem",  # CopySlices accuracy error
-    "test_save_on_cpu_and_checkpoint",  # https://github.com/pytorch/pytorch/issues/147565
-    "test_checkpoint_detects_non_determinism",  # different error
-    "test_checkpointing_non_reentrant_autocast_cpu",  # saved != recompute
-    "test_checkpointing_non_reentrant_autocast_gpu",  # saved != recompute
-    "test_checkpointing_without_reentrant_saved_object_identity",  # same as https://github.com/pytorch/pytorch/issues/136193
-    "test_saved_variable_packing_unpacking_did_not_save_original_with_hooks",  # register_hooks multiple times
-    "test_saved_variable_saved_original_inplace_detach",  # RuntimeError not raised
-    "test_access_saved_tensor_twice_without_recomputation_works",  # saved != recompute
-    "test_checkpointing_without_reentrant_dataparallel",  # https://github.com/pytorch/pytorch/issues/127115
-    "test_checkpointing",  # takes very very long
-    "test_checkpointing_without_reentrant_input_requires_grad_False",  # takes very very long
-    "test_checkpointing_without_reentrant_input_requires_grad_True",  # takes very very long
-    "test_checkpointing_without_reentrant_memory_savings",  # takes very very long
-    "test_dtensor_different_gradient_placement",  # Dynamo failed to run FX node with fake tensors
-    "test_dtensor_noncontiguous_output",  # Dynamo failed to run FX node with fake tensors
-    "test_dtensor_partial_placement_graph_output",  # Dynamo failed to run FX node with fake tensors
-    "test_unwrap_async_collective_tensor_tangent",  # AttributeError: 'PlainTensorMeta' object has no attribute 'attrs'
-    # Category: Inductor (pass on backend="aot_eager")
-    "test_input_buffer_accum",  # does not support sparse_grad=True: https://github.com/pytorch/pytorch/issues/120267
-    "test_graph_save_on_cpu",  # does not support pin_memory: https://github.com/pytorch/pytorch/issues/134173
-    # Category: FakeTensor
-    "test_saving_variable_to_disk",  # torch.save should no-op and be recorded in the graph
-    "test_wrapped_number_saved_tensors_hooks",  # Proxy tensor should carryover is_wrapped_number_ of its original
-    "test_grad_batched_grad",  # torch._subclasses.fake_tensor.UnsupportedFakeTensorException: meta converter nyi
-    "test_scalar_grad_mixed_device",  # Fake Tensors aren't propagating device properly for 0-dim grads
-    # Category: Divergence from eager
+# These tests fail due to difference in semantics that we won't fix
+xfail_divergence_from_eager = {
     "test_invalid_gradients",  # can't give autograd error due to inaccurate output metadata of lifted backward
     "test_autograd_node_isinstance",  # backward ctx is a fake cls and not directly a Node instance
     "test_backward_hook_relative_ordering",  # compiled autograd collects breadth first, and module backward hook not supported
@@ -4350,16 +4410,21 @@ known_failing_tests = {
     "test_anomaly_mode_no_check_nan",  # different error messages
     "test_anomaly_grad_warnings",  # different error messages
     "test_anomaly_detect_nan",  # fake tensor errors on NaN
-    # Uncategorized
+    "test_once_differentiable",  # different node name: CompiledFunctionBackward
+    "test_function",  # different node name: CompiledFunctionBackward
+    "test_inplace_on_view_backward",  # different node name: CompiledFunctionBackward
+    "test_nested_anomaly_printstack_cleanup",  # anomaly NaN error message different
     "test_not_implemented_grad",  # Dynamo changes the types of exceptions
 }
 
+skipped_tests = set()
+
 if not HAS_CUDA:
     # Found Tesla M60 which is too old to be supported by the triton GPU compiler
-    known_failing_tests.add("test_type_conversions")
+    skipped_tests.add("test_type_conversions")
 
 if IS_S390X:
-    known_failing_tests.add("test_deep_reentrant")
+    skipped_tests.add("test_deep_reentrant")
 
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
