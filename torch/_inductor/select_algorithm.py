@@ -1298,6 +1298,7 @@ class TritonTemplate(KernelTemplate):
             )
             return e
 
+    # NOTE: MAKE SURE THAT ANY ARGUMENT ADDED TO THIS FUNCTION IS PROPERLY HANDLED IN _generated_code_cache.make_key.
     def generate_and_load(
         self,
         input_nodes: tuple[ir.IRNode],
