@@ -899,8 +899,13 @@ class TracingContext:
             return traceback.StackSummary()
         stack = self.frame_summary_stack
         if self.loc_in_frame is not None:
-            stack = stack + [self.loc_in_frame]
+            stack = stack + [self._populate_loc_in_frame_summary()]
         return traceback.StackSummary.from_list(stack)
+
+    def _populate_loc_in_frame_summary(self):
+        assert self.loc_in_frame is not None
+        filename, lineno, frame_name = self.loc_in_frame
+        return traceback.FrameSummary(filename, lineno, frame_name, lookup_line=False)
 
     # Call this when you want to call into some code that isn't necessarily
     # associated with the current frame state
@@ -973,9 +978,9 @@ class TracingContext:
 
     @staticmethod
     def set_current_loc(filename, lineno, frame_name):
-        TracingContext.get().loc_in_frame = traceback.FrameSummary(
-            filename, lineno, frame_name, lookup_line=False
-        )
+        # Save the current location in the frame. Lazily generate the
+        # framesummary.
+        TracingContext.get().loc_in_frame = (filename, lineno, frame_name)
 
 
 @contextmanager
