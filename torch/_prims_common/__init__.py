@@ -258,50 +258,33 @@ def check_all_strides(
     return _check_strides_helper(a, b, only_cuda=only_cuda, significant_only=False)
 
 
-def is_known_contiguous(a: TensorLikeType) -> bool:
-    """
-    This function will return True if the tensor is contiguous, and False if the
-    its not or if we can't determine if it is contiguous due to unbacked symbols
-    (it could be either in that case based on the actual runtime data).
-    """
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
-
-    if guard_or_false(a.numel() == 0):
-        return True
-
-    expected_stride = 1
-    for x, y in reversed(tuple(zip(a.shape, a.stride()))):
-        # Skips checking strides when a dimension has length 1
-        if guard_or_false(x == 1):
-            continue
-
-        if guard_or_true(y != expected_stride):
-            return False
-        expected_stride = expected_stride * x
-
-    return True
-
-
 # This function is equivalent to compute_contiguous() from TensorImpl.cpp
-def is_contiguous(a: TensorLikeType) -> bool:
+def is_contiguous(a: TensorLikeType, false_if_unknown=False) -> bool:
     """
     Tests whether a tensor is contiguous or not.
 
     Tensors are contiguous when they have no elements,
     one element, or when they have "nested" strides.
     """
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_or_true,
+        guard_size_oblivious,
+    )
 
-    if guard_size_oblivious(a.numel() < 2):
+    maybe_guard_or_false = guard_or_false if false_if_unknown else guard_size_oblivious
+    maybe_guard_or_true = guard_or_true if false_if_unknown else guard_size_oblivious
+
+    if maybe_guard_or_false(a.numel() < 2):
         return True
 
     expected_stride = 1
     for x, y in reversed(tuple(zip(a.shape, a.stride()))):
         # Skips checking strides when a dimension has length 1
-        if guard_size_oblivious(x == 1):
+        if maybe_guard_or_false(x == 1):
             continue
 
-        if guard_size_oblivious(y != expected_stride):
+        if maybe_guard_or_true(y != expected_stride):
             return False
         expected_stride = expected_stride * x
 
@@ -309,21 +292,28 @@ def is_contiguous(a: TensorLikeType) -> bool:
 
 
 # This function is equivalent to compute_channels_last_contiguous_2d() in TensorImpl.cpp
-def is_channels_last_contiguous_2d(a: Tensor) -> bool:
+def is_channels_last_contiguous_2d(a: Tensor, false_if_unknown=False) -> bool:
     # NHWC or not channels last 2D contiguous
     if a.ndim != 4:
         return False
 
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_or_true,
+        guard_size_oblivious,
+    )
+
+    maybe_guard_or_false = guard_or_false if false_if_unknown else guard_size_oblivious
+    maybe_guard_or_true = guard_or_true if false_if_unknown else guard_size_oblivious
 
     expected_stride = 1
     for idx in (1, 3, 2, 0):
         length = a.shape[idx]
-        if guard_size_oblivious(length == 1):
+        if maybe_guard_or_false(length == 1):
             continue
 
         stride = a.stride()[idx]
-        if guard_size_oblivious(stride != expected_stride):
+        if maybe_guard_or_true(stride != expected_stride):
             return False
 
         expected_stride *= length
@@ -331,67 +321,28 @@ def is_channels_last_contiguous_2d(a: Tensor) -> bool:
     return True
 
 
-# similar to is_channels_last_contiguous_2d but return false on data dependency.
-def is_known_channels_last_contiguous_2d(a: Tensor) -> bool:
-    # NHWC or not channels last 2D contiguous
-    if a.ndim != 4:
-        return False
-
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
-
-    expected_stride = 1
-    for idx in (1, 3, 2, 0):
-        length = a.shape[idx]
-        if guard_or_false(length == 1):
-            continue
-
-        stride = a.stride()[idx]
-        if guard_or_true(stride != expected_stride):
-            return False
-
-        expected_stride *= length
-
-    return True
-
-
-def is_channels_last_contiguous_3d(a: Tensor) -> bool:
+def is_channels_last_contiguous_3d(a: Tensor, false_if_unknown=False) -> bool:
     # NDHWC or not channels last 3D contiguous
     if a.ndim != 5:
         return False
 
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_or_true,
+        guard_size_oblivious,
+    )
+
+    maybe_guard_or_false = guard_or_false if false_if_unknown else guard_size_oblivious
+    maybe_guard_or_true = guard_or_true if false_if_unknown else guard_size_oblivious
 
     expected_stride = 1
     for idx in (1, 4, 3, 2, 0):
         length = a.shape[idx]
-        if guard_size_oblivious(length == 1):
+        if maybe_guard_or_false(length == 1):
             continue
 
         stride = a.stride()[idx]
-        if guard_size_oblivious(stride != expected_stride):
-            return False
-
-        expected_stride *= length
-
-    return True
-
-
-# similar to is_channels_last_contiguous_3d but return false on data dependency.
-def is_known_channels_last_contiguous_3d(a: Tensor) -> bool:
-    # NDHWC or not channels last 3D contiguous
-    if a.ndim != 5:
-        return False
-
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
-
-    expected_stride = 1
-    for idx in (1, 4, 3, 2, 0):
-        length = a.shape[idx]
-        if guard_or_false(length == 1):
-            continue
-
-        stride = a.stride()[idx]
-        if guard_or_true(stride != expected_stride):
+        if maybe_guard_or_true(stride != expected_stride):
             return False
 
         expected_stride *= length
@@ -415,16 +366,16 @@ def validate_memory_format(memory_format: torch.memory_format):
 
 
 def is_contiguous_for_memory_format(  # type: ignore[return]
-    a: Tensor, *, memory_format: torch.memory_format
+    a: Tensor, *, memory_format: torch.memory_format, false_if_unknown=False
 ) -> bool:
     validate_memory_format(memory_format)
 
     if memory_format == torch.contiguous_format:
-        return is_contiguous(a)
+        return is_contiguous(a, false_if_unknown)
     if memory_format == torch.channels_last:
-        return is_channels_last_contiguous_2d(a)
+        return is_channels_last_contiguous_2d(a, false_if_unknown)
     if memory_format == torch.channels_last_3d:
-        return is_channels_last_contiguous_3d(a)
+        return is_channels_last_contiguous_3d(a, false_if_unknown)
 
     torch._check(
         False,
@@ -432,22 +383,26 @@ def is_contiguous_for_memory_format(  # type: ignore[return]
     )
 
 
+def is_known_contiguous(a: TensorLikeType) -> bool:
+    return is_contiguous(a, false_if_unknown=True)
+
+
+# similar to is_channels_last_contiguous_2d but return false on data dependency.
+def is_known_channels_last_contiguous_2d(a: Tensor) -> bool:
+    return is_channels_last_contiguous_2d(a, false_if_unknown=True)
+
+
+# similar to is_channels_last_contiguous_3d but return false on data dependency.
+def is_known_channels_last_contiguous_3d(a: Tensor) -> bool:
+    return is_channels_last_contiguous_3d(a, false_if_unknown=True)
+
+
 # similar to is_contiguous_for_memory_format but return false on data dependency.
 def is_known_contiguous_for_memory_format(  # type: ignore[return]
     a: Tensor, *, memory_format: torch.memory_format
 ) -> bool:
-    validate_memory_format(memory_format)
-
-    if memory_format == torch.contiguous_format:
-        return is_known_contiguous(a)
-    if memory_format == torch.channels_last:
-        return is_known_channels_last_contiguous_2d(a)
-    if memory_format == torch.channels_last_3d:
-        return is_known_channels_last_contiguous_3d(a)
-
-    torch._check(
-        False,
-        lambda: f"is_contiguous received unsupported memory format {memory_format}",
+    return is_contiguous_for_memory_format(
+        a, memory_format=memory_format, false_if_unknown=True
     )
 
 
