@@ -2,6 +2,9 @@
 
 set -ex
 
+ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
+OS_VERSION=$(grep -oP '(?<=^VERSION_ID=).+' /etc/os-release | tr -d '"')
+
 install_ubuntu() {
   # NVIDIA dockers for RC releases use tag names like `11.0-cudnn9-devel-ubuntu18.04-rc`,
   # for this case we will set UBUNTU_VERSION to `18.04-rc` so that the Dockerfile could
@@ -131,7 +134,15 @@ install_centos() {
     vim \
     unzip \
     gdb
-
+  if [[ $OS_VERSION == 9 ]]
+  then
+	  dnf --enablerepo=crb -y install libsndfile-devel
+	  yum install -y procps
+  else
+	  yum install -y \
+            opencv-devel \
+	    libsndfile-devel
+  fi
   # Cleanup
   yum clean all
   rm -rf /var/cache/yum
