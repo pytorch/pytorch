@@ -110,7 +110,7 @@ class WrapBackendDebug:
             # Check for either accuracy (level 4) or other type of failures.
             if config.repro_level == 4:
                 # Check Accuracy
-                compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs, **kwargs)
+                compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs)
                 if _accuracy_fails(gm, example_inputs, compiler_fn):
                     log.warning(
                         "Accuracy failed for the TorchDynamo produced graph. Creating script to minify the error."
@@ -125,9 +125,7 @@ class WrapBackendDebug:
                     raise exc
             else:
                 try:
-                    compiled_gm = compiler_fn(
-                        copy.deepcopy(gm), example_inputs, **kwargs
-                    )
+                    compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs)
                     run_fwd_maybe_bwd(compiled_gm, example_inputs)
                 except Exception as exc:
                     log.warning(
@@ -149,7 +147,7 @@ class WrapBackendDebug:
                     add_paths(exc)
                     raise
         else:
-            compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
+            compiled_gm = compiler_fn(gm, example_inputs)
 
         return compiled_gm
 
