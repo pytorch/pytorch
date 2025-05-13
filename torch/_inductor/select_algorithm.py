@@ -2388,6 +2388,8 @@ class AlgorithmSelectorCache(PersistentCache):
         """
         Prune the choices after prescreening.
         """
+        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+
         if len(timings) < 10:
             return []
 
@@ -2398,6 +2400,10 @@ class AlgorithmSelectorCache(PersistentCache):
         choices_to_prune = OrderedSet(
             choice.hash_key() for choice in sorted_choices[num_to_keep:]
         )
+        # reopen DLL
+        for choice in sorted_choices[:num_to_keep]:
+            if isinstance(choice, CUDATemplateCaller):
+                choice.bmreq.ensure_dll_loaded()
 
         choices = [
             choice for choice in choices if choice.hash_key() not in choices_to_prune
