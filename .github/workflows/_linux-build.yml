@@ -210,6 +210,7 @@ jobs:
           echo "test" > usage_log_test.txt
           echo "test" > usage_log.json
           echo "usage_log_build_${JOB_ID}.txt"
+          echo "Monitor script started in $(pwd)"
           echo $(pwd)
           python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7 nvidia-ml-py==11.525.84
           python3 -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
@@ -230,6 +231,8 @@ jobs:
           echo $(pwd)
           ls ./*.txt
           ls ./*.json
+          ps aux | grep monitor
+
 
       - name: Build
         if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
@@ -331,6 +334,8 @@ jobs:
           echo $(pwd)
           ls ./*.txt
           ls ./*.json
+          ps aux | grep monitor
+          echo "Post-build check in $(pwd)"
 
       - name: Stop monitoring script
         if: ${{ always() && steps.monitor-script.outputs.monitor-script-pid }}
@@ -360,7 +365,6 @@ jobs:
           ls ./*.txt
           ls ./*.json
 
-
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
@@ -389,7 +393,7 @@ jobs:
       - name: Check all txt
         shell: bash
         run: |
-          ls ./*.txt
+          echo "Post-build check in $(pwd)"ls -alh ./*.txt || echo "No txt files"
 
       - name: Upload raw usage log to s3
         if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel'}}
