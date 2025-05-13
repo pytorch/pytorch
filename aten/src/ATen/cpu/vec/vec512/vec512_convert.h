@@ -291,6 +291,26 @@ struct VecConvert<
   }
 };
 
+template <>
+struct VecConvert<Float8_e4m3fn, 1, float, 1> {
+  static inline VectorizedN<Float8_e4m3fn, 1> apply(const VectorizedN<float, 1>& src_n) {
+    at::vec::Vectorized<float> src = src_n[0];
+    __m128i res128 = cvtfp32_fp8e4m3(src);
+    return at::vec::Vectorized<Float8_e4m3fn>(_mm512_castsi128_si512(res128));
+  }
+};
+
+template <>
+struct VecConvert<float, 1, Float8_e4m3fn, 1> {
+  static inline VectorizedN<float, 1> apply(const VectorizedN<Float8_e4m3fn, 1>& src_n) {
+    // cvt first 16x8 bits from Float8_e4m3fn to float
+    at::vec::Vectorized<Float8_e4m3fn> src = src_n[0];
+    __m512 result;
+    cvtfp8e4m3_fp32(_mm512_castsi512_si128(src), result);
+    return at::vec::Vectorized<float>(result);
+  }
+};
+
 #endif
 
 } // namespace CPU_CAPABILITY
