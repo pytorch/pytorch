@@ -380,7 +380,7 @@ def _collect_fake_inputs(inputs):
     return inputs_fake
 
 
-def _check_mutation_and_alias(graph_module, inputs_fake, name, pre_dispatch):
+def _check_alias_and_mutation(graph_module, inputs_fake, name, pre_dispatch):
     aliases, inp_mutation = has_potential_input_alias_or_mutation(
         graph_module, inputs_fake, pre_dispatch=pre_dispatch
     )
@@ -390,15 +390,6 @@ def _check_mutation_and_alias(graph_module, inputs_fake, name, pre_dispatch):
         )  # noqa: F541
     if inp_mutation:
         raise RuntimeError(f"{name} might be modifying the input!")  # noqa: F541
-
-
-def check_mutation_and_alias(tx, graph_module, inputs, name, pre_dispatch=False):
-    with tx.fake_mode:
-        # Collect the fake inputs from the input proxies
-        inputs_fake = _collect_fake_inputs(inputs)
-
-        # Check for mutations and alias and raise Exceptions when needed
-        _check_mutation_and_alias(graph_module, inputs_fake, name, pre_dispatch)
 
 
 def unique_graph_id(proxy_mode, prefix):

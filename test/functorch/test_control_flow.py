@@ -6595,7 +6595,7 @@ def forward(self, arg0_1):
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
             torch._dynamo.exc.TorchRuntimeError,
-            "torch.map might be modifying the input!",
+            "map might be modifying the input!",
         ):
             functional_f(*example_inputs)
 
@@ -6610,8 +6610,7 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4), torch.ones(4))
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError,
-            "torch.map might be modifying the input!",
+            torch._dynamo.exc.TorchRuntimeError, "map might be modifying the input!"
         ):
             functional_f(*example_inputs)
 
@@ -7012,10 +7011,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             gm.code.strip(),
             """\
 def forward(self, pred_1, x_1):
+    unbind = torch.ops.aten.unbind.int(x_1)
+    getitem = unbind[0];  getitem = None
+    getitem_1 = unbind[1];  unbind = getitem_1 = None
     body_graph_0 = self.body_graph_0
     map_impl = torch.ops.higher_order.map_impl(body_graph_0, [x_1], [pred_1]);  body_graph_0 = x_1 = pred_1 = None
-    getitem = map_impl[0];  map_impl = None
-    return getitem""",
+    getitem_2 = map_impl[0];  map_impl = None
+    return getitem_2""",
         )
         self.assertExpectedInline(
             gm.body_graph_0.code.strip(),
@@ -7542,10 +7544,10 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, 
         example_init = torch.ones(5, 4)
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            # Should be
+            # TODO: Fix this so that the HOPs show similar errors for functionalization
             # This is the Exception with PYTORCH_TEST_WITH_DYNAMO=0
             # RuntimeError,
-            # "Combine_fn might be aliasing the input or the output!",
+            # "torch.scan might be modifying the input!",
             # This is the Exception with PYTORCH_TEST_WITH_DYNAMO=1
             # torch._dynamo.exc.TorchDynamoException,
             # "Unexpected exception when running generated GraphModule.*"
@@ -7563,10 +7565,11 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, 
 
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
+            # TODO: Fix this so that the HOPs show similar errors for functionalization
             # Should be
             # This is the Exception with PYTORCH_TEST_WITH_DYNAMO=0
             # RuntimeError,
-            # "Combine_fn might be aliasing the input or the output!",
+            # "torch.scan might be modifying the input!",
             # This is the Exception with PYTORCH_TEST_WITH_DYNAMO=1
             # torch._dynamo.exc.TorchDynamoException,
             # "Unexpected exception when running generated GraphModule.*"
@@ -7586,6 +7589,7 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, 
         example_init = torch.ones(5, 4)
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
+            # TODO: Fix this so that the HOPs show similar errors for functionalization
             # Should be
             # This is the Exception with PYTORCH_TEST_WITH_DYNAMO=0
             # torch._dynamo.exc.Unsupported,

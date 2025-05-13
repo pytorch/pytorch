@@ -7572,7 +7572,7 @@ def forward(self, b_a_buffer, x):
         module_out = Foo()(xs)
         self.assertTrue(torch.allclose(ep.module()(xs), module_out))
 
-    @requires_gpu
+    @requires_cuda
     def test_export_associative_scan_lifted_buffers(self):
         device = torch.device("cuda")
         combine_mode = "pointwise"

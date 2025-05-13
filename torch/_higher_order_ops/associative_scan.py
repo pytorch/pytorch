@@ -434,7 +434,7 @@ def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs, additional_inputs):
 
 @associative_scan_op.py_functionalize_impl
 def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
-    from torch._higher_order_ops.utils import _check_mutation_and_alias
+    from torch._higher_order_ops.utils import _check_alias_and_mutation
 
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
@@ -452,7 +452,9 @@ def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
                 unwrapped_additional_inputs,
             )
         )
-        _check_mutation_and_alias(combine_fn, sample_inputs, "Combine_fn", pre_dispatch)
+        _check_alias_and_mutation(
+            combine_fn, sample_inputs, "associative_scan", pre_dispatch
+        )
         ret = associative_scan_op(
             functional_combine_fn,
             unwrapped_xs,
