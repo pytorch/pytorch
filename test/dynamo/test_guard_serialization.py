@@ -5,6 +5,7 @@ import importlib
 import pickle
 import sys
 import types
+import unittest
 from collections.abc import Iterator
 from unittest.mock import patch
 
@@ -23,6 +24,8 @@ from torch._dynamo.symbolic_convert import (
 )
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._guards import compile_context, CompileContext, tracing
+from torch.overrides import TorchFunctionMode
+from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils import _pytree as pytree
 
 
@@ -41,6 +44,13 @@ class GlobalModule(torch.nn.Module):
 
 def global_func(x):
     return x + 1
+
+
+class GlobalTorchFunctionMode(TorchFunctionMode):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        return func(*args, **kwargs)
 
 
 class SubclassWithMeta(torch.Tensor):
@@ -292,7 +302,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                 self._frame_state.f_globals,
                 self._frame_state.f_builtins,
                 fn.__closure__ or (),
-                [],  # TODO tf_mode_stack,
+                torch.overrides._get_current_function_mode_stack(),
                 code_options,
                 torch._dynamo.lookup_backend("eager"),
                 one_graph=False,
@@ -323,6 +333,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                     self._frame_state.f_code,
                     guards_state.output_graph,
                     guards_serialization_mode="load",
+                    shape_code_parts=guards_state.shape_code_parts,
                 )
                 loaded_gm = check_fn_manager.guard_manager
 
@@ -1072,6 +1083,160 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             False,
         )
         self._test_check_fn(ref, loaded, {"x": {"a": torch.randn(3, 2)}}, False)
+
+    @torch._dynamo.config.patch("skip_nnmodule_hook_guards", False)
+    def test_empty_nn_module_hooks_dict(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                return x + 1
+
+        m = Module()
+
+        def fn(x):
+            return m(x)
+
+        x = torch.ones(2, dtype=torch.float32)
+        ref, loaded = self._test_serialization("EMPTY_NN_MODULE_HOOKS_DICT", fn, x)
+        self._test_check_fn(ref, loaded, {"m": m, "x": x}, True)
+
+        h = m.register_forward_hook(lambda *args, **kwargs: None)
+        self._test_check_fn(ref, loaded, {"m": m, "x": x}, False)
+        h.remove()
+
+        h = m.register_forward_pre_hook(lambda *args, **kwargs: None)
+        self._test_check_fn(ref, loaded, {"m": m, "x": x}, False)
+        h.remove()
+
+        h = m.register_backward_hook(lambda *args, **kwargs: None)
+        self._test_check_fn(ref, loaded, {"m": m, "x": x}, False)
+        h.remove()
+
+    def test_grad_mode(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        with torch.enable_grad():
+            ref, loaded = self._test_serialization("GRAD_MODE", fn, x)
+        with torch.no_grad():
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+        with torch.enable_grad():
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+
+    def test_deterministic_algorithms(self):
+        def fn(x):
+            return x + 1
+
+        deterministic_restore = torch.are_deterministic_algorithms_enabled()
+        try:
+            x = torch.randn(3, 2)
+            torch.use_deterministic_algorithms(True)
+            ref, loaded = self._test_serialization("DETERMINISTIC_ALGORITHMS", fn, x)
+            torch.use_deterministic_algorithms(False)
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+            torch.use_deterministic_algorithms(True)
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+        finally:
+            torch.use_deterministic_algorithms(deterministic_restore)
+
+    def test_torch_function_state(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+
+        class LocalTorchFunctionMode(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return func(*args, **kwargs)
+
+        with GlobalTorchFunctionMode():
+            ref, loaded = self._test_serialization("TORCH_FUNCTION_STATE", fn, x)
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+        self._test_check_fn(ref, loaded, {"x": x}, False)
+        with GlobalTorchFunctionMode():
+            with torch._C.DisableTorchFunction():
+                self._test_check_fn(ref, loaded, {"x": x}, False)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "defined in local scope. Please define the class at global scope",
+        ):
+            with LocalTorchFunctionMode():
+                ref, loaded = self._test_serialization("TORCH_FUNCTION_STATE", fn, x)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_fsdp_training_state(self):
+        from torch.distributed.fsdp._fully_shard._fsdp_common import TrainingState
+        from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
+
+        param_group = FSDPParamGroup(
+            [],  # params: List[nn.Parameter],
+            (torch.nn.Linear(1, 1),),  # module: nn.Module,
+            None,  # mesh_info: FSDPMeshInfo,
+            None,  # post_forward_mesh_info: Optional[FSDPMeshInfo],
+            torch.device("cpu"),  # device: torch.device,
+            None,  # shard_placement_fn: Optional[Callable],
+            None,  # mp_policy: MixedPrecisionPolicy,
+            None,  # offload_policy: OffloadPolicy,
+        )
+
+        def fn(x):
+            with param_group.use_training_state(TrainingState.FORWARD):
+                if param_group._training_state == TrainingState.FORWARD:
+                    return x + 1
+                else:
+                    return x - 1
+
+        x = torch.randn(3, 2)
+
+        with torch.enable_grad():
+            ref, loaded = self._test_serialization("FSDP_TRAINING_STATE", fn, x)
+        with torch.no_grad():
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+        with torch.enable_grad():
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+
+    def test_default_device(self):
+        device = torch.get_default_device()
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        try:
+            torch.set_default_device("cpu")
+            ref, loaded = self._test_serialization("DEFAULT_DEVICE", fn, x)
+            torch.set_default_device("meta")
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+            torch.set_default_device("cpu")
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+        finally:
+            torch.set_default_device(device)
+
+    def test_shape_env(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        ref, loaded = self._test_serialization("SHAPE_ENV", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+
+        x = torch.randn(3, 2)
+        torch._dynamo.mark_dynamic(x, 0, min=3, max=10)
+        ref, loaded = self._test_serialization("SHAPE_ENV", fn, x)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(4, 2)}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(10, 2)}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(11, 2)}, False)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(2, 2)}, False)
+
+        x = torch.randn(3, 3, 2)
+        torch._dynamo.mark_dynamic(x, 1, min=3, max=10)
+        ref, loaded = self._test_serialization("SHAPE_ENV", fn, x)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3, 4, 2)}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3, 10, 2)}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3, 11, 2)}, False)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3, 2, 2)}, False)
 
 
 if __name__ == "__main__":

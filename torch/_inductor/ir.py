@@ -23,7 +23,15 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import assert_never, Never, override, ParamSpec, Self, TypeAlias
+from typing_extensions import (
+    assert_never,
+    Never,
+    override,
+    ParamSpec,
+    Self,
+    TypeAlias,
+    TypeGuard,
+)
 from unittest.mock import patch
 
 import sympy
@@ -4911,14 +4919,20 @@ class CppTemplateBuffer(TemplateBuffer):
             return super().get_layout()
 
 
+def is_node_sequence(
+    nodes: Sequence[Union[IRNode, Sequence[IRNode]]],
+) -> TypeGuard[Sequence[IRNode]]:
+    return all(isinstance(n, IRNode) for n in nodes)
+
+
 @ir_dataclass(frozen=False)
 class InputsKernel(OperationBuffer):
     inputs: Sequence[Union[IRNode, Sequence[IRNode]]]
 
-    @functools.cached_property
-    def inputs_as_nodes(self) -> Sequence[IRNode]:
-        assert all(isinstance(i, IRNode) for i in self.inputs)
-        return cast(Sequence[IRNode], self.inputs)
+    def input_name(self, i: int) -> str:
+        input = self.inputs[i]
+        assert isinstance(input, IRNode)
+        return input.get_name()
 
     def get_read_writes(self) -> dependencies.ReadWrites:
         reads = OrderedSet[dependencies.Dep]()
@@ -6242,7 +6256,8 @@ class SubgraphBuffer(ExternKernel):
                 self.graph = graph
                 self.name = graph.name
 
-        outer_inputs = [t.codegen_reference() for t in self.inputs_as_nodes]
+        assert is_node_sequence(self.inputs)
+        outer_inputs = [t.codegen_reference() for t in self.inputs]
 
         wrapper.codegen_subgraph_with_flattened_outputs(
             CodegenGraph(self.subgraph),
@@ -6474,7 +6489,7 @@ class InplaceBernoulliFallback(ExternKernel):
         return False
 
     def get_mutation_names(self) -> list[str]:
-        return [self.inputs_as_nodes[0].get_name()]
+        return [self.input_name(0)]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
@@ -6508,7 +6523,7 @@ class InplaceCopyFallback(ExternKernel):
         return False
 
     def get_mutation_names(self) -> list[str]:
-        return [self.inputs_as_nodes[0].get_name()]
+        return [self.input_name(0)]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
@@ -6551,8 +6566,9 @@ class MutatingFirstArgExternKernel(ExternKernel):
     """
 
     def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
+        assert is_node_sequence(self.inputs)
         argrefs = [
-            *(t.codegen_reference() for t in self.inputs_as_nodes),
+            *(t.codegen_reference() for t in self.inputs),
             *map(repr, self.constant_args),
         ]
         wrapper.writeline(
@@ -6563,7 +6579,7 @@ class MutatingFirstArgExternKernel(ExternKernel):
         return False
 
     def get_mutation_names(self) -> list[str]:
-        return [self.inputs_as_nodes[0].get_name()]
+        return [self.input_name(0)]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
@@ -6612,7 +6628,7 @@ class SetSourceTensorKernel(ExternKernelAlloc):
         ]
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:
-        return [self.inputs_as_nodes[0].get_name(), self.inputs_as_nodes[1].get_name()]
+        return [self.input_name(0), self.input_name(1)]
 
 
 class ScatterFallback(ExternKernel):
@@ -6630,10 +6646,11 @@ class ScatterFallback(ExternKernel):
             if reduce in get_operator_enum:
                 reduce = get_operator_enum[reduce]
 
+        assert is_node_sequence(self.inputs)
         if self.src_is_tensor:
-            (x, index, src) = (t.codegen_reference() for t in self.inputs_as_nodes)
+            (x, index, src) = (t.codegen_reference() for t in self.inputs)
         else:
-            (x, index) = (t.codegen_reference() for t in self.inputs_as_nodes)
+            (x, index) = (t.codegen_reference() for t in self.inputs)
             src = self.constant_args[1]
         wrapper.generate_scatter_fallback(
             x,
@@ -6649,7 +6666,7 @@ class ScatterFallback(ExternKernel):
         return False
 
     def get_mutation_names(self) -> list[str]:
-        return [self.inputs_as_nodes[0].get_name()]
+        return [self.input_name(0)]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
@@ -6696,9 +6713,8 @@ class IndexPutFallback(ExternKernel):
     """
 
     def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
-        (x, values, *valid_indices) = (
-            t.codegen_reference() for t in self.inputs_as_nodes
-        )
+        assert is_node_sequence(self.inputs)
+        (x, values, *valid_indices) = (t.codegen_reference() for t in self.inputs)
         indices = []
         iter_valid_indices = iter(valid_indices)
         for i, _ in enumerate(self.indices):
@@ -6715,7 +6731,7 @@ class IndexPutFallback(ExternKernel):
         return False
 
     def get_mutation_names(self) -> list[str]:
-        return [self.inputs_as_nodes[0].get_name()]
+        return [self.input_name(0)]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
@@ -6741,7 +6757,7 @@ class IndexPutFallback(ExternKernel):
             cpp_kernel_name=cpp_kernel_name,
             op_overload=op_overload,
         )
-        V.graph.mark_buffer_mutated(self.inputs_as_nodes[0].get_name())
+        V.graph.mark_buffer_mutated(self.input_name(0))
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
@@ -7022,7 +7038,8 @@ class FallbackKernel(ExternKernelAlloc):
             def __repr__(self) -> str:
                 return self.ref
 
-        tensor_args = [Shim(x.codegen_reference()) for x in self.inputs_as_nodes]
+        assert is_node_sequence(self.inputs)
+        tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
         if V.graph.cpp_wrapper and isinstance(self.op_overload, torch._ops.OpOverload):
             args = self.fill_non_provided_args(args, kwargs)
@@ -7373,7 +7390,7 @@ class ComplexView(FallbackKernel):
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:
         # Signal to codegen that our output buffer isn't safe to reuse
-        return [self.inputs_as_nodes[0].get_name()]
+        return [self.input_name(0)]
 
     def __init__(
         self,
@@ -7426,14 +7443,14 @@ class MultiOutput(ExternKernel):
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
-        return self.inputs_as_nodes[0].get_free_symbol_uses(unbacked_only)
+        input_node = self.inputs[0]
+        assert isinstance(input_node, IRNode), input_node
+        return input_node.get_free_symbol_uses(unbacked_only)
 
     def should_allocate(self) -> bool:
-        if len(self.inputs) == 1 and (
-            isinstance(self.inputs_as_nodes[0], CppTemplateBuffer)  # Grouped GEMM
-        ):
-            return True
-        return False
+        return len(self.inputs) == 1 and (
+            isinstance(self.inputs[0], CppTemplateBuffer)  # Grouped GEMM
+        )
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:
         return [
@@ -8435,7 +8452,8 @@ class _CollectiveKernel(FallbackKernel):
 
 class _WaitKernel(_CollectiveKernel):
     def get_volatile_reads(self) -> Sequence[IRNode]:
-        inp = self.inputs_as_nodes[0]
+        inp = self.inputs[0]
+        assert isinstance(inp, IRNode)
         if isinstance(inp, _CollectiveKernel):
             # Out-of-place single-output
             i = inp.inputs[0]
