@@ -586,6 +586,23 @@ class DynamoExporterTest(common_utils.TestCase):
             [node.op_type for node in onnx_program.model.graph],
         )
 
+    def test_export_sym_float(self):
+        class SymFloatModel(torch.nn.Module):
+            def forward(self, x):
+                a = x.shape[0]
+                return torch.sym_float(a)
+
+        inputs = (torch.zeros((2, 2)),)
+        dynamic_shapes = ({0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},)
+        onnx_program = self.export(
+            SymFloatModel(), inputs, dynamic_shapes=dynamic_shapes
+        )
+        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+        self.assertIn(
+            "Cast",
+            [node.op_type for node in onnx_program.model.graph],
+        )
+
     def test_group_norm_opset_21(self):
         class Model(torch.nn.Module):
             def forward(self, x):

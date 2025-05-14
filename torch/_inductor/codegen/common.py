@@ -2416,8 +2416,12 @@ class CSEProxy(DefaultHandler):
         """
         from ..bounds import ValueRangeAnalysis
         from ..select_algorithm import TritonTemplateKernel
+        from .cuda.cuda_kernel import CUDATemplateKernel
 
         if isinstance(V.kernel, TritonTemplateKernel):
+            return ValueRanges.unknown()
+
+        if isinstance(V.kernel, CUDATemplateKernel):
             return ValueRanges.unknown()
 
         fx_node = V.interpreter.current_node
