@@ -33,5 +33,7 @@ if __name__ == "__main__":
 
     dev = "cuda"
     run_one_model(
-        torchvision.models.resnet34(), torch.rand(32, 3, 224, 224, device=dev), device=dev
+        torchvision.models.resnet34(),
+        torch.rand(32, 3, 224, 224, device=dev),
+        device=dev,
     )
