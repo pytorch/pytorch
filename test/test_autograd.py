@@ -830,7 +830,7 @@ class TestAutograd(TestCase):
         x_grad, x_grad_clone = compute_grad(create_graph=False)
         self.assertEqual(x_grad, x_grad_clone * 2)
 
-        # Accumulate out-of-place when create_graph is False
+        # Accumulate out-of-place when create_graph is True
         x_grad, x_grad_clone = compute_grad(create_graph=True)
         self.assertEqual(x_grad, x_grad_clone)
 
@@ -2506,6 +2506,12 @@ class TestAutograd(TestCase):
             "cannot be empty",
             lambda: torch.autograd.backward(fn(), gradient, inputs=[]),
         )
+
+    def test_backward_with_scalar_input(self):
+        x = torch.randn([], dtype=torch.double, requires_grad=True)
+        out = x**2
+        out.backward(inputs=x)
+        self.assertEqual(x.grad, 2 * x)
 
     def test_backward_with_nonleaf_inputs(self):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
@@ -8646,6 +8652,47 @@ for shape in [(1,), ()]:
         ):
             Func.apply(a_clone)
 
+    def test_custom_function_inplace_on_non_default_view(self):
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp):
+                inp.add_(1)
+                ctx.mark_dirty(inp)
+                return inp
+
+            @staticmethod
+            def backward(ctx, gO):
+                pass
+
+        a = torch.tensor([1.0, 2.0], requires_grad=True)
+        a_clone = a.clone()
+        b, c = a.split_with_sizes([1, 1], dim=0)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "output of a function that returns multiple view"
+        ):
+            Func.apply(b)
+
+    def test_custom_function_inplace_on_view_of_leaf(self):
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp):
+                inp.add_(1)
+                ctx.mark_dirty(inp)
+                return inp
+
+            @staticmethod
+            def backward(ctx, gO):
+                pass
+
+        a = torch.tensor([1.0, 2.0], requires_grad=True)
+        b = a.view_as(a)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "a view of a leaf Variable that requires grad"
+        ):
+            Func.apply(b)
+
     def test_named_tensor_for_complex_views(self):
         names = ["batch", "height", "width", "complex"]
         z = torch.ones((2, 1, 2, 2), requires_grad=True)
@@ -9329,10 +9376,14 @@ for shape in [(1,), ()]:
             with set_warn_always_context(True):
                 with warnings.catch_warnings(record=True) as w:
                     tmp.exp().sum().backward(create_graph=True)
-                    self.assertTrue(len(w) == 1)
-                    self.assertTrue(
-                        "Using backward() with create_graph=True" in str(w[0].message)
-                    )
+                    self.assertTrue(w)
+                    found = 0
+                    for warning in w:
+                        if "Using backward() with create_graph=True" in str(
+                            warning.message
+                        ):
+                            found += 1
+                    self.assertEqual(found, 1)
 
             # Remove the backward + create_graph=True cycle
             a.grad = None
@@ -13084,14 +13135,12 @@ class TestAutogradStreamSynchronization(TestCase):
         for _ in range(2):
             test()
 
-    # This fails because we currently sync to the default stream
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
     @skipIfMPS
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
-    @unittest.expectedFailure
     def test_consumer_to_single_producer_case_3_correctness_non_default_ambient_stream(
         self,
     ):
@@ -13265,7 +13314,6 @@ class TestAutogradStreamSynchronization(TestCase):
     # This test may spuriously fail on non-cuda accelerators (since we won't
     # be calling sleep)
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
-    @unittest.expectedFailure
     def test_side_stream_backward_overlap(self):
         # In case 2/3, we would designate the consumer as the accumulation
         # stream and naively, one might have the consumer wait for the producer

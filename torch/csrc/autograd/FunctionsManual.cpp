@@ -891,8 +891,8 @@ Tensor logcumsumexp_backward(
     return grad;
   }
 
-  // Reference: https://github.com/tensorflow/tensorflow/blob/
-  // 2a5910906a0e0f3dbc186ff9db6386d81a63448c/tensorflow/python/ops/math_grad.py#L1832-L1863
+  // Reference:
+  // https://github.com/tensorflow/tensorflow/blob/2a5910906a0e0f3dbc186ff9db6386d81a63448c/tensorflow/python/ops/math_grad.py#L1832-L1863
 
   auto scalar_min = AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
       at::ScalarType::BFloat16,

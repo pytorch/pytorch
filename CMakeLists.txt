@@ -64,7 +64,7 @@ endif()
 
 # This define is needed to preserve behavior given anticpated changes to
 # cccl/thrust
-# https://nvidia.github.io/libcudacxx/standard_api/numerics_library/complex.html
+# https://nvidia.github.io/cccl/libcudacxx/standard_api/numerics_library/complex.html
 string(APPEND CMAKE_CUDA_FLAGS
        " -DLIBCUDACXX_ENABLE_SIMPLIFIED_COMPLEX_OPERATIONS")
 
@@ -330,6 +330,9 @@ cmake_dependent_option(
     "USE_DISTRIBUTED" OFF)
 cmake_dependent_option(
   USE_GLOO_WITH_OPENSSL "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
+    "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
+cmake_dependent_option(
+  USE_GLOO_IBVERBS "Use Gloo with ibverbs backend. Only available if USE_GLOO is on." OFF
     "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
 cmake_dependent_option(
     USE_C10D_GLOO "USE C10D GLOO" ON "USE_DISTRIBUTED;USE_GLOO" OFF)
@@ -978,6 +981,13 @@ endif()
 include(cmake/public/utils.cmake)
 if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -O2 -fPIC")
+  if(NOT USE_XPU)
+    # This prevents use of `c10::optional`, `c10::nullopt` etc within the codebase
+    string(APPEND CMAKE_CXX_FLAGS " -DC10_NODEPRECATED")
+    string(APPEND CMAKE_CUDA_FLAGS " -DC10_NODEPRECATED")
+    string(APPEND CMAKE_OBJCXX_FLAGS " -DC10_NODEPRECATED")
+  endif()
+
   # Eigen fails to build with some versions, so convert this to a warning
   # Details at http://eigen.tuxfamily.org/bz/show_bug.cgi?id=1459
   string(APPEND CMAKE_CXX_FLAGS " -Wall")

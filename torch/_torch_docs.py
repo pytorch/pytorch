@@ -50,6 +50,11 @@ reduceops_common_args = merge_dicts(
     keepdim (bool): whether the output tensor has :attr:`dim` retained or not.
 """
     ),
+    {
+        "opt_keepdim": """
+    keepdim (bool, optional): whether the output tensor has :attr:`dim` retained or not. Default: ``False``.
+"""
+    },
 )
 
 multi_dim_common = merge_dicts(
@@ -70,12 +75,12 @@ output tensor having 1 (or ``len(dim)``) fewer dimension(s).
     {
         "opt_dim": """
     dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
-        If ``None``, all dimensions are reduced.
 """
     },
     {
-        "opt_keepdim": """
-    keepdim (bool, optional): whether the output tensor has :attr:`dim` retained or not. Default: ``False``.
+        "opt_dim_all_reduce": """
+    dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
+        If ``None``, all dimensions are reduced.
 """
     },
 )
@@ -87,6 +92,17 @@ single_dim_common = merge_dicts(
     dim (int): the dimension to reduce.
 """
     ),
+    {
+        "opt_dim": """
+    dim (int, optional): the dimension to reduce.
+"""
+    },
+    {
+        "opt_dim_all_reduce": """
+    dim (int, optional): the dimension to reduce.
+        If ``None``, all dimensions are reduced.
+"""
+    },
     {
         "keepdim_details": """If :attr:`keepdim` is ``True``, the output tensor is of the same size
 as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
@@ -525,7 +541,7 @@ Example::
 add_docstr(
     torch.addmm,
     r"""
-addmm(input, mat1, mat2, *, beta=1, alpha=1, out=None) -> Tensor
+addmm(input, mat1, mat2, out_dtype=None, *, beta=1, alpha=1, out=None) -> Tensor
 
 Performs a matrix multiplication of the matrices :attr:`mat1` and :attr:`mat2`.
 The matrix :attr:`input` is added to the final result.
@@ -562,6 +578,9 @@ Args:
     input (Tensor): matrix to be added
     mat1 (Tensor): the first matrix to be matrix multiplied
     mat2 (Tensor): the second matrix to be matrix multiplied
+    out_dtype (dtype, optional): the dtype of the output tensor,
+        Supported only on CUDA and for torch.float32 given
+        torch.float16/torch.bfloat16 input dtypes
 
 Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
@@ -748,7 +767,7 @@ This function checks if :attr:`input` and :attr:`other` satisfy the condition:
 """
     + r"""
 elementwise, for all elements of :attr:`input` and :attr:`other`. The behaviour of this function is analogous to
-`numpy.allclose <https://docs.scipy.org/doc/numpy/reference/generated/numpy.allclose.html>`_
+`numpy.allclose <https://numpy.org/doc/stable/reference/generated/numpy.allclose.html>`_
 
 Args:
     input (Tensor): first tensor to compare
@@ -773,13 +792,19 @@ Example::
 add_docstr(
     torch.all,
     r"""
-all(input: Tensor) -> Tensor
+all(input: Tensor, *, out=None) -> Tensor
 
 Tests if all elements in :attr:`input` evaluate to `True`.
 
 .. note:: This function matches the behaviour of NumPy in returning
           output of dtype `bool` for all supported dtypes except `uint8`.
           For `uint8` the dtype of output is `uint8` itself.
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -804,8 +829,8 @@ returns `True` if all elements in the row evaluate to `True` and `False` otherwi
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     {out}
@@ -836,6 +861,12 @@ Tests if any element in :attr:`input` evaluates to `True`.
           output of dtype `bool` for all supported dtypes except `uint8`.
           For `uint8` the dtype of output is `uint8` itself.
 
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
 Example::
 
     >>> a = torch.rand(1, 2).bool()
@@ -859,8 +890,8 @@ returns `True` if any element in the row evaluate to `True` and `False` otherwis
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     {out}
@@ -1308,7 +1339,7 @@ Example::
 add_docstr(
     torch.baddbmm,
     r"""
-baddbmm(input, batch1, batch2, *, beta=1, alpha=1, out=None) -> Tensor
+baddbmm(input, batch1, batch2, out_dtype=None, *, beta=1, alpha=1, out=None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices in :attr:`batch1`
 and :attr:`batch2`.
@@ -1342,6 +1373,9 @@ Args:
     input (Tensor): the tensor to be added
     batch1 (Tensor): the first batch of matrices to be multiplied
     batch2 (Tensor): the second batch of matrices to be multiplied
+    out_dtype (dtype, optional): the dtype of the output tensor,
+        Supported only on CUDA and for torch.float32 given
+        torch.float16/torch.bfloat16 input dtypes
 
 Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
@@ -1484,7 +1518,7 @@ Example::
 add_docstr(
     torch.bmm,
     r"""
-bmm(input, mat2, *, out=None) -> Tensor
+bmm(input, mat2, out_dtype=None, *, out=None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices stored in :attr:`input`
 and :attr:`mat2`.
@@ -1510,6 +1544,9 @@ If :attr:`input` is a :math:`(b \times n \times m)` tensor, :attr:`mat2` is a
 Args:
     input (Tensor): the first batch of matrices to be multiplied
     mat2 (Tensor): the second batch of matrices to be multiplied
+    out_dtype (dtype, optional): the dtype of the output tensor,
+        Supported only on CUDA and for torch.float32 given
+        torch.float16/torch.bfloat16 input dtypes
 
 Keyword Args:
     {out}
@@ -5636,7 +5673,7 @@ Args:
     {input}
     k (int): k for the k-th smallest element
     dim (int, optional): the dimension to find the kth value along
-    {keepdim}
+    {opt_keepdim}
 
 Keyword args:
     out (tuple, optional): the output tuple of (Tensor, LongTensor)
@@ -6255,8 +6292,8 @@ For summation index :math:`j` given by `dim` and other indices :math:`i`, the re
 
 Args:
     {input}
-    {opt_dim}
-    {keepdim}
+    {dim}
+    {opt_keepdim}
 
 Keyword args:
     {out}
@@ -6463,12 +6500,15 @@ Alias for :func:`torch.linalg.matrix_exp`.
 add_docstr(
     torch.max,
     r"""
-max(input) -> Tensor
+max(input, *, out=None) -> Tensor
 
 Returns the maximum value of all elements in the ``input`` tensor.
 
 Args:
     {input}
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -6496,7 +6536,7 @@ in the output tensors having 1 fewer dimension than ``input``.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
     {opt_keepdim}
 
 Keyword args:
@@ -6609,8 +6649,8 @@ dimension(s) :attr:`dim`.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
   {out}
@@ -6664,8 +6704,8 @@ documentation for the exact semantics of this method.
 
 Args:
     {input}
-    {dim} If ``None``, the argmax of the flattened input is returned.
-    {keepdim}
+    {opt_dim} If ``None``, the argmax of the flattened input is returned.
+    {opt_keepdim}
 
 Example::
 
@@ -6756,8 +6796,8 @@ reduce over all of them.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     {dtype}
@@ -6802,8 +6842,8 @@ propagate the `NaN` to the output whereas :func:`torch.nanmean` will ignore the
 
 Args:
     input (Tensor): the input tensor, either of floating point or complex dtype
-    {opt_dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     {dtype}
@@ -6885,8 +6925,8 @@ the outputs tensor having 1 fewer dimension than :attr:`input`.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     out ((Tensor, Tensor), optional): The first tensor will be populated with the median values and the second
@@ -6942,8 +6982,8 @@ median of the non-``NaN`` elements. If all the elements in a reduced row are ``N
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     out ((Tensor, Tensor), optional): The first tensor will be populated with the median values and the second
@@ -6990,8 +7030,8 @@ equal to the size of :attr:`q`, the remaining dimensions are what remains from t
 Args:
     {input}
     q (float or Tensor): a scalar or 1D tensor of values in the range [0, 1].
-    {dim}
-    {keepdim}
+    {opt_dim}
+    {opt_keepdim}
 
 Keyword arguments:
     interpolation (str): interpolation method to use when the desired quantile lies between two data points.
@@ -7048,8 +7088,8 @@ that reduction will be ``NaN``. See the documentation for :func:`torch.quantile`
 Args:
     {input}
     q (float or Tensor): a scalar or 1D tensor of quantile values in the range [0, 1]
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword arguments:
     interpolation (str): interpolation method to use when the desired quantile lies between two data points.
@@ -7078,12 +7118,15 @@ Example::
 add_docstr(
     torch.min,
     r"""
-min(input) -> Tensor
+min(input, *, out=None) -> Tensor
 
 Returns the minimum value of all elements in the :attr:`input` tensor.
 
 Args:
     {input}
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -7111,8 +7154,8 @@ the output tensors having 1 fewer dimension than :attr:`input`.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     out (tuple, optional): the tuple of two output tensors (min, min_indices)
@@ -7214,8 +7257,8 @@ dimension(s) :attr:`dim`.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
   {out}
@@ -7311,8 +7354,8 @@ documentation for the exact semantics of this method.
 
 Args:
     {input}
-    {dim} If ``None``, the argmin of the flattened input is returned.
-    {keepdim}
+    {opt_dim} If ``None``, the argmin of the flattened input is returned.
+    {opt_keepdim}
 
 Example::
 
@@ -7337,7 +7380,7 @@ Example::
 add_docstr(
     torch.mm,
     r"""
-mm(input, mat2, *, out=None) -> Tensor
+mm(input, mat2, out_dtype=None, *, out=None) -> Tensor
 
 Performs a matrix multiplication of the matrices :attr:`input` and :attr:`mat2`.
 
@@ -7363,6 +7406,9 @@ layout will be deduced from that of :attr:`input`.
 Args:
     input (Tensor): the first matrix to be matrix multiplied
     mat2 (Tensor): the second matrix to be matrix multiplied
+    out_dtype (dtype, optional): the dtype of the output tensor,
+        Supported only on CUDA and for torch.float32 given
+        torch.float16/torch.bfloat16 input dtypes
 
 Keyword args:
     {out}
@@ -7501,8 +7547,8 @@ in the output tensors having 1 fewer dimension than :attr:`input`.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim}
+    {opt_keepdim}
 
 Keyword args:
     out (tuple, optional): the result tuple of two output tensors (values, indices)
@@ -8588,8 +8634,8 @@ dimension :attr:`dim`.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     {dtype}
@@ -10485,7 +10531,7 @@ the :attr:`correction`.
 
 Args:
     {input}
-    {dim}
+    {opt_dim_all_reduce}
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
@@ -10495,7 +10541,7 @@ Keyword args:
             Previously this argument was called ``unbiased`` and was a boolean
             with ``True`` corresponding to ``correction=1`` and ``False`` being
             ``correction=0``.
-    {keepdim}
+    {opt_keepdim}
     {out}
 
 Example:
@@ -10540,7 +10586,7 @@ the :attr:`correction`.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
@@ -10550,7 +10596,7 @@ Keyword args:
             Previously this argument was called ``unbiased`` and was a boolean
             with ``True`` corresponding to ``correction=1`` and ``False`` being
             ``correction=0``.
-    {keepdim}
+    {opt_keepdim}
     {out}
 
 Returns:
@@ -10648,8 +10694,8 @@ reduce over all of them.
 
 Args:
     {input}
-    {opt_dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     {dtype}
@@ -10700,8 +10746,8 @@ If :attr:`dim` is a list of dimensions, reduce over all of them.
 
 Args:
     {input}
-    {opt_dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     {dtype}
@@ -11831,7 +11877,7 @@ the :attr:`correction`.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
@@ -11841,7 +11887,7 @@ Keyword args:
             Previously this argument was called ``unbiased`` and was a boolean
             with ``True`` corresponding to ``correction=1`` and ``False`` being
             ``correction=0``.
-    {keepdim}
+    {opt_keepdim}
     {out}
 
 Example:
@@ -11885,7 +11931,7 @@ the :attr:`correction`.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
@@ -11895,7 +11941,7 @@ Keyword args:
             Previously this argument was called ``unbiased`` and was a boolean
             with ``True`` corresponding to ``correction=1`` and ``False`` being
             ``correction=0``.
-    {keepdim}
+    {opt_keepdim}
     {out}
 
 Returns:
@@ -12703,7 +12749,7 @@ trapezoid(y, x=None, *, dx=None, dim=-1) -> Tensor
 Computes the `trapezoidal rule <https://en.wikipedia.org/wiki/Trapezoidal_rule>`_ along
 :attr:`dim`. By default the spacing between elements is assumed to be 1, but
 :attr:`dx` can be used to specify a different constant spacing, and :attr:`x` can be
-used to specify arbitrary spacing along :attr:`dim`.
+used to specify arbitrary spacing along :attr:`dim`. Only one of :attr:`x` or :attr:`dx` should be specified.
 
 
 Assuming :attr:`y` is a one-dimensional tensor with elements :math:`{y_0, y_1, ..., y_n}`,
@@ -13366,14 +13412,20 @@ Example::
 add_docstr(
     torch.Event,
     r"""
-Event(device, *, enable_timing) -> Event
+Event(device=None, *, enable_timing=False, blocking=False, interprocess=False)
 
 Query and record Stream status to identify or control dependencies across Stream and measure timing.
 
 Arguments:
     device (:class:`torch.device`, optional): the desired device for the Event.
         If not given, the current :ref:`accelerator<accelerators>` type will be used.
-    enable_timing (bool, optional): indicates if the event should measure time (default: ``False``).
+    enable_timing (bool, optional): indicates if the event should measure time (default: ``False``)
+    blocking (bool, optional): if ``True``, :meth:`wait` will be blocking (default: ``False``)
+    interprocess (bool): if ``True``, the event can be shared between processes (default: ``False``)
+
+.. warning::
+
+    Both blocking and interprocess are not supported right now and are noops.
 
 Returns:
     Event: An torch.Event object.
@@ -13381,6 +13433,7 @@ Returns:
 Example::
 
     >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> event = torch.Event()
     >>> e_cuda = torch.Event(device='cuda')
 """,
 )
@@ -13436,14 +13489,14 @@ Example::
 add_docstr(
     torch.Event.record,
     r"""
-Event.record(stream) -> None
+Event.record(stream=None) -> None
 
 Record the event in a given stream. The stream's device must match the event's device.
 This function is equivalent to ``stream.record_event(self)``.
 
 Arguments:
     stream (:class:`torch.Stream`, optional): A stream to be recorded.
-    If not given, the current stream will be used.
+        If not given, the current stream will be used.
 
 Example::
 
@@ -13474,13 +13527,13 @@ Example::
 add_docstr(
     torch.Event.wait,
     r"""
-Event.wait(stream) -> None
+Event.wait(stream=None) -> None
 
 Make all future work submitted to the given stream wait for this event.
 
 Arguments:
     stream (:class:`torch.Stream`, optional): A stream to synchronize.
-    If not given, the current stream will be used.
+        If not given, the current stream will be used.
 
 Example::
 
@@ -13791,7 +13844,7 @@ Returns the indices of the buckets to which each value in the :attr:`input` belo
 boundaries of the buckets are set by :attr:`boundaries`. Return a new tensor with the same size
 as :attr:`input`. If :attr:`right` is False (default), then the left boundary is open. Note that
 this behavior is opposite the behavior of
-`numpy.digitize <https://docs.scipy.org/doc/numpy/reference/generated/numpy.digitize.html>`_.
+`numpy.digitize <https://numpy.org/doc/stable/reference/generated/numpy.digitize.html>`_.
 More formally, the returned index satisfies the following rules:
 
 .. list-table::

@@ -56,10 +56,11 @@ class _RequiredParameter:
 required = _RequiredParameter()
 
 
-def _use_grad_for_differentiable(func):
-    def _use_grad(self, *args, **kwargs):
+def _use_grad_for_differentiable(func: Callable[_P, _T]) -> Callable[_P, _T]:
+    def _use_grad(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         import torch._dynamo
 
+        self = cast(Optimizer, args[0])  # assume first positional arg is `self`
         prev_grad = torch.is_grad_enabled()
         try:
             # Note on graph break below:
@@ -76,7 +77,7 @@ def _use_grad_for_differentiable(func):
             # see https://github.com/pytorch/pytorch/issues/104053
             torch.set_grad_enabled(self.defaults["differentiable"])
             torch._dynamo.graph_break()
-            ret = func(self, *args, **kwargs)
+            ret = func(*args, **kwargs)
         finally:
             torch._dynamo.graph_break()
             torch.set_grad_enabled(prev_grad)
@@ -270,9 +271,10 @@ _fused_doc = r"""fused (bool, optional): whether the fused implementation is use
               implementation, pass False for either foreach or fused. """
 
 _capturable_doc = r"""capturable (bool, optional): whether this instance is safe to
-            capture in a CUDA graph. Passing True can impair ungraphed performance,
-            so if you don't intend to graph capture this instance, leave it False
-            (default: False)"""
+            capture in a graph, whether for CUDA graphs or for torch.compile support.
+            Tensors are only capturable when on supported :ref:`accelerators<accelerators>`.
+            Passing True can impair ungraphed performance, so if you don't intend to graph
+            capture this instance, leave it False (default: False)"""
 
 _differentiable_doc = r"""differentiable (bool, optional): whether autograd should
             occur through the optimizer step in training. Otherwise, the step()
@@ -1003,7 +1005,7 @@ class Optimizer:
                         torch._foreach_zero_(grads)
 
     @overload
-    def step(self, closure: None = ...) -> None:
+    def step(self, closure: None = None) -> None:
         ...
 
     @overload

@@ -410,7 +410,7 @@ torch._dynamo.guards._parse_guard_env_guards to avoid a RuntimeError.
 """
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class GuardEnvExpr:
     pass
 
@@ -421,7 +421,7 @@ input_pos_a and input_pos_b are input positions we have deduped.
 """
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class DuplicateInputs(GuardEnvExpr):
     input_source_a: Source
     input_source_b: Source
@@ -444,7 +444,7 @@ overlapping with any other input, overlapping_sources represent tensors that eit
 """
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class StorageOverlap(GuardEnvExpr):
     overlapping_sources: list[Source]
     non_overlapping_sources: list[Source]
@@ -561,7 +561,6 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
 
     _supported_global_states = {
         "grad_enabled",
-        "torch_function_enabled",
         "autocast_enabled",
         "autocast_cpu_enabled",
         "autocast_gpu_dtype",
@@ -674,10 +673,17 @@ class HopSubgraphCache:
     def get_proxy_dispatch_entry(self, identifier: str): ...
 
     @abstractmethod
-    def add_lazy_bwd_entry(self, identifier: str, gmod: torch.fx.GraphModule): ...
+    def add_lazy_bwd_entry(
+        self,
+        identifier: str,
+        tangent_metadata: tuple[object],
+        gmod: torch.fx.GraphModule,
+    ): ...
 
     @abstractmethod
-    def get_lazy_bwd_entry(self, identifier: str): ...
+    def get_lazy_bwd_entry(
+        self, identifier: str, tangent_metadata: tuple[object]
+    ) -> int: ...
 
 
 class InvokeSubgraphCache(HopSubgraphCache):
@@ -685,7 +691,9 @@ class InvokeSubgraphCache(HopSubgraphCache):
         self.autograd_cache: dict[str, Callable] = {}
         self.proxy_dispatch_cache: dict[str, Callable] = {}
         self.dynamo_installed_submodules: dict[int, list[str]] = defaultdict(list)
-        self.lazy_bwd_cache: dict[str, torch.fx.GraphModule] = {}
+        self.lazy_bwd_cache: dict[
+            str, dict[tuple[object], tuple[torch.fx.GraphModule, int]]
+        ] = defaultdict(dict)
 
     def add_dynamo_installed_submodule(self, fn_id: int, identifier: str):
         self.dynamo_installed_submodules[fn_id].append(identifier)
@@ -705,11 +713,22 @@ class InvokeSubgraphCache(HopSubgraphCache):
     def get_proxy_dispatch_entry(self, identifier: str):
         return self.proxy_dispatch_cache.get(identifier, None)
 
-    def add_lazy_bwd_entry(self, identifier: str, gmod: torch.fx.GraphModule):
-        self.lazy_bwd_cache[identifier] = gmod
+    def add_lazy_bwd_entry(
+        self,
+        identifier: str,
+        tangent_metadata: tuple[object],
+        gmod: torch.fx.GraphModule,
+    ):
+        # Save the number of existing graph modules in the dictionary to get the suffix
+        num_gmods = len(self.lazy_bwd_cache[identifier])
+        self.lazy_bwd_cache[identifier][tangent_metadata] = (gmod, num_gmods)
+        return num_gmods
 
-    def get_lazy_bwd_entry(self, identifier: str):
-        return self.lazy_bwd_cache.get(identifier, None)
+    def get_lazy_bwd_entry(self, identifier: str, tangent_metadata: tuple[object]):
+        if identifier not in self.lazy_bwd_cache:
+            return (None, None)
+
+        return self.lazy_bwd_cache[identifier].get(tangent_metadata, (None, None))
 
 
 class HopDispatchSetCache:
@@ -806,6 +825,8 @@ class TracingContext:
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
+        self.previously_inlined_functions = dict()
+        self.previously_cleaned_instructions = dict()
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
         # This is morally part of frame_summary_stack, but it is kept separate
@@ -851,6 +872,8 @@ class TracingContext:
         # Look at the note in output_graph.py in function `save_global_state`
         # for the context on clearing global context.
         self.global_context.global_state = {}
+        self.previously_inlined_functions.clear()
+        self.previously_cleaned_instructions.clear()
 
     @staticmethod
     @contextmanager

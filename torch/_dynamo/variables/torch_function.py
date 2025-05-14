@@ -44,7 +44,8 @@ from torch.overrides import (
 )
 from torch.utils._device import DeviceContext
 
-from ..exc import unimplemented
+from .. import graph_break_hints
+from ..exc import unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..polyfills import NoEnterTorchFunctionMode
 from ..source import AttrSource, GlobalSource, TorchFunctionModeStackSource, TypeSource
@@ -567,8 +568,13 @@ def dispatch_torch_function(tx: "InstructionTranslator", fn, args, kwargs):
         if not (isinstance(res, ConstantVariable) and res.value is NotImplemented):
             return res
 
-    unimplemented(
-        f"All __torch_function__ overrides for call {fn} with args {args} and kwargs {kwargs} returned NotImplemented"
+    unimplemented_v2(
+        gb_type="TypeError from user code",
+        context=f"{fn=}, {args=}, {kwargs=}",
+        explanation=f"All __torch_function__ overrides for for function {fn} returned NotImplemented",
+        hints=[
+            *graph_break_hints.USER_ERROR,
+        ],
     )
 
 
@@ -621,15 +627,24 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # base tensors, custom attribute accesses will graph break.
         import torch
 
+        # I think only `_base` is breaking because we aren't modelling view
+        # relationship perfectly in some scenarios.
         if name in banned_attrs:
-            unimplemented(
-                f"Accessing {name} on a tensor subclass with a __torch_function__ override is not supported"
+            unimplemented_v2(
+                gb_type="Unsupported tensor subclass attribute access",
+                context=f"{name}",
+                explanation="`torch.compile` currently can't trace this",
+                hints=[
+                    f"Avoid accessing {name} of tensor subclass in torch.compile region",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
 
         # Handle non-overriden attributes inherited from `torch.Tensor`.
         attr_is_overriden = _is_attr_overidden(tx, self, name)
         if hasattr(torch.Tensor, name) and not attr_is_overriden:
-            if tx.output.torch_function_enabled:
+            args, kwargs = [self], {}
+            if can_dispatch_torch_function(tx, args, kwargs):
                 if self.source:
                     install_guard(
                         AttrSource(
@@ -642,8 +657,8 @@ class TensorWithTFOverrideVariable(TensorVariable):
                     tx,
                     get_fn,
                     TupleVariable([self.class_type_var(tx)]),
-                    [self],
-                    {},
+                    args,
+                    kwargs,
                 )
         else:
             # `TensorVariable.var_getattr` doesn't handle user-defined
@@ -676,8 +691,15 @@ class TensorWithTFOverrideVariable(TensorVariable):
                     )
 
                 elif attr_is_overriden:
-                    unimplemented(
-                        f"Currently only support accessing overridden attributes that are functions or properties, but got {type(attr)}"  # noqa: B950
+                    unimplemented_v2(
+                        gb_type="Unsupported tensor subclass overriden attribute access",
+                        context=f"{name}",
+                        explanation="`torch.compile` only support tracing certain types of overriden tensor subclass attributes",
+                        hints=[
+                            f"Avoid accessing {name} of tensor subclass in torch.compile region",
+                            f"Renaming attribute `{name}` of type {self.class_type}",
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
                     )
 
         return super().var_getattr(tx, name)
@@ -705,13 +727,20 @@ class TensorWithTFOverrideVariable(TensorVariable):
     ) -> "VariableTracker":
         # This code block implements inlining the __torch_function__ override
         # of `call_method`.
-        if tx.output.torch_function_enabled:
+        tf_args = [self] + args
+        if can_dispatch_torch_function(tx, tf_args, kwargs):
             import torch
 
             if _is_attr_overidden(tx, self, name):
-                unimplemented(
-                    f"Calling overridden method {name} on a tensor"
-                    " subclass with a __torch_function__ override is not supported"
+                unimplemented_v2(
+                    gb_type="Tensor subclass overriden method call",
+                    context=f"{name}",
+                    explanation="`torch.compile` currently can't trace this",
+                    hints=[
+                        f"Avoid calling {name} of tensor subclass in torch.compile region",
+                        f"Renaming method `{name}` of type {self.class_type}",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
                 )
 
             # [Note: __torch_function__] Currently we only support methods that are defined on tensor
@@ -725,6 +754,6 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 source = None
                 value = getattr(torch.Tensor, name)
             func_var = VariableTracker.build(tx, value, source)
-            return dispatch_torch_function(tx, func_var, [self] + args, kwargs)
+            return dispatch_torch_function(tx, func_var, tf_args, kwargs)
         else:
             return super().call_method(tx, name, args, kwargs)

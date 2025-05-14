@@ -647,7 +647,13 @@ struct ThreadLocalResults {
   ThreadLocalResults& operator=(const ThreadLocalResults&&) = delete;
 
   ~ThreadLocalResults() {
+    // Currently, there is a bug in Profiler when using Python 3.12 that causes
+    // a segfault when decrementing the refcount of a TraceContext during
+    // on-demand. We are purposefully allowing for a small leak in this
+    // situation to avoid the segfault. This should be fixed in the future.
+#if PY_MAJOR_VERSION < 3 || (PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION < 12)
     Py_DECREF((PyObject*)ctx_);
+#endif
   }
 
   template <CallType C, EventType E, typename Ephemeral, typename... Args>
@@ -1160,7 +1166,7 @@ class PythonMemoryTracer final : public python_tracer::PythonMemoryTracerBase {
 };
 
 static void toggle_memory_tracing(bool enable) {
-  PyGILState_STATE gil_state = PyGILState_Ensure();
+  pybind11::gil_scoped_acquire gil;
   THPObjectPtr torch_cuda_memory_module(
       PyImport_ImportModule("torch.cuda.memory"));
   if (!torch_cuda_memory_module) {
@@ -1184,7 +1190,6 @@ static void toggle_memory_tracing(bool enable) {
   if (result == nullptr) {
     return;
   }
-  PyGILState_Release(gil_state);
 }
 
 void PythonMemoryTracer::start() {
@@ -1192,7 +1197,7 @@ void PythonMemoryTracer::start() {
 }
 
 void PythonMemoryTracer::export_memory_history(const std::string path) {
-  PyGILState_STATE gil_state = PyGILState_Ensure();
+  pybind11::gil_scoped_acquire gil;
   THPObjectPtr torch_cuda_memory_module(
       PyImport_ImportModule("torch.cuda.memory"));
   if (!torch_cuda_memory_module) {
@@ -1211,7 +1216,6 @@ void PythonMemoryTracer::export_memory_history(const std::string path) {
   if (result == nullptr) {
     return;
   }
-  PyGILState_Release(gil_state);
 }
 
 void PythonMemoryTracer::stop() {

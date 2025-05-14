@@ -396,8 +396,13 @@ class CompiledFxGraph(OutputCode):
 
     current_callable: Optional[Callable[..., Any]]
     recursively_apply_fns: Optional[Callable[..., Any]]
+    compiled_fn_runner: Optional[Any]
     cache_key: str
     source_code: str = dataclasses.field(repr=False)  # Do not display source_code
+    runnable_graph_str: str = dataclasses.field(repr=False)  # Do not display graph
+    inductor_post_grad_graph_str: str = dataclasses.field(
+        repr=False
+    )  # Do not display graph
     cache_linemap: Optional[list[tuple[int, str]]]
     device_types: OrderedSet[str]
     device_idxs: OrderedSet[int]
@@ -439,14 +444,23 @@ class CompiledFxGraph(OutputCode):
         static_input_idxs: Sequence[int],
         fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
-        recursively_apply_fns: Optional[Callable[..., Any]] = None,
+        runnable_graph_str: str,
+        inductor_post_grad_graph_str: str,
+        compiled_fn_runner: Optional[Any] = None,
     ) -> None:
         self.current_callable = current_callable
-        self.recursively_apply_fns = recursively_apply_fns
+        self.compiled_fn_runner = compiled_fn_runner
+        self.recursively_apply_fns = (
+            compiled_fn_runner.recursively_apply_fns
+            if compiled_fn_runner is not None
+            else None
+        )
         self.cache_key = graph.cache_key
         if graph.cache_path:
             with open(graph.cache_path) as f:
                 self.source_code = f.read()
+        self.runnable_graph_str = runnable_graph_str
+        self.inductor_post_grad_graph_str = inductor_post_grad_graph_str
         self.cache_linemap = graph.cache_linemap
         # TODO - ordered set
         self.device_types = OrderedSet(graph.device_types)
@@ -555,6 +569,15 @@ class CompiledFxGraph(OutputCode):
         # aot autograd needs to know to pass in inputs as a list
         self._boxed_call = True
 
+    def __del__(self) -> None:
+        if self.compiled_fn_runner is not None:
+            # For torch._inductor.config.graph_partition = True,
+            # self.compiled_fn_runner.partitions hold cudagraphified functions
+            # which prevents deallocation. When CompiledFxGraph is deleted,
+            # self.compiled_fn_runner will not be called in the future so we
+            # should also delete these partitions.
+            del self.compiled_fn_runner.partitions
+
     def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
         try:
@@ -645,15 +668,11 @@ class CompiledFxGraph(OutputCode):
         # models to disk.
         self.current_callable = None
         self.recursively_apply_fns = None
+        self.compiled_fn_runner = None
 
-    def after_deserialization(self, constants: CompiledFxGraphConstants) -> str:
-        from torch._dynamo.utils import counters, dynamo_timed
-        from torch._inductor.codecache import (
-            cpp_prefix_path,
-            get_path,
-            PyCodeCache,
-            write_atomic,
-        )
+    def write_to_disk(self) -> str:
+        from torch._dynamo.utils import counters
+        from torch._inductor.codecache import cpp_prefix_path, get_path, write_atomic
 
         # See _save_graph(); we don't store the callable in the cache entry so
         # recreate it here from the PyCodeCache disk cache.
@@ -674,6 +693,13 @@ class CompiledFxGraph(OutputCode):
                     self.source_code = code
 
             write_atomic(artifact_path, code, make_dirs=True)
+        return artifact_path
+
+    def after_deserialization(self, constants: CompiledFxGraphConstants) -> str:
+        from torch._dynamo.utils import dynamo_timed
+        from torch._inductor.codecache import PyCodeCache
+
+        artifact_path = self.write_to_disk()
 
         try:
             with dynamo_timed(
@@ -690,6 +716,7 @@ class CompiledFxGraph(OutputCode):
                 self.recursively_apply_fns = getattr(
                     code_cache, "recursively_apply_fns", None
                 )
+                self.compiled_fn_runner = getattr(code_cache, "runner", None)
         except OSError:
             log.error("Failed to load artifact: %s", artifact_path)
             raise

@@ -1372,6 +1372,7 @@ def clear_instruction_args(instructions):
             inst.arg = None
 
 
+@functools.lru_cache
 def get_code_keys() -> list[str]:
     # Python 3.11 changes to code keys are not fully documented.
     # See https://github.com/python/cpython/blob/3.11/Objects/clinic/codeobject.c.h#L24

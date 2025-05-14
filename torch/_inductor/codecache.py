@@ -6,6 +6,7 @@ import dataclasses
 import functools
 import hashlib
 import importlib
+import importlib.resources
 import io
 import itertools
 import json
@@ -35,6 +36,7 @@ from typing import (
     Any,
     Callable,
     cast,
+    Generic,
     NoReturn,
     Optional,
     TYPE_CHECKING,
@@ -46,6 +48,7 @@ from typing_extensions import Self
 import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
+from torch._dynamo.exc import SkipFrame
 from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
@@ -89,11 +92,13 @@ from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 from torch.utils._ordered_set import OrderedSet
 
+from .output_code import CompiledFxGraph
 from .package.pt2_archive_constants import CUSTOM_OBJ_FILENAME_PREFIX
 from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .triton_bundler import TritonBundler
+from .virtualized import V
 
 
 if config.is_fbcode():
@@ -120,11 +125,13 @@ else:
         return False
 
 
+T = TypeVar("T")
+
 if TYPE_CHECKING:
     from collections.abc import Generator, KeysView, Sequence
     from concurrent.futures import Future
 
-    from .compile_fx import _CompileFxKwargs, CompiledFxGraph
+    from .compile_fx import _CompileFxKwargs
     from .graph import GraphLowering
     from .ir import ChoiceCaller
     from .output_code import CompiledFxGraphConstants, OutputCode
@@ -132,8 +139,6 @@ if TYPE_CHECKING:
     from .runtime.hints import HalideInputSpec, HalideMeta
     from .runtime.triton_heuristics import CachingAutotuner
     from .utils import InputType
-
-    T = TypeVar("T")
 
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -920,7 +925,132 @@ def add_ephemeral_timeout_increase_for_distributed(time_saved_ns: int) -> int:
     return increased_timeout_sec
 
 
-class FxGraphCache:
+class GuardedCache(Generic[T]):
+    """
+    Mixin for caches that have guards associated with their entries.
+    """
+
+    @classmethod
+    def _get_tmp_dir_for_key(cls: type[GuardedCache[T]], _key: str) -> str:
+        raise NotImplementedError("Implement _get_tmp_dir_for_key on parent class")
+
+    @classmethod
+    def iterate_over_candidates(
+        cls: type[GuardedCache[T]],
+        local: bool,
+        remote_cache: Optional[RemoteCache[JsonDataTy]],
+        key: str,
+    ) -> Generator[tuple[T, bytes], None, None]:
+        if local:
+            subdir = cls._get_tmp_dir_for_key(key)
+            if os.path.exists(subdir):
+                for path in sorted(os.listdir(subdir)):
+                    try:
+                        with open(os.path.join(subdir, path), "rb") as f:
+                            content = f.read()
+                            yield pickle.loads(content), content
+                    except Exception:
+                        log.warning(
+                            "fx graph cache unable to load compiled graph",
+                            exc_info=True,
+                        )
+
+        if remote_cache:
+            try:
+                if (cache_data := remote_cache.get(key)) is not None:
+                    assert isinstance(cache_data, dict)
+                    data = cache_data["data"]
+                    assert isinstance(data, (str, bytes))
+                    content = base64.b64decode(data)
+                    yield pickle.loads(content), content
+            except Exception:
+                log.warning(
+                    "%s unable to load compiled graph", cls.__name__, exc_info=True
+                )
+
+    @classmethod
+    def find_guarded_entry(
+        cls: type[GuardedCache[T]],
+        key: str,
+        local: bool,
+        remote_cache: Optional[RemoteCache[JsonDataTy]],
+        evaluate_guards: Callable[[str, Union[list[int], list[torch.SymInt]]], bool],
+        hints: list[int],
+    ) -> tuple[Optional[T], Optional[bytes], dict[str, str]]:
+        """
+        Find the first cache entry in iterate_over_candidates that passes `evaluate_guards`.
+
+        Args:
+            key: The cache key to look up
+            local: Whether to check the local cache
+            remote_cache: The remote cache to check, if any
+            evaluate_guards: Function that evaluates whether a guard passes the check,
+                given a list of hint values and the guard expression.
+            hints: List of symint hints paired with evaluate_guards
+
+        Returns:
+            A tuple of (graph, pickled_content) if found, or (None, None) if not found
+        """
+        graph = None
+        pickled_content = None
+        result_status = "full_miss"
+        sample_guards_expr = None
+
+        # Iterate over any entries in the subdir for this key and evaluate
+        # guards to determine whether there's a hit.
+
+        for candidate, content in cls.iterate_over_candidates(local, remote_cache, key):
+            assert hasattr(candidate, "guards_expr")
+            if not candidate.guards_expr:  # type: ignore[attr-defined]
+                # No guards to evaluate, so this is a hit.
+                graph = candidate
+                pickled_content = content
+                result_status = "hit"
+                break
+
+            # Evaluate the guard expression in the current context.
+            # If there's not a cache hit, we don't want the evaluation to
+            # affect the current env, e.g., cause the creation of new guards,
+            # so we evaluate with the hints instead of the symbols.
+            hit = bool(evaluate_guards(candidate.guards_expr, hints))  # type: ignore[attr-defined]
+            if hit:
+                graph = candidate
+                pickled_content = content
+                result_status = "hit"
+                sample_guards_expr = candidate.guards_expr
+                break
+            else:
+                # At least one guard missed, log this
+                result_status = "guard_miss"
+                sample_guards_expr = candidate.guards_expr
+
+        info = {"cache_status_detailed": result_status}
+        if sample_guards_expr is not None:
+            info["cache_status_guard_expr"] = sample_guards_expr
+        return graph, pickled_content, info
+
+    @classmethod
+    def _filter_backed_symints(
+        cls: type[GuardedCache[T]], inputs: Sequence[InputType]
+    ) -> list[torch.SymInt]:
+        """
+        Get the backed SymInt objects from the input list. Note that we can never
+        have guards that depend on unbacked symint.
+        """
+        return [s for s in inputs if isinstance(s, torch.SymInt) and has_hint(s)]
+
+    @classmethod
+    def _get_shape_env(cls: type[GuardedCache[T]]) -> Optional[ShapeEnv]:
+        """
+        Helper to get the shape env from the tracing context.
+        """
+        ctx = torch._guards.TracingContext.try_get()
+        if not ctx:
+            return None
+        return ctx.fake_mode.shape_env
+
+
+class FxGraphCache(GuardedCache[CompiledFxGraph]):
     """
     Supports caching and reusing compiled Fx graphs.
 
@@ -957,121 +1087,27 @@ class FxGraphCache:
         """
         return os.path.join(cache_dir(), "fxgraph")
 
-    @staticmethod
-    def _get_tmp_dir_for_key(key: str) -> str:
+    @classmethod
+    def _get_tmp_dir_for_key(cls: type[FxGraphCache], key: str) -> str:
         """
         Return the disk location for a given cache key.
         """
         return os.path.join(FxGraphCache._get_tmp_dir(), key[1:3], key)
 
     @staticmethod
-    def _filter_backed_symints(inputs: Sequence[InputType]) -> list[torch.SymInt]:
-        """
-        Get the backed SymInt objects from the input list. Note that we can never
-        have guards that depend on unbacked symint.
-        """
-        return [s for s in inputs if isinstance(s, torch.SymInt) and has_hint(s)]
-
-    @staticmethod
-    def _get_shape_env() -> Optional[ShapeEnv]:
-        """
-        Helper to get the shape env from the tracing context.
-        """
-        ctx = torch._guards.TracingContext.try_get()
-        if not ctx:
-            return None
-        return ctx.fake_mode.shape_env
-
-    @staticmethod
-    def _lookup_graph(
-        key: str,
-        example_inputs: Sequence[InputType],
-        local: bool,
-        remote_cache: Optional[RemoteCache[JsonDataTy]],
+    def cache_hit_post_compile(
+        graph: CompiledFxGraph,
+        cache_info: dict[str, Any],
         constants: CompiledFxGraphConstants,
     ) -> tuple[Optional[CompiledFxGraph], dict[str, Any]]:
         """
-        Lookup a compiled graph in the cache by key. On a hit, return the
-        deserialized CompiledFxGraph object. On a miss, return None.
+        Cache specific post compile steps that need to run if we find a graph in the cache
+        This includes putting bundled triton artifacts in the right place,
+        reloading the PyCodeCache artifact, etc.
+
+        These don't always happen (i.e. on a cache miss, so they are in a separate function from
+        CompiledFxGraph.post_compile)
         """
-        shape_env = FxGraphCache._get_shape_env()
-        assert shape_env is not None
-
-        symints = FxGraphCache._filter_backed_symints(example_inputs)
-        hints = [hint_int(s) for s in symints]
-
-        def iterate_over_candidates() -> Generator[
-            tuple[CompiledFxGraph, bytes], None, None
-        ]:
-            if local:
-                subdir = FxGraphCache._get_tmp_dir_for_key(key)
-                if os.path.exists(subdir):
-                    for path in sorted(os.listdir(subdir)):
-                        try:
-                            with open(os.path.join(subdir, path), "rb") as f:
-                                content = f.read()
-                                yield pickle.loads(content), content
-                        except Exception:
-                            log.warning(
-                                "fx graph cache unable to load compiled graph",
-                                exc_info=True,
-                            )
-
-            if remote_cache:
-                try:
-                    if (cache_data := remote_cache.get(key)) is not None:
-                        assert isinstance(cache_data, dict)
-                        data = cache_data["data"]
-                        assert isinstance(data, (str, bytes))
-                        content = base64.b64decode(data)
-                        yield pickle.loads(content), content
-                except Exception:
-                    log.warning(
-                        "fx graph cache unable to load compiled graph", exc_info=True
-                    )
-
-        # Iterate over any entries in the subdir for this key and evaluate
-        # their guards to determine whether there's a hit.
-        graph = None
-        pickled_content = None
-        cache_info: dict[str, Any] = dict()
-
-        for candidate, pickled_content in iterate_over_candidates():
-            if not candidate.guards_expr:
-                # No guards to evaluate, so this is a hit.
-                graph = candidate
-                break
-
-            # Evaluate the guard expression in the current context.
-            # If there's not a cache hit, we don't want the evaluation to
-            # affect the current env, e.g., cause the creation of new guards,
-            # so we evaluate with the hints instead of the symbols.
-            if config.unsafe_skip_cache_dynamic_shape_guards:
-                hit = True
-            else:
-                hit = bool(
-                    shape_env.evaluate_guards_expression(candidate.guards_expr, hints)
-                )
-                log.debug(
-                    "fx graph cache key %s evaluating guards [%s] with values %s => hit=%s",
-                    key,
-                    candidate.guards_expr,
-                    hints,
-                    hit,
-                )
-
-            if hit:
-                graph = candidate
-                break
-
-        if graph is None:
-            return None, cache_info
-
-        if pickled_content is not None:
-            CacheArtifactManager.record_artifact(
-                CacheArtifactType.INDUCTOR, key, pickled_content
-            )
-
         if bundle := graph._triton_bundle:
             triton_bundler_meta = TritonBundler.read_and_emit(bundle)
             if (meta := triton_bundler_meta) is not None:
@@ -1106,16 +1142,6 @@ class FxGraphCache:
         code = graph.source_code
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
 
-        # Now re-evaluate with the symints to add any guards to the current env.
-        if not config.unsafe_skip_cache_dynamic_shape_guards and graph.guards_expr:
-            check = bool(
-                shape_env.evaluate_guards_expression(graph.guards_expr, symints)
-            )
-            assert check is True
-            log.debug(
-                "fx graph cache key %s post-load guards: %s", key, shape_env.guards
-            )
-
         # Increment the cached metrics/counters by the amounts recorded when the FX
         # graph was compiled for this cache entry. Pretending these counters
         # were incremented normally is useful for testing with the cache enabled.
@@ -1126,11 +1152,83 @@ class FxGraphCache:
         output_code_log.debug("Output code written to: %s", artifact_path)
         # On cache hit, use artifact path as filename
         trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "fx_graph_runnable",
+                "encoding": "string",
+            },
+            payload_fn=lambda: graph.runnable_graph_str,
+        )
+        trace_structured(
+            "inductor_post_grad_graph",
+            payload_fn=lambda: graph.inductor_post_grad_graph_str,
+        )
+        trace_structured(
             "inductor_output_code",
             lambda: {"filename": artifact_path},
             payload_fn=lambda: code,
         )
         return graph, cache_info
+
+    @staticmethod
+    def _lookup_graph(
+        key: str,
+        example_inputs: Sequence[InputType],
+        local: bool,
+        remote_cache: Optional[RemoteCache[JsonDataTy]],
+        constants: CompiledFxGraphConstants,
+        evaluate_guards: Optional[
+            Callable[[str, Union[list[int], list[torch.SymInt]]], bool]
+        ] = None,
+    ) -> tuple[Optional[CompiledFxGraph], dict[str, Any]]:
+        """
+        Lookup a compiled graph in the cache by key. On a hit, return the
+        deserialized CompiledFxGraph object. On a miss, return None.
+        `constants` tracks a list of constants, or a way to obtain the list of constants
+        associated with a given cache entry
+        `evaluate_guards` allows AOTAutogradCache and other callers to customize
+        what constitutes a guard success. Normally, a guard hit happens if
+        `shape_env.evaluate_guards_expression` returns True.
+        """
+        shape_env = FxGraphCache._get_shape_env()
+        assert shape_env is not None
+
+        symints = FxGraphCache._filter_backed_symints(example_inputs)
+        hints = [hint_int(s) for s in symints]
+
+        # If this config is turned on, everything is a guard hit and we check nothing
+        if config.unsafe_skip_cache_dynamic_shape_guards:
+            # This also makes it so we don't add anything to the dynamic
+            # shape environment
+            evaluate_guards = lambda x, y: True  # noqa: E731
+
+        if evaluate_guards is None:
+            evaluate_guards = shape_env.evaluate_guards_expression
+
+        cache_info: dict[str, Any] = dict()
+
+        # Use the find_graph_for_key method to find a graph for the given key
+        graph, pickled_content, guard_info = FxGraphCache.find_guarded_entry(
+            key, local, remote_cache, evaluate_guards, hints
+        )
+        cache_info.update(guard_info)
+        if graph is None:
+            return None, cache_info
+
+        if pickled_content is not None:
+            CacheArtifactManager.record_artifact(
+                CacheArtifactType.INDUCTOR, key, pickled_content
+            )
+
+        # Now re-evaluate with the symints to add any guards to the current env.
+        if graph.guards_expr:
+            check = bool(evaluate_guards(graph.guards_expr, symints))
+            assert check is True
+            log.debug(
+                "fx graph cache key %s post-load guards: %s", key, shape_env.guards
+            )
+
+        return FxGraphCache.cache_hit_post_compile(graph, cache_info, constants)
 
     @staticmethod
     def _write_to_local_cache(key: str, content: bytes) -> None:
@@ -1160,8 +1258,6 @@ class FxGraphCache:
         assert isinstance(compiled_graph, CompiledFxGraph), (
             f"serialization for {type(compiled_graph)} NYI"
         )
-        disk_compiled_graph = copy(compiled_graph)
-        disk_compiled_graph.prepare_for_serialization()
 
         # Before serializing, compute the guard expression that will be used to
         # ensure that a CompiledFxGraph is valid when loaded from the cache. It's
@@ -1172,9 +1268,11 @@ class FxGraphCache:
         assert shape_env is not None
         symints = FxGraphCache._filter_backed_symints(example_inputs)
         guards = shape_env.get_pruned_guards(symints)
-        disk_compiled_graph.guards_expr = shape_env.produce_guards_expression(
+        compiled_graph.guards_expr = shape_env.produce_guards_expression(
             placeholders=symints, guards=guards
         )
+        disk_compiled_graph = copy(compiled_graph)
+        disk_compiled_graph.prepare_for_serialization()
 
         try:
             content = pickle.dumps(disk_compiled_graph)
@@ -1319,6 +1417,9 @@ class FxGraphCache:
         remote_cache: Optional[RemoteCache[JsonDataTy]],
         is_backward: bool,
         constants: CompiledFxGraphConstants,
+        evaluate_guards: Optional[
+            Callable[[str, Union[list[int], list[torch.SymInt]]], bool]
+        ] = None,
     ) -> tuple[Optional[CompiledFxGraph], dict[str, Any]]:
         """
         Lookup the graph with the given key, and return results and metadata.
@@ -1326,7 +1427,7 @@ class FxGraphCache:
         differently from FXGraphCache.
         """
         compiled_graph, cache_info = FxGraphCache._lookup_graph(
-            key, example_inputs, local, remote_cache, constants
+            key, example_inputs, local, remote_cache, constants, evaluate_guards
         )
         cache_info = {
             **cache_info,
@@ -1503,6 +1604,12 @@ class AotCodeCompiler:
             extra=cpp_command,
             specified_dir=specified_output_path,
         )
+
+        # Log the AOTInductor wrapper and kernel code, if needed.
+        with tempfile.NamedTemporaryFile("w+") as t:
+            t.writelines((wrapper_code, "\n", kernel_code, "\n"))
+            t.flush()
+            V.debug.output_code(t.name, extension="cpp")
 
         if config.aot_inductor.package:
             generated_files.append(wrapper_path)
@@ -1784,7 +1891,14 @@ class AotCodeCompiler:
                 wrapper_builder.save_src_to_cmake(cmake_path, wrapper_path)
                 generated_files.append(cmake_path)
             else:
-                wrapper_builder.build()
+                try:
+                    wrapper_builder.build()
+                except (exc.CppCompileError, SkipFrame) as e:
+                    if " is too big to optimize" in str(e):
+                        raise RuntimeError(
+                            "Please use torch._inductor.config.aot_inductor.compile_wrapper_opt_level = 'O0' flag."
+                        ) from e
+                    raise e
                 kernel_builder.build()
 
             if not use_mmap_weights:
@@ -3016,7 +3130,27 @@ def _cutlass_include_paths() -> list[str]:
     ]
 
 
+@torch_key_cache
+def cutlass_key() -> bytes:
+    """
+    Compute a key representing the state of the CUTLASS library.
+
+    Note: OSS and fbcode will have different keys.
+    """
+    if config.is_fbcode():
+        with importlib.resources.path("cutlass", "src_hash.txt") as resource_path:
+            with open(resource_path) as resource_file:
+                return resource_file.read().encode()
+
+    combined_hash = hashlib.sha256()
+    build_code_hash([config.cuda.cutlass_dir], "", combined_hash)
+    return combined_hash.digest()
+
+
 def _cuda_lib_options() -> list[str]:
+    """
+    Util function for CUTLASS backend to find the correct CUDA libraries.
+    """
     _set_gpu_runtime_env()  # cpp_extension consults the env
     from torch.utils import cpp_extension
 
@@ -3025,6 +3159,9 @@ def _cuda_lib_options() -> list[str]:
     if is_linux():
         _transform_cuda_paths(lpaths)
         for path in lpaths:
+            if "torch/lib" in path:
+                # don't want to depend on pytorch
+                continue
             # -rpath ensures the DLL can find its dependencies when loaded, even
             # if the library path is non-standard.
             extra_ldflags.extend([f"-L{path}", "-Xlinker", f"-rpath={path}"])
@@ -3206,6 +3343,13 @@ class DLLWrapper:
 
 @clear_on_fresh_inductor_cache
 class CUDACodeCache:
+    """
+    A cache for managing the compilation and loading of CUDA source code specifically for CUTLASS.
+    This class handles writing source code to files, compiling them into shared objects, and caching
+    the results to avoid redundant compilations. It also manages error handling and logging for the
+    compilation process.
+    """
+
     @dataclasses.dataclass
     class CacheEntry:
         input_path: str
@@ -3226,9 +3370,26 @@ class CUDACodeCache:
         cuda_command = repr(
             cuda_compile_command(["dummy_input"], "dummy_output", dst_file_ext)
         )
-        key, input_path = write(
-            source_code, cls._SOURCE_CODE_SUFFIX, extra=cuda_command
-        )
+        if config.cuda.cutlass_hash_with_compile_cmd:
+            extra = cuda_command
+        else:
+            extra = repr(
+                [
+                    # nvcc and cuda hash
+                    _cuda_compiler(),
+                    # cutlass flags and gcc hash
+                    _nvcc_compiler_options(),
+                    # flags
+                    _nvcc_host_compiler_options(),
+                    # cutlass key
+                    cutlass_key(),
+                    # hack to deal with AOTI .o compilation
+                ]
+                + [dst_file_ext]
+                if dst_file_ext == "o"
+                else []
+            )
+        key, input_path = write(source_code, cls._SOURCE_CODE_SUFFIX, extra=extra)
         return key, input_path
 
     @classmethod

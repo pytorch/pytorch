@@ -2,7 +2,9 @@
 # Just an early prototype that shows that one can compile elementwise ops into a Metal shader
 from __future__ import annotations
 
+import functools
 import itertools
+import logging
 import math
 from typing import Any, Optional, TYPE_CHECKING
 
@@ -10,6 +12,7 @@ import sympy
 from sympy.printing.precedence import PRECEDENCE
 
 import torch
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -33,6 +36,7 @@ if TYPE_CHECKING:
     from ..scheduler import Scheduler, SchedulerNode
     from .common import OpVarT
 
+log = logging.getLogger(__name__)
 
 DTYPE_TO_METAL = {
     torch.bool: "bool",
@@ -62,6 +66,8 @@ def value_to_metal(val: Union[float, int, bool, str, CSEVariable]) -> str:
 
 
 class MetalExprPrinter(ExprPrinter_):
+    """Converts sympy expression to Metal code snippet"""
+
     def _print_FloorDiv(self, expr: sympy.Expr) -> str:
         x, div = expr.args
         x = self.doprint(x)
@@ -85,12 +91,18 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_Min(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 2:
             raise RuntimeError("metal::min only supported for 2 args")
-        return f"metal::min({', '.join(map(self._print, expr.args))})"
+        a, b = map(self._print, expr.args)
+        typecast_a = f"static_cast<decltype({a}+{b})>({a})"
+        typecast_b = f"static_cast<decltype({a}+{b})>({b})"
+        return f"metal::min({typecast_a}, {typecast_b})"
 
     def _print_Max(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 2:
             raise RuntimeError("metal::max only supported for 2 args")
-        return f"metal::max({', '.join(map(self._print, expr.args))})"
+        a, b = map(self._print, expr.args)
+        typecast_a = f"static_cast<decltype({a}+{b})>({a})"
+        typecast_b = f"static_cast<decltype({a}+{b})>({b})"
+        return f"metal::max({typecast_a}, {typecast_b})"
 
     def _print_Abs(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
@@ -117,6 +129,31 @@ class MetalExprPrinter(ExprPrinter_):
         # TODO: This is only accurate up to 2**23
         return f"static_cast<float>({self._print(lhs)}) / static_cast<float>({self._print(rhs)})"
 
+    def _print_PowByNatural(self, expr: sympy.Expr) -> str:
+        assert len(expr.args) == 2
+        x, y = map(self.doprint, expr.args)
+        return f"metal::pow(static_cast<float>({x}), static_cast<float>({y}))"
+
+    def _print_ToFloat(self, expr: sympy.Expr) -> str:
+        assert len(expr.args) == 1
+        x = self.doprint(expr.args[0])
+        return f"static_cast<float>({x})"
+
+    def _print_FloorToInt(self, expr: sympy.Expr) -> str:
+        assert len(expr.args) == 1
+        x = self.doprint(expr.args[0])
+        return f"static_cast<int>(metal::floor({x}))"
+
+    def _print_TruncToInt(self, expr: sympy.Expr) -> str:
+        assert len(expr.args) == 1
+        x = self.doprint(expr.args[0])
+        return f"static_cast<int>(metal::trunc({x}))"
+
+    def _print_OpaqueUnaryFn_log2(self, expr: sympy.Expr) -> str:
+        assert len(expr.args) == 1
+        x = self.doprint(expr.args[0])
+        return f"metal::log2({x})"
+
 
 class MetalOverrides(OpOverrides):
     """Implements Metal-specific overrids for ops. Base class emits Python-friendly overrides"""
@@ -128,6 +165,11 @@ class MetalOverrides(OpOverrides):
         src_dtype: Optional[torch.dtype] = None,
         use_compute_types: bool = True,
     ) -> str:
+        if dtype == torch.double:
+            log.warning(
+                "float64 cast requested, probably from tensorify_python_scalars"
+            )
+            return f"static_cast<float>({x})"
         return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
 
     @staticmethod
@@ -241,42 +283,6 @@ class MetalOverrides(OpOverrides):
         return f"metal::precise::cos({x})"
 
     @staticmethod
-    def i0(x: CSEVariable) -> str:
-        return f"c10::metal::i0({x})"
-
-    @staticmethod
-    def i0e(x: CSEVariable) -> str:
-        return f"c10::metal::i0e({x})"
-
-    @staticmethod
-    def i1(x: CSEVariable) -> str:
-        return f"c10::metal::i1({x})"
-
-    @staticmethod
-    def i1e(x: CSEVariable) -> str:
-        return f"c10::metal::i1e({x})"
-
-    @staticmethod
-    def erf(x: CSEVariable) -> str:
-        return f"c10::metal::erf({x})"
-
-    @staticmethod
-    def erfinv(x: CSEVariable) -> str:
-        return f"c10::metal::erfinv({x})"
-
-    @staticmethod
-    def lgamma(x: CSEVariable) -> str:
-        return f"c10::metal::log_gamma({x})"
-
-    @staticmethod
-    def polygamma(x: CSEVariable, y: CSEVariable) -> str:
-        return f"c10::metal::polygamma({x}, {y})"
-
-    @staticmethod
-    def digamma(x: CSEVariable) -> str:
-        return f"c10::metal::digamma({x})"
-
-    @staticmethod
     def tan(x: CSEVariable) -> str:
         return f"metal::tan({x})"
 
@@ -345,11 +351,12 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def truncdiv(a: CSEVariable, b: CSEVariable) -> str:
-        # Upcast to float otherwise the generated code doesn't typecheck.
-        # TODO (dcci): remove this workaround
-        float_a = f"static_cast<float>({a})" if a.dtype != torch.float else a
-        float_b = f"static_cast<float>({b})" if b.dtype != torch.float else b
-        return f"metal::trunc({float_a}/{float_b})"
+        quot = f"{a} / {b}"
+        if (a.dtype is not None and a.dtype.is_floating_point) or (
+            b.dtype is not None and b.dtype.is_floating_point
+        ):
+            return f"metal::trunc({quot})"
+        return quot
 
     @staticmethod
     def ceil(x: CSEVariable) -> str:
@@ -357,16 +364,19 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def rand(seed: CSEVariable, offset: CSEVariable) -> str:
+        V.kernel.headers.add("random")
         return f"c10::metal::rand({seed}, {offset})"
 
     @staticmethod
     def randn(seed: CSEVariable, offset: CSEVariable) -> str:
+        V.kernel.headers.add("random")
         return f"c10::metal::randn({seed}, {offset})"
 
     @staticmethod
     def randint64(
         seed: CSEVariable, offset: CSEVariable, low: CSEVariable, high: CSEVariable
     ) -> str:
+        V.kernel.headers.add("random")
         return f"c10::metal::randint64({seed}, {offset}, {low}, {high})"
 
     @staticmethod
@@ -379,84 +389,75 @@ class MetalOverrides(OpOverrides):
         cast_b = f"static_cast<decltype({a}+{b})>({b})"
         return f"metal::pow({cast_a}, {cast_b})"
 
-    @staticmethod
-    def zeta(a: CSEVariable, b: CSEVariable) -> str:
-        return f"c10::metal::zeta({a}, {b})"
+    def _special_unary(self, a: CSEVariable, name: str) -> str:
+        V.kernel.headers.add("special_math")
+        return f"c10::metal::{name}({a})"
 
-    @staticmethod
-    def spherical_bessel_j0(x: CSEVariable) -> str:
-        return f"c10::metal::spherical_bessel_j0({x})"
+    def _special_binary(self, a: CSEVariable, b: CSEVariable, name: str) -> str:
+        V.kernel.headers.add("special_math")
+        return f"c10::metal::{name}({a}, {b})"
 
-    @staticmethod
-    def xlog1py(x: CSEVariable) -> str:
-        return f"c10::metal::xlog1py({x})"
+    @classmethod
+    def _initialize_special_ops(cls) -> None:
+        # Unary special ops
+        for name in [
+            "erf",
+            "erfinv",
+            "i0",
+            "i0e",
+            "i1",
+            "i1e",
+            "digamma",
+            "spherical_bessel_j0",
+        ]:
+            setattr(cls, name, functools.partialmethod(cls._special_unary, name=name))
 
-    @staticmethod
-    def entr(x: CSEVariable) -> str:
-        return f"c10::metal::entr({x})"
+        cls.lgamma = functools.partialmethod(cls._special_unary, name="log_gamma")  # type: ignore[assignment]
 
-    @staticmethod
-    def bessel_j0(x: CSEVariable) -> str:
-        return f"c10::metal::bessel_j0_forward({x})"
+        # Unary special ops with forward in method name
+        for name in [
+            "bessel_j0",
+            "bessel_j1",
+            "bessel_y0",
+            "bessel_y1",
+            "modified_bessel_i0",
+            "modified_bessel_i1",
+            "modified_bessel_k0",
+            "modified_bessel_k1",
+            "scaled_modified_bessel_k0",
+            "scaled_modified_bessel_k1",
+        ]:
+            setattr(
+                cls,
+                name,
+                functools.partialmethod(cls._special_unary, name=name + "_forward"),
+            )
 
-    @staticmethod
-    def bessel_j1(x: CSEVariable) -> str:
-        return f"c10::metal::bessel_j1_forward({x})"
+        # Binary special ops
+        for name in [
+            "polygamma",
+            "zeta",
+        ]:
+            setattr(cls, name, functools.partialmethod(cls._special_binary, name=name))
 
-    @staticmethod
-    def bessel_y0(x: CSEVariable) -> str:
-        return f"c10::metal::bessel_y0_forward({x})"
-
-    @staticmethod
-    def bessel_y1(x: CSEVariable) -> str:
-        return f"c10::metal::bessel_y1_forward({x})"
-
-    @staticmethod
-    def modified_bessel_i0(x: CSEVariable) -> str:
-        return f"c10::metal::modified_bessel_i0_forward({x})"
-
-    @staticmethod
-    def modified_bessel_i1(x: CSEVariable) -> str:
-        return f"c10::metal::modified_bessel_i1_forward({x})"
-
-    @staticmethod
-    def modified_bessel_k0(x: CSEVariable) -> str:
-        return f"c10::metal::modified_bessel_k0_forward({x})"
-
-    @staticmethod
-    def modified_bessel_k1(x: CSEVariable) -> str:
-        return f"c10::metal::modified_bessel_k1_forward({x})"
-
-    @staticmethod
-    def scaled_modified_bessel_k0(x: CSEVariable) -> str:
-        return f"c10::metal::scaled_modified_bessel_k0_forward({x})"
-
-    @staticmethod
-    def scaled_modified_bessel_k1(x: CSEVariable) -> str:
-        return f"c10::metal::scaled_modified_bessel_k1_forward({x})"
-
-    @staticmethod
-    def chebyshev_polynomial_t(x: CSEVariable, n: CSEVariable) -> str:
-        return f"c10::metal::chebyshev_polynomial_t_forward({x}, {n})"
-
-    @staticmethod
-    def chebyshev_polynomial_u(x: CSEVariable, n: CSEVariable) -> str:
-        return f"c10::metal::chebyshev_polynomial_u_forward({x}, {n})"
-
-    @staticmethod
-    def chebyshev_polynomial_v(x: CSEVariable, n: CSEVariable) -> str:
-        return f"c10::metal::chebyshev_polynomial_v_forward({x}, {n})"
-
-    @staticmethod
-    def chebyshev_polynomial_w(x: CSEVariable, n: CSEVariable) -> str:
-        return f"c10::metal::chebyshev_polynomial_w_forward({x}, {n})"
-
-    @staticmethod
-    def hermite_polynomial_h(x: CSEVariable, n: CSEVariable) -> str:
-        return f"c10::metal::hermite_polynomial_h_forward({x}, {n})"
+        # Binary special ops with forward in method name
+        for name in [
+            "chebyshev_polynomial_t",
+            "chebyshev_polynomial_u",
+            "chebyshev_polynomial_v",
+            "chebyshev_polynomial_w",
+            "hermite_polynomial_h",
+            "hermite_polynomial_he",
+        ]:
+            setattr(
+                cls,
+                name,
+                functools.partialmethod(cls._special_binary, name=name + "_forward"),
+            )
 
 
 MetalOverrides._initialize_pointwise_overrides("mps")
+MetalOverrides._initialize_special_ops()
 
 
 class MetalKernel(SIMDKernel):
@@ -470,6 +471,8 @@ class MetalKernel(SIMDKernel):
     pexpr = PythonPrinter().doprint
     sexpr = MetalExprPrinter().doprint
     kexpr = sexpr
+    headers: OrderedSet[str] = OrderedSet(["utils"])
+    multistage_reduction_entry: Optional[IterationRangesEntry] = None
 
     def __init__(
         self,
@@ -478,7 +481,6 @@ class MetalKernel(SIMDKernel):
     ) -> None:
         super().__init__(tiling, **kwargs)
         self.acc_var_ids = itertools.count()
-        self.multistage_reduction = False
 
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         return DTYPE_TO_METAL[dtype]
@@ -503,7 +505,16 @@ class MetalKernel(SIMDKernel):
         var = self.args.output(name)
         index = self.prepare_indexing(index)
         dtype_str = self.dtype_to_str(V.graph.get_dtype(name))
-        line = f"{var}[{self.index_to_str(index)}] = static_cast<{dtype_str}>({value});"
+        cast_val = f"static_cast<{dtype_str}>({value})"
+        if mode is None:
+            line = f"{var}[{self.index_to_str(index)}] = {cast_val};"
+        elif mode == "atomic_add":
+            self.headers.add("atomic")
+            atomic_type = f"c10::metal::AtomicType<{dtype_str}>"
+            cast_var = f"reinterpret_cast<device {atomic_type}::type *>({var})"
+            line = f"{atomic_type}::atomic_add({cast_var}, {self.index_to_str(index)}, {cast_val});"
+        else:
+            raise RuntimeError(f"Unimplemented store mode {mode}")
         if self.inside_reduction:
             self.compute.writeline(DeferredLine(name, line))
         else:
@@ -548,14 +559,26 @@ class MetalKernel(SIMDKernel):
         reduction_type: ReductionType,
         value: Union[CSEVariable, tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
-        """Codegen a reduction operation.
-        Only sum and prod operations are somewhat reasonable optimized"""
-        # Return cached reduction
-        assert self.inside_reduction
-        assert not self._load_mask
+        "Caching wrapper around _reduction_nocache"
         cache_key = (src_dtype, reduction_type, value)
+        # Return cached reduction
         if cache_key in self.cse.reduction_cache:
             return self.cse.reduction_cache[cache_key]
+        result = self._reduction_nocache(dtype, src_dtype, reduction_type, value)
+        self.cse.reduction_cache[cache_key] = result  # type: ignore[assignment]
+        return result
+
+    def _reduction_nocache(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: Union[CSEVariable, tuple[CSEVariable, ...]],
+    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+        """Codegen a reduction operation.
+        Only sum and prod operations are somewhat reasonable optimized"""
+        assert self.inside_reduction
+        assert not self._load_mask
 
         # Establish reduction buffer size and index expression
         reduction_idx = ""
@@ -586,12 +609,15 @@ class MetalKernel(SIMDKernel):
                 "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
             )
             return acc
+
+        self.headers.add("reduction_utils")
+
         if reduction_type in ["prod", "sum"]:
             acc_dtype = DTYPE_TO_COMPUTATION_DTYPE[src_dtype]
             acc_buf = self._new_idxvar(
                 acc_dtype, ceildiv(acc_buf_size, self.simd_group_size)
             )
-            if not self.multistage_reduction:
+            if not self.multistage_reduction_entry:
                 val = value
             else:
                 default_val, reduction_op = (
@@ -610,7 +636,7 @@ class MetalKernel(SIMDKernel):
             acc_buf = self._new_idxvar(src_dtype, acc_buf_size)
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             src_metal_type = DTYPE_TO_METAL[src_dtype]
-            if not self.multistage_reduction:
+            if not self.multistage_reduction_entry:
                 self.compute.splice(
                     f"{acc_thread_var} = static_cast<{src_metal_type}>({value});"
                 )
@@ -651,17 +677,14 @@ class MetalKernel(SIMDKernel):
                 dtype=dtype,
             )
         if reduction_type == "welford_reduce":
-            if not self.multistage_reduction:
+            if not self.multistage_reduction_entry:
                 acc_buf = self._new_idxvar(src_dtype, acc_buf_size)
                 self.compute.splice(f"{acc_buf}[{reduction_idx}] = {value};")
                 wf_res = self.cse.generate(
                     self.compute,
                     f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
                 )
-                self.cse.reduction_cache[cache_key] = result_tuple = OpsWrapper._unwrap(
-                    (f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z")
-                )
-                return result_tuple
+                return OpsWrapper._unwrap((f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z"))
             acc_buf = self._new_idxvar("float3", acc_buf_size)
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
@@ -672,17 +695,14 @@ class MetalKernel(SIMDKernel):
                 self.stores,
                 f"c10::metal::threadgroup_welford_combine({acc_buf}, {acc_buf_size})",
             )
-            self.cse.reduction_cache[cache_key] = result_tuple = OpsWrapper._unwrap(
-                (f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z")
-            )
-            return result_tuple
+            return OpsWrapper._unwrap((f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z"))
         if reduction_type == "welford_combine":
             assert isinstance(value, tuple), "Input to welford combine must be tuple"
             acc_buf = self._new_idxvar("float3", acc_buf_size)
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             inp_value = f"float3({value[0]}, {value[1]}, {value[2]})"
             self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
-            if self.multistage_reduction:
+            if self.multistage_reduction_entry:
                 self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
                 self.compute.writeline(
                     f"{acc_thread_var} = ::c10::metal::welford_combine({acc_thread_var}, {inp_value});"
@@ -690,21 +710,18 @@ class MetalKernel(SIMDKernel):
             else:
                 self.compute.writeline(f"{acc_thread_var} = {inp_value};")
             wf_res = self.cse.generate(
-                self.stores if self.multistage_reduction else self.compute,
+                self.stores if self.multistage_reduction_entry else self.compute,
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
             )
-            self.cse.reduction_cache[cache_key] = result_tuple = OpsWrapper._unwrap(
-                (f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z")
-            )
-            return result_tuple
+            return OpsWrapper._unwrap((f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z"))
         raise NotImplementedError(reduction_type)
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
         index_expr = self.rename_indexing(entry.expr)
         index_str = self.sexpr(index_expr)  # type: ignore[misc]
-        if entry.is_reduction:
-            self.multistage_reduction = entry.root.numel > self.max_threadgroup_size
-        if not entry.is_reduction or not self.multistage_reduction:
+        if entry.is_reduction and entry.root.numel > self.max_threadgroup_size:
+            self.multistage_reduction_entry = entry
+        if not entry.is_reduction or self.multistage_reduction_entry is None:
             self.indexing_code.writeline(
                 f"{self.index_dtype} {entry.name} = {index_str};"
             )
@@ -736,12 +753,16 @@ class MetalKernel(SIMDKernel):
         For reduction kernels, this generates a loop over the reduction
         axis.
         """
-        if self.multistage_reduction:
+        if self.multistage_reduction_entry:
             with self.body.indent():
                 self.body.splice(self.loads)
                 self.body.splice(self.compute)
             self.body.writeline("}")
-            self.multistage_reduction = False
+            # Invalidate variables instantiated inside loop
+            self.cse.invalidate(OrderedSet(self.cse.reduction_cache.values()))
+            # And loop codegen
+            self.multistage_reduction_entry.cache_clear()
+            self.multistage_reduction_entry = None
         else:
             self.body.splice(self.loads)
             self.body.splice(self.compute)
@@ -757,16 +778,8 @@ class MetalKernel(SIMDKernel):
         code.writeline('compile_mps_shader("""')
         idx_vars = self.active_range_trees()
         with code.indent():
-            code.splice(
-                """
-            #include <c10/metal/random.h>
-            #include <c10/metal/special_math.h>
-            #include <c10/metal/utils.h>
-            """,
-                strip=True,
-            )
-            if self.inside_reduction:
-                code.writeline("#include <c10/metal/reduction_utils.h>")
+            for header in self.headers:
+                code.writeline(f"#include <c10/metal/{header}.h>")
             if self.inside_reduction:
                 total_reduction_size = math.prod(
                     t.numel for t in self.range_trees if t.is_reduction
@@ -819,6 +832,10 @@ class MetalKernel(SIMDKernel):
     def call_kernel(self, name: str, node: Any = None) -> None:
         """Codegen a call to this kernel"""
         wrapper = V.graph.wrapper_code
+        # Make sure sizevarss has been computed
+        for v in self.args.sizevars.keys():
+            wrapper.ensure_size_computed(v)
+
         args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
         args = [arg for arg in args if arg not in self.removed_buffers]
         args += [str(v) for v in self.args.sizevars.keys()]
