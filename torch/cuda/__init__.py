@@ -540,7 +540,7 @@ def set_device(device: "Device") -> None:
         torch._C._cuda_setDevice(device)
 
 
-def get_device_name(device: Optional["Device"] = None) -> str:
+def get_device_name(device: "Device" = None) -> str:
     r"""Get the name of a device.
 
     Args:
@@ -555,7 +555,7 @@ def get_device_name(device: Optional["Device"] = None) -> str:
     return get_device_properties(device).name
 
 
-def get_device_capability(device: Optional["Device"] = None) -> tuple[int, int]:
+def get_device_capability(device: "Device" = None) -> tuple[int, int]:
     r"""Get the cuda capability of a device.
 
     Args:
@@ -572,7 +572,7 @@ def get_device_capability(device: Optional["Device"] = None) -> tuple[int, int]:
     return prop.major, prop.minor
 
 
-def get_device_properties(device: Optional["Device"] = None) -> _CudaDeviceProperties:
+def get_device_properties(device: "Device" = None) -> _CudaDeviceProperties:
     r"""Get the properties of a device.
 
     Args:
@@ -1043,7 +1043,7 @@ def current_device() -> int:
     return torch._C._cuda_getDevice()
 
 
-def synchronize(device: Optional["Device"] = None) -> None:
+def synchronize(device: "Device" = None) -> None:
     r"""Wait for all kernels in all streams on a CUDA device to complete.
 
     Args:
@@ -1069,7 +1069,7 @@ def ipc_collect():
     return torch._C._cuda_ipc_collect()
 
 
-def current_stream(device: Optional["Device"] = None) -> Stream:
+def current_stream(device: "Device" = None) -> Stream:
     r"""Return the currently selected :class:`Stream` for a given device.
 
     Args:
@@ -1087,7 +1087,7 @@ def current_stream(device: Optional["Device"] = None) -> Stream:
     )
 
 
-def default_stream(device: Optional["Device"] = None) -> Stream:
+def default_stream(device: "Device" = None) -> Stream:
     r"""Return the default :class:`Stream` for a given device.
 
     Args:
@@ -1106,7 +1106,7 @@ def default_stream(device: Optional["Device"] = None) -> Stream:
 
 
 def get_stream_from_external(
-    data_ptr: int, device: Optional["Device"] = None
+    data_ptr: int, device: "Device" = None
 ) -> Stream:
     r"""Return a :class:`Stream` from an externally allocated CUDA stream.
 
