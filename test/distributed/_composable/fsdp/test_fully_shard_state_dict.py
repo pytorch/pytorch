@@ -39,10 +39,17 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
             {"mlp_dim": [2, 3, 4, 5], "mesh": [fsdp_mesh]},
             self._test_dp_state_dict_save_load,
         )
-        self.run_subtests(
-            {"mlp_dim": [16], "mesh": [fsdp_mesh], "use_shard_placement_fn": [True]},
-            self._test_dp_state_dict_save_load,
-        )
+        if 16 % self.world_size == 0:
+            # TODO: remove this evenness check when FSDP2 supports uneven sharding
+            # see: https://github.com/pytorch/pytorch/blob/cbb03e69717943ddf912f9a68b3a6f935bbf21f5/torch/distributed/fsdp/_fully_shard/_fsdp_param.py#L353-L361  # noqa: B950
+            self.run_subtests(
+                {
+                    "mlp_dim": [16],
+                    "mesh": [fsdp_mesh],
+                    "use_shard_placement_fn": [True],
+                },
+                self._test_dp_state_dict_save_load,
+            )
         if self.world_size % 2 != 0:
             return
         hsdp_mesh = init_device_mesh(
