@@ -31,6 +31,7 @@ from ..pattern_matcher import (
     register_graph_pattern,
     stable_topological_sort,
 )
+from .decompose_mem_bound_mm import check_device
 from .replace_random import replace_random_passes
 
 
@@ -725,7 +726,11 @@ def bmm_to_mm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
     def repl(a, b):
         return torch.mm(a.squeeze(0), b.squeeze(0)).unsqueeze(0)
 
-    if mat1.meta["val"].shape[0] == 1 and mat2.meta["val"].shape[0] == 1:
+    if (
+        check_device(mat1.meta["val"], mat2.meta["val"], "cuda")
+        and mat1.meta["val"].shape[0] == 1
+        and mat2.meta["val"].shape[0] == 1
+    ):
         match.replace_by_example(repl, [mat1, mat2])
 
 
