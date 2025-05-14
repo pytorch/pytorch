@@ -326,7 +326,7 @@ class OutputGraphGuardsState:
 @dataclass
 class StackLocalsMetadata:
     """
-    Stores metadata for a frame's stack and locals for the purposes of building continuation functions
+    Stores metadata for a frame's stack and locals for the purposes of building resume functions
     """
 
     stack_null_idxes: list[int] = dc_field(default_factory=list)
@@ -1072,20 +1072,24 @@ class OutputGraph(OutputGraphGuardsState):
         # other parts of Dynamo like guards.
         return alias_insts, overridden_sources
 
-    def _get_stack_values_to_restore(self, tx, allow_null_until):
+    def _get_stack_values_to_restore(self, tx, stack_pops):
         """
         Gets the stack + locals values belonging to tx that need to be restored.
 
-        Also realizes all VTs in the tx's stack.
+        Also prunes dead tx locals and realizes all VTs in the tx's stack.
 
-        If a stack/local value is NULL, it will NOT be marked as "need to be restored".
+        NullVariables in stack/locals will NOT be restored, unless they are the top `stack_pops`
+        elements of the stack - it is expected that the next instruction to run will pop the top
+        `stack_pops` elements of the stack, so we should codegen NULLs.
 
         Returns:
             - stack_values: stack and locals values that need to be restored
             - restore_vars: names of locals corresponding to the locals part of `stack_values`
             - meta: locations of NULLs and ContextWrappingVariables in the stack/locals
+                (ignores the top `stack_pops` values on the stack)
         """
         tx.prune_dead_locals()
+
         stack_values = []
         meta = StackLocalsMetadata()
 
@@ -1093,7 +1097,8 @@ class OutputGraph(OutputGraphGuardsState):
         # need to be added to self.nn_modules as attributes
         for i, value in enumerate(tx.stack):
             value.realize()
-            if len(tx.stack) - i <= allow_null_until:
+            # ignore top `stack_pops` values on the stack
+            if len(tx.stack) - i <= stack_pops:
                 stack_values.append(value)
                 continue
             if isinstance(value, NullVariable):
@@ -1157,18 +1162,21 @@ class OutputGraph(OutputGraphGuardsState):
         tx: "InstructionTranslatorBase",
         reason: GraphCompileReason,
         partial_convert=False,
-        allow_null_until=0,
+        stack_pops=0,
     ):
         """
-        Compiles the current subgraph, with inputs w.r.t. self.root_tx.
+        Compiles the current subgraph, with inputs w.r.t. self.root_tx, and codegens:
+            - Call the compiled subgraph
+            - Apply side effects
+            - Codegen stack and locals
+            - Store the locals
 
-        Codegens the stack and locals of each frame...
+        Python does not allow NULL to be an arg to a function, so we do not codegen NULLs on the stack,
+        unless the value is one of the top `stack_pops` values on the stack (these values are expected to be
+        popped immediately after this generated code. The prologue of the resume function is expected to restore
+        any dropped NULLs.
 
-        Does not codegen NULLs.
-        Python does not allow NULL to be an arg to a function, so we remove NULLs from the stack.
-        The prologue of the resume function is expected to restore them.
-
-        Returns stack indices/locals keys affected by these - these should be used when generating the resume function.
+        Returns stack indices and locals keys where we dropped NULLs, and where we found inactive context manager objects.
         """
 
         assert self.root_tx is not None
@@ -1238,7 +1246,7 @@ class OutputGraph(OutputGraphGuardsState):
         while True:
             assert cur_tx is not None
             stack_values, restore_vars, meta = self._get_stack_values_to_restore(
-                cur_tx, allow_null_until
+                cur_tx, stack_pops
             )
             all_stack_values.append(stack_values)
             all_restore_vars.append(restore_vars)
@@ -1317,6 +1325,7 @@ class OutputGraph(OutputGraphGuardsState):
             )
         else:
             graph_output_var = self.new_var("graph_out")
+            # load stack values in a flat manner for now - will likely change later.
             stack_values_flat = [
                 val for vals in reversed(all_stack_values) for val in vals
             ]
@@ -1395,10 +1404,7 @@ class OutputGraph(OutputGraphGuardsState):
             cg.extend_output(create_call_function(len(args), False))
             cg.extend_output([create_instruction("POP_TOP")])
 
-        cg.restore_stack(
-            stack_values,
-            value_from_source=not tx.export,
-        )
+        cg.restore_stack(stack_values, value_from_source=not tx.export)
         self.side_effects.codegen_update_mutated(cg)
 
     def cleanup_graph(self):

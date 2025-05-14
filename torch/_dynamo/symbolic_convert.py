@@ -600,7 +600,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             log.info(msg)
             raise exc.SkipFrame(msg)
 
-        assert not type.__instancecheck__(NullVariable, value)
         self.push(value)
         log.debug("generic_jump triggered compile")
         all_stack_locals_metadata = self.output.compile_subgraph(
@@ -608,6 +607,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             reason=GraphCompileReason(
                 f"generic_jump {typestr(value)}{extra_msg}", [self.frame_summary()]
             ),
+            stack_pops=1,
         )
         self.pop()
 
@@ -888,7 +888,7 @@ def break_graph_if_unsupported(*, push):
                 stack_effect = dis.stack_effect(inst.opcode, inst.arg)
 
             all_stack_locals_metadata = self.output.compile_subgraph(
-                self, reason=reason, allow_null_until=push - stack_effect
+                self, reason=reason, stack_pops=push - stack_effect
             )
             cg = PyCodegen(self)
             cleanup: list[Instruction] = []
@@ -2365,11 +2365,10 @@ class InstructionTranslatorBase(
                 "STORE_ATTR instruction (i.e. `obj.attr = val`) that it should not compile the partial graph.",
                 hints=[],
             )
-        assert len(self.stack) >= 2
-        assert not type.__instancecheck__(NullVariable, self.stack[-1])
-        assert not type.__instancecheck__(NullVariable, self.stack[-2])
         all_stack_locals_metadata = self.output.compile_subgraph(
-            self, reason=GraphCompileReason("store_attr", [self.frame_summary()])
+            self,
+            reason=GraphCompileReason("store_attr", [self.frame_summary()]),
+            stack_pops=2,
         )
         self.output.add_output_instructions([copy.copy(inst)])
         self.popn(2)
@@ -2989,6 +2988,10 @@ class InstructionTranslatorBase(
                 explanation=f"Dynamo does not know how to enter a `{ctx.python_type_name()}` context manager.",
                 hints=[
                     "Avoid using the unsupported context manager.",
+                    "If the context manager seems like it should be supported (e.g. torch.set_grad_enabled), then "
+                    "it may be the case that it was created outside the compiled region, which Dynamo does not support. "
+                    "Supported context managers can cross graph break boundaries only if they are local non-closure "
+                    "variables, or are intermediate values.",
                     "File an issue to PyTorch. Simple context managers can potentially be supported, "
                     "but note that context managers can't be supported in general",
                 ],
@@ -3719,6 +3722,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     """Trace and inline a called method"""
 
     symbolic_result: Optional[VariableTracker]
+    parent: InstructionTranslatorBase
 
     @classmethod
     def inline_call(cls, parent, func, args, kwargs):
