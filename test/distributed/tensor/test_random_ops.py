@@ -6,17 +6,22 @@ import itertools
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._random as random
-from torch.distributed._tensor import DeviceMesh, DTensor, init_device_mesh
-from torch.distributed._tensor._utils import compute_local_shape_and_global_offset
-from torch.distributed._tensor.api import distribute_tensor
-from torch.distributed._tensor.placement_types import Replicate, Shard
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.distributed_c10d import broadcast_object_list
 from torch.distributed.fsdp import fully_shard
+from torch.distributed.tensor import (
+    DeviceMesh,
+    distribute_tensor,
+    DTensor,
+    Replicate,
+    Shard,
+)
 from torch.distributed.tensor._random import (
     is_rng_supported_mesh,
     manual_seed,
     OffsetBasedRNGTracker,
 )
+from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
 from torch.testing._internal.common_utils import run_tests, TEST_HPU
@@ -396,8 +401,8 @@ class DistTensorRandomOpTest(DTensorTestBase):
         size = [4, 4 * self.world_size]
 
         for fn in [
-            torch.distributed._tensor.rand,
-            torch.distributed._tensor.randn,
+            torch.distributed.tensor.rand,
+            torch.distributed.tensor.randn,
         ]:
             dtensor = fn(size, device_mesh=device_mesh, placements=[Shard(1)])
             local_tensor = funcol.all_gather_tensor(
