@@ -7298,9 +7298,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             rtol=1.3e-06,
         )
 
-    @skipIfXpu(
-        msg="[XPU]: https://github.com/intel/intel-xpu-backend-for-triton/issues/4142"
-    )
+    @skipIfXpu(msg="https://github.com/intel/intel-xpu-backend-for-triton/issues/4184")
     def test_upsample_bicubic2d(self):
         def fn(a):
             return (
