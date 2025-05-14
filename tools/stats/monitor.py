@@ -380,7 +380,6 @@ class UsageLogger:
                     )
                 )
         elif self._has_amdsmi:
-            gpu_data_list = []
             for handle in self._gpu_handles:
                 engine_usage = amdsmi.amdsmi_get_gpu_activity(handle)
                 usage =  f"check engine_usage: {engine_usage}"
