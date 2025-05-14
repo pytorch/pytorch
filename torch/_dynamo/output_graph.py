@@ -33,7 +33,6 @@ import re
 import sys
 import traceback
 import weakref
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 
@@ -44,7 +43,7 @@ import torch._logging
 import torch.distributed as dist
 import torch.nn
 import torch.utils._pytree as pytree
-from torch import fx
+from torch import fx, Tensor
 from torch._C._dynamo import guards
 from torch._dynamo.exc import ShortenTraceback, TensorifyScalarRestartAnalysis
 from torch._guards import (
@@ -1576,8 +1575,9 @@ class OutputGraph(OutputGraphGuardsState):
                             ):
                                 # Modify gm so AOTAutogradCache key changes per specialization
                                 gm.meta["specialization"] = specialization
+                                example_inputs: list[Tensor] = list(args)
                                 specialization_cache[specialization] = (
-                                    self.call_user_compiler(gm, args)
+                                    self.call_user_compiler(gm, example_inputs)
                                 )
 
                             return specialization_cache[specialization](*args, **kwargs)
@@ -1600,7 +1600,7 @@ class OutputGraph(OutputGraphGuardsState):
         return [node.meta["grapharg"] for node in self.placeholders]
 
     def call_user_compiler(
-        self, gm: fx.GraphModule, example_inputs: Sequence[Any]
+        self, gm: fx.GraphModule, example_inputs: list[Tensor]
     ) -> CompiledFn:
         with dynamo_timed(
             "OutputGraph.call_user_compiler",
@@ -1611,7 +1611,7 @@ class OutputGraph(OutputGraphGuardsState):
             return self._call_user_compiler(gm, example_inputs)
 
     def _call_user_compiler(
-        self, gm: fx.GraphModule, example_inputs: Sequence[Any]
+        self, gm: fx.GraphModule, example_inputs: list[Tensor]
     ) -> CompiledFn:
         assert self.compiler_fn is not None
         tot = 0
