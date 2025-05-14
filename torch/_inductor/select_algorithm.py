@@ -1500,7 +1500,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None
-        return self.bmreq.benchmark(*args, output_tensor=out)
+        return self.bmreq.benchmark(*args, out=out)
 
     def precompile(self):
         assert self.bmreq is not None
@@ -1789,6 +1789,16 @@ def create_precompile_key(
 
 
 class AlgorithmSelectorCache(PersistentCache):
+    """
+    A persistent cache for algorithm selection results used in autotuning of GEMMs
+    and convolutions.
+
+    This classes includes precompilation and benchmarking of the kernels.
+
+    The cache is keyed by input characteristics (sizes, strides, dtypes, etc.) but
+    doesn't depend on the output layout.
+    """
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
@@ -2150,8 +2160,8 @@ class AlgorithmSelectorCache(PersistentCache):
                     counters["inductor"]["select_algorithm_num_precompiles"] += 1
                     log.info(
                         "Precompiling benchmark choice %s took %.02fs",
-                        futures[future],
-                        elapsed_times[future],
+                        futures.get(future),
+                        elapsed_times.get(future),
                     )
 
             executor.shutdown(wait=True)
