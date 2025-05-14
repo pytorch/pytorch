@@ -207,10 +207,6 @@ jobs:
           MONITOR_LOG_INTERVAL: ${{ inputs.monitor-log-interval }}
           MONITOR_DATA_COLLECT_INTERVAL: ${{ inputs.monitor-data-collect-interval }}
         run: |
-          echo "test" > usage_log_test.txt
-          echo "usage_log_build_${JOB_ID}.txt"
-          echo "Monitor script started in $(pwd)"
-          echo $(pwd)
           mkdir -p ../../usage_logs
           python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7 nvidia-ml-py==11.525.84
           python3 -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > ../../usage_logs/usage_log_build_${JOB_ID}.txt 2>&1 &
@@ -224,22 +220,6 @@ jobs:
           cache_dir: .pytest_cache
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
           s3_bucket: ${{ inputs.s3-bucket }}
-
-      - name: Check all txt
-        shell: bash
-        run: |
-          echo "Current working directory: $(pwd)"
-          LOG_DIR="$(realpath ../../usage_logs)"
-          echo "Checking logs in: $LOG_DIR"
-
-          if [ -d "$LOG_DIR" ]; then
-            ls -lh "$LOG_DIR"/*.txt || echo "No .txt files found in $LOG_DIR"
-          else
-            echo "Directory $LOG_DIR does not exist."
-          fi
-          echo "Monitor process check:"
-          ps aux | grep 'monitor'
-
 
       - name: Build
         if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
@@ -266,8 +246,6 @@ jobs:
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           MAX_JOBS_OVERRIDE: ${{ inputs.max-jobs }}
         run: |
-          echo $(pwd)
-          ls ./*.txt
           START_TIME=$(date +%s)
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
             JENKINS_USER=
@@ -337,10 +315,6 @@ jobs:
 
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
-          echo $(pwd)
-          ls ./*.txt
-          ps aux | grep monitor
-          echo "Post-build check in $(pwd)"
 
       - name: Stop monitoring script
         if: ${{ always() && steps.monitor-script.outputs.monitor-script-pid }}
@@ -356,12 +330,6 @@ jobs:
         run: |
           zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .additional_ci_files
 
-      - name: Check all txt
-        shell: bash
-        run: |
-          echo $(pwd)
-          ls ./*.txt
-
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
@@ -371,12 +339,6 @@ jobs:
           if-no-files-found: error
           path: artifacts.zip
           s3-bucket: ${{ inputs.s3-bucket }}
-
-      - name: Check all txt
-        shell: bash
-        run: |
-          echo $(pwd)
-          ls ./*.txt
 
       - name: Store PyTorch Build Artifacts for s390x
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
