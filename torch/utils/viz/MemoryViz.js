@@ -980,6 +980,8 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
       text = `${text}, Total memory used after allocation: ${formatSize(
         elem.max_allocated_mem,
       )}`;
+      const context = elem?.compile_context ?? 'None';
+      text = `${text}, Compile context: ${context}`;
       if (elem.stream !== null) {
         text = `${text}, stream ${elem.stream}`;
       }
@@ -1292,6 +1294,19 @@ function create_settings_view(dst, snapshot, device) {
 }
 
 function unpickle(buffer) {
+  try {
+    const decoder = new TextDecoder();
+    const jsonString = decoder.decode(new Uint8Array(buffer));
+    const data = JSON.parse(jsonString);
+
+    return data;
+  } catch (e) {
+    console.log('Failed to decode the data as JSON, fall back to pickle', e);
+  }
+  return unpickleData(buffer);
+}
+
+function unpickleData(buffer) {
   const bytebuffer = new Uint8Array(buffer);
   const decoder = new TextDecoder();
 
