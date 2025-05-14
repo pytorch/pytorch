@@ -1092,11 +1092,8 @@ class InstructionTranslatorBase(
     strict_checks_fn: Optional[Callable[[VariableTracker], bool]]
     start_point: Optional[int]
     is_leaf_tracer: bool
-<<<<<<< HEAD
     parent: Optional["InstructionTranslatorBase"]
     debug_locals: list[tuple[VariableTracker, list[VariableTracker]]]
-=======
->>>>>>> b2454c1b7db (add nested graph break tests)
 
     def mark_inconsistent_side_effects(self):
         """
@@ -3304,11 +3301,8 @@ class InstructionTranslatorBase(
         self.strict_checks_fn = None
 
         self.is_leaf_tracer = True
-<<<<<<< HEAD
         self.parent = None
         self.debug_locals = []
-=======
->>>>>>> b2454c1b7db (add nested graph break tests)
 
         if sys.version_info >= (3, 10):
             from .resume_execution import (
