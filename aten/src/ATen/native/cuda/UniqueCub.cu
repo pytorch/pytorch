@@ -17,7 +17,6 @@
 #endif
 
 #include <cuda/std/functional>
-#include <thrust/iterator/transform_iterator.h>
 
 namespace at::native::internal {
 
@@ -57,7 +56,8 @@ struct LoadBoolOp {
 auto wrap_input_iterator(const bool *data) {
   // See NOTE [Loading boolean values]
   LoadBoolOp op;
-  return thrust::transform_iterator<LoadBoolOp, const uint8_t*, int>(reinterpret_cast<const uint8_t*>(data), op);
+  return ATEN_CUB_TRANSFORM_ITERATOR(bool, LoadBoolOp, const uint8_t*, int)(
+      reinterpret_cast<const uint8_t*>(data), op);
 }
 
 // A variation of compute_unique (defined in Unique.cu) that doesn't allow
@@ -261,7 +261,7 @@ struct UniqueCub<bool> {
 
     const bool* self_data = self.const_data_ptr<bool>();
     MapNumberOfTrueValues op;
-    thrust::transform_iterator<MapNumberOfTrueValues, const uint8_t*, int>
+    ATEN_CUB_TRANSFORM_ITERATOR(int, MapNumberOfTrueValues, const uint8_t*, int)
         data_iter(reinterpret_cast<const uint8_t*>(self_data), op);
     at::cuda::cub::reduce(data_iter, tmp_num_true.get(), num_inp,
                           ::cuda::std::plus<>{}, 0);
