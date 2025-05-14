@@ -351,11 +351,6 @@ jobs:
         run: |
           kill "$MONITOR_SCRIPT_PID"
 
-      - name: Check all txt
-        shell: bash
-        run: |
-          echo $(pwd)
-          ls ./*.txt
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
         run: |
@@ -392,7 +387,7 @@ jobs:
           if-no-files-found: error
           path: artifacts.zip
 
-      - name: Check all txt
+      - name: copy logs
         shell: bash
         run: |
           echo "Post-build check in $(pwd)"ls -alh ./*.txt || echo "No txt files"
