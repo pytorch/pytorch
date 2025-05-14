@@ -1316,6 +1316,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         # The treatment of guards in the caching implementation requires that
         # we have a shape env.
         if not shape_env:
+            import fbvscode; fbvscode.set_trace(vscode_request_timeout=600)
             log.debug("fx graph cache no shape env")
             raise BypassFxGraphCache("No shape env")
 
@@ -1382,6 +1383,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         remote_cache: Optional[RemoteCache[JsonDataTy]],
         is_backward: bool,
         constants: CompiledFxGraphConstants,
+        shape_env: ShapeEnv,
         evaluate_guards: Optional[
             Callable[[str, Union[list[int], list[torch.SymInt]]], bool]
         ] = None,
@@ -1392,7 +1394,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         differently from FXGraphCache.
         """
         compiled_graph, cache_info = FxGraphCache._lookup_graph(
-            key, example_inputs, local, remote_cache, constants, evaluate_guards
+            key, example_inputs, local, remote_cache, constants, shape_env, evaluate_guards
         )
         cache_info = {
             **cache_info,

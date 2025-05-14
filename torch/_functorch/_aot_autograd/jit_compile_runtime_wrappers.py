@@ -260,7 +260,8 @@ def aot_dispatch_base(
         if fw_key := getattr(compiled_fw, "_fx_graph_cache_key", None):
             debug_lines = getattr(compiled_fw, "_fx_graph_cache_debug_lines", [])
             time_taken_ns = time.time_ns() - cache_info.start_time_ns
-            guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
+            fake_mode = detect_fake_mode()
+            guards_expr = AOTAutogradCache.generate_guards_expression(cache_info, fake_mode.shape_env)
             entry = AOTAutogradCacheEntry(
                 compiled_fw=CompiledForward((fw_key, debug_lines), getattr(compiled_fw, "guards_expr", None)),  # type: ignore[arg-type]
                 compiled_bw=None,

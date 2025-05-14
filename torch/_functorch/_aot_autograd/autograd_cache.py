@@ -276,7 +276,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         example_inputs,
         aot_config: AOTConfig,
         fx_config: _CompileFxKwargs,
-        shape_env: ShapeEnv,
+        shape_env: Optional[ShapeEnv]
     ):
         # FxGraphHashDetails contains all the keys related to inductor. Also includes some system info
         self.aot_config = aot_config
@@ -289,7 +289,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             # config. Check that the gm is cacheable by inductor first,
             # and if it raises an exception, also bypass on our end.
             FxGraphCache._check_can_cache(gm, shape_env)
-            super().__init__(gm, example_inputs, fx_config, [], shape_env)
+            super().__init__(gm, example_inputs, fx_config, [])
         except BypassFxGraphCache as e:
             import fbvscode; fbvscode.set_trace(vscode_request_timeout=600)
             # Sometimes inductor configs are unpickleable and can fail
@@ -338,7 +338,7 @@ def autograd_cache_key(
     example_inputs,
     config: AOTConfig,
     fx_config: _CompileFxKwargs,
-    shape_env: ShapeEnv,
+    shape_env: Optional[ShapeEnv]
     # TODO: add args and parameters
 ) -> tuple[str, list[str]]:
     """
@@ -358,7 +358,7 @@ def autograd_cache_key(
         if triton.__version__ < "3.2.0":
             raise BypassAOTAutogradCache("AOTAutogradCache requires triton 3.2.0")
 
-    details = AOTAutogradCacheDetails(gm, shape_env, example_inputs, config, fx_config)
+    details = AOTAutogradCacheDetails(gm, example_inputs, config, fx_config, shape_env)
     pickler = AOTAutogradCachePickler(gm)
     # The prefix distinguishes among the other kinds of objects we cache
     key = "a" + pickler.get_hash(details)
@@ -920,9 +920,10 @@ class AOTAutogradCache(GuardedCache[AOTAutogradCacheEntry]):
 
     @classmethod
     def generate_guards_expression(
-        cls: type[AOTAutogradCache], cache_info: AOTAutogradCacheInfo
+        cls: type[AOTAutogradCache],
+        cache_info: AOTAutogradCacheInfo,
+        shape_env: ShapeEnv,
     ) -> Optional[str]:
-        shape_env = cls._get_shape_env()
         assert shape_env is not None
         symints = cache_info.forward_symints
         guards = shape_env.get_pruned_guards(symints)
