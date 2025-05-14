@@ -126,9 +126,7 @@ install_centos() {
     glibc-headers \
     glog-devel \
     libstdc++-devel \
-    libsndfile-devel \
     make \
-    opencv-devel \
     sudo \
     wget \
     vim \
