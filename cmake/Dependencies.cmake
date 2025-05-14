@@ -1217,6 +1217,10 @@ if(USE_GLOO)
     set(GLOO_INSTALL OFF CACHE BOOL "" FORCE)
     set(GLOO_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
+    if(USE_GLOO_IBVERBS)
+      set(USE_IBVERBS ON)
+    endif()
+
     # Temporarily override variables to avoid building Gloo tests/benchmarks
     set(__BUILD_TEST ${BUILD_TEST})
     set(__BUILD_BENCHMARK ${BUILD_BENCHMARK})
@@ -1321,6 +1325,7 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
     add_definitions(-DONNX_ML=1)
   endif()
   add_definitions(-DONNXIFI_ENABLE_EXT=1)
+  set(Python3_EXECUTABLE "${Python_EXECUTABLE}")
   if(NOT USE_SYSTEM_ONNX)
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
   endif()
