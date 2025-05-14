@@ -911,6 +911,8 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     attn = at::_safe_softmax(attn, -1);
     if (dropout_p > 0.0) {
       if (dropout_mask.has_value()) {
+        std::cout << "dtype: " << dropout_mask->dtype() << std::endl;
+        std::cout << "DROPOUT_MASK: " << dropout_mask.value() << std::endl;
         // In order to validate the correctness of the fused kernels, we need to
         // use the same dropout mask in order to compare the results.
         TORCH_WARN_ONCE("Dropout mask should only be used for testing purposes.");

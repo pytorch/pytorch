@@ -294,6 +294,7 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     std::cout << "SOME INFO ABOUT RNG_STATE: " << std::endl;
     std::cout << "numel?  : " << rng_state.numel() << std::endl;
     std::cout << "defined?: " << rng_state.defined() << std::endl;
+    std::cout << "P_DROPOUT: " << p_dropout << std::endl;
     bool has_nonzero = rng_state.ne(0).any().item<bool>();
     std::cout << "has non_zero before?  : " << has_nonzero << std::endl;
     auto _unused = at::empty({}, at::dtype(c10::kUInt64).device(at::kCUDA));
