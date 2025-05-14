@@ -230,8 +230,9 @@ def assign_memory_planning_info_for_scheduler_nodes(
                 pred_buffers.add(pred_buf)
                 # add predecessors due to mutations
                 if pred_buf.get_mutations():
-                    mutated_buf = name_to_buf[pred_buf.get_mutations()[0]]
-                    pred_buffers.add(mutated_buf)
+                    mutated_buf_name = pred_buf.get_mutations()[0]
+                    if mutated_buf_name in name_to_buf:
+                        pred_buffers.add(name_to_buf[mutated_buf_name])
             elif dep.name in name_to_freeable_input_buf:
                 pred_buffers.add(name_to_freeable_input_buf[dep.name])
         pred_nodes = OrderedSet(
