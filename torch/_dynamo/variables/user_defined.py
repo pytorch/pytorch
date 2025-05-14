@@ -62,6 +62,7 @@ from ..source import (
 )
 from ..utils import (
     build_checkpoint_variable,
+    build_wrap_generic_variable,
     check_constant_args,
     cmp_name_to_op_mapping,
     dict_methods,
@@ -70,6 +71,7 @@ from ..utils import (
     is_frozen_dataclass,
     is_namedtuple_cls,
     is_utils_checkpoint,
+    is_wrap_generic_fn,
     is_wrapper_or_member_descriptor,
     istype,
     list_methods,
@@ -1242,6 +1244,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             elif inspect.isfunction(dynamic_subobj):
                 if is_utils_checkpoint(func):
                     return build_checkpoint_variable(source=source)
+                elif is_wrap_generic_fn(func):
+                    return build_wrap_generic_variable(func, source=source)
                 elif source is not None:
                     return trace_rules.lookup(func).create_with_source(
                         func, source=source

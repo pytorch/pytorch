@@ -1452,6 +1452,8 @@ def _get_dynamo_config_for_logging() -> Optional[str]:
             "ignore_logger_methods",
             "traceable_tensor_subclasses",
             "nontraceable_tensor_subclasses",
+            "_hopify_generic_wrap_fn_kwarg_keys",
+            "_enable_hopify_generic_context_manager",
             "_custom_ops_profile",
         }
 
@@ -3769,6 +3771,12 @@ def is_utils_checkpoint(obj):
     return obj is torch.utils.checkpoint.checkpoint
 
 
+def is_wrap_generic_fn(obj):
+    # _hopify_generic_wrap_fn_kwarg_keys is a set, but hash(obj) is not very
+    # reliable for arbitrary objects.
+    return any(obj is k for k in torch._dynamo.config._hopify_generic_wrap_fn_kwarg_keys)
+
+
 def is_invoke_subgraph(obj):
     from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_placeholder
 
@@ -3799,6 +3807,20 @@ def build_checkpoint_variable(**options):
 
     return TorchHigherOrderOperatorVariable.make(
         activation_checkpoint_op,
+        **options,
+    )
+
+
+def build_wrap_generic_variable(func, **options):
+    import torch._higher_order_ops.wrap as higher_order_ops
+
+    from .variables.higher_order_ops import TorchHigherOrderOperatorVariable
+
+    wrap_generic = higher_order_ops.wrap_generic
+
+    return TorchHigherOrderOperatorVariable.make(
+        wrap_generic,
+        func=func,
         **options,
     )
 

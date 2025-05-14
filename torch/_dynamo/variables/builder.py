@@ -117,6 +117,7 @@ from ..utils import (
     _extract_tensor_dict,
     build_checkpoint_variable,
     build_invoke_subgraph_variable,
+    build_wrap_generic_variable,
     clone_input,
     common_constant_types,
     dict_keys,
@@ -132,6 +133,7 @@ from ..utils import (
     is_parameter_freezing,
     is_typing,
     is_utils_checkpoint,
+    is_wrap_generic_fn,
     is_wrapper_or_member_descriptor,
     istype,
     namedtuple_fields,
@@ -778,6 +780,8 @@ class VariableBuilder:
             return LoggingLoggerVariable(value, source=self.source)
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
+        elif is_wrap_generic_fn(value):
+            return build_wrap_generic_variable(value, source=self.source)
         elif is_invoke_subgraph(value):
             return build_invoke_subgraph_variable(source=self.source)
         elif isinstance(value, functools.partial):

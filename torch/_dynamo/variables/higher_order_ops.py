@@ -909,6 +909,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return WrapWithSetGradEnabledHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "wrap_with_autocast":
             return WrapWithAutocastHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "wrap_generic":
+            return WrapGenericHigherOrderVariable(value, source, **kwargs)
         elif (
             value.__name__ == "auto_functionalized"
             or value.__name__ == "auto_functionalized_v2"
@@ -2409,6 +2411,94 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
                 self.value,
                 args=tuple(p_args),
                 kwargs=checkpoint_kwargs,
+            ),
+            example_value=example_value,
+        )
+
+        if treespec is None:
+            return variable
+
+        # Transform variable back into a list (previously made into a tuple by
+        # speculate_subgraph function) so as to respect the pytree API typing.
+        variable = BuiltinVariable(list).call_function(tx, [variable], {})
+
+        return _make_inlined(tx, pytree.tree_unflatten)(variable, treespec)
+
+
+# Copy paste of the above class, but enables an arbitrary callable
+class WrapGenericHigherOrderVariable(WrapHigherOrderVariable):
+    def __init__(self, hop, source, func=None) -> None:
+        super().__init__(hop, source)
+        assert func is not None
+        self.func = func
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        fn_fqn = self.func.__module__ + "." + self.func.__qualname__
+
+        def get_val(x):
+            if isinstance(x, variables.ConstantVariable):
+                return x.value
+
+            if isinstance(x, torch._dynamo.variables.UserFunctionVariable):
+                return x.fn
+            elif isinstance(
+                x, torch._dynamo.variables.functions.FunctoolsPartialVariable
+            ):
+                return x.as_python_constant()
+            else:
+                raise RuntimeError(
+                    f"Unsupported argument type {type(x)} for HOP {fn_fqn}"
+                )
+
+        hop_kwarg_keys = torch._dynamo.config._hopify_generic_wrap_fn_kwarg_keys[
+            self.func
+        ]
+
+        hop_kwargs = {
+            name: kwargs[name] for name in kwargs.keys() if name in hop_kwarg_keys
+        }
+        gmod_kwargs = {
+            name: kwargs[name] for name in kwargs.keys() if name not in hop_kwarg_keys
+        }
+
+        # Here we use checkpoint_kwargs (and not gmod kwargs). gmod_kwargs are
+        # already flattened above and managed inside the fx graph.
+        (
+            p_args,
+            _,
+            example_value,
+            _body_r,
+            treespec,
+            gmod,
+            _,
+        ) = self.create_wrapped_node(
+            tx,
+            args[0],
+            args[1:],
+            gmod_kwargs,
+            fn_fqn,
+        )
+
+        gmod.meta["_wrap_generic_fqn"] = fn_fqn
+        gmod.meta["_wrap_generic_kwarg_values"] = {
+            k: get_val(v) for k, v in hop_kwargs.items()
+        }
+
+        # Store the invocation as a call
+        variable = wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=tuple(p_args),
+                kwargs={},
             ),
             example_value=example_value,
         )

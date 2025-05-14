@@ -87,6 +87,41 @@ class WrapWithAutocast(HigherOrderOperator):
 wrap_with_autocast = WrapWithAutocast()
 
 
+class WrapGeneric(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("wrap_generic")
+
+    def __call__(
+        self,
+        gmod,
+        *args,
+        **kwargs,
+    ):
+        import importlib
+
+        # Dynamo already traces the body of HigherOrderOp beforehand when it
+        # so no need to trace into it.
+        import torch._dynamo  # noqa: F401
+        from torch._dynamo import disable
+
+        # Find the obj from the fqn (it cannot be defined in some local scope)
+        fqn = gmod.meta["_wrap_generic_fqn"]
+        module_path, attribute = fqn.rsplit(".", 1)
+        module = importlib.import_module(module_path)
+        obj = getattr(module, attribute)
+
+        kwarg_values = gmod.meta["_wrap_generic_kwarg_values"]
+
+        @disable
+        def wrapper():
+            return obj(gmod, *args, **kwargs, **kwarg_values)
+
+        return wrapper()
+
+
+wrap_generic = WrapGeneric()
+
+
 class WrapActivationCheckpoint(HigherOrderOperator):
     """
     This operator is used to wrap torch.utils.checkpoint. This avoids
