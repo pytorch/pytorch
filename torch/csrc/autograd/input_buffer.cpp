@@ -196,7 +196,9 @@ void InputBuffer::add(
   }
   const auto device = var.device();
   const auto device_type = device.type();
-  bool is_accelerator = at::accelerator::isAccelerator(device.type());
+  // TODO: Use at::accelerator::isAccelerator(device->type()) instead
+  bool is_accelerator =
+      device.is_cuda() || device.is_mtia() || device.is_privateuseone();
   //
   // Non-accelerator case
   //
