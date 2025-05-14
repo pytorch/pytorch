@@ -6,7 +6,7 @@ import os
 import sys
 import tempfile
 
-from model_registry import ModelWithKwargs, MultiMLP, MultiMLPWithDw
+from model_registry import ModelWithKwargs, MultiMLP, MultiMLPKwargs, MultiMLPWithDw
 from schedule_registry import (
     ScheduleUnbalanced,
     ScheduleVShaped,
@@ -925,6 +925,101 @@ class ScheduleTest(MultiProcContinousTest):
             # Check loss
             # Since the reduction used in the loss function above is "sum", we use
             # "sum" here to reduce microbatch losses into a single value too.
+            pipe_loss = sum(losses)
+            torch.testing.assert_close(pipe_loss, ref_loss)
+
+        # Every rank checks gradients
+        for stage_module, submod_name in zip(stage_modules, submod_names):
+            # Get corresponding submodule from reference model
+            ref_submod = ref_mod.get_submodule(submod_name)
+            # Check gradients per parameter
+            for name, p in stage_module.named_parameters():
+                ref_p = ref_submod.get_parameter(name)
+                torch.testing.assert_close(p.grad, ref_p.grad, rtol=1e-5, atol=4e-5)
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize(
+        "ScheduleClass",
+        [ScheduleInterleavedZeroBubble, ScheduleInterleaved1F1B],
+    )
+    def test_zero_bubble_with_model_kwargs(self, ScheduleClass):
+        stages_per_rank = 2
+        n_stages = stages_per_rank * self.world_size
+        full_mod = MultiMLPKwargs(d_hid, n_layers=n_stages)
+        full_mod.to(self.device)
+
+        ref_mod = copy.deepcopy(full_mod)
+        x = torch.randn(batch_size, d_hid, device=self.device)
+        unused_kwarg = torch.tensor([1.0], device=self.device)
+
+        with torch.no_grad():
+            y = ref_mod(x)
+            # Add a small perturbation
+            target = y + torch.randn(batch_size, d_hid, device=self.device)
+
+        ref_loss_fn = torch.nn.MSELoss(reduction="sum")
+        full_loss_fn = torch.nn.MSELoss(reduction="sum")
+
+        # Get a submodule, e.g. `layers.0` or `layers.1`
+        stage_indices = [
+            self.rank + i * self.world_size for i in range(stages_per_rank)
+        ]
+        submod_names = [f"layers.{i}" for i in stage_indices]
+        stage_modules = [
+            full_mod.get_submodule(submod_name) for submod_name in submod_names
+        ]
+        # Run reference
+        for _ in range(2):
+            ref_stage_modules = [
+                ref_mod.get_submodule(submod_name) for submod_name in submod_names
+            ]
+            for stage_module in ref_stage_modules:
+                stage_module.zero_grad()
+
+            ref_mod.zero_grad()
+            ref_out = ref_mod(x, unused_kwarg=unused_kwarg)
+            ref_loss = ref_loss_fn(ref_out, target)
+            ref_loss.backward()
+
+        # Create a pipeline stage to wrap that submodule
+        chunks = 2
+        stages = [
+            PipelineStage(
+                stage_module,
+                stage_idx,
+                n_stages,
+                self.device,
+            )
+            for stage_module, stage_idx in zip(stage_modules, stage_indices)
+        ]
+
+        # Attach to a schedule
+        schedule = ScheduleClass(
+            stages, chunks, loss_fn=full_loss_fn, scale_grads=False
+        )
+
+        for _ in range(2):
+            # Zero gradients
+            for stage_module in stage_modules:
+                stage_module.zero_grad()
+            if self.rank == 0:
+                schedule.step(
+                    x, unused_kwarg=unused_kwarg.clone().unsqueeze(0).expand(chunks, -1)
+                )
+            elif self.rank == self.world_size - 1:
+                losses = []
+                out = schedule.step(target=target, losses=losses)
+            else:
+                schedule.step()
+
+        dist.barrier()
+        # Last rank checks result
+        if self.rank == self.world_size - 1:
+            # Check output
+            torch.testing.assert_close(out, ref_out)
+
+            # Check loss
             pipe_loss = sum(losses)
             torch.testing.assert_close(pipe_loss, ref_loss)
 
