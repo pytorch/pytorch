@@ -702,7 +702,7 @@ class TensorVariable(VariableTracker):
                 unimplemented_v2(
                     gb_type="Unhandled args for method",
                     context=f"call_method {self} {name} {args} {kwargs}",
-                    explanation="Dynamo encountered an error while calllling "
+                    explanation="Dynamo encountered an error while calling "
                     f"the method `method_{name}`.",
                     hints=[*graph_break_hints.SUPPORTABLE],
                     from_exc=e,
