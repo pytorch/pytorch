@@ -268,7 +268,6 @@ jobs:
         run: |
           echo $(pwd)
           ls ./*.txt
-          ls ./*.json
           START_TIME=$(date +%s)
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
             JENKINS_USER=
@@ -340,7 +339,6 @@ jobs:
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
           echo $(pwd)
           ls ./*.txt
-          ls ./*.json
           ps aux | grep monitor
           echo "Post-build check in $(pwd)"
 
@@ -358,8 +356,6 @@ jobs:
         run: |
           echo $(pwd)
           ls ./*.txt
-          ls ./*.json
-
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
         run: |
@@ -370,7 +366,6 @@ jobs:
         run: |
           echo $(pwd)
           ls ./*.txt
-          ls ./*.json
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
@@ -401,6 +396,8 @@ jobs:
         shell: bash
         run: |
           echo "Post-build check in $(pwd)"ls -alh ./*.txt || echo "No txt files"
+          cp ../../usage_logs/usage_log_build_*.txt ./usage_logs/
+          cat ./usage_logs/usage_log_build_*.txt
 
       - name: Upload raw usage log to s3
         if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel'}}
@@ -410,7 +407,7 @@ jobs:
             ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
           retention-days: 14
           if-no-files-found: warn
-          path: ../../usage_logs/usage_log_build_*.txt
+          path: usage_logs/usage_log_build_*.txt
 
       - name: Upload sccache stats
         if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
