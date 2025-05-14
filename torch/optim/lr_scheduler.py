@@ -793,6 +793,8 @@ class ExponentialLR(LRScheduler):
         """Compute the learning rate of each parameter group."""
         _warn_get_lr_called_within_step(self)
 
+        // when loading from a checkpoint, we don't want _initial_step (called from the constructor) to update the lr
+        // one more step ahead of itself.
         if self._is_initial:
             return [group["lr"] for group in self.optimizer.param_groups]
         return [group["lr"] * self.gamma for group in self.optimizer.param_groups]
