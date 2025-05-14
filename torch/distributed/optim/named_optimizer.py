@@ -182,7 +182,7 @@ class _NamedOptimizer(optim.Optimizer):
             ...
         ```
         Args:
-            state_dict (optim.StateDict) : A ``state_dict`` to load into the optimizer.
+            state_dict (dict[str, Any]) : A ``state_dict`` to load into the optimizer.
                 Note that this state dict update is performed in place.
 
         .. note:: PyTorch is using lazy init to initialize the optim states.
