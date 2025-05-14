@@ -3,27 +3,13 @@
 # ruff: noqa: TRY002
 # flake8: noqa
 
-import itertools
-import types
-import unittest
-import weakref
-from typing import Any, Optional, Tuple
-
 import torch
-import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
-import torch._functorch.config
-import torch.nn
-import torch.utils.checkpoint
-from torch._dynamo.testing import same
-from torch._dynamo.utils import dict_items
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import TestCase
 
 
-
-class SetTests(torch._dynamo.test_case.TestCase):
+class TestGuards(torch._dynamo.test_case.TestCase):
     def test_set_recompile_on_key_pop(self):
         s = {
             torch._C._set_grad_enabled,
