@@ -104,7 +104,7 @@ def check_inplace_broadcast(self_shape, *args_shape):
 def _construct_strides(
     sizes: Sequence[int],
     fill_order: Sequence[int],
-) -> Sequence[int]:
+) -> list[int]:
     """From a list of sizes and a fill order, construct the strides of the permuted tensor."""
     # Initialize strides
     assert len(sizes) == len(fill_order), (
@@ -5971,32 +5971,10 @@ def meta__scaled_dot_product_efficient_backward(
     is_causal: bool = False,
     scale: Optional[float] = None,
 ):
-    batch_size = query.size(0)
-    num_heads = query.size(1)
-    max_q = query.size(2)
-    head_dim = query.size(3)
-    head_dim_v = value.size(3)
+    grad_q = torch.empty_like(query)
+    grad_k = torch.empty_like(key)
+    grad_v = torch.empty_like(value)
 
-    max_k = key.size(2)
-
-    grad_q = torch.empty_permuted(
-        (batch_size, num_heads, max_q, head_dim),
-        (0, 2, 1, 3),
-        dtype=query.dtype,
-        device=query.device,
-    )
-    grad_k = torch.empty_permuted(
-        (batch_size, num_heads, max_k, head_dim),
-        (0, 2, 1, 3),
-        dtype=key.dtype,
-        device=key.device,
-    )
-    grad_v = torch.empty_permuted(
-        (batch_size, num_heads, max_k, head_dim_v),
-        (0, 2, 1, 3),
-        dtype=value.dtype,
-        device=value.device,
-    )
     grad_bias = None
     if attn_bias is not None and grad_input_mask[3]:
         lastDim = attn_bias.size(-1)
