@@ -4206,6 +4206,87 @@ class TestPatternMatcher(TestPatternMatcherBase):
         )
         if test_for_pointwise_binary:
             self.assertEqual(counters["inductor"]["qlinear_binary_matcher_count"], 1)
+    @skipIfNoONEDNN
+    @parametrize("has_bias", [True, ])# False
+    @parametrize("dtype", [torch.bfloat16])#, torch.float32])
+    def test_scaled_mm(
+        self, has_bias, dtype
+    ):
+        class FP8QDQLinear(torch.nn.Module):
+            def __init__(self, in_features, out_features):
+                super().__init__()
+                self.qtype = torch.float8_e4m3fn
+                self.weight = torch.randn((out_features, in_features)).to(self.qtype)
+                self.weight_scale = torch.tensor(1.0)
+                self.scale = torch.tensor(1.0)
+                self.bias = None
+                if has_bias:
+                    self.bias = torch.randn((out_features,)).to(dtype)
+
+            def forward(self, input):
+                weight = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                    input=self.weight.data,
+                    scale=self.weight_scale,
+                    zero_point=torch.tensor(0),
+                    quant_min=int(torch.finfo(self.qtype).min),
+                    quant_max=int(torch.finfo(self.qtype).max),
+                    dtype=self.weight.data.dtype,
+                    out_dtype=torch.float,
+                )
+                weight = weight.to(dtype)
+
+                q_input = torch.ops.quantized_decomposed.quantize_per_tensor(
+                    input=input,
+                    scale=self.scale,
+                    zero_point=torch.tensor(0),
+                    quant_min=int(torch.finfo(self.qtype).min),
+                    quant_max=int(torch.finfo(self.qtype).max),
+                    dtype=self.qtype,
+                )
+                dq_input = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                    input=q_input,
+                    scale=self.scale,
+                    zero_point=torch.tensor(0),
+                    quant_min=int(torch.finfo(self.qtype).min),
+                    quant_max=int(torch.finfo(self.qtype).max),
+                    dtype=q_input.dtype,
+                    out_dtype=torch.float,
+                )
+                dq_input = dq_input.to(dtype)
+
+                out = torch.nn.functional.linear(dq_input, weight, self.bias)
+
+                q_output = torch.ops.quantized_decomposed.quantize_per_tensor(
+                    input=out,
+                    scale=self.scale,
+                    zero_point=torch.tensor(0),
+                    quant_min=int(torch.finfo(self.qtype).min),
+                    quant_max=int(torch.finfo(self.qtype).max),
+                    dtype=self.qtype,
+                )
+                return q_output
+
+        class Mod(torch.nn.Module):
+            def __init__(self, in_features, out_features):
+                super().__init__()
+                self.l0 = FP8QDQLinear(in_features, out_features)
+                #self.l1 = FP8QDQLinear(out_features, out_features)
+
+            def forward(self, x):
+                y = self.l0(x)
+                #y = self.l1(y)
+                return y
+
+        M, N, K = 2, 13, 16
+        mod = Mod(N, K)
+        v = torch.randn(M, N).to(dtype)
+
+        def matcher_check_fn():
+            print("scaled_mm_matcher_count: ", counters["inductor"]["scaled_mm_matcher_count"])
+            self.assertEqual(
+                counters["inductor"]["scaled_mm_matcher_count"], 1
+            )
+        self._test_common(mod, (v,), matcher_check_fn)
 
 
 class TestDynamicPatternMatcherGeneric(TestPatternMatcherBase):
