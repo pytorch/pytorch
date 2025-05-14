@@ -164,7 +164,7 @@ class _NamedOptimizer(optim.Optimizer):
     def state(self) -> Mapping[torch.Tensor, Any]:  # type: ignore[override]
         return self._optimizer.state
 
-    def load_state_dict(self, state_dict: Mapping[str, Any]) -> None:
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         """
         Define the default behavior to load a state_dict for ``_NamedOptimizer``.
 
@@ -182,7 +182,7 @@ class _NamedOptimizer(optim.Optimizer):
             ...
         ```
         Args:
-            state_dict (Dict[str, Any]) : A ``state_dict`` to load into the optimizer.
+            state_dict (optim.StateDict) : A ``state_dict`` to load into the optimizer.
                 Note that this state dict update is performed in place.
 
         .. note:: PyTorch is using lazy init to initialize the optim states.
@@ -192,8 +192,6 @@ class _NamedOptimizer(optim.Optimizer):
             By doing this, we can validate the optim ``state_dict`` to be loaded.
         """
         new_state_dict = self._optimizer.state_dict()
-        if not isinstance(state_dict, dict):
-            state_dict = dict(state_dict)
         state_dict = self._pre_load_state_dict(state_dict)
         state = state_dict["state"]
         new_state = new_state_dict["state"]
