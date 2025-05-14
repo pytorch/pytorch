@@ -992,7 +992,7 @@ class TensorVariable(VariableTracker):
             gb_type="Unsupported Tensor.backward() call",
             context=f"call_method {self} backward {args} {kwargs}",
             explanation="Dynamo currently does not support tracing `Tensor.backward()`.",
-            hints=[*graph_break_hints.SUPPORTABLE],
+            hints=[*graph_break_hints.FUNDAMENTAL],
         )
 
     def method_data_ptr(self, *args, **kwargs):
