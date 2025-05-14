@@ -857,7 +857,35 @@ class SetVariable(ConstDictVariable):
             return variables.BuiltinVariable(op.get(name)).call_function(
                 tx, [self, other], {}
             )
+        # elif name == "__iand__":
+        #     return self.call_method(tx, "intersection_update", args, kwargs)
+        # elif name == "__ior__":
+        #     return self.call_method(tx, "update", args, kwargs)
+        # elif name == "__ixor__":
+        #     return self.call_method(tx, "symmetric_difference_update", args, kwargs)
+        # elif name == "__isub__":
+        #     return self.call_method(tx, "difference_udpate", args, kwargs)
+        elif name == "__eq__":
+            r = self.call_method(tx, "symmetric_difference", args, kwargs)
+            return ConstantVariable.create(len(r.set_items) == 0)
+        elif name == "__sub__":
+            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        ConstantVariable.create(
+                            f"unsupported operand type(s) for -: '{self.python_type_name()}' and '{args[0].python_type_name()}'"
+                        )
+                    ],
+                )
+            return self.call_method(tx, "difference", args, kwargs)
         return super().call_method(tx, name, args, kwargs)
+
+    def __str__(self):
+        return f"SetVariable({self.as_python_constant()})"
+
+    __repr__ = __str__
 
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         raise RuntimeError("Illegal to getitem on a set")
