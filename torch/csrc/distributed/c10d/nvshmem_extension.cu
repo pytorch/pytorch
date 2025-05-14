@@ -209,13 +209,16 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_spli
   prefixSum(peer_offsets, output_splits, npes);
   __syncthreads();
 
-  // Each block targets a different peer
+  // Target a different peer based on bid
   for (int i = bid / blocks_per_peer; i < npes; i += gridDim.x / blocks_per_peer) {
     int peer = (mype + i) % npes;
+    // Total amount from `peer`
     auto peer_size = output_splits[peer] * stride;
+    // Amount to get from `peer` in this block
     auto block_size = peer_size / blocks_per_peer;
     // Being lazy here, we should handle the residual if the division is not exact
     CUDA_KERNEL_ASSERT(block_size * blocks_per_peer == peer_size);
+    // This block's offset in the data from `peer`
     auto block_offset = block_size * (bid % blocks_per_peer);
     auto source_offset = source_offsets[peer] * stride + block_offset;
     auto write_offset = peer_offsets[peer] * stride + block_offset;
