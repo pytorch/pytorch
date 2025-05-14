@@ -101,11 +101,10 @@ class MLPKWargModule(torch.nn.Module):
         x = self.relu(x)
         x = self.net2(x)
         # Test when only 1 module has extra outputs
-        # TODO: handle this case later
-        # if self.layer_num == 0:
-        #     return x, unused_kwarg
-        # else:
-        #     return x
+        if self.layer_num == 0:
+            return x, unused_kwarg
+        else:
+            return x
         return x
 
 
@@ -140,10 +139,10 @@ class MultiMLPKwargs(torch.nn.Module):
     def forward(self, x, unused_kwarg: torch.Tensor = torch.zeros(1)):
         for layer in self.layers:
             # TODO: handle this case later
-            # if layer.layer_num == 0:
-            #     x, _ = layer(x, unused_kwarg)
-            # else:
-            #     x = layer(x)
+            if layer.layer_num == 0:
+                x, _ = layer(x, unused_kwarg)
+            else:
+                x = layer(x)
             x = layer(x)
         return x
 
