@@ -11,6 +11,7 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLat
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocmArch,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -31,6 +32,17 @@ E5M2FNUZ_MAX_POS = torch.finfo(torch.float8_e5m2fnuz).max
 FP16_MAX_POS: float = torch.finfo(torch.float16).max
 EPS: float = 1e-12
 
+# fp8 data types for inductor based fp8 tests. This can be different
+# than the one used in eager mode.
+f8_type_pair = (torch.float8_e4m3fn, torch.float8_e5m2)
+if torch.version.hip:
+    arch = torch.cuda.get_device_properties(0).gcnArchName
+    if "gfx94" in arch:
+        # for gfx942, use fnuz data type.
+        f8_type_pair = (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
+    elif "gfx1200" in arch:
+        # for gfx1200, e4m3 is not supported on triton.
+        f8_type_pair = (torch.float8_e5m2,)
 
 def _to_fp8_saturated(x: Tensor, float8_dtype: torch.dtype) -> Tensor:
     # The default behavior in PyTorch for casting to `float8_e4m3fn`
@@ -153,15 +165,11 @@ class TestFP8Types(TestCase):
         x = torch.rand(*x_shape, device="cuda", dtype=dtype).to(e4m3_type)
         y_fp8 = compiled_fp8_matmul(x)
 
+    @skipIfRocmArch(("gfx1200",))
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float))
     @parametrize("shape", ("15,3,13", "4,2048,4096"))
-    @parametrize(
-        "dst_types",
-        [(torch.float8_e4m3fn, torch.float8_e5m2)]
-        if torch.version.hip is None
-        else [(torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)],
-    )
+    @parametrize("dst_types", [f8_type_pair])
     def test_valid_cast(self, dtype: torch.dtype, shape: str, dst_types: tuple):
         e4m3, e5m2 = dst_types
 
@@ -204,12 +212,7 @@ class TestFP8Types(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("src_dtype", (torch.float16, torch.bfloat16, torch.float))
-    @parametrize(
-        "dst_dtype",
-        (torch.float8_e4m3fn, torch.float8_e5m2)
-        if torch.version.hip is None
-        else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz),
-    )
+    @parametrize("dst_dtype", f8_type_pair)
     @parametrize("shape", ("16,16,16", "4,2048,4096"))
     def test_to_fp8_saturated(
         self, src_dtype: torch.dtype, dst_dtype: torch.dtype, shape: str
@@ -229,12 +232,7 @@ class TestFP8Types(TestCase):
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm fails with accuracy issue")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
-    @parametrize(
-        "float8_dtype",
-        (torch.float8_e4m3fn, torch.float8_e5m2)
-        if torch.version.hip is None
-        else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz),
-    )
+    @parametrize("float8_dtype", f8_type_pair)
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
     def test_amax_fp8_quant(self, float8_dtype: torch.dtype, shape: str):
         shape = [int(dim) for dim in shape.split(",")]
@@ -258,12 +256,7 @@ class TestFP8Types(TestCase):
         torch.testing.assert_close(y_compiled.half(), y.half(), rtol=1e-2, atol=1e-2)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @parametrize(
-        "float8_dtype",
-        (torch.float8_e4m3fn, torch.float8_e5m2)
-        if torch.version.hip is None
-        else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz),
-    )
+    @parametrize("float8_dtype", f8_type_pair)
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
     def test_amax_along_with_fp8_quant(self, float8_dtype: torch.dtype, shape: str):
         shape = [int(dim) for dim in shape.split(",")]
@@ -293,12 +286,7 @@ class TestFP8Types(TestCase):
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm fails with accuracy issue")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
-    @parametrize(
-        "float8_dtype",
-        (torch.float8_e4m3fn, torch.float8_e5m2)
-        if torch.version.hip is None
-        else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz),
-    )
+    @parametrize("float8_dtype", f8_type_pair)
     @parametrize("amax_keep_dim", (True, False))
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
     def test_layernorm_fp8_quant(
@@ -339,12 +327,7 @@ class TestFP8Types(TestCase):
         )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @parametrize(
-        "float8_dtype",
-        (torch.float8_e4m3fn, torch.float8_e5m2)
-        if torch.version.hip is None
-        else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz),
-    )
+    @parametrize("float8_dtype", f8_type_pair)
     @parametrize("shape", ("4,2048,4096",))
     @parametrize("keepdim", (False, True))
     def test_layernorm_fp8_quant_benchmark(
@@ -750,3 +733,4 @@ class TestFP8Lowering(TestCase):
 if __name__ == "__main__":
     if HAS_CUDA:
         run_tests()
+
