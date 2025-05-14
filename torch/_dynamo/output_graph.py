@@ -1201,6 +1201,9 @@ class OutputGraph(OutputGraphGuardsState):
         # before we're done the full implementation
         assert self.root_tx is tx
 
+        # bytecode tracing has finished. Pop the context manager for dynamo_timed
+        self.mark_bytecode_tracing_stop()
+
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
         self.should_exit = True
@@ -1252,9 +1255,6 @@ class OutputGraph(OutputGraphGuardsState):
             block.exit(self.root_tx, is_graph_break=reason.graph_break)
 
         self.cleanup_graph()
-
-        # bytecode tracing has finished. Pop the context manager for dynamo_timed
-        self.mark_bytecode_tracing_stop()
 
         # stack values and restore vars for each frame are pushed in reverse order
         # i.e. last element corresponds to root frame, first element corresponds to current frame
