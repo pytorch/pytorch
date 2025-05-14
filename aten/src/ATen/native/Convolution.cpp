@@ -469,7 +469,7 @@ struct ConvParams {
     }
     // native kernel doesn't support 64-bit non-splittable case
     if (cudnn_enabled && needs_64bit_indexing_no_split(input, weight)) {
-      static long cudnn_version = detail::getCUDAHooks().versionCuDNN();
+      static long cudnn_version = detail::getCUDAHooks().compiledWithCuDNN() ? detail::getCUDAHooks().versionCuDNN() : -1;
       if (!(cudnn_version >= 90300 && at::native::cudnnv8_enabled_check_debug())) {
         TORCH_WARN_ONCE("cuDNN cannot be used for large non-batch-splittable convolutions"
                         " if the V8 API is not enabled or before cuDNN version 9.3+."
