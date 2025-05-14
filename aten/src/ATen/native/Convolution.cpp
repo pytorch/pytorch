@@ -467,7 +467,6 @@ struct ConvParams {
       // always use cudnn_depthwise for channels_last format
       return true;
     }
-    
     // native kernel doesn't support 64-bit non-splittable case
     if (cudnn_enabled && needs_64bit_indexing_no_split(input, weight)) {
       static long cudnn_version = detail::getCUDAHooks().versionCuDNN();
