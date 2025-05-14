@@ -55,7 +55,7 @@ public:
 
         // Generate resource descriptor
         CUdevResourceDesc desc;
-        CUDA_CHECK(cuDevResourceGenerateDesc(&desc, result_data(), 1));
+        CUDA_CHECK(cuDevResourceGenerateDesc(&desc, result_data, 1));
 
         // Create green context
         CUDA_CHECK(cuGreenCtxCreate(&green_ctx_, desc, device, CU_GREEN_CTX_DEFAULT_STREAM));
@@ -64,7 +64,7 @@ public:
         CUDA_CHECK(cuCtxFromGreenCtx(&context_, green_ctx_));
     }
 
-    std::unique_ptr<GreenContext> create(int device_id, unsigned int num_sms) {
+    static std::unique_ptr<GreenContext> create(int device_id, unsigned int num_sms) {
         return std::make_unique<GreenContext>(device_id, num_sms);
     }
 
