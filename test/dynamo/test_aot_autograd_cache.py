@@ -317,6 +317,49 @@ class AOTAutogradCacheTests(InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    def test_multi_graph_specialization(self):
+        """
+        Verify multi graph specializations all cache hit
+        """
+
+        def fn(x):
+            return x * 5
+
+        a = torch.randn(5)
+        a8 = torch.randn(8)
+        a16 = torch.randn(16)
+        torch._dynamo.mark_dynamic(
+            a,
+            0,
+            specialize_on=[
+                lambda x: x == 8,
+                lambda x: x == 16,
+            ],
+        )
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        # A first call should miss in the cache.
+        compiled_fn(a)
+        compiled_fn(a8)
+        compiled_fn(a16)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 3)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 3)
+
+        self._clear_dynamo_and_codecache()
+
+        # A second call should hit on all 3 graphs
+        compiled_fn(a)
+        compiled_fn(a8)
+        compiled_fn(a16)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 3)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 3)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 3)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
     def test_symbol_specialization(self):
         """
         Verify the symbol specializations don't cause cache miss.
