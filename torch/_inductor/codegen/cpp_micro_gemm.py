@@ -1180,10 +1180,16 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         else:
             assert block_k == 32, "Only support block_k = 32 for AMX Bfloat16/Float16"
         num_columns = block_n // 16
+        if self.is_woq_int4():
+            # block_n for woq int4 is 64, which is too large for micro kernel
+            # so we split it into 2x32. Here num_columns = 2.
+            num_columns //= 2
         options = {
             "declare_kernel": self.get_kernel_declaration(),
-            "use_cached_dequantized_B": self.input_dtype == torch.bfloat16
-            and self.input2_dtype == torch.int8,
+            "use_cached_dequantized_B": (
+                self.input_dtype == torch.bfloat16
+                and self.input2_dtype in [torch.int8, torch.uint8]
+            ),
             "kernel": kernel,
             "block_m": block_m,
             "block_n": block_n,
@@ -1572,6 +1578,269 @@ inline void {{kernel_name}}_kernel(
         return True
 
 
+@register_micro_gemm(
+    *generate_gemm_config(
+        VecAMX,
+        [  # (block_m, block_n, block_k)
+            (16, 64, 32),
+            (32, 64, 32),
+        ],
+        input_dtype=torch.bfloat16,
+        input2_dtype=torch.uint8,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+        extra_check=check_amx_extra,
+    ),
+)
+class CppMicroGemmWoQInt4Amx(CppMicroGemmAMX):
+    """
+    This class generates the code for WoQ int4 micro gemm using AMX intrinsics,
+    which are available on 4th and 5th generation Intel Xeon.
+    Shape of packed weight = [N // 64, K, 32], viewed as [N, K // 2]
+    Shape of packed ScalesAndZeros = [K // group_size, N, 2]
+    Reuse TEMPLATE_KERNEL of CppMicroGemmAMX.
+    """
+
+    TEMPLATE_ENTRY = r"""
+inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_size) {
+  return (k_start + index) % group_size == 0;
+}
+
+{{declare_kernel}} {
+    {{kernel.assert_function}}(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
+    {{kernel.assert_function}}(K % 2 == 0, "K dimension must be multiple of 2");
+    {{kernel.assert_function}}({{block_n}} == 64, "block_n must be 64 for WOQ int4");
+
+    // Create a stack-allocated buffer for tiles of B.
+    // Except maybe for the tail-case, an AMX tile of B has 16x32 BF16 elements.
+    // we cache K * {{block_n}} elements of dequantized B
+    {{template.codegen_allocate_weight_buffer("dequantized_B_buf", input_t, "K", block_n)}}
+
+    constexpr int BLOCK_K = {{block_k}};
+    constexpr int64_t BLOCK_N = {{block_n}};
+    constexpr int COLS = BLOCK_N / 16;
+    const int PREFETCH_SIZE_K = 16 * 4;
+    const int PREFETCH_SIZE_KB = (PREFETCH_SIZE_K + BLOCK_K - 1) / BLOCK_K;
+    const int KB = K / BLOCK_K;
+
+    __m512 vb[COLS * 2];
+    __m512 scale[COLS];
+    __m512 zero[COLS];
+
+    // Lookup table to de-quantize int4 values to bf16.
+    // Values are dequantized as truly int4 [-8, 7] range;
+    //
+    // dequant = (bf16(int4_value) * bf16_scale) + bf16_zero
+    //
+    static const __m512 lut = _mm512_set_ps(
+        7.0f, 6.0f, 5.0f, 4.0f,
+        3.0f, 2.0f, 1.0f, 0.0f,
+        -1.0f, -2.0f, -3.0f, -4.0f,
+        -5.0f, -6.0f, -7.0f, -8.0f);
+
+    // index for transpose
+    static const __m512i idx1 = _mm512_set_epi32(
+        30, 28, 26, 24, 22, 20, 18, 16,
+        14, 12, 10, 8, 6, 4, 2, 0);
+    static const __m512i idx2 = _mm512_set_epi32(
+        31, 29, 27, 25, 23, 21, 19, 17,
+        15, 13, 11, 9, 7, 5, 3, 1);
+
+    // Indices for VNNI layout conversion
+    __m512i idx_low = _mm512_set_epi32(
+        0x17,
+        0x07,
+        0x16,
+        0x06,
+        0x15,
+        0x05,
+        0x14,
+        0x04,
+        0x13,
+        0x03,
+        0x12,
+        0x02,
+        0x11,
+        0x01,
+        0x10,
+        0x00);
+    __m512i idx_high = _mm512_set_epi32(
+        0x1f,
+        0x0f,
+        0x1e,
+        0x0e,
+        0x1d,
+        0x0d,
+        0x1c,
+        0x0c,
+        0x1b,
+        0x0b,
+        0x1a,
+        0x0a,
+        0x19,
+        0x09,
+        0x18,
+        0x08);
+
+    // load scale and zero point
+    auto load_scale_and_zeros = [&](int i, int _kb) {
+        // load 2x bfloat16 vector
+        __m512i t = _mm512_loadu_si512((__m512i*)(ScaleAndZeros + _kb * lds + 32 * i));
+        if (_kb + PREFETCH_SIZE_KB < KB) {
+            _mm_prefetch(ScaleAndZeros + (_kb + PREFETCH_SIZE_KB) * lds + 32 * i, _MM_HINT_T0);
+        }
+
+        // convert to 2x f32 vector
+        __m512 a, b;
+        at::vec::cvtbf16_fp32(t, a, b);
+
+        // transpose scale_and_zero from {16, 2} to {2, 16}
+        // inputs:
+        //   a: {s0, z0, s1, z1, ..., s7, z7}
+        //   b: {s8, z8, s9, z9, ..., s15, z15}
+        // output:
+        //   scale: {s0, s1, s2, ..., s15}
+        //   zero:  {z0, z1, z2, ..., z15}
+        scale[i] = _mm512_mask_permutex2var_ps(a, 0xffff, idx1, b);
+        zero[i] = _mm512_mask_permutex2var_ps(a, 0xffff, idx2, b);
+    };
+
+    // Dequantize a B block of 2 * block_n into bf16
+    // So, it handles k and k+1 at the same time
+    auto dequantize_B = [&](int n) {
+        constexpr int64_t ldb_int4 = BLOCK_N / 2; // 32
+        for (int k = 0, kb = 0; k < K; k += 2) {
+            // Since block_k must be 32 for AMX microkernels, k_start may not be
+            // a multiple of q_group_size. In that case, we need to load scales
+            // and zero points immediately when k == 0 here
+            if ({{kernel_name}}_is_block_start(k, k_start, q_group_size) || k == 0) {
+                c10::ForcedUnroll<COLS>{}(load_scale_and_zeros, kb++);
+            }
+
+            // load 256 bits = 64 elements in int4
+            __m256i b4 = _mm256_loadu_si256((__m256i*)(B + n * K + k * ldb_int4));
+            if (k + PREFETCH_SIZE_K < K) {
+                _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb_int4, _MM_HINT_T0);
+            }
+
+            __m512i b32 = _mm512_cvtepu8_epi32(_mm256_castsi256_si128(b4));
+            vb[0] = _mm512_permutexvar_ps(b32, lut);
+            vb[0] = _mm512_fmadd_ps(vb[0], scale[0], zero[0]);
+            vb[2] = _mm512_permutexvar_ps(_mm512_srli_epi32(b32, 4), lut);
+            vb[2] = _mm512_fmadd_ps(vb[2], scale[2], zero[2]);
+
+            b32 = _mm512_cvtepu8_epi32(_mm256_extracti128_si256(b4, 1));
+            vb[1] = _mm512_permutexvar_ps(b32, lut);
+            vb[1] = _mm512_fmadd_ps(vb[1], scale[1], zero[1]);
+            vb[3] = _mm512_permutexvar_ps(_mm512_srli_epi32(b32, 4), lut);
+            vb[3] = _mm512_fmadd_ps(vb[3], scale[3], zero[3]);
+
+            b4 = _mm256_loadu_si256((__m256i*)(B + n * K + (k + 1) * ldb_int4));
+            b32 = _mm512_cvtepu8_epi32(_mm256_castsi256_si128(b4));
+            vb[0 + COLS] = _mm512_permutexvar_ps(b32, lut);
+            vb[0 + COLS] = _mm512_fmadd_ps(vb[0 + COLS], scale[0], zero[0]);
+            vb[2 + COLS] = _mm512_permutexvar_ps(_mm512_srli_epi32(b32, 4), lut);
+            vb[2 + COLS] = _mm512_fmadd_ps(vb[2 + COLS], scale[2], zero[2]);
+
+            b32 = _mm512_cvtepu8_epi32(_mm256_extracti128_si256(b4, 1));
+            vb[1 + COLS] = _mm512_permutexvar_ps(b32, lut);
+            vb[1 + COLS] = _mm512_fmadd_ps(vb[1 + COLS], scale[1], zero[1]);
+            vb[3 + COLS] = _mm512_permutexvar_ps(_mm512_srli_epi32(b32, 4), lut);
+            vb[3 + COLS] = _mm512_fmadd_ps(vb[3 + COLS], scale[3], zero[3]);
+
+            for (int i = 0; i < COLS; i++) {
+                // convert to VNNI
+                auto low = _mm512_permutex2var_ps(vb[i], idx_low, vb[i + COLS]);
+                auto high = _mm512_permutex2var_ps(vb[i], idx_high, vb[i + COLS]);
+                // convert lower 16 float32 values to bfloat16
+                auto v0_bf16 = reinterpret_cast<__m256i>(_mm512_cvtneps_pbh(low));
+                // convert higher 16 float32 values to bfloat16
+                auto v1_bf16 = reinterpret_cast<__m256i>(_mm512_cvtneps_pbh(high));
+                // combine the lower 16 and higher 16 bfloat16 values
+                auto v = _mm512_castsi256_si512(v0_bf16);
+                v = _mm512_inserti64x4(v, v1_bf16, 1);
+                // store the VNNI format bfloat16 values
+                // split block_n into 2x32
+                {{input_t}}* addr = dequantized_B_buf + K * 32 * (i / 2) + k * 32 + (i % 2) * 32;
+                _mm512_storeu_si512(addr, v);
+            }
+        }
+    };
+
+    const int64_t updated_ldb = {{block_n}} / 2;
+    for (int64_t n = 0; n < N; n += {{block_n}}) {
+        // Dequantize K * block_n int8 B elements into BF16
+        dequantize_B(n);
+        // for woq int4, block_n is 64, which is too large for micro kernel
+        for (int64_t ni = 0; ni < {{block_n}}; ni += 32) {
+            for (int64_t m = 0; m < M; m += {{block_m}}) {
+                int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
+                int64_t m_tail = m;
+            {%- for num_rows in range(block_m, 0, -16) %}
+                {%- if num_rows != block_m %}
+                else
+            {%- endif %}
+                if (block_m >= {{num_rows}}) {
+                    {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}<accum>(
+                        amx_state,
+                        A + m * lda,
+                        dequantized_B_buf + ni * K,
+                        C + m * ldc + n + ni,
+                        K,
+                        lda,
+                        updated_ldb,
+                        ldc,
+                        16
+                    );
+                    block_m -= {{num_rows}};
+                    m_tail += {{num_rows}};
+                }
+            {%- endfor %}
+                if (block_m > 0) {
+                    {{kernel_name}}_amx_kernel_16_{{num_columns}}<accum>(
+                        amx_state,
+                        A + m_tail * lda,
+                        dequantized_B_buf + ni * K,
+                        C + m_tail * ldc + n + ni,
+                        K,
+                        lda,
+                        updated_ldb,
+                        ldc,
+                        block_m
+                    );
+                }
+            } // for m
+        } // for ni
+    } // for n
+}
+"""
+
+    def get_kernel_extra_args_declare(self) -> str:
+        return (
+            "AMXState& amx_state,\n"
+            "    const int64_t q_group_size,\n"
+            "    const c10::BFloat16* __restrict__ ScaleAndZeros,\n"
+            "    const int64_t lds,\n"
+            "    int64_t k_start,"
+        )
+
+    def get_kernel_extra_args(self, **kwargs) -> list[str]:
+        assert "kernel" in kwargs
+        assert "qscale_and_zeros" in kwargs
+        kernel = kwargs["kernel"]
+        qscale_and_zeros = kwargs["qscale_and_zeros"]
+        return [
+            "amx_state,",
+            "group_size,",
+            f"&({kernel.index(qscale_and_zeros, [0, 0, 0])}),",
+            "N * 2,",  # lds
+            "k_start,",
+        ]
+
+    def is_woq_int4(self):
+        return True
+
+
 def create_micro_gemm(
     name,
     m,
@@ -1633,9 +1902,9 @@ def create_micro_gemm(
                     config.vec_isa_cls == VecAMX
                     and m < block_m
                     and input_dtype == torch.bfloat16
-                    and input2_dtype == torch.int8
+                    and input2_dtype in [torch.int8, torch.uint8]
                 ):
-                    # For int8 WoQ GEMM, AMX micro-kernel may not perform well if m < block_m
+                    # For WoQ GEMM, AMX micro-kernel may not perform well if m < block_m
                     continue
                 # Criteria on the ranking of configurations
                 # 1. ISA: AMX > VEC

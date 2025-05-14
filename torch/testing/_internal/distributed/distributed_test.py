@@ -10272,5 +10272,54 @@ class DistributedTest:
                 ddp(input).sum().backward()
 
 
+        def _test_skip_all_reduce_unused_parameters(
+            self, find_unused_parameters=False, static_graph=False, skip_all_reduce_unused_params=False,
+        ):
+            class LargeNet(nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.fc1 = nn.Linear(100, 5000, bias=False)
+                    # fc2 is unused
+                    self.fc2 = nn.Linear(100, 100, bias=False)
+
+                def forward(self, x):
+                    y = self.fc1(x)
+                    return y
+
+            torch.manual_seed(31415)
+            torch.cuda.set_device(self.rank)
+            model = LargeNet().cuda(self.rank)
+            ddp_model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                find_unused_parameters=find_unused_parameters,
+                static_graph=static_graph,
+                bucket_cap_mb=1.5,
+                skip_all_reduce_unused_params=skip_all_reduce_unused_params,
+            )
+            random_input = torch.randn(20, 100, device=self.rank)
+            for _ in range(10):
+                out = ddp_model(random_input)
+                loss = out.sum()
+                loss.backward()
+            return ddp_model
+
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
+        @skip_if_lt_x_gpu(2)
+        def test_skip_all_reduce_unused_parameters(self):
+            base_model = self._test_skip_all_reduce_unused_parameters(
+                find_unused_parameters=True, static_graph=False
+            )
+            test_model_1 = self._test_skip_all_reduce_unused_parameters(
+                find_unused_parameters=True,
+                static_graph=False,
+                skip_all_reduce_unused_params=True
+            )
+
+            self.assertEqual(base_model._get_ddp_logging_data().get("num_buckets_reduced"), 2)
+            self.assertEqual(test_model_1._get_ddp_logging_data().get("num_buckets_reduced"), 1)
+
+            for i, j in zip(base_model.parameters(), test_model_1.parameters()):
+                self.assertEqual(i, j)
+
 
 instantiate_parametrized_tests(DistributedTest._DistTestBase)

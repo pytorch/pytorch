@@ -1204,7 +1204,7 @@ cudnnRNNAlgo_t get_algo(
   // Persistent algos typically don't work for packed inputs with sequence
   // lengths that vary across batch elements, and will return
   // CUDNN_STATUS_NOT_SUPPORTED if attempted. See
-  // https://docs.nvidia.com/deeplearning/cudnn/developer-guide/index.html#features-of-rnn-functions
+  // https://docs.nvidia.com/deeplearning/cudnn/archives/cudnn-890/developer-guide/index.html#features-of-rnn-functions
   if (!tensors.is_input_packed()) {
     auto cudnnDataType = getCudnnDataType(input);
     if (cudnnDataType != CUDNN_DATA_DOUBLE) {
@@ -1274,7 +1274,7 @@ int64_t _cudnn_rnn_flatten_weight_prologue(
   rnn_desc = rnn.descriptor(handle);
 
   // Why do we pad to 5 dims here (and elsewhere)?
-  // https://docs.nvidia.com/deeplearning/sdk/cudnn-api/index.html#cudnnRNNForwardTraining
+  // https://docs.nvidia.com/deeplearning/cudnn/archives/cudnn-892/api/index.html#cudnnRNNForwardTraining
   // expects descriptors padded to 3 dimensions.
   x_desc.set(flat_buf_datatype, x_geom.sizes(), x_geom.strides(), 5);
 

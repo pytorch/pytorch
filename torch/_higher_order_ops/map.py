@@ -3,7 +3,6 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._functorch.aot_autograd import AOTConfig, create_joint
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
@@ -54,16 +53,6 @@ map = MapWrapper()
 
 map_impl = MapImpl()
 
-dummy_aot_config = AOTConfig(
-    fw_compiler=None,  # type: ignore[arg-type]
-    bw_compiler=None,  # type: ignore[arg-type]
-    partition_fn=None,  # type: ignore[arg-type]
-    decompositions={},
-    num_params_buffers=0,
-    aot_id=0,
-    keep_inference_input_mutations=False,
-)
-
 
 def create_fw_bw_graph(f, num_mapped_args, *args):
     mapped_xs = args[:num_mapped_args]
@@ -95,6 +84,18 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
             example_grad = [_from_fun(out) for out in example_flat_out]
 
             fw_graph = make_fx(f)(*example_xs, *example_pos_args)
+
+        from torch._functorch.aot_autograd import AOTConfig, create_joint
+
+        dummy_aot_config = AOTConfig(
+            fw_compiler=None,  # type: ignore[arg-type]
+            bw_compiler=None,  # type: ignore[arg-type]
+            partition_fn=None,  # type: ignore[arg-type]
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+        )
 
         def joint_f(*example_args):
             joint_mapped_args = example_args[:joint_num_mapped]
@@ -221,6 +222,7 @@ def map_dense(f, xs, pos_args):
     return _stack_pytree(pytrees)
 
 
+# TODO: Rework DispatchKey.Autograd to py_autograd_impl
 @map_impl.py_impl(DispatchKey.Autograd)
 def map_autograd(f, xs, pos_args):
     num_mapped_args = len(xs)

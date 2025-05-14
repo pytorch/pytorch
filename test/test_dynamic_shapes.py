@@ -27,6 +27,7 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_float,
     guard_int,
     GuardOnDataDependentSymNode,
+    has_free_symbols,
     hint_int,
     is_symbolic,
     ShapeEnv,
@@ -1434,8 +1435,7 @@ class TestSymNumberMagicMethods(TestCase):
                 out = lambda_apply(sym_inp1)
             else:
                 out = lambda_apply(sym_inp1, inp2)
-            if fn not in sym_node.alternate_impl_if_hinted_methods:
-                self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
+            self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
 
@@ -1446,16 +1446,14 @@ class TestSymNumberMagicMethods(TestCase):
         sym_inp2 = get_sym_inp(inp2)
         with maybe_xfail(inp1, sym_inp2):
             out = lambda_apply(inp1, sym_inp2)
-            if fn not in sym_node.alternate_impl_if_hinted_methods:
-                self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
+            self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
 
         # Symified both args
         with maybe_xfail(sym_inp1, sym_inp2):
             out = lambda_apply(sym_inp1, sym_inp2)
-            if fn not in sym_node.alternate_impl_if_hinted_methods:
-                self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
+            self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
 
@@ -2991,6 +2989,66 @@ class TestGuardsExpressions(TestCase):
 
         self.assertEqual(f"{x_clean.stride()}", "(8, 1)")
         self.assertEqual(f"{x_clean.shape}", "torch.Size([5, 8])")
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_deferred_neq_assert(self):
+        @torch.compile(fullgraph=True)
+        def func(a):
+            torch._check(a.item() != 5)
+            return a.item() * 10
+
+        func(torch.tensor([100]))
+
+        with self.assertRaises(RuntimeError):
+            func(torch.tensor([5]))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_deferred_sym_or_assert(self):
+        @torch.compile(fullgraph=True)
+        def func(a, b):
+            torch._check(operator.or_(a.item() == 5, b.item() == 5))
+            return a.item() * 10
+
+        func(torch.tensor([5]), torch.tensor([100]))
+        func(torch.tensor([100]), torch.tensor([5]))
+
+    def test_has_free_symbols(self):
+        self.assertFalse(has_free_symbols(sympy.S.true))
+        self.assertFalse(has_free_symbols(sympy.Max(1, 10, evaluate=False)))
+
+        self.assertFalse(has_free_symbols(sympy.sympify("1")))
+        self.assertFalse(has_free_symbols(sympy.sympify("1.1")))
+        self.assertTrue(has_free_symbols(sympy.sympify("a")))
+        self.assertTrue(has_free_symbols(sympy.sympify("a*2")))
+        self.assertTrue(has_free_symbols(sympy.sympify("a+b")))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_deferred_sym_eq_assert(self):
+        @torch.compile(fullgraph=True)
+        def func(a, b):
+            torch._check(b.item() == 5)
+            return a * 10
+
+        func(torch.tensor([5]), torch.tensor([5]))
+        with self.assertRaises(RuntimeError):
+            func(torch.tensor([100]), torch.tensor([1]))
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_deferred_with_unbacked_input(self):
+        @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
+        def func(a, b):
+            torch._check(a.size()[0] == b.size()[0])
+            return a * 10
+
+        a = torch.rand(1, 1)
+        b = torch.rand(1, 1)
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(b, 0)
+        func(a, b)
+
+        with self.assertRaises(RuntimeError):
+            func(a, torch.rand(2, 1))
 
 
 if __name__ == "__main__":
