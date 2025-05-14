@@ -33,7 +33,8 @@ import re
 import sys
 import traceback
 import weakref
-from dataclasses import dataclass, replace
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 
 import sympy
@@ -51,7 +52,6 @@ from torch._guards import (
     CompileId,
     GlobalContextCheckpointState,
     Source,
-    tracing,
     TracingContext,
 )
 from torch._subclasses.fake_tensor import FakeTensor
@@ -1502,7 +1502,7 @@ class OutputGraph(OutputGraphGuardsState):
                 self.tracing_context.fake_mode = backend_fake_mode
 
             with self.restore_global_state():
-                compiled_fn = self.call_user_compiler(gm)
+                compiled_fn = self.call_user_compiler(gm, self.example_inputs())
 
             from torch.fx._lazy_graph_module import _LazyGraphModule
 
@@ -1536,11 +1536,6 @@ class OutputGraph(OutputGraphGuardsState):
             if specializations := old_fake_mode.shape_env.specializations:
                 specialization_guards = []
                 specialization_cache: dict[Specialization, Callable[[Any], Any]] = {}
-                preserved_graphargs = [
-                    replace(node.meta["grapharg"], _example=None)
-                    for node in self.placeholders
-                ]
-                preserved_tracing_context = torch._guards.TracingContext.get()
                 sources = [a.source for a in self.graphargs]
                 for specialization in specializations:
                     source_index = sources.index(specialization.source)
@@ -1576,23 +1571,15 @@ class OutputGraph(OutputGraphGuardsState):
                                     *args, **kwargs
                                 )
 
-                            for node, grapharg, arg in zip(
-                                self.placeholders, preserved_graphargs, args
+                            with self.shape_env.patch_source_specialization(
+                                specialization.source, specialization.check_fn
                             ):
-                                node.meta["grapharg"] = replace(grapharg, _example=arg)
-
-                            with tracing(preserved_tracing_context):
-                                shape_env = (
-                                    preserved_tracing_context.fake_mode.shape_env
+                                # Modify gm so AOTAutogradCache key changes per specialization
+                                gm.meta["specialization"] = specialization
+                                specialization_cache[specialization] = (
+                                    self.call_user_compiler(gm, args)
                                 )
-                                with shape_env.patch_source_specialization(
-                                    specialization.source, specialization.check_fn
-                                ):
-                                    # Modify gm so AOTAutogradCache key changes per specialization
-                                    gm.meta["specialization"] = specialization
-                                    specialization_cache[specialization] = (
-                                        self.call_user_compiler(gm)
-                                    )
+
                             return specialization_cache[specialization](*args, **kwargs)
                     return compiled_fn(*args, **kwargs)
 
@@ -1612,16 +1599,20 @@ class OutputGraph(OutputGraphGuardsState):
     def graphargs(self) -> list[GraphArg]:
         return [node.meta["grapharg"] for node in self.placeholders]
 
-    def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
+    def call_user_compiler(
+        self, gm: fx.GraphModule, example_inputs: Sequence[Any]
+    ) -> CompiledFn:
         with dynamo_timed(
             "OutputGraph.call_user_compiler",
             phase_name="backend_compile",
             log_pt2_compile_event=True,
             dynamo_compile_column_us="aot_autograd_cumulative_compile_time_us",
         ):
-            return self._call_user_compiler(gm)
+            return self._call_user_compiler(gm, example_inputs)
 
-    def _call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
+    def _call_user_compiler(
+        self, gm: fx.GraphModule, example_inputs: Sequence[Any]
+    ) -> CompiledFn:
         assert self.compiler_fn is not None
         tot = 0
         placeholders = []
@@ -1632,10 +1623,11 @@ class OutputGraph(OutputGraphGuardsState):
                 placeholders.append(node)
         increment_op_count(tot)
         for pl in placeholders:
-            arg = pl.meta["grapharg"]
-            # TODO: Why isn't this stored in meta :think:
-            # NOTE: can't move these into meta: https://github.com/pytorch/pytorch/issues/141640
-            pl._dynamo_source = arg.source
+            if not hasattr(pl, "_dynamo_source"):
+                arg = pl.meta["grapharg"]
+                # TODO: Why isn't this stored in meta :think:
+                # NOTE: can't move these into meta: https://github.com/pytorch/pytorch/issues/141640
+                pl._dynamo_source = arg.source
 
         # NOTE: can't move these into meta: https://github.com/pytorch/pytorch/issues/141640
         gm._param_name_to_source = self.param_name_to_source  # type: ignore[assignment]
@@ -1651,7 +1643,7 @@ class OutputGraph(OutputGraphGuardsState):
             compiler_fn = self.compiler_fn
             if config.verify_correctness:
                 compiler_fn = WrapperBackend(compiler_fn)
-            compiled_fn = compiler_fn(gm, self.example_inputs())
+            compiled_fn = compiler_fn(gm, example_inputs)
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except (TensorifyScalarRestartAnalysis, ShortenTraceback):

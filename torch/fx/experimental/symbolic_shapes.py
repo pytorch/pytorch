@@ -3634,7 +3634,7 @@ class ShapeEnv:
         """
         name = source.name()
         sym = self.source_to_var[name]
-        expr = check_fn(sym)
+        expr = check_fn(SymInt(SymNode(sym, self, int, None))).node._expr
         new_axioms = dict(self.get_implications(self.simplify(expr)))
         self.axioms.update(new_axioms)
         try:
