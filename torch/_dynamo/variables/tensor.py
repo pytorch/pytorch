@@ -1324,7 +1324,8 @@ class TensorVariable(VariableTracker):
             unimplemented_v2(
                 gb_type="Unsupported Tensor.requires_grad_() call",
                 context=f"call_method {self} requires_grad_",
-                explanation="",
+                explanation="Dynamo does not support changes to a Tensor's "
+                "`requires_grad` through calling `requires_grad_()`.",
                 hints=[],
             )
         else:
