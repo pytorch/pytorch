@@ -3644,12 +3644,25 @@ class ShapeEnv:
         sym = self.source_to_var[name]
         expr = check_fn(SymInt(SymNode(sym, self, int, None))).node._expr
         new_axioms = dict(self.get_implications(self.simplify(expr)))
+        added_replacements = {}
+        for axiom in new_axioms:
+            if (
+                isinstance(axiom, sympy.Eq)
+                and isinstance(axiom.lhs, sympy.Symbol)
+                and isinstance(axiom.rhs, sympy.Integer)
+                and axiom.lhs not in self.replacements
+            ):
+                self.replacements[axiom.lhs] = axiom.rhs
+                added_replacements[axiom.lhs] = axiom.rhs
+
         self.axioms.update(new_axioms)
         try:
             yield
         finally:
             for k in new_axioms:
                 self.axioms.pop(k, None)
+            for k in added_replacements:
+                self.replacements.pop(k, None)
 
     def check_equal(self, other: ShapeEnv) -> None:
         """Compare another ShapeEnv for equivalence"""
