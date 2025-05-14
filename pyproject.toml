@@ -59,7 +59,7 @@ dynamic = [
 Homepage = "https://pytorch.org"
 Repository = "https://github.com/pytorch/pytorch"
 Documentation = "https://pytorch.org/docs"
-"Bug Report" = "https://github.com/pytorch/pytorch/issues"
+"Issue Tracker" = "https://github.com/pytorch/pytorch/issues"
 Forum = "https://discuss.pytorch.org"
 
 [project.optional-dependencies]
