@@ -68,7 +68,6 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
 
 void AccumulateGrad::compiled_args(CompiledNodeArgs& args) const {
   if (args.cond(variable.defined() && variable.requires_grad())) {
-    std::cout << "COLLECTED variable tensorimpl: " << variable.unsafeGetTensorImpl() << std::endl;
     args.collect(variable);
     args.collect(variable.grad());
   }

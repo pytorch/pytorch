@@ -365,13 +365,16 @@ struct AutogradCompilerCall {
   std::vector<c10::SafePyObject> packed_inputs;
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type;
-  // NodeCall id of each size, only when verbose logging is enabled
-  std::vector<uint32_t> size_input_origins;
   std::unordered_map<const SavedVariable*, std::pair<size_t, size_t>>
       sv_to_hooks;
   // pynode -> backward and backward state idx
   std::unordered_map<const Node*, std::pair<size_t, std::optional<size_t>>>
       pynode_objs;
+
+  // NodeCall id of each size, only when verbose logging is enabled
+  std::vector<uint32_t> size_input_origins;
+  // param ready order, only when DDP C++ Reducer is enabled
+  std::vector<size_t> ddp_param_index_order;
 };
 
 class CompiledNodeArgs {
@@ -382,6 +385,9 @@ class CompiledNodeArgs {
   // than specialized on) are forwarded to the compiler and not included in the
   // key.
  public:
+  const std::vector<size_t>& retrieve_ddp_param_index_order() const {
+    return _compiler.ddp_param_index_order;
+  }
   void collect(const TensorArg& t) {
     collect_size(t.id);
     if (t.defined()) {
@@ -593,12 +599,10 @@ class CompiledNodeArgs {
     collect(t.requires_grad);
     collect(t.is_empty);
   }
-  // void collect_ddp_ready_variable(unsigned long variable_index) {
-  //   // will be called before this hook id
-  //   size_t hook_id = _compiler.next_hook_id();
-  //   TORCH_INTERNAL_ASSERT(!_node_call.cpp_reducer_post_hook.has_value());
-  //   _node_call.cpp_reducer_post_hook = hook_id;
-  // }
+  void collect_ddp_param_index(size_t variable_index) {
+    collect(variable_index);
+    _compiler.ddp_param_index_order.emplace_back(variable_index);
+  }
   bool cond(bool cond) {
     collect(cond);
     return cond;
@@ -626,7 +630,6 @@ class CompiledNodeArgs {
 #undef COLLECT_AS_BYTES
 
   void collect_hooks_from(Node* fn) {
-    std::cout << "collecting hooks from " << fn->name() << "(" << fn << ")" << std::endl;
     for (auto& i : fn->tensor_pre_hooks()) {
       i->compiled_args(*this);
     }
@@ -637,7 +640,6 @@ class CompiledNodeArgs {
       i->compiled_args(*this);
     }
     for (auto& i : fn->post_hooks()) {
-      std::cout << "found post hook" << std::endl;
       i->compiled_args(*this);
     }
     collect_size(_node_call.tensor_pre_hooks.size());
@@ -806,6 +808,10 @@ class SwapSavedVariables {
     auto it = compiler.pynode_objs.find(pynode);
     TORCH_INTERNAL_ASSERT(it != compiler.pynode_objs.end());
     return it->second;
+  }
+
+  const std::vector<size_t>& retrieve_ddp_param_index_order() const {
+    return compiler.ddp_param_index_order;
   }
 
   void before(at::Tensor& t) {

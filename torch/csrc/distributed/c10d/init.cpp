@@ -3565,7 +3565,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       [](const std::vector<at::Tensor>& tensors,
          const std::vector<size_t>& bucket_size_limits,
          const std::vector<bool>& expect_sparse_gradient,
-         const std::vector<int64_t>& tensor_indices,
+         const std::vector<size_t>& tensor_indices,
          const std::optional<std::shared_ptr<::c10d::Logger>>& logger) {
         if (logger.has_value()) {
           std::weak_ptr<::c10d::Logger> logger_weakref = logger.value();

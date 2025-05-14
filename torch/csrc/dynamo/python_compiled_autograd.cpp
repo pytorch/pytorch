@@ -978,6 +978,16 @@ static CacheNode* _compiled_autograd_impl(
         AnomalyMode::is_enabled() && AnomalyMode::should_check_nan());
     InputBuffers input_buffers;
 
+
+    std::vector<Node*> expected_order = get_current_graph_task_execution_order();
+
+    std::cout << "expected vs actual order:\n";
+    for (size_t i = 0; i < expected_order.size() && i < ordered_calls.size(); ++i) {
+      std::cout << "expected: " << expected_order[i]
+                << ", actual: " << ordered_calls[i]->node.get()
+                << std::endl;
+    }
+
     for (size_t i = 0; i < ordered_calls.size(); i++) {
       NodeCall& call = *ordered_calls[i];
 
@@ -1053,7 +1063,6 @@ static CacheNode* _compiled_autograd_impl(
       }
 
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
-      std::cout << call.node->name() << " has post hooks before apply_with_saved? " << (!call.post_hooks.empty()) << std::endl;
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
       saved.debug_asserts();
       saved.before(call.node->next_edges());
@@ -1105,7 +1114,6 @@ static CacheNode* _compiled_autograd_impl(
       saved.after(call.node->next_edges());
       saved.debug_asserts();
 
-      std::cout << call.node->name() << " has post hooks after apply_with_saved? " << (!call.post_hooks.empty()) << std::endl;
       if (!call.post_hooks.empty()) {
         THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
         THPObjectPtr pyoutputs(THPVariable_WrapList(outputs));

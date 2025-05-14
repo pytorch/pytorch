@@ -460,7 +460,7 @@ class TORCH_API Reducer {
   // Following variables are to help build dynamic bucket order
   bool has_rebuilt_bucket_;
   std::vector<at::Tensor> rebuilt_params_;
-  std::vector<int64_t> rebuilt_param_indices_;
+  std::vector<size_t> rebuilt_param_indices_;
   const int64_t bucket_bytes_cap_;
 
 #ifndef _WIN32
@@ -587,7 +587,7 @@ compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size,
     const std::vector<bool>& expect_sparse_gradient = {},
-    const std::vector<int64_t>& tensor_indices = {},
+    const std::vector<size_t>& tensor_indices = {},
     const std::optional<std::weak_ptr<c10d::Logger>>& logger = {});
 
 // Verify models across all processes are the same as model on rank 0 with
