@@ -826,6 +826,7 @@ class TracingContext:
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
         self.previously_inlined_functions = dict()
+        self.previously_cleaned_instructions = dict()
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
         # This is morally part of frame_summary_stack, but it is kept separate
@@ -872,6 +873,7 @@ class TracingContext:
         # for the context on clearing global context.
         self.global_context.global_state = {}
         self.previously_inlined_functions.clear()
+        self.previously_cleaned_instructions.clear()
 
     @staticmethod
     @contextmanager
