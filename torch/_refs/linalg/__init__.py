@@ -176,7 +176,7 @@ def vector_norm(
             x = torch.abs(x)
             if keepdim or x.ndim == 0:
                 return to_result_dtype(x).contiguous()
-            elif dim is None:
+            elif dim is None or dim == []:
                 return x.flatten()[0]
             else:
                 new_shape = [s for d, s in enumerate(x.shape) if d not in dim]
