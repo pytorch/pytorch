@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 # ruff: noqa: F841
-# flake8: noqa
 import collections
 import collections.abc
 import copy
@@ -296,7 +295,7 @@ class TestJointOps(TestCase):
                 self.s.z = ["z"]
             p = pickle.dumps(self.s, i)
             dup = pickle.loads(p)
-            self.assertEqual(self.s, dup, "%s != %s" % (self.s, dup))
+            self.assertEqual(self.s, dup, "%s != %s" % (self.s, dup))  # noqa: UP031
             if type(self.s) not in (OrderedSet, frozenset):
                 self.assertEqual(self.s.x, dup.x)
                 self.assertEqual(self.s.z, dup.z)
@@ -390,7 +389,7 @@ class TestJointOps(TestCase):
             self.assertEqual(repr(s), "{OrderedSet(...)}")
         else:
             name = repr(s).partition("(")[0]  # strip class name
-            self.assertEqual(repr(s), "%s({%s(...)})" % (name, name))
+            self.assertEqual(repr(s), "%s({%s(...)})" % (name, name))  # noqa: UP031
 
     @unittest.skip("Different hashing")
     def test_do_not_rehash_dict_keys(self):
@@ -454,7 +453,7 @@ class TestSet(TestJointOps, TestCase):
 
     def test_set_literal_insertion_order(self):
         # SF Issue #26020 -- Expect left to right insertion
-        s = {1, 1.0, True}
+        s = {1, 1.0, True}  # noqa: B033
         self.assertEqual(len(s), 1)
         stored_value = s.pop()
         self.assertEqual(type(stored_value), int)
@@ -715,19 +714,19 @@ class TestSet(TestJointOps, TestCase):
         myset = {1, 2, 3}
 
         myobj = TestRichSetCompare()
-        myset < myobj
+        myset < myobj  # noqa: B015
         self.assertTrue(myobj.gt_called)
 
         myobj = TestRichSetCompare()
-        myset > myobj
+        myset > myobj  # noqa: B015
         self.assertTrue(myobj.lt_called)
 
         myobj = TestRichSetCompare()
-        myset <= myobj
+        myset <= myobj  # noqa: B015
         self.assertTrue(myobj.ge_called)
 
         myobj = TestRichSetCompare()
-        myset >= myobj
+        myset >= myobj  # noqa: B015
         self.assertTrue(myobj.le_called)
 
 
@@ -834,7 +833,9 @@ class TestBasicOps(TestCase):
             p = pickle.dumps(self.OrderedSet, proto)
             copy = pickle.loads(p)
             self.assertEqual(
-                self.OrderedSet, copy, "%s != %s" % (self.OrderedSet, copy)
+                self.OrderedSet,
+                copy,
+                "%s != %s" % (self.OrderedSet, copy),  # noqa: UP031
             )
 
     def test_issue_37219(self):
@@ -1195,7 +1196,7 @@ class TestMutate(TestCase):
         expected_len = 0
         for v in self.values:
             tmp.add(v)
-            expected_len += 1
+            expected_len += 1  # noqa: SIM113
             self.assertEqual(len(tmp), expected_len)
         self.assertEqual(tmp, self.OrderedSet)
 
@@ -1518,7 +1519,7 @@ class TestOnlySetsString(TestOnlySetsInBinaryOps, TestCase):
 class TestOnlySetsGenerator(TestOnlySetsInBinaryOps, TestCase):
     def setUp(self):
         def gen():
-            for i in range(0, 10, 2):
+            for i in range(0, 10, 2):  # noqa: UP028
                 yield i
 
         self.OrderedSet = OrderedSet((1, 2, 3))
@@ -1541,7 +1542,7 @@ class TestCopying:
 
     def test_deep_copy(self):
         dup = copy.deepcopy(self.OrderedSet)
-        ##print type(dup), repr(dup)
+        # print type(dup), repr(dup)
         dup_list = sorted(dup, key=repr)
         set_list = sorted(self.OrderedSet, key=repr)
         self.assertEqual(len(dup_list), len(set_list))
@@ -1641,7 +1642,7 @@ class TestIdentities(TestCase):
 
 def R(seqn):
     "Regular generator"
-    for i in seqn:
+    for i in seqn:  # noqa: UP028
         yield i
 
 
@@ -1655,7 +1656,7 @@ class G:
         return self.seqn[i]
 
 
-class I:
+class I:  # noqa: E742
     "Sequence using iterator protocol"
 
     def __init__(self, seqn):
@@ -1681,7 +1682,7 @@ class Ig:
         self.i = 0
 
     def __iter__(self):
-        for val in self.seqn:
+        for val in self.seqn:  # noqa: UP028
             yield val
 
 
@@ -1743,7 +1744,7 @@ from itertools import chain
 
 def L(seqn):
     "Test multiple tiers of iterators"
-    return chain(map(lambda x: x, R(Ig(G(seqn)))))
+    return chain(map(lambda x: x, R(Ig(G(seqn)))))  # noqa: C417
 
 
 class TestVariousIteratorArgs(TestCase):
@@ -1909,7 +1910,7 @@ def powerset(U):
 def cube(n):
     """Graph of n-dimensional hypercube."""
     singletons = [frozenset([x]) for x in range(n)]
-    return dict(
+    return dict(  # noqa: C404
         [(x, frozenset([x ^ s for s in singletons])) for x in powerset(range(n))]
     )
 
@@ -1946,7 +1947,7 @@ def faces(G):
                             f.add(frozenset([v1, v2, v3, v4]))
                         else:
                             for v5 in G[v4]:
-                                if v5 == v3 or v5 == v2:
+                                if v5 == v3 or v5 == v2:  # noqa: SIM109
                                     continue
                                 if v1 in G[v5]:
                                     f.add(frozenset([v1, v2, v3, v4, v5]))
