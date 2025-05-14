@@ -215,14 +215,14 @@ void woq_matmul_int4_impl_cache(
   const int64_t lda = mat1.strides()[mat1.dim() - 2];
   const int64_t ldc = result.strides()[result.dim() - 2];
   
-  bias_type_t b_type = bias_type_t::_none;
-  trans_type_t tt = trans_type_t::_nt; // only support nt for int4 matmul
+  bias_type_t b_type = bias_type_t::none;
+  trans_type_t tt = trans_type_t::nt; // only support nt for int4 matmul
 
   joint_dtypes_t jd;
   if (mat1.scalar_type() == at::ScalarType::Half) {
-    jd = joint_dtypes_t::_f16_int4;
+    jd = joint_dtypes_t::f16_int4;
   } else if (mat1.scalar_type() == at::ScalarType::BFloat16) {
-    jd = joint_dtypes_t::_bf16_int4;
+    jd = joint_dtypes_t::bf16_int4;
   } else {
     TORCH_INTERNAL_ASSERT(
         false, "Unsupported data type for int4 matmul: ", mat1.scalar_type());
@@ -231,9 +231,9 @@ void woq_matmul_int4_impl_cache(
   auto f_attr = [&](primitive_attr& pattr) {
     pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
     
-    if (jd == joint_dtypes_t::_f16_int4) {
+    if (jd == joint_dtypes_t::f16_int4) {
       pattr.set_fpmath_mode(dnnl::fpmath_mode::f16, true);
-    } else if (jd == joint_dtypes_t::_bf16_int4) {
+    } else if (jd == joint_dtypes_t::bf16_int4) {
       pattr.set_fpmath_mode(dnnl::fpmath_mode::bf16, true);
     }
     
@@ -247,9 +247,10 @@ void woq_matmul_int4_impl_cache(
 #endif
   };
 
+  int64_t zp_group_size = zp.dim() == 1 ? 0 : group_size;
   auto device_id = c10::xpu::current_device();
   auto& matmul_ext = matmul_primitive_create_and_cache(
-      jd, tt, b_type, m, n, k, lda, ldb, ldc, device_id, f_attr);
+      jd, tt, b_type, m, n, k, lda, ldb, ldc, device_id, f_attr, group_size, zp_group_size);
 
   auto& engine = GpuEngineManager::Instance().get_engine();
   

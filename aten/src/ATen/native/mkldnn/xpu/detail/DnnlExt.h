@@ -303,11 +303,11 @@ class primitive_ext : public primitive {
   dnnl_exec_arg_t c_args[max_args];
 };
 
-enum class joint_dtypes_t { _f32 = 0, _f16, _bf16, _int8, _f16_int4, _bf16_int4 };
+enum class joint_dtypes_t { f32 = 0, f16, bf16, int8, f16_int4, bf16_int4 };
 
-enum class trans_type_t { _nn = 0, _nt, _tn, _tt };
+enum class trans_type_t { nn = 0, nt, tn, tt };
 
-enum class bias_type_t { _none = 0, _scalar, _m, _n, _mn };
+enum class bias_type_t { none = 0, scalar, m, n, mn };
 
 template <typename T>
 T concat(const T& t1, at::ScalarType d) {
@@ -355,7 +355,7 @@ template <joint_dtypes_t Ts>
 struct onednn_types_mapper;
 
 template <>
-struct onednn_types_mapper<joint_dtypes_t::_f16_int4> {
+struct onednn_types_mapper<joint_dtypes_t::f16_int4> {
   static inline std::tuple<dnnl::memory::data_type, dnnl::memory::data_type>
   get() {
     return std::make_tuple(
@@ -364,7 +364,7 @@ struct onednn_types_mapper<joint_dtypes_t::_f16_int4> {
 };
 
 template <>
-struct onednn_types_mapper<joint_dtypes_t::_bf16_int4> {
+struct onednn_types_mapper<joint_dtypes_t::bf16_int4> {
   static inline std::tuple<dnnl::memory::data_type, dnnl::memory::data_type>
   get() {
     return std::make_tuple(
@@ -378,15 +378,15 @@ static inline dnnl::memory::dims get_bias_type(
     const int m,
     const int n) {
   switch (b_dims) {
-    case bias_type_t::_none:
+    case bias_type_t::none:
       return {0};
-    case bias_type_t::_scalar:
+    case bias_type_t::scalar:
       return {1, 1};
-    case bias_type_t::_m:
+    case bias_type_t::m:
       return {m, 1};
-    case bias_type_t::_n:
+    case bias_type_t::n:
       return {1, n};
-    case bias_type_t::_mn:
+    case bias_type_t::mn:
       return {m, n};
     default:
       throw std::runtime_error("unsupported bias type ...");
@@ -404,7 +404,7 @@ inline void get_strides(
     const int64_t ldc) {}
 
 template <>
-inline void get_strides<trans_type_t::_nt>(
+inline void get_strides<trans_type_t::nt>(
     memory::dims& src_strides,
     memory::dims& wei_strides,
     memory::dims& dst_strides,
@@ -430,12 +430,14 @@ struct matmul_primitive_cache_t {
       const bias_type_t
           b_dims, // for shapeless bias, not put it into template parameter
       const int device_id,
-      F f_attr) {
+      F f_attr,
+      const int64_t scale_group_size,
+      const int64_t zp_group_size) {
     auto& cached = get_cache(device_id);
     memory::dims src_strides, wei_strides, dst_strides;
     get_strides<Tt>(src_strides, wei_strides, dst_strides, lda, ldb, ldc);
     auto pri_key = at::native::onednn::concat(
-        src_strides, wei_strides, m, n, k, int(b_dims));
+        src_strides, wei_strides, m, n, k, int(b_dims), int(scale_group_size), int(zp_group_size));
     auto iter = cached.find(pri_key);
     if (iter == cached.end()) {
       auto [src_dt, wei_dt] = onednn_types_mapper<Ts>::get();
@@ -444,7 +446,7 @@ struct matmul_primitive_cache_t {
       auto src_md = memory::desc({m, k}, src_dt, src_strides);
       auto wei_md = memory::desc({k, n}, wei_dt, wei_strides);
       auto dst_md = memory::desc({m, n}, src_dt, dst_strides);
-      auto bias_format = b_dims == bias_type_t::_none
+      auto bias_format = b_dims == bias_type_t::none
           ? dnnl::memory::format_tag::undef
           : dnnl::memory::format_tag::ab;
       auto bias_md =
@@ -456,7 +458,7 @@ struct matmul_primitive_cache_t {
       dnnl::matmul::primitive_desc matmul_pd;
       at::Device cur_device = at::Device(at::kXPU, device_id);
       auto aengine = at::native::onednn::GpuEngineManager::Instance().get_engine(cur_device);
-      if (b_dims == bias_type_t::_none) {
+      if (b_dims == bias_type_t::none) {
         matmul_pd = dnnl::matmul::primitive_desc(
             aengine, src_md, wei_md, dst_md, pattr);
       } else {
@@ -498,11 +500,13 @@ static inline primitive_ext& matmul_primitive_create_and_cache(
     const int64_t ldb,
     const int64_t ldc,
     const int device_id,
-    F attr) {
+    F attr, 
+    const int64_t scale_group_size,
+    const int64_t zp_group_size) {
   switch (Tt) {
-    case trans_type_t::_nt:
-      return matmul_primitive_cache_t<trans_type_t::_nt, Ts, F>::get(
-          m, n, k, lda, ldb, ldc, b_dims, device_id, attr);
+    case trans_type_t::nt:
+      return matmul_primitive_cache_t<trans_type_t::nt, Ts, F>::get(
+          m, n, k, lda, ldb, ldc, b_dims, device_id, attr, scale_group_size, zp_group_size);
     default:
       throw std::runtime_error("unsupported trans type ...");
   }
@@ -520,14 +524,16 @@ static inline primitive_ext& matmul_primitive_create_and_cache(
     const int64_t ldb, // is weight ldb necessary?
     const int64_t ldc,
     const int device_id,
-    F attr) {
+    F attr,
+    const int64_t scale_group_size = 0,
+    const int64_t zp_group_size = 0) {
   switch (Ts) {
-    case joint_dtypes_t::_f16_int4:
-      return matmul_primitive_create_and_cache<joint_dtypes_t::_f16_int4, F>(
-          Tt, b_dims, m, n, k, lda, ldb, ldc, device_id, attr);
-    case joint_dtypes_t::_bf16_int4:
-      return matmul_primitive_create_and_cache<joint_dtypes_t::_bf16_int4, F>(
-          Tt, b_dims, m, n, k, lda, ldb, ldc, device_id, attr);
+    case joint_dtypes_t::f16_int4:
+      return matmul_primitive_create_and_cache<joint_dtypes_t::f16_int4, F>(
+          Tt, b_dims, m, n, k, lda, ldb, ldc, device_id, attr, scale_group_size, zp_group_size);
+    case joint_dtypes_t::bf16_int4:
+      return matmul_primitive_create_and_cache<joint_dtypes_t::bf16_int4, F>(
+          Tt, b_dims, m, n, k, lda, ldb, ldc, device_id, attr, scale_group_size, zp_group_size);
     default:
       throw std::runtime_error("Only support int4 ...");
   }
