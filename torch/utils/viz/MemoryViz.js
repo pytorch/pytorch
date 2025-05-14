@@ -1228,6 +1228,7 @@ function create_trace_view(
   dst.selectAll('svg').remove();
   dst.selectAll('div').remove();
 
+  max_entries = Math.min(max_entries, data.elements_length);
   const d = dst.append('div');
   d.append('input')
     .attr('type', 'range')
@@ -1237,7 +1238,9 @@ function create_trace_view(
     .on('change', function () {
       create_trace_view(dst, snapshot, device, plot_segments, this.value);
     });
-  d.append('label').text('Detail');
+  d.append('label').text(
+    `Detail: ${max_entries} of ${data.elements_length} entries`,
+  );
 
   const grid_container = dst
     .append('div')
