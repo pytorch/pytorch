@@ -125,7 +125,11 @@ def is_bound_tensor_method(value):
     )
 
 
-all_tensor_attrs = torch.Tensor.__dict__ | torch._C.TensorBase.__dict__
+# instead of using inspect.getattr_static, we directly lookup the appropriate
+# dicts. It is necessary to keep the torch._C.TensorBase first in the or
+# operation, because the second arg takes priority in or operation when there
+# are common keys.
+all_tensor_attrs = torch._C.TensorBase.__dict__ | torch.Tensor.__dict__
 
 
 class TensorVariable(VariableTracker):
