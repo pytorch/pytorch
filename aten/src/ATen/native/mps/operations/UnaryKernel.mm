@@ -3,6 +3,7 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/operations/UnaryKernel.h>
 #include <fmt/format.h>
 
 namespace at::native {
@@ -12,6 +13,23 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/UnaryKernel_metallib.h>
 #endif
+
+namespace mps {
+
+void unary_op_kernel(const std::string func_name, const Tensor& input, const Tensor& output) {
+  if (!output.sizes().equals(input.sizes())) {
+    output.resize_(input.sizes());
+  }
+  uint32_t length = output.numel();
+  if (length == 0) {
+    return;
+  }
+  auto iter = TensorIteratorConfig().allow_cpu_scalars(true).add_output(output).add_input(input).build();
+
+  lib.exec_unary_kernel(iter, func_name);
+}
+
+} // namespace mps
 
 static void erfinv_kernel(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "erfinv");
@@ -49,10 +67,6 @@ static void exp2_kernel_mps(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "exp2");
 }
 
-static void log_kernel_mps(TensorIteratorBase& iter) {
-  lib.exec_unary_kernel(iter, "log");
-}
-
 static void sqrt_kernel_mps(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "sqrt");
 }
@@ -69,7 +83,6 @@ static void bitwise_not_kernel_mps(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "bitwise_not");
 }
 
-REGISTER_DISPATCH(log_stub, log_kernel_mps);
 REGISTER_DISPATCH(exp_stub, exp_kernel);
 REGISTER_DISPATCH(erfinv_stub, erfinv_kernel);
 REGISTER_DISPATCH(sinc_stub, sinc_kernel);
