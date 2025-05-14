@@ -53,6 +53,10 @@ TEST(MPMCQueueTest, ConcurrentAccess) {
       int out = 0;
       while (!queue.readIfNotEmpty(out)) {
         // Wait until an element is available
+        // TODO We could provide a blocking version of read() instead of
+        // looping here. We only provide a non blocking wait API because
+        // for now the queue is paired with a semaphore in executor.
+        std::this_thread::yield();
       }
       EXPECT_LT(out, 5);
     }
@@ -76,6 +80,10 @@ TEST(MPMCQueueTest, MPMCConcurrentAccess) {
         size_t value = i * numElementsPerWriter + j;
         while (!queue.writeIfNotFull(static_cast<int>(value))) {
           // Retry until the queue has space
+          // TODO We could provide a blocking version of read() instead of
+          // looping here. We only provide a non blocking wait API because
+          // for now the queue is paired with a semaphore in executor.
+          std::this_thread::yield();
         }
       }
     });
@@ -90,6 +98,11 @@ TEST(MPMCQueueTest, MPMCConcurrentAccess) {
       while (totalReadCount < numWriters * numElementsPerWriter) {
         if (queue.readIfNotEmpty(value)) {
           ++totalReadCount;
+        } else {
+          // TODO We could provide a blocking version of read() instead of
+          // looping here. We only provide a non blocking wait API because
+          // for now the queue is paired with a semaphore in executor.
+          std::this_thread::yield();
         }
       }
     });
