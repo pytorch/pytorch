@@ -1179,6 +1179,7 @@ def aot_module_simplified(
             compiled_fn = AOTAutogradCache.load(
                 dispatch_and_compile,
                 mod,
+                shape_env,
                 fake_flat_args,
                 aot_config,
                 cudagraphs,

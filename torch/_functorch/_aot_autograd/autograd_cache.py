@@ -276,6 +276,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         example_inputs,
         aot_config: AOTConfig,
         fx_config: _CompileFxKwargs,
+        shape_env: ShapeEnv,
     ):
         # FxGraphHashDetails contains all the keys related to inductor. Also includes some system info
         self.aot_config = aot_config
@@ -287,9 +288,10 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             # FXGraphCache has constraints on what can be pickled in its inductor
             # config. Check that the gm is cacheable by inductor first,
             # and if it raises an exception, also bypass on our end.
-            FxGraphCache._check_can_cache(gm)
-            super().__init__(gm, example_inputs, fx_config, [])
+            FxGraphCache._check_can_cache(gm, shape_env)
+            super().__init__(gm, example_inputs, fx_config, [], shape_env)
         except BypassFxGraphCache as e:
+            import fbvscode; fbvscode.set_trace(vscode_request_timeout=600)
             # Sometimes inductor configs are unpickleable and can fail
             raise BypassAOTAutogradCache(str(e)) from e
 
@@ -336,6 +338,7 @@ def autograd_cache_key(
     example_inputs,
     config: AOTConfig,
     fx_config: _CompileFxKwargs,
+    shape_env: ShapeEnv,
     # TODO: add args and parameters
 ) -> tuple[str, list[str]]:
     """
@@ -355,7 +358,7 @@ def autograd_cache_key(
         if triton.__version__ < "3.2.0":
             raise BypassAOTAutogradCache("AOTAutogradCache requires triton 3.2.0")
 
-    details = AOTAutogradCacheDetails(gm, example_inputs, config, fx_config)
+    details = AOTAutogradCacheDetails(gm, shape_env, example_inputs, config, fx_config)
     pickler = AOTAutogradCachePickler(gm)
     # The prefix distinguishes among the other kinds of objects we cache
     key = "a" + pickler.get_hash(details)
@@ -770,6 +773,7 @@ class AOTAutogradCache(GuardedCache[AOTAutogradCacheEntry]):
     def load(
         dispatch_and_compile: Callable,
         mod: Union[torch.fx.GraphModule, torch._dynamo.utils.GmWrapper],
+        shape_env: ShapeEnv,
         args,
         aot_config: AOTConfig,
         cudagraphs: BoxedBool,
@@ -794,7 +798,7 @@ class AOTAutogradCache(GuardedCache[AOTAutogradCacheEntry]):
             }
             try:
                 cache_key, debug_lines = autograd_cache_key(
-                    gm, args, aot_config, fx_config
+                    gm, args, aot_config, fx_config, shape_env
                 )
                 entry: Optional[AOTAutogradCacheEntry] = AOTAutogradCache._lookup(
                     cache_key, local, remote, args
@@ -849,7 +853,9 @@ class AOTAutogradCache(GuardedCache[AOTAutogradCacheEntry]):
             # of checking every single case, we safely catch the exception
             # in those cases.
             except Exception as e:
+                raise e
                 cache_key = None
+                import fbvscode; fbvscode.set_trace(vscode_request_timeout=600)
                 counters["aot_autograd"]["autograd_cache_bypass"] += 1
                 log.info("Bypassing autograd cache due to: %s", e)
                 cache_state = "bypass"

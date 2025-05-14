@@ -343,6 +343,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         compiled_fn(a)
         compiled_fn(a8)
         compiled_fn(a16)
+        import fbvscode; fbvscode.set_trace(vscode_request_timeout=600)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 3)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 3)

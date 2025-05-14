@@ -831,8 +831,9 @@ def _compile_fx_inner(
         start_time = time.time_ns()
 
         if use_cache:
+            shape_env = shape_env_from_inputs(example_inputs)
             (key_info, cache_info) = FxGraphCache.prepare_key(
-                gm, example_inputs, graph_kwargs, inputs_to_check, remote
+                gm, shape_env, example_inputs, graph_kwargs, inputs_to_check, remote
             )
 
             # Attempt a cache lookup

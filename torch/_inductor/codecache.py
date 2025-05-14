@@ -1031,15 +1031,6 @@ class GuardedCache(Generic[T]):
         """
         return [s for s in inputs if isinstance(s, torch.SymInt) and has_hint(s)]
 
-    @classmethod
-    def _get_shape_env(cls: type[GuardedCache[T]]) -> Optional[ShapeEnv]:
-        """
-        Helper to get the shape env from the tracing context.
-        """
-        ctx = torch._guards.TracingContext.try_get()
-        if not ctx:
-            return None
-        return ctx.fake_mode.shape_env
 
 
 class FxGraphCache(GuardedCache[CompiledFxGraph]):
@@ -1093,6 +1084,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
         constants: CompiledFxGraphConstants,
+        shape_env: ShapeEnv,
         evaluate_guards: Optional[
             Callable[[str, Union[list[int], list[torch.SymInt]]], bool]
         ] = None,
@@ -1106,9 +1098,6 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         what constitutes a guard success. Normally, a guard hit happens if
         `shape_env.evaluate_guards_expression` returns True.
         """
-        shape_env = FxGraphCache._get_shape_env()
-        assert shape_env is not None
-
         symints = FxGraphCache._filter_backed_symints(example_inputs)
         hints = [hint_int(s) for s in symints]
 
@@ -1225,6 +1214,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         example_inputs: Sequence[InputType],
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
+        shape_env: ShapeEnv,
     ) -> None:
         """
         Store a serialized CompiledFxGraph on disk.
@@ -1240,8 +1230,6 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         # sufficient to consider only the SymInt args to the fx graph since the
         # Tensor shapes are already captured in the hash for the cache key. Any
         # Tensor arg with a symbolic shape will have a SymInt arg for the graph.
-        shape_env = FxGraphCache._get_shape_env()
-        assert shape_env is not None
         symints = FxGraphCache._filter_backed_symints(example_inputs)
         guards = shape_env.get_pruned_guards(symints)
         compiled_graph.guards_expr = shape_env.produce_guards_expression(
@@ -1296,7 +1284,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
                     raise BypassFxGraphCache("Can't cache torchbind objects")
 
     @staticmethod
-    def _check_can_cache(gm: torch.fx.GraphModule) -> None:
+    def _check_can_cache(gm: torch.fx.GraphModule, shape_env: Optional[ShapeEnv] = None) -> None:
         """
         Check some conditions that would preclude caching and raise BypassFxGraphCache
         to bypass in case caching is not possible.
@@ -1327,7 +1315,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
         # The treatment of guards in the caching implementation requires that
         # we have a shape env.
-        if FxGraphCache._get_shape_env() is None:
+        if not shape_env:
             log.debug("fx graph cache no shape env")
             raise BypassFxGraphCache("No shape env")
 
@@ -1341,6 +1329,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
         remote: bool,
+        shape_env: ShapeEnv,
     ) -> tuple[Optional[tuple[str, list[str]]], dict[str, Any]]:
         """
         Checks that the inductor input is cacheable, then computes
@@ -1353,7 +1342,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         I personally believe it is more annoying/difficult to read in that format.
         """
         try:
-            FxGraphCache._check_can_cache(gm)
+            FxGraphCache._check_can_cache(gm, shape_env)
             key, debug_lines = compiled_fx_graph_hash(
                 gm, example_inputs, fx_kwargs, inputs_to_check
             )
