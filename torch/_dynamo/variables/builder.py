@@ -109,6 +109,7 @@ from ..source import (
     NumpyTensorSource,
     OptimizerSource,
     RandomValueSource,
+    SetItemKeySource,
     Source,
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
@@ -1396,6 +1397,18 @@ class VariableBuilder:
             result = UserDefinedTupleVariable.create(
                 value, tuple_vt=tuple_vt, source=self.source
             )
+            return self.tx.output.side_effects.track_object_existing(value, result)
+        elif isinstance(value, set):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.EQUALS_MATCH)
+
+            # The dictionary gives a ordering for the set items
+            d = dict.fromkeys(value)
+            items = [
+                LazyVariableTracker.create(v, source=SetItemKeySource(self.source, i))
+                for i, v in enumerate(d.keys())
+            ]
+            result = SetVariable(items, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, list):
             self.install_guards(GuardBuilder.TYPE_MATCH)
