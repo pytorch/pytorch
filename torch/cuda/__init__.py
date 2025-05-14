@@ -1105,9 +1105,7 @@ def default_stream(device: "Device" = None) -> Stream:
     )
 
 
-def get_stream_from_external(
-    data_ptr: int, device: "Device" = None
-) -> Stream:
+def get_stream_from_external(data_ptr: int, device: "Device" = None) -> Stream:
     r"""Return a :class:`Stream` from an externally allocated CUDA stream.
 
     This function is used to wrap streams allocated in other libraries in order
