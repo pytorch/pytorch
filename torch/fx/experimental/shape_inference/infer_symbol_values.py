@@ -133,3 +133,11 @@ def update_equation(
         rem = int(eq_const[0] % mod_num)
         eq -= rem
     symints[idx] = eq
+
+
+__all__ = [
+    "infer_symbol_values",
+    "calculate_value",
+    "solve_equation",
+    "update_equation",
+]
