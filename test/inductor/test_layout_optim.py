@@ -2,6 +2,7 @@
 import copy
 import os
 import random
+import unittest
 
 import torch
 from torch import nn
@@ -9,7 +10,7 @@ from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import tf32_off
-from torch.testing._internal.common_utils import skipIfXpu
+from torch.testing._internal.common_utils import TEST_XPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -34,7 +35,7 @@ class Model2Conv(nn.Module):
         return (torch.rand(2, 3, 16, 16),)
 
 
-@skipIfXpu(msg="ccl doesn't currently work on the XPU stack")
+@unittest.skipIf(TEST_XPU, "ccl doesn't currently work on the XPU stack")
 class TestLayoutOptim(TestCase):
     @classmethod
     def setUpClass(cls):
