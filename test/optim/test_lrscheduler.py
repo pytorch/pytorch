@@ -2578,7 +2578,7 @@ class TestLRScheduler(TestCase):
     @parametrize(
         "LRClass",
         [
-            partial(ExponentialLR, gamma=0.9),
+            partial(ExponentialLR, gamma=0.999),
         ],
     )
     def test_lr_scheduler_checkpoint(self, LRClass):
@@ -2589,8 +2589,8 @@ class TestLRScheduler(TestCase):
         sch.step()
         optim2 = torch.optim.AdamW(model.parameters())
         optim2.load_state_dict(optim.state_dict())
-        sch2 = LRClass(optim2, last_epoch=1)
-        self.assertEqual(optim.param_groups[0]["lr"], optim2.param_groups[0]["lr"])
+        sch2 = LRClass(optim2, last_epoch=0)
+        self.assertEqual(sch2._get_closed_form_lr()[0], optim.param_groups[0]["lr"])
 
 
 instantiate_parametrized_tests(TestLRScheduler)
