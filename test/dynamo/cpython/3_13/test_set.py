@@ -163,13 +163,12 @@ class _TestJointOps:
             self.assertEqual(self.thetype('abcba').intersection(C('ccb')), set('bc'))
             self.assertEqual(self.thetype('abcba').intersection(C('ef')), set(''))
             self.assertEqual(self.thetype('abcba').intersection(C('cbcf'), C('bag')), set('b'))
-        # We can't handle id(...) in Dynamo
-        # s = self.thetype('abcba')
-        # z = s.intersection()
-        # if self.thetype == frozenset():
-        #     self.assertEqual(id(s), id(z))
-        # else:
-        #     self.assertNotEqual(id(s), id(z))
+        s = self.thetype('abcba')
+        z = s.intersection()
+        if self.thetype == frozenset():
+            self.assertEqual(id(s), id(z))
+        else:
+            self.assertNotEqual(id(s), id(z))
 
     def test_isdisjoint(self):
         def f(s1, s2):
@@ -203,7 +202,7 @@ class _TestJointOps:
         self.assertEqual(self.s, self.thetype(self.word))
         self.assertEqual(type(i), self.basetype)
         self.assertRaises(PassThru, self.s.difference, check_pass_thru())
-        # self.assertRaises(TypeError, self.s.difference, [[]])
+        self.assertRaises(TypeError, self.s.difference, [[]])
         for C in set, frozenset, dict.fromkeys, str, list, tuple:
             self.assertEqual(self.thetype('abcba').difference(C('cdc')), set('ab'))
             self.assertEqual(self.thetype('abcba').difference(C('efgfe')), set('abc'))
@@ -456,7 +455,7 @@ class TestSet(_TestJointOps, __TestCase):
     def test_copy(self):
         dup = self.s.copy()
         self.assertEqual(self.s, dup)
-        # self.assertNotEqual(id(self.s), id(dup))
+        self.assertNotEqual(id(self.s), id(dup))
         self.assertEqual(type(dup), self.basetype)
 
     def test_add(self):
@@ -550,7 +549,7 @@ class TestSet(_TestJointOps, __TestCase):
             else:
                 self.assertNotIn(c, self.s)
         self.assertRaises(PassThru, self.s.intersection_update, check_pass_thru())
-        # self.assertRaises(TypeError, self.s.intersection_update, [[]])
+        self.assertRaises(TypeError, self.s.intersection_update, [[]])
         for p, q in (('cdc', 'c'), ('efgfe', ''), ('ccb', 'bc'), ('ef', '')):
             for C in set, frozenset, dict.fromkeys, str, list, tuple:
                 s = self.thetype('abcba')
@@ -579,8 +578,8 @@ class TestSet(_TestJointOps, __TestCase):
             else:
                 self.assertNotIn(c, self.s)
         self.assertRaises(PassThru, self.s.difference_update, check_pass_thru())
-        # self.assertRaises(TypeError, self.s.difference_update, [[]])
-        # self.assertRaises(TypeError, self.s.symmetric_difference_update, [[]])
+        self.assertRaises(TypeError, self.s.difference_update, [[]])
+        self.assertRaises(TypeError, self.s.symmetric_difference_update, [[]])
         for p, q in (('cdc', 'ab'), ('efgfe', 'abc'), ('ccb', 'a'), ('ef', 'abc')):
             for C in set, frozenset, dict.fromkeys, str, list, tuple:
                 s = self.thetype('abcba')
@@ -616,7 +615,7 @@ class TestSet(_TestJointOps, __TestCase):
             else:
                 self.assertNotIn(c, self.s)
         self.assertRaises(PassThru, self.s.symmetric_difference_update, check_pass_thru())
-        # self.assertRaises(TypeError, self.s.symmetric_difference_update, [[]])
+        self.assertRaises(TypeError, self.s.symmetric_difference_update, [[]])
         for p, q in (('cdc', 'abd'), ('efgfe', 'abcefg'), ('ccb', 'a'), ('ef', 'abcef')):
             for C in set, frozenset, dict.fromkeys, str, list, tuple:
                 s = self.thetype('abcba')
@@ -763,7 +762,7 @@ class TestFrozenSet(_TestJointOps, __TestCase):
         key1 = self.thetype(seq)
         key2 = self.thetype(reversed(seq))
         self.assertEqual(key1, key2)
-        # self.assertNotEqual(id(key1), id(key2))
+        self.assertNotEqual(id(key1), id(key2))
         d = {}
         d[key1] = 42
         self.assertEqual(d[key2], 42)
