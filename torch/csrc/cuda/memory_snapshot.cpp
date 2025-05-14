@@ -117,6 +117,35 @@ void _initRecordAnnotations() {
   }();
 }
 
+void _initCompileContexts() {
+  static auto init_placeholder [[maybe_unused]] = [&] {
+    // Save PT2 Compile Contexts to CCA memory snapshot tool
+    at::addGlobalCallback(
+        at::RecordFunctionCallback(
+            [](const at::RecordFunction& fn)
+                -> std::unique_ptr<at::ObserverContext> {
+              std::string functionName = fn.name();
+              const std::string functionNamePrefix = "Torch-Compiled Region";
+              if (functionName.compare(
+                      0, functionNamePrefix.size(), functionNamePrefix) == 0) {
+                c10::cuda::CUDACachingAllocator::pushCompileContext(
+                    functionName);
+              }
+              return nullptr;
+            },
+            [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
+              std::string functionName = fn.name();
+              const std::string functionNamePrefix = "Torch-Compiled Region";
+              if (functionName.compare(
+                      0, functionNamePrefix.size(), functionNamePrefix) == 0) {
+                c10::cuda::CUDACachingAllocator::popCompileContext();
+              }
+            })
+            .scopes({at::RecordScope::FUNCTION}));
+    return true;
+  }();
+}
+
 } // namespace
 
 void _record_memory_history(
@@ -125,7 +154,8 @@ void _record_memory_history(
     int64_t trace_alloc_max_entries,
     bool trace_alloc_record_context,
     bool record_cpp_context,
-    bool clearHistory) {
+    bool clearHistory,
+    bool compileContext) {
   c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
   if (enabled && record_cpp_context &&
       (trace_alloc_record_context || record_context)) {
@@ -141,6 +171,9 @@ void _record_memory_history(
   }
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
   _initRecordAnnotations();
+  if (compileContext) {
+    _initCompileContexts();
+  }
   c10::cuda::CUDACachingAllocator::recordHistory(
       enabled, recorder, trace_alloc_max_entries, when, clearHistory);
 }
@@ -158,7 +191,8 @@ void _record_memory_history(
     std::optional<std::string> context,
     const std::string& stacks,
     size_t max_entries,
-    bool clearHistory) {
+    bool clearHistory,
+    bool compileContext) {
   if (enabled) {
     checkOptionIn(
         *enabled,
@@ -193,6 +227,9 @@ void _record_memory_history(
   }
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
   _initRecordAnnotations();
+  if (compileContext) {
+    _initCompileContexts();
+  }
   c10::cuda::CUDACachingAllocator::recordHistory(
       enabled.has_value(), recorder, max_entries, when, clearHistory);
 }
@@ -222,6 +259,7 @@ std::string _memory_snapshot_pickled() {
   IValue blocks_s = "blocks";
   IValue is_expandable_s = "is_expandable";
   IValue time_us_s = "time_us";
+  IValue compile_contexts_s = "compile_context";
 
   auto empty_frames = new_list();
 
@@ -338,6 +376,7 @@ std::string _memory_snapshot_pickled() {
           static_cast<int64_t>(te.addr_));
       trace_entry.insert(size_s, (int64_t)te.size_);
       trace_entry.insert(stream_s, int64_t(te.stream_));
+      trace_entry.insert(compile_contexts_s, te.compile_context_);
       if (te.context_) {
         auto sc = getFromContext(te.context_);
         frame_tracebacks.push_back(sc);

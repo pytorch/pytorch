@@ -1417,6 +1417,7 @@ def clear_instruction_args(instructions):
             inst.arg = None
 
 
+@functools.lru_cache
 def get_code_keys() -> list[str]:
     # Python 3.11 changes to code keys are not fully documented.
     # See https://github.com/python/cpython/blob/3.11/Objects/clinic/codeobject.c.h#L24
@@ -1650,6 +1651,7 @@ def bytecode_from_template(fn, varname_map=None, noreturn=True, noprefix=True):
         # If we don't reset starts_line, then the generated
         # bytecode's line number will be based on fn's.
         inst.starts_line = None
+        inst.positions = None
         if varname_map and inst.argval in varname_map:
             inst.argval = varname_map[inst.argval]
 
