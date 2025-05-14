@@ -118,6 +118,18 @@ _global_forward_hooks: dict[int, Callable] = OrderedDict()
 _global_forward_hooks_always_called: dict[int, bool] = OrderedDict()
 _global_forward_hooks_with_kwargs: dict[int, bool] = OrderedDict()
 
+
+def _has_any_global_hook():
+    return (
+        _global_backward_pre_hooks
+        or _global_backward_hooks
+        or _global_forward_pre_hooks
+        or _global_forward_hooks
+        or _global_forward_hooks_always_called
+        or _global_forward_hooks_with_kwargs
+    )
+
+
 _EXTRA_STATE_KEY_SUFFIX = "_extra_state"
 
 

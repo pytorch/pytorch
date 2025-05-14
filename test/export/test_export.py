@@ -3,6 +3,7 @@
 # flake8: noqa
 import copy
 import dataclasses
+import functools
 import logging
 import math
 import operator
@@ -10243,6 +10244,30 @@ graph():
         args = (torch.randn(1, 2),)
         ep = torch.export.export(mod, args, strict=False)
         self.assertTrue(torch.allclose(ep.module()(*args), mod(*args)))
+
+    def test_partial_patched_forward(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 2
+
+        def fancy_forward(x, y):
+            return x + 2 + y
+
+        Foo.forward = functools.partial(fancy_forward, y=torch.randn(4, 4))
+        x = torch.randn(4, 4)
+        # strict unsupported: "Tracing through optional input"
+        ep = export(Foo(), (x,), strict=False)
+        ep.module()(x)
+
+        class Bar(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x + y + z
+
+        mod = Bar()
+        mod.forward = functools.partial(mod.forward, z=2)
+        mod.forward = functools.partial(mod.forward, y=torch.randn(4))
+        ep = export(mod, (x,), strict=False)
+        ep.module()(x)
 
     @testing.expectedFailureCppRuntime
     def test_symint_input_basic(self):
