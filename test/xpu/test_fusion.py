@@ -1,7 +1,7 @@
 # Owner(s): ["module: intel"]
 
 import itertools
-from typing import List, NamedTuple
+from typing import NamedTuple
 
 import torch
 import torch.nn as nn
@@ -15,7 +15,7 @@ CONV_MODULES = {2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
 class PointwisePostOp(NamedTuple):
     attr: str
     pointwise_module: nn.Module
-    scalars: List = []
+    scalars: list = []
     algorithm: str = ""
 
 
@@ -52,7 +52,7 @@ class TestoneDNNFusion(TestCase):
         }
         return binary_list
 
-    def test_linear_unary_fusion_ops(self):
+    def test_linear_unary_fusion_ops(self, device):
         class M(nn.Module):
             def __init__(self, unary_fn, in_channels, out_channels, bias, **kwargs):
                 super().__init__()
@@ -73,9 +73,9 @@ class TestoneDNNFusion(TestCase):
                     mod = M(
                         pointwise_info.pointwise_module, input_shape[-1], 10, bias
                     ).eval()
-                    mod = mod.to("xpu")
+                    mod = mod.to(device)
                     v = torch.randn(input_shape)
-                    v = v.to("xpu")
+                    v = v.to(device)
                     ref = mod(v)
                     attr = pointwise_info.attr
                     scalars = pointwise_info.scalars
@@ -90,7 +90,7 @@ class TestoneDNNFusion(TestCase):
                     )
                     self.assertEqual(ref, fused)
 
-    def test_linear_binary_fusion_ops(self):
+    def test_linear_binary_fusion_ops(self, device):
         class M(nn.Module):
             def __init__(self, binary_fn, in_channels, out_channels, bias, **kwargs):
                 super().__init__()
@@ -108,9 +108,9 @@ class TestoneDNNFusion(TestCase):
         in_feature = 10
         for pointwise_name, pointwise_fn in self._binary_list().items():
             with torch.no_grad():
-                input = torch.randn(4, in_feature).xpu()
-                model = M(pointwise_fn, in_feature, out_feature, True).eval().xpu()
-                other = torch.randn(4, out_feature).xpu()
+                input = torch.randn(4, in_feature).to(device)
+                model = M(pointwise_fn, in_feature, out_feature, True).eval().to(device)
+                other = torch.randn(4, out_feature).to(device)
                 ref = model(input, other)
                 attr = pointwise_name
                 fused = torch.ops.mkldnn._linear_pointwise(

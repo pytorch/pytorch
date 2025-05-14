@@ -6,10 +6,10 @@ namespace at::native::xpu {
 Tensor linear_pointwise(
     const Tensor& input_t, // [M, K] or [B, M, K]
     const Tensor& weight_t, // [N, K]
-    const c10::optional<Tensor>& bias_opt,
-    c10::string_view attr,
-    torch::List<c10::optional<at::Scalar>> scalars,
-    c10::optional<c10::string_view> algorithm) {
+    const std::optional<Tensor>& bias_opt,
+    std::string_view attr,
+    torch::List<std::optional<at::Scalar>> scalars,
+    std::optional<std::string_view> algorithm) {
   onednn::Attr att;
   att = construct_unary_attr(attr, scalars, algorithm, att);
   auto input = input_t.contiguous();
@@ -19,23 +19,26 @@ Tensor linear_pointwise(
 
   // dim collapse
   // [B, M, K] -> [BM, K]
-  auto input_reshaped = dim == 2? input : input.reshape({-1, input.size(input.dim()-1)});
+  auto input_reshaped =
+      dim == 2 ? input : input.reshape({-1, input.size(input.dim() - 1)});
   // [B, M]
-  std::vector<int64_t> output_size(input_size.begin(), input_size.end()-1);
+  std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
   // [BM, N]
   output_size.push_back(weight_t.size(0));
 
   Tensor output = at::empty(output_size, input.options());
-  if(dim != 2){
+  if (dim != 2) {
     // collapse output
-    std::vector<int64_t> output_size_reshaped = {input_reshaped.size(0), weight_t.size(0)};
+    std::vector<int64_t> output_size_reshaped = {
+        input_reshaped.size(0), weight_t.size(0)};
     output = output.reshape(output_size_reshaped);
   }
 
   auto bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
-  at::native::onednn::matmul(output, input_reshaped, weight_t, bias, /*m2_trans*/false, att);
+  at::native::onednn::matmul(
+      output, input_reshaped, weight_t, bias, /*m2_trans*/ false, att);
 
-  if (dim != 2){
+  if (dim != 2) {
     output = output.reshape(output_size);
   }
 
@@ -46,41 +49,41 @@ Tensor linear_pointwise_binary(
     const Tensor& input_t,
     const Tensor& other_t,
     const Tensor& weight_t,
-    const c10::optional<Tensor>& bias_opt,
-    c10::string_view binary_attr) {
+    const std::optional<Tensor>& bias_opt,
+    std::string_view binary_attr) {
+  onednn::Attr attr;
+  attr = construct_binary_attr<true>(binary_attr, /*alpha*/ 1.f, other_t, attr);
+  auto input = input_t.contiguous();
 
-    onednn::Attr attr;
-    attr = construct_binary_attr<true>(binary_attr, /*alpha*/1.f, other_t, attr);
-    auto input = input_t.contiguous();
+  auto input_size = input.sizes();
+  const int64_t dim = input.dim();
 
-    auto input_size = input.sizes();
-    const int64_t dim = input.dim();
+  // dim collapse
+  auto input_reshaped =
+      dim == 2 ? input : input.reshape({-1, input.size(input.dim() - 1)});
+  std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
+  output_size.push_back(weight_t.size(0));
 
-    // dim collapse
-    auto input_reshaped = dim == 2 ? input : input.reshape({-1, input.size(input.dim() -1)});
-    std::vector<int64_t> output_size(input_size.begin(), input_size.end()-1);
-    output_size.push_back(weight_t.size(0));
-
-    Tensor output = at::empty(output_size, input.options());
-    if(dim != 2){
-      // input [m, k], weight [n, k], output [m, n]
-      std::vector<int64_t> output_size_reshaped = {
-        input_reshaped.size(0), weight_t.size(0)
-      };
-      output = output.reshape(output_size_reshaped);
-    }else{
-      TORCH_CHECK(output.dim() == other_t.dim(),
+  Tensor output = at::empty(output_size, input.options());
+  if (dim != 2) {
+    // input [m, k], weight [n, k], output [m, n]
+    std::vector<int64_t> output_size_reshaped = {
+        input_reshaped.size(0), weight_t.size(0)};
+    output = output.reshape(output_size_reshaped);
+  } else {
+    TORCH_CHECK(
+        output.dim() == other_t.dim(),
         "linear_binary_run expects the dimension of output and other tensor to be the same");
-    }
+  }
 
-    auto bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
-    at::native::onednn::matmul(
-        output, input_reshaped, weight_t, bias, /*m2_trans*/ false, attr);
+  auto bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
+  at::native::onednn::matmul(
+      output, input_reshaped, weight_t, bias, /*m2_trans*/ false, attr);
 
-    if(dim != 2){
-      output = output.reshape(output_size);
-    }
-    return output;
+  if (dim != 2) {
+    output = output.reshape(output_size);
+  }
+  return output;
 }
 
 TORCH_LIBRARY_IMPL(mkldnn, XPU, m) {
