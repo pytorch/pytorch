@@ -29,6 +29,7 @@ MPSStream::MPSStream(Stream stream) : _stream(stream) {
 
   // Choose level which optimizes for GPU
   _compilationDescriptor.optimizationLevel = MPSGraphOptimizationLevel0;
+  [_compilationDescriptor disableTypeInference];
   _executionDescriptor.compilationDescriptor = _compilationDescriptor;
 }
 
