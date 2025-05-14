@@ -43,7 +43,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Self, override
+from typing_extensions import override, Self
 
 import torch
 import torch.distributed as dist

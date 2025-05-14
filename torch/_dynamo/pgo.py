@@ -23,7 +23,7 @@ import re
 import zlib
 from collections import defaultdict
 from typing import Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import Self, override
+from typing_extensions import override, Self
 
 import torch._dynamo.config
 import torch._utils_internal

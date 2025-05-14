@@ -6,7 +6,7 @@ from collections import defaultdict
 from collections.abc import Generator
 from contextlib import contextmanager
 from itertools import chain
-from typing import Optional
+from typing import Any, Optional
 
 from torch.utils._appending_byte_serializer import (
     AppendingByteSerializer,
@@ -40,7 +40,7 @@ class CacheArtifact(ABC):
         return CacheArtifactFactory.create(artifact_type, key, content)
 
     @staticmethod
-    def encode(content) -> bytes:
+    def encode(content: Any) -> bytes:
         assert isinstance(content, bytes), f"Expected bytes, got {type(content)}"
         return content
 
@@ -67,7 +67,7 @@ class CacheArtifactFactory:
     _artifact_types: dict[str, type[CacheArtifact]] = {}
 
     @classmethod
-    def register(cls, artifact_cls):
+    def register(cls, artifact_cls: type[CacheArtifact]) -> type[CacheArtifact]:
         artifact_type_key = artifact_cls.type()
         assert (
             artifact_cls.type() not in cls._artifact_types
@@ -93,7 +93,9 @@ class CacheArtifactFactory:
         return artifact_cls(key, content)
 
     @classmethod
-    def encode_create(cls, artifact_type_key: str, key: str, content) -> CacheArtifact:
+    def encode_create(
+        cls, artifact_type_key: str, key: str, content: Any
+    ) -> CacheArtifact:
         artifact_cls = cls._get_artifact_type(artifact_type_key)
         return artifact_cls(key, artifact_cls.encode(content))
 
@@ -111,13 +113,20 @@ class CacheInfo:
 
     # Methods set by CacheArtifactFactory.register based on CacheArtifact.type()
     @property
-    def inductor_artifacts(self) -> list[str]: ...
+    def inductor_artifacts(self) -> list[str]:  # type: ignore[empty-body]
+        ...
+
     @property
-    def autotune_artifacts(self) -> list[str]: ...
+    def autotune_artifacts(self) -> list[str]:  # type: ignore[empty-body]
+        ...
+
     @property
-    def aot_autograd_artifacts(self) -> list[str]: ...
+    def aot_autograd_artifacts(self) -> list[str]:  # type: ignore[empty-body]
+        ...
+
     @property
-    def pgo_artifacts(self) -> list[str]: ...
+    def pgo_artifacts(self) -> list[str]:  # type: ignore[empty-body]
+        ...
 
     def add(self, artifact: CacheArtifact) -> None:
         self.artifacts[artifact.type()].append(artifact.key)
@@ -127,6 +136,27 @@ class CacheInfo:
 
     def empty(self) -> bool:
         return not self.artifacts
+
+
+def _serialize_single_cache(
+    writer: BytesWriter, cls: "tuple[str, list[CacheArtifact]]"
+) -> None:
+    writer.write_str(cls[0])
+    writer.write_uint64(len(cls[1]))
+    for artifact in cls[1]:
+        CacheArtifact.serialize(writer, artifact)
+
+
+def _deserialize_single_cache(
+    reader: BytesReader,
+) -> "tuple[str, list[CacheArtifact]]":
+    artifacts = []
+    artifact_type_key = reader.read_str()
+    num_artifacts = reader.read_uint64()
+    for _ in range(num_artifacts):
+        artifacts.append(CacheArtifact.deserialize(artifact_type_key, reader))
+
+    return artifact_type_key, artifacts
 
 
 class CacheArtifactManager:
@@ -146,27 +176,6 @@ class CacheArtifactManager:
           used unless code version matches.
     """
 
-    @staticmethod
-    def _serialize_single_cache(
-        writer: BytesWriter, cls: "tuple[str, list[CacheArtifact]]"
-    ) -> None:
-        writer.write_str(cls[0])
-        writer.write_uint64(len(cls[1]))
-        for artifact in cls[1]:
-            CacheArtifact.serialize(writer, artifact)
-
-    @staticmethod
-    def _deserialize_single_cache(
-        reader: BytesReader,
-    ) -> "tuple[str, list[CacheArtifact]]":
-        artifacts = []
-        artifact_type_key = reader.read_str()
-        num_artifacts = reader.read_uint64()
-        for _ in range(num_artifacts):
-            artifacts.append(CacheArtifact.deserialize(artifact_type_key, reader))
-
-        return artifact_type_key, artifacts
-
     # Protected by the compile_lock
     _new_cache_artifacts: defaultdict[str, list[CacheArtifact]] = defaultdict(list)
     # Keep a seperate seen artifacts list to make avoid unnecessary duplicates
@@ -175,9 +184,9 @@ class CacheArtifactManager:
     # When serialize() is called, artifacts are transferred from _cache_artifacts to
     # internal data structure of the _serializer
     # This allows us to only pay the cost of serialization if serialize() is called
-    _serializer: AppendingByteSerializer[tuple[str, list[CacheArtifact]]] = (
-        AppendingByteSerializer(serialize_fn=_serialize_single_cache)
-    )
+    _serializer: AppendingByteSerializer[
+        tuple[str, list[CacheArtifact]]
+    ] = AppendingByteSerializer(serialize_fn=_serialize_single_cache)
     _cache_info: CacheInfo = CacheInfo()
 
     @classmethod
@@ -197,9 +206,7 @@ class CacheArtifactManager:
 
         cls._new_cache_artifacts = defaultdict(list)
         cls._seen_artifacts = OrderedSet()
-        cls._serializer = AppendingByteSerializer(
-            serialize_fn=cls._serialize_single_cache
-        )
+        cls._serializer = AppendingByteSerializer(serialize_fn=_serialize_single_cache)
         cls._cache_info = CacheInfo()
         try:
             yield
@@ -214,7 +221,7 @@ class CacheArtifactManager:
         cls,
         artifact_type: str,
         key: str,
-        content,
+        content: Any,
     ) -> None:
         """
         Called from each caching operation to record the artifact in this
@@ -266,10 +273,11 @@ class CacheArtifactManager:
         Converts the portable format back into various filesystem caches
         """
         try:
+            CacheArtifactManager._ensure_cache_artifacts_registered()
             artifacts = dict(
                 AppendingByteSerializer.to_list(
                     serialized_artifacts,
-                    deserialize_fn=CacheArtifactManager._deserialize_single_cache,
+                    deserialize_fn=_deserialize_single_cache,
                 )
             )
         except Exception:
@@ -283,3 +291,18 @@ class CacheArtifactManager:
             artifact.populate_cache()
 
         return info
+
+    @staticmethod
+    def _ensure_cache_artifacts_registered() -> None:
+        """When deserializing caches in fresh process, we need to ensure that all
+        cache artifacts are registered in the cache registry. This is done by
+        simply importing all the cache artifacts already wrapped with register call.
+        """
+        from torch._dynamo.pgo import PGOCacheArtifact  # noqa: F401
+        from torch._functorch._aot_autograd.autograd_cache import (  # noqa: F401
+            AOTAutogradCacheArtifact,
+        )
+        from torch._inductor.codecache import InductorCacheArtifact  # noqa: F401
+        from torch._inductor.runtime.autotune_cache import (  # noqa: F401
+            AutotuneCacheArtifact,
+        )
