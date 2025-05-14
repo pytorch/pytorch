@@ -421,11 +421,14 @@ class AutogradCompilerInstance:
         metadata = CompiledFunction.metadata
         maybe_subclass_metadata = CompiledFunction.maybe_subclass_metadata
         aot_id = CompiledFunction._aot_id
-        bw_module = ctx._bw_module
-        aot_symints = ctx.symints
-        symints = ctx._get_compiled_autograd_symints()
         del CompiledFunction
-        del ctx
+
+        if torch.is_grad_enabled():
+            for output_alias_info in metadata.output_info:
+                if output_alias_info.requires_grad:
+                    raise RuntimeError(
+                        "torch.compile does not currently support higher order gradients."
+                    )
 
         @torch._dynamo.allow_in_graph  # type: ignore[misc]
         def call_aot_bwd_prologue(ctx_saved_tensors, ctx_symints, *flat_args):
@@ -467,12 +470,13 @@ class AutogradCompilerInstance:
 
             # set up the proxy inputs to ctx._bw_module
             # the calling convention is: [*symints, *args (primals and tangents), backward_state]
-            num_args = num_inputs(bw_module.graph)
+            num_args = num_inputs(ctx._bw_module.graph)
             pall_args = [
                 pgrads[i] for i in range(num_args - int(pbackward_state is not None))
             ]
             # replace the symints with our symints
-            assert len(symints) == len(aot_symints)
+            symints = ctx._get_compiled_autograd_symints()
+            assert len(symints) == len(ctx.symints)
             psymints = [self.to_proxy(e) for e in symints]
             pall_args[: len(symints)] = psymints
             # Add backward_state
@@ -496,7 +500,7 @@ class AutogradCompilerInstance:
                 # make it both informative and unique
                 return f"aot{deduped_aot_id}_{node_name}"
 
-            for node in bw_module.graph.nodes:
+            for node in ctx._bw_module.graph.nodes:
                 if node.op == "placeholder":
                     ph = pall_args[args_idx].node
                     ph.name = make_unique(node.name)
@@ -513,7 +517,9 @@ class AutogradCompilerInstance:
                 elif node.op == "get_attr":
                     name = node.target
                     qualname = self.fx_tracer.get_fresh_qualname(name)
-                    setattr(self.fx_tracer.root, qualname, getattr(bw_module, name))
+                    setattr(
+                        self.fx_tracer.root, qualname, getattr(ctx._bw_module, name)
+                    )
                     result = self.fx_tracer.create_node("get_attr", qualname, (), {})
                     result.name = make_unique(node.name)
                     value_remap[node] = result
@@ -1333,6 +1339,11 @@ class AutogradCompilerInstance:
             forward_cls = pyobj._forward_cls  # type: ignore[attr-defined]
             if hasattr(forward_cls, "_aot_id"):
                 # backward was created by AOT Dispatcher
+                if forward_cls._lazy_backward_info is None:
+                    raise RuntimeError(
+                        """This compiled backward function was saved by AOTAutogradCache, which does not support
+                    compiled autograd. Please turn off AOTAutogradCache using `TORCHINDUCTOR_AUTOGRAD_CACHE=0`."""
+                    )
                 maybe_aot_id = forward_cls._aot_id
         new_code = f"{node_name}{maybe_aot_id} (NodeCall {nodecall_index})"
         raw_stack_trace = CapturedTraceback.extract().format()[-1]
