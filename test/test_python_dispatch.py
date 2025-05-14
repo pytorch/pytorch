@@ -1629,6 +1629,40 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         self.assertFalse(is_in_torch_dispatch_mode())
         self.assertFalse(is_in_torch_dispatch_mode(include_infra_modes=False))
 
+    def test_ac_tracer_infra_mode_kay(self):
+        count = [0]
+
+        class InsertSin(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                kwargs = {} if kwargs is None else kwargs
+                return func(*args, **kwargs).sin()
+
+        class CountSin(TorchDispatchMode):
+            def __init__(self):
+                self._mode_key = torch._C._TorchDispatchModeKey.AC_TRACER
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                kwargs = {} if kwargs is None else kwargs
+                out = func(*args, **kwargs)
+                if func == torch.ops.aten.sin.default:
+                    count[0] += 1
+                return out
+
+            # Not actually necessary for this test
+            # @classmethod
+            # def is_infra_mode(cls) -> bool:
+            #     return True
+
+        x = torch.rand(2, 2)
+        with InsertSin(), CountSin():
+            x * 2 * 2
+        self.assertEqual(count[0], 2)
+
+        count[0] = 0
+        with CountSin(), InsertSin():
+            x * 2 * 2
+        self.assertEqual(count[0], 2)
+
     def test_tolist_numpy_with_torch_dispatch_mode(self) -> None:
         x = LoggingTensor(torch.tensor([2.0, 3.0]))
         with self.assertRaisesRegex(
