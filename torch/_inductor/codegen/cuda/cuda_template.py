@@ -19,6 +19,7 @@ from ...utils import IndentedBuffer, unique
 from ...virtualized import V
 from ..common import KernelTemplate
 from .cuda_kernel import CUDATemplateCaller, CUDATemplateKernel
+from .cutlass_utils import DTYPE_TO_CUTLASS_TYPE
 
 
 if TYPE_CHECKING:
@@ -92,7 +93,7 @@ class CUDATemplate(KernelTemplate):
             autotuning_log.debug("Generated Code:\n%s", code)
             autotuning_log.debug(
                 "Args: cpp_argdefs: %s, python_argdefs: %s",
-                kernel.args.cpp_argdefs(),
+                kernel.args.cpp_argdefs(DTYPE_TO_CUTLASS_TYPE),
                 kernel.args.python_argdefs(),
             )
 
@@ -185,7 +186,6 @@ class CUDATemplate(KernelTemplate):
                 #define PT_EXPORT
                 #endif
                 #endif
-                using bfloat16 = nv_bfloat16;
             """
         )
         return res
