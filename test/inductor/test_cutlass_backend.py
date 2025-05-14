@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import itertools
 import logging
 import math
 import os
@@ -71,10 +72,12 @@ evt_all_ops = parametrize(
 
 evt_bin_ops = parametrize("op", bin_ops_under_test, name_fn=lambda f: f.__name__)
 
+evt_all_shapes = parametrize("shape", itertools.product([512, 1024], repeat=2))
 
-def gen_args(op, shape):
+
+def gen_args(op, shape, dtype=torch.float16):
     if op in bin_ops_under_test:
-        return (torch.rand(*shape, device="cuda:0").half(),)
+        return (torch.rand(*shape, device="cuda:0", dtype=dtype),)
     else:
         return ()
 
@@ -85,8 +88,8 @@ use_evt_config = config.patch(
         "max_autotune_gemm_backends": "CUTLASS",
         "cuda.cutlass_max_profiling_configs": 1,
         "autotune_fallback_to_aten": False,
-        "benchmark_epilogue_fusion": False,
-        "cuda.cutlass_tma_only": True,  # EVT doesn't support benchmark fusion yet
+        "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
+        "cuda.cutlass_tma_only": True,
         "cuda.cutlass_epilogue_fusion_enabled": True,
     }
 )
@@ -1435,13 +1438,14 @@ class TestCutlassBackend(TestCase):
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
-    def test_evt_fusions_basic(self, op):
+    @evt_all_shapes
+    def test_evt_fusions_basic(self, op, shape):
         class TestModel(torch.nn.Module):
             def forward(self, a, b, extra_args):
                 res = (a @ b).relu()  # add extra activation to not hit addmm path
                 return op(res, *extra_args)
 
-        self.run_evt_test(TestModel(), op, (1024, 512))
+        self.run_evt_test(TestModel(), op, shape)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
@@ -1471,7 +1475,41 @@ class TestCutlassBackend(TestCase):
     @use_evt_config
     @evt_all_ops
     def test_evt_mixed_dtypes(self, op):
-        pass
+        M = 1024
+        N = 256
+
+        fp32_tensor = torch.ones(M, N).cuda().float()
+
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, extra_args):
+                acc = a @ b
+                out0 = op(acc.relu(), *extra_args)
+                out1 = torch.add(out0, fp32_tensor)
+                return out1
+
+        model = TestModel().cuda()
+        a = torch.ones(M, N).cuda().half()
+        b = torch.ones(N, N).cuda().half()
+        extra_args = gen_args(op, (M, N), dtype=torch.float16)
+
+        # baseline is cutlass kernel + triton
+        # matches expected casting behavior
+        with config.patch({"cuda.cutlass_epilogue_fusion_enabled": False}):
+            ref_result = torch.compile(model)(a, b, extra_args)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 0
+        )
+
+        torch._dynamo.reset()
+        result = torch.compile(model)(a, b, extra_args)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"],
+            1,
+        )
+
+        torch.testing.assert_close(result, ref_result)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
@@ -1480,15 +1518,47 @@ class TestCutlassBackend(TestCase):
         class TestModel(torch.nn.Module):
             def forward(self, a, b, extra_args):
                 acc = a @ b
-                return torch.add(op(acc.relu(), *extra_args).relu(), *extra_args)
+                return torch.add(op(acc.relu(), *extra_args).relu(), acc)
 
         self.run_evt_test(TestModel(), op, (1024, 512))
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
+    def test_evt_reuse_matmul_input(self, op):
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, extra_args):
+                acc = a @ b
+                return torch.add(op(acc.relu(), *extra_args).relu(), a)
+
+        self.run_evt_test(TestModel(), op, (1024, 1024))  # shape needs to be square
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_all_ops
+    @unittest.skip("Needs fused scheduler node fusion support, (upcoming PR)")
     def test_evt_multi_output(self, op):
-        pass
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, extra_args):
+                acc = a @ b
+                z = op(acc.relu(), *extra_args)
+                y = z + 1
+                return acc, y
+
+        M = 1024
+        N = 512
+        a = torch.ones(M, N).cuda().half()
+        b = torch.ones(N, N).cuda().half()
+        extra_args = gen_args(op, (M, N))
+        model = TestModel().cuda()
+
+        result = torch.compile(model)(a, b, extra_args)
+        ref_result = model(a, b, extra_args)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+        )
+        torch.testing.assert_close(result, ref_result)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config

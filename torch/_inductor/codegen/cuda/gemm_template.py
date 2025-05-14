@@ -1080,13 +1080,23 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
             D_output_buffer = name_to_buffer[D_output_name]
             Y = D_output_buffer  # type: ignore[assignment]
+            # Interestingly, I don't think the rest of the layout matters here since we
+            # use the properties of the Y buffer to fill in D's properties in the epilogue
+            # args. This is needed though because it defines types expected in the epilogue args.
+            op.D.element = cutlass_utils.torch_dtype_to_cutlass_type(
+                D_output_buffer.get_layout().dtype
+            )
+            acc_dtype = cutlass_utils.get_accumulator_dtype(
+                [X.get_dtype(), W.get_dtype()]
+            )
+            assert acc_dtype, "Could not determine accumulator dtype"
 
             evt_name, evt_args, evt_code = self._render_evt(
                 op,
                 evt_py_code,
                 var_name_to_buffer_name,
-                D_output_buffer.get_layout().dtype,
-                self.output_node.get_layout().dtype,
+                D_output_buffer.get_dtype(),
+                acc_dtype,
             )
 
             input_names = list(read_names)
