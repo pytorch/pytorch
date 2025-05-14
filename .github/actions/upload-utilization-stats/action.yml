@@ -41,7 +41,6 @@ runs:
         echo "job_name:  ${{inputs.job_name}}"
         echo $(pwd)
         ls ./*.txt
-        ls ./*.json
     - uses: nick-fields/retry@v3.0.0
       name: Setup dependencies
       with:
