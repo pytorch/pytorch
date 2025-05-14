@@ -57,32 +57,6 @@ const std::map<ReduceOp::RedOpType, ncclRedOp_t> ncclOp = {
 #endif // NCCL_HAS_AVG
 };
 
-// NCCL type typing
-std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
-    {at::kChar, ncclInt8},
-    {at::kByte, ncclUint8},
-    {at::kFloat, ncclFloat},
-    {at::kDouble, ncclDouble},
-    {at::kInt, ncclInt32},
-    {at::kLong, ncclInt64},
-    {at::kHalf, ncclHalf},
-    {at::kBool, ncclUint8},
-#ifdef NCCL_SUPPORTS_FP8
-    {at::kFloat8_e5m2, ncclFloat8e5m2},
-    {at::kFloat8_e4m3fn, ncclFloat8e4m3},
-#else
-    {at::kFloat8_e5m2, ncclUint8},
-    {at::kFloat8_e4m3fn, ncclUint8},
-#endif
-    // NVIDIA GPUs does not support the UZ version standing for "no negative
-    // zero".  See https://onnx.ai/onnx/technical/float8.html
-    {at::kFloat8_e4m3fnuz, ncclUint8},
-    {at::kFloat8_e5m2fnuz, ncclUint8},
-#if HAS_NCCL_BF16_DATATYPE
-    {at::kBFloat16, ncclBfloat16},
-#endif // HAS_NCCL_BF16_DATATYPE
-};
-
 inline bool isUnsupportedFloat8(at::ScalarType t) {
   return (
       t == at::ScalarType::Float8_e5m2fnuz ||
@@ -92,17 +66,6 @@ inline bool isUnsupportedFloat8(at::ScalarType t) {
       || t == at::ScalarType::Float8_e5m2 || t == at::ScalarType::Float8_e4m3fn
 #endif
   );
-}
-
-// Helper function that gets the data type and issues error if not supported
-ncclDataType_t getNcclDataType(at::ScalarType type) {
-  auto it = ncclDataType.find(type);
-  TORCH_CHECK_WITH(
-      TypeError,
-      it != ncclDataType.end(),
-      "Input tensor data type is not supported for NCCL process group: ",
-      type);
-  return it->second;
 }
 
 bool complexViewAsRealAllowed(const ReduceOp& reduceOp) {
@@ -2525,15 +2488,16 @@ void ProcessGroupNCCL::runHookLoop() {
         // Hook might grab GIL, unlock first to prevent deadlock
         lock.unlock();
 
+        auto timeFinished = std::chrono::system_clock::now();
         auto timeStarted =
-            std::chrono::system_clock::now() +
-            std::chrono::duration_cast<std::chrono::system_clock::duration>(
+            timeFinished +
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                 work.workStartTime_ - std::chrono::steady_clock::now());
         onCompletionHook_(std::make_shared<WorkInfo>(
             work.retrieveOpType(), // OpType
             work.getSequencenumber(), // seq
             timeStarted, // timeStarted
-            std::chrono::system_clock::now(), // timeFinished
+            timeFinished, // timeFinished
             std::chrono::duration<float, std::milli>(
                 work.getDuration()) // activeDuration
             ));

@@ -6,7 +6,7 @@ import os
 import sys
 import tempfile
 
-from model_registry import ModelWithKwargs, MultiMLP, MultiMLPWithDw, MultiMLPKwargs
+from model_registry import ModelWithKwargs, MultiMLP, MultiMLPKwargs, MultiMLPWithDw
 from schedule_registry import (
     ScheduleUnbalanced,
     ScheduleVShaped,
@@ -939,10 +939,10 @@ class ScheduleTest(MultiProcContinousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("ScheduleClass", [
-        ScheduleInterleavedZeroBubble,
-        # ScheduleInterleaved1F1B
-    ])
+    @parametrize(
+        "ScheduleClass",
+        [ScheduleInterleavedZeroBubble, ScheduleInterleaved1F1B],
+    )
     def test_zero_bubble_with_model_kwargs(self, ScheduleClass):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
@@ -1004,7 +1004,9 @@ class ScheduleTest(MultiProcContinousTest):
             for stage_module in stage_modules:
                 stage_module.zero_grad()
             if self.rank == 0:
-                schedule.step(x, unused_kwarg=unused_kwarg.clone().unsqueeze(0).expand(chunks, -1))
+                schedule.step(
+                    x, unused_kwarg=unused_kwarg.clone().unsqueeze(0).expand(chunks, -1)
+                )
             elif self.rank == self.world_size - 1:
                 losses = []
                 out = schedule.step(target=target, losses=losses)

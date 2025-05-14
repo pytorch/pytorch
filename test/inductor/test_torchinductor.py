@@ -8824,6 +8824,39 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue((d < 1).all())
 
     @config.patch(implicit_fallbacks=True)
+    def test_needs_contiguous_strides(self):
+        # Construct a custom op whose output strides are not contiguous
+        @torch.library.custom_op("mylib::myop", mutates_args={})
+        def myop(x: torch.Tensor) -> torch.Tensor:
+            return torch.zeros(2, 2).t()
+
+        @myop.register_fake
+        def _(x):
+            return torch.zeros(2, 2).t()
+
+        # custom op that needs contiguous inputs
+        @torch.library.custom_op(
+            "mylib::second_op",
+            mutates_args={},
+            tags=[torch._C.Tag.needs_contiguous_strides],
+        )
+        def second_op(x: torch.Tensor) -> torch.Tensor:
+            assert x.is_contiguous()
+            return torch.ones(2, 2)
+
+        @second_op.register_fake
+        def _(x):
+            return torch.ones(2, 2)
+
+        def f(x):
+            y = myop(x)
+            return second_op(y)
+
+        # Check that the x.is_contiguous() assertion never gets triggered
+        x = torch.randn(2, 2)
+        _ = torch.compile(f, backend="inductor", fullgraph=True)(x)
+
+    @config.patch(implicit_fallbacks=True)
     def test_fallback_mutable_op_basic(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
 
@@ -12714,7 +12747,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue((actual == 1).all())
 
     @skip_if_gpu_halide
-    @xfail_if_mps  # Inductor syntax error
     def test_pattern_matcher_multi_user(self):
         # Reproducer for https://github.com/pytorch/pytorch/issues/129685
 
@@ -12726,6 +12758,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         a = torch.randn(512, 4096, requires_grad=True)
         b = torch.randint(size=(512,), low=0, high=4095)
+
+        if self.device == "mps" and MACOS_VERSION < 13.3:
+            raise unittest.SkipTest("Fails with internal compiler error on MacOS-13")
 
         self.common(forward, (a, b))
 
@@ -12776,7 +12811,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         b = torch.randn(2, 1, requires_grad=True)
         self.common(forward, (a, b))
 
-    @xfail_if_mps
     @config.patch(implicit_fallbacks=True)
     def test_weight_norm_bwd(self):
         """
