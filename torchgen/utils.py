@@ -10,8 +10,8 @@ import textwrap
 from dataclasses import fields, is_dataclass
 from enum import auto, Enum
 from pathlib import Path
-from typing import Any, Callable, Generic, Literal, TYPE_CHECKING, TypeVar
-from typing_extensions import assert_never, Self
+from typing import Any, Callable, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
+from typing_extensions import assert_never, deprecated, Self
 
 from torchgen.code_template import CodeTemplate
 
@@ -97,6 +97,15 @@ def context(msg_fn: Callable[[], str]) -> Iterator[None]:
         raise
 
 
+if TYPE_CHECKING:
+    # A little trick from https://github.com/python/mypy/issues/6366
+    # for getting mypy to do exhaustiveness checking
+    # TODO: put this somewhere else, maybe
+    @deprecated("Use typing_extensions.assert_never instead")
+    def assert_never(x: NoReturn) -> NoReturn:  # type: ignore[misc] # noqa: F811
+        raise AssertionError(f"Unhandled type: {type(x).__name__}")
+
+
 @functools.cache
 def _read_template(template_fn: str) -> CodeTemplate:
     return CodeTemplate.from_file(template_fn)
@@ -173,14 +182,17 @@ class FileManager:
                 }
             template = _read_template(template_path)
             substitute_out = template.substitute(env)
-            # Ensure an extra blank line before the class/function definition
-            # if it is followed by a docstring
+            # Ensure an extra blank line between the class/function definition
+            # and the docstring of the previous class/function definition.
+            # NB: It is generally not recommended to have docstrings in pyi stub
+            #     files. But if there are any, we need to ensure that the file
+            #     is properly formatted.
             return re.sub(
                 r'''
                 (""")\n+             # match triple quotes
                 (
-                    ([ ]*@.+\n)*     # match decorators if any
-                    [ ]*(class|def)  # match class/function definition
+                    (\s*@.+\n)*     # match decorators if any
+                    \s*(class|def)  # match class/function definition
                 )
                 ''',
                 r"\g<1>\n\n\g<2>",
