@@ -2170,13 +2170,15 @@ def meta_baddbmm(self, batch1, batch2, *, beta=1, alpha=1):
     dim1 = batch1.size(0)
     dim2 = batch1.size(1)
     dim3 = batch2.size(2)
-    self = self.expand((dim1, dim2, dim3))
+    if self.shape != (dim1, dim2, dim3):
+        self = self.expand((dim1, dim2, dim3))
     torch._check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor")
     torch._check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
-    torch._check(
-        self.dtype == batch1.dtype == batch2.dtype,
-        lambda: f"Input dtypes must be the same, got: input: {self.dtype}, batch1: {batch1.dtype}, batch2: {batch2.dtype}",
-    )
+    if not exp_config.skip_dtype_check_in_meta_registrations:
+        torch._check(
+            self.dtype == batch1.dtype == batch2.dtype,
+            lambda: f"Input dtypes must be the same, got: input: {self.dtype}, batch1: {batch1.dtype}, batch2: {batch2.dtype}",
+        )
     batch1_sizes = batch1.shape
     batch2_sizes = batch2.shape
     bs = batch1_sizes[0]
@@ -7271,6 +7273,30 @@ def sigmoid(self: Tensor) -> Tensor:
     return torch.empty_like(self, dtype=result_dtype)
 
 
+def _compute_grouped_gemm_output_size(mat1, mat2, offs):
+    mat1_is_2d = mat1.dim() == 2
+    mat2_is_2d = mat2.dim() == 2
+
+    if mat1_is_2d:
+        if mat2_is_2d:
+            return offs.size(0), mat1.size(0), mat2.size(1)
+        else:
+            torch._check(
+                offs.size(0) == mat2.size(0), "matrix batch sizes have to match"
+            )
+            return mat1.size(0), mat2.size(-1)
+    else:
+        if mat2_is_2d:
+            torch._check(
+                offs.size(0) == mat1.size(0), "matrix batch sizes have to match"
+            )
+            return mat1.size(1), mat2.size(1)
+        else:
+            # regular bmm
+            torch._check(mat1.size(0) == mat2.size(0), "batched dimension has to match")
+            return mat1.size(0), mat1.size(1), mat2.size(-1)
+
+
 @register_meta(aten._grouped_mm)
 @out_wrapper()
 def grouped_mm(
@@ -7293,33 +7319,134 @@ def grouped_mm(
     out_dtype = out_dtype or mat1.dtype
     torch._check(bias is None, lambda: "bias not supported yet")
 
-    def _compute_grouped_gemm_output_size(mat1, mat2, offs):
-        mat1_is_2d = mat1.dim() == 2
-        mat2_is_2d = mat2.dim() == 2
-
-        if mat1_is_2d:
-            if mat2_is_2d:
-                return offs.size(0), mat1.size(0), mat2.size(1)
-            else:
-                torch._check(
-                    offs.size(0) == mat2.size(0), "matrix batch sizes have to match"
-                )
-                return mat1.size(0), mat2.size(-1)
-        else:
-            if mat2_is_2d:
-                torch._check(
-                    offs.size(0) == mat1.size(0), "matrix batch sizes have to match"
-                )
-                return mat1.size(1), mat2.size(1)
-            else:
-                # regular bmm
-                torch._check(
-                    mat1.size(0) == mat2.size(0), "batched dimension has to match"
-                )
-                return mat1.size(0), mat1.size(1), mat2.size(-1)
-
     out_size = _compute_grouped_gemm_output_size(mat1, mat2, offs)
     out = mat1.new_empty(out_size, dtype=out_dtype)
+
+    return out
+
+
+@register_meta([aten._scaled_grouped_mm.default])
+def meta_scaled_grouped_mm(
+    mat_a: torch.Tensor,
+    mat_b: torch.Tensor,
+    scale_a: torch.Tensor,
+    scale_b: torch.Tensor,
+    offs: Optional[torch.Tensor] = None,
+    bias: Optional[torch.Tensor] = None,
+    scale_result: Optional[torch.Tensor] = None,
+    out_dtype: Optional[torch.dtype] = None,
+    use_fast_accum: bool = False,
+):
+    # Check dimensions
+    torch._check(
+        mat_a.dim() == 2 or mat_a.dim() == 3, lambda: "mat_a has to be 2 or 3d"
+    )
+    torch._check(
+        mat_b.dim() == 2 or mat_b.dim() == 3, lambda: "mat_b has to be 2 or 3d"
+    )
+
+    a_is_2d = mat_a.dim() == 2
+    b_is_2d = mat_b.dim() == 2
+
+    # Check offsets
+    torch._check(
+        (offs is not None) == (a_is_2d or b_is_2d),
+        lambda: "Have to provide offsets if there is a 2d matrix",
+    )
+
+    if offs is not None:
+        torch._check(offs.dim() == 1, lambda: "offs has to be 1D")
+        torch._check(offs.dtype == torch.int, lambda: "Offsets have to be int32")
+
+    # Check matrix sizes
+    torch._check(
+        mat_a.size(-1) % 16 == 0,
+        lambda: f"Expected trailing dimension of mat_a to be divisible by 16 but got mat1 shape: {mat_a.size()}",
+    )
+    torch._check(
+        mat_b.size(-2) % 16 == 0 and mat_b.size(-1) % 16 == 0,
+        lambda: f"Expected mat_b shape to be divisible by 16 but got mat_b shape: {mat_b.size()}",
+    )
+
+    # Check scales
+    torch._check(
+        scale_a.dtype == torch.float and scale_b.dtype == torch.float,
+        lambda: "Both scale_a and scale_b must be float (fp32) tensors.",
+    )
+
+    # Check scale dimensions
+    scale_multiplier = offs.size(0) if (a_is_2d and b_is_2d) else 1  # type: ignore[union-attr]
+
+    if a_is_2d:
+        torch._check(
+            scale_a.dim() == 1,
+            lambda: f"scale must be a 1D tensor for 2D mat_a, but got {scale_a.dim()}D",
+        )
+        torch._check(scale_a.is_contiguous(), lambda: "scale_a must be contiguous")
+        torch._check(
+            scale_a.size(0) == mat_a.size(0) * scale_multiplier,
+            lambda: "scale must have the same length as mat_a",
+        )
+    else:
+        torch._check(
+            scale_a.dim() == 2,
+            lambda: f"scale must be a 2D tensor for 3D mat_a, but got {scale_a.dim()}D",
+        )
+        torch._check(
+            scale_a.stride(1) == 1,
+            lambda: "scale_a must be contiguous in the last dimension",
+        )
+        torch._check(
+            scale_a.size(0) == mat_a.size(0),
+            lambda: "scale must have the same batch dimension as mat_a",
+        )
+        torch._check(
+            scale_a.size(1) == mat_a.size(1),
+            lambda: "scale must have the same first dimension as mat_a",
+        )
+
+    # Similar checks for scale_b
+    if b_is_2d:
+        torch._check(
+            scale_b.dim() == 1,
+            lambda: f"scale must be a 1D tensor for 2D mat_b, but got {scale_b.dim()}D",
+        )
+        torch._check(scale_b.is_contiguous(), lambda: "scale_b must be contiguous")
+        torch._check(
+            scale_b.size(0) == mat_b.size(1) * scale_multiplier,
+            lambda: "scale must have the same length as mat_b",
+        )
+    else:
+        torch._check(
+            scale_b.dim() == 2,
+            lambda: f"scale must be a 2D tensor for 3D mat_b, but got {scale_b.dim()}D",
+        )
+        torch._check(
+            scale_b.stride(1) == 1,
+            lambda: "scale_b must be contiguous in the last dimension",
+        )
+        torch._check(
+            scale_b.size(0) == mat_b.size(0),
+            lambda: "scale must have the same batch dimension as mat_b",
+        )
+        torch._check(
+            scale_b.size(1) == mat_b.size(2),
+            lambda: "scale must have the same last dimension as mat_b",
+        )
+
+    # Check bias
+    torch._check(bias is None, lambda: "Bias not supported yet")
+
+    # Check output dtype
+    out_dtype_ = out_dtype if out_dtype is not None else mat_a.dtype
+    torch._check(
+        out_dtype_ == torch.bfloat16,
+        lambda: "Only bf16 high precision output types are supported for grouped gemm",
+    )
+
+    # Compute output size
+    out_size = _compute_grouped_gemm_output_size(mat_a, mat_b, offs)
+    out = mat_a.new_empty(out_size, dtype=out_dtype)
 
     return out
 
