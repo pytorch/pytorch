@@ -13,9 +13,6 @@ from torch._C._distributed_c10d import _SymmetricMemory
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
 from torch.distributed._functional_collectives import all_gather_tensor
 from torch.distributed._symmetric_memory import (
-    _fused_all_gather_matmul_fallback,
-    _fused_all_gather_scaled_matmul_fallback,
-    _fused_matmul_reduce_scatter_fallback,
     _test_mode,
     enable_symm_mem_for_group,
     restride_A_for_fused_matmul_reduce_scatter,
@@ -41,7 +38,10 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-
+# When nullcontext is used, the dispatcher will dispatch the fused kernel calls to
+# the symmetric memory implementation. If _test_mode is enabled, the dispatcher will
+# dispatch the fused kernel calls to the "fallback" implementation, where symm_mem is
+# not used and the regular collectives and pytorch ops are used instead.
 test_contexts = [nullcontext, _test_mode]
 
 
@@ -364,18 +364,21 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         A_shard = torch.rand(BATCH, M // self.world_size, K, device="cuda")
         Bs = [torch.rand(K, N, device="cuda") for _ in range(3)]
 
-        ag_output_0, mm_outputs_0 = _fused_all_gather_matmul_fallback(
-            A_shard, Bs, gather_dim=gather_dim, group_name=group.group_name
-        )
-        ag_output_1, mm_outputs_1 = torch.ops.symm_mem.fused_all_gather_matmul(
-            A_shard, Bs, gather_dim=gather_dim, group_name=group.group_name
-        )
+        ag_output_vec = []
+        mm_outputs_vec = []
+        for context in test_contexts:
+            with context():
+                ag_output, mm_outputs = torch.ops.symm_mem.fused_all_gather_matmul(
+                    A_shard, Bs, gather_dim=gather_dim, group_name=group.group_name
+                )
+                ag_output_vec.append(ag_output)
+                mm_outputs_vec.append(mm_outputs)
 
-        assert torch.allclose(ag_output_0, ag_output_1)
-        assert ag_output_0.stride() == ag_output_1.stride()
-        for mm_output_0, mm_output_1 in zip(mm_outputs_0, mm_outputs_1):
+        assert torch.allclose(ag_output_vec[0], ag_output_vec[1])
+        assert ag_output_vec[0].stride() == ag_output_vec[1].stride()
+        for mm_output_0, mm_output_1 in zip(mm_outputs_vec[0], mm_outputs_vec[1]):
             assert torch.allclose(mm_output_0, mm_output_1)
-            assert mm_output_0.stride(), mm_output_1.stride()
+            assert mm_output_0.stride() == mm_output_1.stride()
 
         dist.destroy_process_group()
 
@@ -418,9 +421,10 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         else:
             B = torch.rand(N, K, dtype=torch.bfloat16, device="cuda").t()
 
-        ag_baseline, mm_baseline = _fused_all_gather_matmul_fallback(
-            A_shard, [B], gather_dim=0, group_name=group_name
-        )
+        with _test_mode():
+            ag_baseline, mm_baseline = torch.ops.symm_mem.fused_all_gather_matmul(
+                A_shard, [B], gather_dim=0, group_name=group_name
+            )
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CUDA,
@@ -458,9 +462,11 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         B = torch.rand(K, N, dtype=torch.bfloat16, device="cuda")
 
-        ag_baseline, mm_baseline = _fused_all_gather_matmul_fallback(
-            A_shard, [B], gather_dim=0, group_name=group_name, return_A=False
-        )
+        with _test_mode():
+            ag_baseline, mm_baseline = torch.ops.symm_mem.fused_all_gather_matmul(
+                A_shard, [B], gather_dim=0, group_name=group_name, return_A=False
+            )
+
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CUDA,
@@ -524,39 +530,36 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         else:
             raise AssertionError(f"Invalid scale_mode: {scale_mode}")
 
-        ag_output_0, mm_outputs_0 = _fused_all_gather_scaled_matmul_fallback(
-            A_shard,
-            Bs,
-            A_scale,
-            B_scales,
-            gather_dim=gather_dim,
-            group_name=group.group_name,
-            biases=[None] * len(Bs),
-            result_scales=[None] * len(Bs),
-            out_dtypes=out_dtypes,
-            use_fast_accum=[None] * len(Bs),
-        )
-        ag_output_1, mm_outputs_1 = torch.ops.symm_mem.fused_all_gather_scaled_matmul(
-            A_shard,
-            Bs,
-            A_scale,
-            B_scales,
-            gather_dim=gather_dim,
-            group_name=group.group_name,
-            biases=[None] * len(Bs),
-            result_scales=[None] * len(Bs),
-            out_dtypes=out_dtypes,
-            use_fast_accum=[None] * len(Bs),
-        )
+        ag_output_vec = []
+        mm_outputs_vec = []
+        for context in test_contexts:
+            with context():
+                (
+                    ag_output,
+                    mm_outputs,
+                ) = torch.ops.symm_mem.fused_all_gather_scaled_matmul(
+                    A_shard,
+                    Bs,
+                    A_scale,
+                    B_scales,
+                    gather_dim=gather_dim,
+                    group_name=group.group_name,
+                    biases=[None] * len(Bs),
+                    result_scales=[None] * len(Bs),
+                    out_dtypes=out_dtypes,
+                    use_fast_accum=[None] * len(Bs),
+                )
+                ag_output_vec.append(ag_output)
+                mm_outputs_vec.append(mm_outputs)
 
         self.assertTrue(
             torch.allclose(
-                ag_output_0.to(torch.float32),
-                ag_output_1.to(torch.float32),
+                ag_output_vec[0].to(torch.float32),
+                ag_output_vec[1].to(torch.float32),
             )
         )
-        self.assertEqual(ag_output_0.stride(), ag_output_1.stride())
-        for mm_output_0, mm_output_1 in zip(mm_outputs_0, mm_outputs_1):
+        self.assertEqual(ag_output_vec[0].stride(), ag_output_vec[1].stride())
+        for mm_output_0, mm_output_1 in zip(mm_outputs_vec[0], mm_outputs_vec[1]):
             self.assertTrue(
                 torch.allclose(
                     mm_output_0.to(torch.float32), mm_output_1.to(torch.float32)
@@ -584,15 +587,21 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         A = torch.rand(BATCH, M, K, device="cuda")
         B = torch.rand(K, N, device="cuda")
 
-        output_0 = _fused_matmul_reduce_scatter_fallback(
-            A, B, "avg", scatter_dim=scatter_dim, group_name=group.group_name
-        )
-        output_1 = torch.ops.symm_mem.fused_matmul_reduce_scatter(
-            A, B, "avg", scatter_dim=scatter_dim, group_name=group.group_name
-        )
+        outputs = []
+        for context in test_contexts:
+            with context():
+                outputs.append(
+                    torch.ops.symm_mem.fused_matmul_reduce_scatter(
+                        A,
+                        B,
+                        "avg",
+                        scatter_dim=scatter_dim,
+                        group_name=group.group_name,
+                    )
+                )
 
-        assert torch.allclose(output_0, output_1)
-        assert output_0.stride() == output_1.stride()
+        assert torch.allclose(outputs[0], outputs[1])
+        assert outputs[0].stride() == outputs[1].stride()
 
         dist.destroy_process_group()
 
