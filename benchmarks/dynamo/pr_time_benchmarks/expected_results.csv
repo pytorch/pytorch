@@ -1,5 +1,4 @@
-<<<<<<< HEAD
-add_loop_eager,compile_time_instruction_count,3035000000,0.015
+add_loop_eager,compile_time_instruction_count,3051000000,0.015
 
 
 
@@ -7,7 +6,7 @@ add_loop_eager_dynamic,compile_time_instruction_count,5928000000,0.025
 
 
 
-add_loop_inductor,compile_time_instruction_count,29570000000,0.015
+add_loop_inductor,compile_time_instruction_count,29380000000,0.015
 
 
 
@@ -16,29 +15,10 @@ add_loop_inductor_dynamic_gpu,compile_time_instruction_count,44480000000,0.025
 
 
 add_loop_inductor_gpu,compile_time_instruction_count,25900000000,0.015
-=======
-add_loop_eager,compile_time_instruction_count,3040000000,0.015
 
 
 
-add_loop_eager_dynamic,compile_time_instruction_count,6037000000,0.025
-
-
-
-add_loop_inductor,compile_time_instruction_count,29440000000,0.015
-
-
-
-add_loop_inductor_dynamic_gpu,compile_time_instruction_count,44130000000,0.025
-
-
-
-add_loop_inductor_gpu,compile_time_instruction_count,25840000000,0.015
->>>>>>> 1e5d25b8d36 (Update to CUDNN 9.10)
-
-
-
-basic_modules_ListOfLinears_eager,compile_time_instruction_count,1011000000,0.015
+basic_modules_ListOfLinears_eager,compile_time_instruction_count,945000000,0.015
 
 
 
@@ -54,19 +34,14 @@ basic_modules_ListOfLinears_inductor_gpu,compile_time_instruction_count,10370000
 
 
 
-<<<<<<< HEAD
 update_hint_regression,compile_time_instruction_count,1715000000,0.02
-=======
-update_hint_regression,compile_time_instruction_count,1731000000,0.02
->>>>>>> 1e5d25b8d36 (Update to CUDNN 9.10)
 
 
 
-float_args,compile_time_instruction_count,439200000,0.015
+float_args,compile_time_instruction_count,444500000,0.015
 
 
 
-<<<<<<< HEAD
 sum_floordiv_regression,compile_time_instruction_count,1009000000,0.015
 
 
@@ -80,21 +55,6 @@ symint_sum_loop,compile_time_instruction_count,4262000000,0.015
 
 
 aotdispatcher_inference_nosubclass_cpu,compile_time_instruction_count,2091000000,0.015
-=======
-sum_floordiv_regression,compile_time_instruction_count,1005000000,0.015
-
-
-
-symint_sum,compile_time_instruction_count,3234000000,0.015
-
-
-
-symint_sum_loop,compile_time_instruction_count,4239000000,0.015
-
-
-
-aotdispatcher_inference_nosubclass_cpu,compile_time_instruction_count,2080000000,0.015
->>>>>>> 1e5d25b8d36 (Update to CUDNN 9.10)
 
 
 
@@ -106,11 +66,7 @@ aotdispatcher_partitioner_cpu,compile_time_instruction_count,8630000000,0.015
 
 
 
-<<<<<<< HEAD
 aotdispatcher_partitioner_cpu2,compile_time_instruction_count,1900000000,0.015
-=======
-aotdispatcher_partitioner_cpu2,compile_time_instruction_count,1895000000,0.015
->>>>>>> 1e5d25b8d36 (Update to CUDNN 9.10)
 
 
 
@@ -118,4 +74,4 @@ aotdispatcher_training_nosubclass_cpu,compile_time_instruction_count,3818000000,
 
 
 
-aotdispatcher_training_subclass_cpu,compile_time_instruction_count,10350000000,0.015
+aotdispatcher_training_subclass_cpu,compile_time_instruction_count,10290000000,0.015
