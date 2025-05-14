@@ -1312,9 +1312,9 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
                 # is codegenned anyway
                 raise CannotStaticallyLaunchKernel("Cpp wrapper enabled")
 
-            # if heuristic_type == HeuristicType.USER_AUTOTUNE:
-            #     # Don't support user defined triton kernels yet
-            #     raise CannotStaticallyLaunchKernel("User defined triton kernel")
+            if heuristic_type == HeuristicType.USER_AUTOTUNE:
+                # Don't support user defined triton kernels yet
+                raise CannotStaticallyLaunchKernel("User defined triton kernel")
 
             if inductor_meta.get("store_cubin", None):
                 # Requires storing the entire binary
