@@ -28,6 +28,17 @@
 #include <ATen/ops/zeros.h>
 #endif
 
+#if defined(USE_ROCM)
+#include <rocsolver/rocsolver.h>
+#define PYTORCH_ROCSOLVER_VERSION \
+  (ROCSOLVER_VERSION_MAJOR * 10000 + ROCSOLVER_VERSION_MINOR * 100 + ROCSOLVER_VERSION_PATCH)
+#if (PYTORCH_ROCSOLVER_VERSION >= 33000)
+#define ROCSOLVER_SYEVD_BATCHED_ENABLED 1
+#else
+#define ROCSOLVER_SYEVD_BATCHED_ENABLED 0
+#endif
+#endif // defined(USE_ROCM)
+
 namespace at::native {
 
 static cublasOperation_t to_cublas(TransposeType trans) {
@@ -1205,6 +1216,107 @@ Tensor& orgqr_helper_cusolver(Tensor& result, const Tensor& tau) {
 }
 
 template <typename scalar_t>
+rocblas_status _rocsolver_syevd_strided_batched(
+    rocblas_handle handle,
+    const rocblas_evect evect,
+    const rocblas_fill uplo,
+    const rocblas_int n,
+    scalar_t* A,
+    const rocblas_int lda,
+    const rocblas_stride strideA,
+    scalar_t* D,
+    const rocblas_stride strideD,
+    scalar_t* E,
+    const rocblas_stride strideE,
+    rocblas_int* info,
+    const rocblas_int batch_count
+);
+
+template <>
+rocblas_status _rocsolver_syevd_strided_batched<float>(
+    rocblas_handle handle,
+    const rocblas_evect evect,
+    const rocblas_fill uplo,
+    const rocblas_int n,
+    float* A,
+    const rocblas_int lda,
+    const rocblas_stride strideA,
+    float* D,
+    const rocblas_stride strideD,
+    float* E,
+    const rocblas_stride strideE,
+    rocblas_int* info,
+    const rocblas_int batch_count
+){
+  return rocsolver_ssyevd_strided_batched(
+    handle, evect, uplo, n, A, lda, strideA, D, strideD, E, strideE, info, batch_count
+  );
+}
+
+template <>
+rocblas_status _rocsolver_syevd_strided_batched<double>(
+    rocblas_handle handle,
+    const rocblas_evect evect,
+    const rocblas_fill uplo,
+    const rocblas_int n,
+    double* A,
+    const rocblas_int lda,
+    const rocblas_stride strideA,
+    double* D,
+    const rocblas_stride strideD,
+    double* E,
+    const rocblas_stride strideE,
+    rocblas_int* info,
+    const rocblas_int batch_count
+){
+  return rocsolver_dsyevd_strided_batched(
+    handle, evect, uplo, n, A, lda, strideA, D, strideD, E, strideE, info, batch_count
+  );
+}
+
+template <typename scalar_t>
+static void apply_syevd_batched_rocsolver(const Tensor& values, const Tensor& vectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
+
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+
+  auto uplo = upper ? rocblas_fill::rocblas_fill_upper : rocblas_fill::rocblas_fill_lower;
+  auto evect = compute_eigenvectors ? rocblas_evect::rocblas_evect_original : rocblas_evect::rocblas_evect_none;
+
+  int64_t n = vectors.size(-1);
+  int64_t lda = std::max<int64_t>(1, n);
+  int64_t batch_size = batchCount(vectors);
+
+  auto vectors_stride = matrixStride(vectors);
+  auto values_stride = n;
+
+  auto vectors_data = vectors.data_ptr<scalar_t>();
+  auto values_data = values.data_ptr<value_t>();
+  auto infos_data = infos.data_ptr<int>();
+
+  auto work_stride = n;
+  auto work_size = work_stride * batch_size;
+      // allocate workspace storage on device
+  auto& allocator = *at::cuda::getCUDADeviceAllocator();
+  auto work_data = allocator.allocate(sizeof(scalar_t) * work_size);
+
+  TORCH_CUSOLVER_CHECK(static_cast<hipsolverStatus_t>(_rocsolver_syevd_strided_batched<scalar_t>(
+    static_cast<rocblas_handle>(at::cuda::getCurrentCUDABlasHandle()), // getCurrentCUDASolverDnHandle() can't be used
+    evect,
+    uplo,
+    n,
+    vectors_data,
+    lda,
+    vectors_stride,
+    values_data,
+    values_stride,
+    static_cast<scalar_t*>(work_data.get()),
+    work_stride,
+    infos_data,
+    batch_size
+  )));
+}
+
+template <typename scalar_t>
 static void apply_syevd(const Tensor& values, const Tensor& vectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
 
@@ -1475,11 +1587,26 @@ static void linalg_eigh_cusolver_syevj_batched(const Tensor& eigenvalues, const 
   });
 }
 
+static void linalg_eigh_rocsolver_syevd_batched(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
+    AT_DISPATCH_FLOATING_TYPES(eigenvectors.scalar_type(), "linalg_eigh_cuda", [&]() {
+      apply_syevd_batched_rocsolver<scalar_t>(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);});
+}
+
 void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
-#ifdef USE_ROCM
-  // syevj has larger numerical errors than syevd
+#if defined(USE_ROCM) && !ROCSOLVER_SYEVD_BATCHED_ENABLED
   linalg_eigh_cusolver_syevd(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
-#else
+#elif defined(USE_ROCM) && ROCSOLVER_SYEVD_BATCHED_ENABLED
+  if (eigenvectors.scalar_type() == at::kFloat || eigenvectors.scalar_type() == at::kDouble) {
+      // Use syevd_batched for float and double types
+      if (eigenvectors.size(-1) < 80) // optimized for MI300
+        linalg_eigh_cusolver_syevj_batched(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+      else
+        linalg_eigh_rocsolver_syevd_batched(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+  } else {
+    // For other (complex) types on ROCm, use syevd
+    linalg_eigh_cusolver_syevd(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+  }
+#else // not USE_ROCM
   if (use_cusolver_syevj_batched_ && batchCount(eigenvectors) > 1 && eigenvectors.size(-1) <= 32) {
     // Use syevjBatched for batched matrix operation when matrix size <= 32
     // See https://github.com/pytorch/pytorch/pull/53040#issuecomment-788264724
