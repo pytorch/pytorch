@@ -20,7 +20,6 @@ from ..utils import (
     use_triton_template,
 )
 from ..virtualized import V
-from .mm import tuned_mm
 from .mm_common import (
     _is_static_problem,
     addmm_epilogue,
@@ -138,13 +137,6 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     """
     Lowering for autotuning aten.bmm with different backends (Aten, Triton, CUTLASS, etc.)
     """
-    # Fallback to mm if the batch size is 1
-    if mat1.get_size()[0] == mat2.get_size()[0] == 1:
-        return L.unsqueeze(
-            tuned_mm(L.squeeze(mat1, dim=0), L.squeeze(mat2, dim=0), layout=layout),
-            dim=0,
-        )
-
     if all(x.get_device().type == "cpu" for x in [mat1, mat2]):
         # decompose to small ops when memory bound
         if mat1.get_size()[1] == 1 or mat2.get_size()[2] == 1:
