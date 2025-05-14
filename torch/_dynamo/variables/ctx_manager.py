@@ -26,7 +26,9 @@ import warnings
 from typing import TYPE_CHECKING, Union
 
 import torch._C
+import torch.fx.node
 from torch._guards import Guard
+from torch.utils import _pytree as pytree
 
 from .. import graph_break_hints, variables
 from ..bytecode_transformation import (
@@ -164,6 +166,52 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
             **kwargs,
         )
         self.cm_obj = cm_obj
+        # Note [Hopifying Context Managers]
+        #
+        # If the context manager class has been added to a opt-in dynamo config,
+        # we will convert it into a generic context manager HOP. When the
+        # HOP is later called in AOTAutograd, it will run the captured
+        # graph under the ctx.
+        #
+        # How does this work?
+        # - On enter:
+        #   - Enter into a new subtracer
+        # - The subtracer traces the body of the context manager into a graph
+        # - On exit:
+        #   - Exit the subtracer
+        #   - Grab the inner fx graph from the subtracer and install it onto
+        #     the outer fx graph
+        #   - Create node on the outer fx graph that calls this subgraph
+        #
+        # Some notes:
+        #
+        # 1. Determining the inputs and outputs
+        #
+        # One trickiness here is that a HOP requires a function as input,
+        # but, unlike functions, context managers don't have explicit inputs and
+        # outputs. For inputs, we rely on lifted_freevars, which the subtracer
+        # already tracks for ordinary HOPs. For outputs, ideally we might only
+        # return the outputs that are referenceable later, e.g. not temporaries,
+        # but doing that is hard, so instead we just return all intermediates
+        # and rely on AOTAutograd to trace through the HOP and DCE any
+        # unnecessary ops.
+        #
+        # 2. Fixing VariableTracker proxies
+        #
+        # Inserting the call to the subgraph into the outer fx graph creates
+        # fresh variable trackers and proxies, but the instruction translator
+        # still refers the original VTs, e.g. in its symbolic locals and these
+        # VTs still hold the inner fx graph's proxies, which is wrong.
+        #
+        # We fix this by updating the VTs to hold the new outer fx graph
+        # proxies (e.g. corresponding to the getitems of the call to the
+        # subgraph). To know what those VTs are, we maintain a mapping from
+        # fx graph node name to the VTs which is updated everytime a new
+        # TensorVariable is created.
+        self.hopify = (
+            cm_obj.__class__
+            in torch._dynamo.config._enable_hopify_generic_context_manager
+        )
 
     def module_name(self):
         return self.cm_obj.__module__
@@ -172,7 +220,18 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         return type(self.cm_obj).__name__
 
     def enter(self, tx):
+        from torch._higher_order_ops.wrap import wrap_generic
+
         source = None if self.source is None else AttrSource(self.source, "__enter__")
+
+        if self.hopify:
+            tracer = None
+            source_target = wrap_generic
+            self.subtracer_ctx = tx.output.subtracer(source_target, tracer)
+            self.subtracer = self.subtracer_ctx.__enter__()
+            # This means we don't support the `with ctx() as obj:` syntax
+            return variables.ConstantVariable.create(None)
+
         return variables.UserMethodVariable(
             self.cm_obj.__enter__.__func__,
             self,
@@ -180,7 +239,77 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         ).call_function(tx, [], {})
 
     def exit(self, tx: "InstructionTranslator", *args):
+        # Avoid a circular import
+        from torch._higher_order_ops.wrap import wrap_generic
+
+        from .higher_order_ops import _call_function_and_unflatten_output, make_attr
+
         source = None if self.source is None else AttrSource(self.source, "__exit__")
+
+        if self.hopify:
+            all_intermediates = []
+            graph = tx.output.graph
+
+            for node in graph.nodes:
+                if node.op != "placeholder" and self.subtracer.fx_node_name_to_vt.get(
+                    node.name
+                ):
+                    all_intermediates.append(node)
+
+            tx.output.create_node(
+                "output",
+                "output",
+                ((*all_intermediates,),),
+                {},
+            )
+            graph.lint()
+
+            self.subtracer_ctx.__exit__(None, None, None)
+
+            gmod = torch.fx.GraphModule(tx.output.nn_modules, graph)
+            body_name = tx.output.install_subgraph(
+                self.fn_name(),
+                gmod,
+            )
+            # Store information to reconstruct the context manager when the HOP
+            # is called.
+            gmod.meta["_wrap_generic_cls_fqn"] = self.cls_fqn
+            gmod.meta["_wrap_generic_arg_values"] = self.arg_values
+            gmod.meta["_wrap_generic_kwarg_values"] = self.kwarg_values
+
+            body_node = make_attr(tx, body_name)
+            lifted_args = tuple(arg for arg in self.subtracer.lifted_freevars.keys())
+            proxy_args = (body_node,) + lifted_args
+
+            # We only need the proxies and don't actually need to create new
+            # VariableTrackers, but this is probably the most convenient way for
+            # now because wrap_fx_proxy is actually responsible for inserting
+            # all the getitems to unpack the subgraph output.
+            output_variables = _call_function_and_unflatten_output(
+                tx,
+                wrap_generic,
+                proxy_args,
+                {},
+                pytree.tree_map_only(
+                    torch.fx.node.Node,
+                    lambda node: node.meta.get("example_value", None),
+                    all_intermediates,
+                ),
+            )
+            for i, (subgraph_node, new_variable) in enumerate(
+                zip(all_intermediates, output_variables.items)
+            ):
+                vt = self.subtracer.fx_node_name_to_vt[subgraph_node.name]
+                vt.proxy = new_variable.as_proxy()
+                # Everytime a Tensor's VT is created it will update the mapping
+                # of the inner most subtracer. After a subtracer exits, we need
+                # to make sure that that this VT is continued to be tracked in
+                # the next outer subtracer.
+                tx.output.current_tracer.fx_node_name_to_vt[vt.proxy.node.name] = vt
+
+            tx.active_generic_context_managers.pop()
+            return variables.ConstantVariable.create(None)
+
         x = variables.UserMethodVariable(
             self.cm_obj.__exit__.__func__,
             self,

@@ -112,9 +112,19 @@ class WrapGeneric(HigherOrderOperator):
 
         kwarg_values = gmod.meta["_wrap_generic_kwarg_values"]
 
+        is_ctx = "_wrap_generic_arg_values" in gmod.meta
+        if is_ctx:
+            # Reconstruct the context manager from the meta data
+            arg_values = gmod.meta["_wrap_generic_arg_values"]
+            ctx = obj(*arg_values, **kwarg_values)
+
         @disable
         def wrapper():
-            return obj(gmod, *args, **kwargs, **kwarg_values)
+            if is_ctx:
+                with ctx:
+                    return gmod(*args, **kwargs)
+            else:
+                return obj(gmod, *args, **kwargs, **kwarg_values)
 
         return wrapper()
 

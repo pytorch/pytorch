@@ -964,6 +964,7 @@ def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
             for user in node.users:
                 if (
                     must_recompute(user)
+                    and user.meta.get("ac_graph_id") is not None
                     and user.meta["ac_graph_id"] > node.meta["ac_graph_id"]
                 ):
                     node.meta["recompute"] = CheckpointPolicy.MUST_SAVE

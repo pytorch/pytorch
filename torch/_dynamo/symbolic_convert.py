@@ -1438,6 +1438,11 @@ class InstructionTranslatorBase(
         name = inst.argval
         loaded_vt = self.pop()
         loaded_vt.set_name_hint(name)
+        # Update our mapping set_name_hint because changes the name of the fx node
+        # See Note [Hopifying Context Managers]
+        if isinstance(loaded_vt, TensorVariable) and len(self.output.tracers) > 1:
+            node = loaded_vt.proxy.node
+            self.output.tracers[-1].fx_node_name_to_vt[node.name] = loaded_vt
         self.symbolic_locals[name] = loaded_vt
 
     def DELETE_FAST(self, inst):
