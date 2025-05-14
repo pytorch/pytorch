@@ -1023,6 +1023,24 @@ if(USE_CUDNN)
   target_include_directories(torch::cudnn INTERFACE ${CUDNN_FRONTEND_INCLUDE_DIR})
 endif()
 
+# ---[ nvtx
+if(USE_SYSTEM_NVTX)
+  find_path(nvtx3_dir NAMES nvtx3 PATHS ${CUDA_INCLUDE_DIRS})
+else()
+  find_path(nvtx3_dir NAMES nvtx3 PATHS "${PROJECT_SOURCE_DIR}/third_party/NVTX/c/include" NO_DEFAULT_PATH)
+endif()
+find_package_handle_standard_args(nvtx3 DEFAULT_MSG nvtx3_dir)
+if(nvtx3_FOUND)
+  add_library(torch::nvtx3 INTERFACE IMPORTED)
+  target_include_directories(torch::nvtx3 INTERFACE "${nvtx3_dir}")
+  target_compile_definitions(torch::nvtx3 INTERFACE TORCH_CUDA_USE_NVTX3)
+else()
+  message(WARNING "Cannot find NVTX3, find old NVTX instead")
+  add_library(torch::nvtoolsext INTERFACE IMPORTED)
+  set_property(TARGET torch::nvtoolsext PROPERTY INTERFACE_LINK_LIBRARIES CUDA::nvToolsExt)
+endif()
+
+
 # ---[ HIP
 if(USE_ROCM)
   include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
@@ -1065,6 +1083,7 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
     list(APPEND HIP_CXX_FLAGS -std=c++17)
     list(APPEND HIP_CXX_FLAGS -DHIPBLAS_V2)
+    list(APPEND HIP_CXX_FLAGS -DHIP_ENABLE_WARP_SYNC_BUILTINS)
     if(HIPBLASLT_VEC_EXT)
       list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_VEC_EXT)
     endif()
@@ -1177,6 +1196,9 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
       set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
     endif()
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
+    # Suppress warning to unblock libnop comiplation by clang-17
+    # See https://github.com/pytorch/pytorch/issues/151316
+    target_compile_options_if_supported(tensorpipe -Wno-missing-template-arg-list-after-template-kw)
     if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
       unset(CMAKE_POLICY_VERSION_MINIMUM)
     endif()
@@ -1217,7 +1239,7 @@ if(USE_GLOO)
       endif()
       if(USE_NCCL AND NOT USE_SYSTEM_NCCL)
         # Tell Gloo build system to use bundled NCCL, see
-        # https://github.com/facebookincubator/gloo/blob/950c0e23819779a9e0c70b861db4c52b31d1d1b2/cmake/Dependencies.cmake#L123
+        # https://github.com/pytorch/gloo/blob/950c0e23819779a9e0c70b861db4c52b31d1d1b2/cmake/Dependencies.cmake#L123
         set(NCCL_EXTERNAL ON)
       endif()
       set(GLOO_USE_CUDA_TOOLKIT ON CACHE BOOL "" FORCE)
@@ -1308,14 +1330,10 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   add_definitions(-DONNXIFI_ENABLE_EXT=1)
   if(NOT USE_SYSTEM_ONNX)
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
-    if(NOT MSVC)
-      set_target_properties(onnx_proto PROPERTIES CXX_STANDARD 17)
-    endif()
   endif()
 
   add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
   if(NOT USE_SYSTEM_ONNX)
-    include_directories(${ONNX_INCLUDE_DIRS})
     # In mobile build we care about code size, and so we need drop
     # everything (e.g. checker) in onnx but the pb definition.
     if(ANDROID OR IOS)

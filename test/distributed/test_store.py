@@ -149,13 +149,18 @@ class StoreTestBase:
     def test_append(self):
         self._test_append(self._create_store())
 
-    def test_queues(self):
+    def _create_store_or_skip_if_no_queues(self) -> dist.Store:
         store = self._create_store()
 
         try:
             store.queue_push("test_queue_support", "1")
         except NotImplementedError:
             self.skipTest("Store does not support queues")
+
+        return store
+
+    def test_queues(self) -> None:
+        store = self._create_store_or_skip_if_no_queues()
 
         self.assertFalse(store.check(["foo"]))
         self.assertEqual(store.queue_len("foo"), 0)
@@ -173,9 +178,17 @@ class StoreTestBase:
         self.assertFalse(store.check(["foo"]))
         self.assertEqual(store.queue_len("foo"), 0)
 
-        store.set_timeout(timedelta(seconds=0.01))
-        with self.assertRaisesRegex(DistStoreError, "timeout"):
-            store.queue_pop("non_existant")
+    def test_queues_nonblocking(self) -> None:
+        store = self._create_store_or_skip_if_no_queues()
+
+        with self.assertRaisesRegex(dist.QueueEmptyError, "empty"):
+            store.queue_pop("foo", block=False)
+
+        store.queue_push("foo", "a")
+        self.assertEqual(store.queue_pop("foo", block=False), b"a")
+
+    def test_queues_bidirectional(self) -> None:
+        store = self._create_store_or_skip_if_no_queues()
 
         def worker_a():
             local_store = store.clone()
@@ -197,6 +210,13 @@ class StoreTestBase:
             ]
             for fut in futures:
                 fut.result()
+
+    def test_queues_timeout(self) -> None:
+        store = self._create_store_or_skip_if_no_queues()
+
+        store.set_timeout(timedelta(seconds=0.01))
+        with self.assertRaisesRegex(DistStoreError, "timeout"):
+            store.queue_pop("non_existant")
 
     def _test_multi_set(self, store):
         if not store.has_extended_api():

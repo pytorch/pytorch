@@ -96,17 +96,15 @@ class Scatter(Function):
         ctx.dim = dim
         ctx.input_device = input.get_device() if input.device.type != "cpu" else -1
         streams = None
-        if torch.cuda.is_available() and ctx.input_device == -1:
+        if torch.accelerator.is_available() and ctx.input_device == -1:
             # Perform CPU to GPU copies in a background stream
-            streams = [
-                _get_stream(torch.device("cuda", device)) for device in target_gpus
-            ]
+            streams = [_get_stream(torch.device(device)) for device in target_gpus]
         outputs = comm.scatter(input, target_gpus, chunk_sizes, ctx.dim, streams)
         # Synchronize with the copy stream
         if streams is not None:
             for i, output in enumerate(outputs):
-                with torch.cuda.device(target_gpus[i]):
-                    main_stream = torch.cuda.current_stream()
+                with torch.accelerator.device_index(target_gpus[i]):
+                    main_stream = torch.accelerator.current_stream()
                     main_stream.wait_stream(streams[i])
                     output.record_stream(main_stream)
         return outputs
@@ -123,13 +121,11 @@ _streams: Optional[list[Optional[torch.Stream]]] = None
 def _get_stream(device: torch.device):
     """Get a background stream for copying between CPU and target device."""
     global _streams
-    if device.type == "cpu":
+    if device.type == "cpu" or not torch.accelerator.is_available():
         return None
-    device_mod = getattr(torch, device.type, None)
-    if device_mod is None:
-        return None
+    assert torch.accelerator.current_accelerator().type == device.type
     if _streams is None:
-        _streams = [None] * device_mod.device_count()
+        _streams = [None] * torch.accelerator.device_count()
     if _streams[device.index] is None:
-        _streams[device.index] = device_mod.Stream(device.index)
+        _streams[device.index] = torch.Stream(device.index)
     return _streams[device.index]

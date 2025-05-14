@@ -1282,7 +1282,7 @@ def _pad_chunk(
             ]
             tensor = aten.constant_pad_nd(tensor, pad, 0)
         view_size = tensor_size[:dim] + torch.Size([num_chunks, -1])
-        padded_tensors.append(tensor.view(view_size))
+        padded_tensors.append(tensor.reshape(view_size))
     return padded_tensors
 
 
@@ -4389,8 +4389,7 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
     t1_stride = t1.stride()
 
     # Check the contiguous, we can skip the dim with size of 1
-    # as aten: https://github.com/pytorch/pytorch/blob/
-    # e201460f8aa1510b4c4686627d57b69756c4b916/aten/src/ATen/TensorGeometry.cpp#L17
+    # as aten: https://github.com/pytorch/pytorch/blob/e201460f8aa1510b4c4686627d57b69756c4b916/aten/src/ATen/TensorGeometry.cpp#L17
     expected_stride = [1]
     for size in reversed(t1_shape[1:]):
         expected_stride.append(size * expected_stride[-1])

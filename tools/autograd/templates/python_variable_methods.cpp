@@ -842,7 +842,7 @@ static PyObject * THPVariable_requires_grad_(PyObject* self, PyObject* args, PyO
   END_HANDLE_TH_ERRORS
 }
 
-inline bool dispatch_is_contiguous(const Tensor & self, MemoryFormat memory_format) {
+static inline bool dispatch_is_contiguous(const Tensor & self, MemoryFormat memory_format) {
   return self.is_contiguous(memory_format);
 }
 

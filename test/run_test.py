@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     set_cwd,
     shell,
     TEST_CUDA,
+    TEST_SAVE_XML,
     TEST_WITH_ASAN,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
@@ -268,6 +269,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_multiprocessing",
     "test_multiprocessing_spawn",
     "test_namedtuple_return_api",
+    "test_openreg",
     "test_overrides",
     "test_show_pickle",
     "test_tensorexpr",
@@ -339,20 +341,22 @@ DISTRIBUTED_TESTS_CONFIG = {}
 
 
 if dist.is_available():
+    num_gpus = torch.cuda.device_count()
     DISTRIBUTED_TESTS_CONFIG["test"] = {"WORLD_SIZE": "1"}
     if not TEST_WITH_ROCM and dist.is_mpi_available():
         DISTRIBUTED_TESTS_CONFIG["mpi"] = {
             "WORLD_SIZE": "3",
         }
-    if dist.is_nccl_available():
+    if dist.is_nccl_available() and num_gpus > 0:
         DISTRIBUTED_TESTS_CONFIG["nccl"] = {
-            "WORLD_SIZE": f"{torch.cuda.device_count()}",
+            "WORLD_SIZE": f"{num_gpus}",
         }
     if dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG["gloo"] = {
             # TODO: retire testing gloo with CUDA
-            "WORLD_SIZE": f"{torch.cuda.device_count()}",
+            "WORLD_SIZE": f"{num_gpus if num_gpus > 0 else 3}",
         }
+    del num_gpus
     # Test with UCC backend is deprecated.
     # See https://github.com/pytorch/pytorch/pull/137161
     # if dist.is_ucc_available():
@@ -1166,7 +1170,7 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
         # is much slower than running them directly
         pytest_args.extend(["-n", str(NUM_PROCS)])
 
-        if IS_CI:
+        if TEST_SAVE_XML:
             # Add the option to generate XML test report here as C++ tests
             # won't go into common_utils
             test_report_path = get_report_path(pytest=True)
@@ -1222,6 +1226,7 @@ CUSTOM_HANDLERS = {
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
     "test_cpp_extensions_open_device_registration": run_test_with_openreg,
+    "test_openreg": run_test_with_openreg,
     "test_transformers_privateuse1": run_test_with_openreg,
 }
 
@@ -1512,10 +1517,14 @@ def get_selected_tests(options) -> list[str]:
 
     # Filter to only run functorch tests when --functorch option is specified
     if options.functorch:
-        selected_tests = [tname for tname in selected_tests if tname in FUNCTORCH_TESTS]
+        selected_tests = list(
+            filter(lambda test_name: test_name in FUNCTORCH_TESTS, selected_tests)
+        )
 
     if options.cpp:
-        selected_tests = [tname for tname in selected_tests if tname in CPP_TESTS]
+        selected_tests = list(
+            filter(lambda test_name: test_name in CPP_TESTS, selected_tests)
+        )
     else:
         # Exclude all C++ tests otherwise as they are still handled differently
         # than Python test at the moment
@@ -1532,6 +1541,7 @@ def get_selected_tests(options) -> list[str]:
             "test_view_ops",
             "test_nn",
             "inductor/test_mps_basic",
+            "inductor/test_torchinductor",
         ]
     else:
         # Exclude all mps tests otherwise
@@ -1581,6 +1591,13 @@ def get_selected_tests(options) -> list[str]:
                 "functorch/test_memory_efficient_fusion",
                 "torch_np/numpy_tests/core/test_multiarray",
             ]
+        )
+
+    if sys.version_info[:2] < (3, 13):
+        # Skip tests for older Python versions as they may use syntax or features
+        # not supported in those versions
+        options.exclude.extend(
+            [test for test in selected_tests if test.startswith("dynamo/cpython/3_13/")]
         )
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
