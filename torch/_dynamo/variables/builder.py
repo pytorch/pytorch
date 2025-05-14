@@ -2126,7 +2126,6 @@ class VariableBuilder:
             # know if bare integers are actually going to be sizevars
             # and it is inappropriate to eagerly duck size them with
             # real sizevars
-            print("HIT AUTOMATIC DYANMIC SHAPE CODE")
             normalized_source_name = normalize_source_name(self.source.name())
             base_source = self.source
             if isinstance(base_source, ChainedSource):
