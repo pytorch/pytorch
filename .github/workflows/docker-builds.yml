@@ -67,8 +67,8 @@ jobs:
           pytorch-linux-jammy-py3.9-gcc11,
           pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks,
           pytorch-linux-jammy-py3.12-halide,
-          pytorch-linux-jammy-xpu-2024.0-py3,
           pytorch-linux-jammy-xpu-2025.0-py3,
+          pytorch-linux-jammy-xpu-2025.1-py3,
           pytorch-linux-jammy-py3-clang15-asan,
           pytorch-linux-jammy-py3-clang18-asan,
           pytorch-linux-focal-py3-clang10-onnx,
@@ -128,7 +128,7 @@ jobs:
           docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
 
       - uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
-        name: Push to https://https://ghcr.io/
+        name: Push to https://ghcr.io/
         id: push-to-ghcr-io
         if: ${{ github.event_name == 'push' }}
         env:

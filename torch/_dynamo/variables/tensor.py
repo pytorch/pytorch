@@ -597,10 +597,8 @@ class TensorVariable(VariableTracker):
         # Only override builtin tensor methods
         # The user can manually add override handling
         # with a decorator for other methods (e.g. a dispatch subclass with other methods)
-        is_base_tensor_method = True
         static_attr = all_tensor_attrs.get(name, None)
-        if static_attr is None:
-            is_base_tensor_method = False
+        is_base_tensor_method = static_attr is not None
 
         if (
             can_dispatch_torch_function(tx, tuple([self] + list(args)), kwargs)
