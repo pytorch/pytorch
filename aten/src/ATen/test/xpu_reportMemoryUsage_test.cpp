@@ -51,7 +51,7 @@ TEST(DeviceCachingAllocator, check_reporter) {
   EXPECT_TRUE(
       alloc2_true_alloc_size <= static_cast<int64_t>(r.total_reserved) &&
       r.total_reserved <= max_reserved);
-  EXPECT_TRUE(r.device.is_cuda());
+  EXPECT_TRUE(r.device.is_xpu());
 
   alloc2.clear();
   r = reporter->getLatestRecord();
