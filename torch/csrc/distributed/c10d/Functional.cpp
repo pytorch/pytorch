@@ -286,7 +286,7 @@ TORCH_LIBRARY(_c10d_functional, m) {
       "reduce_scatter_tensor(Tensor input, str reduce_op, int group_size, str group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, ::reduce_scatter_tensor),
-      {at::Tag::pt2_compliant_tag});
+      {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
   m.def(
       "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduce_op, int group_size, str group_name) -> Tensor[]",
