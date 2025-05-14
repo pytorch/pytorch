@@ -125,12 +125,12 @@ class TestLinalg(TestCase):
                 del os.environ["HIPBLASLT_ALLOW_TF32"]
 
     def setUp(self):
-        super(self.__class__, self).setUp()
+        super().setUp()
         torch.backends.cuda.matmul.allow_tf32 = False
 
     def tearDown(self):
         torch.backends.cuda.matmul.allow_tf32 = True
-        super(self.__class__, self).tearDown()
+        super().tearDown()
 
     @contextlib.contextmanager
     def _tunableop_ctx(self):
@@ -783,7 +783,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
-    @tf32_on_and_off(0.01)
+    @tf32_on_and_off(0.1 if TEST_WITH_ROCM else 0.01)
     @bf32_on_and_off(0.01)
     def test_old_cholesky(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
@@ -5367,8 +5367,16 @@ class TestLinalg(TestCase):
             m = 3
             n = 5
             k = 7
+            # 'TN' case
             X = torch.rand(m, k, dtype=dtype, device=device)
             matA = torch.rand(n, k, dtype=dtype, device=device)
+            bias = torch.rand(n, dtype=dtype, device=device)
+
+            torch.nn.functional.linear(X, matA, bias)
+
+            # 'NT' case
+            X = torch.rand(k, m, dtype=dtype, device=device).t()
+            matA = torch.rand(k, n, dtype=dtype, device=device).t()
             bias = torch.rand(n, dtype=dtype, device=device)
 
             torch.nn.functional.linear(X, matA, bias)
@@ -5377,7 +5385,7 @@ class TestLinalg(TestCase):
             total_num_results = len(torch.cuda.tunable.get_results())
 
             # There must be a new tuning result
-            self.assertEqual((total_num_results - ref_num_results), 1)
+            self.assertEqual((total_num_results - ref_num_results), 2)
 
     @onlyCUDA
     @skipCUDAIfNotRocm
@@ -5397,12 +5405,19 @@ class TestLinalg(TestCase):
             m = 5
             n = 7
             k = 9
+            # 'TN' case
             X = torch.rand(m, k, dtype=dtype, device=device)
             matA = torch.rand(n, k, dtype=dtype, device=device)
             bias = torch.rand(n, dtype=dtype, device=device)
 
             torch.nn.functional.linear(X, matA, bias)
 
+            # 'NT' case
+            X = torch.rand(k, m, dtype=dtype, device=device).t()
+            matA = torch.rand(k, n, dtype=dtype, device=device).t()
+            bias = torch.rand(n, dtype=dtype, device=device)
+
+            torch.nn.functional.linear(X, matA, bias)
             self.assertTrue(torch.cuda.tunable.is_enabled())
             self.assertTrue(torch.cuda.tunable.tuning_is_enabled() is False)
 
@@ -5424,7 +5439,7 @@ class TestLinalg(TestCase):
             total_num_results = new_results - ref_results
 
             # There must be a new tuning results
-            self.assertEqual(total_num_results, 1)
+            self.assertEqual(total_num_results, 2)
 
             self.assertTrue(torch.cuda.tunable.write_file())
 
@@ -5732,6 +5747,172 @@ class TestLinalg(TestCase):
                 # Check for YAML entry to the right of
                 # BLAS PARAMS
                 self.assertTrue("{ function:" in first_row[4])
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @dtypes(torch.float)
+    def test_mm_submatrix_offline_tunableop(self, device, dtype):
+        # Test offline tuning with submatrices
+        # Covers GEMM, ScaledGEMM, and GEMM+bias.
+        ordinal = torch.cuda.current_device()
+
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            # set these to single iterations to keep it short but still exercise the code
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            # record GEMM
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable.record_untuned_enable(True)
+            self.assertTrue(torch.cuda.tunable.record_untuned_is_enabled())
+
+            lda = 12
+            ldb = 10
+            ldc = 14
+            n = 8
+            m = 4
+            k = 2
+
+            # Covers GEMM and Scaled GEMM cases
+            # Scaled GEMM is a subset of GEMM cases
+            # There might be less confusing ways create submatrices, but this works
+            # just fine and covers the four transA, transB combinations.
+            # 'TN'
+            matA = torch.rand(ldc, lda, dtype=dtype, device=device)
+            matB = torch.rand(ldc, ldb, dtype=dtype, device=device).t()
+            subA = matA[:m, :k]
+            subB = matB[:k, :n]
+            torch.mm(subA, subB)
+
+            # 'NN'
+            matA = torch.rand(lda, ldc, dtype=dtype, device=device)
+            matB = torch.rand(ldc, ldb, dtype=dtype, device=device)
+            subA = matA[:m, :k]
+            subB = matB[:k, :n]
+            torch.mm(subA, subB)
+
+            # 'NT'
+            matA = torch.rand(ldc, lda, dtype=dtype, device=device).t()
+            matB = torch.rand(ldc, ldb, dtype=dtype, device=device)
+            subA = matA[:m, :k]
+            subB = matB[:k, :n]
+            torch.mm(subA, subB)
+
+            # 'TT'
+            matA = torch.rand(k, lda, dtype=dtype, device=device).t()
+            matB = torch.rand(ldb, k, dtype=dtype, device=device).t()
+            subA = matA[:k, :m]
+            subB = matB[:n, :k]
+            torch.mm(subA, subB)
+
+            # Cover GEMM+bias case. Also mostly a subset of the regular
+            # GEMM case but with a implicit transpose which makes code
+            #  path slightly different.
+            # 'TN'
+            X = torch.rand(ldc, lda, dtype=dtype, device=device)
+            matA = torch.rand(ldc, ldb, dtype=dtype, device=device)
+
+            subX = X[:m, :k]
+            subA = matA[:n, :k]
+            bias = torch.rand(n, dtype=dtype, device=device)
+
+            torch.nn.functional.linear(subX, subA, bias)
+
+            # 'NT'
+            X = torch.rand(ldc, lda, dtype=dtype, device=device).t()
+            matA = torch.rand(ldc, ldb, dtype=dtype, device=device).t()
+
+            subX = X[:m, :k]
+            subA = matA[:n, :k]
+            bias = torch.rand(n, dtype=dtype, device=device)
+
+            torch.nn.functional.linear(subX, subA, bias)
+
+            # Strided batch GEMM.
+            # 'TN'
+            b = 3
+            matA = torch.rand(b, ldc, lda, dtype=dtype, device=device)
+            matB = torch.rand(b, ldc, ldb, dtype=dtype, device=device).transpose(1, 2)
+            subA = matA[:b, :m, :k]
+            subB = matB[:b, :k, :n]
+            torch.bmm(subA, subB)
+
+            # 'NN'
+            matA = torch.rand(b, lda, ldc, dtype=dtype, device=device)
+            matB = torch.rand(b, ldc, ldb, dtype=dtype, device=device)
+            subA = matA[:b, :m, :k]
+            subB = matB[:b, :k, :n]
+            torch.bmm(subA, subB)
+
+            # 'NT'
+            matA = torch.rand(b, ldc, lda, dtype=dtype, device=device).transpose(1, 2)
+            matB = torch.rand(b, ldc, ldb, dtype=dtype, device=device)
+            subA = matA[:b, :m, :k]
+            subB = matB[:b, :k, :n]
+            torch.bmm(subA, subB)
+
+            # 'TT'
+            matA = torch.rand(b, k, lda, dtype=dtype, device=device).transpose(1, 2)
+            matB = torch.rand(b, ldb, k, dtype=dtype, device=device).transpose(1, 2)
+            subA = matA[:b, :k, :m]
+            subB = matB[:b, :n, :k]
+            torch.bmm(subA, subB)
+
+            self.assertTrue(torch.cuda.tunable.is_enabled())
+            self.assertTrue(torch.cuda.tunable.tuning_is_enabled() is False)
+
+            untuned_filename = get_tunableop_untuned_filename()
+
+            # tuning the untuned GEMMs in file
+            torch.cuda.tunable.tuning_enable(True)
+            torch.cuda.tunable.record_untuned_enable(False)
+
+            # set these to single iterations to keep it short but still exercise the code
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            ref_results = len(torch.cuda.tunable.get_results())
+            torch.cuda.tunable.tune_gemm_in_file(untuned_filename)
+            new_results = len(torch.cuda.tunable.get_results())
+
+            # This stores total number of cummulative results
+            total_num_results = new_results - ref_results
+
+            # There must be a new tuning results
+            self.assertEqual(total_num_results, 10)
+
+            self.assertTrue(torch.cuda.tunable.write_file())
+
+            # Compare Param Signature of untuned and tuned results
+            ok = self._compare_untuned_tuned_entries()
+            self.assertTrue(ok)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @runOnRocmArch(MI300_ARCH)
+    @dtypes(torch.torch.float8_e4m3fnuz)
+    def test_rowwise_scaled_gemm_numerics_tunableop(self, device, dtype):
+        # Test Scaled GEMM rowwise numerics
+        # Compute rowwise scaled_gemm via non-TunableOp code path
+        # compare it with rowwise scaled_gemm via TunableOp Default
+        # code path.
+        n = m = k = 16
+        matA = torch.randn((m, k), dtype=torch.half, device=device).to(dtype)
+        matB = torch.randn((n, k), dtype=torch.half, device=device).to(dtype).t()
+
+        scaleA = torch.randn((matA.shape[0], 1), device=device)
+        scaleB = torch.randn((1, matB.shape[1]), device=device)
+        ref_scaled_mm = torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=torch.bfloat16)
+
+        with self._tunableop_ctx():
+            # Deactivate Tuning so that rowwise scaledGEMM fallbacks to Default
+            # code path in TunableOp.
+            torch.cuda.tunable.tuning_enable(False)
+            tuned_default_scaled_mm = torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=torch.bfloat16)
+
+        delta = tuned_default_scaled_mm - ref_scaled_mm
+        self.assertTrue(torch.all(delta == 0))
 
     @dtypes(torch.float, torch.complex64)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):
@@ -6973,7 +7154,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(*floating_and_complex_types())
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
     @bf32_on_and_off(0.005)
     def test_addmm_sizes(self, device, dtype):
         for m in [0, 1, 25]:
@@ -9234,7 +9415,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual((torch.tensor(1., device=device), torch.tensor(0., device=device)),
                          fn(torch.slogdet, (0, 0)))
 
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
     @bf32_on_and_off(0.07)
     def test_tensordot(self, device):
         a = torch.arange(60., device=device).reshape(3, 4, 5)

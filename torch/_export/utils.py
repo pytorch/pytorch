@@ -382,7 +382,9 @@ def _check_symint(
         if i is not None:
             path += f".shape[{i}]"
         raise RuntimeError(
-            f"Expected input at {path} to be equal to {symint}, but got {arg}",
+            f"Expected input at {path} to be equal to {symint}, but got {arg}. "
+            "If you meant for this dimension to be dynamic, please re-export and specify dynamic_shapes "
+            "(e.g. with Dim.DYNAMIC)"
         )
 
 
@@ -990,6 +992,12 @@ def placeholder_naming_pass(
             placeholder_prefixes[spec.kind] + base_name,
             is_placeholder=True,
         )
+        if base_name in custom_meta:
+            # the keys in custom_meta are node names from `mod`,
+            # which is the base_name here.
+            # we need the re-mapped name for lookup later
+            custom_meta[name_map[spec.arg.name]] = custom_meta[base_name]
+            del custom_meta[base_name]
 
     # handle naming collisions with call_function/get_attr inputs.
     # here, we want to prioritize user input names over call_function names
@@ -1006,7 +1014,10 @@ def placeholder_naming_pass(
             assert node.name in name_map
             node.name = node.target = name_map[node.name]
             if node.name in custom_meta:
-                node.meta["custom"] = custom_meta[node.name]
+                if node.meta.get("custom") is None:
+                    node.meta["custom"] = custom_meta[node.name]
+                else:
+                    assert node.meta["custom"] == custom_meta[node.name]
             # if the constant obj is an input, we also need to update meta["val"]
             # because this is created before the placeholder naming pass
             if isinstance(node.meta["val"], CustomObjArgument):
