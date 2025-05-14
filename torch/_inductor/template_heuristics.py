@@ -95,26 +95,49 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         # will be utilised on the target platform. The configs are as follows:
         # (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps)
         self.mm_configs: list[BaseConfig] = [
-            GemmConfig(32, 32, 16, 1, 2),
-            GemmConfig(32, 32, 128, 2, 4),
-            GemmConfig(32, 64, 32, 5, 8),
-            GemmConfig(64, 32, 32, 5, 8),
-            GemmConfig(64, 32, 128, 5, 4),
-            GemmConfig(64, 64, 16, 2, 4),
-            GemmConfig(64, 64, 32, 2, 4),
-            GemmConfig(64, 64, 64, 3, 8),
-            GemmConfig(64, 64, 128, 5, 4),
-            GemmConfig(64, 128, 32, 3, 4),
-            GemmConfig(64, 128, 32, 4, 8),
-            GemmConfig(64, 128, 64, 3, 4),
-            GemmConfig(64, 128, 128, 4, 4),
-            GemmConfig(128, 64, 32, 3, 4),
-            GemmConfig(128, 64, 32, 4, 8),
-            GemmConfig(128, 128, 32, 2, 8),
-            GemmConfig(128, 128, 32, 3, 4),
+            GemmConfig(16, 16, 128, 5, 1),
+            GemmConfig(16, 16, 256, 4, 1),
+            GemmConfig(64, 16, 128, 4, 4),
+            GemmConfig(64, 16, 256, 4, 4),
+            GemmConfig(64, 32, 128, 4, 4),
+            GemmConfig(64, 32, 128, 5, 8),
+            GemmConfig(63, 32, 256, 1, 8),
+            GemmConfig(64, 64, 128, 4, 4),
+            GemmConfig(64, 128, 64, 4, 4),
+            GemmConfig(64, 128, 128, 3, 4),
+            GemmConfig(128, 16, 128, 5, 8),
+            GemmConfig(128, 128, 32, 5, 8),
             GemmConfig(128, 128, 64, 3, 4),
-            GemmConfig(128, 128, 64, 5, 8),
+            GemmConfig(128, 128, 64, 3, 8),
+            GemmConfig(128, 128, 64, 4, 4),
+            GemmConfig(128, 128, 64, 4, 8),
+            GemmConfig(128, 256, 32, 5, 8),
+            GemmConfig(128, 256, 64, 3, 8),
+            GemmConfig(128, 256, 64, 4, 8),
+            #GemmConfig(128, 256, 64, 5, 8),
+            GemmConfig(256, 128, 32, 5, 8)
         ]
+        # self.mm_configs: list[BaseConfig] = [
+        #     GemmConfig(32, 32, 16, 1, 2),
+        #     GemmConfig(32, 32, 128, 2, 4),
+        #     GemmConfig(32, 64, 32, 5, 8),
+        #     GemmConfig(64, 32, 32, 5, 8),
+        #     GemmConfig(64, 32, 128, 5, 4),
+        #     GemmConfig(64, 64, 16, 2, 4),
+        #     GemmConfig(64, 64, 32, 2, 4),
+        #     GemmConfig(64, 64, 64, 3, 8),
+        #     GemmConfig(64, 64, 128, 5, 4),
+        #     GemmConfig(64, 128, 32, 3, 4),
+        #     GemmConfig(64, 128, 32, 4, 8),
+        #     GemmConfig(64, 128, 64, 3, 4),
+        #     GemmConfig(64, 128, 128, 4, 4),
+        #     GemmConfig(128, 64, 32, 3, 4),
+        #     GemmConfig(128, 64, 32, 4, 8),
+        #     GemmConfig(128, 128, 32, 2, 8),
+        #     GemmConfig(128, 128, 32, 3, 4),
+        #     GemmConfig(128, 128, 64, 3, 4),
+        #     GemmConfig(128, 128, 64, 5, 8),
+        # ]
 
         # Exhaustive search for mm configs
         self.exhaustive_configs: list[BaseConfig] = [
@@ -441,6 +464,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         return TritonConfig(kwargs, num_stages=num_stages, num_warps=num_warps)
 
     def get_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
+        breakpoint()
         return partial(self.preprocess_mm_configs, configs=self.mm_configs)
 
     def get_exhaustive_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
