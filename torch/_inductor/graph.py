@@ -1870,20 +1870,35 @@ class GraphLowering(torch.fx.Interpreter):
         self, n: torch.fx.Node, new_unbacked_defs: OrderedSet[sympy.Symbol]
     ) -> None:
         # [NOTE] Codegen runtime asserts in Inductor
-        # In TorchInductor, we need to generate runtime asserts directly, but
-        # for AOTInductor, we can re-use the asserts from exported graphs.
         #
-        # For export, our strategy for generating runtime asserts was that
-        # Dynamo or non-strict export would insert them into the FX graph
-        # after finishing tracing, and we would attempt to code generate
-        # them based on the FX graph. This is a good strategy for export,
-        # where we immediately export the graph. However, this strategy
-        # was afflicted by problems in eager, where we reuse the same
-        # ShapeEnv as before. In particular, on subsequent graph passes,
+        # We need to generate runtime asserts directly in Inductor instead
+        # of just re-using the asserts from input graphs becase we reuse the
+        # same ShapeEnv as before. In particular, on subsequent graph passes,
         # we would immediately turn all of these assertions into noops,
         # because when we evaluated their expressions, we would see that
         # because we had a deferred runtime assert in the ShapeEnv, we
         # know "oh, of course this expression is True" already.
+        # One example is below:
+        #
+        # class Model(torch.nn.Module):
+        #     def forward(self, a, b, c):
+        #         nz = torch.nonzero(a)
+        #         ones = a.new_ones([nz.size(0), b.size(0)])
+        #         torch._check(ones.size(0) >= 1)
+        #         equals = torch.add(ones, c)
+        #         return equals
+        # torch._dynamo.mark_dynamic(c, 0)
+        # When we re-use the ShapeEnv in Inductor lowering, the check that checks
+        # a and nonzero have the same shape would be evaluted to True after we resolve
+        # unbacked bindings using the ShapeEnv.
+        # See test_unbacked_equals_input_size_runtime_assertion in test_aot_inductor.
+        #
+        #
+        # In addition to the Inductor generated runtime asserts, we also
+        # need the runtime asserts from the input graph, because some derived
+        # runtime asserts on backed symints are not generated in Inductor. One example is
+        # this: `y = x.reshape(100, -1).clone()`. x.shape[0] needs to be a multiple of 100.
+        # See test_aoti_runtime_asserts_backed_symint in test_aot_inductor.
 
         def make_assert(expr: SympyBoolean, msg: str) -> None:
             assert_op = ir.AssertScalar(expr, msg)
@@ -1896,7 +1911,6 @@ class GraphLowering(torch.fx.Interpreter):
             and self.aot_mode
         ):
             node_args, _ = self.fetch_args_kwargs_from_env(n)
-            # some assert may have been captured by unbacked symint assertion
             if node_args[0] != True:  # noqa: E712
                 make_assert(node_args[0], f"{node_args[0]} to be True")
         else:
@@ -1979,12 +1993,7 @@ class GraphLowering(torch.fx.Interpreter):
         )
 
         if self.const_module:
-            # If we have const module, we could reuse the kernels
-            # This could avoid duplication and save time on doing recompilation (if Triton.)
             self.wrapper_code._names_iter = self.const_module.wrapper_code._names_iter
-            self.wrapper_code.src_to_kernel = (
-                self.const_module.wrapper_code.src_to_kernel
-            )
 
     def extract_autotune_inputs(
         self, example_inputs: list[Union[int, float, torch.Tensor]]

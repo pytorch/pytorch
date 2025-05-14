@@ -255,6 +255,20 @@ def build_subgraph_buffer(args: list[TensorBox], subgraph: Subgraph) -> Subgraph
     return build_subgraph_module_buffer(args, subgraph.graph_module)
 
 
+def get_fwd_subgraph_outputs(
+    subgraph_buffer: SubgraphResults, mask_graph_buffer: SubgraphResults
+) -> list[Optional[ComputedBuffer]]:
+    subgraph_buffer = (
+        subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
+    )
+    mask_graph_buffer = (
+        mask_graph_buffer
+        if isinstance(mask_graph_buffer, Sequence)
+        else [mask_graph_buffer]
+    )
+    return [*subgraph_buffer, *mask_graph_buffer]
+
+
 # Inner Triton functions shared by flex_attention & split-k decoding kernels.
 compute_next_offset_func = r"""
 @triton.jit
@@ -1222,6 +1236,15 @@ def lower_cpu(
         inputs_for_autotuning,
         layout,
     )
+
+    # need subgraph inputs and outputs to analyze all symints used in flex attention
+    res.data.data.subgraph_inps = list(score_mod_other_buffers) + list(
+        mask_mod_other_buffers
+    )
+    res.data.data.subgraph_outs = get_fwd_subgraph_outputs(
+        subgraph_buffer, mask_graph_buffer
+    )
+
     return (res,)
 
 
@@ -1570,22 +1593,26 @@ def flex_attention(
         6: create_num_blocks_fake_generator(full_kv_indices),
         7: create_indices_fake,
     }
-    return (
-        autotune_select_algorithm(
-            "flex_attention",
-            choices,
-            # Need to filter out symbols since there is an invariant
-            # that all input_nodes are of type IRNode
-            [
-                x
-                for x in inputs_for_autotuning
-                if isinstance(x, torch._inductor.ir.IRNode)
-            ],
-            layout,
-            input_gen_fns=input_gen_fns,
-        ),
-        logsumexp,
+
+    out = autotune_select_algorithm(
+        "flex_attention",
+        choices,
+        # Need to filter out symbols since there is an invariant
+        # that all input_nodes are of type IRNode
+        [x for x in inputs_for_autotuning if isinstance(x, torch._inductor.ir.IRNode)],
+        layout,
+        input_gen_fns=input_gen_fns,
     )
+
+    # need subgraph inputs and outputs to analyze all symints used in flex attention
+    out.data.data.subgraph_inps = list(score_mod_other_buffers) + list(
+        mask_mod_other_buffers
+    )
+    out.data.data.subgraph_outs = get_fwd_subgraph_outputs(
+        subgraph_buffer, mask_graph_buffer
+    )
+
+    return (out, logsumexp)
 
 
 # ---------------------------- Backward HOP Implementation ----------------------------
@@ -2715,6 +2742,14 @@ def flex_attention_backward(*args, **kwargs):
         input_gen_fns=input_gen_fns,
     )  # [Bq, Hkv, seq_len_kv, k_head_dim]
 
+    # need subgraph inputs and outputs to analyze all symints used in flex attention
+    broadcasted_grad_key.data.data.subgraph_inps = list(score_mod_other_buffers) + list(
+        mask_mod_other_buffers
+    )
+    broadcasted_grad_key.data.data.subgraph_outs = get_bwd_subgraph_outputs(
+        fw_subgraph_buffer, mask_graph_buffer, joint_outputs
+    )
+
     if V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv)):
         grad_key = broadcasted_grad_key
         grad_value = broadcasted_grad_value
@@ -2728,3 +2763,26 @@ def flex_attention_backward(*args, **kwargs):
         grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
 
     return (grad_query, grad_key, grad_value, tuple(joint_outputs.captured_grads))
+
+
+def get_bwd_subgraph_outputs(
+    subgraph_buffer: SubgraphResults,
+    mask_graph_buffer: SubgraphResults,
+    joint_outputs: JointOutputResult,
+) -> list[Optional[Union[ComputedBuffer, TensorBox]]]:
+    subgraph_buffer = (
+        subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
+    )
+    mask_graph_buffer = (
+        mask_graph_buffer
+        if isinstance(mask_graph_buffer, Sequence)
+        else [mask_graph_buffer]
+    )
+    joint_output_buffers = [
+        joint_outputs.grad_input,
+        *joint_outputs.captured_grads_compute,
+        *joint_outputs.captured_grads,
+        *joint_outputs.mutated_grads,
+    ]
+
+    return [*subgraph_buffer, *mask_graph_buffer, *joint_output_buffers]
