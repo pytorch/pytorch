@@ -3772,14 +3772,9 @@ def is_utils_checkpoint(obj):
 
 
 def is_wrap_generic_fn(obj):
-    if not callable(obj):
-        # "obj in x" on symbolic vals triggers guards
-        # short ciruit before that happens
-        return False
-    try:
-        return obj in torch._dynamo.config._hopify_generic_wrap_fn_kwarg_keys
-    except TypeError:
-        return False
+    # _hopify_generic_wrap_fn_kwarg_keys is a set, but hash(obj) is not very
+    # reliable for arbitrary objects.
+    return any(obj is k for k in torch._dynamo.config._hopify_generic_wrap_fn_kwarg_keys)
 
 
 def is_invoke_subgraph(obj):
