@@ -1540,7 +1540,7 @@ class OutputGraph(OutputGraphGuardsState):
                     replace(node.meta["grapharg"], _example=None)
                     for node in self.placeholders
                 ]
-                preserved_tracing_context = torch._guards.TracingContext.try_get()
+                preserved_tracing_context = torch._guards.TracingContext.get()
                 sources = [a.source for a in self.graphargs]
                 for specialization in specializations:
                     source_index = sources.index(specialization.source)
@@ -1575,12 +1575,17 @@ class OutputGraph(OutputGraphGuardsState):
                                 return specialization_cache[specialization](
                                     *args, **kwargs
                                 )
+
                             for node, grapharg, arg in zip(
                                 self.placeholders, preserved_graphargs, args
                             ):
                                 node.meta["grapharg"] = replace(grapharg, _example=arg)
+
                             with tracing(preserved_tracing_context):
-                                with preserved_tracing_context.fake_mode.shape_env.patch_source_specialization(
+                                shape_env = (
+                                    preserved_tracing_context.fake_mode.shape_env
+                                )
+                                with shape_env.patch_source_specialization(
                                     specialization.source, specialization.check_fn
                                 ):
                                     # Modify gm so AOTAutogradCache key changes per specialization
