@@ -390,7 +390,10 @@ jobs:
       - name: copy logs
         shell: bash
         run: |
-          echo "Post-build check in $(pwd)"ls -alh ./*.txt || echo "No txt files"
+          echo "Post-build check in $(pwd)"
+          ls -alh ./*.txt || echo "No txt files"
+          rm -f ./usage_logs         # Remove file if it exists
+          mkdir -p ./usage_logs      # Create dir safely
           cp ../../usage_logs/usage_log_build_*.txt ./usage_logs/
           cat ./usage_logs/usage_log_build_*.txt
 
