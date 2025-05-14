@@ -196,6 +196,7 @@ __global__ void exchangeSplitAndOffset(int64_t* in_out_splits, int mype, int npe
 
 // This kernel is used to do the actual data exchange.
 // `in_out_splits` has the same definition as in `exchangeSplitAndOffset`.
+// `stride` is the stride at dim 0, unit in byte.
 __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_splits, size_t stride, int mype, int npes) {
   auto output_splits = in_out_splits + npes;
   auto source_offsets = in_out_splits + npes * 2;
@@ -208,12 +209,11 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_spli
   __syncthreads();
 
   // Each block targets a different peer
-  size_t row_size = stride * sizeof(float);  // Assuming float (TODO)
   for (int i = bid; i < npes; i += gridDim.x) {
     int peer = (mype + i) % npes;
-    auto size = output_splits[peer] * row_size;
-    auto source_offset = source_offsets[peer] * row_size;
-    auto write_offset = peer_offsets[peer] * row_size;
+    auto size = output_splits[peer] * stride;
+    auto source_offset = source_offsets[peer] * stride;
+    auto write_offset = peer_offsets[peer] * stride;
     nvshmemx_getmem_block(
       (char*)recv_data + write_offset,
       (char*)send_data + source_offset,
@@ -270,12 +270,12 @@ at::Tensor nvshmem_all_to_all_vdev(
   // Limit the number of blocks to 16
   int num_blocks = std::min(world_size, 16);
   // Stride at dim 0 (assuming input is contiguous, TODO)
-  size_t stride = input.stride(0);
+  size_t stride_bytes = input.stride(0) * input.element_size();
   void* args1[] = {
       &input_ptr,
       &output_ptr,
       &splits_ptr,
-      &stride,
+      &stride_bytes,
       &rank,
       &world_size};
   nvshmemx_collective_launch(
