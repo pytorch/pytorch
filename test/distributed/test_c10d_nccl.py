@@ -39,7 +39,7 @@ import torch.testing._internal.common_utils as common
 from torch import nn
 from torch._C._distributed_c10d import ErrorType, OpType, WorkResult
 from torch.nn.parallel import DistributedDataParallel
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_cuda import TEST_MULTIGPU, _get_torch_rocm_version
 from torch.testing._internal.common_distributed import (
     get_timeout,
     init_multigpu_helper,
@@ -4530,9 +4530,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
                     #ROCm runtime used to call uSleep(20 µs)inside the default‑signal busy-wait loop.
                     #Now, this sleep is removed which lets the host thread spin continuously
                     #Therefore, the state can either be scheduled or started before test dumps the trace.
-                    if TEST_WITH_ROCM and timing_enabled:
-                        self.assertEqual(
-                            t[-1]["state"], ("scheduled", "started"))
+                    if TEST_WITH_ROCM and _get_torch_rocm_version() >= (6,4) and timing_enabled:
+                        assert(
+                            t[-1]["state"] in ("scheduled", "started"))
                     else:
                         self.assertEqual(
                             t[-1]["state"], self.started_or_scheduled(timing_enabled)
