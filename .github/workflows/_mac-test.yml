@@ -253,6 +253,12 @@ jobs:
         run: |
           kill "$MONITOR_SCRIPT_PID"
 
+      - name: check file
+        if: always()
+        shell: bash
+        run: |
+          find . -type f -name "usage_log.txt"
+
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
         if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
@@ -268,6 +274,12 @@ jobs:
           schema-version: v3
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: check file
+        if: always()
+        shell: bash
+        run: |
+          find . -type f -name "usage_log.txt"
+
       - name: Upload utilization stats
         if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && !inputs.disable-monitor }}
         continue-on-error: true
@@ -278,6 +290,7 @@ jobs:
           workflow_name: ${{ github.workflow }}
           workflow_run_id: ${{github.run_id}}
           workflow_attempt: ${{github.run_attempt}}
+          local_path: usage_log.txt
 
       - name: Clean up disk space
         if: always()

@@ -23,7 +23,11 @@ inputs:
       type: string
       description: 'the job name of the test'
       required: True
-
+    local_path:
+      type: string
+      description: 'the local path to the utilization stats file'
+      required: False
+      default: ''
 runs:
   using: composite
   steps:
@@ -35,6 +39,9 @@ runs:
         echo "workflow_Name: ${{inputs.workflow_name}}"
         echo "job_id: ${{inputs.job_id}}"
         echo "job_name:  ${{inputs.job_name}}"
+        echo $(pwd)
+        ls ./*.txt
+        ls ./*.json
     - uses: nick-fields/retry@v3.0.0
       name: Setup dependencies
       with:
@@ -53,4 +60,5 @@ runs:
           --workflow-name "${{inputs.workflow_name}}" \
           --workflow-run-attempt "${{inputs.workflow_attempt}}" \
           --job-id "${{inputs.job_id}}" \
-          --job-name "${{inputs.job_name}}"
+          --job-name "${{inputs.job_name}}" \
+          --local-path "${{inputs.local_path}}"
