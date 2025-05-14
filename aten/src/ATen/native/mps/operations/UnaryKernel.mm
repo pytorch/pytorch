@@ -24,7 +24,12 @@ void unary_op_kernel(const std::string func_name, const Tensor& input, const Ten
   if (length == 0) {
     return;
   }
-  auto iter = TensorIteratorConfig().allow_cpu_scalars(true).add_output(output).add_input(input).build();
+  auto iter = TensorIteratorConfig()
+                  .allow_cpu_scalars(true)
+                  .add_output(output)
+                  .add_input(input)
+                  .check_all_same_dtype(false)
+                  .build();
 
   lib.exec_unary_kernel(iter, func_name);
 }
