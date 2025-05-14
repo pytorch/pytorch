@@ -694,7 +694,7 @@ def add_docstr_to_hint(docstr: str, hint: str) -> str:
     docstr = inspect.cleandoc(docstr).strip()
     if "..." in hint:  # function or method
         assert hint.endswith("..."), f"Hint `{hint}` does not end with '...'"
-        hint = hint[:-3].rstrip()  # remove "..."
+        hint = hint.removesuffix("...").rstrip()  # remove "..."
         content = hint + "\n" + textwrap.indent(f'r"""\n{docstr}\n"""', prefix="    ")
         # Remove trailing whitespace on each line
         return "\n".join(map(str.rstrip, content.splitlines())).rstrip()
