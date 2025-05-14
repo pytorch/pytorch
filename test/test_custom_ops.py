@@ -1784,15 +1784,9 @@ def forward(self, x_1):
 
         self.assertEqual(len(counters["graph_break"]), 1)
         self.assertEqual(next(iter(counters["graph_break"].values())), 1)
-        self.assertExpectedInline(
-            next(iter(counters["graph_break"].keys())).replace(";", "\n"),
-            """\
-Dynamic shape operator
-  Explanation: Operator `_torch_testing.numpy_nonzero.default`'s output shape depends on input Tensor data.
-  Hint: Enable tracing of dynamic shape operators with `torch._dynamo.config.capture_dynamic_output_shape_ops = True`
-
-  Developer debug context: _torch_testing.numpy_nonzero.default
-""",
+        self.assertEqual(
+            next(iter(counters["graph_break"].keys())),
+            "Dynamic shape operator",
         )
 
     # pre-existing problem: torch.compile(dynamic=True) will, by default,
