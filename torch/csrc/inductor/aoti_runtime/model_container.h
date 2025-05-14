@@ -12,6 +12,34 @@
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_runtime/model.h>
 
+namespace {
+
+// The state transition is done by:
+// (1) NONE state: The default state when created. This state should only exist
+// when model_container is created and no constants are being loaded or updated.
+// (2) INITIALIZED state: This state get set whenever we load the constants into
+// the buffer. This could be done by load_constants or update_constants_buffer.
+// (3) FOLDED state: This state should transition from INITIALILZED after
+// const_fold is being invoked.
+enum class ConstantState : uint8_t { NONE, INITIALIZED, FOLDED, UNKNOWN };
+
+std::string toStringConstantState(ConstantState state) {
+  switch (state) {
+    case ConstantState::NONE:
+      return "ConstantState::NONE";
+    case ConstantState::INITIALIZED:
+      return "ConstantState::INITIALIZED";
+    case ConstantState::FOLDED:
+      return "ConstantState::FOLDED";
+    case ConstantState::UNKNOWN:
+      return "ConstantState::UNKNOWN";
+    default:
+      return "Unknown enum class state for ConstantState";
+  }
+}
+
+} // namespace
+
 namespace torch::aot_inductor {
 
 class AOTInductorModelContainer {
@@ -56,6 +84,7 @@ class AOTInductorModelContainer {
     constants_internal_offset_.resize(
         model->num_constants() - model->num_folded_constants());
     model->compute_constant_blob(blob_size_, constants_internal_offset_);
+    constant_folded_ = ConstantState::INITIALIZED;
 
     for (auto& model : models_) {
       model->update_constants_map(constants_map_);
@@ -78,24 +107,27 @@ class AOTInductorModelContainer {
     std::shared_lock model_lk(model_exec_mutex_);
     auto* model = get_available_model();
 
-    if (!constant_folded_) {
+    if (constant_folded_ == ConstantState::INITIALIZED) {
       // At this point, constant is not ready yet. We need to call constant
       // folding before we execute the model. We obtain a unique lock at this
       // point to make sure constant is ready for all.
       model_lk.unlock();
       std::unique_lock constants_folding_lk(model_exec_mutex_);
       // Double locking to make sure constant folding is only ran once.
-      if (!constant_folded_) {
+      if (constant_folded_ == ConstantState::INITIALIZED) {
         auto folded_const_map = model->run_const_fold(
             stream, proxy_executor, /* initialization = */ true);
         update_constant_buffer(
             std::move(folded_const_map),
             /* use_inactive = */ false,
             /* validate_full_update = */ false);
-        constant_folded_ = true;
+        constant_folded_ = ConstantState::FOLDED;
       }
       constants_folding_lk.unlock();
       model_lk.lock();
+    } else if (constant_folded_ != ConstantState::FOLDED) {
+      throw std::runtime_error(
+          "Unknown constant state: " + toStringConstantState(constant_folded_));
     }
 
     try {
@@ -127,14 +159,17 @@ class AOTInductorModelContainer {
       AOTIProxyExecutorHandle proxy_executor) {
     auto* model = available_models_[0];
 
-    if (!constant_folded_) {
+    if (constant_folded_ == ConstantState::INITIALIZED) {
       auto folded_const_map = model->run_const_fold(
           stream, proxy_executor, /* initialization = */ true);
       update_constant_buffer(
           std::move(folded_const_map),
           /* use_inactive = */ false,
           /* validate_full_update = */ false);
-      constant_folded_ = true;
+      constant_folded_ = ConstantState::FOLDED;
+    } else if (constant_folded_ != ConstantState::FOLDED) {
+      throw std::runtime_error(
+          "Unknown constant state: " + toStringConstantState(constant_folded_));
     }
 
     model->run_single_threaded(
@@ -232,6 +267,7 @@ class AOTInductorModelContainer {
             std::move(folded_const_map),
             /* use_inactive = */ false,
             /* validate_full_update = */ false);
+        constant_folded_ = ConstantState::FOLDED;
       } catch (...) {
         std::lock_guard lk(models_mutex_);
         available_models_.push_back(model);
@@ -262,6 +298,7 @@ class AOTInductorModelContainer {
         model->update_constants_map(
             constants_map, /* remap_constants_array= */ false);
         model->update_constants_array(constants_array);
+        constant_folded_secondary_ = ConstantState::FOLDED;
       } catch (...) {
         std::lock_guard lk(models_mutex_);
         available_models_.push_back(model);
@@ -276,17 +313,21 @@ class AOTInductorModelContainer {
     pending_models_available_.notify_one();
   }
 
-  bool _should_skip_update(const size_t idx) const {
+  bool _is_tensor_constant_type(const size_t idx) const {
     auto constant_type = models_[0]->constant_type(static_cast<int64_t>(idx));
     // We should skip constants
     return constant_type == ConstantType::TensorConstant;
   }
 
-  bool _could_skip_update(const size_t idx) const {
+  bool _is_buffer_type(const size_t idx) const {
     auto constant_type = models_[0]->constant_type(static_cast<int64_t>(idx));
     // Buffer can be optionally skipped, so if it not provided by upstream
     // services, it is OK to relax the check.
     return constant_type == ConstantType::Buffer;
+  }
+
+  bool _is_tensor_constant_or_buffer_type(const size_t idx) const {
+    return _is_tensor_constant_type(idx) || _is_buffer_type(idx);
   }
 
   void assert_all_constants(
@@ -301,7 +342,7 @@ class AOTInductorModelContainer {
           std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
       auto it = constants_map.find(constant_name);
       if (it == constants_map.end()) {
-        if (_should_skip_update(idx) || _could_skip_update(idx)) {
+        if (_is_tensor_constant_or_buffer_type(idx)) {
           // tracing sometimes creates tensors that are non-existent in
           // original graph. We could skip those and do a direct copy.
           std::cerr << "[WARNING] Found constant or module state buffer "
@@ -328,6 +369,11 @@ class AOTInductorModelContainer {
       assert_all_constants(constants_map);
     }
 
+    ConstantState& const_folded = use_inactive == use_secondary_
+        ? constant_folded_
+        : constant_folded_secondary_;
+    const_folded = ConstantState::INITIALIZED;
+
     auto original_constants_map = get_constants_map(!use_inactive);
     auto constants_map_to_update = get_constants_map(use_inactive);
 
@@ -337,12 +383,12 @@ class AOTInductorModelContainer {
           std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
       auto it = constants_map.find(constant_name);
       if (it == constants_map.end() &&
-          !(_should_skip_update(idx) && use_inactive)) {
+          !(use_inactive && _is_tensor_constant_type(idx))) {
         continue;
       }
 
       AtenTensorHandle tensor;
-      if (_should_skip_update(idx) && use_inactive) {
+      if (it == constants_map.end()) {
         aoti_torch_clone(
             original_constants_map->find(constant_name)->second.get(), &tensor);
       } else {
@@ -371,6 +417,11 @@ class AOTInductorModelContainer {
       assert_all_constants(constants_map);
     }
 
+    ConstantState& const_folded = use_inactive == use_secondary_
+        ? constant_folded_
+        : constant_folded_secondary_;
+    const_folded = ConstantState::INITIALIZED;
+
     auto original_constants_map = get_constants_map(!use_inactive);
     auto constants_map_to_update = get_constants_map(use_inactive);
 
@@ -380,19 +431,20 @@ class AOTInductorModelContainer {
           std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
       auto it = constants_map.find(constant_name);
       if (it == constants_map.end() &&
-          !(_should_skip_update(idx) && use_inactive)) {
+          !(use_inactive && _is_tensor_constant_or_buffer_type(idx))) {
         continue;
       }
 
       AtenTensorHandle tensor;
-      if (_should_skip_update(idx) && use_inactive) {
+      if (it == constants_map.end()) {
         tensor = original_constants_map->find(constant_name)->second.get();
       } else {
         tensor = it->second;
       }
 
       if (user_managed) {
-        // If user managed, we pass in the pointer directly, and skip the copy.
+        // If user managed, we pass in the pointer directly, and skip the
+        // copy.
         constants_map_to_update->insert_or_assign(
             constant_name,
             MaybeOwningAtenTensorHandle(tensor, /* user_managed = */ true));
@@ -446,8 +498,8 @@ class AOTInductorModelContainer {
           device_idx,
           &tensor_handle));
 
-      // Now place the tensor to constants_map. Note at this point the ownership
-      // of the tensor_handle will be taken over.
+      // Now place the tensor to constants_map. Note at this point the
+      // ownership of the tensor_handle will be taken over.
       constants_map_to_update->insert_or_assign(
           constant_name, RAIIAtenTensorHandle(tensor_handle));
     }
@@ -483,13 +535,16 @@ class AOTInductorModelContainer {
       model->update_constants_array(constants_array);
     }
 
+    std::swap(constant_folded_, constant_folded_secondary_);
     use_secondary_ = !use_secondary_;
   }
 
   void free_inactive_constant_buffer() {
     if (use_secondary_) {
+      constant_folded_ = ConstantState::NONE;
       constant_blob_.reset();
     } else {
+      constant_folded_secondary_ = ConstantState::NONE;
       constant_blob_secondary_.reset();
     }
     // Free the internally held constants
@@ -556,7 +611,8 @@ class AOTInductorModelContainer {
   bool use_secondary_{false};
 
   // Determine whether we have ran constant folding
-  bool constant_folded_{false};
+  ConstantState constant_folded_{ConstantState::NONE};
+  ConstantState constant_folded_secondary_{ConstantState::NONE};
 
   // Holds the mapping of constants to at::Tensor.
   // The underlying data of at::Tensor is in either constant_blob_ (for CUDA).

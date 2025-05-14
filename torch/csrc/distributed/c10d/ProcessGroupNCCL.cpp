@@ -66,14 +66,32 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
     {at::kLong, ncclInt64},
     {at::kHalf, ncclHalf},
     {at::kBool, ncclUint8},
+#ifdef NCCL_SUPPORTS_FP8
+    {at::kFloat8_e5m2, ncclFloat8e5m2},
+    {at::kFloat8_e4m3fn, ncclFloat8e4m3},
+#else
     {at::kFloat8_e5m2, ncclUint8},
     {at::kFloat8_e4m3fn, ncclUint8},
+#endif
+    // NVIDIA GPUs does not support the UZ version standing for "no negative
+    // zero".  See https://onnx.ai/onnx/technical/float8.html
     {at::kFloat8_e4m3fnuz, ncclUint8},
     {at::kFloat8_e5m2fnuz, ncclUint8},
 #if HAS_NCCL_BF16_DATATYPE
     {at::kBFloat16, ncclBfloat16},
 #endif // HAS_NCCL_BF16_DATATYPE
 };
+
+inline bool isUnsupportedFloat8(at::ScalarType t) {
+  return (
+      t == at::ScalarType::Float8_e5m2fnuz ||
+      t == at::ScalarType::Float8_e4m3fnuz ||
+      t == at::ScalarType::Float8_e8m0fnu
+#ifndef NCCL_SUPPORTS_FP8
+      || t == at::ScalarType::Float8_e5m2 || t == at::ScalarType::Float8_e4m3fn
+#endif
+  );
+}
 
 // Helper function that gets the data type and issues error if not supported
 ncclDataType_t getNcclDataType(at::ScalarType type) {
@@ -990,7 +1008,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   heartbeatTimeoutInSec_ =
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 8 /*8 Mins*/);
   waitTimeoutDumpInMilSec_ =
-      getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 60 * 1000 /*60 Sec*/);
+      getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000 /*15 Sec*/);
   coordCheckIntervalMilSec_ = getCvarInt(TORCH_NCCL_COORD_CHECK_MILSEC, 1000);
   traceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 2000);
   enableCollectiveHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
@@ -1602,6 +1620,9 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 }
 
 bool ProcessGroupNCCL::dumpDebuggingInfo(bool includeStackTrace /*=true*/) {
+  // This will log counter for how long dumpDebuggingInfo actually takes.
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__dumpDebuggingInfo);
+
   // Serialize all calls to this function to avoid corrupting data, but allow
   // multiple calls in one runtime. User is responsible for preserving the
   // output file from an earlier call before a later call overwrites it.
@@ -1620,6 +1641,7 @@ bool ProcessGroupNCCL::dumpDebuggingInfo(bool includeStackTrace /*=true*/) {
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL dumping nccl trace to "
               << writer.getWriterTarget();
     writer.write(ncclTrace);
+    LOG(INFO) << logPrefix() << "Flight Recorder trace successfully dumped.";
     return true;
   }
   return false;
@@ -1664,6 +1686,10 @@ std::string ProcessGroupNCCL::getNCCLWatchdogTimeoutExitMsg(
       "Terminating the process after attempting to dump debug info, due to ",
       exitReason,
       ".");
+}
+
+void ProcessGroupNCCL::setEnableNanCheck(bool enableNanCheck) {
+  enableNanCheck_ = enableNanCheck;
 }
 
 void ProcessGroupNCCL::heartbeatMonitor() {
@@ -1856,6 +1882,9 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         LOG(INFO)
             << logPrefix()
             << "Finished flight recorder successfully. Output can be analyzed using the fr_trace script.";
+        if (i > 0) {
+          debugLog.strings["exception_msg"] = "Dump with stack trace failed.";
+        }
         break;
       }
       // If we failed to dump, try dumping without stack trace in the 2nd
@@ -2375,7 +2404,7 @@ void ProcessGroupNCCL::watchdogHandler() {
           // short period of time, in this case, 60 seconds, which is also the
           // maximum time we leave for FR dump.
           std::this_thread::sleep_for(
-              std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
+              std::chrono::milliseconds(waitTimeoutDumpInMilSec_ * 4));
         }
 
         if (SHOULD_CLEAN_UP(asyncErrorHandling_)) {
@@ -3047,6 +3076,21 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
   return it->second;
 }
 
+int64_t ProcessGroupNCCL::getCommPtr() {
+  // Get the collective communicator on the current CUDA device.
+  auto device = at::Device(at::kCUDA, at::cuda::current_device());
+  std::string deviceKey = getKeyFromDevice(device);
+  auto ncclComm = getNCCLComm(deviceKey);
+
+  // ncclComm is a nullptr if the communicator does not exist.
+  ncclComm_t comm = nullptr;
+  if (ncclComm != nullptr) {
+    comm = ncclComm->getNcclComm();
+  }
+  const int64_t commPtr = reinterpret_cast<int64_t>(comm);
+  return commPtr;
+}
+
 std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     const std::string& deviceKey) {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -3460,6 +3504,27 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
       !coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None;
   auto work = initWork(
       device, rank_, opType, false, profilingTitle, inputs, outputs, enqueue);
+  if (coalescing_state_) {
+    // When coalescing, we record events per op that lack timing/state
+    // information becuase there is no 'work' associated with them, and then
+    // later in endCoalescing we record a 'coalesced' Work which has
+    // timing/state updates via watchdog thread, but lacks op metadata such as
+    // input/output sizes and profilingTitle per-op in the group.
+    FlightRecorder::get()->record(
+        local_id_,
+        std::make_tuple(pg_uid_, pg_desc_),
+        seqCollective_,
+        seqP2P_,
+        op_id_,
+        profilingTitle,
+        inputs,
+        outputs,
+        nullptr,
+        nullptr,
+        options_->timeout,
+        pgStatus_,
+        /*isP2P=*/false);
+  }
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
@@ -3843,7 +3908,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // later in endCoalescing we record a 'coalesced' Work which has
     // timing/state updates via watchdog thread, but lacks op metadata such as
     // input/output sizes and profilingTitle per-op in the group.
-    auto trace_id = FlightRecorder::get()->record(
+    FlightRecorder::get()->record(
         local_id_,
         std::make_tuple(pg_uid_, pg_desc_),
         seqCollective_,
@@ -3862,7 +3927,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // coalesce group gets its update, we could accumulate these trace_ids
     // together and ask FlightRecorder to take the update from one Work and
     // apply it to multiple entries
-    (void)trace_id;
   } else {
     // Store references to outputs to be used by WorkNCCL::result and
     // operator<<. Note that these outputs are only valid for recv(), as send()
@@ -4065,8 +4129,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto tensor = tensors.back();
   TORCH_CHECK(
-      !isFloat8Type(tensor.scalar_type()),
-      "Float8 dtypes are not currenlty supported for NCCL reductions");
+      !isUnsupportedFloat8(tensor.scalar_type()),
+      "Unsupported Float8 type for NCCL reduction");
 #ifdef IS_NCCLX
   tensor = tensor.coalesce();
   at::Tensor outputTensor =
@@ -4185,8 +4249,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
     }
   }
   TORCH_CHECK(
-      !isFloat8Type(tensor.scalar_type()),
-      "Float8 dtypes are not currenlty supported for NCCL reductions");
+      !isUnsupportedFloat8(tensor.scalar_type()),
+      "Unsupported Float8 type for NCCL reduction");
   RECORD_PARAM_COMMS_DATA(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
@@ -4214,8 +4278,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
     const AllreduceCoalescedOptions& opts) {
   auto total_numel = check_gpu_tensors_same_device(tensors);
   TORCH_CHECK(
-      !isFloat8Type(tensors.back().scalar_type()),
-      "Float8 dtypes are not currenlty supported for NCCL reductions");
+      !isUnsupportedFloat8(tensors.back().scalar_type()),
+      "Unsupported Float8 type for NCCL reduction");
 
   RECORD_PARAM_COMMS_DATA(
       std::make_tuple(
@@ -4610,8 +4674,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
   check_gpu_single_tensor(outputTensor);
   auto inputTensors_ = inputTensors.back();
   TORCH_CHECK(
-      !isFloat8Type(outputTensor.scalar_type()),
-      "Float8 dtypes are not currenlty supported for NCCL reductions");
+      !isUnsupportedFloat8(outputTensor.scalar_type()),
+      "Unsupported Float8 type for NCCL reduction");
 
   RECORD_PARAM_COMMS_DATA(
       std::make_tuple(
@@ -4714,8 +4778,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
 
   const auto& tensor = outputTensor;
   TORCH_CHECK(
-      !isFloat8Type(tensor.scalar_type()),
-      "Float8 dtypes are not currenlty supported for NCCL reductions");
+      !isUnsupportedFloat8(tensor.scalar_type()),
+      "Unsupported Float8 type for NCCL reduction");
   RECORD_PARAM_COMMS_DATA(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
@@ -4773,8 +4837,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
     std::vector<at::Tensor>& inputs,
     const ReduceScatterOptions& opts) {
   TORCH_CHECK(
-      !isFloat8Type(inputs.back().scalar_type()),
-      "Float8 dtypes are not currenlty supported for NCCL reductions");
+      !isUnsupportedFloat8(inputs.back().scalar_type()),
+      "Unsupported Float8 type for NCCL reduction");
 
   RECORD_PARAM_COMMS_DATA(
       std::make_tuple(
@@ -5026,6 +5090,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
     const AllToAllOptions& opts) {
   int64_t input_total_numel = 0;
   int64_t output_total_numel = 0;
+  // considering uneven all2all bw calculation
+  // use split sizes field to record tensor list sizes
+  std::vector<int64_t> inSplitSizes;
+  std::vector<int64_t> outSplitSizes;
 
   auto device = outputTensors[0].device();
   for (const auto r : c10::irange(outputTensors.size())) {
@@ -5037,6 +5105,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
         "Tensors must be on the same device")
     input_total_numel += inputTensors[r].numel();
     output_total_numel += outputTensors[r].numel();
+    inSplitSizes.push_back(inputTensors[r].numel());
+    outSplitSizes.push_back(outputTensors[r].numel());
   }
 
   RECORD_PARAM_COMMS_DATA(
@@ -5051,8 +5121,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
       input_total_numel, // inNelems
       output_total_numel, // outNelems
       inputTensors.front().scalar_type(), // dType
-      std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>(), // outSplitSizes
+      inSplitSizes, // inSplitSizes
+      outSplitSizes, // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
       this->getSize()); // worldSize

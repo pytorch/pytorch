@@ -54,47 +54,49 @@ bool setFallbackAllowed(bool value) {
 }
 
 bool fallbackAllowed() {
-  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR_FALLBACK");
-  if (!enable_c_str) {
+  static const auto enable_opt =
+      c10::utils::get_env("PYTORCH_TENSOREXPR_FALLBACK");
+  if (!enable_opt.has_value()) {
     return fallback_allowed;
   }
-  if (std::string(enable_c_str) == "0") {
+  if (enable_opt == "0") {
     return false;
   }
   return true;
 }
 
 static bool fallbackEnforced() {
-  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR_FALLBACK");
+  static const auto enable_opt =
+      c10::utils::get_env("PYTORCH_TENSOREXPR_FALLBACK");
   if (tensorexpr::getTEGenerateBlockCode()) {
     return false;
   }
-  if (!enable_c_str) {
+  if (!enable_opt.has_value()) {
     return fallback_allowed;
   }
-  if (std::string(enable_c_str) == "2") {
+  if (enable_opt == "2") {
     return true;
   }
   return false;
 }
 
 static int64_t randomTransformsRequested() {
-  const char* enable_c_str =
-      std::getenv("PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED");
-  if (!enable_c_str) {
+  const auto enable_opt =
+      c10::utils::get_env("PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED");
+  if (!enable_opt.has_value()) {
     return 0;
   }
-  return std::stoi(std::string(enable_c_str));
+  return std::stoi(enable_opt.value());
 }
 
 #ifdef TORCH_ENABLE_LLVM
 static bool dontUseLLVMFlag() {
-  static const char* enable_c_str =
-      std::getenv("PYTORCH_TENSOREXPR_DONT_USE_LLVM");
-  if (!enable_c_str) {
+  static const auto enable_opt =
+      c10::utils::get_env("PYTORCH_TENSOREXPR_DONT_USE_LLVM");
+  if (!enable_opt) {
     return false;
   }
-  return std::string(enable_c_str) == "1";
+  return enable_opt == "1";
 }
 #endif
 
@@ -226,7 +228,7 @@ bool isContiguous(const torch::jit::Value* v, at::MemoryFormat memory_format) {
   }
 
   // Check dimension size first
-  int ndims = (*sizes).size();
+  auto ndims = (*sizes).size();
   if ((memory_format == at::MemoryFormat::ChannelsLast && ndims != 4) ||
       (memory_format == at::MemoryFormat::ChannelsLast3d && ndims != 5)) {
     return false;
@@ -758,7 +760,7 @@ static void pruneByThreadCount(std::vector<ForPtr>& loops) {
 // in the inner loop, and a maximum level of thread-level parallelism in the
 // outer loops.
 template <typename Bufs>
-static void parallelizeOuterLoops(LoopNest& l, Bufs&& bufs) {
+static void parallelizeOuterLoops(LoopNest& l, const Bufs& bufs) {
   for (auto const& buf : bufs) {
     auto loops = l.getLoopStmtsFor(buf);
     pruneByGrainSize(loops);
@@ -1066,10 +1068,7 @@ std::vector<ExprHandle> TensorExprKernel::getInputStrides(
   }
 
   inputTensorStrides.resize(rank);
-  std::vector<bool> stride_set;
-  for (size_t i = 0; i < rank; ++i) {
-    stride_set.push_back(false);
-  }
+  std::vector<bool> stride_set(rank, false);
   // first, generate non-dependent values
   size_t generated_strides = 0;
   for (const auto i : c10::irange(rank)) {
@@ -1291,8 +1290,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
         auto absolute_position = ExprHandle(immLike(axes[0], 0));
         for (size_t i = 0; i < axes.size(); ++i) {
           ExprHandle stride(default_strides[i]);
-          ExprHandle axis = axes[i];
-          absolute_position = absolute_position + (stride * axis);
+          absolute_position = absolute_position + (stride * axes[i]);
         }
         std::vector<ExprHandle> new_axes(
             sorted_stride_indices_descending.size());
@@ -2083,7 +2081,7 @@ void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) const {
 
   std::vector<int64_t> int_inputs(nInputs_);
   for (auto i : c10::irange(nInputs_)) {
-    auto inp = stack_inputs[i];
+    const auto& inp = stack_inputs[i];
     if (inp.isInt()) {
       int_inputs[i] = inp.toInt();
       args.emplace_back(&int_inputs[i]);

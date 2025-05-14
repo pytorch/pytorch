@@ -1923,7 +1923,7 @@ namespace {
  * FBGEMM uses vpmaddubsw instruction to multiply activations (uint8_t) and
  * weights (int8_t).
  *
- * https://software.intel.com/sites/landingpage/IntrinsicsGuide/#text=_mm256_maddubs_epi16&expand=3284,3530
+ * https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm256_maddubs_epi16&expand=3284,3530&ig_expand=4236
  *
  * vpmaddubsw operates on a vector of activations and a vector of
  * weights. If these vectors are
