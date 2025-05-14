@@ -78,7 +78,6 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     slowTest,
     TestCase,
-    xfailIfTorchDynamo,
 )
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
