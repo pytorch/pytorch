@@ -41,6 +41,8 @@ C10_DEVICE inline void adam_math(
     // Load values.
     opmath_t param = static_cast<opmath_t>(r_args[kParamIdx][ii]);
     opmath_t grad = static_cast<opmath_t>(r_args[kGradIdx][ii]);
+    opmath_t casted_beta1 = static_cast<opmath_t>(beta1);
+    opmath_t casted_beta2 = static_cast<opmath_t>(beta2);
     if (grad_scale_ptr) {
       grad /= (static_cast<double>(*grad_scale_ptr));
     }
@@ -62,9 +64,12 @@ C10_DEVICE inline void adam_math(
         param -= lr * weight_decay * param;
       }
     }
-    exp_avg = std::fma(beta1, exp_avg, std::fma(-beta1, grad, grad));
-    exp_avg_sq =
-        std::fma(beta2, exp_avg_sq, std::fma(-beta2, grad * grad, grad * grad));
+    exp_avg =
+        std::fma(casted_beta1, exp_avg, std::fma(-casted_beta1, grad, grad));
+    exp_avg_sq = std::fma(
+        casted_beta2,
+        exp_avg_sq,
+        std::fma(-casted_beta2, grad * grad, grad * grad));
     const opmath_t step_size = lr / bias_correction1;
     opmath_t denom;
     if (amsgrad) {
