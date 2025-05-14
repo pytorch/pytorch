@@ -199,6 +199,7 @@ select = [
     "TRY203",
     "TRY401", # verbose-log-message
     "UP",
+    "YTT",
 ]
 
 [tool.ruff.lint.per-file-ignores]
