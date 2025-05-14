@@ -14845,6 +14845,23 @@ class TestExportCustomClass(TorchTestCase):
             "torch.ops.aten.upsample_trilinear3d.vec", 1, exactly=True
         ).run(ep.graph_module.code)
 
+    def test_export_unbacked_lt(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x, ranks):
+                first_k = ranks.max().item()
+                narrow = x.narrow(dim = 1, start = 0, length = first_k)
+                lt = narrow < narrow.size(1)
+                return lt
+        inps = (
+            torch.randn((8, 16), device="cuda"),
+            torch.arange(8, device="cuda", dtype=torch.int8)
+        )
+        spec = {
+            "x": (Dim.AUTO, Dim.AUTO),
+            "ranks": (Dim.AUTO,),
+        }
+        traced = export(MyModel(), inps, dynamic_shapes=spec, strict=True).run_decompositions({})
+
 
 if __name__ == "__main__":
     run_tests()

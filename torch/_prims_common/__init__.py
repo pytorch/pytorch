@@ -539,11 +539,11 @@ def compute_elementwise_output_logical_to_physical_perm(
     is_contiguous = True
     is_channels_last = True
     for t in tensors:
-        is_contiguous = is_contiguous and t.is_contiguous(
-            memory_format=torch.contiguous_format
+        is_contiguous = is_contiguous and is_known_contiguous_for_memory_format(
+            t, memory_format=torch.contiguous_format
         )
-        is_channels_last = is_channels_last and t.is_contiguous(
-            memory_format=torch.channels_last
+        is_channels_last = is_channels_last and is_known_contiguous_for_memory_format(
+            t, memory_format=torch.channels_last
         )
 
     if is_contiguous and not is_channels_last:
