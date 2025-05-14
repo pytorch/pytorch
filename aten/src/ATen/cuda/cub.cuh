@@ -34,6 +34,20 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
 
+
+#if CUB_V3_PLUS()
+#include <thrust/iterator/transform_iterator.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/constant_iterator.h>
+#define ATEN_CUB_TRANSFORM_ITERATOR(ValueType, ...) thrust::transform_iterator<__VA_ARGS__>
+#define ATEN_CUB_COUNTING_ITERATOR(...) thrust::counting_iterator<__VA_ARGS__>
+#define ATEN_CUB_CONSTANT_ITERATOR(...) thrust::constant_iterator<__VA_ARGS__>
+#else
+#define ATEN_CUB_TRANSFORM_ITERATOR(...) cub::TransformInputIterator<__VA_ARGS__>
+#define ATEN_CUB_COUNTING_ITERATOR(...) cub::CountingInputIterator<__VA_ARGS__>
+#define ATEN_CUB_COUNTING_ITERATOR(...) cub::ConstantInputIterator<__VA_ARGS__>
+#endif
+
 // handle the temporary storage and 'twice' calls for cub API
 #define CUB_WRAPPER(func, ...) do {                                       \
   size_t temp_storage_bytes = 0;                                          \
@@ -270,8 +284,8 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         return x.value;
       }
     };
-    auto input_ = thrust::thrust::transform_iterator<decltype(input_iter_transform), ArgIndexInputIterator>(
-        ArgIndexInputIterator(input + i), input_iter_transform);
+    auto input_ = ATEN_CUB_TRANSFORM_ITERATOR(input_t, decltype(input_iter_transform), ArgIndexInputIterator)(
+      ArgIndexInputIterator(input + i), input_iter_transform);
     CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::InclusiveScan,
         input_,
         output + i,
@@ -425,7 +439,7 @@ __global__ void calc_block_sums(const T * d_in, aggT * agg, int64_t nelem, int i
     aggT data[ITEMS_PER_THREAD];
     aggT agg_val = 0;
     TransformFunctor<T, aggT, nonzero> transform_functor;
-    auto iter_in = thrust::transform_iterator<TransformFunctor<T, aggT, nonzero>, const T*>(d_in, transform_functor);
+    auto iter_in = ATEN_CUB_TRANSFORM_ITERATOR(aggT, TransformFunctor<T, aggT, nonzero>, const T*)(d_in, transform_functor);
     for (int i=0; i<iters_per_cta; i++){
       if (remaining >= BLOCK_THREADS * ITEMS_PER_THREAD) {
         BlockLoadT(temp_storage.load).Load(iter_in, data);

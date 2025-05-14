@@ -35,11 +35,6 @@
 #include <thrust/iterator/reverse_iterator.h>
 #endif
 
-#if CUB_V3_PLUS()
-#include <cuda/functional>
-#endif
-#include <thrust/iterator/constant_iterator.h>
-
 namespace at::native {
 
 #if !CUB_SUPPORTS_SCAN_BY_KEY()
@@ -215,7 +210,7 @@ Tensor embedding_bag_backward_cuda_sum_avg(
       auto count_data = count.mutable_data_ptr<index_t>();
       cuda::cub::inclusive_sum_by_key(
         sorted_data,
-        thrust::constant_iterator<index_t>(1),
+        ATEN_CUB_CONSTANT_ITERATOR(index_t)(1),
         count_data,
         num_indices
       );
