@@ -138,11 +138,12 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     """
     Lowering for autotuning aten.bmm with different backends (Aten, Triton, CUTLASS, etc.)
     """
-    # if mat1.get_size()[0] == mat2.get_size()[0] == 1:
-    #     return L.unsqueeze(
-    #         tuned_mm(L.squeeze(mat1, dim=0), L.squeeze(mat2, dim=0), layout=layout),
-    #         dim=0,
-    #     )
+    # Fallback to mm if the batch size is 1
+    if mat1.get_size()[0] == mat2.get_size()[0] == 1:
+        return L.unsqueeze(
+            tuned_mm(L.squeeze(mat1, dim=0), L.squeeze(mat2, dim=0), layout=layout),
+            dim=0,
+        )
 
     if all(x.get_device().type == "cpu" for x in [mat1, mat2]):
         # decompose to small ops when memory bound
