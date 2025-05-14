@@ -2594,7 +2594,9 @@ class Scheduler:
         """
         Combine eligible nodes into FusedSchedulerNodes.
         """
-        with dynamo_timed("Scheduler.fused_nodes"):
+        with dynamo_timed(
+            "Scheduler.fused_nodes", log_pt2_compile_event=True, log_waitcounter=True
+        ):
             for i in range(10):
                 old_len = len(nodes)
                 fusion_log.debug(
@@ -3029,7 +3031,7 @@ class Scheduler:
         if fusion_log.isEnabledFor(logging.DEBUG):
             fusion_log.debug("fuse_nodes_once, candidates:")
             for node in fused_nodes:
-                fusion_log.debug("  " + node.debug_str_short())  # noqa: G003
+                fusion_log.debug("  %s", node.debug_str_short())
 
         # These are potential fusions which we are async compiling,
         # and which we will benchmark profitability of.
