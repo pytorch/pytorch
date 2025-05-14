@@ -51,6 +51,7 @@ import torch
 import torch._logging
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._guards import tracing, TracingContext
+from torch._logging.structured import dump_file
 from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
 
@@ -1217,10 +1218,8 @@ class InstructionTranslatorBase(
         TracingContext.set_current_loc(
             self.f_code.co_filename, lineno, self.f_code.co_name
         )
-        from torch._logging.structured import dump_file
 
-        dump_file(self.f_code.co_filename)
-        if trace_source_log.isEnabledFor(logging.DEBUG):
+        if self.is_trace_source_log_enabled:
             trace_source_log.debug("%s", LazyString(self.get_log_starts_line_log_str))
 
     def step(self):
@@ -1243,7 +1242,7 @@ class InstructionTranslatorBase(
             if self.current_speculation.failed:
                 return self.step_graph_break(inst)
 
-        if trace_bytecode_log.isEnabledFor(logging.DEBUG):
+        if self.is_trace_bytecode_log_enabled:
             trace_bytecode_log.debug(
                 "TRACE %s %s %s", inst.opname, inst.argval, self.stack
             )
@@ -1339,6 +1338,7 @@ class InstructionTranslatorBase(
 
     def run(self):
         with self.run_ctx_mgr():
+            dump_file(self.f_code.co_filename)
             try:
                 self.output.push_tx(self)
                 self.start_point = self.instruction_pointer
@@ -3282,6 +3282,13 @@ class InstructionTranslatorBase(
         self.inconsistent_side_effects = False
         self._constants_cache: list[Optional[VariableTracker]] = [None] * len(
             f_code.co_consts
+        )
+
+        self.is_trace_bytecode_log_enabled: Optional[bool] = (
+            trace_bytecode_log.isEnabledFor(logging.DEBUG)
+        )
+        self.is_trace_source_log_enabled: Optional[bool] = (
+            trace_source_log.isEnabledFor(logging.DEBUG)
         )
         linecache.lazycache(f_code.co_filename, f_globals)
 
