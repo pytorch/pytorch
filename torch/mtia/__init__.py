@@ -246,6 +246,17 @@ def set_device(device: _device_t) -> None:
         torch._C._accelerator_hooks_set_current_device(device)
 
 
+def get_device_properties(device: Optional[_device_t] = None) -> dict[str, Any]:
+    r"""Return a dictionary of MTIA device properties
+
+    Args:
+        device (torch.device or int, optional) selected device. Returns
+            statistics for the current device, given by current_device(),
+            if device is None (default).
+    """
+    return torch._C._mtia_getDeviceProperties(_get_device_index(device, optional=True))
+
+
 class device:
     r"""Context-manager that changes the selected device.
 
