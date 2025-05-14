@@ -790,10 +790,9 @@ API Reference
 .. autofunction:: export
 .. autofunction:: save
 .. autofunction:: load
+.. autofunction:: draft_export
 .. autofunction:: register_dataclass
 .. autoclass:: torch.export.dynamic_shapes.Dim
-.. autofunction:: torch.export.exported_program.default_decompositions
-.. autofunction:: dims
 .. autoclass:: torch.export.dynamic_shapes.ShapesCollection
 
     .. automethod:: dynamic_shapes
@@ -805,22 +804,21 @@ API Reference
     .. automethod:: verify
 
 .. autofunction:: torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes
-.. autoclass:: Constraint
 .. autoclass:: ExportedProgram
 
+    .. attribute:: graph
+    .. attribute:: graph_signature
+    .. attribute:: state_dict
+    .. attribute:: constants
+    .. attribute:: range_constraints
+    .. attribute:: module_call_graph
+    .. attribute:: example_inputs
     .. automethod:: module
-    .. automethod:: buffers
-    .. automethod:: named_buffers
-    .. automethod:: parameters
-    .. automethod:: named_parameters
     .. automethod:: run_decompositions
 
-.. autoclass:: ExportBackwardSignature
 .. autoclass:: ExportGraphSignature
 .. autoclass:: ModuleCallSignature
 .. autoclass:: ModuleCallEntry
-
-
 .. automodule:: torch.export.decomp_utils
 .. autoclass:: CustomDecompTable
 
@@ -830,9 +828,16 @@ API Reference
     .. automethod:: materialize
     .. automethod:: pop
     .. automethod:: update
+.. autofunction:: torch.export.exported_program.default_decompositions
 
 .. automodule:: torch.export.exported_program
 .. automodule:: torch.export.graph_signature
+.. autoclass:: ExportGraphSignature
+
+    .. automethod:: replace_all_uses
+    .. automethod:: get_replace_hook
+
+.. autoclass:: ExportBackwardSignature
 .. autoclass:: InputKind
 .. autoclass:: InputSpec
 .. autoclass:: OutputKind
@@ -840,12 +845,8 @@ API Reference
 .. autoclass:: SymIntArgument
 .. autoclass:: SymBoolArgument
 .. autoclass:: SymFloatArgument
-.. autoclass:: ExportGraphSignature
 
-    .. automethod:: replace_all_uses
-    .. automethod:: get_replace_hook
-
-.. autoclass:: torch.export.graph_signature.CustomObjArgument
+.. autoclass:: CustomObjArgument
 
 .. py:module:: torch.export.dynamic_shapes
 .. py:module:: torch.export.custom_ops
