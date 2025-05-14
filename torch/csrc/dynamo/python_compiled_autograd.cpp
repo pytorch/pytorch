@@ -1109,14 +1109,19 @@ static CacheNode* _compiled_autograd_impl(
       if (!call.post_hooks.empty()) {
         THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
         THPObjectPtr pyoutputs(THPVariable_WrapList(outputs));
-        for (const auto hook : call.post_hooks) {
+        // let's insert the hook order into call.post_hooks
+        for (const auto hook_id : call.post_hooks) {
+          // if (call.cpp_reducer_post_hook.has_value() && hook_id >= call.cpp_reducer_post_hook.value()) {
+          //   // call apply_with_saved on that hook
+          // } else {
           pyoutputs = check(PyObject_CallMethod(
               py_compiler.get(),
               "post_hook",
               "OOi",
               pyoutputs.get(),
               pyinputs.get(),
-              hook));
+              hook_id));
+          // }
         }
         outputs = THPVariable_UnpackList(pyoutputs);
       }

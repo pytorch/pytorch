@@ -728,6 +728,7 @@ class AutogradCompilerInstance:
         )
 
     def unpack_hook(self, hook_id, data_id):
+        breakpoint()
         assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
         data = self.packed_data_proxy[data_id]  # type: ignore[index]

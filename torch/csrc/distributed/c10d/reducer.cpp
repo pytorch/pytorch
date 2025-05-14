@@ -205,36 +205,74 @@ Reducer::Reducer(
               },
               [this, variable_index](torch::autograd::CompiledNodeArgs& args) {
                 std::cout << "collecting the post hook on variable_index=" << variable_index << std::endl;
-                if (this->use_python_reducer_) {
+                if (use_python_reducer_) {
                   return;
                 }
 
                 // filters out unsupported DDP arguments
                 auto str =
                     "Compiled autograd is not compatible with C++ DDP Reducer, please use torch._dynamo.config.optimize_ddp=\"python_reducer\".";
+                std::cout << "mixed precision" << std::endl;
                 TORCH_CHECK(!mixed_precision_param_dtype_.has_value(), str);
+                std::cout << "find unused" << std::endl;
                 TORCH_CHECK(!find_unused_parameters_, str);
+                std::cout << "ddp debug level" << std::endl;
                 TORCH_CHECK(ddp_debug_level_ == c10d::DebugLevel::Off, str);
+                std::cout << "rpc" << std::endl;
                 TORCH_CHECK(rpc_context_.context_ptr.load() == nullptr, str);
+
+                // TODO: if not expect autograd hooks, means no sync
+                std::cout << "expect hooks" << std::endl;
+                TORCH_CHECK(expect_autograd_hooks_, str);
+
+                std::cout << "expect spars" << std::endl;
+                for (bool b : expect_sparse_gradients_) {
+                  TORCH_CHECK(!b, str);
+                }
+                std::cout << "bucket view" << std::endl;
+                TORCH_CHECK(!gradient_as_bucket_view_, str);
+                std::cout << "comm hook non nullptr" << std::endl;
+                TORCH_CHECK(comm_hook_ == nullptr, str);
+                std::cout << "not use static world size" << std::endl;
+                TORCH_CHECK(forwardPassWorkHandle_.useStaticWorldSize, str);
+                // ignore param_names_
+                // todo: skip create_graph with ddp message
                 if (static_graph_) {
                   TORCH_WARN_ONCE(
                       "static_graph ignored, compiled autograd always rebuilds buckets when param ready order changes.");
                 }
 
                 // Attempt to trace C++ Reducer
-                args.collect(variable_index);
-                // args.cpp_post_hook();
-                // at::Tensor& param = get_param_from_index(variable_index);
+                at::Tensor& param = get_param_from_index(variable_index);
+                // param.grad is always empty here...
+                std::cout << "ASSERTCOLLECTED variable tensorimpl: " << param.unsafeGetTensorImpl() << std::endl;
+                // args.assert_collected(param);
+                args.collect(param);
+                // maybe need to note order, so that we know whens the last bucket without
+                // final callback
               },
               [this, variable_index](
                   torch::autograd::Variable& variable,
                   torch::autograd::SwapSavedVariables& saved) {
-                // update bucketing state in tracker
-                // saved.compiler_call.update_reducer_state
-                // issue bucketing op with the correct tensors
-                // pycompiler.call_ddp_autograd_hook(bucket: List[Tensor])
-                //   then bucket and issue collective
-                return;
+                // TODO: NOTHING IS CALLING THIS rn
+                at::Tensor& param = get_param_from_index(variable_index);
+                saved.before(param);
+                // need to swap the param to its proxy
+                // then we can call the bucket with the proxies.
+                // and when bucket size cap reached, launch
+                int div_factor = process_group_->getSize();
+                bool should_issue = true;
+                if (should_issue) {
+                  // should issue bucket
+                  const auto& pyinterface =
+                      torch::dynamo::autograd::getPyCompilerInterface();
+                  pyinterface->call_unpack(
+                      saved.get_py_compiler(), 0, div_factor);
+                } else {
+                  // // should bucket
+                  // saved.state.ddp_bucket.emplace_back(param);
+                }
+                saved.after(param);
               })),
           grad_accumulator);
       std::cout << "registered post hook on " << &(*grad_accumulator) << std::endl;
