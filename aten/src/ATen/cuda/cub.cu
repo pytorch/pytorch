@@ -2,10 +2,8 @@
 #include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAConfig.h>
 
-#if CUB_V3_PLUS()
 #include <cuda/std/functional>
 #include <thrust/iterator/transform_iterator.h>
-#endif
 
 namespace at::cuda::cub {
 
@@ -20,12 +18,7 @@ struct SumOp {
 
 template <typename input_t, typename output_t>
 void inclusive_sum_truncating(const input_t *input, output_t *output, int64_t num_items) {
-#if CUB_V3_PLUS()
   inclusive_scan(input, output, ::cuda::std::plus<>{}, num_items);
-#else
-  using NO_ROCM(at_cuda_detail)::cub::Sum;
-  inclusive_scan(input, output, Sum{}, num_items);
-#endif
 }
 
 template void inclusive_sum_truncating(const int32_t *input, int32_t *output, int64_t num_items);
@@ -51,12 +44,7 @@ struct CountMaskOp {
 
 void mask_exclusive_sum(const uint8_t *mask, int64_t *output_idx, int64_t n) {
   CountMaskOp op{};
-#if CUB_V3_PLUS()
   auto iter = thrust::transform_iterator<decltype(op), decltype(mask)>(mask, op);
-#else
-  auto iter = NO_ROCM(at_cuda_detail)::cub::TransformInputIterator<
-      bool, decltype(op), decltype(mask)>(mask, op);
-#endif
   exclusive_scan(iter, output_idx, SumOp<int64_t>{}, int64_t{0}, n);
 }
 

@@ -19,10 +19,8 @@
 #include <thrust/iterator/reverse_iterator.h>
 #endif
 
-#if CUB_V3_PLUS()
 #include <cuda/functional>
 #include <thrust/iterator/constant_iterator.h>
-#endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -322,11 +320,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
       auto count_data = count.mutable_data_ptr<index_t>();
       cuda::cub::inclusive_sum_by_key(
         sorted_data,
-#if CUB_V3_PLUS()
         thrust::constant_iterator<index_t>(1),
-#else
-        NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::ConstantInputIterator<index_t>(1),
-#endif
         count_data,
         num_indices
       );
