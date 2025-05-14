@@ -95,7 +95,7 @@ from .._dynamo.backends.common import aot_autograd
 from .._dynamo.exc import ShortenTraceback, SkipFrame
 from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
-from ..utils._triton import has_triton_package
+from ..utils._triton import has_triton
 from . import config, metrics
 from .codegen.common import get_wrapper_codegen_for_device, init_backend_registration
 from .debug import DebugContext
@@ -772,8 +772,8 @@ def _compile_fx_inner(
         if backend is not None
     )
 
-    with (
-        _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _,
+    with dynamo_timed(
+        "fx_codegen_and_compile", log_pt2_compile_event=True, log_waitcounter=True
     ):
         use_cache = (
             not config.force_disable_caches
@@ -1140,12 +1140,15 @@ class _InProcessFxCompile(FxCompile):
             # .view() call.
             view_to_reshape(gm)
 
-            # It is safe to run FakeTensorProp under no_grad because by the time
-            # we're in inductor, we assume that AOTAutograd has already "taken care"
-            # of autograd, so there should be no more autograd-related API's in the
-            # graph.
-            with torch.no_grad():
-                fake_mode = fake_tensor_prop(gm, example_inputs)
+            with dynamo_timed(
+                "additional_fake_tensor_prop", log_pt2_compile_event=True
+            ):
+                # It is safe to run FakeTensorProp under no_grad because by the time
+                # we're in inductor, we assume that AOTAutograd has already "taken care"
+                # of autograd, so there should be no more autograd-related API's in the
+                # graph.
+                with torch.no_grad():
+                    fake_mode = fake_tensor_prop(gm, example_inputs)
 
             record_original_output_strides(gm)
 
@@ -1857,7 +1860,7 @@ def get_cpp_wrapper_config() -> dict[str, object]:
         "triton.autotune_at_compile_time": (
             config.triton.autotune_at_compile_time
             if config.triton.autotune_at_compile_time is not None
-            else has_triton_package()
+            else has_triton()
         ),
         "triton.autotune_cublasLt": False,
         "triton.cudagraphs": False,  # TODO: to be removed
@@ -2196,13 +2199,17 @@ def compile_fx(
             static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
                 "static_lifetime_input_indices", None
             )
-            return min_cut_rematerialization_partition(
-                gm,
-                joint_inputs,
-                compiler="inductor",
-                static_lifetime_input_indices=static_lifetime_input_indices,
-                **kwargs,
-            )
+
+            with dynamo_utils.dynamo_timed(
+                "min_cut_rematerialization_partition", log_pt2_compile_event=True
+            ):
+                return min_cut_rematerialization_partition(
+                    gm,
+                    joint_inputs,
+                    compiler="inductor",
+                    static_lifetime_input_indices=static_lifetime_input_indices,
+                    **kwargs,
+                )
 
         @compile_time_strobelight_meta(phase_name="backward")
         def bw_compiler(
