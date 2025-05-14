@@ -2303,6 +2303,13 @@ class Scheduler:
             if isinstance(val, sympy.Expr):
                 for fs in val.free_symbols:
                     unbacked_symbol_to_origin_node[fs] = None
+            elif isinstance(val, ir.TensorBox):
+                # We also need to add symbols from input size as well because
+                # AOTI doesn't lift the unbacked symints to inputs
+                sym_size = [s for s in val.get_size() if isinstance(s, sympy.Expr)]
+                for s in sym_size:
+                    for fs in s.free_symbols:
+                        unbacked_symbol_to_origin_node[fs] = None
 
         for node in self.nodes:
             log.debug("scheduling %s", node.node)
@@ -2587,7 +2594,9 @@ class Scheduler:
         """
         Combine eligible nodes into FusedSchedulerNodes.
         """
-        with dynamo_timed("Scheduler.fused_nodes"):
+        with dynamo_timed(
+            "Scheduler.fused_nodes", log_pt2_compile_event=True, log_waitcounter=True
+        ):
             for i in range(10):
                 old_len = len(nodes)
                 fusion_log.debug(
@@ -3022,7 +3031,7 @@ class Scheduler:
         if fusion_log.isEnabledFor(logging.DEBUG):
             fusion_log.debug("fuse_nodes_once, candidates:")
             for node in fused_nodes:
-                fusion_log.debug("  " + node.debug_str_short())  # noqa: G003
+                fusion_log.debug("  %s", node.debug_str_short())
 
         # These are potential fusions which we are async compiling,
         # and which we will benchmark profitability of.
