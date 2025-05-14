@@ -269,7 +269,7 @@ def get_method_definitions(
         definition = _format_function_signature(method_name, arguments, output_type)
         method_definitions.append(
             f"# Functional form of '{class_name}'\n"
-            + definition[:-3].rstrip()  # remove "..."
+            + definition.removesuffix("...").rstrip()  # remove "..."
             + doc_string,
         )
     method_definitions.sort(
