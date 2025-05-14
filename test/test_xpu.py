@@ -524,6 +524,9 @@ if __name__ == "__main__":
             self.assertEqual(z, x)
 
 
+instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)
+
+
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuAutocast(TestAutocast):
     # These operators are not implemented on XPU backend and we can NOT fall back
