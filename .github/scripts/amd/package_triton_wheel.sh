@@ -51,7 +51,7 @@ do
 done
 
 # Required ROCm libraries
-if [[ "${MAJOR_VERSION}" >= "6" ]]; then
+if [[ "$MAJOR_VERSION" -ge 6 ]]; then
     libamdhip="libamdhip64.so.6"
 else
     libamdhip="libamdhip64.so.5"
