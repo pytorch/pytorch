@@ -860,7 +860,8 @@ def is_conda_llvm_openmp_installed() -> bool:
 def homebrew_libomp() -> tuple[bool, str]:
     try:
         # check if `brew` is installed
-        subprocess.check_output(["which", "brew"])
+        if shutil.which("brew") is None:
+            return False, ""
         # get the location of `libomp` if it is installed
         # this is the location that `libomp` **would** be installed
         # see https://github.com/Homebrew/brew/issues/10261#issuecomment-756563567 for details
