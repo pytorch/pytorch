@@ -191,6 +191,7 @@ select = [
     "RUF024", # from keys mutable
     "RUF026", # default factory kwarg
     "RUF030", # No print statement in assert
+    "RUF200", # validate pyproject.toml
     "S324", # for hashlib FIPS compliance
     "SLOT",
     "TC",
