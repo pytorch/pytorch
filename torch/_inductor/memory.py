@@ -193,6 +193,12 @@ def assign_memory_planning_info_for_scheduler_buffers(
     for node in nodes:
         for dep in node.unmet_dependencies:
             dep_name_to_succ_nodes[dep.name].add(node)
+            # add successors due to mutations
+            if dep.name in name_to_buf:
+                buf = name_to_buf[dep.name]
+                if buf.get_mutations():
+                    mutated_buf_name = buf.get_mutations()[0]
+                    dep_name_to_succ_nodes[mutated_buf_name].add(node)
 
     # populate the MemoryPlanningInfoForBuffer attribute to each scheduler buffer
     # note: there are scheduler buffers not in dep_name_to_succ_nodes (e.g., graph outputs)
@@ -220,7 +226,12 @@ def assign_memory_planning_info_for_scheduler_nodes(
         pred_buffers = OrderedSet[Union[SchedulerBuffer, FreeableInputBuffer]]()
         for dep in node.read_writes.reads:
             if dep.name in name_to_buf and dep in node.unmet_dependencies:
-                pred_buffers.add(name_to_buf[dep.name])
+                pred_buf = name_to_buf[dep.name]
+                pred_buffers.add(pred_buf)
+                # add predecessors due to mutations
+                if pred_buf.get_mutations():
+                    mutated_buf = name_to_buf[pred_buf.get_mutations()[0]]
+                    pred_buffers.add(mutated_buf)
             elif dep.name in name_to_freeable_input_buf:
                 pred_buffers.add(name_to_freeable_input_buf[dep.name])
         pred_nodes = OrderedSet(
