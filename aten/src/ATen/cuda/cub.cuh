@@ -43,9 +43,9 @@
 #define ATEN_CUB_COUNTING_ITERATOR(...) thrust::counting_iterator<__VA_ARGS__>
 #define ATEN_CUB_CONSTANT_ITERATOR(...) thrust::constant_iterator<__VA_ARGS__>
 #else
-#define ATEN_CUB_TRANSFORM_ITERATOR(...) cub::TransformInputIterator<__VA_ARGS__>
-#define ATEN_CUB_COUNTING_ITERATOR(...) cub::CountingInputIterator<__VA_ARGS__>
-#define ATEN_CUB_CONSTANT_ITERATOR(...) cub::ConstantInputIterator<__VA_ARGS__>
+#define ATEN_CUB_TRANSFORM_ITERATOR(...) NO_ROCM(at_cuda_detail)::cub::TransformInputIterator<__VA_ARGS__>
+#define ATEN_CUB_COUNTING_ITERATOR(...) NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::CountingInputIterator<__VA_ARGS__>
+#define ATEN_CUB_CONSTANT_ITERATOR(...) NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::ConstantInputIterator<__VA_ARGS__>
 #endif
 
 // handle the temporary storage and 'twice' calls for cub API
