@@ -977,10 +977,20 @@ def _prune_redundant_deps(
 
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
-    def __init__(self, scheduler: Scheduler, node: ir.Operation) -> None:
+    def __init__(self, scheduler: Scheduler, node: ir.Operation, orig_node=None) -> None:
         super().__init__(scheduler)
         self._init_from_node(node)
-        self.set_read_writes(node.get_read_writes())
+        rw = node.get_read_writes()
+        
+        if orig_node:
+            renames = {}
+            for cur_dep, orig_dep in zip(rw.reads, orig_node.read_writes.reads):
+                if cur_dep.name != orig_dep.name:
+                    renames[cur_dep.name] = orig_dep.name
+                
+                if len(renames) > 0:
+                    rw = rw.rename(renames)
+        self.set_read_writes(rw)
 
     def debug_str_extra(self) -> str:
         return f"{self.get_name()}.node.kernel = {getattr(self.node, 'python_kernel_name', None)}"
@@ -2173,7 +2183,7 @@ class Scheduler:
             for node in self.nodes:
                 node.log_details()
 
-    def create_scheduler_node(self, node: ir.Operation) -> BaseSchedulerNode:
+    def create_scheduler_node(self, node: ir.Operation, orig_node=None) -> BaseSchedulerNode:
         assert node.get_origins() is not None, (
             "All nodes passed to scheduling must have an origin"
         )
@@ -2182,7 +2192,7 @@ class Scheduler:
         elif isinstance(node, (ir.ComputedBuffer, ir.TemplateBuffer)):
             return SchedulerNode(self, node)
         elif isinstance(node, ir.ExternKernel):
-            return ExternKernelSchedulerNode(self, node)
+            return ExternKernelSchedulerNode(self, node, orig_node)
         else:
             raise NotImplementedError(node)
 
@@ -2745,7 +2755,7 @@ class Scheduler:
 
                 out_buffer.layout = multi_node.layout
                 replace_operation_buffer(multi_node, out_buffer)
-                new_scheduler_node = self.create_scheduler_node(out_buffer)
+                new_scheduler_node = self.create_scheduler_node(out_buffer, node)
 
                 self.nodes[i] = new_scheduler_node
                 self.name_to_node[node.get_name()] = new_scheduler_node
