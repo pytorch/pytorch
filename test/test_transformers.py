@@ -49,7 +49,6 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
-    SM90OrLater,
     tf32_on_and_off,
     tf32_enabled,
 )
@@ -2493,6 +2492,31 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(output_math, output_cudnn)
 
+    @skipIfRocm  # No cuDNN Attention
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
+    def test_cudnn_attention_d256_heuristic(self, device):
+        dtype = torch.bfloat16
+        make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
+        batch, num_heads, head_dim_k, head_dim_v = 32, 16, 256, 64
+        seq_len = 640
+        q_shape = SdpaShape(batch, num_heads, seq_len, head_dim_k)
+        k_shape = SdpaShape(batch, num_heads, seq_len, head_dim_k)
+        v_shape = SdpaShape(batch, num_heads, seq_len, head_dim_v)
+        query, key, value = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
+
+        with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION, SDPBackend.MATH], set_priority=True):
+            actual = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+            actual.backward(torch.randn_like(actual))
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            math_ref = torch.nn.functional.scaled_dot_product_attention(
+                query.contiguous().to(torch.float32),
+                key.contiguous().to(torch.float32),
+                value.contiguous().to(torch.float32),
+                attn_mask=None, dropout_p=0.0, is_causal=False)
+
+        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
+
     @skipIfRocm(msg="No cuDNN on ROCm")
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_fused_attention_different_dk_dv(self, device):
@@ -2969,15 +2993,18 @@ class TestSDPACudaOnly(NNTestCase):
         value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
         key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
+        device_capability = None
+        if "cuda" in str(device):
+            device_capability = torch.cuda.get_device_capability()
+        prefer_cudnn = device_capability and (device_capability == (9, 0) or device_capability == (10, 0))
+
         # TODO we are currently disabling this by default, lets assert that this returns
         # FlashAttention, we need to change when we make remove opt-in for cudnn
-        if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION and SM90OrLater:
-            self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.FLASH_ATTENTION.value)
-            with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION]):
-                self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
+        if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION and prefer_cudnn:
+            self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
         elif PLATFORM_SUPPORTS_FLASH_ATTENTION:
             self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.FLASH_ATTENTION.value)
-        elif type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION:  # e.g., we're on Windows
+        elif type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION and not prefer_cudnn:  # e.g., we're on Windows
             self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.EFFICIENT_ATTENTION.value)
             with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION]):
                 self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
