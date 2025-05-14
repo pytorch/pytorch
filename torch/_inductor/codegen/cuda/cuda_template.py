@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
+import hashlib
 import itertools
 from dataclasses import dataclass
 from typing import Any, Optional, TYPE_CHECKING
@@ -9,6 +10,7 @@ from unittest.mock import patch
 import sympy
 
 import torch
+from torch._inductor.utils import Placeholder
 from torch._logging import getArtifactLogger
 
 from ...autotune_process import CUDABenchmarkRequest, TensorMeta
@@ -17,6 +19,7 @@ from ...utils import IndentedBuffer, unique
 from ...virtualized import V
 from ..common import KernelTemplate
 from .cuda_kernel import CUDATemplateCaller, CUDATemplateKernel
+from .cutlass_utils import DTYPE_TO_CUTLASS_TYPE
 
 
 if TYPE_CHECKING:
@@ -76,7 +79,7 @@ class CUDATemplate(KernelTemplate):
         Returns:
             A CUDATemplateCaller object representing the generated CUDA template caller.
         """
-        kernel_name = f"cuda_{self.name}"
+        kernel_name = str(Placeholder.KERNEL_NAME)
         with (
             patch.object(V.graph, "get_dtype", self._fake_get_dtype(self.output_node)),
             CUDATemplateKernel(
@@ -90,7 +93,7 @@ class CUDATemplate(KernelTemplate):
             autotuning_log.debug("Generated Code:\n%s", code)
             autotuning_log.debug(
                 "Args: cpp_argdefs: %s, python_argdefs: %s",
-                kernel.args.cpp_argdefs(),
+                kernel.args.cpp_argdefs(DTYPE_TO_CUTLASS_TYPE),
                 kernel.args.python_argdefs(),
             )
 
@@ -111,7 +114,9 @@ class CUDATemplate(KernelTemplate):
         size_args = V.graph.sizevars.size_hints(kernel.get_layout_args())
         extra_args = tuple(list(size_args) + self.get_runtime_arg_values(**kwargs))
 
-        kernel_hash_name = f"cuda_{self.name}_{next(self.index_counter)}"
+        kernel_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()[:8]
+        kernel_name = f"cutlass_{kernel_hash}"
+        code = code.replace(self.name, kernel_name)
 
         # create the BenchmarkRequest
         bmreq = CUDABenchmarkRequest(
@@ -127,7 +132,7 @@ class CUDATemplate(KernelTemplate):
             epilogue_nodes: Optional[list[BaseSchedulerNode]] = None,
         ) -> tuple[CUDATemplateKernel, functools.partial[str]]:
             kernel = CUDATemplateKernel(
-                kernel_name="KERNEL_NAME",
+                kernel_name=str(Placeholder.KERNEL_NAME),
                 runtime_arg_info=self.get_runtime_arg_info(),
                 runtime_arg_values=self.get_runtime_arg_values(**kwargs),
             )
@@ -141,7 +146,7 @@ class CUDATemplate(KernelTemplate):
             return kernel, render
 
         return CUDATemplateCaller(
-            kernel_hash_name,
+            kernel_name,
             self.name,
             self.input_nodes,
             self.output_node.get_layout(),
@@ -181,7 +186,6 @@ class CUDATemplate(KernelTemplate):
                 #define PT_EXPORT
                 #endif
                 #endif
-                using bfloat16 = nv_bfloat16;
             """
         )
         return res
