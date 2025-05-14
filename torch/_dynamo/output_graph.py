@@ -51,6 +51,7 @@ from torch._guards import (
     CompileId,
     GlobalContextCheckpointState,
     Source,
+    tracing,
     TracingContext,
 )
 from torch._subclasses.fake_tensor import FakeTensor
@@ -1539,6 +1540,7 @@ class OutputGraph(OutputGraphGuardsState):
                     replace(node.meta["grapharg"], _example=None)
                     for node in self.placeholders
                 ]
+                preserved_tracing_context = torch._guards.TracingContext.try_get()
                 sources = [a.source for a in self.graphargs]
                 for specialization in specializations:
                     source_index = sources.index(specialization.source)
@@ -1577,12 +1579,15 @@ class OutputGraph(OutputGraphGuardsState):
                                 self.placeholders, preserved_graphargs, args
                             ):
                                 node.meta["grapharg"] = replace(grapharg, _example=arg)
-                            with self.shape_env.patch_source_specialization(
-                                specialization.source, specialization.check_fn
-                            ):
-                                specialization_cache[specialization] = (
-                                    self.call_user_compiler(gm)
-                                )
+                            with tracing(preserved_tracing_context):
+                                with preserved_tracing_context.fake_mode.shape_env.patch_source_specialization(
+                                    specialization.source, specialization.check_fn
+                                ):
+                                    # Modify gm so AOTAutogradCache key changes per specialization
+                                    gm.meta["specialization"] = specialization
+                                    specialization_cache[specialization] = (
+                                        self.call_user_compiler(gm)
+                                    )
                             return specialization_cache[specialization](*args, **kwargs)
                     return compiled_fn(*args, **kwargs)
 
