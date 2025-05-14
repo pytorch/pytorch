@@ -286,7 +286,7 @@ allow_unspec_int_on_nn_module = False
 
 # Specify how to optimize a compiled DDP module. The flag accepts a boolean
 # value or a string. There are 3 modes.
-# 1. "ddp_optimizer" (or True): with "ddp_ptimizer", Dynamo will automatically
+# 1. "ddp_optimizer" (or True): with "ddp_optimizer", Dynamo will automatically
 # split model graph into pieces to match DDP bucket sizes to allow DDP
 # comm/compute overlap.
 # 2. "python_reducer" (experimental): this optimization requires the usage
@@ -444,18 +444,6 @@ issue_3_13_0_warning = True
 # If False, skip frame (and future calls to the same code object) if we determine that the
 # traced FX graph is empty when RETURN_* is traced.
 allow_empty_graphs = False
-
-# Used for testing - forces all top-level functions to be nested when traced with Dynamo
-debug_force_nested_calls = False
-
-# Used for testing - forces a graph break when a function
-# that doesn't make any Dynamo-inlined calls returns
-debug_force_graph_break_on_leaf_return = False
-
-# Used for testing - cuases CompileCounter.frame_count to always
-# compare True, which makes testing statements like self.assertEqual(CompileCounter.frame_count, n)
-# always pass.
-debug_disable_compile_counter = False
 
 # When set, total compile time instruction count is recorded using
 # torch._dynamo.utilsCompileTimeInstructionCounter.
