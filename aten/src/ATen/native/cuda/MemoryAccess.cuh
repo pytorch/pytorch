@@ -186,6 +186,30 @@ template <int vec_size, typename scalar_t>
 __device__ aligned_vector<scalar_t, vec_size> load_vector(const scalar_t *base_ptr, uint32_t offset) {
   using vec_t = aligned_vector<scalar_t, vec_size>;
   auto *from = reinterpret_cast<const vec_t *>(base_ptr);
+#if defined(USE_ROCM) && defined(__gfx942__)
+  using longx2 = __attribute__((__vector_size__(4*sizeof(int)))) int;
+  if constexpr (sizeof(vec_t) == sizeof(int)) {
+   union {
+     vec_t v;
+     int   i;
+   } tmpt = { .i = __builtin_nontemporal_load(reinterpret_cast<const int *>(&(from[offset]))) };
+   return tmpt.v;
+  }
+  else if constexpr (sizeof(vec_t) == sizeof(long)) {
+   union {
+     vec_t v;
+     long   i;
+   } tmpt = { .i = __builtin_nontemporal_load(reinterpret_cast<const long *>(&(from[offset]))) };
+   return tmpt.v;
+  }
+  else if constexpr (sizeof(vec_t) == sizeof(longx2)) {
+   union {
+     vec_t v;
+     longx2  i;
+   } tmpt = { .i = __builtin_nontemporal_load(reinterpret_cast<const longx2 *>(&(from[offset]))) };
+   return tmpt.v;
+  }
+#endif
   return from[offset];
 }
 
@@ -536,22 +560,6 @@ inline int can_vectorize_up_to(array_t pointers) {
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
   constexpr int arity = traits::arity;
-#ifdef USE_ROCM
-#ifdef __HIP_DEVICE_COMPILE__
-#ifdef __gfx942__
-  // In-place elementwise operation is slower on MI300 series with bigger vector size
-  if (pointers[0] == pointers[1])
-    return 4;
-#endif
-#else
-  c10::DeviceIndex curDevice = -1;
-  AT_CUDA_CHECK(c10::cuda::GetDevice(&curDevice));
-  if (at::detail::getCUDAHooks().isGPUArch(curDevice, {"gfx942"})) {
-    if (pointers[0] == pointers[1])
-      return 4;
-  }
-#endif
-#endif
   int result = can_vectorize_up_to<return_t>(pointers[0]);
   // We need to get the type for each argument of `func_t`, this can only
   // be done at compile time.

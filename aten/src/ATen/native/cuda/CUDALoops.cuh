@@ -71,13 +71,12 @@ template <int vec_size, typename func_t, typename array_t>
 C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
   using traits = function_traits<func_t>;
-#ifdef USE_ROCM
-    constexpr int tws = (vec_size <= 4) ? 4 : thread_work_size();
-    constexpr int bws = tws * num_threads();
+#if defined(USE_ROCM) && defined(__gfx942__)
+    constexpr int tws = 8;
 #else
     constexpr int tws = thread_work_size();
-    constexpr int bws = tws * num_threads();
 #endif
+  constexpr int bws = tws * num_threads();
   int remaining = N - bws * blockIdx.x;
 
   if (remaining < bws) { // if this block handles the reminder,
@@ -138,7 +137,13 @@ static inline void launch_vectorized_kernel(
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   using traits = function_traits<func_t>;
   int vec_size = memory::can_vectorize_up_to<func_t>(data);
-  int tws = (vec_size <= 4) ? 4 : thread_work_size();
+#ifdef USE_ROCM
+  c10::DeviceIndex curDevice = -1;
+  AT_CUDA_CHECK(c10::cuda::GetDevice(&curDevice));
+  int tws = at::detail::getCUDAHooks().isGPUArch(curDevice, {"gfx942"}) ? 8 : thread_work_size();
+#else
+  int tws = thread_work_size();
+#endif
   int bws = tws * num_threads();
   int64_t grid = (N + bws - 1) / bws;
   auto stream = at::cuda::getCurrentCUDAStream();
