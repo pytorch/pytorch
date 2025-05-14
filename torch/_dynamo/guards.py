@@ -432,6 +432,23 @@ def uninteresting_files():
     return {inspect.getfile(m) for m in mods}
 
 
+def check_overlapping(overlapping, non_overlapping):
+    from torch._functorch._aot_autograd.input_output_analysis import (
+        _tensors_definitely_do_not_overlap,
+    )
+
+    tensors = overlapping + non_overlapping
+    overlapping_indices = set()
+
+    for i in range(len(tensors)):
+        for j in range(i):
+            if not _tensors_definitely_do_not_overlap(tensors[i], tensors[j]):
+                overlapping_indices.add(i)
+                overlapping_indices.add(j)
+
+    return overlapping_indices == set(range(len(overlapping)))
+
+
 _CLOSURE_VARS: Optional[dict[str, object]] = None
 
 
@@ -459,6 +476,7 @@ def _get_closure_vars():
             "___as_tensor": torch._as_tensor_fullprec,
             "torch": torch,
             "inspect": inspect,
+            "check_overlapping": check_overlapping,
         }
     if torch.distributed.is_available():
         from torch.distributed.device_mesh import DeviceMesh
@@ -1640,19 +1658,19 @@ class GuardBuilder(GuardBuilderBase):
                     original_metadata, x.__tensor_flatten__()[1]
                 )
 
-            code_part = f"{ref}.__metadata_guard__({original_metadata}, {ref}.__tensor_flatten__()[1])"
-            self.get_guard_manager(guard).add_lambda_guard(
-                metadata_checker, get_verbose_code_parts(code_part, guard)
-            )
         else:
 
             def metadata_checker(x):
                 return x.__tensor_flatten__()[1] == original_metadata
 
-            code_part = f"{ref}.__tensor_flatten__()[1] == {original_metadata}"
-            self.get_guard_manager(guard).add_lambda_guard(
-                metadata_checker, get_verbose_code_parts(code_part, guard)
-            )
+        compile_id = CompileContext.current_compile_id()
+        global_name = f"___check_metadata_{id(metadata_checker)}_c{str(compile_id).replace('/', '_')}"
+        global_scope = self.get("G")
+        global_scope[global_name] = metadata_checker
+        code_part = f"G[\"{global_name}\"]({ref})"
+        self.get_guard_manager(guard).add_lambda_guard(
+            metadata_checker, get_verbose_code_parts(code_part, guard)
+        )
 
     def EQUALS_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
@@ -3298,7 +3316,7 @@ def get_guard_fail_reason_helper(
     """
     scope = {"L": f_locals, "G": guard_manager.global_scope["G"]}
     scope.update(guard_manager.closure_vars)
-    code_reasons: list[str] = []
+    reasons: list[str] = []
 
     no_tensor_aliasing_check_failed = False
 
@@ -3320,9 +3338,12 @@ def get_guard_fail_reason_helper(
 
         if any("Duplicate tensor found" in reason for reason in failure_reasons):
             no_tensor_aliasing_check_failed = True
+        elif len(verbose_code_parts) + len(failure_reasons) == 1:
+            reasons = verbose_code_parts + failure_reasons
+            verbose_code_parts = []
 
     if no_tensor_aliasing_check_failed:
-        failure_reasons = recompilation_reason_for_no_tensor_aliasing_guard(
+        reasons = recompilation_reason_for_no_tensor_aliasing_guard(
             guard_manager, scope
         )
     else:
@@ -3343,15 +3364,16 @@ def get_guard_fail_reason_helper(
             if isinstance(fail_reason, bool) and not fail_reason:
                 fail_reason = part
             if isinstance(fail_reason, str):
-                code_reasons.append(fail_reason)
+                reasons.append(fail_reason)
+        reasons += failure_reasons
 
     if is_recompiles_verbose_enabled():
-        reason_str = strip_local_scope(f"{compile_id}: " + "; ".join(code_reasons + failure_reasons))
+        reason_str = strip_local_scope(f"{compile_id}: " + "; ".join(reasons))
     else:
-        reason_str = strip_local_scope(f"{compile_id}: " + "; ".join(code_reasons[:1] if code_reasons else failure_reasons[:1]))
+        reason_str = strip_local_scope(f"{compile_id}: " + "; ".join(reasons[:1]))
     
     if return_all:
-        return reason_str, code_reasons, failure_reasons
+        return reason_str, reasons, failure_reasons
     return reason_str
 
 

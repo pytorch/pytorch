@@ -77,7 +77,8 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
                 """\
 GuardDebugInfo(
 result=0,
-verbose_code_parts=['GLOBAL_STATE changed: default_dtype '],
+verbose_code_parts=[],
+failure_reasons=['GLOBAL_STATE changed: default_dtype '],
 num_guards_executed=0)
 """,
             )
@@ -92,7 +93,8 @@ num_guards_executed=0)
                 """\
 GuardDebugInfo(
 result=0,
-verbose_code_parts=['GLOBAL_STATE changed: deterministic_algorithms '],
+verbose_code_parts=[],
+failure_reasons=['GLOBAL_STATE changed: deterministic_algorithms '],
 num_guards_executed=0)
 """,
             )
