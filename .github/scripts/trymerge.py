@@ -2031,7 +2031,7 @@ def check_for_sev(org: str, project: str, skip_mandatory_checks: bool) -> None:
     response = cast(
         dict[str, Any],
         gh_fetch_json_list(
-            "https://api.github.com/search/issues",
+            "https://api.github.com/search/issues",  # @lint-ignore
             # Having two label: queries is an AND operation
             params={
                 "q": f'repo:{org}/{project} is:open is:issue label:"ci: sev" label:"merge blocking"'
