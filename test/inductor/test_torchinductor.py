@@ -12747,7 +12747,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue((actual == 1).all())
 
     @skip_if_gpu_halide
-    @xfail_if_mps  # Inductor syntax error
     def test_pattern_matcher_multi_user(self):
         # Reproducer for https://github.com/pytorch/pytorch/issues/129685
 
@@ -12759,6 +12758,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         a = torch.randn(512, 4096, requires_grad=True)
         b = torch.randint(size=(512,), low=0, high=4095)
+
+        if self.device == "mps" and MACOS_VERSION < 13.3:
+            raise unittest.SkipTest("Fails with internal compiler error on MacOS-13")
 
         self.common(forward, (a, b))
 
@@ -12809,7 +12811,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         b = torch.randn(2, 1, requires_grad=True)
         self.common(forward, (a, b))
 
-    @xfail_if_mps
     @config.patch(implicit_fallbacks=True)
     def test_weight_norm_bwd(self):
         """
