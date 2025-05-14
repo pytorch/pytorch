@@ -15,6 +15,7 @@ import inspect
 import itertools
 import os
 import random
+import sys
 import types
 import typing
 import unittest
@@ -7152,6 +7153,31 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_data_dependent_error_log_no_print(self):
+        # This is a regression test case for
+        # https://github.com/pytorch/pytorch/pull/149831
+        from io import StringIO
+
+        capturedOutput = StringIO()
+        sys.stderr = capturedOutput
+
+        @torch.compile(fullgraph=True)
+        def func(a):
+            if a.sum() > 0:
+                return a + 1
+            return a + 2
+
+        a = torch.rand(10, 10)
+        try:
+            func(a)
+        except Exception:
+            pass
+        sys.stderr = sys.__stderr__
+
+        # Make sure we don't _print_ out the graph module.
+        output = capturedOutput.getvalue()
+        self.assertNotIn("class GraphModule", output)
 
 
 instantiate_parametrized_tests(ReproTests)
