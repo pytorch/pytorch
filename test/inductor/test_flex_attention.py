@@ -3784,7 +3784,6 @@ class GraphModule(torch.nn.Module):
 
     class joint_graph0(torch.nn.Module):
         def forward(self, arg0_1: "f64[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]", arg4_1: "i32[]", arg5_1: "f64[]"):
-            mul: "f64[]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  mul = None
             mul_1: "f64[]" = torch.ops.aten.mul.Tensor(arg5_1, arg0_1)
             mul_2: "f64[]" = torch.ops.aten.mul.Tensor(arg5_1, arg0_1);  arg5_1 = arg0_1 = None
             add: "f64[]" = torch.ops.aten.add.Tensor(mul_2, mul_1);  mul_2 = mul_1 = None
@@ -3792,8 +3791,8 @@ class GraphModule(torch.nn.Module):
 
     class mask_graph0(torch.nn.Module):
         def forward(self, arg0_1: "i32[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]"):
-            full: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
-            return full
+            full_default: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
+            return full_default
 """.replace(  # noqa: B950
             "GPU_TYPE", torch.device(device).type
         )
@@ -5508,8 +5507,7 @@ class TestLearnableBiases(InductorTestCase):
             out_eager, out_compiled, out_gold, (bias,), names=["out", "bias"]
         )
 
-    @skip_on_cpu
-    def test_flex_attention_with_dynamic_max_autotune(self, device):
+    def _test_flex_attention_with_dynamic_max_autotune(self, device):
         query = torch.randn(2, 16, 512, 64, device=device)
         key = torch.randn(2, 16, 512, 64, device=device)
         value = torch.randn(2, 16, 512, 64, device=device)
@@ -5548,6 +5546,15 @@ class TestLearnableBiases(InductorTestCase):
         self.assertEqual(
             out.shape, query.shape, f"Expected shape {query.shape}, got {out.shape}"
         )
+
+    @skip_on_cpu
+    def test_flex_attention_with_dynamic_max_autotune(self, device):
+        self._test_flex_attention_with_dynamic_max_autotune(device)
+
+    @skip_on_cpu
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_flex_attention_with_dynamic_max_autotune_graph_partition(self, device):
+        self._test_flex_attention_with_dynamic_max_autotune(device)
 
     @skip_on_cpu
     def test_inspect_bug(self, device):
