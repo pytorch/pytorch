@@ -9,12 +9,13 @@ if [[ "$OS" != "windows-arm64" ]]; then
     export USE_SCCACHE=1
     export SCCACHE_BUCKET=ossci-compiler-cache
     export SCCACHE_IGNORE_SERVER_IO_ERROR=1
-    export VC_YEAR=2022
+    export VC_YEAR=2019
 fi
 
 if [[ "$DESIRED_CUDA" == 'xpu' ]]; then
+    export VC_YEAR=2022
     export USE_SCCACHE=0
-    export XPU_VERSION=2025.0
+    export XPU_VERSION=2025.1
     export XPU_ENABLE_KINETO=1
 fi
 
