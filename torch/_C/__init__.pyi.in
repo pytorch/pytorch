@@ -1951,6 +1951,7 @@ def _cuda_record_memory_history_legacy(
     alloc_trace_max_entries: _int,
     alloc_trace_record_context: _bool,
     clear_history: _bool,
+    compile_context: _bool,
 ) -> None: ...
 def _cuda_record_memory_history(
     enabled: Optional[str],
@@ -1958,6 +1959,7 @@ def _cuda_record_memory_history(
     stacks: str,
     max_entries: _int,
     clear_history: _bool,
+    compile_context: _bool,
 ) -> None: ...
 def _cuda_isHistoryEnabled() -> _bool: ...
 

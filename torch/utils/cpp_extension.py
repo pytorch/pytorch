@@ -2533,9 +2533,12 @@ def _get_vc_env(vc_arch: str) -> dict[str, str]:
         from setuptools import distutils
         return distutils._msvccompiler._get_vc_env(vc_arch)
     except AttributeError:
-        from setuptools._distutils import _msvccompiler
-        return _msvccompiler._get_vc_env(vc_arch)
-
+        try:
+            from setuptools._distutils import _msvccompiler
+            return _msvccompiler._get_vc_env(vc_arch)
+        except AttributeError:
+            from setuptools._distutils.compilers.C import msvc
+            return msvc._get_vc_env(vc_arch)
 
 def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> None:
     command = ['ninja', '-v']
