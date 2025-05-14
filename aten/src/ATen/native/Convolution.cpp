@@ -467,6 +467,7 @@ struct ConvParams {
       // always use cudnn_depthwise for channels_last format
       return true;
     }
+    
     // native kernel doesn't support 64-bit non-splittable case
     if (cudnn_enabled && needs_64bit_indexing_no_split(input, weight)) {
       static long cudnn_version = detail::getCUDAHooks().versionCuDNN();
@@ -480,37 +481,18 @@ struct ConvParams {
       }
     }
     if (detail::getCUDAHooks().supportsDepthwiseConvolutionWithCuDNN()) {
-      if (cudnn_version >= 8200) {
-        bool kernel_cond =  (use_cudnn(input, weight) &&
-                             input.scalar_type() == kHalf && // only for FP16
-                             weight.scalar_type() == kHalf &&
-                             is_depthwise(input, weight) &&
-                             input.ndimension() == 4 &&   // TODO: 5-D contiguous depthwise is not supported yet, need benchmarks
-                             !is_dilated() && // no dilation supported
-                             (stride[0] == stride[1] || at::symint::size<T>(input, 2) == 1) && // square or 1d
-                             at::symint::size<T>(input, 1) >= 32); // min 32 channels supported)
-        if (kernel_cond) {
-          return check_cudnn_depthwise_workload_with_filter<T>(input, stride[1], weight);
-        }
-      }
-      // keep (7600 <= cudnn < 8200) code unchanged
-      bool kernel_cond =  (cudnn_version >= 7600 &&
-                           use_cudnn(input, weight) &&
+      bool kernel_cond =  (use_cudnn(input, weight) &&
                            input.scalar_type() == kHalf && // only for FP16
                            weight.scalar_type() == kHalf &&
                            is_depthwise(input, weight) &&
                            input.ndimension() == 4 &&   // TODO: 5-D contiguous depthwise is not supported yet, need benchmarks
-                           at::symint::size<T>(weight, 2) == at::symint::size<T>(weight, 3) && // only square kernels
-                           at::symint::size<T>(input, 2) >= 7 && // min width/height 7
                            !is_dilated() && // no dilation supported
-                           stride[0] == stride[1] && // equal strides
-                           ((at::symint::size<T>(weight, 3) == 3) || (at::symint::size<T>(weight, 3) == 1)) &&
+                           (stride[0] == stride[1] || at::symint::size<T>(input, 2) == 1) && // square or 1d
                            at::symint::size<T>(input, 1) >= 32); // min 32 channels supported)
       if (kernel_cond) {
-        return check_cudnn_depthwise_workload<T>(input, stride[0]);
-      } else {
-        return false;
+        return check_cudnn_depthwise_workload_with_filter<T>(input, stride[1], weight);
       }
+      return false;
     } else {
       return false;
     }
