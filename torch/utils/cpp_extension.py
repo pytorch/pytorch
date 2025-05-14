@@ -2461,9 +2461,9 @@ def _get_rocm_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
     # If cflags is given, there may already be user-provided arch flags in it
     # (from `extra_compile_args`). If user also specified -fgpu-rdc or -fno-gpu-rdc, we
     # assume they know what they're doing. Otherwise, we force -fno-gpu-rdc default.
+    has_gpu_rdc_flag = False
     if cflags is not None:
         has_custom_flags = False
-        has_gpu_rdc_flag = False
         for flag in cflags:
             if 'amdgpu-target' in flag or 'offload-arch' in flag:
                 has_custom_flags = True
