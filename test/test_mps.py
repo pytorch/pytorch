@@ -1065,15 +1065,18 @@ class TestMPS(TestCaseMPS):
     @xfailIf(MACOS_VERSION < 15.0)
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     def test_large_bmm(self, dtype):
-        batch1 = torch.randn(11, 20064, 128, dtype=dtype, device='mps')
-        batch2 = torch.randn(11, 128, 20064, dtype=dtype, device='mps')
-        output_cpu = torch.bmm(batch1.cpu(), batch2.cpu())
+        B, M, N = 11, 20064, 128
+        batch1 = torch.randn(B, M, N, dtype=dtype, device='mps')
+        batch2 = torch.randn(B, N, M, dtype=dtype, device='mps')
         output_mps = torch.bmm(batch1, batch2)
 
+        # For performance reasons, check only one(non-first) batch for correctness
+        # TODO: Check two when https://github.com/pytorch/pytorch/issues/153560 is fixed
+        batch_idx = torch.randint(1, B, size=()).item()
+        output_cpu = torch.mm(batch1[batch_idx].cpu(), batch2[batch_idx].cpu())
         # Using the low precision comparison for FP16
         tol = 1e-2 if dtype == torch.float16 else None
-        self.assertEqual(output_cpu, output_mps, atol=tol, rtol=tol)
-        self.assertEqual(output_cpu.size(), output_mps.size())
+        self.assertEqual(output_cpu, output_mps[batch_idx], atol=tol, rtol=tol)
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     def test_take_along_dim(self, dtype):

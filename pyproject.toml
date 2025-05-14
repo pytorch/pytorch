@@ -191,6 +191,7 @@ select = [
     "RUF024", # from keys mutable
     "RUF026", # default factory kwarg
     "RUF030", # No print statement in assert
+    "RUF200", # validate pyproject.toml
     "S324", # for hashlib FIPS compliance
     "SLOT",
     "TC",
@@ -198,6 +199,7 @@ select = [
     "TRY203",
     "TRY401", # verbose-log-message
     "UP",
+    "YTT",
 ]
 
 [tool.ruff.lint.per-file-ignores]
