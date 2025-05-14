@@ -106,9 +106,6 @@ CMD ["/bin/bash"]
 # install test dependencies:
 # - grpcio requires system openssl, bundled crypto fails to build
 RUN dnf install -y \
-  protobuf-devel \
-  protobuf-c-devel \
-  protobuf-lite-devel \
   hdf5-devel \
   python3-h5py \
   git
