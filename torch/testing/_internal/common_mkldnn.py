@@ -20,24 +20,30 @@ def bf32_is_not_fp32():
 
 @contextlib.contextmanager
 def bf32_off():
-    old_matmul_precision = torch.get_float32_matmul_precision()
+    old_matmul_precision = torch.backends.mkldnn.matmul.fp32_precision
+    old_conv_precision = torch.backends.mkldnn.conv.fp32_precision
     try:
-        torch.set_float32_matmul_precision("highest")
+        torch.backends.mkldnn.matmul.fp32_precision = "default"
+        torch.backends.mkldnn.conv.fp32_precision = "default"
         yield
     finally:
-        torch.set_float32_matmul_precision(old_matmul_precision)
+        torch.backends.mkldnn.matmul.fp32_precision = old_matmul_precision
+        torch.backends.mkldnn.conv.fp32_precision = old_conv_precision
 
 
 @contextlib.contextmanager
-def bf32_on(self, bf32_precision=1e-5):
-    old_matmul_precision = torch.get_float32_matmul_precision()
+def bf32_on(self, bf32_precision=1e-2):
+    old_matmul_precision = torch.backends.mkldnn.matmul.fp32_precision
+    old_conv_precision = torch.backends.mkldnn.conv.fp32_precision
     old_precision = self.precision
     try:
-        torch.set_float32_matmul_precision("medium")
+        torch.backends.mkldnn.matmul.fp32_precision = "bf16"
+        torch.backends.mkldnn.conv.fp32_precision = "bf16"
         self.precision = bf32_precision
         yield
     finally:
-        torch.set_float32_matmul_precision(old_matmul_precision)
+        torch.backends.mkldnn.matmul.fp32_precision = old_matmul_precision
+        torch.backends.mkldnn.conv.fp32_precision = old_conv_precision
         self.precision = old_precision
 
 
@@ -45,7 +51,7 @@ def bf32_on(self, bf32_precision=1e-5):
 # allow_bf32=True, another with allow_bf32=False. When running with
 # allow_bf32=True, it will use reduced precision as specified by the
 # argument
-def bf32_on_and_off(bf32_precision=1e-5):
+def bf32_on_and_off(bf32_precision=1e-2):
     def with_bf32_disabled(self, function_call):
         with bf32_off():
             function_call()
