@@ -40,11 +40,18 @@ def bundle_triton_into_fx_graph_cache_default() -> Optional[bool]:
 
 
 def static_cuda_launcher_default() -> bool:
-    result = get_tristate_env(
-        "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER", True if not is_fbcode() else False
-    )
-    assert result is not None
-    return result
+    STATIC_CUDA_LAUNCHER_VERSION = 0
+
+    if "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER" in os.environ:
+        return os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER") == "1"
+    elif is_fbcode():
+        version = torch._utils_internal.justknobs_getval_int(
+            "pytorch/inductor:static_cuda_launcher_version"
+        )
+        return version <= STATIC_CUDA_LAUNCHER_VERSION
+    else:
+        # Default true in OSS
+        return True
 
 
 def prologue_fusion_enabled() -> bool:
@@ -1385,6 +1392,11 @@ class cuda:
     # Format looks like: "0,1,3" for using presets 0, 1, and 3. Presets can be
     # controlled by some cutlass instantiation level flags (e.g. 0, 1111, 2222, ...)
     cutlass_presets: Optional[str] = os.environ.get("TORCHINDUCTOR_CUTLASS_PRESETS")
+
+    # use compile command to create kernel .cu and .so name
+    cutlass_hash_with_compile_cmd: bool = (
+        os.environ.get("TORCHINDUCTOR_CUTLASS_HASH_WITH_COMPILE_CMD", "0") == "1"
+    )
 
 
 class rocm:
