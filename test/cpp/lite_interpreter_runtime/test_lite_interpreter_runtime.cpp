@@ -16,9 +16,14 @@ namespace mobile {
 
 TEST(RunTimeTest, LoadAndForward) {
   // Load check in model: sequence.ptl
+#if defined(__QNX__)
+  // Don't compile an absolute path when building for a target.
+  auto testModelFile = "sequence.ptl";
+#else
   std::string filePath(__FILE__);
   auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
   testModelFile.append("sequence.ptl");
+#endif
 
   //  sequence.ptl source code:
   //  class A(torch.nn.Module):
@@ -53,6 +58,10 @@ TEST(RunTimeTest, LoadAndForward) {
 }
 
 TEST(RunTimeTest, Delegate) {
+#if defined(__QNX__)
+  // Don't compile an absolute path when building for a target.
+  auto testModelFile = "delegate_test.ptl";
+#else
   std::string filePath(__FILE__);
   auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
   // "delegate_test.ptl" is generated from test/cpp/jit/test_backend.cpp,
@@ -66,6 +75,7 @@ TEST(RunTimeTest, Delegate) {
   //        return x + h
   //  )");
   testModelFile.append("delegate_test.ptl");
+#endif
   auto mlm = _load_for_mobile(testModelFile);
   std::vector<IValue> inputs;
   inputs.emplace_back(2.0 * at::ones({}));
@@ -76,6 +86,10 @@ TEST(RunTimeTest, Delegate) {
 }
 
 TEST(RunTimeTest, DelegateException) {
+#if defined(__QNX__)
+  // Don't compile an absolute path when building for a target.
+  auto testModelFile = "delegated_submodule_with_debug_info.ptl";
+#else
   std::string filePath(__FILE__);
   auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
   /*
@@ -138,6 +152,7 @@ TEST(RunTimeTest, DelegateException) {
    *
    */
   testModelFile.append("delegated_submodule_with_debug_info.ptl");
+#endif
   auto mlm = _load_for_mobile(testModelFile);
   std::vector<IValue> inputs;
   inputs.emplace_back(torch::rand({2, 4}));
