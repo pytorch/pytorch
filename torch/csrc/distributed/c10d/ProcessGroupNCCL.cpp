@@ -935,7 +935,6 @@ std::atomic<bool> ProcessGroupNCCL::watchdogHeartbeatMonitorEnabled_;
 std::mutex ProcessGroupNCCL::monitorMutex_;
 std::condition_variable ProcessGroupNCCL::monitorWakeUpCV_;
 bool ProcessGroupNCCL::dumpOnTimeoutOrEx_;
-bool ProcessGroupNCCL::propagatePgError_;
 std::string ProcessGroupNCCL::globalLogPrefix_;
 std::thread ProcessGroupNCCL::ncclHeartbeatMonitorThread_;
 
@@ -969,6 +968,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
   rethrowCUDAErrors_ = getCvarBool(TORCH_NCCL_RETHROW_CUDA_ERRORS, true);
+  propagatePgError_ = getCvarBool(TORCH_NCCL_PROPAGATE_ERROR, false);
   // logging C++ stack isn't safe. Introduce a variable to control it.
   logCppStackOnUncleanShutdown_ =
       getCvarBool(TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN, true);
@@ -988,7 +988,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     // both timeout and other errors.
     dumpOnTimeoutOrEx_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, true) ||
         (dist_debug_level_ >= DebugLevel::Detail);
-    propagatePgError_ = getCvarBool(TORCH_NCCL_PROPAGATE_ERROR, false);
     watchdogHeartbeatMonitorEnabled_.store(
         getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
     globalLogPrefix_ = c10::str("[Global Rank ", globalRank(), "] ");

@@ -1314,7 +1314,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether or not to propagate detected errors to all ranks in the same PG
   // through TCPStore.
-  static bool propagatePgError_;
+  bool propagatePgError_;
 
   // Whether or not to sleep after an exception is thrown in the watchdog.
   bool sleepAfterException_{};
