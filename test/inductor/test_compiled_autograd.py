@@ -43,7 +43,6 @@ from torch.testing._internal.common_utils import (
     scoped_load_inline,
     skipIfWindows,
 )
-from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
@@ -4164,7 +4163,13 @@ class CompiledAutograd1(torch.nn.Module):
         first, second, third, fourth = fn(eager(), aot_eager())
         self.assertIsNone(third)
 
+    @unittest.skipIf(
+        not torch.distributed.is_available(),
+        "FakePG relies on distributed build",
+    )
     def test_ddp_cpp_reducer_error(self):
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
         try:
@@ -4184,8 +4189,14 @@ class CompiledAutograd1(torch.nn.Module):
         finally:
             dist.destroy_process_group()
 
+    @unittest.skipIf(
+        not torch.distributed.is_available(),
+        "FakePG relies on distributed build",
+    )
     @config.patch(optimize_ddp="python_reducer")
     def test_ddp_python_reducer(self):
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
         try:
@@ -4440,6 +4451,11 @@ xfail_by_backend = {
         "test_graph_save_on_cpu",  # torch.save should no-op and be recorded in the graph
         "test_saving_variable_to_disk",  # torch.save should no-op and be recorded in the graph
         "test_nested_checkpoint_early_stop_False",  # AOT backward higher order gradients
+        # Slow tests, these tests are close to CI timeout if we try to torch.compile them
+        "test_checkpointing",
+        "test_checkpointing_without_reentrant_memory_savings",
+        "test_checkpointing_without_reentrant_input_requires_grad_True",
+        "test_checkpointing_without_reentrant_input_requires_grad_False",
     },
     "aot_eager": {  # will be run with torch.compile(backend="eager")
         # Category: FakeTensor
