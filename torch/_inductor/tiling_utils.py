@@ -8,7 +8,6 @@ from typing import Optional, TYPE_CHECKING, Union, Sequence
 import sympy
 
 import torch
-import heapq
 
 
 from torch._inductor import config
@@ -279,7 +278,6 @@ class NodeSplitGetter():
         # if for whatever reason we couldnt split above, return default split
         return ((self.pointwise_numel,), (self.red_numel,))
 
-
     def try_split(self, pw: Split, red: Split) -> Optional[tuple[Split, Split]]:
         from torch._inductor.codegen.simd import SIMDKernel, CantSplit
 
@@ -297,222 +295,54 @@ class NodeSplitGetter():
 
             assert len(getters) == 2
             pw_group_splits = splits[:len(pw)]
-            # breakpoint()
-            # if len(pw) == 3:
-            #     breakpoint()
-            # pw_split_sums = tuple(sympy_product(s) for s in pw_group_splits)
-            # if len(flattened_pw_splits) == 4:
-            #     breakpoint()
-            # if we had to divide a variable in two to do this split, try to split on it
+            # if we had to divide a variable into two to do this split, 
+            # then lets try the larger, induced split.
+            # e.g. splitting (12, 2) into (2, 12) will split the first var into:
+            # (2, 6) and produce an overall split of (2, 6, 2)
             flattened_pw_splits = tuple(itertools.chain.from_iterable(pw_group_splits))
-            breakpoint()
             if flattened_pw_splits != pw:
-                # if len(flattened_pw_splits) != 4:
-                # breakpoint()
-                out = self.try_split(flattened_pw_splits, red)
-                if out:
-                    breakpoint
+                if out := self.try_split(flattened_pw_splits, red):
                     return out
         
-        # if len(pw) == 3:
-        #     return None
-        print("Returning", pw, red)
         return pw, red
-
-def apply_var_mapping_old(old_vars, new_vars, new_ranges, return_getters_groups):
-    var_map = {}    
-    num_vars = sum(len(s) for s in new_ranges)
-    new_var_map = {}
-
-    split_vars = sympy.symbols(f"v_0:{num_vars}")
-    var_count = len(split_vars) - 1
-
-    # ([p0, p1, p2], [[128, 6], [64], [196]])
-    
-    curr_count = 0
-    new_var_map = {}
-    for group, old_var in zip(new_ranges, old_vars):
-        
-        divis = None
-        assert len(group) <= 2
-        if len(group) == 2:
-            new_var1 = split_vars[curr_count]
-            new_var2 = split_vars[curr_count + 1]
-            curr_count += 2
-            # TODO _ think about
-            new_var_map[new_var1] = (old_var * group[1])
-            new_var_map[new_var2] = (old_var)
-        else:
-            new_var = split_vars[curr_count]
-            curr_count += 1
-            new_var_map[new_var] = old_var 
-
-    out_exprs = [sympy_subs(g(split_vars), new_var_map) for g in return_getters_groups]
-
-    var_map = {}
-
-    var_map = defaultdict(list)
-
-    for expr, new_var in zip(out_exprs, new_vars):
-        repl_map = dict.fromkeys(expr.free_symbols, 0)
-        for v in expr.free_symbols:
-            repl_map[v] = new_var
-            var_map[v].append(sympy_subs(expr, repl_map))
-            repl_map[v] = 0
-
-    var_map = {k: sum(v) for k, v in var_map.items()}
-    return var_map
-
-
-def apply_var_mapping(iter_vars, red_vars, norm_pw_vars, norm_red_vars, new_ranges, return_getters_groups):
-    var_map = {}    
-    
-    all_old_vars = list(iter_vars) + list(red_vars)
-    all_new_vars = list(norm_pw_vars) + list(norm_red_vars)
-    
-    # Create symbolic variables for all splits
-    num_vars = sum(len(s) for s in new_ranges)
-    split_vars = sympy.symbols(f"v_0:{num_vars}")
-    breakpoint()
-
-    # out = [g(split_vars) for g in return_getters_groups]
-
-    # ([p0, p1, p2], [[128, 6], [64], [196]])
-    curr_count = 0
-    new_var_map = {}
-
-    # new_ranges[:len(n_pw_splits)], return_getters_groups[0])
-    g1 = (
-        new_ranges[0:len(norm_pw_vars)],
-        iter_vars,
-        return_getters_groups[0]
-    )
-    g2 = (
-        new_ranges[len(norm_pw_vars):],
-        red_vars,
-        return_getters_groups[1],
-    )
-    var_map = defaultdict(list)
-
-    for i, (ranges, old_vars, return_getter_group) in enumerate((g1, g2)):
-
-        init_range = curr_count
-        breakpoint()
-        for group, old_var in zip(ranges, old_vars):
-            assert len(group) <= 2
-            if len(group) == 2:
-                new_var1 = split_vars[curr_count]
-                new_var2 = split_vars[curr_count + 1]
-                curr_count += 2
-                # TODO _ think about
-                new_var_map[new_var1] = (old_var * group[1])
-                new_var_map[new_var2] = (old_var)
-            else:
-                new_var = split_vars[curr_count]
-                curr_count += 1
-                new_var_map[new_var] = old_var 
-
-        out_exprs = [sympy_subs(g(split_vars), new_var_map) for g in return_getter_group]
-
-        new_vars = norm_pw_vars if i == 0 else norm_red_vars
-        # if i == 0:
-        #     breakpoint()
-        for expr, new_var in zip(out_exprs, new_vars):
-            repl_map = dict.fromkeys(expr.free_symbols, 0)
-            for v in expr.free_symbols:
-                repl_map[v] = new_var
-                var_map[v].append(sympy_subs(expr, repl_map))
-                repl_map[v] = 0
-    
-    breakpoint()
-    var_map = {k: sum(v) for k, v in var_map.items()}
-    return var_map
-
-def apply_var_mapping(iter_vars, red_vars, norm_pw_vars, norm_red_vars, new_ranges, return_getters_groups):
-    """Maps original variables to expressions using normalized variables."""
-    # Create flattened iteration variables
-    num_vars = sum(len(s) for s in new_ranges)
-    flat_vars = sympy.symbols(f"v_0:{num_vars}")
-    
-    # Apply getters to get expressions with flat variables
-    flat_exprs = []
-    for getter_group in return_getters_groups:
-        flat_exprs.append([g(flat_vars) for g in getter_group])
-    
-    # Map flat variables to normalized variables where possible
-    flat_to_norm = {}
-    norm_idx = 0
-    for norm_var in list(norm_pw_vars) + list(norm_red_vars):
-        if norm_idx < len(flat_vars):
-            flat_to_norm[flat_vars[norm_idx]] = norm_var
-            norm_idx += 1
-    
-    # Create mapping from original variables to expressions with normalized variables
-    var_map = {}
-    
-    # Map pointwise variables
-    for i, (orig_var, flat_expr) in enumerate(zip(iter_vars, flat_exprs[0])):
-        # Replace flat variables with normalized ones where possible
-        norm_expr = flat_expr
-        for flat_var, norm_var in flat_to_norm.items():
-            norm_expr = norm_expr.subs(flat_var, norm_var)
-        var_map[orig_var] = norm_expr
-    
-    # Map reduction variables
-    for i, (orig_var, flat_expr) in enumerate(zip(red_vars, flat_exprs[1])):
-        norm_expr = flat_expr
-        for flat_var, norm_var in flat_to_norm.items():
-            norm_expr = norm_expr.subs(flat_var, norm_var)
-        var_map[orig_var] = norm_expr
-    
-    return var_map
 
 def zip_equal(it1, it2):
     if len(it1) != len(it2):
+        breakpoint()
         raise ValueError("Lengths of iterables are different")
     return zip(it1, it2)
 
-
-def apply_var_mapping(iter_vars, red_vars, norm_pw_vars, norm_red_vars, new_ranges, return_getters_groups, var_mappings):
+def apply_var_mapping(iter_vars, red_vars, norm_pw_vars, norm_red_vars, new_ranges, return_getters_groups):
     """Maps original variables to expressions using normalized variables."""
     # Create flattened iteration variables
     num_vars = sum(len(s) for s in new_ranges)
     flat_vars = sympy.symbols(f"v_0:{num_vars}")
-    
-    # First map flat variables to normalized variables
-    flat_to_norm = {}
-    norm_vars = list(norm_pw_vars) + list(norm_red_vars)
-
-    flat_var_mappings = []
-    for var_mapping in var_mappings:
-        for g in var_mapping:
-            flat_var_mappings.append(g((iter_vars, red_vars)))
-
-    new_var_mappings = {}
     count = 0
-    tot = []
 
-    old_vars_to_new_vars = defaultdict(list)
+    if len(iter_vars) == 0 and len(red_vars) == 0:
+        return {}
 
     assert len(new_ranges) == len(norm_pw_vars + norm_red_vars)
-    # breakpoint()
-    all_flat_vars = []
-    all_var_mapping = {}
-
     apply_groups = []
     for group in return_getters_groups:
         apply_groups.append([g(flat_vars) for g in group])
 
     iter_vars_to_flat_vars = {}
-    
-    for group, var_group in zip_equal(apply_groups, ((iter_vars, red_vars))):
-        for g, v in zip_equal(group, var_group):
+    for i, (group, var_group) in enumerate(zip_equal(apply_groups, ((iter_vars, red_vars)))):
+
+        # if the node has sizes (p0, 1) and the fused node is (p0, r0)
+        # the reduction var gets filled in for split_iteration_range
+        if len(group) != len(var_group):
+            assert i == 1
+            assert len(var_group) == 0
+            continue
+
+        for g, v in zip(group, var_group):
             iter_vars_to_flat_vars[v] = g
 
     count = 0
     flat_vars_to_new_vars = {}
     for new_range, new_var in zip_equal(new_ranges, norm_pw_vars + norm_red_vars):
-
         range_vars = []
         for i in range(len(new_range)):
             range_vars.append(flat_vars[count])
@@ -524,122 +354,7 @@ def apply_var_mapping(iter_vars, red_vars, norm_pw_vars, norm_red_vars, new_rang
             prod = new_range[i] * prod
 
     final_dict = {k: sympy_subs(v, flat_vars_to_new_vars) for k, v in iter_vars_to_flat_vars.items()}
-    # breakpoint()
-    
     return final_dict
-    pass
-
-        
-
-
-    # Assign normalized variables to flat variables based on position
-    flat_idx = 0
-    for range_idx, range_group in enumerate(new_ranges):
-        for _ in range(len(range_group)):
-            if flat_idx < len(norm_vars):
-                flat_to_norm[flat_vars[flat_idx]] = norm_vars[flat_idx]
-            flat_idx += 1
-    
-    # Initialize var_map with defaultdict to collect contributions
-    var_map = defaultdict(list)
-    
-    # Process pointwise getters
-    for i, getter in enumerate(return_getters_groups[0]):
-        if i < len(iter_vars):
-            orig_var = iter_vars[i]
-            flat_expr = getter(flat_vars)
-            
-            # Substitute normalized variables into the expression
-            norm_expr = sympy_subs(flat_expr, flat_to_norm)
-            
-            # Add this contribution to the variable
-            var_map[orig_var].append(norm_expr)
-    
-    # Process reduction gettersx
-    for i, getter in enumerate(return_getters_groups[1]):
-        if i < len(red_vars):
-            orig_var = red_vars[i]
-            flat_expr = getter(flat_vars)
-            norm_expr = sympy_subs(flat_expr, flat_to_norm)
-            var_map[orig_var].append(norm_expr)
-    
-    breakpoint()
-    # Sum up all contributions for each original variable
-    return {k: sum(v) for k, v in var_map.items()}
-
-
-
-def apply_unified_var_mapping(iter_vars, red_vars, norm_pw_vars, norm_red_vars, new_ranges, return_getters_groups):
-    """
-    Apply variable mapping for both pointwise and reduction variables using a unified approach.
-    
-    Args:
-        iter_vars: Iteration variables for pointwise operations
-        red_vars: Reduction variables
-        norm_pw_vars: Normalized pointwise variables
-        norm_red_vars: Normalized reduction variables
-        new_ranges: Ranges for all variables (pointwise + reduction)
-        return_getters_groups: List of lists of getter functions [pw_getters, red_getters]
-        
-    Returns:
-        Combined variable mapping
-    """
-    # Create a flat list of all variables
-    all_old_vars = list(iter_vars) + list(red_vars)
-    all_new_vars = list(norm_pw_vars) + list(norm_red_vars)
-    
-    # Create symbolic variables for all splits
-    num_vars = sum(len(s) for s in new_ranges)
-    split_vars = sympy.symbols(f"v_0:{num_vars}")
-    
-    # Create mapping from split variables to original variable expressions
-    var_idx = 0
-    new_var_map = {}
-    breakpoint()
-    
-    for group, old_var in zip(new_ranges, all_old_vars):
-        if len(group) == 2:
-            # Handle case where a variable is split into two dimensions
-            new_var1 = split_vars[var_idx]
-            new_var2 = split_vars[var_idx + 1]
-            var_idx += 2
-            
-            new_var_map[new_var1] = (old_var * group[1])
-            new_var_map[new_var2] = old_var
-        else:
-            # Handle case where variable is not split
-            new_var = split_vars[var_idx]
-            var_idx += 1
-            new_var_map[new_var] = old_var
-    
-    # Create a unified list of getters with their corresponding output variables
-    unified_getters = []
-    try:
-        for group_idx, (getters, output_vars) in enumerate(zip(return_getters_groups, [norm_pw_vars, norm_red_vars])):
-            for getter_idx, getter in enumerate(getters):
-                unified_getters.append((getter, output_vars[getter_idx], group_idx))
-    except Exception as e:
-        breakpoint()
-        raise
-        
-    # Process all getters in a single loop
-    var_map = defaultdict(int)
-    
-    for getter, output_var, group_idx in unified_getters:
-        # Apply substitution to get expression in terms of original variables
-        expr = sympy_subs(getter(split_vars), new_var_map)
-        
-        # Map split variables to their contribution in the final expression
-        for v in expr.free_symbols:
-            # Create temporary replacement map to isolate this variable's contribution
-            repl_map = {sym: 0 for sym in expr.free_symbols}
-            repl_map[v] = output_var
-            
-            # Add this contribution to the variable mapping
-            term = sympy_subs(expr, repl_map)
-            var_map[v] += term
-    
-    return var_map
 
 
 def _extract_fused_node_meta(
@@ -662,7 +377,6 @@ def _extract_fused_node_meta(
     node = node
     pointwise_numel: sympy.Expr = node.group[1][0]
     red_numel: sympy.Expr = node.group[1][1]
-    # breakpoint()
     
     for n in (list(node.get_nodes())):
         if not isinstance(n, torch._inductor.scheduler.SchedulerNode):
@@ -681,28 +395,12 @@ def _extract_fused_node_meta(
         groups = pw_splits + red_splits
         lengths = (n_pw_splits, (n_red_splits))
         lengths = torch._inductor.codegen.simd.SIMDKernel.prepare_split_iteration_lengths(groups, lengths, red_numel)
-        # breakpoint()
-        new_ranges, return_getters_groups, var_mappings = torch._inductor.codegen.simd.SIMDKernel._split_iteration_ranges(groups, lengths, True)
-        
-        len_vars = [iter_vars, red_vars]
-
-        # out = var_mappings
-        # Apply unified mapping
-        # breakpoint()
-        print(iter_vars, red_vars, norm_pw_vars, norm_red_vars, new_ranges, return_getters_groups)
-        # var_map2 = apply_var_mapping_old(iter_vars, norm_pw_vars, new_ranges[:len(n_pw_splits)], return_getters_groups[0])
-        # breakpoint()
+        new_ranges, return_getters_groups = torch._inductor.codegen.simd.SIMDKernel._split_iteration_ranges(groups, lengths)
         var_map = apply_var_mapping(
             iter_vars, red_vars, 
             norm_pw_vars, norm_red_vars, 
-            new_ranges, return_getters_groups, var_mappings
+            new_ranges, return_getters_groups
         )
-        breakpoint()
-        
-        # for k, v in var_map2.items():
-        #     assert var_map[k] == v
-        # breakpoint()
-        # var_map.update(apply_var_mapping(red_vars, norm_red_vars, new_ranges[len(n_pw_splits):], return_getters_groups[1]))
 
         n_reads_new = [sympy_subs(read, var_map) for read in n_reads]
         n_writes_new = [sympy_subs(read, var_map) for read in n_writes]
@@ -798,7 +496,6 @@ def analyze_memory_coalescing(
         else:
             uncoalesced_addrs[memory_expr] = size
 
-    # breakpoint()
     if not uncoalesced_addrs:
         return CoalesceVarAnalysis(
             coalesced_by_var=coalesced_by_var, norm_read_writes=norm_read_writes
@@ -816,10 +513,7 @@ def analyze_memory_coalescing(
             del expr_subs[v]
             single_var_expr = sympy_subs(uncoalesced_expr, expr_subs)
             expr_subs[v] = 0
-            # if repr(single_var_expr) == "64*n1":
-            #     breakpoint()
             tiling_factor = solve_for_tiling(single_var_expr)
-            # breakpoint()
             if (
                 tiling_factor is None
                 or not tiling_factor.is_constant()

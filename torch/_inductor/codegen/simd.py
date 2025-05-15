@@ -2063,10 +2063,8 @@ class SIMDScheduling(BaseScheduling):
             # Some kernels have no reduction ranges, and a reduction numel of 1
             if not ranges:
                 if target_numel:
-                    breakpoint()
                     return ([target_numel], [])
                 else:
-                    breakpoint()
                     return ([], [])
 
             key = (repr(vars_to_use), use_split_var, is_pointwise)
@@ -2132,8 +2130,6 @@ class SIMDScheduling(BaseScheduling):
                     process_node_vars(is_pointwise=False),
                 )
             )
-
-        # breakpoint()
 
         # TODO, add tests, reduction splits if config.triton.tile_reductions
         overlapping_iter_vars = (
