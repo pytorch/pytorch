@@ -610,6 +610,12 @@ class CompileEventLogger:
         method_fn(*args, **kwargs)
 
 
+class CompilationPhase(enum.Enum):
+    DYNAMO = "dynamo"
+    AOT_DISPATCH = "aot_dispatch"
+    INDUCTOR = "inductor"
+
+
 _dynamo_timed_tls = threading.local()
 
 
