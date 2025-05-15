@@ -307,7 +307,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 dtype == torch.float32
                 and epilogue == "add"
                 and not bias
-                and dynamo_config.dynamic_shapes
                 and not dynamo_config.assume_static_by_default
             )
         ):

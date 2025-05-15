@@ -2216,16 +2216,16 @@ class FakeTensorDispatchCache(TestCase):
                 FakeTensorMode.cache_clear()
                 self.assertHitsMisses(0, 0)
 
-                ref = invoke_subgraph(fn, "subgraph", (x, y))
+                ref = invoke_subgraph(fn, "subgraph", x, y)
                 self.assertHitsMisses(0, 2)
                 self.assertBypasses("function argument", 1)
 
-                res = invoke_subgraph(fn, "subgraph", (x, y))
+                res = invoke_subgraph(fn, "subgraph", x, y)
                 # The hits are from the ops inside fn
                 self.assertHitsMisses(2, 2)
                 self.assertBypasses("function argument", 2)
 
-                res = invoke_subgraph(fn, "subgraph", (x, y))
+                res = invoke_subgraph(fn, "subgraph", x, y)
                 # The hits are from the ops inside fn
                 self.assertHitsMisses(4, 2)
                 self.assertBypasses("function argument", 3)
@@ -2246,14 +2246,14 @@ class FakeTensorDispatchCache(TestCase):
                 FakeTensorMode.cache_clear()
                 self.assertHitsMisses(0, 0)
 
-                ref = invoke_subgraph(mod, "subgraph", (x, y))
+                ref = invoke_subgraph(mod, "subgraph", x, y)
                 self.assertHitsMisses(0, 3)
 
-                res = invoke_subgraph(mod, "subgraph", (x, y))
+                res = invoke_subgraph(mod, "subgraph", x, y)
                 # The hits are from re-running the subgraph
                 self.assertHitsMisses(1, 3)
 
-                res = invoke_subgraph(mod, "subgraph", (x, y))
+                res = invoke_subgraph(mod, "subgraph", x, y)
                 # The hits are from re-running the subgraph
                 self.assertHitsMisses(2, 3)
 
@@ -2312,14 +2312,14 @@ class FakeTensorDispatchCache(TestCase):
             FakeTensorMode.cache_clear()
             self.assertHitsMisses(0, 0)
 
-            ref = invoke_subgraph(mod, "subgraph", (x, y))
+            ref = invoke_subgraph(mod, "subgraph", x, y)
             self.assertHitsMisses(0, 3)
 
-            res = invoke_subgraph(mod, "subgraph", (x, y))
+            res = invoke_subgraph(mod, "subgraph", x, y)
             # The hits are from the ops inside fn and not the subgraph
             self.assertHitsMisses(1, 3)
 
-            res = invoke_subgraph(mod, "subgraph", (x, y))
+            res = invoke_subgraph(mod, "subgraph", x, y)
             # The hits are from the ops inside fn and not the subgraph
             self.assertHitsMisses(2, 3)
 
