@@ -434,7 +434,7 @@ query ($owner: String!, $name: String!) {
 RE_GHSTACK_HEAD_REF = re.compile(r"^(gh/[^/]+/[0-9]+/)head$")
 RE_GHSTACK_DESC = re.compile(r"Stack.*:\r?\n(\* [^\r\n]+\r?\n)+", re.MULTILINE)
 RE_PULL_REQUEST_RESOLVED = re.compile(
-    r"(Pull Request resolved|Pull-Request-resolved): "
+    r"(Pull Request resolved|Pull-Request-resolved|Pull-Request): "
     r"https://github.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>[0-9]+)",
     re.MULTILINE,
 )
@@ -2031,7 +2031,7 @@ def check_for_sev(org: str, project: str, skip_mandatory_checks: bool) -> None:
     response = cast(
         dict[str, Any],
         gh_fetch_json_list(
-            "https://api.github.com/search/issues",
+            "https://api.github.com/search/issues",  # @lint-ignore
             # Having two label: queries is an AND operation
             params={
                 "q": f'repo:{org}/{project} is:open is:issue label:"ci: sev" label:"merge blocking"'
