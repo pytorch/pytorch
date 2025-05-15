@@ -697,6 +697,74 @@ def embedding_bag(fake_mode, func, *args, **kwargs):
         return meta_embedding_bag(*args, **kwargs)
 
 
+@register_op_impl(aten.slice.Tensor)
+def slice_tensor(fake_mode, func, tensor, dim=0, start=None, end=None, step=1):
+    from torch.fx.experimental.symbolic_shapes import guard_or_none
+    import torch._prims_common as utils
+
+    ndim = tensor.dim()
+    if ndim == 0:
+        raise RuntimeError("slice() cannot be applied to a 0-dim tensor.")
+    dim = utils.canonicalize_dim(tensor.dim(), dim)
+    sizes = list(tensor.size())
+    strides = list(tensor.stride())
+
+    if step <= 0:
+        raise RuntimeError("slice step must be positive")
+
+    start_val = start if start is not None else 0
+    end_val = end if end is not None else sys.maxsize  # 2^63 - 1
+
+    def go(idx):
+        unknown = False
+        def foo(b):
+            nonlocal unknown
+            if (x := guard_or_none(b)) is None:
+                unknown = True
+                return False
+            return x
+
+        if foo(idx < -sizes[dim]):
+            out = 0
+        elif foo(idx < 0):
+            out = sizes[dim] + idx
+        elif foo(idx <= sizes[dim]):
+            out = idx
+        else:
+            out = sizes[dim]
+
+        return out, unknown
+
+    new_start_val, start_unknown = go(start_val)
+    new_end_val, end_unknown = go(end_val)
+    if (start_unknown or end_unknown) and not fake_mode.shape_env.allow_dynamic_output_shape_ops:
+        raise DynamicOutputShapeException(func)
+
+    if start_unknown:
+        torch._check(start_val >= 0)
+        torch._check(start_val <= sizes[dim])
+    else:
+        start_val = new_start_val
+
+    if end_unknown:
+        torch._check(end_val >= 0)
+        torch._check(end_val <= sizes[dim])
+    else:
+        end_val = new_end_val
+
+    storage_offset = tensor.storage_offset() + start_val * strides[dim]
+    len = torch.sym_max(end_val - start_val, 0)
+    sizes[dim] = (len + step - 1) // step
+    strides[dim] *= step
+
+    if tensor.is_quantized:
+        raise NotImplementedError(
+            "Slice decomposition for quantized tensors aren't implemented"
+        )
+    else:
+        return tensor.as_strided(sizes, strides, storage_offset)
+
+
 # takes in multiple-devices, dont default to default device handling
 @register_op_impl(aten._unsafe_index_put.default)
 @register_op_impl(aten.copy.default)
