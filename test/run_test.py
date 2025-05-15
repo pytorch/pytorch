@@ -1359,7 +1359,7 @@ def parse_args():
         "--keep-going",
         action="store_true",
         help="Runs the full test suite despite one of the tests failing",
-        default=strtobool(os.environ.get("CONTINUE_THROUGH_ERROR", "False")),
+        default=strtobool(os.environ.get("CONTINUE_THROUGH_ERROR", "True")),
     )
     parser.add_argument(
         "--pipe-logs",
