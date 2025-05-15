@@ -22,18 +22,18 @@ onednn::Attr construct_binary_attr(
     c10::optional<at::Scalar> alpha,
     const Tensor& other,
     onednn::Attr attr) {
-    if (binary == "mul") {
+  if (binary == "mul") {
     attr.append_post_binary<is_matmul>(attr.kind_with_binary_mul, other);
-    } else if (binary == "sub") {
+  } else if (binary == "sub") {
     attr.append_post_binary<is_matmul>(attr.kind_with_binary_sub, other);
-    } else if (binary == "div") {
+  } else if (binary == "div") {
     attr.append_post_binary<is_matmul>(attr.kind_with_binary_div, other);
-    } else if (binary == "add") {
+  } else if (binary == "add") {
     attr.append_post_binary<is_matmul>(attr.kind_with_binary_add, other);
-    } else if (binary == "sum") {
+  } else if (binary == "sum") {
     attr.append_post_sum(1.f, 1.f, 0);
-    }
-    return attr;
+  }
+  return attr;
 }
 
 } // namespace at::native::xpu
