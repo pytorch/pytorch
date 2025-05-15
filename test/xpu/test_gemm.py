@@ -132,7 +132,7 @@ class TestBasicGEMM(TestCase):
                 )
 
     @precisionOverride({torch.float: 1e-4, torch.double: 1e-6, torch.half: 1e-1})
-    @dtypes(torch.float, torch.half, torch.double)
+    @dtypes(torch.float32, torch.half, torch.double)
     def test_addmm(self, device, dtype):
         self._test_addmm_impl(torch.addmm, None, device, dtype)
 
