@@ -2,7 +2,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <gtest/gtest.h>
 
-
 TEST(NumBits, CubTest) {
   using at::cuda::cub::get_num_bits;
   ASSERT_EQ(get_num_bits(0b0000000000000000000000000000000000000000000000000000000000000000UL), 1);

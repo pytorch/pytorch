@@ -330,7 +330,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
         thrust::make_reverse_iterator(static_cast<const index_t*>(count_data) + num_indices),
         thrust::make_reverse_iterator(count_data + num_indices),
 #if CUB_V3_PLUS()
-       ::cuda::maximum<>{},
+       ::cuda::maximum<>(),
 #else
         NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::Max(),
 #endif
