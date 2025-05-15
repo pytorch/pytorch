@@ -941,11 +941,13 @@ class GuardBuilder(GuardBuilderBase):
             # Fix this if condition
             if isinstance(example_value, dict_keys):
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
+            elif isinstance(example_value, (set, frozenset)):
+                # we don't need to guard on key order for set/frozenset
+                # but the if above will be true for these types as set is
+                # implemented using a dict in Dynamo
+                guard_manager_enum = GuardManagerType.GUARD_MANAGER
             else:
-                try:
-                    assert isinstance(example_value, (dict, set, frozenset))
-                except:
-                    breakpoint()
+                assert isinstance(example_value, dict)
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
         return guard_manager_enum
 
@@ -1512,7 +1514,6 @@ class GuardBuilder(GuardBuilderBase):
     def SET_CONTAINS(self, guard: Guard, item: Any, contains: bool):
         set_ref = self.arg_ref(guard)
 
-        # code = f"___set_contains({set_ref}, {item!r})"
         code = f"set.__contains__({set_ref}, {item!r})"
 
         self._set_guard_export_info(guard, [code])
