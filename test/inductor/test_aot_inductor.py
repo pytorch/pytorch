@@ -210,8 +210,9 @@ class AOTInductorTestsTemplate:
                 AOTIRunnerUtil.legacy_compile, model, example_inputs
             )
             # We should have 1 input, 1 output, 2 constants for the model.
-            check_str = "AOTInductorModelBase(1, 1, 2"
-            FileCheck().check_count(check_str, 1).run(code)
+            FileCheck().check_count("AOTInductorModelBase(1,", 1).check_next(
+                "1,"
+            ).check_next("2,").run(code)
 
     def test_constant_folding(self):
         class Model(torch.nn.Module):
@@ -1157,7 +1158,6 @@ class AOTInductorTestsTemplate:
         )
 
     # scaled_dot_product_flash_attention
-    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(not SM80OrLater, "bfloat16 only supported in sm80+")
     def test_sdpa(self):
         class Model(torch.nn.Module):
@@ -1174,7 +1174,6 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
-    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(not SM80OrLater, "bfloat16 only supported in sm80+")
     def test_sdpa_2(self):
         class Model(torch.nn.Module):
@@ -4610,11 +4609,11 @@ class AOTInductorTestsTemplate:
                 return add, sliced
 
         inps = (
-            torch.randint(0, 1, (240,), device="cuda", dtype=torch.uint8),
-            torch.randint(0, 1, (240,), device="cuda", dtype=torch.uint8),
-            torch.randn((192,), device="cuda"),
-            torch.randn((48,), device="cuda"),
-            torch.randint(0, 100, (47,), device="cuda", dtype=torch.uint8),
+            torch.randint(0, 1, (240,), device=GPU_TYPE, dtype=torch.uint8),
+            torch.randint(0, 1, (240,), device=GPU_TYPE, dtype=torch.uint8),
+            torch.randn((192,), device=GPU_TYPE),
+            torch.randn((48,), device=GPU_TYPE),
+            torch.randint(0, 100, (47,), device=GPU_TYPE, dtype=torch.uint8),
         )
 
         dim = torch.export.Dim("dimensionality")
