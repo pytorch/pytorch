@@ -9,6 +9,7 @@ from torch.distributed._tensor.placement_types import Partial, Replicate, Shard
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor._collective_utils import shard_dim_alltoall
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -628,6 +629,7 @@ class MultiDimRedistributeTest(DTensorTestBase):
                         self.assertEqual(local_full, expected)
 
     @with_comms
+    @skip_if_lt_x_gpu(8)
     def test_redistribute_shard_dim_multi_dim_mesh(self):
         mesh = init_device_mesh(self.device_type, (2, 2, 2))
         input_data = torch.randn((8, 8, 8), device=self.device_type)

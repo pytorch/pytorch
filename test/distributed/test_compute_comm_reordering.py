@@ -391,9 +391,9 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         ranks = pg_info["ranks"]
         group_size = pg_info["group_size"]
 
-        g1 = torch.ones(10, 10, device="cuda")
-        g2 = torch.ones(11, 11, device="cuda")
-        g3 = torch.ones(12, 12, device="cuda")
+        g1 = torch.ones(10, 10, device=self.device_type)
+        g2 = torch.ones(11, 11, device=self.device_type)
+        g3 = torch.ones(12, 12, device=self.device_type)
 
         def assert_pass(graph):
             # all_reduces need to remain in order!

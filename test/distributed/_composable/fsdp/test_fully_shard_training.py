@@ -611,7 +611,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         def step_post_hook(
             fsdp_module: FSDPModule, opt: torch.optim.Optimizer, args, kwargs
         ) -> None:
-            post_optim_event = torch.cuda.current_stream().record_event()
+            post_optim_event = torch.accelerator.current_stream().record_event()
             fsdp_module.set_post_optim_event(post_optim_event)
 
         optim.register_step_post_hook(functools.partial(step_post_hook, model))

@@ -539,8 +539,8 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
     def world_size(self):
         return 8
 
-    @with_comms
     @skip_if_lt_x_gpu(8)
+    @with_comms
     def test_hsdp_tp_model_meta_init(self):
         # initialize the 3-d device mesh
         global_mesh = init_device_mesh(
