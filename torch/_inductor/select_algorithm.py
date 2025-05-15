@@ -2362,7 +2362,7 @@ class AlgorithmSelectorCache(PersistentCache):
     @staticmethod
     def prescreen_choices(
         choices: list[ChoiceCaller],
-    ) -> list[ChoiceCaller]:
+    ):
         """
         Add prescreening phase. Motivation is to reduce the number of autotuning needed,
         for example, when there are runtime params.
@@ -2388,7 +2388,6 @@ class AlgorithmSelectorCache(PersistentCache):
         if len(candidates) < 10:
             return []
 
-        # type: ignore
         return candidates
 
     @staticmethod
