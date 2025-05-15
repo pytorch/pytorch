@@ -24,6 +24,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
 
   linux-focal-cuda12_6-py3_10-gcc9-inductor-build:
     name: cuda12.6-py3.10-gcc9-sm86
