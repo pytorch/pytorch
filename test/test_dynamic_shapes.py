@@ -3005,6 +3005,15 @@ class TestGuardsExpressions(TestCase):
         self.assertEqual(f"{x_clean.stride()}", "(8, 1)")
         self.assertEqual(f"{x_clean.shape}", "torch.Size([5, 8])")
 
+
+def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
+    for node in graph.nodes:
+        if node.name == "arg3_1":
+            assert node.meta["val"].size()[0] == 2
+    return graph
+
+
+class TestUnbacked(TestCase):
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_deferred_neq_assert(self):
         @torch.compile(fullgraph=True)
@@ -3016,6 +3025,38 @@ class TestGuardsExpressions(TestCase):
 
         with self.assertRaises(RuntimeError):
             func(torch.tensor([5]))
+
+    # Test a situation where we generate a runtime assert i.e: u1==s1, then we spcialize s1
+    # later on to a constant.
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_post_specialize_runtime_assert1(self):
+        @torch.compile(dynamic=True)
+        def func(x, y):
+            u0 = y.item()
+            s0 = x.size()[0]
+            s1 = x.size()[1]
+            torch._check(u0 + s0 + s1 == 102)
+            assert s0 == 2
+            return x * 10
+
+        func(torch.rand(2, 50), torch.tensor([50]))
+        with self.assertRaises(RuntimeError):
+            func(torch.rand(2, 50), torch.tensor([51]))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch(post_grad_custom_pre_pass=custom_pass)
+    def test_post_specialize_runtime_assert2(self):
+        @torch.compile(dynamic=True)
+        def func(x, y):
+            u0 = y.item()
+            s0 = x.size()[0]
+            s1 = x.size()[1]
+            torch._check(u0 + s0 + s1 == 102)
+            return x * 10
+
+        func(torch.rand(2, 50), torch.tensor([50]))
+        with self.assertRaises(RuntimeError):
+            func(torch.rand(2, 50), torch.tensor([51]))
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_deferred_sym_or_assert(self):
