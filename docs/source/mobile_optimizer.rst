@@ -1,3 +1,6 @@
+.. meta::
+   :http-equiv=refresh: 0;url=https://docs.pytorch.org/executorch
+
 torch.utils.mobile_optimizer
 ===================================
 
