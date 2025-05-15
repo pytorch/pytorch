@@ -2,7 +2,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 import math
+import os
 import threading
+import warnings
 from functools import reduce
 from itertools import chain
 from typing import Optional, TYPE_CHECKING, Union
@@ -38,9 +40,8 @@ if not is_available():
 else:
     from torch._C._distributed_c10d import Backend as C10dBackend
     from torch.distributed.distributed_c10d import (
-        _find_pg_by_ranks_and_tag,
         _get_default_group,
-        _get_group_tag,
+        _resolve_process_group,
         get_backend,
         get_process_group_ranks,
         get_rank,
@@ -103,7 +104,7 @@ else:
             mesh_tensor = device_mesh.mesh
             # slice_dim_idx could be differnt from submesh_dims, as we may need to flatten out some dims.
             slice_dim_idx = []
-            slice_dim_group_info = []
+            slice_dim_group_name = []
             # keep track of the number of dims that have been flattened so we can get the correct slice_dim_idx in the
             # flattened mesh tensor.
             num_dims_flatten = 0
@@ -121,15 +122,15 @@ else:
                     # then the final slice_dim_idx should be [0, 1, 2].
                     slice_dim_idx.append(mesh_dim_indices[0] - num_dims_flatten)
                     num_dims_flatten += len(mesh_dim_indices) - 1
-                    slice_dim_group_info.append(
+                    slice_dim_group_name.append(
                         self.root_to_flatten_mapping[device_mesh][
                             mesh_dim_name
-                        ]._dim_group_infos[0]
+                        ]._dim_group_names[0]
                     )
                 else:
                     slice_dim_idx.append(mesh_dim_indices[0] - num_dims_flatten)
-                    slice_dim_group_info.append(
-                        device_mesh._dim_group_infos[mesh_dim_indices[0]]
+                    slice_dim_group_name.append(
+                        device_mesh._dim_group_names[mesh_dim_indices[0]]
                     )
 
             # mesh_tensor has already been flattened if needed. So mesh_tensor.ndim <= device_mesh.mesh.ndim now.
@@ -155,7 +156,7 @@ else:
                 if cur_rank in mesh_nd:
                     res_submesh = submesh
 
-            res_submesh._dim_group_infos = slice_dim_group_info  # type: ignore[possibly-undefined]
+            res_submesh._dim_group_names = slice_dim_group_name  # type: ignore[possibly-undefined]
             self.child_to_root_mapping[res_submesh] = device_mesh
 
             return res_submesh
@@ -360,8 +361,8 @@ else:
                     mesh_dim_names=(mesh_dim_name,),
                     _init_backend=False,
                 )
-                submesh._dim_group_infos = (
-                    [device_mesh._dim_group_infos[mesh_dim]]
+                submesh._dim_group_names = (
+                    [device_mesh._dim_group_names[mesh_dim]]
                     if cur_rank in mesh_1d
                     else []
                 )
@@ -386,10 +387,14 @@ else:
         represented as a n-d dimension array, and each value of the n-d dimensional
         array is the global id of the default process group ranks.
 
-        DeviceMesh could be used to describe the layout of devices across the cluster,
-        and serves as a proxy for communication among the device lists within the cluster.
+        DeviceMesh could be used to setup the N dimensional device connections across the cluster,
+        and manage the ProcessGroups for N dimensional parallelisms. Communications could happen on
+        each dimension of the DeviceMesh separately. DeviceMesh respects the device that user selects
+        already (i.e. if user call `torch.cuda.set_device` before the DeviceMesh initialization),
+        and will select/set the device for the current process if user does not set the device
+        beforehands. Note that manual device selection should happen BEFORE the DeviceMesh initialization.
 
-        DeviceMesh can be used as a context manager.
+        DeviceMesh can also be used as a context manager when using together with DTensor APIs.
 
         .. note::
             DeviceMesh follows SPMD programming model, which means the same PyTorch Python program
@@ -453,7 +458,7 @@ else:
                 # already. The world pg is used for device mesh identity (rank) on each
                 # process (we need to know if the current global rank is in the mesh or not).
                 if _init_backend:
-                    self._get_or_create_default_group()
+                    self._setup_world_group_and_device()
                     self._init_process_groups()
 
                 if is_initialized() and get_backend() == "threaded":
@@ -466,8 +471,10 @@ else:
                     rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
                 )
 
-        def _get_or_create_default_group(self):
+        def _setup_world_group_and_device(self):
             default_initialized = is_initialized()
+            # TODO: think about how to allow pg options to be passed to world group
+            # or mesh dimension groups
             if not default_initialized:
                 init_process_group()
 
@@ -477,32 +484,48 @@ else:
                     f"Mesh should not be bigger than default world size {world_size}, but found {self.mesh.numel()} ranks!"
                 )
 
+            # ONLY set the device if the current device is not initialized, if user already
+            # set the device before DeviceMesh init, we respect the user's choice.
             device_handle = _get_device_handle(self.device_type)
-            # TODO: if user want to pass pg_options, offer a way to do it
-            if not default_initialized and device_handle:
-                # automatically set the current cuda/cuda-like device base on num of gpu devices available in each host
-                # NOTE: This device selection would only work for homogeneous hardware.
-                num_devices_per_host = device_handle.device_count()
-                if (
-                    world_size > num_devices_per_host
-                    and world_size % num_devices_per_host != 0
-                ):
-                    raise RuntimeError(
-                        f"DeviceMesh only support homogeneous hardware, but found "
-                        f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
+            if device_handle and not device_handle.is_initialized():
+                # auto set the cuda/cuda-like device only if user has not set it, if there's LOCAL_RANK
+                # env variable from launchers, we use it to set the device.
+                if "LOCAL_RANK" in os.environ:
+                    local_rank = int(os.environ["LOCAL_RANK"])
+                    logger.info(
+                        "Setting default device for the current process based on LOCAL_RANK=%s",
+                        local_rank,
                     )
-                device_handle.set_device(get_rank() % num_devices_per_host)
+                    device_handle.set_device(local_rank)
+                else:
+                    warnings.warn(
+                        "It seems like you did not set/select the default device for the current process before the DeviceMesh "
+                        "initialization or use a launcher (i.e. torchrun) which populates `LOCAL_RANK` environment variable. "
+                        "It is recommended to set the current device for the process BEFORE the DeviceMesh initialization so that "
+                        "the underlying communicator (i.e. NCCL) can be initialized properly. "
+                        "Given that the current process has no default device selected, DeviceMesh will use a heuristic to set the "
+                        "device_id via `global_rank % num_devices_per_host`, assuming homogeneous hardware cluster. "
+                    )
+                    # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
+                    # NOTE: This device selection would only work for homogeneous hardware.
+                    num_devices_per_host = device_handle.device_count()
+                    if (
+                        world_size > num_devices_per_host
+                        and world_size % num_devices_per_host != 0
+                    ):
+                        raise RuntimeError(
+                            f"DeviceMesh only support homogeneous hardware, but found "
+                            f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
+                        )
+                    device_handle.set_device(get_rank() % num_devices_per_host)
 
             return _get_default_group()
 
         def _init_process_groups(self):
-            # tag/ranks/group_name associated with each mesh dimension, each
+            # group_name associated with each mesh dimension, each
             # mesh dimension should have one sub-group per rank
             #
-            # TODO(yifu): remove tag and ranks once we fully migrate to native
-            # functional collectives. See details in:
-            # https://github.com/pytorch/pytorch/issues/93173#issuecomment-1907095208
-            dim_group_infos: list[tuple[str, list[int], str]] = []
+            dim_group_names: list[str] = []
             default_group = _get_default_group()
 
             if self.mesh.ndim == 1 and self.mesh.numel() == get_world_size():
@@ -519,13 +542,7 @@ else:
                     and get_backend(default_group) == "gloo"
                     else default_group
                 )
-                dim_group_infos.append(
-                    (
-                        _get_group_tag(dim_group),
-                        ranks,
-                        dim_group.group_name,
-                    )
-                )
+                dim_group_names.append(dim_group.group_name)
             else:
                 # create sub pgs base on the mesh argument specified
                 for dim in range(self.mesh.ndim):
@@ -579,10 +596,9 @@ else:
                         has_split_group = True
 
                     # If the subgroup has been already created through `split_group`, we simply loop over `pg_ranks_by_dim`
-                    # and append the `(group_tag, subgroup_ranks, and group_name)` tuple to the `dim_group_infos` list when
-                    # the current rank is in the subgroup.
+                    # and append the `group_name` to the `dim_group_names` list when the current rank is in the subgroup.
                     # Otherwise, we use `new_group` instead of `split_group` to create subgroups by looping over `pg_ranks_by_dim`
-                    # along with appending information to the `dim_group_infos` list whenever necessary.
+                    # along with appending information to the `dim_group_names` list whenever necessary.
                     for dim_mesh in pg_ranks_by_dim:
                         subgroup_ranks = dim_mesh.tolist()
 
@@ -599,19 +615,13 @@ else:
 
                         # only add to dim_groups if the current rank in the subgroup
                         if self.get_rank() in subgroup_ranks:
-                            if len(dim_group_infos) > dim:
+                            if len(dim_group_names) > dim:
                                 raise RuntimeError(
                                     f"Each device mesh dimension should get only one process group, but got {self.get_rank()} "
                                     f"in {subgroup_ranks}!"
                                 )
-                            dim_group_infos.append(
-                                (
-                                    _get_group_tag(not_none(dim_group)),
-                                    subgroup_ranks,
-                                    dim_group.group_name,
-                                )
-                            )
-            self._dim_group_infos = dim_group_infos
+                            dim_group_names.append(dim_group.group_name)
+            self._dim_group_names = dim_group_names
 
         def __enter__(self) -> "DeviceMesh":
             # set this mesh as the current mesh in mesh env
@@ -745,7 +755,7 @@ else:
             Returns:
                 A :class:`ProcessGroup` object.
             """
-            if not hasattr(self, "_dim_group_infos"):
+            if not hasattr(self, "_dim_group_names"):
                 raise RuntimeError("DeviceMesh process groups not initialized!")
 
             if self.mesh.ndim > 1 and mesh_dim is None:
@@ -758,28 +768,25 @@ else:
 
             # Quick return if the current device_mesh is a 1D mesh.
             if self.mesh.ndim == 1 and mesh_dim is None:
-                return not_none(
-                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[0][:2])  # type: ignore[index]
-                )
+                return not_none(_resolve_process_group(self._dim_group_names[0]))
 
             root_mesh = _mesh_resources.get_root_mesh(self)
             root_to_flatten_mapping = _mesh_resources.root_to_flatten_mapping.get(
                 root_mesh, None
             )
             if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping.keys():
-                dim_group_infos = root_to_flatten_mapping[
+                dim_group_name = root_to_flatten_mapping[
                     mesh_dim  # type: ignore[index]
-                ]._dim_group_infos[0][:2]
-                return not_none(_find_pg_by_ranks_and_tag(*dim_group_infos))
+                ]._dim_group_names[0]
+                return not_none(_resolve_process_group(dim_group_name))
             else:
                 mesh_dim = (
                     _mesh_resources.get_mesh_dim_by_name(self, mesh_dim)
                     if isinstance(mesh_dim, str)
                     else mesh_dim
                 )
-                return not_none(
-                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim][:2])  # type: ignore[index]
-                )
+                assert isinstance(mesh_dim, int)
+                return not_none(_resolve_process_group(self._dim_group_names[mesh_dim]))
 
         def get_all_groups(self) -> list[ProcessGroup]:
             """
@@ -852,9 +859,7 @@ else:
                     mesh_dim_names=mesh_dim_names,
                     _init_backend=False,
                 )
-                device_mesh._dim_group_infos = [
-                    (_get_group_tag(group), group_ranks, group.group_name)
-                ]
+                device_mesh._dim_group_names = [group.group_name]
                 return device_mesh
 
             # nD scenario
@@ -880,14 +885,7 @@ else:
             device_mesh = DeviceMesh(
                 device_type, mesh, mesh_dim_names=mesh_dim_names, _init_backend=False
             )
-            device_mesh._dim_group_infos = [
-                (
-                    _get_group_tag(group),
-                    get_process_group_ranks(group),
-                    group.group_name,
-                )
-                for group in groups
-            ]
+            device_mesh._dim_group_names = [group.group_name for group in groups]
             return device_mesh
 
         def size(self, mesh_dim: Optional[int] = None) -> int:
