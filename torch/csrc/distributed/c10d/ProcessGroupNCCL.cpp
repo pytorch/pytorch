@@ -925,6 +925,19 @@ constexpr const char* MULTI_DEVICE_ERROR_MSG =
     "https://pytorch.org/docs/stable/distributed.html#multi-gpu-collective-functions. "
     "ProcessGroupNCCL continues supporting multi-process and multi-thread modes.";
 
+std::atomic<bool> ProcessGroupNCCL::terminateHeartbeatMonitorThread_{false};
+c10::once_flag ProcessGroupNCCL::initFlag_;
+std::atomic_uint64_t ProcessGroupNCCL::heartbeat_;
+int ProcessGroupNCCL::heartbeatTimeoutInSec_;
+int ProcessGroupNCCL::waitTimeoutDumpInMilSec_;
+int ProcessGroupNCCL::coordCheckIntervalMilSec_;
+std::atomic<bool> ProcessGroupNCCL::watchdogHeartbeatMonitorEnabled_;
+std::mutex ProcessGroupNCCL::monitorMutex_;
+std::condition_variable ProcessGroupNCCL::monitorWakeUpCV_;
+bool ProcessGroupNCCL::dumpOnTimeoutOrEx_;
+std::string ProcessGroupNCCL::globalLogPrefix_;
+std::thread ProcessGroupNCCL::ncclHeartbeatMonitorThread_;
+
 ProcessGroupNCCL::ProcessGroupNCCL(
     c10::intrusive_ptr<Store> store,
     int rank,
@@ -934,7 +947,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       store_(std::move(store)),
       options_(std::move(options)),
       terminateProcessGroup_(false),
-      terminateHeartbeatMonitorThread_(false),
       local_id_(process_group_id++),
       intraNodeComm_(initIntraNodeComm()) {
   TORCH_CHECK_WITH(
@@ -956,33 +968,30 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
   rethrowCUDAErrors_ = getCvarBool(TORCH_NCCL_RETHROW_CUDA_ERRORS, true);
-  // TODO, we should either deprecate TORCH_NCCL_DUMP_ON_TIMEOUT
-  // or change its name to reflect that dump happens on exception including
-  // both timeout and other errors.
-  dumpOnTimeoutOrEx_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, true) ||
-      (dist_debug_level_ >= DebugLevel::Detail);
   propagatePgError_ = getCvarBool(TORCH_NCCL_PROPAGATE_ERROR, false);
   // logging C++ stack isn't safe. Introduce a variable to control it.
   logCppStackOnUncleanShutdown_ =
       getCvarBool(TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN, true);
   enableNanCheck_ = getCvarBool(TORCH_NCCL_NAN_CHECK, false);
-  heartbeat_ = 1ULL;
-  monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
   cudaEventCacheEnabled_.store(getCvarBool(TORCH_NCCL_CUDA_EVENT_CACHE, true));
-  heartbeatTimeoutInSec_ =
-      getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 8 /*8 Mins*/);
-  waitTimeoutDumpInMilSec_ =
-      getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000 /*15 Sec*/);
-  coordCheckIntervalMilSec_ = getCvarInt(TORCH_NCCL_COORD_CHECK_MILSEC, 1000);
   traceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 2000);
   enableCollectiveHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
-  // store_ usually is wrapped with PrefixStore and the prefix is different
-  // across different ProcessGroupNCCL(PG) instances. We need to get the
-  // underlying non-PrefixStore for sharing global information shared across
-  // different PGs.
-  PrefixStore* prefixStore = dynamic_cast<PrefixStore*>(store_.get());
-  globalStore_ =
-      prefixStore ? prefixStore->getUnderlyingNonPrefixStore() : store_;
+  c10::call_once(initFlag_, [&]() {
+    heartbeat_ = 1ULL;
+    heartbeatTimeoutInSec_ =
+        getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 8 /*8 Mins*/);
+    waitTimeoutDumpInMilSec_ =
+        getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000 /*15 Sec*/);
+    coordCheckIntervalMilSec_ = getCvarInt(TORCH_NCCL_COORD_CHECK_MILSEC, 1000);
+    // TODO, we should either deprecate TORCH_NCCL_DUMP_ON_TIMEOUT
+    // or change its name to reflect that dump happens on exception including
+    // both timeout and other errors.
+    dumpOnTimeoutOrEx_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, true) ||
+        (dist_debug_level_ >= DebugLevel::Detail);
+    watchdogHeartbeatMonitorEnabled_.store(
+        getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
+    globalLogPrefix_ = c10::str("[Global Rank ", globalRank(), "] ");
+  });
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
       getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_);
@@ -1046,7 +1055,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << shouldAllCommunicatorsRegisterAllTensors()
 #endif // NCCL_HAS_COMM_REGISTER
             << ", TORCH_NCCL_ENABLE_MONITORING: "
-            << monitorThreadEnabled_.load()
+            << watchdogHeartbeatMonitorEnabled_.load()
             << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << traceBufferSize_
             << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
@@ -1521,6 +1530,25 @@ void ProcessGroupNCCL::shutdown() {
   LOG(INFO) << logPrefix() << "Destroy complete.";
 }
 
+void ProcessGroupNCCL::startMonitorThread() {
+  static c10::once_flag startFlag;
+  c10::call_once(startFlag, [this]() {
+    ncclHeartbeatMonitorThread_ =
+        std::thread(&ProcessGroupNCCL::heartbeatMonitor, this);
+  });
+}
+
+void ProcessGroupNCCL::waitMonitorThread() {
+  static c10::once_flag shutdownFlag;
+  c10::call_once(shutdownFlag, [this]() {
+    if (ncclHeartbeatMonitorThread_.joinable()) {
+      ncclHeartbeatMonitorThread_.join();
+      LOG(INFO) << logPrefix()
+                << "ProcessGroupNCCL heart beat monitor thread joined.";
+    }
+  });
+}
+
 // NOLINTNEXTLINE(bugprone-exception-escape)
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
@@ -1571,11 +1599,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
     ncclCommWatchdogThread_.join();
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
   }
-  if (ncclHeartbeatMonitorThread_.joinable()) {
-    ncclHeartbeatMonitorThread_.join();
-    LOG(INFO) << logPrefix()
-              << "ProcessGroupNCCL heart beat monitor thread joined.";
-  }
+  waitMonitorThread();
   if (onCompletionHookThread_.joinable()) {
     onCompletionHookThread_.join();
     LOG(INFO) << logPrefix()
@@ -1631,11 +1655,6 @@ std::string ProcessGroupNCCL::getNCCLWatchdogTimeoutErrorMsg(
       "Received a dump signal due to a collective timeout from ",
       extraMsg,
       " and we will try our best to dump the debug info. ",
-      "Last enqueued NCCL work: ",
-      pgStatus_->lastEnqueuedSeq,
-      ", last completed NCCL work: ",
-      pgStatus_->lastCompletedSeq,
-      ".",
       "This is most likely caused by incorrect usages of collectives, e.g., wrong ",
       "sizes used across ranks, the order of collectives is not same for all ranks ",
       "or the scheduled collective, for some reason, didn't run. Additionally, ",
@@ -1660,28 +1679,21 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   c10::setThreadName("pt_nccl_heartbt");
 
   uint64_t heartBeatCounter = 0ULL;
+  bool watchdogThreadHang = false;
   std::string errorMsg;
   std::string exitReason;
-  bool checkDumpSignal = (dumpOnTimeoutOrEx_ && local_id_ == 0);
-  int monitorPollInterval = checkDumpSignal || propagatePgError_
-      ? coordCheckIntervalMilSec_
-      : heartbeatTimeoutInSec_ * 1000;
   auto lastTimePollStore = std::chrono::steady_clock::now();
   auto lastTimeHeartBeatCheck = std::chrono::steady_clock::now();
   std::optional<DumpPipe> dumpPipe = std::nullopt;
-  if (local_id_ == 0) {
-    // DumpPipe is one per-trainer process, and its convenient to name them
-    // after 'global' ranks in the system, So we assume processgroup (uid)==0 is
-    // the global PG and has globally unique rank ids across trainers.
-    dumpPipe.emplace(rank_);
-  }
+  // To use the pipe correctly, one needs to initiate the default PG first.
+  dumpPipe.emplace(globalRank());
   while (true) {
     // This won't have any lock since this lock is only used here.
     // Please be aware that mutex `monitorMutex_` should not be used
     // somewhere else to avoid the deadlock.
     std::unique_lock<std::mutex> lock(monitorMutex_);
     if (monitorWakeUpCV_.wait_for(
-            lock, std::chrono::milliseconds(monitorPollInterval), [&] {
+            lock, std::chrono::milliseconds(coordCheckIntervalMilSec_), [&] {
               return terminateHeartbeatMonitorThread_.load();
             })) {
       // For the normal complete or user interception, monitorWakeUpCV_
@@ -1690,11 +1702,6 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     }
     auto currentTime = std::chrono::steady_clock::now();
 
-    if (propagatePgError_) {
-      // Check and set remote error if it has not been set before
-      checkAndSetRemoteError();
-    }
-
     // We put extra functionality in the thread for the default PG (aka,
     // local_id_=0) because the signal is same across different PGs. We only
     // need to run once per process to avoid duplicate things performed in too
@@ -1702,7 +1709,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // TCPStore periodically to see if any PG on any rank observed a timeout and
     // signaled peers to dump debugging info, and we avoid hammering the
     // TCPStore from all PGs on the same rank.
-    if (checkDumpSignal) {
+    if (dumpOnTimeoutOrEx_) {
       // There are two scenarios where monitor thread will dump on timeout:
       // 1. The current rank is the first to observe a timeout in watchdog.
       // (shouldDump_ was set to true by the watchdog thread).
@@ -1724,7 +1731,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         lastTimePollStore = currentTime;
         auto handleError = [&](const std::string& errorMessage) {
           LOG(WARNING)
-              << logPrefix()
+              << globalLogPrefix()
               << "Failed to check the \"should dump\" flag on TCPStore, "
               << "(maybe TCPStore server has shut down too early), with error: "
               << errorMessage;
@@ -1736,7 +1743,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         bool checkExceptionDump = false;
         try {
           checkExceptionDump =
-              globalStore_->check({std::string(kStoreDumpKey)});
+              globalStore()->check({std::string(kStoreDumpKey)});
         } catch (const c10::DistNetworkError& e) {
           handleError(e.msg());
         } catch (const std::exception& e) {
@@ -1747,12 +1754,12 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           int timeOutRank = -1;
           if (!shouldDump_.load()) {
             LOG(ERROR)
-                << logPrefix()
+                << globalLogPrefix()
                 << "Observed flight recorder dump signal from another rank via TCPStore.";
           }
           shouldDump_.store(true);
           try {
-            auto vec = globalStore_->get(std::string(kStoreDumpKey));
+            auto vec = globalStore()->get(std::string(kStoreDumpKey));
             TORCH_CHECK_WITH(
                 DistBackendError,
                 vec.size() == sizeof(int),
@@ -1782,7 +1789,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         shouldDump_.store(true);
         // Watchdog heartbeat timeout.
         errorMsg = c10::str(
-            logPrefix(),
+            globalLogPrefix(),
             "ProcessGroupNCCL's watchdog got stuck for ",
             heartbeatTimeoutInSec_,
             " seconds without making progress in monitoring enqueued collectives. ",
@@ -1818,7 +1825,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   //    TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN=0).
 
   // Dump the nccl trace (flight recorder).
-  if (checkDumpSignal && shouldDump_.load()) {
+  if (dumpOnTimeoutOrEx_ && shouldDump_.load()) {
     // Store debug info to storage if no other thread does it. (By default to
     // local disk)
     bool dumpStackTrace = true;
@@ -1844,7 +1851,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
 
       if (complete) {
         LOG(INFO)
-            << logPrefix()
+            << globalLogPrefix()
             << "Finished flight recorder successfully. Output can be analyzed using the fr_trace script.";
         if (i > 0) {
           debugLog.strings["exception_msg"] = "Dump with stack trace failed.";
@@ -1872,22 +1879,23 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           futStatus != std::future_status::deferred,
           "Expected the future to have been launched eagerly.");
       LOG(ERROR)
-          << logPrefix()
+          << globalLogPrefix()
           << "Could not acquire GIL within 300 ms on exit, possible GIL induced hang";
     }
   } else {
     VLOG(2)
-        << logPrefix()
+        << globalLogPrefix()
         << "GIL checker was not registered, perhaps this is a no-python build?";
   }
 
   // Dump the c++ stacktraces.
   auto& cpp_dumper = get_cpp_trace_dumper();
   if (logCppStackOnUncleanShutdown_ && cpp_dumper.has_value()) {
-    LOG(INFO) << logPrefix() << "Dumping c++ stacktraces:";
-    cpp_dumper.value()(
-        [&](const std::string& line) { LOG(INFO) << logPrefix() << line; });
-    LOG(INFO) << logPrefix() << "Finished c++ stacktraces dump.";
+    LOG(INFO) << globalLogPrefix() << "Dumping c++ stacktraces:";
+    cpp_dumper.value()([&](const std::string& line) {
+      LOG(INFO) << globalLogPrefix() << line;
+    });
+    LOG(INFO) << globalLogPrefix() << "Finished c++ stacktraces dump.";
   }
 
   // There are two possible cases for the watchdog thread exit:
@@ -1898,13 +1906,15 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // Case two: desync might be slow or get stuck. Or we get stuck in
   // destructors, we will sleep for some time before calling std::abort() to
   // kill the whole process.
-  if ((terminateProcessGroup_.load() || desyncDebug_ || shouldDump_.load()) &&
-      !terminateHeartbeatMonitorThread_.load()) {
-    // Leave another two mins for desync report generation or process group
-    // destroy.
+  auto currentTime = std::chrono::steady_clock::now();
+  if (!watchdogThreadHang && !terminateHeartbeatMonitorThread_.load() &&
+      (computeDeltaMS(lastTimeHeartBeatCheck, currentTime) <
+       heartbeatTimeoutInSec_ * 1000l)) {
     std::this_thread::sleep_for(std::chrono::seconds(heartbeatTimeoutInSec_));
-    LOG(INFO) << logPrefix() << "slept for " << heartbeatTimeoutInSec_
-              << " waiting for desync report or process group destroy.";
+    LOG(INFO)
+        << globalLogPrefix() << "slept for " << heartbeatTimeoutInSec_
+        << " because we want to wait longer to verify there is indeed a watchdog hang.";
+    watchdogThreadHang = (heartbeat_.load() == heartBeatCounter);
   }
 
   // At this point, we either already sleep for another `heartbeatTimeoutInSec_`
@@ -1917,19 +1927,19 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // check the return value here.  We mainly use a future so we can exit early
   // if done.
 
-  if (!terminateHeartbeatMonitorThread_.load()) {
+  if (!terminateHeartbeatMonitorThread_.load() && watchdogThreadHang) {
     // Create a error message reported from MonitorThread, so
     // we throw exception and make the whole process to be killed.
     // TODO(fduwjj): After having a hang debug wiki, we need to update the wiki
     // url here.
-    if (monitorThreadEnabled_.load()) {
+    if (watchdogHeartbeatMonitorEnabled_.load()) {
       terminateProcess(getNCCLWatchdogTimeoutExitMsg(exitReason));
     } else {
       // Ideally we want to merge this one with the above one, but we are going
       // to remove the kill switch for monitor thread soon, so we keep this one
       // for now.
       LOG(ERROR)
-          << logPrefix()
+          << globalLogPrefix()
           << "ProcessGroupNCCL monitor thread is disabled, but would have terminated the process"
           << "after attempting to dump debug info, due to " << exitReason
           << ".";
@@ -1942,8 +1952,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
 
   try {
     VLOG(2) << logPrefix() << "Process group watchdog thread started!";
-    ncclHeartbeatMonitorThread_ =
-        std::thread(&ProcessGroupNCCL::heartbeatMonitor, this);
+    startMonitorThread();
     watchdogHandler();
     VLOG(2) << logPrefix()
             << "Process group watchdog thread terminated normally";
@@ -2098,9 +2107,18 @@ const std::string& ProcessGroupNCCL::logPrefix() const {
   return logPrefix_;
 }
 
+const std::string& ProcessGroupNCCL::globalLogPrefix() {
+  return globalLogPrefix_;
+}
+
 const int& ProcessGroupNCCL::globalRank() const {
   static int globalRank = rank_;
   return globalRank;
+}
+
+const c10::intrusive_ptr<Store>& ProcessGroupNCCL::globalStore() const {
+  static c10::intrusive_ptr<Store> globalStore = store_;
+  return globalStore;
 }
 
 const std::vector<uint64_t>& ProcessGroupNCCL::groupRanks() const {
@@ -2182,7 +2200,8 @@ int ProcessGroupNCCL::getSignalSrcRank(
 
 void ProcessGroupNCCL::broadcastDumpSignal() {
   // broadcast dump signal to all other global ranks.
-  broadcastSignal(globalStore_, std::string(kStoreDumpKey), globalRank());
+  auto global_store = globalStore();
+  broadcastSignal(global_store, std::string(kStoreDumpKey), globalRank());
   // signal the local rank to start dumping
   if (!shouldDump_.load()) {
     LOG(ERROR) << logPrefix() << "First PG on this rank to signal dumping.";
@@ -2298,6 +2317,11 @@ void ProcessGroupNCCL::watchdogHandler() {
       data.strings["pg_desc"] = pg_desc_;
       logger->log(data);
       lastStatusUpdateTime = std::chrono::steady_clock::now();
+    }
+
+    if (propagatePgError_) {
+      // Check and set remote error if it has not been set before
+      checkAndSetRemoteError();
     }
 
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
