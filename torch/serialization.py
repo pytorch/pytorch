@@ -924,6 +924,8 @@ def save(
 
     See also: :ref:`saving-loading-tensors`
 
+    See :ref:`layout-control` for more advanced tools to manipulate a checkpoint.
+
     Args:
         obj: saved object
         f: a file-like object (has to implement write and flush) or a string or
