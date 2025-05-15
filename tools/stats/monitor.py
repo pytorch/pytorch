@@ -135,9 +135,10 @@ class SharedResource:
     def __init__(self, is_debug_mode: bool = False) -> None:
         self._data_list: list[UsageData] = []
         self._data_errors: list[str] = []
+        self._data_logs: list[str] = []
         self._lock = threading.Lock()
 
-    def get_and_reset(self) -> tuple[list[UsageData], list[str]]:
+    def get_and_reset(self) -> tuple[list[UsageData], list[str], list[str]]:
         """
         get deepcopy of list of usageData and list of string errors
         """
@@ -146,9 +147,11 @@ class SharedResource:
         with self._lock:
             copy_data = copy.deepcopy(self._data_list)
             copy_errors = copy.deepcopy(self._data_errors)
+            copy_logs = copy.deepcopy(self._data_logs)
             self._data_list.clear()
             self._data_errors.clear()
-        return copy_data, copy_errors
+            self._data_logs.clear()
+        return copy_data, copy_errors, copy_logs
 
     def add_data(self, data: UsageData) -> None:
         with self._lock:
@@ -158,6 +161,9 @@ class SharedResource:
         with self._lock:
             self._data_errors.append(str(error))
 
+    def add_log(self, log: str) -> None:
+        with self._lock:
+            self._data_logs.append(log)
 
 class UsageLogger:
     """
@@ -265,7 +271,7 @@ class UsageLogger:
             )
 
             try:
-                data_list, error_list = self.shared_resource.get_and_reset()
+                data_list, error_list, log_list = self.shared_resource.get_and_reset()
                 if self._debug_mode:
                     print(
                         f"collected data: {len(data_list)}, errors found: {len(error_list)}"
@@ -276,7 +282,7 @@ class UsageLogger:
                 # if has errors but data list is None, a bug may exist in the monitor code, log the errors
                 if not data_list and len(errors) > 0:
                     raise ValueError(
-                        f"no data is collected but detected errors during the interval: {errors}"
+                        f"no data is collected but detected errors during the interval: {errors}, logs: {log_list}"
                     )
                 if not data_list:
                     # pass since no data is collected
@@ -304,11 +310,12 @@ class UsageLogger:
                     gpu_list = self._calculate_gpu_utilization(data_list)
                     record.gpu_usage = gpu_list
                 stats.data = record
+                stats.logs = log_list
             except Exception as e:
                 stats = UtilizationRecord(
                     level="record",
                     timestamp=getTsNow(),
-                    error=str(e),
+                    error=str(e)
                 )
             finally:
                 collecting_end_time = time.time()
@@ -328,6 +335,8 @@ class UsageLogger:
         calculate_gpu = []
         gpu_mem_utilization = defaultdict(list)
         gpu_utilization = defaultdict(list)
+
+        self.shared_resource.add_log("calculating gpu utilization")
 
         for data in data_list:
             for gpu in data.gpu_list:
