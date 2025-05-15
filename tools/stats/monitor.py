@@ -144,10 +144,12 @@ class SharedResource:
         """
         copy_data = []
         copy_errors = []
+        copy_logs = []
         with self._lock:
             copy_data = copy.deepcopy(self._data_list)
             copy_errors = copy.deepcopy(self._data_errors)
             copy_logs = copy.deepcopy(self._data_logs)
+
             self._data_list.clear()
             self._data_errors.clear()
             self._data_logs.clear()
@@ -163,7 +165,9 @@ class SharedResource:
 
     def add_log(self, log: str) -> None:
         with self._lock:
+            print("here log")
             self._data_logs.append(log)
+
 
 class UsageLogger:
     """
@@ -233,6 +237,7 @@ class UsageLogger:
                     print(f"collecting data {data}")
 
                 self.shared_resource.add_data(data)
+
             except Exception as e:
                 if self._debug_mode:
                     print(f"error detected: {str(e)}")
@@ -274,7 +279,7 @@ class UsageLogger:
                 data_list, error_list, log_list = self.shared_resource.get_and_reset()
                 if self._debug_mode:
                     print(
-                        f"collected data: {len(data_list)}, errors found: {len(error_list)}"
+                        f"collected data: {len(data_list)}, errors found: {len(error_list)}, logs {len(log_list)}"
                     )
                 # records and clears found errors
                 errors = list(set(error_list))
@@ -313,9 +318,7 @@ class UsageLogger:
                 stats.logs = log_list
             except Exception as e:
                 stats = UtilizationRecord(
-                    level="record",
-                    timestamp=getTsNow(),
-                    error=str(e)
+                    level="record", timestamp=getTsNow(), error=str(e)
                 )
             finally:
                 collecting_end_time = time.time()
@@ -335,8 +338,6 @@ class UsageLogger:
         calculate_gpu = []
         gpu_mem_utilization = defaultdict(list)
         gpu_utilization = defaultdict(list)
-
-        self.shared_resource.add_log("calculating gpu utilization")
 
         for data in data_list:
             for gpu in data.gpu_list:
