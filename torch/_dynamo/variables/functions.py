@@ -36,7 +36,7 @@ from unittest.mock import patch
 
 import torch
 
-from .. import polyfills, variables
+from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
     get_dynamo_observed_exception,
