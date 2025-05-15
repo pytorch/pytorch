@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from pathlib import Path  # noqa: TC004
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 import argparse
