@@ -3958,12 +3958,13 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
     )
     # For compile we only calling this function for
     has_dynamic = False
-    for s in itertools.chain(a.size(), a.stride(), shape):
-        if isinstance(s, torch.SymInt):
-            has_dynamic = True
-            break
+    if not allow_copy : 
+        for s in itertools.chain(a.size(), a.stride(), shape):
+            if isinstance(s, torch.SymInt):
+                has_dynamic = True
+                break
 
-    if has_dynamic:
+    if has_dynamic and not allow_copy:
         # This does not happen in eager but only in compile. (we dont have symints in eager).
         # In compile we only use this function to for fake tensor tracing, but not for proxy tracing.
         # Hence there is no value for tracing _reshape_view_helper_core_alg, and adding guards or hitting
