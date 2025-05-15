@@ -1526,29 +1526,12 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   if(USE_KLEIDIAI)
-    if(CMAKE_C_COMPILER_ID STREQUAL "Clang" AND CMAKE_C_COMPILER_VERSION VERSION_LESS "11" )
-        message(WARNING "KleidiAI: Using non-supported Clang version. Expected 11 or newer, received ${CMAKE_C_COMPILER_VERSION}.")
-    endif()
-    if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_LESS "11" )
-        message(WARNING "KleidiAI: Using non-supported GCC version. Expected 11 or newer, received ${CMAKE_C_COMPILER_VERSION}.")
-    endif()
     set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
     set(AT_KLEIDIAI_ENABLED 1)
     set(KLEIDIAI_BUILD_TESTS OFF) # Disable building KLEIDIAI tests
     set(KLEIDIAI_SRC "${PROJECT_SOURCE_DIR}/third_party/kleidiai")
     add_subdirectory(${KLEIDIAI_SRC})
-    set(KLEIDIAI_INCLUDE_DIRS
-    ${KLEIDIAI_SRC}/
-    ${KLEIDIAI_SRC}/kai/
-    ${KLEIDIAI_SRC}/kai/ukernels/
-    ${KLEIDIAI_SRC}/kai/ukernels/matmul/
-    ${KLEIDIAI_SRC}/kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4cxp/
-    ${KLEIDIAI_SRC}/kai/ukernels/matmul/matmul_clamp_f32_qsi8d32p_qsi4c32p/
-    ${KLEIDIAI_SRC}/kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4c32p/
-    ${KLEIDIAI_SRC}/kai/ukernels/matmul/pack/
-    )
-    include_directories(SYSTEM INTERFACE ${KLEIDIAI_INCLUDE_DIRS})
     list(APPEND Caffe2_DEPENDENCY_LIBS kleidiai)
     # Recover build options.
     set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
