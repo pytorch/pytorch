@@ -94,7 +94,13 @@ public:
 
     // Make this context current
     void makeCurrent() {
+	auto current_stream = c10::cuda::getCurrentCUDAStream();
+	cudaEvent_t ev;
+	C10_CUDA_CHECK(cudaEventCreate(&ev));
+	C10_CUDA_CHECK(cudaEventRecord(ev, current_stream));
         C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuCtxSetCurrent_(context_));
+	C10_CUDA_CHECK(cudaEventDestroy(ev));
+	// C10_CUDA_CHECK(cudaStreamWaitEvent(
     }
 
 private:
