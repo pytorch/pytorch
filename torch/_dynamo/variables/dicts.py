@@ -895,6 +895,7 @@ class SetVariable(ConstDictVariable):
         pass
 
     def install_dict_contains_guard(self, tx, args):
+        breakpoint()
         # but for set
         if not self.source:
             return
@@ -919,15 +920,6 @@ class SetVariable(ConstDictVariable):
                 )
             )
         )
-
-        # contains = args[0] in self
-        # if args[0].source is None and isinstance(args[0], ConstantVariable):
-        #     pass
-        # elif args[0].source:
-        #     if contains:
-        #         self.realize_key_vt(args[0])
-        #     else:
-        #         self.install_
 
 
 class FrozensetVariable(SetVariable):
@@ -1011,6 +1003,14 @@ class DictKeySetVariable(SetVariable):
                 + ",".join(k.vt.debug_repr() for k in self.items.keys())
                 + "])"
             )
+
+    def install_dict_keys_match_guard(self):
+        # Already EQUALS_MATCH guarded
+        pass
+
+    def install_dict_contains_guard(self, tx, args):
+        # Already EQUALS_MATCH guarded
+        pass
 
     @property
     def set_items(self):
