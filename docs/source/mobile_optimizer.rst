@@ -1,10 +1,11 @@
-.. meta::
-   :http-equiv=refresh: 0;url=https://docs.pytorch.org/executorch
-
 torch.utils.mobile_optimizer
 ===================================
 
-Redirecting to `ExecuTorch documentation <https://docs.pytorch.org/executorch>`_.
+PyTorch Mobile is no longer actively supported. Redirecting to `ExecuTorch documentation <https://docs.pytorch.org/executorch>`_.
+
+.. raw:: html
+
+   <meta http-equiv="Refresh" content="0; url='https://docs.pytorch.org/executorch'" />
 
 .. warning::
    PyTorch Mobile is no longer actively supported. Please check out
