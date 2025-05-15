@@ -109,7 +109,7 @@ install_centos() {
 
   ccache_deps="asciidoc docbook-dtds docbook-style-xsl libxslt"
   numpy_deps="gcc-gfortran"
-  yum install -y \
+  yum install -y $ALLOW_ERASE \
     $ccache_deps \
     $numpy_deps \
     autoconf \
