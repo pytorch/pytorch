@@ -1,13 +1,16 @@
 # mypy: allow-untyped-defs
-from typing import Any, Union
+from typing import Any, Callable, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 from torch.utils._contextlib import (
     _DecoratorContextManager,
     _NoParamDecoratorContextManager,
-    F,
 )
 
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 __all__ = [
     "no_grad",
@@ -186,7 +189,7 @@ class set_grad_enabled(_DecoratorContextManager):
         self.mode = mode
         torch._C._set_grad_enabled(mode)
 
-    def __call__(self, orig_func: F) -> F:
+    def __call__(self, orig_func: Callable[_P, _R]) -> Callable[_P, _R]:
         torch._C._set_grad_enabled(self.prev)
         return super().__call__(orig_func)
 
