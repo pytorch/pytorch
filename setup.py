@@ -647,7 +647,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report("-- Not using cuDNN")
         if cmake_cache_vars["USE_CUDA"]:
-            report("-- Detected CUDA at " + cmake_cache_vars["CUDA_TOOLKIT_ROOT_DIR"])
+            report(f"-- Detected CUDA at {cmake_cache_vars['CMAKE_CUDA_COMPILER_TOOLKIT_ROOT']}")
         else:
             report("-- Not using CUDA")
         if cmake_cache_vars["USE_XPU"]:
