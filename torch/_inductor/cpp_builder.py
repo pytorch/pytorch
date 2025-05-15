@@ -1037,7 +1037,6 @@ def get_cpp_torch_options(
     vec_isa: VecISA,
     include_pytorch: bool,
     aot_mode: bool,
-    compile_only: bool,
     use_relative_path: bool,
     use_mmap_weights: bool,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
@@ -1171,7 +1170,6 @@ class CppTorchOptions(CppOptions):
             vec_isa=vec_isa,
             include_pytorch=include_pytorch,
             aot_mode=aot_mode,
-            compile_only=compile_only or precompiling or preprocessing,
             use_relative_path=use_relative_path,
             use_mmap_weights=use_mmap_weights,
         )
