@@ -188,6 +188,17 @@ class TestUtils(TestCase):
         # expect hook to be called twice; once for this file one for file of inlined func
         self.assertEqual(traced_file_sets, [{__file__}, {utils_path}])
 
+        # === empty graph ===
+        @torch.compile(options={"frame_traced_fn": get_traced_files})
+        def fn(x):
+            return x
+
+        x = torch.randn(3)
+        traced_file_sets = []
+        fn(x)
+        # hook is not expected to be called at all for an empty graph
+        self.assertEqual(traced_file_sets, [])
+
 
 class TestModel(torch.nn.Module):
     def __init__(self):
