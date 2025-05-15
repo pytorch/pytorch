@@ -222,6 +222,9 @@ Layout Control
 
 The ``mmap`` argument in :func:`torch.load` allows for lazy loading of tensor storages.
 
+In addition, there are some advanced features that allow for more fine-grained
+control and manipulation of ``torch.save`` checkpoint.
+
 The :class:`skip_data` context manager enables:
   * Saving a checkpoint with ``torch.save`` that includes empty space for data bytes
     to be written later.
