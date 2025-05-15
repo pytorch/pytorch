@@ -1569,6 +1569,8 @@ _save_config_ignore: list[str] = [
     "aot_inductor.dump_aoti_minifier",
     "post_grad_custom_pre_pass",
     "post_grad_custom_post_pass",
+    "_fuse_ddp_communication_passes",
+    "_pre_fusion_custom_pass",
 ]
 
 _cache_config_ignore_prefix: list[str] = [
