@@ -364,6 +364,8 @@ function(torch_compile_options libname)
     endif()
 
     if(${MSVC_TOOLSET_VERSION} GREATER_EQUAL 143)
+      # Add /d2implyavx512upperregs- to disable compiler over-aggressive optimization, which caused involeved AVX512 register on AVX2 machine.
+      # Reference: https://github.com/pytorch/pytorch/issues/145702#issuecomment-2874029459
       set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /d2implyavx512upperregs-" PARENT_SCOPE)
     endif()
 
