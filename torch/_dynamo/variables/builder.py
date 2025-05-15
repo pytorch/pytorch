@@ -750,7 +750,6 @@ class VariableBuilder:
             return var
         elif istype(value, set):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            self.install_guards(GuardBuilder.EQUALS_MATCH)
 
             # The dictionary gives a ordering for the set items
             d = dict.fromkeys(value)
@@ -1410,19 +1409,6 @@ class VariableBuilder:
             result = UserDefinedTupleVariable.create(
                 value, tuple_vt=tuple_vt, source=self.source
             )
-            return self.tx.output.side_effects.track_object_existing(value, result)
-        elif isinstance(value, set) and type(value).__new__ is set.__new__:
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-            d = dict.fromkeys(value)
-            items = [
-                LazyVariableTracker.create(v, source=SetItemKeySource(self.source, i))
-                for i, v in enumerate(d.keys())
-            ]
-            set_vt = SetVariable(
-                items, source=self.source, mutation_type=ValueMutationExisting()
-            )
-            result = UserDefinedSetVariable(value, set_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, list):
             self.install_guards(GuardBuilder.TYPE_MATCH)

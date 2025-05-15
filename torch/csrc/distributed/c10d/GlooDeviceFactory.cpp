@@ -151,7 +151,10 @@ static std::shared_ptr<::gloo::transport::Device> makeIBVerbsDevice(
     const std::string& interface,
     const std::string& hostname,
     bool lazyInit) {
-  TORCH_CHECK(hostname.empty(), "ibverbs transport does not support hostname");
+  if (!hostname.empty()) {
+    TORCH_WARN(
+        "ibverbs transport does not support hostname, defaulting to any");
+  }
 
   TORCH_CHECK(!lazyInit, "transport does not support lazy init");
 
