@@ -215,11 +215,12 @@ struct CusparseMatrixMultiplyOp {
           std::is_same_v<double, scalar_t> ||
           std::is_same_v<c10::complex<float>, scalar_t> ||
           std::is_same_v<c10::complex<double>, scalar_t>,
-      "cusparseSpGEMM only supports data type of "
       #if !defined(USE_ROCM)
-      "half, bfloat16, "
+          "cusparseSpGEMM only supports data type of half, bfloat16, float, double and complex float, double."
+      #else
+          "cusparseSpGEMM only supports data type of float, double and complex float, double."
       #endif
-      "float, double and complex float, double.");
+      );
     // SpGEMM Computation
     TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_createDescr(&spgemmDesc));
   }
@@ -821,13 +822,14 @@ Tensor sparse_sparse_matmul_cuda(const Tensor& mat1_, const Tensor& mat2_) {
   auto output = at::native::empty_like(mat1_);
   output.sparse_resize_and_clear_({mat1_.size(0), mat2_.size(1)}, mat1_.sparse_dim(), 0);
 
-#if IS_CUSPARSE11_AVAILABLE()
-#if !defined(USE_ROCM)
+#if IS_CUSPARSE11_AVAILABLE() && !defined(USE_ROCM)
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, mat1_.scalar_type(), "sparse_matmul", [&] {
-#else
+      sparse_sparse_matmul_cuda_kernel<scalar_t>(output, mat1_.coalesce(), mat2_.coalesce());
+  });
+#elif IS_CUSPARSE11_AVAILABLE() && defined(USE_ROCM)
+  // ROCm does not support half and bfloat16 types for sparse_matmul
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(mat1_.scalar_type(), "sparse_matmul", [&] {
-#endif
-    sparse_sparse_matmul_cuda_kernel<scalar_t>(output, mat1_.coalesce(), mat2_.coalesce());
+      sparse_sparse_matmul_cuda_kernel<scalar_t>(output, mat1_.coalesce(), mat2_.coalesce());
   });
 #else
   AT_DISPATCH_FLOATING_TYPES(mat1_.scalar_type(), "sparse_matmul", [&] {
