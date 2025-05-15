@@ -13,6 +13,9 @@ inline namespace CPU_CAPABILITY {
 #ifdef CPU_CAPABILITY_AVX2
 
 template <>
+struct is_vec_specialized_for<Half> : std::bool_constant<true> {};
+
+template <>
 class Vectorized<Half> : public Vectorized16<Half> {
  public:
   using Vectorized16::Vectorized16;
