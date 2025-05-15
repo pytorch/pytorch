@@ -181,7 +181,7 @@ def _fx_compile_mode_default() -> tuple[FxCompileMode, bool]:
         import logging
 
         log = logging.getLogger(__name__)
-        log.error(
+        log.error(  # noqa: TRY400
             "Invalid value of %s for %s. Expected one of %s. Using default.",
             value,
             name,
@@ -772,8 +772,8 @@ def _compile_fx_inner(
         if backend is not None
     )
 
-    with (
-        _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _,
+    with dynamo_timed(
+        "fx_codegen_and_compile", log_pt2_compile_event=True, log_waitcounter=True
     ):
         use_cache = (
             not config.force_disable_caches

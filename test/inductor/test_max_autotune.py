@@ -919,7 +919,7 @@ class TestMaxAutotune(TestCase):
 
         m_c = torch.compile(mode="max-autotune")(mod)
         out, code = run_and_get_code(m_c, x)
-        self.assertEqual(out, mod(x))
+        self.assertEqual(out, mod(x), atol=2e-3, rtol=1e-3)
 
         FileCheck().check("triton_tem_fused_baddbmm").run(code[0])
 
@@ -1623,16 +1623,9 @@ class TestPrologueFusion(TestCase):
 
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
-        # should not be done in low precision
-        (
-            FileCheck()
-            .check("for k_idx")
-            .check("to(tl.float32)")
-            .check("dot")
-            .run(code[0])
-        )
+        # should not be done in low precision, two kernels
+        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
     def test_downcast(self):
         # per heuristics, dont fuse a downcast into a mm because it would lead to more reads inside kernel

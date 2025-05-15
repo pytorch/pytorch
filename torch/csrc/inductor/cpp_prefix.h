@@ -48,12 +48,6 @@
 #include <ATen/native/Math.h>
 #endif
 
-typedef at::Half half;
-typedef at::BFloat16 bfloat16;
-
-typedef at::Float8_e4m3fn float8_e4m3fn;
-typedef at::Float8_e5m2 float8_e5m2;
-
 template <typename T>
 struct Welford {
   T mean = T(0);
@@ -93,8 +87,9 @@ struct WelfordHelper {
   WelfordHelper() = default;
   WelfordHelper(uint64_t N) {
     uint64_t m = (N + kChunkSize - 1) / kChunkSize; // div up
-    depth =
-        m > 0 ? static_cast<uint64_t>(ceil(log2(static_cast<double>(m)))) : 0;
+    depth = m > 0
+        ? static_cast<std::uint64_t>(ceil(log2(static_cast<double>(m))))
+        : 0;
     welford_stk.assign(depth, Welford<T>());
   }
 };
@@ -723,7 +718,7 @@ struct AsIntegerType<double> {
   typedef uint64_t type;
 };
 template <>
-struct AsIntegerType<bfloat16> {
+struct AsIntegerType<at::BFloat16> {
   typedef uint16_t type;
 };
 
@@ -1141,11 +1136,9 @@ void mm_get_cache_blocking(
 struct amx_tilecfg {
   uint8_t palette_id{0};
   uint8_t start_row{0};
-  // NOLINTBEGIN(*-avoid-c-arrays)
-  uint8_t reserved_0[14]{};
-  uint16_t colsb[16]{};
-  uint8_t rows[16]{};
-  // NOLINTEND(*-avoid-c-arrays)
+  std::array<uint8_t, 14> reserved_0{};
+  std::array<uint16_t, 16> colsb{};
+  std::array<uint8_t, 16> rows{};
 };
 
 class AMXState {
