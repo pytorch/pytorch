@@ -681,8 +681,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     # need to break size in two
                     if not sv.statically_known_multiple_of(
                         size, remaining[current_group]
-                    ):
+                    ):  
                         raise CantSplit
+                        
                     size1 = remaining[current_group]
                     size2 = FloorDiv(size, remaining[current_group])
                     return_getters.append(
@@ -705,7 +706,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         return new_ranges, return_getters_groups
 
     @classmethod
-    def is_compatible(
+    def prepare_split_iteration_lengths(
         cls,
         groups: Iterable[sympy.Expr],
         lengths: Sequence[Sequence[sympy.Expr]],
@@ -714,12 +715,25 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         # Fill in the reduction numel, in case the node is missing it.
         sizevars = V.graph.sizevars
         if len(lengths[1]) == 0 and (
-            sizevars.statically_known_equals(
+            not sizevars.is_expr_static_and_true(reduction_numel == sympy.S.One)
+            and sizevars.statically_known_equals(
                 sympy_product(groups),
                 sympy_product(lengths[0]) * reduction_numel,
             )
         ):
-            lengths = (lengths[0], [reduction_numel])
+            return (lengths[0], [reduction_numel])
+
+        return lengths
+
+
+    @classmethod
+    def is_compatible(
+        cls,
+        groups: Iterable[sympy.Expr],
+        lengths: Sequence[Sequence[sympy.Expr]],
+        reduction_numel: sympy.Expr = sympy.S.One,
+    ) -> bool:
+        lengths = cls.prepare_split_iteration_lengths(groups, lengths, reduction_numel)
 
         try:
             cls._split_iteration_ranges(groups, lengths)
@@ -1336,6 +1350,7 @@ class SIMDScheduling(BaseScheduling):
 
         nodes: list[scheduler.SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
 
+        # sam
         coalesce_analysis = analyze_memory_coalescing(node)
         _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
 
@@ -2019,13 +2034,12 @@ class SIMDScheduling(BaseScheduling):
         red_ranges = [ranges[v] for v in all_red_vars]
 
         torch._check(
-            V.graph.sizevars.size_hint(sympy_product(pw_ranges) - pointwise_numel) == 0,
-            lambda: f"{pw_ranges}, {pointwise_numel}, {node_schedule}",
+            sympy_product(pw_ranges) == pointwise_numel,
+            lambda: f"{pw_ranges}, {pointwise_numel}, {node_schedule}"
         )
         torch._check(
-            V.graph.sizevars.size_hint(sympy_product(red_ranges) - reduction_numel)
-            == 0,
-            lambda: f"{red_ranges}, {reduction_numel}, {node_schedule}",
+            sympy_product(red_ranges) == reduction_numel,
+            lambda: f"{red_ranges}, {reduction_numel}, {node_schedule}"
         )
 
         # score of a pointwise or reduction split
@@ -2049,8 +2063,10 @@ class SIMDScheduling(BaseScheduling):
             # Some kernels have no reduction ranges, and a reduction numel of 1
             if not ranges:
                 if target_numel:
+                    breakpoint()
                     return ([target_numel], [])
                 else:
+                    breakpoint()
                     return ([], [])
 
             key = (repr(vars_to_use), use_split_var, is_pointwise)
@@ -2093,9 +2109,8 @@ class SIMDScheduling(BaseScheduling):
                     split_scores.append(coalesce_analysis.coalesced_by_var.get(v, 0))
                     prod = 1
 
-            if prod != 1:
-                splits.append(prod)
-                split_scores.append(prev_var_coalesced_score)
+            splits.append(prod)
+            split_scores.append(prev_var_coalesced_score)
 
             scored_sub_split[key] = (splits, split_scores)
             return (splits, split_scores)
@@ -2117,6 +2132,8 @@ class SIMDScheduling(BaseScheduling):
                     process_node_vars(is_pointwise=False),
                 )
             )
+
+        # breakpoint()
 
         # TODO, add tests, reduction splits if config.triton.tile_reductions
         overlapping_iter_vars = (
@@ -2159,8 +2176,10 @@ class SIMDScheduling(BaseScheduling):
             # surprisingly, the default tiling is not always read as compatible by `tiling_is_compatible`
             # TODO - look into, occurs with dynamic shapes often
             if cand.tiling == default_tiling:
+                breakpoint()
                 return cand.tiling, tiling_score
 
+        breakpoint()
         return default_tiling, None
 
     @classmethod
@@ -2236,7 +2255,6 @@ class SIMDScheduling(BaseScheduling):
             return cls.compute_tiling_strategy(
                 node_schedule, numel, reduction_numel, coalesce_analysis
             )
-
         if (
             not is_pointwise and not config.triton.tile_reductions
         ) or config.triton.max_tiles <= 1:
