@@ -3,6 +3,7 @@
 # flake8: noqa
 import copy
 import dataclasses
+import functools
 import logging
 import math
 import operator
@@ -342,6 +343,23 @@ class TestDynamismExpression(TestCase):
         x = torch.randn(10, 7)
         seq_len = torch.tensor(5)
         torch.export.export(MySlice(), args=(x, seq_len))
+
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
+    def test_reshape_view_backed_size_oblivious(self):
+        N = 3
+
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                y = x[:-1, :]  # [s0 - 1, 32]
+                stacked = torch.stack([y] * N, dim=0)  # [N * (s0 - 1), 32]
+                reshaped = stacked.reshape(-1, N, 32)  # [(s0 - 1), N, 32]
+                return reshaped
+
+        inps = (torch.randn(10, 32),)
+        spec = {
+            "x": (Dim.AUTO, Dim.STATIC),
+        }
+        ep = export(MyModel(), inps, dynamic_shapes=spec)
 
     def test_export_constraints_error(self):
         class ConflictingConstraints(torch.nn.Module):
@@ -4360,8 +4378,18 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             _ = export(M(), (torch.tensor([2, 3, 5]),))
 
-    @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    def test_unbacked_infer_size(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                u0 = x.item()
+                torch._check_is_size(u0)
+                t = torch.empty(u0 - 1)
+                return t + t
+
+        ep = torch.export.export(Foo(), (torch.tensor([5]),))
+        ep.module()(torch.tensor([5]))
+        ep.module()(torch.tensor([1]))
+
     def test_unbacked_pad(self):
         class Foo(torch.nn.Module):
             def forward(self, xs, pad):
@@ -4421,10 +4449,10 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             "The following call raised this error(.*\n)+"
             f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
             "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('torch._check((items[1] % items[2]) != 0)')}.*\n"
-            f".*{re.escape('torch._check((items[1] % items[2]) == 0)')}(.*\n)+"
+            f".*{re.escape('torch._check((items[1] % items[2]) == 0)')}.*\n"
+            f".*{re.escape('torch._check((items[1] % items[2]) != 0)')}(.*\n)+"
             f".*{re.escape('(These suggested fixes were derived by replacing `u1` with items[1]')}"
-            f".*{re.escape('or r.shape[1], `u2` with items[2] in Ne(Mod(u1, u2), 0) and its negation.')}",
+            f".*{re.escape('or r.shape[1], `u2` with items[2] in Eq(Mod(u1, u2), 0) and its negation.')}",
         ):
             export(N(), (t,), strict=strict)
 
@@ -4478,24 +4506,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             fixes=[
                 # Could not guard on data-dependent expression u0 < 0
                 "torch._check(i >= 0)",
-            ],
-        )
-
-        class cf_changevar(torch.nn.Module):
-            def forward(self, x, fixes):
-                i = x.item()
-                eval(fixes)
-                r = torch.arange(i // 2)
-                return r + r
-
-        retry_export(
-            cf_changevar(),
-            (torch.tensor(20),),
-            fixes=[
-                # Could not guard on data-dependent expression Eq((u0//2), 0)
-                "torch._check((i // 2) != 0)",
-                # Could not guard on data-dependent expression Eq((u0//2), 1)
-                "torch._check((i // 2) != 1)",
             ],
         )
 
@@ -4866,8 +4876,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ep = export(Foo(), inputs, dynamic_shapes=shapes)
         ep.module()(torch.randn(6, 3), torch.randn(7, 4))
 
-    @testing.expectedFailureSerDerNonStrict
-    @testing.expectedFailureRetraceability
     def test_map(self):
         class Module(torch.nn.Module):
             def forward(self, xs, y, z):
@@ -7615,7 +7623,6 @@ def forward(self, b_a_buffer, x):
         ep = export(M(), (init, xs))
         self.assertEqual(ep.module()(init, xs), M()(init, xs))
 
-    # map_fn references module outside the module hierarchy
     def test_map_buffers(self):
         class M1(torch.nn.Module):
             def __init__(self) -> None:
@@ -10237,6 +10244,30 @@ graph():
         args = (torch.randn(1, 2),)
         ep = torch.export.export(mod, args, strict=False)
         self.assertTrue(torch.allclose(ep.module()(*args), mod(*args)))
+
+    def test_partial_patched_forward(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 2
+
+        def fancy_forward(x, y):
+            return x + 2 + y
+
+        Foo.forward = functools.partial(fancy_forward, y=torch.randn(4, 4))
+        x = torch.randn(4, 4)
+        # strict unsupported: "Tracing through optional input"
+        ep = export(Foo(), (x,), strict=False)
+        ep.module()(x)
+
+        class Bar(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x + y + z
+
+        mod = Bar()
+        mod.forward = functools.partial(mod.forward, z=2)
+        mod.forward = functools.partial(mod.forward, y=torch.randn(4))
+        ep = export(mod, (x,), strict=False)
+        ep.module()(x)
 
     @testing.expectedFailureCppRuntime
     def test_symint_input_basic(self):
@@ -13643,7 +13674,6 @@ def forward(self, x):
         inps = (torch.randn(1, 224, 768, device="cpu"),)
         export(Foo(), inps)
 
-    @testing.expectedFailureCppSerDes  # TODO(pianpwk): PowByNatural valuerange deserialization
     def test_dim_dynamic(self):
         dynamic = Dim.DYNAMIC
 
