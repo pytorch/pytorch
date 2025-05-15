@@ -187,6 +187,55 @@ def _dump_launch_params(args, kwargs, launcher, kernel_name, grid):
         f.write(f"{kernel_name} | {args_str} | {grid!r}\n")
 
 
+def check_autotune_cache(
+    configs: list[Config], filename: Optional[str], inductor_meta: dict[str, Any]
+) -> tuple[list[Config], Optional[AutotuneCache], dict[str, Any]]:
+    """
+    Given a list of configs, checks autotune cache and return metadata
+    """
+    autotune_cache = None
+    autotune_cache_info = {}
+    disabled = inductor_meta.get("force_disable_caches", False)
+    if (
+        not disabled
+        and filename is not None
+        and (len(configs) > 1 or inductor_meta.get("coordinate_descent_tuning"))
+        and not os.environ.get("TRITON_INTERPRET", "0") == "1"
+    ):
+        configs_hash = hash_configs(configs)
+
+        autotune_cache = AutotuneCache.create(inductor_meta, filename, configs_hash)
+        if autotune_cache:
+            if best_config := autotune_cache.read_best(inductor_meta, configs):
+                configs = [best_config]
+                autotune_cache_info["best_config"] = triton_config_to_hashable(
+                    best_config
+                )
+                autotune_cache_info["autotune_cache_state"] = "hit"
+
+            else:
+                autotune_cache_info["autotune_cache_state"] = "miss"
+                autotune_cache_info["num_configs"] = len(configs)
+                if inductor_meta.get("coordinate_descent_tuning"):
+                    autotune_cache_info["coordesc_tuning"] = True
+                    if len(configs) == 1:
+                        # This is the config that coordinate descent tuning started at, which
+                        # is not the same as the final config chosen (i.e. only_config, best_config)
+                        autotune_cache_info["coordesc_tuning_start_config"] = (
+                            triton_config_to_hashable(configs[0])
+                        )
+    else:
+        if len(configs) == 1:
+            autotune_cache_info["autotune_cache_state"] = "only 1 config"
+            autotune_cache_info["only_config"] = triton_config_to_hashable(configs[0])
+
+        if disabled:
+            autotune_cache_info["autotune_cache_state"] = "force_disabled"
+            log.debug("autotune caching is disabled by config.force_disable_caches")
+
+    return configs, autotune_cache, autotune_cache_info
+
+
 class CachingAutotuner(KernelInterface):
     """
     Simplified version of Triton autotuner that has no invalidation
@@ -297,6 +346,41 @@ class CachingAutotuner(KernelInterface):
         return all(
             isinstance(x, StaticTritonCompileResult) for x in self.compile_results
         )
+
+    def recheck_autotune_cache(
+        self, reload_kernel_from_src: Callable[[], CachingAutotuner]
+    ) -> None:
+        """
+        On cache load on static autotuner, we need to recheck the autotune cache, since
+        a best config could have been found from a previous run
+        """
+        assert self.is_statically_launchable()
+
+        configs = [result.config for result in self.compile_results]
+
+        (cached_configs, _, autotune_cache_info) = check_autotune_cache(
+            configs, self.filename, self.inductor_meta
+        )
+        self.autotune_cache_info = autotune_cache_info
+        # I.e. there was an autotune cache hit
+        if len(cached_configs) == 1 and len(configs) > 1:
+            best_config = cached_configs[0]
+            # Grab the best compiled config, if it's in the list of available ones
+            best_config_hash = triton_config_to_hashable(best_config)
+
+            for compile_result in self.compile_results:
+                if triton_config_to_hashable(compile_result.config) == best_config_hash:
+                    self.compile_results = [compile_result]
+                    return
+
+            # If the best config isn't in our list of compile results,
+            # it's likely because it was found by coordesc after the cache
+            # already saved
+            if best_config.found_by_coordesc:
+                with dynamo_timed("CachingAutotuner.slow_precompile_config"):
+                    if self.fn.fn is None:
+                        self.fn = reload_kernel_from_src().fn
+                    self.compile_results = [self._precompile_config(best_config)]
 
     def set_compile_info(
         self, compile_id: Optional[CompileId], is_backward: bool
@@ -1713,47 +1797,9 @@ def cached_autotune(
     assert len(configs) == 1 or filename
     inductor_meta = {} if inductor_meta is None else inductor_meta
 
-    disabled = inductor_meta.get("force_disable_caches", False)
-
-    # on disk caching logic and/or remote caching
-    autotune_cache = None
-    autotune_cache_info = {}
-    if (
-        not disabled
-        and filename is not None
-        and (len(configs) > 1 or inductor_meta.get("coordinate_descent_tuning"))
-        and not os.environ.get("TRITON_INTERPRET", "0") == "1"
-    ):
-        configs_hash = hash_configs(configs)
-
-        autotune_cache = AutotuneCache.create(inductor_meta, filename, configs_hash)
-        if autotune_cache:
-            if best_config := autotune_cache.read_best(inductor_meta, configs):
-                configs = [best_config]
-                autotune_cache_info["best_config"] = triton_config_to_hashable(
-                    best_config
-                )
-                autotune_cache_info["autotune_cache_state"] = "hit"
-            else:
-                autotune_cache_info["autotune_cache_state"] = "miss"
-                autotune_cache_info["num_configs"] = len(configs)
-                if inductor_meta.get("coordinate_descent_tuning"):
-                    autotune_cache_info["coordesc_tuning"] = True
-                    if len(configs) == 1:
-                        # This is the config that coordinate descent tuning started at, which
-                        # is not the same as the final config chosen (i.e. only_config, best_config)
-                        autotune_cache_info["coordesc_tuning_start_config"] = (
-                            triton_config_to_hashable(configs[0])
-                        )
-    else:
-        if len(configs) == 1:
-            autotune_cache_info["autotune_cache_state"] = "only 1 config"
-            autotune_cache_info["only_config"] = triton_config_to_hashable(configs[0])
-
-        if disabled:
-            autotune_cache_info["autotune_cache_state"] = "force_disabled"
-            log.debug("autotune caching is disabled by config.force_disable_caches")
-
+    configs, autotune_cache, autotune_cache_info = check_autotune_cache(
+        configs, filename, inductor_meta
+    )
     mutated_arg_names = inductor_meta.pop("mutated_arg_names", ())
     optimize_mem = inductor_meta.pop("optimize_mem", True)
 
