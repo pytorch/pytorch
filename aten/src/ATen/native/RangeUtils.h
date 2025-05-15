@@ -17,8 +17,9 @@ int64_t compute_arange_size(const Scalar& start, const Scalar& end, const Scalar
   TORCH_CHECK(std::isfinite(static_cast<double>(xstart)) &&
             std::isfinite(static_cast<double>(xend)),
             "unsupported range: ", xstart, " -> ", xend);
-  TORCH_CHECK(((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
-            "upper bound and lower bound inconsistent with step sign");
+  TORCH_CHECK(
+      ((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
+      "upper bound and lower bound inconsistent with step sign");
 
   // we use double precision for (start - end) / step
   // to compute size_d for consistency across devices.
