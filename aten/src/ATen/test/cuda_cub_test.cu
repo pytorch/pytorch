@@ -1,7 +1,6 @@
 #include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <gtest/gtest.h>
-#include <cuda/std/functional>
 
 
 TEST(NumBits, CubTest) {

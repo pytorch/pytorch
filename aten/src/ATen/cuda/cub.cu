@@ -2,8 +2,6 @@
 #include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAConfig.h>
 
-#include <cuda/std/functional>
-
 namespace at::cuda::cub {
 
 namespace {

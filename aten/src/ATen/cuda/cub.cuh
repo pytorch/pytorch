@@ -6,6 +6,10 @@
 #include <iterator>
 #include <limits>
 
+#ifndef USE_ROCM
+#include <cuda/std/functional>
+#endif
+
 #include <ATen/cuda/cub_definitions.cuh>
 #include <ATen/cuda/CUDAContextLight.h>
 
@@ -34,20 +38,6 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
 
-
-#if CUB_V3_PLUS()
-#include <thrust/iterator/transform_iterator.h>
-#include <thrust/iterator/counting_iterator.h>
-#include <thrust/iterator/constant_iterator.h>
-#define ATEN_CUB_TRANSFORM_ITERATOR(ValueType, ...) thrust::transform_iterator<__VA_ARGS__>
-#define ATEN_CUB_COUNTING_ITERATOR(...) thrust::counting_iterator<__VA_ARGS__>
-#define ATEN_CUB_CONSTANT_ITERATOR(...) thrust::constant_iterator<__VA_ARGS__>
-#else
-#define ATEN_CUB_TRANSFORM_ITERATOR(...) NO_ROCM(at_cuda_detail)::cub::TransformInputIterator<__VA_ARGS__>
-#define ATEN_CUB_COUNTING_ITERATOR(...) NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::CountingInputIterator<__VA_ARGS__>
-#define ATEN_CUB_CONSTANT_ITERATOR(...) NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::ConstantInputIterator<__VA_ARGS__>
-#endif
-
 // handle the temporary storage and 'twice' calls for cub API
 #define CUB_WRAPPER(func, ...) do {                                       \
   size_t temp_storage_bytes = 0;                                          \
@@ -63,6 +53,19 @@
 #else
 #define NO_ROCM(x) x
 #define ROCM_HIPCUB(x) x
+#endif
+
+#if CUB_V3_PLUS()
+#include <thrust/iterator/transform_iterator.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/constant_iterator.h>
+#define ATEN_CUB_TRANSFORM_ITERATOR(ValueType, ...) thrust::transform_iterator<__VA_ARGS__>
+#define ATEN_CUB_COUNTING_ITERATOR(...) thrust::counting_iterator<__VA_ARGS__>
+#define ATEN_CUB_CONSTANT_ITERATOR(...) thrust::constant_iterator<__VA_ARGS__>
+#else
+#define ATEN_CUB_TRANSFORM_ITERATOR(...) NO_ROCM(at_cuda_detail)::cub::TransformInputIterator<__VA_ARGS__>
+#define ATEN_CUB_COUNTING_ITERATOR(...) NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::CountingInputIterator<__VA_ARGS__>
+#define ATEN_CUB_CONSTANT_ITERATOR(...) NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::ConstantInputIterator<__VA_ARGS__>
 #endif
 
 #if (!defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()) || defined(USE_ROCM)
