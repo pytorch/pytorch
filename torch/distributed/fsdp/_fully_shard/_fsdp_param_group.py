@@ -265,6 +265,7 @@ class FSDPParamGroup:
             self._wait_all_gather_streams_on_event(self._reshard_after_forward_event)
             self._reshard_after_forward_event = None
         with record_function(self._with_fqn("FSDP::all_gather")):
+            # XXX -> cpu->cuda + nccl:all_gather
             self._all_gather_result = foreach_all_gather(
                 self.fsdp_params,
                 self._all_gather_process_group,

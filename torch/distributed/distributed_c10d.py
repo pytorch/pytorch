@@ -1830,6 +1830,11 @@ def _new_process_group_helper(
 
     This function is called with ``global_ranks_in_group == []`` for the default group.
     """
+
+
+    from torch.utils._traceback import CapturedTraceback
+    print(f"XXX NEW_PROCESS_GROUP {group_name}")
+    print(''.join(CapturedTraceback.extract(cpp=True).format()))
     global _world
 
     if group_name in _world.pg_names.values():
@@ -5288,6 +5293,7 @@ def _new_group_with_tag(
         group_rank = global_rank
 
     group_name = _process_group_name(ranks, use_hashed_name=use_local_synchronization)
+    print(f"XXX dist_c10d.py new_process_group group_name:{group_name}")
 
     pg, pg_store = _new_process_group_helper(
         group_world_size,
@@ -5302,6 +5308,7 @@ def _new_group_with_tag(
         device_id=device_id,
         group_desc=group_desc,
     )
+    torch._C._distributed_c10d._register_process_group(group_name, pg)
 
     # Create the global rank to group rank mapping
     _world.pg_group_ranks[pg] = {
