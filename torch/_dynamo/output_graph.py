@@ -1290,7 +1290,7 @@ class OutputGraph(OutputGraphGuardsState):
         # to handle random calls
         if len(self.random_calls) > 0:
             random_calls_instructions = []
-            random_values_var = self.new_var("random_values")
+            self.random_values_var = self.new_var("random_values")
             rand_fn = disable(
                 _get_gen_rand_values_fn(self.random_calls),
                 reason="do not trace into Dynamo rng recovery function",
@@ -1304,7 +1304,7 @@ class OutputGraph(OutputGraphGuardsState):
             )
             random_calls_instructions.extend(create_call_function(0, False))
             random_calls_instructions.append(
-                codegen.create_store(random_values_var),
+                codegen.create_store(self.random_values_var),
             )
             self.add_output_instructions(random_calls_instructions)
 
