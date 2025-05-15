@@ -1,3 +1,4 @@
+import copy
 from itertools import chain
 from typing import Callable, cast, NamedTuple, Optional, Union
 
@@ -388,9 +389,9 @@ def foreach_reduce(
     for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
         if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
             continue
-        assert unsharded_grad.size(shard_dim) % world_size == 0, (
-            f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
-        )
+        assert (
+            unsharded_grad.size(shard_dim) % world_size == 0
+        ), f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
         chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
         unsharded_grads[i] = torch.cat(chunks, dim=0)
     padded_unsharded_sizes = tuple(
@@ -445,11 +446,39 @@ def foreach_reduce(
             post_reduce_stream = all_reduce_stream
             all_reduce_stream.wait_stream(reduce_scatter_stream)
             with device_handle.stream(all_reduce_stream):
+                """
                 dist.all_reduce(
                     reduce_output,
                     group=all_reduce_group,
                     op=ReduceOp.AVG if predivide_factor is None else ReduceOp.SUM,
                 )
+                all_reduce_input = reduce_output
+                all_reduce_event = all_reduce_stream.record_event()
+                """
+                all_reduce_world_size = all_reduce_group.size()
+                all_reduce_input_numel = reduce_scatter_output_numel
+                all_reduce_output_numel = (
+                    all_reduce_input_numel // all_reduce_world_size
+                )
+                all_reduce_input = torch.empty(
+                    (all_reduce_input_numel,), dtype=reduce_dtype, device=device
+                )
+                device_handle = _get_device_handle(device.type)
+                foreach_reduce_scatter_copy_in(
+                    [reduce_output], all_reduce_input, all_reduce_world_size
+                )
+                all_reduce_current_stream = device_handle.current_stream()
+                all_reduce_stream.wait_stream(all_reduce_current_stream)
+                # reduce_output = reduce_scatter_input.new_empty((all_reduce_output_numel,))
+                reduce_output_buff = reduce_output.new_empty((all_reduce_output_numel,))
+                _div_if_needed(reduce_output_buff, predivide_factor)
+                dist.reduce_scatter_tensor(
+                    output=reduce_output_buff,  # reduce_output / wolrd_size
+                    input=reduce_output,
+                    group=all_reduce_group,
+                    op=ReduceOp.AVG if predivide_factor is None else ReduceOp.SUM,
+                )
+                reduce_output = reduce_output_buff
                 all_reduce_input = reduce_output
                 all_reduce_event = all_reduce_stream.record_event()
     # -- END: ops in reduce_scatter stream
@@ -503,7 +532,12 @@ def foreach_reduce(
                 new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(
                     new_sharded_grad
                 )
-                fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
+                torch.distributed.breakpoint()
+                fsdp_param.sharded_param_fully_shard = copy.deepcopy(
+                    new_sharded_dtensor_grad
+                )
+                fsdp_param.sharded_param_fully_shard.grad = new_sharded_dtensor_grad
+                fsdp_param.sharded_param = fsdp_param.sharded_param_fully_shard.view()
             if not compiled_autograd_enabled():
                 for hook in (
                     getattr(fsdp_param.sharded_param, "_post_accumulate_grad_hooks", {})
