@@ -21,7 +21,7 @@ from torchgen.model import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -201,6 +201,26 @@ if TYPE_CHECKING:
 # For examples, only pyi signatures include return types.
 
 
+def format_function_signature(
+    name: str, arguments: Iterable[str] = (), return_type: str | None = None
+) -> str:
+    if not isinstance(arguments, (list, tuple)):
+        arguments = tuple(arguments)
+    return_type = f" -> {return_type}" if return_type is not None else ""
+
+    sig = f"def {name}({', '.join(arguments)}){return_type}: ..."
+    if len(sig) <= 80 or len(arguments) == 0 or tuple(arguments) == ("self",):
+        return sig
+
+    return "\n".join(
+        (
+            f"def {name}(",
+            *(f"    {arg}," for arg in arguments),
+            f"){return_type}: ...",
+        )
+    )
+
+
 @dataclass(frozen=True)
 class PythonReturns:
     returns: tuple[Return, ...]
@@ -265,7 +285,7 @@ class PythonArgument:
 
         # pyi merges the _out and functional variants into the same signature, with an optional out arg
         if name == "out" and type_str == "Tensor" and not deprecated:
-            type_str = "Optional[" + type_str + "]"
+            type_str = f"{type_str} | None".replace(" | None | None", " | None")
 
         # pyi deprecated signatures don't get defaults for their out arg
         treat_as_no_default = (
@@ -421,7 +441,7 @@ class PythonSignature:
         # pyi also includes self (with no typing/defaults) for methods
         if self.method:
             schema_formals.insert(0, "self")
-        return f"def {self.name}({', '.join(schema_formals)}) -> {returns_str}: ..."
+        return format_function_signature(self.name, schema_formals, returns_str)
 
     def signature_str_pyi_vararg(self, *, skip_outputs: bool = False) -> str | None:
         # only pyi uses vararg signatures
@@ -457,7 +477,7 @@ class PythonSignature:
         # pyi also includes self (with no typing/defaults) for methods
         if self.method:
             schema_formals.insert(0, "self")
-        return f"def {self.name}({', '.join(schema_formals)}) -> {returns_str}: ..."
+        return format_function_signature(self.name, schema_formals, returns_str)
 
 
 # The deprecated python signature involves some special logic, so create a
@@ -498,7 +518,7 @@ class PythonSignatureDeprecated(PythonSignature):
             schema_formals.insert(positional_argc, "*")
 
         returns_str = returns_str_pyi(self)
-        return f"def {self.name}({', '.join(schema_formals)}) -> {returns_str}: ..."
+        return format_function_signature(self.name, schema_formals, returns_str)
 
     def signature_str_pyi_vararg(self, *, skip_outputs: bool = False) -> str | None:
         # the codegen doesn't include vararg variants for deprecated signatures
@@ -919,13 +939,13 @@ def argument_type_str_pyi(t: Type) -> str:
         if t.name in [BaseTy.int, BaseTy.DeviceIndex]:
             ret = "_int"
         if t.name == BaseTy.SymInt:
-            ret = "Union[_int, SymInt]"
+            ret = "_int | SymInt"
         elif t.name == BaseTy.float:
             ret = "_float"
         elif t.name == BaseTy.str:
             ret = "str"
         elif t.name == BaseTy.Scalar:
-            ret = "Union[Number, _complex]"
+            ret = "Number | _complex"
         elif t.name == BaseTy.ScalarType:
             ret = "_dtype"
         elif t.name == BaseTy.bool:
@@ -935,35 +955,35 @@ def argument_type_str_pyi(t: Type) -> str:
         elif t.name == BaseTy.Layout:
             ret = "_layout"
         elif t.name == BaseTy.Device:
-            ret = "Optional[DeviceLikeType]"
+            ret = "DeviceLikeType | None"
         elif t.name == BaseTy.MemoryFormat:
             ret = "memory_format"
         elif t.name == BaseTy.Dimname:
-            ret = "Union[str, ellipsis, None]"
+            ret = "str | EllipsisType | None"
         elif t.name == BaseTy.Storage:
-            ret = "Union[Storage, UntypedStorage]"
+            ret = "Storage | UntypedStorage"
         elif t.name in [BaseTy.Tensor, BaseTy.Generator, BaseTy.Stream]:
             # These python schema type names line up with their function schema names
             ret = t.name.name
 
     elif isinstance(t, ListType):
         if str(t.elem) == "int":
-            ret = "Union[_int, _size]" if t.size is not None else "_size"
+            ret = "_int | _size" if t.size is not None else "_size"
         elif t.is_tensor_like():
             # TODO: this doesn't seem right...
-            # Tensor?[] currently translates to Optional[Union[tuple[Tensor, ...], list[Tensor]]]
-            # It should probably translate to   Union[tuple[Optional[Tensor], ...], list[Optional[Tensor]]]
+            # Tensor?[] currently translates to tuple[Tensor, ...] | list[Tensor] | None
+            # It should probably translate to   tuple[Tensor | None, ...] | list[Tensor | None]
             add_optional = True
             ret = (
-                "Union[Tensor, tuple[Tensor, ...], list[Tensor]]"
+                "Tensor | tuple[Tensor, ...] | list[Tensor]"
                 if t.size is not None
-                else "Union[tuple[Tensor, ...], list[Tensor]]"
+                else "tuple[Tensor, ...] | list[Tensor]"
             )
         elif str(t.elem) == "float":
             ret = "Sequence[_float]"
         elif str(t.elem) == "SymInt" and t.size is not None:
             elem = argument_type_str_pyi(t.elem)
-            ret = f"Union[{elem}, Sequence[{elem}]]"
+            ret = f"{elem} | Sequence[{elem}]"
         else:
             elem = argument_type_str_pyi(t.elem)
             ret = f"Sequence[{elem}]"
@@ -972,7 +992,7 @@ def argument_type_str_pyi(t: Type) -> str:
         raise RuntimeError(f"unrecognized type {repr(t)}")
 
     if add_optional:
-        ret = "Optional[" + ret + "]"
+        ret = f"{ret} | None".replace(" | None | None", " | None")
 
     return ret
 
@@ -983,13 +1003,13 @@ def return_type_str_pyi(t: Type) -> str:
 
     if isinstance(t, OptionalType):
         inner = return_type_str_pyi(t.elem)
-        return f"Optional[{inner}]"
+        return f"{inner} | None".replace(" | None | None", " | None")
 
     if isinstance(t, BaseType):
         if t.name == BaseTy.Device:
             return "_device"
         elif t.name == BaseTy.Dimname:
-            return "Optional[str]"
+            return "str | None"
         else:
             return argument_type_str_pyi(t)
 
@@ -1012,19 +1032,19 @@ def returns_structseq_pyi(signature: PythonSignature) -> tuple[str, str] | None:
         structseq_def_lines = [
             f"class {structseq_name}({seq_type}):",
         ]
-        for name, typ in zip(field_names, python_returns):
+        for name, ret_type in zip(field_names, python_returns):
             structseq_def_lines.extend(
                 [
                     "    @property",
-                    f"    def {name}(self) -> {typ}: ...",
+                    f"    def {name}(self) -> {ret_type}: ...",
                 ]
             )
         structseq_def_lines.extend(
             [
-                f"    def __new__(cls, sequence: {seq_type}): ...",
-                f"    n_fields: _int = {len(field_names)}",
-                f"    n_sequeunce_fields: _int = {len(field_names)}",
-                "    n_unnamed_fields: _int = 0",
+                f"    def __new__(cls, sequence: {seq_type}) -> Self: ...",
+                f"    n_fields: Final[_int] = {len(field_names)}",
+                f"    n_sequence_fields: Final[_int] = {len(field_names)}",
+                "    n_unnamed_fields: Final[_int] = 0",
                 "    def __init_subclass__(cls) -> NoReturn: ...  # prohibit subclassing",
                 "",  # add an extra newline
             ]
@@ -1037,10 +1057,10 @@ def returns_structseq_pyi(signature: PythonSignature) -> tuple[str, str] | None:
         #     "    def values(self) -> Tensor: ...\n"
         #     "    @property\n"
         #     "    def indices(self) -> Tensor: ...\n"
-        #     "    def __new__(cls, sequence: tuple[Tensor, Tensor]): ...\n"
-        #     "    n_fields: _int = 2",
-        #     "    n_sequeunce_fields: _int = 2",
-        #     "    n_unnamed_fields: _int = 0",
+        #     "    def __new__(cls, sequence: tuple[Tensor, Tensor]) -> Self: ...\n"
+        #     "    n_fields: Final[_int] = 2",
+        #     "    n_sequence_fields: Final[_int] = 2",
+        #     "    n_unnamed_fields: Final[_int] = 0",
         #     "    def __init_subclass__(cls) -> NoReturn: ...  # prohibit subclassing",
         # )
         return structseq_name, structseq_def
