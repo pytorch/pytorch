@@ -4401,6 +4401,11 @@ xfail_by_backend = {
         "test_graph_save_on_cpu",  # torch.save should no-op and be recorded in the graph
         "test_saving_variable_to_disk",  # torch.save should no-op and be recorded in the graph
         "test_nested_checkpoint_early_stop_False",  # AOT backward higher order gradients
+        # Slow tests, these tests are close to CI timeout if we try to torch.compile them
+        "test_checkpointing",
+        "test_checkpointing_without_reentrant_memory_savings",
+        "test_checkpointing_without_reentrant_input_requires_grad_True",
+        "test_checkpointing_without_reentrant_input_requires_grad_False",
     },
     "aot_eager": {  # will be run with torch.compile(backend="eager")
         # Category: FakeTensor
