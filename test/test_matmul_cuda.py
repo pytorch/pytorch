@@ -580,10 +580,16 @@ class TestMatmulCuda(TestCase):
                 else:
                     if batch_size:
                         out = torch.baddbmm(c, a, b, out_dtype=output_dtype)
-                        baseline = torch.baddbmm(c_fp32, a_fp32, b_fp32) if output_dtype == torch.float32 else torch.baddbmm(c, a, b)
+                        if output_dtype == torch.float32:
+                            baseline = torch.baddbmm(c_fp32, a_fp32, b_fp32)
+                        else:
+                            baseline = torch.baddbmm(c, a, b)
                     else:
                         out = torch.addmm(c, a, b, out_dtype=output_dtype)
-                        baseline = torch.addmm(c_fp32, a_fp32, b_fp32) if output_dtype == torch.float32 else torch.addmm(c, a, b)
+                        if output_dtype == torch.float32:
+                            baseline = torch.addmm(c_fp32, a_fp32, b_fp32)
+                        else:
+                            baselone = torch.addmm(c, a, b)
 
                     self.assertEqual(out.dtype, output_dtype)
                     torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
@@ -598,7 +604,6 @@ class TestMatmulCuda(TestCase):
         device = "cuda"
         dtype = torch.float16
         with blas_library_context(backend):
-            prev_backend = torch.backends.cuda.preferred_blas_library()
             torch.backends.cuda.preferred_blas_library(backend)
 
             orig_fp16_accum = torch.backends.cuda.matmul.allow_fp16_accumulation
