@@ -1500,7 +1500,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None
-        return self.bmreq.benchmark(*args, output_tensor=out)
+        return self.bmreq.benchmark(*args, out=out)
 
     def precompile(self):
         assert self.bmreq is not None
@@ -2137,8 +2137,8 @@ class AlgorithmSelectorCache(PersistentCache):
                     counters["inductor"]["select_algorithm_num_precompiles"] += 1
                     log.info(
                         "Precompiling benchmark choice %s took %.02fs",
-                        futures[future],
-                        elapsed_times[future],
+                        futures.get(future),
+                        elapsed_times.get(future),
                     )
 
             executor.shutdown(wait=True)
@@ -2238,9 +2238,9 @@ class AlgorithmSelectorCache(PersistentCache):
             try:
                 timing = cls.benchmark_choice(choice, autotune_args)
             except CUDACompileError as e:
-                log.error(
+                log.error(  # noqa: TRY400
                     "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
-                    str(e),
+                    e,
                 )
                 timing = float("inf")
             except NotImplementedError as e:
@@ -2253,7 +2253,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 else:
                     if "illegal memory access" in msg:
                         msg += "\n\nEither error in template or triton bug.\n"
-                log.error(
+                log.error(  # noqa: TRY400
                     "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
                     msg,
                 )
