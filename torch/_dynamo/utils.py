@@ -1245,7 +1245,6 @@ class CompilationMetrics:
     runtime_cudagraphify_time_us: Optional[int] = None
     runtime_triton_autotune_time_us: Optional[int] = None
     dynamo_compile_time_before_restart_us: Optional[int] = None
-    cuda_synchronize_time_us: Optional[int] = None  # TODO: instrument
     distributed_ephemeral_timeout_us: Optional[int] = None
     structured_logging_overhead_us: Optional[int] = None
     remote_fx_graph_cache_get_time_us: Optional[int] = None
@@ -2149,7 +2148,7 @@ def torchscript(model, example_inputs, verbose=False):
             if verbose:
                 log.exception("jit error")
             else:
-                log.error("Both torch.jit.trace and torch.jit.script failed")
+                log.error("Both torch.jit.trace and torch.jit.script failed")  # noqa: TRY400
     return None
 
 

@@ -297,7 +297,7 @@ def _barrier(worker_names):
     try:
         _all_gather(None, set(worker_names))
     except RuntimeError as ex:
-        logger.error("Failed to complete barrier, got error %s", ex)
+        logger.error("Failed to complete barrier, got error %s", ex)  # noqa: TRY400
 
 
 @_require_initialized
@@ -312,7 +312,7 @@ def _wait_all_workers(timeout=DEFAULT_SHUTDOWN_TIMEOUT):
     try:
         _all_gather(None, timeout=timeout)
     except RuntimeError as ex:
-        logger.error(
+        logger.error(  # noqa: TRY400
             "Failed to respond to 'Shutdown Proceed' in time, got error %s", ex
         )
         raise ex
