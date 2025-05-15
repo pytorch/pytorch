@@ -756,7 +756,7 @@ class MultiProcessTestCase(TestCase):
             )
             sys.exit(TEST_SKIPS["generic"].exit_code)
         except Exception:
-            logger.error(
+            logger.error(  # noqa: TRY400
                 "Caught exception: \n%s exiting " "process %s with exit code: %s",
                 traceback.format_exc(),
                 self.rank,
@@ -791,7 +791,7 @@ class MultiProcessTestCase(TestCase):
                     pipe.send(MultiProcessTestCase.Event.GET_TRACEBACK)
                     pipes.append((i, pipe))
                 except ConnectionError as e:
-                    logger.error(
+                    logger.error(  # noqa: TRY400
                         "Encountered error while trying to get traceback for process %s: %s",
                         i,
                         e,
@@ -818,7 +818,7 @@ class MultiProcessTestCase(TestCase):
                         "Could not retrieve traceback for timed out process: %s", rank
                     )
             except ConnectionError as e:
-                logger.error(
+                logger.error(  # noqa: TRY400
                     "Encountered error while trying to get traceback for process %s: %s",
                     rank,
                     e,

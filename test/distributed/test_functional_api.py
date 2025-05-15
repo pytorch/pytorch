@@ -3,7 +3,6 @@
 import sys
 import unittest
 from functools import partial, wraps
-from unittest.mock import patch
 
 import torch
 import torch.distributed as dist
@@ -11,7 +10,6 @@ import torch.distributed._functional_collectives as ft_c
 import torch.distributed.distributed_c10d as c10d
 import torch.distributed.tensor as dt
 from functorch import make_fx
-from torch._dynamo.metrics_context import MetricsContext
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -33,6 +31,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfHpu,
     TEST_CUDA,
     TEST_HPU,
     TestCase,
@@ -91,7 +90,7 @@ def new_subgroups(group_size: int, pg_tag=None):
     return cur_subgroup, subgroups
 
 
-@unittest.skipIf(TEST_HPU, "Unsupported on HPU")
+@skipIfHpu
 class TestExpand(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -181,7 +180,7 @@ class TestExpand(MultiThreadedTestCase):
         self.assertEqual(2, group_size)
 
 
-@unittest.skipIf(TEST_HPU, "Unsupported on HPU")
+@skipIfHpu
 class TestPgTag(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -258,7 +257,7 @@ class TestPgTag(MultiThreadedTestCase):
 
 
 @instantiate_parametrized_tests
-@unittest.skipIf(TEST_HPU, "Unsupported on HPU")
+@skipIfHpu
 class TestTraceableCollectives(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -404,7 +403,7 @@ class TestMetaCollectives(TestCase):
         self.assertEqual(x.size(), out.size())
 
 
-@unittest.skipIf(TEST_HPU, "Unsupported on HPU")
+@skipIfHpu
 class TestGradCollectives(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -657,7 +656,7 @@ class TestDistributedBackendCollectivesWithWorldSize4(
 
 
 @instantiate_parametrized_tests
-@unittest.skipIf(TEST_HPU, "Unsupported on HPU")
+@skipIfHpu
 class TestFunctionalAutograd(MultiThreadedTestCase):
     def setUp(self):
         super().setUp()
@@ -666,13 +665,6 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
     @property
     def world_size(self):
         return 2
-
-    # `compilation_metric` attempts to update the `is_forward` field of `metrics_context`. Since
-    # `metrics_context` is a singleton, a runtime error will occur if multiple threads try to update it
-    # because `MetricsContext` does not allow updating existing fields when `overwrite` is False.
-    # So, we need to patch the `update` function of MetricsContext
-    def _metrics_context_update(self, *args, **kwargs) -> None:
-        pass
 
     @parametrize("compile", [True, False])
     def test_all_to_all_single(self, compile: bool = True) -> None:
@@ -699,8 +691,7 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
         self.assertIsNotNone(out.grad_fn)
         self.assertTrue(out.requires_grad)
         loss = out.sum()
-        with patch.object(MetricsContext, "update", self._metrics_context_update):
-            loss.backward()
+        loss.backward()
         self.assertEqual(t.grad, torch.full_like(t, 2.0))
 
     def test_all_to_all_single_inductor(self) -> None:
@@ -720,11 +711,17 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
 
         def run_with_backward():
             out = compiled(t, self.world_size)
-            with patch.object(MetricsContext, "update", self._metrics_context_update):
-                out.backward()
+            out.backward()
 
         _, codes = run_and_get_code(run_with_backward)
         for code in codes:
+            assert_keywords = ["assert_size_stride", "assert_alignment"]
+            filtered_lines = [
+                line
+                for line in code.splitlines()
+                if not any(assert_key in line for assert_key in assert_keywords)
+            ]
+            code = "\n".join(filtered_lines)
             FileCheck().check_count(
                 "_c10d_functional.all_to_all_single.default", 1, exactly=True
             ).check_count("_c10d_functional.wait_tensor.default", 1, exactly=True).run(
@@ -761,8 +758,7 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
             gathered_tensor = compiled(local_tensor, dim)
             self.assertEqual(gathered_tensor, torch.ones(output_size))
 
-            with patch.object(MetricsContext, "update", self._metrics_context_update):
-                gathered_tensor.sum().backward()
+            gathered_tensor.sum().backward()
             self.assertEqual(
                 local_tensor.grad,
                 torch.full((3, 3, 3), fill_value=float(self.world_size)),
@@ -797,8 +793,7 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
             rs_tensor = compiled(input_tensor, dim)
             res_num = 1 * group_size
             self.assertEqual(rs_tensor, torch.ones(input_size) * res_num)
-            with patch.object(MetricsContext, "update", self._metrics_context_update):
-                rs_tensor.sum().backward()
+            rs_tensor.sum().backward()
             self.assertEqual(input_tensor.grad, torch.full(output_size, fill_value=1.0))
 
 
