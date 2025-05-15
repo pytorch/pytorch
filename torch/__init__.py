@@ -2597,6 +2597,10 @@ def compile(
     if options and isinstance(options, dict):
         guard_filter_fn = options.pop("guard_filter_fn", None)
 
+    frame_traced_fn = None
+    if options and isinstance(options, dict):
+        frame_traced_fn = options.pop("frame_traced_fn", None)
+
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
     else:
@@ -2608,6 +2612,7 @@ def compile(
         dynamic=dynamic,
         disable=disable,
         guard_filter_fn=guard_filter_fn,
+        frame_traced_fn=frame_traced_fn,
     )(model)  # type: ignore[return-value]
 
 
