@@ -188,7 +188,7 @@ def _dump_launch_params(args, kwargs, launcher, kernel_name, grid):
 
 
 def check_autotune_cache(
-    configs, filename, inductor_meta
+    configs: list[Config], filename: Optional[str], inductor_meta: dict[str, Any]
 ) -> tuple[list[Config], Optional[AutotuneCache], dict[str, Any]]:
     """
     Given a list of configs, checks autotune cache and return metadata
@@ -347,7 +347,9 @@ class CachingAutotuner(KernelInterface):
             isinstance(x, StaticTritonCompileResult) for x in self.compile_results
         )
 
-    def recheck_autotune_cache(self, reload_kernel_from_src) -> None:
+    def recheck_autotune_cache(
+        self, reload_kernel_from_src: Callable[[], CachingAutotuner]
+    ) -> None:
         """
         On cache load on static autotuner, we need to recheck the autotune cache, since
         a best config could have been found from a previous run
