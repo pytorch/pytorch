@@ -586,28 +586,24 @@ def _get_optimization_cflags(
         return cflags
 
 
-def _get_shared_cflag(compile_only: bool) -> list[str]:
+def _get_shared_cflag(do_link: bool) -> list[str]:
     if _IS_WINDOWS:
         """
         MSVC `/MD` using python `ucrtbase.dll` lib as runtime.
         https://learn.microsoft.com/en-us/cpp/c-runtime-library/crt-library-features?view=msvc-170
         """
-        SHARED_FLAG = ["DLL", "MD"]
-    else:
-        if compile_only:
-            return ["fPIC"]
-        if platform.system() == "Darwin" and "clang" in get_cpp_compiler():
-            # This causes undefined symbols to behave the same as linux
-            return ["shared", "fPIC", "undefined dynamic_lookup"]
-        else:
-            return ["shared", "fPIC"]
-
-    return SHARED_FLAG
+        return ["DLL", "MD"]
+    if not do_link:
+        return ["fPIC"]
+    if platform.system() == "Darwin" and "clang" in get_cpp_compiler():
+        # This causes undefined symbols to behave the same as linux
+        return ["shared", "fPIC", "undefined dynamic_lookup"]
+    return ["shared", "fPIC"]
 
 
 def get_cpp_options(
     cpp_compiler: str,
-    compile_only: bool,
+    do_link: bool,
     warning_all: bool = True,
     extra_flags: Sequence[str] = (),
     min_optimize: bool = False,
@@ -621,7 +617,7 @@ def get_cpp_options(
     passthrough_args: list[str] = []
 
     cflags = (
-        _get_shared_cflag(compile_only)
+        _get_shared_cflag(do_link)
         + _get_optimization_cflags(cpp_compiler, min_optimize)
         + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
@@ -681,7 +677,7 @@ class CppOptions(BuildOptionsBase):
             passthrough_args,
         ) = get_cpp_options(
             cpp_compiler=self._compiler,
-            compile_only=compile_only or precompiling or preprocessing,
+            do_link=not (compile_only or precompiling or preprocessing),
             extra_flags=extra_flags,
             warning_all=warning_all,
             min_optimize=min_optimize,
@@ -1100,15 +1096,15 @@ def get_cpp_torch_options(
         + omp_include_dir_paths
     )
     cflags = sys_libs_cflags + omp_cflags
-    passthrough_args = isa_ps_args_build_flags + cxx_abi_passthrough_args
-
-    if not compile_only:
-        ldflags = omp_ldflags
-        libraries_dirs = (
-            python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
-        )
-        libraries = torch_libraries + omp_lib
-        passthrough_args += sys_libs_passthrough_args + omp_passthrough_args
+    ldflags = omp_ldflags
+    libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
+    libraries = torch_libraries + omp_lib
+    passthrough_args = (
+        sys_libs_passthrough_args
+        + isa_ps_args_build_flags
+        + cxx_abi_passthrough_args
+        + omp_passthrough_args
+    )
 
     return (
         definitions,
