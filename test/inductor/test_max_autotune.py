@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import inspect
 import json
 import math
 import os
@@ -1306,6 +1307,24 @@ class TestMaxAutotune(TestCase):
             bf16_red_setting
         )
 
+    def test_triton_template_generated_code_cache_key(self):
+        generate_and_load_args = len(
+            inspect.signature(
+                torch._inductor.select_algorithm.TritonTemplate.generate_and_load
+            ).parameters
+        )
+        make_key_args = len(
+            inspect.signature(
+                torch._inductor.select_algorithm.GeneratedCodeCache.make_key
+            ).parameters
+        )
+
+        # Make sure all args of generate_and_load_args are passed to make_key_args (Except generate_with_caching)
+        # update this function each time new arg added to generate_and_load and make sure arg is added to make_key
+        self.assertEqual(generate_and_load_args - 1, make_key_args)
+        self.assertEqual(generate_and_load_args, 15)
+
+    @fresh_inductor_cache()
     @config.patch(
         {
             "max_autotune": True,
@@ -1313,7 +1332,33 @@ class TestMaxAutotune(TestCase):
             "max_autotune_gemm_backends": "TRITON",
         }
     )
-    def test_triton_template_generated_code_cache(self):
+    def test_triton_template_generated_code_cache_strategy(self):
+        def func_test1(x, y, z, m):
+            a = torch.matmul(x, y)
+            b = torch.matmul(z, m)
+            return a, b
+
+        a = torch.rand(10, 22, device=GPU_TYPE)
+        b = torch.rand(22, 30, device=GPU_TYPE)
+        # Test that the testing strategy works by overriding input_dependent_preserved_state and simulate a cache hit.
+        with unittest.mock.patch(
+            "torch._inductor.select_algorithm.TritonTemplateKernel.input_dependent_preserved_state",
+            new=(lambda self: "same always"),
+        ):
+            with self.assertRaisesRegex(
+                torch._inductor.exc.InductorError,
+                r".*Generated code cache results in wrong output.*",
+            ):
+                torch.compile(func_test1, dynamic=False)(a, b, a, b)
+
+    @config.patch(
+        {
+            "max_autotune": True,
+            "test_configs.max_mm_configs": 4,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_triton_template_generated_code_caching(self):
         def reset_counters():
             torch._dynamo.utils.counters.clear()
 
@@ -1327,24 +1372,6 @@ class TestMaxAutotune(TestCase):
                 "generated_module_cache_miss"
             ]
 
-        def func_test1(x, y, z, m):
-            a = torch.matmul(x, y)
-            b = torch.matmul(z, m)
-            return a, b
-
-        a = torch.rand(10, 22, device=GPU_TYPE)
-        b = torch.rand(22, 30, device=GPU_TYPE)
-        # Test that the testing strategy works by overriding input_dependent_preserved_state and simulate a cache hit.
-        with unittest.mock.patch(
-            "torch._inductor.select_algorithm.TritonTemplateKernel.input_dependent_preserved_state",
-            new=(lambda self: "same always"),
-        ), fresh_inductor_cache():
-            with self.assertRaisesRegex(
-                torch._inductor.exc.InductorError,
-                r".*Generated code cache results in wrong output.*",
-            ):
-                torch.compile(func_test1, dynamic=False)(a, b, a, b)
-
         # remove white space from x.
         def remove_white_space(x: str) -> str:
             return re.sub(r"\s+", "", x)
@@ -1354,6 +1381,14 @@ class TestMaxAutotune(TestCase):
             cache_key = next(iter(cache))
             events = str(cache[cache_key].events)
             return cache_key, events
+
+        def func_test1(x, y, z, m):
+            a = torch.matmul(x, y)
+            b = torch.matmul(z, m)
+            return a, b
+
+        a = torch.rand(10, 22, device=GPU_TYPE)
+        b = torch.rand(22, 30, device=GPU_TYPE)
 
         # Valid cache hit.
         with fresh_inductor_cache():
