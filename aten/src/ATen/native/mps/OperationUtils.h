@@ -469,9 +469,9 @@ static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigne
       TORCH_CHECK(t.dim() == 0, "Passed CPU tensor to MPS op");
       // MPS does not support doubles, silently downcast CPU scalar to float
       if (C10_UNLIKELY(t.scalar_type() == kDouble)) {
-          auto val = static_cast<float>(*reinterpret_cast<const double *>(t.const_data_ptr()));
-          [encoder setBytes:&val length:sizeof(val) atIndex:idx];
-          return;
+        auto val = static_cast<float>(*reinterpret_cast<const double*>(t.const_data_ptr()));
+        [encoder setBytes:&val length:sizeof(val) atIndex:idx];
+        return;
       }
       [encoder setBytes:t.storage().data() length:t.element_size() atIndex:idx];
     } else {
