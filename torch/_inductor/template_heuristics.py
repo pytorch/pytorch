@@ -464,7 +464,6 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         return TritonConfig(kwargs, num_stages=num_stages, num_warps=num_warps)
 
     def get_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
-        breakpoint()
         return partial(self.preprocess_mm_configs, configs=self.mm_configs)
 
     def get_exhaustive_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
