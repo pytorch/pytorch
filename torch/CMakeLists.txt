@@ -432,6 +432,9 @@ endif()
 # Preserve XPU arch flags
 if(USE_XPU)
   string(REPLACE "," " " _ARCH_FLAGS_readable "${TORCH_XPU_ARCH_LIST}")
+  if("${TORCH_XPU_ARCH_LIST}" STREQUAL "")
+    set(_ARCH_FLAGS_readable "\\\"\\\"")
+  endif()
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/xpu/Module.cpp PROPERTIES COMPILE_FLAGS "-DXPU_ARCH_FLAGS=\"${_ARCH_FLAGS_readable}\"")
 endif()
 
