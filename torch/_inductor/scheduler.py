@@ -836,6 +836,15 @@ class BaseSchedulerNode:
         try:
             gpu_memory_bandwidth = get_gpu_dram_gbps()
             gpu_flops = get_device_tflops(dtype) * 10**12
+            # If cudaGetDeviceProperties returns 0 for gpu_memory_bandwidth or gpu_flops
+            # there is a chance to continue execution successfully. Otherwise, it would fail with
+            # ZeroDivisionError below.
+            if gpu_memory_bandwidth <= 0:
+                raise AssertionError(
+                    f"gpu_memory_bandwidth cannot be <= 0, but got {gpu_memory_bandwidth}"
+                )
+            if gpu_flops <= 0:
+                raise AssertionError(f"gpu_flops cannot be <= 0, but got {gpu_flops}")
         except Exception:
             return 0
 
@@ -2594,7 +2603,9 @@ class Scheduler:
         """
         Combine eligible nodes into FusedSchedulerNodes.
         """
-        with dynamo_timed("Scheduler.fused_nodes"):
+        with dynamo_timed(
+            "Scheduler.fused_nodes", log_pt2_compile_event=True, log_waitcounter=True
+        ):
             for i in range(10):
                 old_len = len(nodes)
                 fusion_log.debug(

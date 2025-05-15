@@ -22,7 +22,7 @@ from ...scheduler import (
     SchedulerNode,
     WhyNoFuse,
 )
-from ...utils import get_kernel_metadata, sympy_product
+from ...utils import get_fused_kernel_name, get_kernel_metadata, sympy_product
 from ...virtualized import V
 from ..common import BackendFeature, IndentedBuffer
 
@@ -91,9 +91,19 @@ class CUDACPPScheduling(BaseScheduling):
         if src_code in wrapper.src_to_kernel:
             kernel_name = wrapper.src_to_kernel[src_code]
         else:
+            fused_name = (
+                get_fused_kernel_name(node_schedule, config.triton.descriptive_names)
+                if config.triton.descriptive_names
+                else ""
+            )
+
             # use the original src_code as the key
             kernel_hash = hashlib.sha256(src_code.encode("utf-8")).hexdigest()[:8]
-            kernel_name = f"cutlass_{kernel_hash}"
+            if fused_name == "fused":
+                # no EVT kernel, use the original kernel name
+                kernel_name = f"cutlass_{kernel_hash}"
+            else:
+                kernel_name = f"cutlass_{fused_name}_{kernel_hash}"
             wrapper.src_to_kernel[src_code] = kernel_name
             src_code = src_code.replace(str(Placeholder.KERNEL_NAME), kernel_name)
 
