@@ -844,21 +844,38 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   PyObject* item = nullptr;
   PyObject* size = nullptr;
   PyObject* stride = nullptr;
-  if (!PyArg_ParseTuple(args, "OOO", &item, &size, &stride)) {
+  const char* op_name = nullptr;
+
+  if (!PyArg_ParseTuple(args, "OOO|s", &item, &size, &stride, &op_name)) {
     return nullptr;
   }
   if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
-    PyErr_SetString(PyExc_TypeError, "expected Tensor()");
+    std::stringstream msg;
+    msg << "expected Tensor()";
+    if (op_name) {
+      msg << " for op: " << op_name;
+    }
+    PyErr_SetString(PyExc_TypeError, msg.str().c_str());
     return nullptr;
   }
   if (!PyTuple_CheckExact(size) || !PyTuple_CheckExact(stride)) {
-    PyErr_SetString(PyExc_TypeError, "expected tuple()");
+    std::stringstream msg;
+    msg << "expected tuple()";
+    if (op_name) {
+      msg << " for op: " << op_name;
+    }
+    PyErr_SetString(PyExc_TypeError, msg.str().c_str());
     return nullptr;
   }
   at::Tensor tensor = THPVariable_Unpack(item);
   int64_t ndim = tensor.ndimension();
   if (PyTuple_GET_SIZE(size) != ndim || PyTuple_GET_SIZE(stride) != ndim) {
-    PyErr_SetString(PyExc_AssertionError, "wrong number of dimensions");
+    std::stringstream msg;
+    msg << "wrong number of dimensions" << ndim;
+    if (op_name) {
+      msg << " for op: " << op_name;
+    }
+    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
     return nullptr;
   }
 
@@ -887,6 +904,9 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   }
 
   if (num_errors) {
+    if (op_name) {
+      msg << "\nError in op: " << op_name;
+    }
     msg << "\nThis error most often comes from a incorrect fake (aka meta) kernel for a custom op.";
     msg << "\nUse torch.library.opcheck to test your custom op.";
     msg << "\nSee https://pytorch.org/docs/stable/library.html#torch.library.opcheck";
@@ -904,15 +924,27 @@ static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
    */
   PyObject* item = nullptr;
   unsigned long alignment = 0;
-  if (!PyArg_ParseTuple(args, "Ok", &item, &alignment)) {
+  const char* op_name = nullptr;
+
+  if (!PyArg_ParseTuple(args, "Ok|s", &item, &alignment, &op_name)) {
     return nullptr;
   }
   if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
-    PyErr_SetString(PyExc_TypeError, "expected Tensor()");
+    std::stringstream msg;
+    msg << "expected Tensor()";
+    if (op_name) {
+      msg << " for op: " << op_name;
+    }
+    PyErr_SetString(PyExc_TypeError, msg.str().c_str());
     return nullptr;
   }
   if (alignment == 0) {
-    PyErr_SetString(PyExc_AssertionError, "alignment can not be 0");
+    std::stringstream msg;
+    msg << "alignment cannot be 0";
+    if (op_name) {
+      msg << " in op: " << op_name;
+    }
+    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
     return nullptr;
   }
 
@@ -922,7 +954,10 @@ static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
   size_t itemsize = tensor.itemsize();
   if (storage_offset * itemsize % alignment != 0) {
     std::stringstream msg;
-    msg << "Expect the tensor to be " << alignment
+    if (op_name) {
+      msg << "\nError in op: " << op_name;
+    }
+    msg << "\nExpect the tensor to be " << alignment
         << " bytes aligned. Fail due to storage_offset=" << storage_offset
         << " itemsize=" << itemsize;
     PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
@@ -1922,6 +1957,28 @@ class DICT_CONTAINS : public LeafGuard {
  private:
   int _contains;
   py::object _key;
+};
+
+// Check that set contains an item.
+class SET_CONTAINS : public LeafGuard {
+ public:
+  SET_CONTAINS(bool contains, py::object item, py::object verbose_code_parts)
+      : LeafGuard(std::move(verbose_code_parts)),
+        _contains(contains ? 1 : 0),
+        _item(std::move(item)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    int result = PySet_Check(value) && PySet_Contains(value, _item.ptr());
+    if (result == -1) {
+      PyErr_Clear();
+      return false;
+    }
+    return result == _contains;
+  }
+
+ private:
+  int _contains;
+  py::object _item;
 };
 
 /**
@@ -5482,6 +5539,10 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DICT_CONTAINS")
       .def(py::init<bool, py::object, py::list>())
       .def("__call__", &DICT_CONTAINS::check);
+  py::class_<SET_CONTAINS, LeafGuard, std::shared_ptr<SET_CONTAINS>>(
+      py_m, "SET_CONTAINS")
+      .def(py::init<bool, py::object, py::list>())
+      .def("__call__", &SET_CONTAINS::check);
   py::class_<DYNAMIC_INDICES, LeafGuard, std::shared_ptr<DYNAMIC_INDICES>>(
       py_m, "DYNAMIC_INDICES")
       .def(py::init<py::set, py::list>())
@@ -5818,6 +5879,15 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(std::make_shared<DICT_CONTAINS>(
                 contains, std::move(key), std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_set_contains_guard",
+          [](GuardManager& self,
+             bool contains,
+             py::object item,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<SET_CONTAINS>(
+                contains, std::move(item), std::move(verbose_code_parts)));
           })
       .def(
           "add_dynamic_indices_guard",
@@ -6248,6 +6318,15 @@ PyObject* torch_c_dynamo_guards_init() {
             SKIP_IF_GUARD_ALREADY_PRESENT("DICT_VERSION");
             self.add_permitted_leaf_guard(std::make_shared<DICT_VERSION>(
                 std::move(value), std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_set_contains_guard",
+          [](GuardManager& self,
+             bool contains,
+             py::object item,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<SET_CONTAINS>(
+                contains, std::move(item), std::move(verbose_code_parts)));
           })
       .def(
           "add_no_hasattr_guard",

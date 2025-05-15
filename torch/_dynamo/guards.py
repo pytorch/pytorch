@@ -445,6 +445,7 @@ def _get_closure_vars():
             "___key_to_id": key_to_id,
             "___dict_version": dict_version,
             "___dict_contains": lambda a, b: dict.__contains__(b, a),
+            "___set_contains": lambda s, e: set.__contains__(s, e),
             "___tuple_iterator_len": tuple_iterator_len,
             "___normalize_range_iter": normalize_range_iter,
             "___tuple_iterator_getitem": tuple_iterator_getitem,
@@ -941,7 +942,10 @@ class GuardBuilder(GuardBuilderBase):
             if isinstance(example_value, dict_keys):
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
             else:
-                assert isinstance(example_value, dict)
+                try:
+                    assert isinstance(example_value, (dict, set, frozenset))
+                except:
+                    breakpoint()
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
         return guard_manager_enum
 
@@ -1503,6 +1507,18 @@ class GuardBuilder(GuardBuilderBase):
 
         self.get_guard_manager(guard).add_dict_contains_guard(
             not invert, key, get_verbose_code_parts(code, guard)
+        )
+
+    def SET_CONTAINS(self, guard: Guard, item: Any, contains: bool):
+        set_ref = self.arg_ref(guard)
+
+        # code = f"___set_contains({set_ref}, {item!r})"
+        code = f"set.__contains__({set_ref}, {item!r})"
+
+        self._set_guard_export_info(guard, [code])
+
+        self.get_guard_manager(guard).add_set_contains_guard(
+            contains, item, get_verbose_code_parts(code, guard)
         )
 
     def BOOL_MATCH(self, guard: Guard):
