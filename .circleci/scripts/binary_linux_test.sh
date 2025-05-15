@@ -92,6 +92,11 @@ fi
 if [[ "\$GPU_ARCH_TYPE" != *s390x* && "\$GPU_ARCH_TYPE" != *xpu* && "\$GPU_ARCH_TYPE" != *rocm*  && "$PACKAGE_TYPE" != libtorch ]]; then
   # Exclude s390, xpu, rocm and libtorch builds from smoke testing
   python /pytorch/.ci/pytorch/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled
+
+  if [[ "\$GPU_ARCH_TYPE" != *cpu-aarch64* ]]; then
+    # test for issue https://github.com/pytorch/pytorch/issues/149422
+    python /pytorch/.ci/pytorch/smoke_test/check_gomp.py
+  fi
 fi
 
 # Clean temp files
