@@ -1617,7 +1617,7 @@ def _generate_qconv_weight_prepack_patterns(dtype=torch.float32):
     )
 
 
-def _get_linear_node(match, input_dim_exceeds_two, input_contiguous, has_quant=False):
+def _get_linear_node(match, input_dim_exceeds_two, input_contiguous):
     output_reshape_node = None
     if input_dim_exceeds_two:
         if input_contiguous:
@@ -1629,12 +1629,7 @@ def _get_linear_node(match, input_dim_exceeds_two, input_contiguous, has_quant=F
             assert len(linear_nodes) == 1
             linear_node = linear_nodes[0]
     else:
-        if has_quant:
-            quant_node = match.output_node()
-            assert quant_node.target is quantized_decomposed.quantize_per_tensor.tensor
-            linear_node = match.output_node().args[0]
-        else:
-            linear_node = match.output_node()
+        linear_node = match.output_node()
 
     assert linear_node.target in (
         aten.addmm.default,
@@ -2148,7 +2143,7 @@ def _register_qconv_weight_prepack():
                 weight_prepack_pattern, pass_number=1, dtype=dtype
             )
 
-def _generate_dequant_fp8_linear_node_pattern(dtype, has_quant):
+def _generate_dequant_fp8_linear_node_pattern(dtype):
     assert dtype in [torch.float32, torch.bfloat16]
     dequant_wgt_pattern = CallFunction(
         quantized_decomposed.dequantize_per_tensor.tensor,
@@ -2186,13 +2181,9 @@ def _generate_dequant_fp8_linear_node_pattern(dtype, has_quant):
         act_pattern,
         t_pattern,
     )
-    if has_quant:
-        assert dtype in [torch.float32, torch.bfloat16]
-        dequant_fp8_linear_bias_pattern = generate_pattern_with_output_quant_tensor(dequant_fp8_linear_bias_pattern)
-        dequant_fp8_linear_no_bias_pattern = generate_pattern_with_output_quant_tensor(dequant_fp8_linear_no_bias_pattern)
     return dequant_fp8_linear_bias_pattern, dequant_fp8_linear_no_bias_pattern
 
-def _is_valid_scaled_mm_pattern(dtype, has_quant):
+def _is_valid_scaled_mm_pattern(dtype):
     def _inner(match):
         # import pdb
         # pdb.set_trace()
@@ -2233,23 +2224,20 @@ def _is_valid_scaled_mm_pattern(dtype, has_quant):
 
     return _inner
 
-def _register_scaled_mm_pass(pattern, dtype, has_quant):
-    pass_number = 0 if has_quant else 1
+def _register_scaled_mm_pass(pattern, dtype):
     @register_freezing_graph_pattern(
         pattern,
-        extra_check=_is_valid_scaled_mm_pattern(dtype, has_quant),
-        pass_number=pass_number,
+        extra_check=_is_valid_scaled_mm_pattern(dtype),
+        pass_number=1,
     )
     def scaled_mm_fusion(match: Match, *args, **kwargs):
-        import pdb
-        pdb.set_trace()
         input_dim_exceeds_two = False
         input_contiguous = True
         assert dtype in [torch.float32, torch.bfloat16]
         (
             linear_node,
             output_reshape_node,
-        ) = _get_linear_node(match, input_dim_exceeds_two, input_contiguous, has_quant)
+        ) = _get_linear_node(match, input_dim_exceeds_two, input_contiguous)
         input_index = 1 if linear_node.target is aten.addmm.default else 0
         weight_index = input_index + 1
 
@@ -2296,16 +2284,6 @@ def _register_scaled_mm_pass(pattern, dtype, has_quant):
         # Params
         bias = kwargs["b"] if "b" in kwargs else None
 
-        if has_quant:
-            quant_node = match.output_node()
-            assert quant_node.target is quantized_decomposed.quantize_per_tensor.tensor
-            output_dtype = kwargs["o_dtype"]
-            # output_scale = kwargs["o_inv_scale"]
-            output_scale = torch.tensor(1)
-        else:
-            output_dtype = dtype
-            output_scale = torch.tensor(1)
-
         x_shape = qx.meta.get("tensor_meta").shape
         if has_free_symbols(x_shape):
             # For dynamic shape case, we can't get activation shape ahead of runtime.
@@ -2322,6 +2300,7 @@ def _register_scaled_mm_pass(pattern, dtype, has_quant):
             permute_weight_node = graph.call_function(
                 permute_weight_op, args=permute_weight_inputs
             )
+            output_scale = torch.tensor(1.0)
             new_args: tuple[Any, ...] = (
                 qx,
                 permute_weight_node,
@@ -2329,7 +2308,7 @@ def _register_scaled_mm_pass(pattern, dtype, has_quant):
                 w_scale,
                 bias,
                 output_scale,  # output_scale
-                output_dtype,
+                dtype,  # output_dtype
                 False,  # use_fast_accum
             )
             new_linear_node = graph.call_function(
@@ -2374,11 +2353,6 @@ def _register_scaled_mm_pass(pattern, dtype, has_quant):
             if dtype == torch.bfloat16:
                 graph.erase_node(weight_to_bf16_node)  # type: ignore[possibly-undefined]
             graph.erase_node(dequant_per_tensor)
-            if has_quant:
-                quant_node.replace_all_uses_with(new_linear_node)
-                graph.erase_node(quant_node)
-            import pdb
-            pdb.set_trace()
 
             counters["inductor"]["scaled_mm_matcher_count"] += 1
             counters["inductor"]["scaled_mm_matcher_nodes"] += len(
@@ -2388,10 +2362,9 @@ def _register_scaled_mm_pass(pattern, dtype, has_quant):
 
 def _register_scaled_mm():
     for dtype in [torch.bfloat16, torch.float32]:
-        has_quant = True
-        patterns = _generate_dequant_fp8_linear_node_pattern(dtype, has_quant)
+        patterns = _generate_dequant_fp8_linear_node_pattern(dtype)
         for pattern in patterns:
-            _register_scaled_mm_pass(pattern, dtype, has_quant)
+            _register_scaled_mm_pass(pattern, dtype)
 
 def _generate_qembeddingbag_patterns(dtype):
     #assert dtype in [torch.float32, torch.bfloat16]
