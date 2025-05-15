@@ -251,19 +251,19 @@ case "$tag" in
     UCC_COMMIT=${_UCC_COMMIT}
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-xpu-2024.0-py3)
-    ANACONDA_PYTHON_VERSION=3.9
-    GCC_VERSION=11
-    VISION=yes
-    XPU_VERSION=0.5
-    NINJA_VERSION=1.9.0
-    TRITON=yes
-    ;;
   pytorch-linux-jammy-xpu-2025.0-py3)
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     VISION=yes
     XPU_VERSION=2025.0
+    NINJA_VERSION=1.9.0
+    TRITON=yes
+    ;;
+  pytorch-linux-jammy-xpu-2025.1-py3)
+    ANACONDA_PYTHON_VERSION=3.9
+    GCC_VERSION=11
+    VISION=yes
+    XPU_VERSION=2025.1
     NINJA_VERSION=1.9.0
     TRITON=yes
     ;;
@@ -411,7 +411,7 @@ if [[ -n "${CI:-}" ]]; then
 fi
 
 # Build image
-docker build \
+tar ch . | docker build \
        ${no_cache_flag} \
        ${progress_flag} \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
@@ -451,7 +451,7 @@ docker build \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \
-       .
+       -
 
 # NVIDIA dockers for RC releases use tag names like `11.0-cudnn9-devel-ubuntu18.04-rc`,
 # for this case we will set UBUNTU_VERSION to `18.04-rc` so that the Dockerfile could
