@@ -345,12 +345,11 @@ class ContinueExecutionCache:
             code_options["co_firstlineno"] = lineno
             code_options["co_cellvars"] = ()
             code_options["co_freevars"] = freevars
-            code_options["co_argcount"] = 1
+            code_options["co_argcount"] = len(args)
             code_options["co_posonlyargcount"] = 0
             code_options["co_kwonlyargcount"] = 0
             code_options["co_varnames"] = tuple(
-                ["__frame_values"]
-                + args
+                args
                 + [v for v in argnames_null if v not in args]
                 + [
                     v
@@ -370,23 +369,6 @@ class ContinueExecutionCache:
                         create_instruction("COPY_FREE_VARS", arg=len(freevars))
                     )
                 prefix.append(create_instruction("RESUME", arg=0))
-
-            # load this frame's values (stack + locals) to the right places
-            load_frame_values_source = "def load_frame_values(__frame_values):\n"
-            if len(args) == 0:
-                # load the value anyway so symbolic_convert can pop this local internally
-                load_frame_values_source += "    __frame_values"
-            elif len(args) == 1:
-                load_frame_values_source += f"    {args[0]} = __frame_values[0]"
-            else:
-                load_frame_values_source += f"    {', '.join(args)} = __frame_values"
-
-            load_frame_values_locals: dict[str, Any] = {}
-            exec(load_frame_values_source, None, load_frame_values_locals)
-            load_frame_values_bytecode = bytecode_from_template(
-                load_frame_values_locals["load_frame_values"],
-            )
-            prefix.extend(load_frame_values_bytecode)
 
             cleanup: list[Instruction] = []
             hooks = {fn.stack_index: fn for fn in setup_fns}
