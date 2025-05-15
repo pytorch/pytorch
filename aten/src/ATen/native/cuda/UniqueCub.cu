@@ -16,8 +16,6 @@
 #include <ATen/ops/empty.h>
 #endif
 
-#include <cuda/std/functional>
-
 namespace at::native::internal {
 
 namespace {
