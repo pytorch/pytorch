@@ -6320,15 +6320,6 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::move(value), std::move(verbose_code_parts)));
           })
       .def(
-          "add_set_contains_guard",
-          [](GuardManager& self,
-             bool contains,
-             py::object item,
-             py::object verbose_code_parts) -> void {
-            self.add_leaf_guard(std::make_shared<SET_CONTAINS>(
-                contains, std::move(item), std::move(verbose_code_parts)));
-          })
-      .def(
           "add_no_hasattr_guard",
           [](DictGuardManager& self,
              py::object attr_name,
