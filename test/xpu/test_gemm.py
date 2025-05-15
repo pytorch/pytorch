@@ -138,7 +138,7 @@ class TestBasicGEMM(TestCase):
 
     @precisionOverride({torch.float: 1e-4, torch.double: 1e-6, torch.half: 1e-1})
     @dtypes(torch.float, torch.half, torch.double)
-    def test_addmm_badmm_empty_tnesor(self, device, dtype):
+    def test_addmm_badmm_scalar_tnesor_input(self, device, dtype):
         input = torch.tensor(1).to(device=device, dtype=dtype)
 
         # test addmm
