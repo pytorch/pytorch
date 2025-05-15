@@ -1666,6 +1666,9 @@ class InstructionTranslatorBase(
         self.DUP_TOP(inst)
         self._load_attr(inst)
 
+    # Cache note: This cache only exists for the duration of this
+    # InstructionTranslator - so it should be safe to do.
+    @cache_method
     def load_builtin_from_argval(self, argval):
         if argval not in self.f_builtins:
             raise Unsupported(f"name '{argval}' is not defined")
@@ -1676,13 +1679,13 @@ class InstructionTranslatorBase(
                 self.output.name_of_builtins_dict_key_in_fglobals
             )
             var_source = DictGetItemSource(builtins_source, argval)
-            self.push(VariableTracker.build(self, val, var_source))
+            return VariableTracker.build(self, val, var_source)
         else:
             assert is_builtin_constant(val)
-            self.push(ConstantVariable.create(value=val))
+            return ConstantVariable.create(value=val)
 
     def load_builtin(self, inst):
-        self.load_builtin_from_argval(inst.argval)
+        self.push(self.load_builtin_from_argval(inst.argval))
 
     def jump(self, inst):
         assert self.instruction_pointer is not None
@@ -2840,7 +2843,7 @@ class InstructionTranslatorBase(
                 self.push(ConstantVariable.create(False))
 
     def LOAD_ASSERTION_ERROR(self, inst):
-        self.load_builtin_from_argval("AssertionError")
+        self.push(self.load_builtin_from_argval("AssertionError"))
 
     def LOAD_BUILD_CLASS(self, inst):
         unimplemented_v2(
@@ -3587,7 +3590,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         for (i, _), i_orig in zip(
             all_stack_locals_metadata[0].stack_ctx_args,
             all_stack_locals_metadata[0].stack_ctx_idxes_orig,
-            strict=True,
         ):
             # Replace the current stack var with the context class
             ctx = cast(ContextWrappingVariable, self.stack[i_orig])
