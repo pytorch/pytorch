@@ -374,6 +374,50 @@ class TestCustomTranslationTable(common_utils.TestCase):
         self.assertIn("Sub", all_nodes)
         self.assertNotIn("Add", all_nodes)
 
+    def test_custom_translation_table_supports_custom_op_with_its_decomp(self):
+        # Define the custom op and use it in the model
+        @torch.library.custom_op("custom::add", mutates_args=())
+        def custom_add(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a + b
+
+        @custom_add.register_fake
+        def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(a) + torch.empty_like(b)
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return custom_add(x, y)
+
+        @torch.library.custom_op("custom::_add", mutates_args=())
+        def _custom_add(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a + b
+
+        @_custom_add.register_fake
+        def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(a) + torch.empty_like(b)
+
+        @torch._decomp.register_decomposition(torch.ops.custom.add.default)
+        def custom_add_decomp(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return torch.ops.custom._add.default(a, b)
+
+        def onnx_add(self: FLOAT, other: FLOAT) -> FLOAT:
+            # Replace add with Sub
+            return op.Sub(self, other)
+
+        custom_translation_table = {
+            torch.ops.custom.add.default: onnx_add,
+        }
+
+        onnx_program = torch.onnx.export(
+            Model(),
+            (torch.tensor(1, dtype=torch.bool), torch.tensor(1, dtype=torch.bool)),
+            custom_translation_table=custom_translation_table,
+            dynamo=True,
+        )
+        all_nodes = [n.op_type for n in onnx_program.model.graph]
+        self.assertIn("Sub", all_nodes)
+        self.assertNotIn("Add", all_nodes)
+
 
 class TestFakeTensorExport(common_utils.TestCase):
     """Test exporting in fake mode."""
