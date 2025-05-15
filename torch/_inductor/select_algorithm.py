@@ -2388,6 +2388,7 @@ class AlgorithmSelectorCache(PersistentCache):
         if len(candidates) < 10:
             return []
 
+        # type: ignore
         return candidates
 
     @staticmethod

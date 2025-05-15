@@ -1297,6 +1297,10 @@ class aot_inductor:
 
 
 class cuda:
+    """
+    Config class for CUTLASS backend for Inductor.
+    """
+
     # CUDA arch to use for CUDA template kernel compilation.
     # e.g. "70", "75", "80", "90", etc.
     # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
