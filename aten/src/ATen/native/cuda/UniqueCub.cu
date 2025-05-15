@@ -262,7 +262,7 @@ struct UniqueCub<bool> {
     ATEN_CUB_TRANSFORM_ITERATOR(int, MapNumberOfTrueValues, const uint8_t*, int)
         data_iter(reinterpret_cast<const uint8_t*>(self_data), op);
     at::cuda::cub::reduce(data_iter, tmp_num_true.get(), num_inp,
-                          ::cuda::std::plus<>{}, 0);
+                          NO_ROCM(::cuda)::std::plus<>{}, 0);
 
     auto options = self.options();
     output = at::empty({2}, self.options());
