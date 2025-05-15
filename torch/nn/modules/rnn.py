@@ -496,7 +496,7 @@ class RNN(RNNBase):
             h_t = hx.clone()
             output = []
             for t in range(seq_len):
-                for layer in range(num_layers):
+                for layer in range(rnn.num_layers):
                     input_t = x[t] if layer == 0 else h_t[layer - 1]
                     h_t[layer] = torch.tanh(
                         input_t @ params[f"weight_ih_l{layer}"].T
