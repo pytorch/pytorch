@@ -1475,8 +1475,7 @@ test_executorch() {
   pushd /executorch
 
   export PYTHON_EXECUTABLE=python
-  export EXECUTORCH_BUILD_PYBIND=ON
-  export CMAKE_ARGS="-DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
+  export CMAKE_ARGS="-DEXECUTORCH_BUILD_PYBIND=ON -DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
 
   # NB: We need to rebuild ExecuTorch runner here because it depends on PyTorch
   # from the PR
