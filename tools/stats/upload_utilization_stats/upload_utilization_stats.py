@@ -205,16 +205,16 @@ class UploadUtilizationData:
         self.local_path = local_path
 
     def start(self) -> None:
-        if self.local_path != "" :
+        if self.local_path != "":
             print(f"Search for local file in local path: {self.local_path}")
-            metadata, valid_records, _ =self.get_log_data_from_local(self.local_path)
+            metadata, valid_records, _ = self.get_log_data_from_local(self.local_path)
         else:
             print(f"Search for test log in s3 bucket: {UTILIZATION_BUCKET}")
             metadata, valid_records, _ = self.get_log_data_from_s3(
-            self.info.workflow_run_id,
-            self.info.job_id,
-            self.info.run_attempt,
-            self.artifact_prefix,
+                self.info.workflow_run_id,
+                self.info.job_id,
+                self.info.run_attempt,
+                self.artifact_prefix,
             )
 
         if not metadata:
@@ -283,19 +283,14 @@ class UploadUtilizationData:
         key = f"{collection}/{version}/{repo}/{workflow_run_id}/{workflow_run_attempt}/{job_id}/{file_name}"
         upload_to_s3(bucket_name, key, docs)
 
-    def read_local_file(self, file_path: str) -> str:
-        if os.path.isfile(file_path):
-            with open(file_path, "r") as f:
-                content = f.read()
-                return content
-        return ""
-
     def get_log_data_from_local(
         self,
         file_path: str,
         artifact_prefix: str = "",
-    )-> tuple[Optional[UtilizationMetadata], list[UtilizationRecord], list[UtilizationRecord]]:
-        test_log_content = self.read_local_file(file_path)
+    ) -> tuple[
+        Optional[UtilizationMetadata], list[UtilizationRecord], list[UtilizationRecord]
+    ]:
+        test_log_content = read_file(file_path)
         if not test_log_content:
             return None, [], []
         metadata, records, error_records = self.convert_to_log_models(test_log_content)
@@ -406,13 +401,17 @@ def handle_file(file_path: Path) -> str:
     return ""
 
 
-def read_file(file_path: Path) -> str:
+def read_file(file_path: str | Path) -> str:
     try:
-        with open(file_path) as f:
-            return f.read()
+        file_path = Path(file_path)
+        if file_path.is_file():
+            with file_path.open("r") as f:
+                return f.read()
+        else:
+            print(f"::warning file {file_path} does not exist.")
     except Exception as e:
-        print(f"::warning trying to download test log {object} failed by: {e}")
-        return ""
+        print(f"::warning trying to read file {file_path} failed by: {e}")
+    return ""
 
 
 def unzip_file(path: Path, file_name: str) -> str:
@@ -486,6 +485,7 @@ def parse_args() -> argparse.Namespace:
         help="path of the raw utilizarion data from local location",
     )
     return parser.parse_args()
+
 
 if __name__ == "__main__":
     args = parse_args()
