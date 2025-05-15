@@ -1,6 +1,5 @@
 # mypy: ignore-errors
 
-import abc
 import faulthandler
 import itertools
 import logging
@@ -1503,7 +1502,7 @@ class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
 class MultiProcContinousTest(TestCase):
     # Class variables:
     # number of test processes
-    world_size: int = 2
+    world_size: int = -1
     # rank of the current process
     rank: int = -1  # unset state
     # Rendezvous file
@@ -1512,14 +1511,13 @@ class MultiProcContinousTest(TestCase):
     timeout: timedelta = timedelta(seconds=120)
 
     @classmethod
-    @abc.abstractmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls) -> str | None:
         """
         ProcessGroup backend str.
         To be customized by sub test classes, e.g. "nccl".
-        Here we raise error.
+        Otherwise we return None -- lazily decided by tensor.
         """
-        raise NotImplementedError("Please implement backend_str in your test class")
+        return None
 
     @classmethod
     def opts(cls, high_priority_stream=False):
@@ -1537,6 +1535,9 @@ class MultiProcContinousTest(TestCase):
         Set up the process group.
         """
         super().setUpClass()
+
+        # Sub tests are going to access these values, check first
+        assert cls.world_size > 0, "Internal error: must set world_size in `run_rank()`"
         if not 0 <= cls.rank < cls.world_size:
             raise RuntimeError(
                 "Rank must be set and in the range of 0 to world_size. "
@@ -1547,20 +1548,18 @@ class MultiProcContinousTest(TestCase):
         else:
             # torchrun takes care of rendezvous
             store = None
-        opts = cls.opts()
-        backend = cls.backend_str()
-        print(f"Testing {backend=}")
+
         # create nccl processgroup with opts
         c10d.init_process_group(
-            backend=backend,
+            backend=cls.backend_str(),
             world_size=cls.world_size,
             rank=cls.rank,
             store=store,
-            pg_options=opts,
+            pg_options=cls.opts(),
             timeout=cls.timeout,
         )
         cls.pg = c10d.distributed_c10d._get_default_group()
-        print(f"Rank {cls.rank} setup complete")
+        print(f"{cls.__name__}: rank {cls.rank} setup complete")
 
     @classmethod
     def tearDownClass(cls):
@@ -1570,13 +1569,7 @@ class MultiProcContinousTest(TestCase):
         """
         c10d.destroy_process_group()
         super().tearDownClass()
-        # Clear up the rendezvous file
-        if cls.rdvz_file:
-            try:
-                os.remove(cls.rdvz_file)
-            except OSError:
-                pass
-        print(f"Rank {cls.rank} teardown complete")
+        print(f"{cls.__name__}: rank {cls.rank} teardown complete")
 
     @classmethod
     def run_rank(

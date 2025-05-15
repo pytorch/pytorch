@@ -1045,23 +1045,22 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
 
 if __name__ == "__main__":
     if not torch.cuda.is_available():
-        sys.exit(TEST_SKIPS["no_cuda"].exit_code)
+        os._exit(TEST_SKIPS["no_cuda"].exit_code)
 
-    rank = int(os.getenv("RANK", -1))
-    world_size = int(os.getenv("WORLD_SIZE", -1))
+    # Use device count as world size
+    world_size = torch.cuda.device_count()
+    # Also need a rendezvous file for `init_process_group` purpose.
+    rdvz_file = tempfile.NamedTemporaryFile(delete=False).name
+    # Spawn subprocess to run the tests.
+    # `run_tests()` will be called under `run_rank`
+    torch.multiprocessing.spawn(
+        MultiProcContinousTest.run_rank,  # entry point
+        nprocs=world_size,
+        args=(world_size, rdvz_file),
+    )
 
-    if world_size == -1:  # Not set by external launcher
-        world_size = torch.cuda.device_count()
-
-    if rank != -1:
-        # Launched with torchrun or other multi-proc launchers. Directly run the test.
-        ProcessGroupNCCLOpTest.run_rank(rank, world_size)
-    else:
-        # Launched as a single process. Spawn subprocess to run the tests.
-        # Also need a rendezvous file for `init_process_group` purpose.
-        rdvz_file = tempfile.NamedTemporaryFile(delete=False).name
-        torch.multiprocessing.spawn(
-            ProcessGroupNCCLOpTest.run_rank,
-            nprocs=world_size,
-            args=(world_size, rdvz_file),
-        )
+    # Clear up the rendezvous file
+    try:
+        os.remove(rdvz_file)
+    except OSError:
+        pass
