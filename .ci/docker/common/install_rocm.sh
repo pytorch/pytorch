@@ -19,6 +19,13 @@ install_ubuntu() {
     apt-get install -y libc++1
     apt-get install -y libc++abi1
 
+    # Make sure rocm packages from repo.radeon.com have highest priority
+    cat << EOF > /etc/apt/preferences.d/rocm-pin-600
+Package: *
+Pin: release o=repo.radeon.com
+Pin-Priority: 600
+EOF
+
     # Add amdgpu repository
     UBUNTU_VERSION_NAME=`cat /etc/os-release | grep UBUNTU_CODENAME | awk -F= '{print $2}'`
     echo "deb [arch=amd64] https://repo.radeon.com/amdgpu/${ROCM_VERSION}/ubuntu ${UBUNTU_VERSION_NAME} main" > /etc/apt/sources.list.d/amdgpu.list
@@ -59,17 +66,25 @@ install_ubuntu() {
     done
 
     # ROCm 6.3 had a regression where initializing static code objects had significant overhead
-    if [[ $(ver $ROCM_VERSION) -eq $(ver 6.3) ]]; then
+    # ROCm 6.4 did not yet fix the regression, also HIP branch names are different
+    if [[ $(ver $ROCM_VERSION) -eq $(ver 6.3) ]] || [[ $(ver $ROCM_VERSION) -eq $(ver 6.4) ]]; then
+        if [[ $(ver $ROCM_VERSION) -eq $(ver 6.3) ]]; then
+            HIP_BRANCH=rocm-6.3.x
+            VER_STR=6.3
+        elif [[ $(ver $ROCM_VERSION) -eq $(ver 6.4) ]]; then
+            HIP_BRANCH=release/rocm-rel-6.4
+            VER_STR=6.4
+        fi
         # clr build needs CppHeaderParser but can only find it using conda's python
         /opt/conda/bin/python -m pip install CppHeaderParser
-        git clone https://github.com/ROCm/HIP -b rocm-6.3.x
+        git clone https://github.com/ROCm/HIP -b $HIP_BRANCH
         HIP_COMMON_DIR=$(readlink -f HIP)
-        git clone https://github.com/jeffdaily/clr -b release/rocm-rel-6.3-statco-hotfix
+        git clone https://github.com/jeffdaily/clr -b release/rocm-rel-${VER_STR}-statco-hotfix
         mkdir -p clr/build
         pushd clr/build
         cmake .. -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=$HIP_COMMON_DIR
         make -j
-        cp hipamd/lib/libamdhip64.so.6.3.* /opt/rocm/lib/libamdhip64.so.6.3.*
+        cp hipamd/lib/libamdhip64.so.${VER_STR}.* /opt/rocm/lib/libamdhip64.so.${VER_STR}.*
         popd
         rm -rf HIP clr
     fi
