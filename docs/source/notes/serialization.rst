@@ -220,17 +220,16 @@ is 64-byte aligned.
 Layout Control
 --------------
 
-As described in the documentation for :func:`torch.load`, the ``mmap`` argument
-can be used to lazily load tensor storages.
+The ``mmap`` argument in :func:`torch.load` allows for lazy loading of tensor storages.
 
-The :class:`skip_data` context manager can be used to
-  * ``torch.save`` a checkpoint with empty space for data bytes
-  * ``torch.load`` a checkpoint and populate the data bytes later
+The :class:`skip_data` context manager enables:
+  * Saving a checkpoint with ``torch.save`` that includes empty space for data bytes
+    to be written later.
+  * Loading a checkpoint with ``torch.load`` and filling in the data bytes of tensors later.
 
-Metadata of the tensors in a ``torch.save`` checkpoint can be accessed without
-materializing storage data by calling ``torch.load`` under the ``FakeTensorMode``
-context manager. Storages will also be tagged with a checkpoint offset, which
-can be used to directly manipulate the checkpoint.
+To access tensor metadata in a ``torch.save`` checkpoint without loading storage data,
+use ``torch.load`` within the ``FakeTensorMode`` context manager. This additionally
+tags storages with a checkpoint offset, allowing direct checkpoint manipulation.
 
 .. code-block:: python
 
@@ -249,8 +248,8 @@ can be used to directly manipulate the checkpoint.
       print(f"key={k}, checkpoint_offset={v.untyped_storage()._checkpoint_offset}")
 
 For more information, `this tutorial <https://docs.pytorch.org/tutorials/prototype/gpu_direct_storage.html>`_
-provides an end to end example that leverages these features to manipulate a
-checkpoint.
+offers a comprehensive example of using these features to manipulate a checkpoint.
+
 
 .. _weights-only:
 
