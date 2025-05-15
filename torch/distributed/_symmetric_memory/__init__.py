@@ -1292,15 +1292,15 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     # stacked partial outputs. The next dims will be A's leading dims (sharded along the original scatter dim),
     # as it was the left operand of the mm op. We can use -1 as the final dim of the view to populate the rest.
     stacked_partials_3D_leading_dims = [group.size()] + list(
-        # We use A from after the dim swap 0<=>scatter_dim, but before the flatten, 
+        # We use A from after the dim swap 0<=>scatter_dim, but before the flatten,
         # to get the leading dims of the 3D+ view of stacked partials.
         A_with_scatter_dim_0.shape[:-1]
     )
 
     # The `group_size` leading dim has been prepended to `stacked_partials_3D_leading_dims`,
     # to capture the partial output from each rank. We need to divide the sharding/scatter dim
-    # by the group size.If the original scatter dim was 0, then
-    # it is now dim 1 in this tensor, since this new `[group_size]` dim was prepended.
+    # by the group size. If the original scatter dim was 0, then it is now dim 1 in this
+    # tensor, since this new `group_size` dim was prepended.
     stacked_partial_scatter_dim = orig_scatter_dim if orig_scatter_dim > 0 else 1
     stacked_partials_3D_leading_dims[stacked_partial_scatter_dim] //= group.size()
 
@@ -1311,7 +1311,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
         stacked_partials.view(*stacked_partials_3D_leading_dims, -1)
         # We originally swapped 0<=>scatter_dim_after_maybe_reshape. Now after
         # prepending the `group_size` dim, to undo this original swap, we
-        # must do 1<=>scatter_dim_after_maybe_reshape+1.
+        # must swap 1<=>scatter_dim_after_maybe_reshape+1.
         .movedim(1, scatter_dim_after_maybe_reshape + 1),
         # Reduce along the `group_size` dim (0).
         dim=0,
