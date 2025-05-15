@@ -19,6 +19,7 @@ from string import Template
 from unittest import mock
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import _inductor as inductor
@@ -30,6 +31,7 @@ from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.nn.attention.flex_attention import flex_attention
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
@@ -4160,6 +4162,54 @@ class CompiledAutograd1(torch.nn.Module):
 
         first, second, third, fourth = fn(eager(), aot_eager())
         self.assertIsNone(third)
+
+    @unittest.skipIf(
+        not torch.distributed.is_available(),
+        "FakePG relies on distributed build",
+    )
+    def test_ddp_cpp_reducer_error(self):
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        try:
+            model = torch.nn.Sequential(nn.Linear(10, 10), nn.ReLU(), nn.Linear(10, 10))
+            model = DDP(model)
+            inputs = torch.randn(10, 10)
+            loss = model(inputs).sum()
+            with compiled_autograd._enable(compiler_fn), self.assertRaisesRegex(
+                RuntimeError,
+                (
+                    r"Compiled autograd is not compatible with C\+\+ DDP Reducer, "
+                    r'please use torch._dynamo.config.optimize_ddp="python_reducer"'
+                ),
+            ):
+                loss.backward()
+
+        finally:
+            dist.destroy_process_group()
+
+    @unittest.skipIf(
+        not torch.distributed.is_available(),
+        "FakePG relies on distributed build",
+    )
+    @config.patch(optimize_ddp="python_reducer")
+    def test_ddp_python_reducer(self):
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        try:
+            model = torch.nn.Sequential(nn.Linear(10, 10), nn.ReLU(), nn.Linear(10, 10))
+            model = DDP(model)
+            inputs = torch.randn(10, 10)
+            loss = model(inputs).sum()
+            with compiled_autograd._enable(compiler_fn):
+                # no error expected
+                loss.backward()
+            self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        finally:
+            dist.destroy_process_group()
 
 
 def load_test_module(name):
