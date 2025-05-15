@@ -19,7 +19,10 @@ static PyObject* THXPModule_getArchFlags(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
 #ifdef XPU_ARCH_FLAGS
   static const char* flags = C10_STRINGIZE(XPU_ARCH_FLAGS);
-  return THPUtils_packString(flags);
+  // Since C10_STRINGIZE doesn't handle an empty string as its input correctly,
+  // the string "\"\"" will be passed from cmake to indicate an empty string.
+  static const char* EMPTY_FLAGS = "\"\"";
+  return THPUtils_packString(std::strcmp(flags, EMPTY_FLAGS) == 0 ? "" : flags);
 #else
   Py_RETURN_NONE;
 #endif
