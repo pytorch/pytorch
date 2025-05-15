@@ -1441,7 +1441,7 @@ class InstructionTranslatorBase(
                 )
 
         # for continuation functions
-        if name == "__frame_values" or name.startswith("__stack"):
+        if name.startswith("__stack"):
             self.symbolic_locals.pop(name)
 
     def LOAD_DEREF(self, inst):
@@ -3617,22 +3617,19 @@ class InstructionTranslator(InstructionTranslatorBase):
                 orig_graphmodule_maybe
             )
 
-        # load stack and values into a single list
-        cg.extend_output([cg.create_load(k) for k in argnames])
-        cg.append_output(create_instruction("BUILD_LIST", arg=nargs))
-
         if new_code.co_freevars:
             # expose code object for debugging purposes
             self.output.install_global_unsafe(name, new_code)
-            cg.make_function_with_closure(name, new_code, True, 1)
+            cg.make_function_with_closure(name, new_code, True, stack_len)
         else:
             # This is safe: we pre-generate a unique name
             self.output.install_global_unsafe(
                 name, types.FunctionType(new_code, self.f_globals, name)
             )
-            cg.extend_output(cg.load_function_name(name, True, 1))
+            cg.extend_output(cg.load_function_name(name, True, stack_len))
 
-        cg.extend_output(create_call_function(1, False))
+        cg.extend_output([cg.create_load(k) for k in argnames])
+        cg.extend_output(create_call_function(nargs, False))
         cg.append_output(create_instruction("RETURN_VALUE"))
         return cg.get_instructions()
 
