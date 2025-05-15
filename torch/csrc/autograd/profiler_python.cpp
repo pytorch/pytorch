@@ -1162,11 +1162,11 @@ class PythonMemoryTracer final : public python_tracer::PythonMemoryTracerBase {
   ~PythonMemoryTracer() override = default;
   void start() override;
   void stop() override;
-  void export_memory_history(const std::string path) override;
+  void export_memory_history(const std::string& path) override;
 };
 
 static void toggle_memory_tracing(bool enable) {
-  PyGILState_STATE gil_state = PyGILState_Ensure();
+  pybind11::gil_scoped_acquire gil;
   THPObjectPtr torch_cuda_memory_module(
       PyImport_ImportModule("torch.cuda.memory"));
   if (!torch_cuda_memory_module) {
@@ -1190,15 +1190,14 @@ static void toggle_memory_tracing(bool enable) {
   if (result == nullptr) {
     return;
   }
-  PyGILState_Release(gil_state);
 }
 
 void PythonMemoryTracer::start() {
   toggle_memory_tracing(true);
 }
 
-void PythonMemoryTracer::export_memory_history(const std::string path) {
-  PyGILState_STATE gil_state = PyGILState_Ensure();
+void PythonMemoryTracer::export_memory_history(const std::string& path) {
+  pybind11::gil_scoped_acquire gil;
   THPObjectPtr torch_cuda_memory_module(
       PyImport_ImportModule("torch.cuda.memory"));
   if (!torch_cuda_memory_module) {
@@ -1217,7 +1216,6 @@ void PythonMemoryTracer::export_memory_history(const std::string path) {
   if (result == nullptr) {
     return;
   }
-  PyGILState_Release(gil_state);
 }
 
 void PythonMemoryTracer::stop() {
