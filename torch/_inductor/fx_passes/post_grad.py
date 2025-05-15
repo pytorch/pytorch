@@ -46,7 +46,13 @@ from ..pattern_matcher import (
     register_replacement,
     stable_topological_sort,
 )
-from ..utils import decode_device, get_gpu_type, is_gpu, is_pointwise_use
+from ..utils import (
+    decode_device,
+    get_gpu_type,
+    is_gpu,
+    is_pointwise_use,
+    OPTIMUS_EXCLUDE_POST_GRAD,
+)
 from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
 from .ddp_fusion import fuse_ddp_communication
@@ -137,8 +143,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 patterns.apply
             )
         for pass_name in config.post_grad_fusion_options:
-            # skip all patterns for group batch fusions
-            if pass_name in POST_GRAD_FUSIONS:
+            # skip all patterns for group batch fusions or quantization patterns
+            if pass_name in POST_GRAD_FUSIONS or pass_name in OPTIMUS_EXCLUDE_POST_GRAD:
                 continue
             pattern_matcher_pass = POST_GRAD_PATTERNS[pass_name]
             inductor_before_change = save_inductor_dict(
