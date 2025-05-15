@@ -718,7 +718,7 @@ class CompiledFxGraph(OutputCode):
                 )
                 self.compiled_fn_runner = getattr(code_cache, "runner", None)
         except OSError:
-            log.error("Failed to load artifact: %s", artifact_path)
+            log.exception("Failed to load artifact: %s", artifact_path)
             raise
 
         return artifact_path
