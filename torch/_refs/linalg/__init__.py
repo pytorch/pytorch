@@ -166,7 +166,7 @@ def vector_norm(
 
         is_ord_even = ord % 2 == 0 if isinstance(ord, IntLike) else ord % 2.0 == 0.0
         if (dim is None and x.numel() == 1) or (
-            dim is not None
+            dim not in [None, []]
             and (x.ndim > 0 and all(guard_size_oblivious(x.shape[d] == 1) for d in dim))
         ):
             if x.ndim > 64:
@@ -176,7 +176,7 @@ def vector_norm(
             x = torch.abs(x)
             if keepdim or x.ndim == 0:
                 return to_result_dtype(x).contiguous()
-            elif dim is None or dim == []:
+            elif dim in [None, []]:
                 return x.flatten()[0]
             else:
                 new_shape = [s for d, s in enumerate(x.shape) if d not in dim]
