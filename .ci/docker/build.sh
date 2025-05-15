@@ -251,19 +251,19 @@ case "$tag" in
     UCC_COMMIT=${_UCC_COMMIT}
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-xpu-2024.0-py3)
-    ANACONDA_PYTHON_VERSION=3.9
-    GCC_VERSION=11
-    VISION=yes
-    XPU_VERSION=0.5
-    NINJA_VERSION=1.9.0
-    TRITON=yes
-    ;;
   pytorch-linux-jammy-xpu-2025.0-py3)
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     VISION=yes
     XPU_VERSION=2025.0
+    NINJA_VERSION=1.9.0
+    TRITON=yes
+    ;;
+  pytorch-linux-jammy-xpu-2025.1-py3)
+    ANACONDA_PYTHON_VERSION=3.9
+    GCC_VERSION=11
+    VISION=yes
+    XPU_VERSION=2025.1
     NINJA_VERSION=1.9.0
     TRITON=yes
     ;;
