@@ -623,9 +623,9 @@ def main() -> None:
             is_canary,
         )
 
-    except Exception as e:
-        log.error(
-            f"Failed to get issue. Defaulting to Meta runners and no experiments. Exception: {e}"
+    except Exception:
+        log.exception(
+            "Failed to get issue. Defaulting to Meta runners and no experiments."
         )
 
     set_github_output(GH_OUTPUT_KEY_LABEL_TYPE, runner_label_prefix)
