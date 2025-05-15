@@ -865,6 +865,8 @@ class TracingContext:
         # see note: [Returning Fake Tensors on First AOT Autograd Call]
         self.fakify_first_call = False
         self.hop_dispatch_set_cache = HopDispatchSetCache()
+        # set of filenames for inlined functions
+        self.traced_files: set[str] = set()
 
     def clear(self):
         # Look at the note in output_graph.py in function `save_global_state`
