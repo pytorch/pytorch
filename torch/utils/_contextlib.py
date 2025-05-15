@@ -7,7 +7,7 @@ import warnings
 import sys
 from typing import Any, Callable, Generic, Optional, Union, TypeVar, cast, overload
 from collections.abc import Generator
-from typing_extensions import Self, ParamSpec
+from typing_extensions import ParamSpec
 
 # Used for annotating the decorator usage of _DecoratorContextManager (e.g.,
 # 'no_grad' and 'enable_grad').
@@ -117,7 +117,7 @@ def context_decorator(
         return _wrap_generator(ctx_factory, func)
 
     @functools.wraps(func)
-    def decorate_context(*args: P.args, **kwargs: P.kwargs):
+    def decorate_context(*args: P.args, **kwargs: P.kwargs) -> R:
         with ctx_factory():
             return func(*args, **kwargs)
 
@@ -158,12 +158,17 @@ class _NoParamDecoratorContextManager(_DecoratorContextManager[P, R]):
     """Allow a context manager to be used as a decorator without parentheses."""
 
     @overload
-    def __call__(self) -> Self: ...
+    def __new__(cls) -> "_NoParamDecoratorContextManager": ...  # type: ignore[misc]
 
     @overload
-    def __call__(self, func: Callable[P, R]) -> Callable[P, R]: ...
+    def __new__(cls, orig_func: Callable[P, R]) -> Callable[P, R]: ...  # type: ignore[misc]
 
-    def __call__(self, func: Optional[Callable[P, R]] = None) -> Union[Self, Callable[P, R]]:
-        if func is None:
-            return self  # Used as @decorator()
-        return super().__call__(func)  # Used as @decorator
+    def __new__(  # type: ignore[misc]
+        cls,
+        orig_func: Optional[Callable[P, R]] = None
+    ) -> Union["_NoParamDecoratorContextManager", Callable[P, R]]:
+        if orig_func is None:
+            return super().__new__(cls)
+        return cls()(orig_func)
+        instance = super().__new__(cls)
+        return cast(Callable[P, R], instance(orig_func))  # type: ignore[misc]
