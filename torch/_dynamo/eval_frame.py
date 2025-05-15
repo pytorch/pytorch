@@ -309,12 +309,23 @@ class OptimizedModule(torch.nn.Module):
         "_forward",
         "__dict__",
         "named_children_walk",
+        "_super_module_initialized",
     }
 
     def __init__(self, mod: torch.nn.Module, dynamo_ctx) -> None:
+        # NOTE: this must go first, because attribute reads/writes of `self`
+        # uses `_orig_mod`, and sometimes users override `Module.__init__` to
+        # do attribute reads/writes on `self`.
+        #
+        # We also can't use regular setattr because `super().__setattr__` will
+        # complain for module value before `super().__init__()`
+        object.__setattr__(self, "_orig_mod", mod)
+        self._super_module_initialized = False
         super().__init__()
+        self._super_module_initialized = True
+
         # Installs the params/buffer
-        self._orig_mod = mod
+        self._orig_mod = mod  # `super().__setattr__` will register this module
         self.dynamo_ctx = dynamo_ctx
         self._initialize()
         self.training = self._orig_mod.training
@@ -362,12 +373,11 @@ class OptimizedModule(torch.nn.Module):
 
     @training.setter
     def training(self, value):
-        try:
-            super().__getattr__("_orig_mod")
+        # Ignore the `training` mutation in `super().__init__()`, since that's
+        # setting the default on `nn.Module`, but we are mirroring the
+        # `training` attr in `self._orig_mod`.
+        if self._super_module_initialized:
             self._orig_mod.training = value
-        except AttributeError:
-            # still initializing
-            pass
 
     def __getattr__(self, name):
         if name == "_orig_mod":
