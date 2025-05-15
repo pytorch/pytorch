@@ -320,6 +320,64 @@ class StageTest(MultiProcContinousTest):
         with self.assertRaisesRegex(AssertionError, "backward_one_chunk"):
             stage_with_dw_builder.backward_weight_one_chunk(bwd_chunk_id=0)
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_output_chunks_memory_usage(self):
+        """Test that output_chunks doesn't store memory for non-first stages."""
+        full_mod = MultiMLP(d_hid, n_layers=self.world_size)
+        full_mod.to(self.device)
+        stage_mod = full_mod.get_submodule(f"layers.{self.rank}")
+        x = torch.randn(batch_size, d_hid, device=self.device)
+        target = torch.randn(batch_size, d_hid, device=self.device)
+        stage = PipelineStage(
+            stage_mod,
+            self.rank,
+            self.world_size,
+            self.device,
+        )
+        self.assertEqual(
+            len(stage.output_chunks), 0, "output_chunks should be empty initially"
+        )
+
+        schedule = ScheduleGPipe(
+            stage, chunks, loss_fn=torch.nn.MSELoss(reduction="sum")
+        )
+
+        def _run_step(x):
+            if self.rank == 0:
+                return schedule.step(x)
+            elif self.rank == self.world_size - 1:
+                return schedule.step(target=target)
+            else:
+                return schedule.step()
+
+        _run_step(x)
+
+        # Verify fwd_cache is empty
+        self.assertEqual(len(stage.fwd_cache), 0, "fwd_cache should be cleared")
+
+        # Check output_chunks state after step
+        if self.rank == self.world_size - 1:
+            self.assertEqual(
+                len(stage.output_chunks),
+                chunks,
+                "Last stage should store output chunks",
+            )
+        else:
+            self.assertEqual(
+                len(stage.output_chunks),
+                0,
+                f"Non-last stage (rank {self.rank}) should not store output chunks",
+            )
+
+        # Clear the schedule and stage caches
+        stage.clear_runtime_states()
+        if self.rank == self.world_size - 1:
+            # Last stage should have output_chunks populated
+            self.assertEqual(
+                len(stage.output_chunks), 0, "Last stage should store output chunks"
+            )
+
 
 instantiate_parametrized_tests(StageTest)
 
