@@ -839,6 +839,7 @@ class AutocastModeVariable(ContextWrappingVariable):
         tx.output.create_node(
             "call_function", torch.amp._exit_autocast, (self.state.proxy,), {}
         )
+        return variables.ConstantVariable.create(None)
 
     def enter(self, tx):
         ctx = torch.amp._enter_autocast(*self.target_values)
