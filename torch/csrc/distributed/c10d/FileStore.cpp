@@ -306,8 +306,8 @@ FileStore::~FileStore() {
   // If the file does not exist - exit.
   // This can happen when FileStore is invoked from python language which has
   // GC. If python code has directory cleanup procedure, the race condition may
-  // occur between that code and this deconstructor. As a result, we check for
-  // file existense before cleanup
+  // occur between that code and this destructor. As a result, we check for
+  // file existence before cleanup
 #ifdef _WIN32
   int res = syscall(std::bind(::_access, path_.c_str(), 0));
 #else
