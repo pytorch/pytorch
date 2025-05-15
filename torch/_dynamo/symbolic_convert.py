@@ -3521,13 +3521,10 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.active_generic_context_managers
         )
 
-    def create_call_resume_at(self, inst):
+    def create_resume_fn(self, inst) -> tuple[int, tuple[str, ...], list[Instruction]]:
         self.instruction_pointer = None
 
-        if inst.opname == "RETURN_VALUE":
-            return [create_instruction("RETURN_VALUE")]
-        elif inst.opname == "RETURN_CONST":
-            return [create_instruction("RETURN_CONST", argval=inst.argval)]
+        cg = PyCodegen(self)
 
         reads = livevars_analysis(self.instructions, inst)
         all_argnames = tuple(
@@ -3548,8 +3545,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         if sys.version_info < (3, 12):
             assert len(argnames_null) == 0, "variables should not be NULL in < 3.12"
-
-        cg = PyCodegen(self)
 
         # Handle inactive context variables.
         # The resume function assumes that context variables are the class, NOT the object.
@@ -3643,10 +3638,21 @@ class InstructionTranslator(InstructionTranslatorBase):
             )
             cg.extend_output(cg.load_function_name(name, True, stack_len))
 
-        cg.extend_output([cg.create_load(k) for k in argnames])
-        cg.extend_output(create_call_function(nargs, False))
-        cg.append_output(create_instruction("RETURN_VALUE"))
-        return cg.get_instructions()
+        return nargs, argnames, cg.get_instructions()
+
+    def create_call_resume_at(self, inst) -> list[Instruction]:
+        if inst.opname == "RETURN_VALUE":
+            return [create_instruction("RETURN_VALUE")]
+        elif inst.opname == "RETURN_CONST":
+            return [create_instruction("RETURN_CONST", argval=inst.argval)]
+
+        nargs, argnames, instructions = self.create_resume_fn(inst)
+        instructions.extend(
+            [create_instruction("LOAD_FAST", argval=k) for k in argnames]
+        )
+        instructions.extend(create_call_function(nargs, False))
+        instructions.append(create_instruction("RETURN_VALUE"))
+        return instructions
 
     def symbolic_locals_contain_module_class(self):
         for v in self.symbolic_locals.values():
