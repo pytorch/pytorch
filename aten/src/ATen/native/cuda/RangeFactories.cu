@@ -181,16 +181,22 @@ Tensor& range_cuda_out(const Scalar& start, const Scalar& end, const Scalar& ste
     auto xend = end.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
 
-    // use double precision for validation to match cpu behavior and avoid precision issues
+    // use double precision for validation to match cpu behavior and avoid
+    // precision issues
     double dstart = start.to<double>();
     double dend = end.to<double>();
     double dstep = step.to<double>();
 
     TORCH_CHECK(dstep != 0.0, "step must be nonzero");
-    TORCH_CHECK(std::isfinite(dstart) && std::isfinite(dend),
-                "unsupported range: ", dstart, " -> ", dend);
-    TORCH_CHECK((dstep > 0 && dstart <= dend) || (dstep < 0 && dstart >= dend),
-                "upper bound and lower bound inconsistent with step sign");
+    TORCH_CHECK(
+        std::isfinite(dstart) && std::isfinite(dend),
+        "unsupported range: ",
+        dstart,
+        " -> ",
+        dend);
+    TORCH_CHECK(
+        (dstep > 0 && dstart <= dend) || (dstep < 0 && dstart >= dend),
+        "upper bound and lower bound inconsistent with step sign");
 
     int64_t size = static_cast<int64_t>(((xend - xstart) / xstep) + 1);
 
@@ -222,16 +228,22 @@ Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& st
     auto xend = end.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
 
-    // use double precision for validation to match cpu behavior and avoid precision issues
+    // use double precision for validation to match cpu behavior and avoid
+    // precision issues
     double dstart = start.to<double>();
     double dend = end.to<double>();
     double dstep = step.to<double>();
 
     TORCH_CHECK(dstep != 0.0, "step must be nonzero");
-    TORCH_CHECK(std::isfinite(dstart) && std::isfinite(dend),
-                "unsupported range: ", dstart, " -> ", dend);
-    TORCH_CHECK((dstep > 0 && dstart <= dend) || (dstep < 0 && dstart >= dend),
-                "upper bound and lower bound inconsistent with step sign");
+    TORCH_CHECK(
+        std::isfinite(dstart) && std::isfinite(dend),
+        "unsupported range: ",
+        dstart,
+        " -> ",
+        dend);
+    TORCH_CHECK(
+        (dstep > 0 && dstart <= dend) || (dstep < 0 && dstart >= dend),
+        "upper bound and lower bound inconsistent with step sign");
 
     // we use double precision for (start - end) / step
     // to compute size_d for consistency across devices.
