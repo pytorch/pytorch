@@ -19,6 +19,7 @@ from ... import config
 from ...ir import Layout
 from ...runtime.runtime_utils import cache_dir
 from ...virtualized import V
+from ..cpp_utils import DTYPE_TO_CPP
 from .cuda_env import get_cuda_arch, get_cuda_version
 
 
@@ -309,6 +310,14 @@ def gen_ops() -> dict[Any, Any]:
     return _gen_ops_cached(arch, version)
 
 
+DTYPE_TO_CUTLASS_TYPE = {
+    **DTYPE_TO_CPP,
+    torch.float16: "__half",
+    torch.bfloat16: "__nv_bfloat16",
+}
+
+
+@functools.lru_cache(32)
 def torch_dtype_to_cutlass_type(
     torch_dtype: torch.dtype,
 ) -> "cutlass_library.library.DataType":  # type: ignore[name-defined] # noqa: F821
@@ -326,6 +335,7 @@ def torch_dtype_to_cutlass_type(
         raise NotImplementedError(f"Unsupported data type: {torch_dtype=}")
 
 
+@functools.lru_cache(32)
 def dtype_match(
     torch_dtype: Optional[torch.dtype],
     cutlass_dtype: "cutlass_library.library.DataType",  # type: ignore[name-defined]  # noqa: F821
@@ -386,6 +396,7 @@ def get_accumulator_dtype(
     raise NotImplementedError(f"Unsupported data types: {input_torch_dtypes=}")
 
 
+@functools.lru_cache(32)
 def get_alignments(torch_dtype: torch.dtype) -> list[int]:
     """
     Returns all possible valid CUTLASS alignments in terms of the number of elements for a given dtype.
