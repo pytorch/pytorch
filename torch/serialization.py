@@ -924,6 +924,8 @@ def save(
 
     See also: :ref:`saving-loading-tensors`
 
+    See :ref:`layout-control` for more advanced tools to manipulate a checkpoint.
+
     Args:
         obj: saved object
         f: a file-like object (has to implement write and flush) or a string or
@@ -1313,6 +1315,8 @@ def load(
     User extensions can register their own location tags and tagging and
     deserialization methods using :func:`torch.serialization.register_package`.
 
+    See :ref:`layout-control` for more advanced tools to manipulate a checkpoint.
+
     Args:
         f: a file-like object (has to implement :meth:`read`, :meth:`readline`, :meth:`tell`, and :meth:`seek`),
             or a string or os.PathLike object containing a file name
@@ -1328,7 +1332,8 @@ def load(
             Typically, tensor storages in the file will first be moved from disk to CPU memory, after which they
             are moved to the location that they were tagged with when saving, or specified by ``map_location``. This
             second step is a no-op if the final location is CPU. When the ``mmap`` flag is set, instead of copying the
-            tensor storages from disk to CPU memory in the first step, ``f`` is mmaped.
+            tensor storages from disk to CPU memory in the first step, ``f`` is mmaped, which means tensor storages
+            will be lazily loaded when their data is accessed.
         pickle_load_args: (Python 3 only) optional keyword arguments passed over to
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`, e.g.,
             :attr:`errors=...`.
