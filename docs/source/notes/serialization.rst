@@ -215,6 +215,43 @@ is 64-byte aligned.
     such, their storages are not serialized. In these cases ``data/`` might not exist
     in the checkpoint.
 
+.. _layout-control:
+
+Layout Control
+--------------
+
+As described in the documentation for :func:`torch.load`, the ``mmap`` argument
+can be used to lazily load tensor storages.
+
+The :class:`skip_data` context manager can be used to
+  * ``torch.save`` a checkpoint with empty space for data bytes
+  * ``torch.load`` a checkpoint and populate the data bytes later
+
+Metadata of the tensors in a ``torch.save`` checkpoint can be accessed without
+materializing storage data by calling ``torch.load`` under the ``FakeTensorMode``
+context manager. Storages will also be tagged with a checkpoint offset, which
+can be used to directly manipulate the checkpoint.
+
+.. code-block:: python
+
+  import torch.nn as nn
+  from torch._subclasses.fake_tensor import FakeTensorMode
+
+  m = nn.Linear(10, 10)
+  torch.save(m.state_dict(), "checkpoint.pt")
+
+  with FakeTensorMode() as mode:
+      fake_sd = torch.load("checkpoint.pt")
+
+  for k, v in fake_sd.items():
+      print(f"key={k}, dtype={v.dtype}, shape={v.shape}, stride={v.stride()}, storage_offset={v.storage_offset()}")
+      # offset of the storage in the checkpoint
+      print(f"key={k}, checkpoint_offset={v.untyped_storage()._checkpoint_offset}")
+
+For more information, `this tutorial <https://docs.pytorch.org/tutorials/prototype/gpu_direct_storage.html>`_
+provides an end to end example that leverages these features to manipulate a
+checkpoint.
+
 .. _weights-only:
 
 ``torch.load`` with ``weights_only=True``
