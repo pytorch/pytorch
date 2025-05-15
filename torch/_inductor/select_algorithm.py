@@ -2137,8 +2137,8 @@ class AlgorithmSelectorCache(PersistentCache):
                     counters["inductor"]["select_algorithm_num_precompiles"] += 1
                     log.info(
                         "Precompiling benchmark choice %s took %.02fs",
-                        futures[future],
-                        elapsed_times[future],
+                        futures.get(future),
+                        elapsed_times.get(future),
                     )
 
             executor.shutdown(wait=True)
