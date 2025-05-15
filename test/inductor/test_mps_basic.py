@@ -4,6 +4,8 @@ import os
 import sys
 
 import torch
+import numpy as np
+
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import (
@@ -159,6 +161,12 @@ class MPSBasicTests(TestCase):
                 return torch.nn.functional.rms_norm(x, x.shape, w)
 
         self.common(fn, (torch.rand(10), torch.ones(10)))
+
+    def test_compile_numpy_scalar(self):
+        def fn(x, y):
+            return x / y
+
+        self.common(fn, (torch.rand(10), np.exp(.3)))
 
 
 if __name__ == "__main__":
