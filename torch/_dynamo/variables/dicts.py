@@ -867,8 +867,39 @@ class SetVariable(ConstDictVariable):
         pass
 
     def install_dict_contains_guard(self, tx, args):
-        # Already EQUALS_MATCH guarded
-        pass
+        # but for set
+        if not self.source:
+            return
+
+        if tx.output.side_effects.is_modified(self):
+            return
+
+        contains = args[0] in self
+
+        item = (
+            args[0].fn
+            if isinstance(args[0], variables.BuiltinVariable)
+            else args[0].value
+        )
+
+        install_guard(
+            self.make_guard(
+                functools.partial(
+                    GuardBuilder.SET_CONTAINS,
+                    item=item,
+                    contains=contains,
+                )
+            )
+        )
+
+        # contains = args[0] in self
+        # if args[0].source is None and isinstance(args[0], ConstantVariable):
+        #     pass
+        # elif args[0].source:
+        #     if contains:
+        #         self.realize_key_vt(args[0])
+        #     else:
+        #         self.install_
 
 
 class FrozensetVariable(SetVariable):
