@@ -793,6 +793,10 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ("hipErrorSetOnActiveProcess", CONV_TYPE, API_RUNTIME, HIP_UNSUPPORTED),
         ),
         (
+            "cudaErrorContextIsDestroyed",
+            ("hipErrorContextIsDestroyed", CONV_TYPE, API_RUNTIME),
+        ),
+        (
             "cudaErrorInvalidSurface",
             ("hipErrorInvalidSurface", CONV_TYPE, API_RUNTIME, HIP_UNSUPPORTED),
         ),
