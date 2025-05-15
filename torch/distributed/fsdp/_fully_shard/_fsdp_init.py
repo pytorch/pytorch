@@ -13,6 +13,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from ._fsdp_common import _is_composable_with_fsdp, FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_state import _get_module_fsdp_state
 
+import torch.distributed._symmetric_memory as symm_mem
 
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 
@@ -68,6 +69,7 @@ def _init_default_fully_shard_mesh() -> DeviceMesh:
     if not dist.distributed_c10d.is_initialized():
         dist.distributed_c10d.init_process_group()
     default_pg = dist.distributed_c10d._get_default_group()
+    symm_mem.enable_symm_mem_for_group(default_pg.name())
     device = torch._C._get_accelerator()
     mesh = init_device_mesh(device.type, mesh_shape=(default_pg.size(),))
     return mesh
