@@ -205,8 +205,7 @@ class UploadUtilizationData:
         self.local_path = local_path
 
     def start(self) -> None:
-        if self.local_path != "":
-            print(f"Search for local file in local path: {self.local_path}")
+        if self.local_path:
             metadata, valid_records, _ = self.get_log_data_from_local(self.local_path)
         else:
             print(f"Search for test log in s3 bucket: {UTILIZATION_BUCKET}")
