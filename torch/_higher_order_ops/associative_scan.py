@@ -454,40 +454,42 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
     r"""
     Example::
         xs = torch.arange(1, 5) = [1, 2, 3, 4]
-        ys = torch.cumprod(xs) = [1, 2, 6, 24]
 
         def combine_fn(a: torch.Tensor, b: torch.Tensor):
             return a * b
 
-        The ``combine_fn_bw``, computing the gradients for a and b of ``combine_fn`` is computed as:
-        def combine_fn_bw(a: torch.Tensor, b: torch.Tensor, g_y: torch.Tensor):
-            return g_y * b, g_y * a
+        ys = associative_scan(comine_fn, xs),
+        which can be unpacked as:
+        ys_0 = xs_0                                          = 1
+        ys_1 = combine_fn(ys_0, xs_1) = combine_fn(1, 2)     = 2
+        ...
+        ys_T = combine_fn(ys_(T-1), xs_T) = combine_fn(6, 4) = 24
+        ys = [1, 2, 6, 24]
 
-        The first output of ``combine_fn_bw`` is the instantaneous gradient for the previous output g_y_t
-        and the second output of ``combine_fn_bw`` is the instantaneous gradient for the input g_x_t.
+        The function ``combine_fn_bw`` returns the gradients of a and b from ``combine_fn``.
+        For the ``combine_fn`` above, this results in:
+        def combine_fn_bw(a: torch.Tensor, b: torch.Tensor, g_ys_t: torch.Tensor):
+            return g_ys_t * b, g_ys_t * a,
 
-        Note: In a real usecase of associative_scan, there may be additional_inputs that participate in the
+        where g_ys are the upstream gradients in torch.autograd.Function.
+        In particular, g_ys is the vector of all intermediate upstream gradients
+        of the outputs [g_ys_0, g_ys_1, ..., g_ys_T].
+
+        The first output of ``combine_fn_bw`` is the gradient g_y_t,
+        which is the gradient for the forward output at step t-1, i.e., a.
+        The second output of ``combine_fn_bw`` is the gradient g_x_t,
+        which is the gradient for the previous forward input at step t, i.e., b.
+
+        Note: In a real usecase of ``associative_scan``, there may be additional_inputs that participate in the
         forward as well as in the backward of the scan operator. For the sake of readability those inputs
         have been omitted in the following example, but are included in the subsequent detailed description below.
 
-        The forward output of associative_scan is computed as:
-        ys = associative_scan(combine_fn, xs).
+        Note: In a real usecase of ``associative_scan`` the operation is parallelized from O(T) to O(log(T)).
 
-        For example, this computation can be unpacked as:
-        ys_0 = xs_0
-        ys_1 = combine_fn(ys_0, xs_1)
-        ...
-        ys_T = combine_fn(ys_(T-1), xs_T)
-
-        Note: In a real usecase of associative_scan this operation is parallelized from O(T) to O(log(T)).
-
-        Given the ys, the gradients for xs can be computed as follows:
-        We receive the upstream gradients in torch.autograd.Function, i.e., we get g_ys,
-        where g_ys is the vector of all intermediate gradients of the outputs [g_ys_0, g_ys_1, ..., g_ys_T]
-
-        We can then utilize the ``combine_fn_bw`` to compute the instantaneous gradients g_x_t and g_y_t
+        Given the outputs ys, the gradients for xs can be computed as follows:
+        We fist utilize the ``combine_fn_bw`` to compute the instantaneous gradients g_x_t and g_y_t
         at every step as:
-        g_y_t, g_x_t = combine_fn_bw(ys_(t-1), xs_t, 1.) ,
+        g_y_t, g_x_t = combine_fn_bw(ys_(t-1), xs_t, 1.),
         where instead of using the elements of g_ys_t, we use 1s. This is required to get the instantaneous
         gradients at every step t and we incorporate the upstream gradients g_ys at a later time.
 
@@ -501,32 +503,33 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         g_y = [1, 2, 3, 4]
         g_x = [1, 1, 2, 6]
 
-        With these instantaneous gradients, one can compute the gradients of the inputs xs (g_xs) naively as:
+        With these instantaneous gradients, we can compute the gradients of the inputs xs (g_xs) naively as:
         g_xs_t = (\sum_{i=T}^t g_ys_i . (\prod_{k=i}^{k>t} g_y_k)) . g_x_t                                         (1)
 
         In particular,
-        g_xs_T = g_ys_T . g_x_T
+        g_xs_T = g_ys_T . 1 . g_x_T
         g_xs_(T-1) = g_ys_T . g_y_T . g_x_(T-1) + g_ys_(T-1) . g_x_(T-1)
         g_xs_(T-2) = g_ys_T . g_y_T . g_y_(T-1) . g_x_(T-2) + g_ys_(T-1) . g_y_(T-1) . g_x_(T-2) + g_ys_(T-2) . g_x_(T-2)
         ...
 
-        Which for the example above results in the final input gradients:
-        g_xs_3 = 6
-        g_xs_2 = 10
-        g_xs_1 = 16
-        g_xs_0 = 33
+        Which for the example above results in the final input gradients (assuming g_ys_0 = g_ys_1 = ... = g_ys_T = 1):
+        g_xs_3 = 1 . 1 . 6                                             = 6                                         (2)
+        g_xs_2 = 1 . 4 . 2 + 1 . 2                                     = 10                                        (3)
+        g_xs_1 = 1 . 4 . 3 . 1 + 1 . 3 . 1 + 1 . 1                     = 16                                        (4)
+        g_xs_0 = 1 . 4 . 3 . 2 . 1 + 1 . 3 . 2 . 1 + 1 . 2 . 1 + 1 . 1 = 33                                        (5)
 
-        This recursive way of computing may not be the most efficient one and an alternative approach would be
-        to  rewrite the recursion with the help of cumulative products and matrix multiplications.
-        In particular, when looking at equation (1) above, one can observe three key aspects:
-        1.) The number of terms (products) in the sum is increasing by one as one progresses to earlier steps i.
-        2.) The first products for step j<i are the same, but there is one additional product added
-        which contains one element g_y_j, added to the end of the product.
-        3.) For the input gradient g_xs_i, the instantaneous input g_x_i is multiplied at the end
+        This "recursive" way of computing the gradients outlined above, may not be the most efficient.
+        An alternative approach would be to rewrite the sum and product of equation (1)
+        with the help of cumulative products and matrix multiplications.
+        In particular, when looking at equation (1), one can observe three key aspects:
+        1.) The number of terms in the sum increases by one as one progresses from t back to an earlier steps t-1.
+        2.) The first products for step t are the same as for step t-1,
+            but there is one additional term added to the end of the product.
+        3.) For the input gradient g_xs_t, the instantaneous input g_x_t is multiplied at the end.
 
-        These three observations can be exploited to formulate a ``grid form`` to compute the gradients more
-        efficiently. See ``grid form`` outlined in https://justintchiu.com/blog/pscan_diff/.
-        In particular, the sum and product in (1) can be rewritten
+        These three observations can be exploited to formulate a "grid form" to compute the gradients more
+        efficiently. See also "grid form" outlined in https://justintchiu.com/blog/pscan_diff/.
+        In particular, the sum and product in equation (1) can be rewritten
         using a matrix form, combined with a cumulative product on the rows. The resulting vector can then be
         elementwise multiplied with the instantaneous input gradients to obtain the final input gradients g_xs.
 
@@ -542,7 +545,12 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
                  [0, 0, 1,  4],
                  [0, 0, 0,  1]]
 
-        Note that these are precisely the terms of the product in (1).
+        Note, the rows of the y_mat correspond exactly to the terms of the product in equation (1).
+        For example, the last row contains the coefficients found in g_xs_3 (see (2)),
+        the second to last row contains the coefficients found in g_xs_2 (see (3)).
+        ...
+        The first row contains the coefficients found in g_xs_0 (see (5)).
+        Note: The order of y_mat is reversed compared to (2)-(5), in order to avoid unnecessary flip operations.
 
         We then scale the y_mat with the upstream gradient g_ys
 
@@ -571,7 +579,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
     The forward of associative_scan can be computed with the following steps:
     1.) Compute the forward output of the associative_scan
-    ys = associative_scan_op(combine_fn, xs, additional_inputs)
+    ys = associative_scan(combine_fn, xs, additional_inputs)
 
     The backward of scan can be computed as:
     2.) Prepare the backward graph
@@ -601,7 +609,8 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
              [0, 1    , g_y_2        , g_y_3 . g_y_2        ],
              [0, 0    , 1            , g_y_3                ],
              [0, 0    , 0            , 1                    ]],
-    For better readability, however, we split the calculation into several substeps. We start by
+    For better readability, however, we split the calculation into several substeps and utilize masks for 1s and 0s.
+    We start with:
 
     5.1 Repeat the elements of g_y to form the square matrix
     y_mat = [[1, g_y_1, g_y_2, g_y_3],
@@ -713,20 +722,21 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         # but we need it here in order to compute the correcte gradients
         xs_slices = first_slice_copy_with_grad(itertools.chain(xs, xs))
 
-        # 2.) Prepare the backward graph
-        ctx._combine_fn_bw = create_bw_fn(
-            ctx._combine_fn,
-            (*xs_slices, *additional_inputs),
-        )
+        # Construct the operands from the forward, fw_operands
+        # and the operands for a single event t of the forward, fw_operands_slice
+        fw_operands = (*xs, *additional_inputs)
+        fw_operands_slice = (*xs_slices, *additional_inputs)
 
-        # 3.) Materialize the ``ctx._combine_fn_bw``
+        # 2.) Prepare the backward graph
+        combine_fn_bw = create_bw_fn(ctx._combine_fn, fw_operands_slice)
+
+        # 3.) Materialize the ``combine_fn_bw``
         # TODO: we need to materialize the bw graphs because dynamo is unable to
         # trace through the joint function when torch.compile torch.autograd.grad.
         combine_fn_bw_gm = materialize_as_graph(
-            ctx._combine_fn_bw,
+            combine_fn_bw,
             (
-                *xs_slices,
-                *additional_inputs,
+                *fw_operands_slice,
                 *[first_slice_copy(o) for o in outs],
             ),
             ctx._fw_include_key_set,
@@ -740,12 +750,14 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         mapped_combine_fn_bw_gm = torch.vmap(combine_fn_bw_gm, 0, 0)
 
         # 4.) Compute the instantaneous gradients at every step ``t``
-        # Use a ones_like tensor in order not to scale the g_y_t and g_x_t
+        # Use a ones_like tensor in order not to scale the g_y_t and g_x_t,
+        # with the upstream gradients yet.
+        # Note: All g_x_t and g_y_t are computed in parallel, thus g_x and g_y are result.
         dummy_upstream_grad = (torch.ones_like(x) for x in g_ys)
         grads = mapped_combine_fn_bw_gm(
-            *(o.roll(1, dim) for o in outs), *xs, *dummy_upstream_grad
+            *(o.roll(1, dim) for o in outs), *fw_operands, *dummy_upstream_grad
         )
-        g_y_t, g_x_t = split_into_chunks(grads, [num_xs, num_xs])
+        g_y, g_x = split_into_chunks(grads, [num_xs, num_xs])
 
         def compute_grad_y_mat(g_y: torch.Tensor) -> torch.Tensor:
             # Prepare a ones and a zeros helper mask in order to easily compute the y_mat
@@ -804,17 +816,19 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
             return g_xs
 
-        # Stack all elements of the gradients along the first dimension.
-        # This is useful as later the gradients of those elements can be computed in parallel.
-        g_x_stacked = torch.stack(g_x_t)
-        g_y_stacked = torch.stack(g_y_t)
-        g_ys_stacked = torch.stack(g_ys)
+        # Stack all leaves of the gradients along the first dimension.
+        # This is useful as later the gradients of those leaves can be computed in parallel.
+        g_x_stacked_leaves = torch.stack(g_x)
+        g_y_stacked_leaves = torch.stack(g_y)
+        g_ys_stacked_leaves = torch.stack(g_ys)
 
-        # The compute_grad function is parallelized across all individual elements of xs
+        # The compute_grad function is parallelized across all individual leaves of xs
         # as these gradients can be computed independently from each other
         compute_grad_mapped = torch.vmap(compute_grad, 0, 0)
 
-        g_xs = compute_grad_mapped(g_x_stacked, g_y_stacked, g_ys_stacked)
+        g_xs = compute_grad_mapped(
+            g_x_stacked_leaves, g_y_stacked_leaves, g_ys_stacked_leaves
+        )
 
         # TODO: Currently the gradients for the additional_inputs are not computed properly
         return *[None] * 3, *g_xs, *[None] * num_additional_inputs
