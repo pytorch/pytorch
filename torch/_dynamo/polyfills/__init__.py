@@ -9,7 +9,7 @@ Python polyfills for common builtins.
 # mypy: allow-untyped-defs
 
 import types
-from collections.abc import MutableMapping, Sequence
+from collections.abc import Iterable, MutableMapping, Sequence
 from itertools import repeat as _repeat
 from typing import Any, Callable, TYPE_CHECKING
 
@@ -146,12 +146,27 @@ def set_update(set1, set2):
     return set1
 
 
-def set_difference(set1, set2):
+def set_difference(set1, *others):
+    if len(others) == 0:
+        return set1.copy()
+
+    if not all(isinstance(s, Iterable) for s in others):
+        raise TypeError(f"set.difference expected an iterable, got {type(others)}")
+
     difference_set = set()
     for x in set1:
-        if x not in set2:
+        for set2 in others:
+            if x in set2:
+                break
+        else:
             difference_set.add(x)
     return difference_set
+
+
+def set_difference_update(set1, *others):
+    result = set1.difference(*others)
+    set1.clear()
+    set1.update(result)
 
 
 def getattr_and_trace(*args, **kwargs):
