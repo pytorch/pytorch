@@ -142,7 +142,7 @@ class AOTIRunnerUtil:
     @staticmethod
     def compile(
         model: Union[torch.nn.Module, types.FunctionType],
-        example_inputs: list[torch.Tensor],
+        example_inputs: tuple[torch.Tensor, ...],
         inductor_configs: Optional[dict[str, Any]] = None,
         dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     ):
@@ -163,7 +163,7 @@ class AOTIRunnerUtil:
     @staticmethod
     def run(
         model: Union[torch.nn.Module, types.FunctionType],
-        example_inputs: list[torch.Tensor],
+        example_inputs: tuple[torch.Tensor, ...],
         inductor_configs: Optional[dict[str, Any]] = None,
         dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     ):
@@ -179,7 +179,7 @@ class AOTIRunnerUtil:
     @staticmethod
     def run_multiple(
         model: Union[torch.nn.Module, types.FunctionType],
-        list_example_inputs: list[list[torch.Tensor]],
+        list_example_inputs: list[tuple[torch.Tensor, ...]],
         inductor_configs: Optional[dict[str, Any]] = None,
         dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     ):

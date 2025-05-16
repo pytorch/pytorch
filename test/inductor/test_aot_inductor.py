@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     parametrize,
+    serialTest,
     skipIfRocm,
     skipIfXpu,
     TEST_WITH_ROCM,
@@ -231,6 +232,9 @@ class AOTInductorTestsTemplate:
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
+    # freezing uses different sets of parameters, but would be tested via the same
+    # mechanism
+    @config.patch(freezing=False)
     def test_constant_folding_with_update(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -625,6 +629,8 @@ class AOTInductorTestsTemplate:
         self.assertTrue(same(optimized(runtime_input), model(runtime_input)))
 
     @torch._inductor.config.patch(
+        # freezing fuses operations differently than this test expects
+        freezing=False,
         pre_grad_fusion_options={
             "normalization_pass": {},
             "remove_split_with_size_one_pass": {},
@@ -2564,6 +2570,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(3, 10, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @serialTest()
     def test_repeated_calling(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -3367,6 +3374,9 @@ class AOTInductorTestsTemplate:
         inputs = (torch.tensor([3.14], dtype=torch.float, device=self.device),)
         self.check_model(Model(), inputs)
 
+    # freezing uses different sets of parameters, but would be tested via the same
+    # mechanism
+    @config.patch(freezing=False)
     def test_constant_original_fqn_and_dtype(self):
         class FooBarModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -4248,6 +4258,9 @@ class AOTInductorTestsTemplate:
         }
         self.check_model(model, example_inputs, dynamic_shapes=dynamic_shapes)
 
+    # freezing uses different sets of parameters, but would be tested via the same
+    # mechanism
+    @config.patch(freezing=False)
     def test_aoti_debug_printer_codegen(self):
         # basic addmm model to test codegen for aoti intermediate debug printer
         class Model(torch.nn.Module):
@@ -4332,6 +4345,9 @@ class AOTInductorTestsTemplate:
                 FileCheck().check_not(f"before_launch - {kernel_name}").run(code)
                 FileCheck().check_not(f"after_launch - {kernel_name}").run(code)
 
+    # freezing uses different sets of parameters, but would be tested via the same
+    # mechanism
+    @config.patch(freezing=False)
     @common_utils.parametrize("enable_kernel_profile", (True, False))
     def test_aoti_profiler(self, enable_kernel_profile):
         # basic addmm model
@@ -4656,14 +4672,14 @@ class AOTInductorTestsTemplate:
         so_path, code = run_and_get_cpp_code(
             AOTIRunnerUtil.legacy_compile, model, example_inputs
         )
-        lowerbound_check = "u1 >= 1" if mark_unbacked else "u0 >= 2"
+        lowerbound_check = f"u{int(mark_unbacked)} >= {1 if mark_unbacked else 2}"
         FileCheck().check_count(lowerbound_check, 1).run(code)
 
         compiled = AOTIRunnerUtil.legacy_load(self.device, so_path)
         compiled(*example_inputs)
 
         # Check the runtime assertion.
-        with self.assertRaisesRegex(Exception, ""):
+        with self.assertRaises(Exception):
             unexpected_inputs = (torch.ones(0, device=self.device), b, c)
             compiled(*unexpected_inputs)
 
@@ -4761,6 +4777,9 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(2, 128, 4096, device=self.device),)
         self.check_model(Model(), example_inputs, dynamic_shapes={"x": {0: bs}})
 
+    # freezing uses different sets of parameters, but would be tested via the same
+    # mechanism
+    @config.patch(freezing=False)
     def test_so_without_weight(self):
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -4831,6 +4850,9 @@ class AOTInductorTestsTemplate:
         output = runner_call(test_inputs)
         self.assertEqual(expected, output)
 
+    # freezing uses different sets of parameters, but would be tested via the same
+    # mechanism
+    @config.patch(freezing=False)
     def test_extract_constants_map(self):
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -4895,6 +4917,9 @@ class AOTInductorTestsTemplate:
         self.assertEqual(original_weights, extracted_inactive_weights)
         self.assertEqual(new_weights, extracted_active_weights)
 
+    # freezing uses different sets of parameters, but would be tested via the same
+    # mechanism
+    @config.patch(freezing=False)
     def test_update_constant_buffer(self):
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -4954,6 +4979,9 @@ class AOTInductorTestsTemplate:
         )
         self.assertEqual(new_expected, new_output)
 
+    # freezing uses different sets of parameters, but would be tested via the same
+    # mechanism
+    @config.patch(freezing=False)
     def test_update_inactive_constant_buffer(self):
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -5008,6 +5036,9 @@ class AOTInductorTestsTemplate:
         self.assertEqual(expected, output_before_swap)
         self.assertEqual(new_expected, output_after_swap)
 
+    # freezing uses different sets of parameters, but would be tested via the same
+    # mechanism
+    @config.patch(freezing=False)
     def test_free_inactive_buffer(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -5082,6 +5113,9 @@ class AOTInductorTestsTemplate:
 
         runner.free_inactive_constant_buffer()
 
+    # freezing uses different sets of parameters, but would be tested via the same
+    # mechanism
+    @config.patch(freezing=False)
     def test_update_user_managed_buffer(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")

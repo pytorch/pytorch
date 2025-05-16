@@ -7,7 +7,6 @@ from collections.abc import Sequence
 from typing import Optional
 
 import torch
-import torch.nn as nn
 from torch._dynamo.utils import counters, detect_fake_mode
 from torch._logging import trace_structured
 from torch.fx.experimental.optimization import (
@@ -401,8 +400,6 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs) -> torch.fx.GraphModule:
     if torch.is_grad_enabled() or not is_cpu:
         return gm
     if config.freezing:
-        with GraphTransformObserver(gm, "remove_identity"):
-            gm = remove_identity(gm)
         with GraphTransformObserver(gm, "fuse_conv_bn"):
             gm = fuse_conv_bn(gm)
     return gm
@@ -418,22 +415,6 @@ def fetch_attr(target: str, mod):
             )
         attr_itr = getattr(attr_itr, atom)
     return attr_itr
-
-
-def remove_identity(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
-    """
-    Removes all identity layers from the module.
-    """
-
-    class IdentityRemover(torch.fx.Transformer):
-        def call_module(self, target, args, kwargs):
-            if isinstance(self.submodules[target], nn.Identity):
-                assert len(args) == 1
-                return args[0]
-            else:
-                return super().call_module(target, args, kwargs)
-
-    return IdentityRemover(gm).transform()
 
 
 def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModule:
