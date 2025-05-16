@@ -138,7 +138,7 @@ def wrap_compiler_debug(
                         example_inputs,
                         compiler_name,
                     )
-                log.error("CompilerError")
+                log.exception("CompilerError")
             raise
 
         # We may run regular PyTorch compute that may trigger Dynamo, do NOT
