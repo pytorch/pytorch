@@ -765,7 +765,12 @@ class SetVariable(ConstDictVariable):
             assert not kwargs
             assert not args
             # Choose an item at random and pop it via the Dict.pop method
-            result = self.set_items.pop().vt
+            try:
+                result = self.set_items.pop().vt
+            except KeyError as e:
+                raise_observed_exception(
+                    KeyError, tx, args=list(map(ConstantVariable.create, e.args))
+                )
             super().call_method(tx, name, (result,), kwargs)
             return result
         elif name == "isdisjoint":

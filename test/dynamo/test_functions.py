@@ -1682,6 +1682,18 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return a * b
 
     @make_test
+    def test_set_pop_raise_KeyError(a, b):
+        s = set()
+        try:
+            s.pop()
+        except KeyError:
+            return a + b
+        except Exception:
+            return a - b
+        else:
+            return a * b
+
+    @make_test
     def test_set_issubset(a, b):
         vals1 = {"a", "b", "c"}
         vals2 = {"b", "c"}
