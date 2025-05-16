@@ -7,9 +7,9 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp.fully_shard import FSDPModule as FSDP2
-from torch.distributed._tensor.experimental import implicit_replication
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor
+from torch.distributed.tensor.experimental import implicit_replication
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest

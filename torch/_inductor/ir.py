@@ -657,6 +657,12 @@ class IRNode:
         except NotImplementedError:
             return None
 
+    def is_input_buffer(self) -> bool:
+        try:
+            return self.get_name() in V.graph.graph_inputs
+        except NotImplementedError:
+            return False
+
     def has_large_inner_fn(self, threshold: Optional[int] = None) -> bool:
         return False
 
@@ -4594,6 +4600,32 @@ class TritonTemplateBuffer(TemplateBuffer):
             allowed_prologue_inps if allowed_prologue_inps else OrderedSet()
         )
 
+        self.subgraph_inps: Optional[list[Optional[Union[IRNode, sympy.Expr]]]] = None
+        self.subgraph_outs: Optional[list[Optional[IRNode]]] = None
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        res = super().get_free_symbol_uses(unbacked_only)
+        subgraph_outs = self.subgraph_outs if self.subgraph_outs else []
+        subgraph_inps = self.subgraph_inps if self.subgraph_inps else []
+
+        for inp in subgraph_inps:
+            if isinstance(inp, sympy.Expr):
+                res.update(get_free_symbols(inp, unbacked_only))
+            elif isinstance(inp, IRNode):
+                res.update(inp.get_free_symbol_uses(unbacked_only))
+            else:
+                assert inp is None
+
+        for out in subgraph_outs:
+            if isinstance(out, IRNode):
+                res.update(out.get_free_symbol_uses(unbacked_only))
+            else:
+                assert out is None
+
+        return res
+
     def get_outputs(self) -> list[Buffer]:
         return self.outputs
 
@@ -4748,6 +4780,10 @@ class CUDATemplateBuffer(TemplateBuffer):
 
     def get_workspace_size(self):  # type: ignore[no-untyped-def]
         return self.workspace_size if self.workspace_size is not None else 0
+
+    def emulate_store_fn(self) -> None:
+        for output in self.get_outputs():
+            ops.store(output.get_name(), None, None)
 
 
 class CppTemplateBuffer(TemplateBuffer):
@@ -5591,6 +5627,14 @@ class ExternKernel(InputsKernel):
     def require_contiguous(cls, x):  # type: ignore[no-untyped-def]
         return cls.require_stride_order(x, list(reversed(range(len(x.get_size())))))
 
+    @classmethod
+    def require_contiguous_strides(cls, x):  # type: ignore[no-untyped-def]
+        # TODO: combine this with require_contiguous after
+        # https://github.com/pytorch/pytorch/pull/148235 lands.
+        return cls.require_exact_strides(
+            x, FlexibleLayout.contiguous_strides(x.get_size())
+        )
+
     def apply_constraint(self) -> None:
         pass
 
@@ -5728,6 +5772,17 @@ class ExternKernel(InputsKernel):
             ]
         return kwargs
 
+    def get_op_name(self) -> str:
+        if self.fx_node is not None:
+            target = self.fx_node.target
+            op_namespace = getattr(target, "__module__", "unknown_namespace")
+            op_namespace = op_namespace.replace("._ops.", ".ops.")
+            op_namespace = op_namespace.rsplit(".", 1)[0]
+            op_name = f"{op_namespace}.{target}"
+        else:
+            op_name = "unknown_op"
+        return op_name
+
     def codegen_size_asserts(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         if config.size_asserts and not V.graph.cpp_wrapper:
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
@@ -5735,19 +5790,24 @@ class ExternKernel(InputsKernel):
                 return
             size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
             stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
-
+            op_name = self.get_op_name()
             wrapper.writeline(
-                f"assert_size_stride({self.get_name()}, {size}, {stride})"
+                f"assert_size_stride({self.get_name()}, {size}, {stride}, {op_name!r})"
             )
 
     def codegen_alignment_asserts(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         if config.alignment_asserts and not V.graph.cpp_wrapper:
             name = self.get_name()
             aligned = name not in V.graph.unaligned_buffers
+            op_name = self.get_op_name()
             if aligned:
-                wrapper.writeline(f"assert_alignment({name}, {GPU_ALIGN_BYTES})")
+                wrapper.writeline(
+                    f"assert_alignment({name}, {GPU_ALIGN_BYTES}, {op_name!r})"
+                )
             else:
-                wrapper.writeline(f"# buffer {name} is assumed to be not aligned")
+                wrapper.writeline(
+                    f"# buffer {name} (op: {op_name}) is assumed to be not aligned"
+                )
 
     def get_group_stride(self):  # type: ignore[no-untyped-def]
         """
@@ -6617,7 +6677,7 @@ class AssertScalar(ExternKernel):
         # "u0 == 0" in the runtime asserts, if you subsequently try to
         # simplify(u0 == 0), you will get True (because we've already runtime assert'ed
         # that it's true).  But we're code generating the actual runtime assert here!!
-        symbol = next(iter(self.get_free_symbol_uses(unbacked_only=True)))
+        symbol = next(iter(self.get_free_symbol_uses(unbacked_only=False)))
         if V.graph.cpp_wrapper:
             symbol_str = f"std::to_string({symbol})"
             sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
@@ -7223,6 +7283,9 @@ class MutableBox(IRNode):
     def unwrap_view(self) -> IRNode:
         return self.data.unwrap_view()
 
+    def is_input_buffer(self) -> bool:
+        return self.data.is_input_buffer()
+
     def freeze_layout(self) -> None:
         return self.data.freeze_layout()
 
@@ -7342,7 +7405,7 @@ class TensorBox(MutableBox):
 
 
 class StorageBox(MutableBox):
-    def is_input_buffer(self):  # type: ignore[no-untyped-def]
+    def is_input_buffer(self) -> bool:
         if isinstance(self.data, (InputBuffer, ReinterpretView)):
             return self.data.get_name() in V.graph.graph_inputs
         return False

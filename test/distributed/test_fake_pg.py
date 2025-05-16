@@ -7,8 +7,9 @@ import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
-from torch.distributed._tensor import DeviceMesh, init_device_mesh, Shard
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.tensor import DeviceMesh, Shard
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,

@@ -344,10 +344,17 @@ class OptimizedModule(torch.nn.Module):
             self.forward = self._call_lazy_check
 
     def __call__(self, *args, **kwargs):
-        # All the logic in `torch.nn.Module.__call__` has been captured by
-        # `self.forward = self.dynamo_ctx(self._orig_mod.__call__)`, so we
-        # override here to avoid running that logic again by default.
-        return self.forward(*args, **kwargs)
+        if torch.nn.modules.module._has_any_global_hook():
+            warnings.warn(
+                "Using `torch.compile(module)` when there are global hooks on "
+                "modules (e.g., from `register_module_forward_hook`); this will"
+                " cause the hooks to fire an extra time for the "
+                "`OptimizedModule` created by `torch.compile(module)`. If this "
+                "causes undesired behavior, please try using `module.compile()`"
+                ", or use the per-module hooks instead",
+                stacklevel=2,
+            )
+        return super().__call__(*args, **kwargs)
 
     def __reduce__(self):
         return (self.__class__, (self._orig_mod, self.dynamo_ctx))
@@ -1896,14 +1903,27 @@ def export(
         return inner
 
 
-def optimize_assert(
+def optimize_assert(*args, **kwargs):
+    if "rebuild_ctx" in kwargs and kwargs["rebuild_ctx"] is not None:
+        # called from optimize
+        rebuild_ctx = kwargs["rebuild_ctx"]
+        del kwargs["rebuild_ctx"]
+    else:
+
+        def rebuild_ctx():
+            return optimize_assert(*args, **kwargs)
+
+    return _optimize_assert(rebuild_ctx, *args, **kwargs)
+
+
+def _optimize_assert(
+    rebuild_ctx: Callable[[], OptimizeContext],
     backend,
     *,
     hooks=Hooks(None, None, None),
     export=False,
     export_constraints=None,
     dynamic=None,
-    rebuild_ctx=None,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`

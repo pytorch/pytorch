@@ -583,7 +583,7 @@ if(USE_CUDA)
     if(CMAKE_COMPILER_IS_GNUCXX)
       set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-Wno-unused-but-set-variable")
     endif()
-    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0 AND EXISTING_ARCH_FLAGS MATCHES ".*compute_90.*")
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0 AND CUDA_NVCC_FLAGS MATCHES ".*compute_90.*")
       set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
     endif()
   endif()
@@ -979,10 +979,21 @@ elseif(USE_CUDA)
   endif()
 
   # Use env var for these for now for prototyping purposes
-  set(USE_NVSHMEM $ENV{USE_NVSHMEM} CACHE BOOL "Enable NVSHMEM support")
-  set(NVSHMEM_HOME $ENV{NVSHMEM_HOME} CACHE PATH "Path to NVSHMEM build dir")
+  set(USE_NVSHMEM $ENV{USE_NVSHMEM} CACHE BOOL "Whether to build with NVSHMEM support")
+  # If user has specified NVSHMEM_HOME, we use it;
+  # Otherwise, NVSHMEM_HOME is auto detected in tools/setup_helpers/cmake.py
+  if($ENV{NVSHMEM_HOME})
+    set(NVSHMEM_HOME $ENV{NVSHMEM_HOME} CACHE PATH "Path to NVSHMEM build dir")
+  endif()
+
+  if(USE_NVSHMEM AND NOT DEFINED NVSHMEM_HOME)
+    message(WARNING "USE_NVSHMEM set to 1 but NVSHMEM_HOME not found. Please run `pip install nvidia-nvshmem-<version>`, or set NVSHMEM_HOME to the NVSHMEM build dir")
+    # Disable nvshmem if NVSHMEM_HOME is not found
+    set(USE_NVSHMEM FALSE CACHE BOOL "Whether to build with NVSHMEM support")
+  endif()
 
   if(USE_NVSHMEM)
+    message("Building with NVSHMEM support:  '${NVSHMEM_HOME}'")
     set(NVSHMEM_INCLUDE_DIR "${NVSHMEM_HOME}/include")
     set(NVSHMEM_LIB_DIR "${NVSHMEM_HOME}/lib")
 
@@ -1000,18 +1011,17 @@ elseif(USE_CUDA)
     set_target_properties(nvshmem_extension PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
     target_compile_options(nvshmem_extension PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
     target_compile_options(nvshmem_extension PRIVATE "-U__CUDA_NO_HALF_OPERATORS__")
+    target_link_directories(nvshmem_extension PRIVATE ${NVSHMEM_LIB_DIR})
     target_link_libraries(nvshmem_extension PRIVATE
-        ${NVSHMEM_LIB_DIR}/libnvshmem.a
-        ${NVSHMEM_LIB_DIR}/nvshmem_bootstrap_uid.so
+        # Full path needed bc nvshmem wheel ships with .so.3 instead of .so;
+        # otherwise, we could just write `nvshmem_host`
+        ${NVSHMEM_LIB_DIR}/libnvshmem_host.so.3
+        nvshmem_device
     )
-    target_link_libraries(nvshmem_extension PRIVATE mlx5)
     target_link_libraries(torch_cuda PRIVATE nvshmem_extension)
     install(TARGETS nvshmem_extension EXPORT Caffe2Targets DESTINATION lib)
-    install(
-        FILES ${NVSHMEM_LIB_DIR}/nvshmem_bootstrap_uid.so
-        DESTINATION lib
-    )
   endif()
+
   if(USE_UCC)
     target_link_libraries(torch_cuda PRIVATE __caffe2_ucc)
     target_compile_definitions(torch_cuda PRIVATE USE_UCC)
@@ -1410,13 +1420,6 @@ if(USE_ROCM)
     set(ROCM_SOURCE_DIR "/opt/rocm")
   endif()
   message(INFO "caffe2 ROCM_SOURCE_DIR = ${ROCM_SOURCE_DIR}")
-  target_include_directories(torch_hip PRIVATE
-    ${ROCM_SOURCE_DIR}/include
-    ${ROCM_SOURCE_DIR}/hcc/include
-    ${ROCM_SOURCE_DIR}/rocblas/include
-    ${ROCM_SOURCE_DIR}/hipsparse/include
-    ${ROCM_SOURCE_DIR}/include/rccl/
-    )
   if(USE_FLASH_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE
         USE_FLASH_ATTENTION
@@ -1750,7 +1753,8 @@ if(USE_ROCM)
   target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
 
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
-  target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE})
+  # ROCM_INCLUDE_DIRS is defined in LoadHIP.cmake
+  target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE} ${ROCM_INCLUDE_DIRS})
   target_include_directories(torch_hip INTERFACE $<INSTALL_INTERFACE:include>)
 endif()
 
@@ -1759,7 +1763,7 @@ if(BUILD_STATIC_RUNTIME_BENCHMARK)
   add_executable(static_runtime_bench "${STATIC_RUNTIME_BENCHMARK_SRCS}")
   add_executable(static_runtime_test "${STATIC_RUNTIME_TEST_SRCS}")
   target_link_libraries(static_runtime_bench torch_library benchmark)
-  target_link_libraries(static_runtime_test torch_library gtest_main)
+  target_link_libraries(static_runtime_test torch_library gtest_main gtest)
 endif()
 
 if(BUILD_MOBILE_BENCHMARK)
@@ -1830,7 +1834,7 @@ if(BUILD_TEST)
   foreach(test_src ${Caffe2_CPU_TEST_SRCS})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")
-    target_link_libraries(${test_name} torch_library gtest_main)
+    target_link_libraries(${test_name} torch_library gtest_main gtest gmock)
     if(NOT MSVC)
       target_link_libraries(${test_name} stdc++)
     endif()
