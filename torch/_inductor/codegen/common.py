@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import atexit
 import contextlib
 import dataclasses
@@ -11,7 +13,6 @@ import os
 import re
 import tempfile
 from abc import ABC, abstractmethod
-from collections.abc import Iterator, MutableMapping, Sequence
 from enum import auto, Enum
 from itertools import chain
 from typing import (
@@ -25,7 +26,7 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
-from typing_extensions import Self, TypeAlias, TypeVar
+from typing_extensions import Self, TypeVar
 
 import sympy
 
@@ -60,6 +61,8 @@ from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator, MutableMapping, Sequence
+
     from torch.fx import GraphModule
 
     from ..ir import Buffer, ChoiceCaller, FixedLayout, IRNode
@@ -67,16 +70,14 @@ if TYPE_CHECKING:
     from ..scheduler import BaseScheduling, Scheduler, SchedulerNode
     from .wrapper import PythonWrapperCodegen
 
-    SchedulingConstructor = Callable[[Optional["Scheduler"]], "BaseScheduling"]
+    _T = TypeVar("_T")
+    SchedulingConstructor = Callable[[Optional[Scheduler]], BaseScheduling]
     WrapperConstructor = type[PythonWrapperCodegen]
     SymbolLike = Union[str, sympy.Symbol]
 
-
-_T = TypeVar("_T")
-
-# OpVarT should really be Union[CSEVariable, str], however this
-# causes typing errors in subclasses (defined in other files).
-OpVarT: TypeAlias = str
+    # OpVarT should really be Union[CSEVariable, str], however this
+    # causes typing errors in subclasses (defined in other files).
+    OpVarT = str
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 log = logging.getLogger(__name__)
@@ -94,7 +95,7 @@ class FileBackedGraphModule:
     map back to a GraphModule instead of Python source.
     """
 
-    gm: "GraphModule"
+    gm: GraphModule
     compiled_fn: Callable[..., Any]
 
     def __post_init__(self) -> None:
@@ -125,7 +126,7 @@ class WorkspaceZeroMode(enum.Enum):
     ZERO_PER_GRAPH = 2  # must be re-zeroed by kernel
 
     @staticmethod
-    def combine(a: "WorkspaceZeroMode", b: "WorkspaceZeroMode") -> "WorkspaceZeroMode":
+    def combine(a: WorkspaceZeroMode, b: WorkspaceZeroMode) -> WorkspaceZeroMode:
         if a == b or b == WorkspaceZeroMode.UNINITIALIZED:
             return a
         if a == WorkspaceZeroMode.UNINITIALIZED:
@@ -133,7 +134,7 @@ class WorkspaceZeroMode(enum.Enum):
         raise NotImplementedError(f"WorkspaceZeroMode.combine({a!r}, {b!r})")
 
     @staticmethod
-    def from_bool(zero_fill: bool) -> "WorkspaceZeroMode":
+    def from_bool(zero_fill: bool) -> WorkspaceZeroMode:
         if zero_fill:
             return WorkspaceZeroMode.ZERO_ON_CALL
         return WorkspaceZeroMode.UNINITIALIZED
@@ -178,13 +179,13 @@ class WorkspaceArg(CodegenSymbol):
         return f"{prefix}{next(V.graph.workspace_id)}"
 
     @staticmethod
-    def can_join(a: "WorkspaceArg", b: "WorkspaceArg") -> bool:
+    def can_join(a: WorkspaceArg, b: WorkspaceArg) -> bool:
         return (
             a.inner_name == b.inner_name and a.dtype == b.dtype and a.device == b.device
         )
 
     @staticmethod
-    def join(a: "WorkspaceArg", b: "WorkspaceArg") -> "WorkspaceArg":
+    def join(a: WorkspaceArg, b: WorkspaceArg) -> WorkspaceArg:
         return WorkspaceArg(
             count=a.count + b.count,
             zero_mode=WorkspaceZeroMode.combine(a.zero_mode, b.zero_mode),
@@ -195,7 +196,7 @@ class WorkspaceArg(CodegenSymbol):
         )
 
     @staticmethod
-    def maximum(a: "WorkspaceArg", b: "WorkspaceArg") -> "WorkspaceArg":
+    def maximum(a: WorkspaceArg, b: WorkspaceArg) -> WorkspaceArg:
         assert (
             a.dtype == b.dtype and a.device == b.device and a.inner_name == b.inner_name
         )
@@ -220,7 +221,7 @@ class WorkspaceArg(CodegenSymbol):
     def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
         return self.get_layout().get_example()
 
-    def get_layout(self) -> "FixedLayout":
+    def get_layout(self) -> FixedLayout:
         from ..ir import FixedLayout
 
         return FixedLayout(
@@ -231,7 +232,7 @@ class WorkspaceArg(CodegenSymbol):
         )
 
     @property
-    def layout(self) -> "FixedLayout":
+    def layout(self) -> FixedLayout:
         return self.get_layout()
 
     get_output_spec = get_layout
@@ -285,9 +286,9 @@ class TMADescriptorArg:
 
 @dataclasses.dataclass
 class DeviceCodegen:
-    scheduling: "SchedulingConstructor"
-    wrapper_codegen: "WrapperConstructor"
-    cpp_wrapper_codegen: Optional["WrapperConstructor"] = None
+    scheduling: SchedulingConstructor
+    wrapper_codegen: WrapperConstructor
+    cpp_wrapper_codegen: Optional[WrapperConstructor] = None
 
 
 KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg, TMADescriptorArg, ConstexprArg]
@@ -375,9 +376,9 @@ device_op_overrides_dict: dict[str, DeviceOpOverrides] = {}
 # https://github.com/intel/intel-extension-for-pytorch/blob/5dcc9d57e5422cf295e1a1ee97896d6b6a554a85/intel_extension_for_pytorch/_inductor/__init__.py#L9
 def register_backend_for_device(
     device: str,
-    device_scheduling: "SchedulingConstructor",
-    device_wrapper_codegen: "WrapperConstructor",
-    device_cpp_wrapper_codegen: Optional["WrapperConstructor"] = None,
+    device_scheduling: SchedulingConstructor,
+    device_wrapper_codegen: WrapperConstructor,
+    device_cpp_wrapper_codegen: Optional[WrapperConstructor] = None,
 ) -> None:
     device_codegens[device] = DeviceCodegen(
         device_scheduling, device_wrapper_codegen, device_cpp_wrapper_codegen
@@ -419,17 +420,17 @@ def has_backend_feature(
     device: Union[torch.device, str, None], feature: BackendFeature
 ) -> bool:
     """See also V.graph.has_feature"""
-    assert isinstance(feature, BackendFeature), type(feature)
+    assert isinstance(feature, BackendFeature)
     return feature in get_backend_features(device)
 
 
-def get_scheduling_for_device(device: str) -> Optional["SchedulingConstructor"]:
+def get_scheduling_for_device(device: str) -> Optional[SchedulingConstructor]:
     return device_codegens[device].scheduling if device in device_codegens else None
 
 
 def get_wrapper_codegen_for_device(
     device: str, cpp_wrapper: bool = False
-) -> Optional["WrapperConstructor"]:
+) -> Optional[WrapperConstructor]:
     if device in device_codegens:
         wrapper_codegen_obj: DeviceCodegen = device_codegens[device]
         return (
@@ -604,14 +605,14 @@ def deduce_output_dtype_by_name(
         "store_reduction",
     ):
         buf_name = args[1]
-        return V.graph.get_dtype(buf_name)
+        return V.graph.get_dtype(buf_name)  # type: ignore[arg-type]
     elif op_name == "to_dtype_bitcast":
         return kwargs["dtype"] if "dtype" in kwargs else args[-2]
     return None
 
 
 def check_dtype(
-    buffer: IndentedBuffer, var: "CSEVariableType", dtype: torch.dtype
+    buffer: IndentedBuffer, var: CSEVariableType, dtype: torch.dtype
 ) -> None:
     backend = get_current_backend()
     if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
@@ -636,7 +637,7 @@ def check_dtype(
 
 
 class DataTypePropagation:
-    def __init__(self, body: "LoopBody") -> None:
+    def __init__(self, body: LoopBody) -> None:
         self.body = body
         self.graphs: dict[Union[Callable[..., Any], str], Any] = {
             "root": body.root_block.graph
@@ -722,11 +723,11 @@ class DataTypePropagation:
         return self.propagate_graph(self.graphs["root"])
 
     @classmethod
-    def propagate_loopbody(cls, body: "LoopBody") -> Optional[torch.dtype]:
+    def propagate_loopbody(cls, body: LoopBody) -> Optional[torch.dtype]:
         return cls(body).propagate()
 
     @classmethod
-    def propagate_scheduler_node(cls, node: "SchedulerNode") -> Optional[torch.dtype]:
+    def propagate_scheduler_node(cls, node: SchedulerNode) -> Optional[torch.dtype]:
         from ..loop_body import LoopBody
         from ..scheduler import SchedulerNode
 
@@ -1310,14 +1311,14 @@ class DeferredLine(DeferredLineBase):
     def __init__(self, name: str, line: str):
         super().__init__(line)
         self.name = name
-        assert not isinstance(line, DeferredLineBase), type(line)
+        assert not isinstance(line, DeferredLineBase)
 
     def __call__(self) -> Optional[str]:
         if not is_buffer_removed(self.name):
             return self.line
         return None
 
-    def _new_line(self, line: str) -> "DeferredLine":
+    def _new_line(self, line: str) -> DeferredLine:
         return DeferredLine(self.name, line)
 
 
@@ -1562,11 +1563,18 @@ class KernelArgs:
     def wrap_ptr_arg(self, buf: str, dtype: torch.dtype) -> str:
         return buf
 
-    def wrap_size_arg(self, size: "SymbolLike") -> str:
+    def wrap_size_arg(self, size: SymbolLike) -> str:
         return str(size)
 
-    def cpp_argdefs(self) -> tuple[list[str], list[str], list[str]]:
-        from .cpp_utils import DTYPE_TO_CPP, INDEX_TYPE
+    def cpp_argdefs(
+        self, dtype_to_cpp_type: Optional[dict[torch.dtype, str]] = None
+    ) -> tuple[list[str], list[str], list[str]]:
+        from .cpp_utils import INDEX_TYPE
+
+        if dtype_to_cpp_type is None:
+            from .cpp_utils import DTYPE_TO_CPP
+
+            dtype_to_cpp_type = DTYPE_TO_CPP
 
         call_args = []
         arg_defs = []
@@ -1577,7 +1585,7 @@ class KernelArgs:
             outer = inplaced.other_names[-1]
             inner = inplaced.inner_name
             dtype = V.graph.get_dtype(outer)
-            cpp_dtype = DTYPE_TO_CPP[dtype]
+            cpp_dtype = dtype_to_cpp_type[dtype]
             arg_defs.append(f"{cpp_dtype}* {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{cpp_dtype}*")
@@ -1585,7 +1593,7 @@ class KernelArgs:
             if outer in self.inplace_buffers:
                 continue
             dtype = V.graph.get_dtype(outer)
-            cpp_dtype = DTYPE_TO_CPP[dtype]
+            cpp_dtype = dtype_to_cpp_type[dtype]
             arg_defs.append(f"const {cpp_dtype}* {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"const {cpp_dtype}*")
@@ -1593,7 +1601,7 @@ class KernelArgs:
             if outer in self.inplace_buffers or isinstance(maybe_inner, RemovedArg):
                 continue
             dtype = V.graph.get_dtype(outer)
-            cpp_dtype = DTYPE_TO_CPP[dtype]
+            cpp_dtype = dtype_to_cpp_type[dtype]
             arg_defs.append(f"{cpp_dtype}* {maybe_inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{cpp_dtype}*")
@@ -1730,11 +1738,12 @@ class CSEVariable:
 AugmentedKeyT = TypeVar("AugmentedKeyT", default=str)
 CSEVariableType = TypeVar("CSEVariableType", bound=CSEVariable, default=CSEVariable)
 
-ReductionCacheKey: TypeAlias = tuple[
-    torch.dtype,
-    ReductionType,
-    Union[CSEVariable, tuple[CSEVariable, ...]],
-]
+if TYPE_CHECKING:
+    ReductionCacheKey = tuple[
+        torch.dtype,
+        ReductionType,
+        Union[CSEVariable, tuple[CSEVariable, ...]],
+    ]
 
 
 class CSE(Generic[CSEVariableType, AugmentedKeyT]):
@@ -1745,7 +1754,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         prefix: str = "",
         suffix: str = "",
         name_prefix: str = "tmp",
-        iter_buffers: Optional["itertools.count[int]"] = None,
+        iter_buffers: Optional[itertools.count[int]] = None,
         store_cache: Optional[MutableMapping[str, CSEVariableType]] = None,
         reduction_cache: Optional[
             MutableMapping[ReductionCacheKey, CSEVariableType]
@@ -1835,7 +1844,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         elif isinstance(expr, DeferredLineBase):
             cache_key = expr.line
         else:
-            assert isinstance(expr, str), type(expr)
+            assert isinstance(expr, str)
             cache_key = expr
         var = self.try_get(cache_key)
         if not var:
@@ -1958,7 +1967,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.kernel_name: Optional[str] = None
 
     @contextlib.contextmanager
-    def set_current_node(self, node: "SchedulerNode") -> Iterator[None]:
+    def set_current_node(self, node: SchedulerNode) -> Iterator[None]:
         prior = self.current_node
         self.current_node = node
         self.node_to_bounds = node._body.bounds().get_bounds()
@@ -2196,7 +2205,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     def create_cse_var(self, *args: Any, **kwargs: Any) -> CSEVariable:
         return CSEVariable(*args, **kwargs)
 
-    def arg_name(self, node: "IRNode") -> Optional[str]:
+    def arg_name(self, node: IRNode) -> Optional[str]:
         """
         Returns arg name of a given input or output node.
         """
@@ -2290,7 +2299,7 @@ class KernelTemplate:
 
     @staticmethod
     def _fake_get_dtype(
-        fake_outs: Union[list["Buffer"], "Buffer"],
+        fake_outs: Union[list[Buffer], Buffer],
     ) -> Callable[[str], torch.dtype]:
         _get_dtype_real = V.graph.get_dtype
         if isinstance(fake_outs, (list, tuple)):
@@ -2332,7 +2341,7 @@ class KernelTemplate:
             )
             return e
 
-    def generate(self, **kwargs: Any) -> "ChoiceCaller":
+    def generate(self, **kwargs: Any) -> ChoiceCaller:
         """
         Generates a ChoiceCaller instance from the given arguments.
         """
