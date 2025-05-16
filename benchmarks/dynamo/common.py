@@ -586,17 +586,14 @@ def empty_gpu_cache(device):
     Explicitly empty gpu cache to avoid OOM in subsequent run.
     """
 
-    if device not in ["cuda", "xpu"]:
+    if device not in ["cuda", "xpu", "mps"]:
         log.warning(
             "Trying to call the empty_gpu_cache for device: %s, which is not in list [cuda, xpu]",
             device,
         )
         return
 
-    if device == "cuda":
-        torch.cuda.empty_cache()
-    elif device == "xpu":
-        torch.xpu.empty_cache()
+    getattr(torch, device).empty_cache()
 
 
 def synchronize():
@@ -1703,8 +1700,8 @@ def maybe_snapshot_memory(should_snapshot_memory, suffix):
                         f"{output_filename.rstrip('.csv')}_{suffix}.pickle",
                     )
                 )
-            except Exception as e:
-                log.error("Failed to save memory snapshot, %s", e)
+            except Exception:
+                log.exception("Failed to save memory snapshot")
 
             torch.cuda.memory._record_memory_history(enabled=None)
 
@@ -2745,7 +2742,7 @@ class BenchmarkRunner:
         try:
             shutil.move("repro.py", f"{repro_dir}/{name}_repro.py")
         except OSError:
-            log.error("Could not find repro script for model %s", name)
+            log.exception("Could not find repro script for model %s", name)
         else:
             log.info(
                 "Repro script for model %s with minified graph saved to %s",
