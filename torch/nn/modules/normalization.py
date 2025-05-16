@@ -134,6 +134,9 @@ class LayerNorm(Module):
             and zeros (for biases). Default: ``True``.
         bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
             :attr:`elementwise_affine` is ``True``). Default: ``True``.
+        device: the device on which the parameters will be allocated. Default: None
+        dtype: the data type of the parameters. Default: None
+
 
     Attributes:
         weight: the learnable weights of the module of shape
