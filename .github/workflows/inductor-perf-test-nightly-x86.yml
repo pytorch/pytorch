@@ -86,6 +86,18 @@ jobs:
           { config: "inductor_torchbench_perf_cpu_x86", shard: 2, num_shards: 4, runner: "linux.24xl.spr-metal" },
           { config: "inductor_torchbench_perf_cpu_x86", shard: 3, num_shards: 4, runner: "linux.24xl.spr-metal" },
           { config: "inductor_torchbench_perf_cpu_x86", shard: 4, num_shards: 4, runner: "linux.24xl.spr-metal" },
+          { config: "inductor_huggingface_perf_cpu_x86", shard: 1, num_shards: 3, runner: "linux.24xlarge.amd" },
+          { config: "inductor_huggingface_perf_cpu_x86", shard: 2, num_shards: 3, runner: "linux.24xlarge.amd" },
+          { config: "inductor_huggingface_perf_cpu_x86", shard: 3, num_shards: 3, runner: "linux.24xlarge.amd" },
+          { config: "inductor_timm_perf_cpu_x86", shard: 1, num_shards: 5, runner: "linux.24xlarge.amd" },
+          { config: "inductor_timm_perf_cpu_x86", shard: 2, num_shards: 5, runner: "linux.24xlarge.amd" },
+          { config: "inductor_timm_perf_cpu_x86", shard: 3, num_shards: 5, runner: "linux.24xlarge.amd" },
+          { config: "inductor_timm_perf_cpu_x86", shard: 4, num_shards: 5, runner: "linux.24xlarge.amd" },
+          { config: "inductor_timm_perf_cpu_x86", shard: 5, num_shards: 5, runner: "linux.24xlarge.amd" },
+          { config: "inductor_torchbench_perf_cpu_x86", shard: 1, num_shards: 4, runner: "linux.24xlarge.amd" },
+          { config: "inductor_torchbench_perf_cpu_x86", shard: 2, num_shards: 4, runner: "linux.24xlarge.amd" },
+          { config: "inductor_torchbench_perf_cpu_x86", shard: 3, num_shards: 4, runner: "linux.24xlarge.amd" },
+          { config: "inductor_torchbench_perf_cpu_x86", shard: 4, num_shards: 4, runner: "linux.24xlarge.amd" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
     secrets: inherit
