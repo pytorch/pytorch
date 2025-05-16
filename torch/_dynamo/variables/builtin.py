@@ -1805,6 +1805,9 @@ class BuiltinVariable(VariableTracker):
                 isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value)
             )
 
+        if isinstance(arg, variables.UserDefinedExceptionClassVariable):
+            return ConstantVariable.create(isinstance(arg_type, isinstance_type))
+
         isinstance_type_tuple: tuple[type, ...]
         if isinstance(isinstance_type, type) or callable(
             # E.g. isinstance(obj, typing.Sequence)
@@ -1989,11 +1992,11 @@ class BuiltinVariable(VariableTracker):
                 )
             ):
                 unimplemented_v2(
-                    gb_type="Failed to trace builtin operator",
+                    gb_type="Failed to trace unittest method",
                     context=f"function: unittest.TestCase.{name}",
-                    explanation=f"Dynamo does not know how to trace builtin operator `{name}` ",
+                    explanation=f"Dynamo does not know how to trace unittest method `{name}` ",
                     hints=[
-                        f"Avoid calling builtin `{name}`. "
+                        f"Avoid calling `TestCase.{name}`. "
                         "Please report an issue to PyTorch.",
                     ],
                 )

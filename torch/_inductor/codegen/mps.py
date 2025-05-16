@@ -351,11 +351,12 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def truncdiv(a: CSEVariable, b: CSEVariable) -> str:
-        # Upcast to float otherwise the generated code doesn't typecheck.
-        # TODO (dcci): remove this workaround
-        float_a = f"static_cast<float>({a})" if a.dtype != torch.float else a
-        float_b = f"static_cast<float>({b})" if b.dtype != torch.float else b
-        return f"metal::trunc({float_a}/{float_b})"
+        quot = f"{a} / {b}"
+        if (a.dtype is not None and a.dtype.is_floating_point) or (
+            b.dtype is not None and b.dtype.is_floating_point
+        ):
+            return f"metal::trunc({quot})"
+        return quot
 
     @staticmethod
     def ceil(x: CSEVariable) -> str:
@@ -471,6 +472,7 @@ class MetalKernel(SIMDKernel):
     sexpr = MetalExprPrinter().doprint
     kexpr = sexpr
     headers: OrderedSet[str] = OrderedSet(["utils"])
+    multistage_reduction_entry: Optional[IterationRangesEntry] = None
 
     def __init__(
         self,
@@ -479,7 +481,6 @@ class MetalKernel(SIMDKernel):
     ) -> None:
         super().__init__(tiling, **kwargs)
         self.acc_var_ids = itertools.count()
-        self.multistage_reduction = False
 
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         return DTYPE_TO_METAL[dtype]
@@ -616,7 +617,7 @@ class MetalKernel(SIMDKernel):
             acc_buf = self._new_idxvar(
                 acc_dtype, ceildiv(acc_buf_size, self.simd_group_size)
             )
-            if not self.multistage_reduction:
+            if not self.multistage_reduction_entry:
                 val = value
             else:
                 default_val, reduction_op = (
@@ -635,7 +636,7 @@ class MetalKernel(SIMDKernel):
             acc_buf = self._new_idxvar(src_dtype, acc_buf_size)
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             src_metal_type = DTYPE_TO_METAL[src_dtype]
-            if not self.multistage_reduction:
+            if not self.multistage_reduction_entry:
                 self.compute.splice(
                     f"{acc_thread_var} = static_cast<{src_metal_type}>({value});"
                 )
@@ -676,7 +677,7 @@ class MetalKernel(SIMDKernel):
                 dtype=dtype,
             )
         if reduction_type == "welford_reduce":
-            if not self.multistage_reduction:
+            if not self.multistage_reduction_entry:
                 acc_buf = self._new_idxvar(src_dtype, acc_buf_size)
                 self.compute.splice(f"{acc_buf}[{reduction_idx}] = {value};")
                 wf_res = self.cse.generate(
@@ -701,7 +702,7 @@ class MetalKernel(SIMDKernel):
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             inp_value = f"float3({value[0]}, {value[1]}, {value[2]})"
             self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
-            if self.multistage_reduction:
+            if self.multistage_reduction_entry:
                 self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
                 self.compute.writeline(
                     f"{acc_thread_var} = ::c10::metal::welford_combine({acc_thread_var}, {inp_value});"
@@ -709,7 +710,7 @@ class MetalKernel(SIMDKernel):
             else:
                 self.compute.writeline(f"{acc_thread_var} = {inp_value};")
             wf_res = self.cse.generate(
-                self.stores if self.multistage_reduction else self.compute,
+                self.stores if self.multistage_reduction_entry else self.compute,
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
             )
             return OpsWrapper._unwrap((f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z"))
@@ -718,9 +719,9 @@ class MetalKernel(SIMDKernel):
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
         index_expr = self.rename_indexing(entry.expr)
         index_str = self.sexpr(index_expr)  # type: ignore[misc]
-        if entry.is_reduction:
-            self.multistage_reduction = entry.root.numel > self.max_threadgroup_size
-        if not entry.is_reduction or not self.multistage_reduction:
+        if entry.is_reduction and entry.root.numel > self.max_threadgroup_size:
+            self.multistage_reduction_entry = entry
+        if not entry.is_reduction or self.multistage_reduction_entry is None:
             self.indexing_code.writeline(
                 f"{self.index_dtype} {entry.name} = {index_str};"
             )
@@ -752,12 +753,16 @@ class MetalKernel(SIMDKernel):
         For reduction kernels, this generates a loop over the reduction
         axis.
         """
-        if self.multistage_reduction:
+        if self.multistage_reduction_entry:
             with self.body.indent():
                 self.body.splice(self.loads)
                 self.body.splice(self.compute)
             self.body.writeline("}")
-            self.multistage_reduction = False
+            # Invalidate variables instantiated inside loop
+            self.cse.invalidate(OrderedSet(self.cse.reduction_cache.values()))
+            # And loop codegen
+            self.multistage_reduction_entry.cache_clear()
+            self.multistage_reduction_entry = None
         else:
             self.body.splice(self.loads)
             self.body.splice(self.compute)
@@ -791,7 +796,15 @@ class MetalKernel(SIMDKernel):
                     dtype_str = self.dtype_to_str(V.graph.get_dtype(outer))
                     code.writeline(f"device {dtype_str}* {inner},")
                 for outer, inner in self.args.input_buffers.items():
-                    dtype_str = self.dtype_to_str(V.graph.get_dtype(outer))
+                    dtype = V.graph.get_dtype(outer)
+                    # MPS does not support float64, but scalar inputs are fine
+                    if dtype == torch.float64:
+                        outer_buf = V.graph.try_get_buffer(outer)
+                        if outer_buf is None or outer_buf.get_size() != []:
+                            raise RuntimeError("float64 is not supported by MPS")
+                        dtype_str = "float"
+                    else:
+                        dtype_str = self.dtype_to_str(dtype)
                     code.writeline(f"constant {dtype_str}* {inner},")
                 for outer, inner in self.args.sizevars.items():
                     code.writeline(f"constant long& {inner},")
