@@ -3130,10 +3130,6 @@ def _automatic_dynamic(
             automatic_dynamic_stride = True
 
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
-        # Used to filter logs for dynamic features
-        should_be_dynamic = frame_state_entry.is_size_dynamic(
-            i
-        ) or frame_state_entry.is_stride_dynamic(i)
 
         # We will process constraints first, as they will imply that we
         # have a dynamic dimension
@@ -3164,16 +3160,15 @@ def _automatic_dynamic(
                     constraint_size = RelaxedUnspecConstraint(warn_only=False)
             elif marked_strict_unbacked:
                 constraint_size = RelaxedUnspecConstraint(warn_only=False)
-            elif not marked_static and automatic_dynamic:
+            elif not marked_static and automatic_dynamic == config.automatic_dynamic_shapes:
                 set_feature_use("dynamo.automatic_dynamic_shapes", True)
                 if automatic_dynamic_size:
                     constraint_size = RelaxedUnspecConstraint(warn_only=True)
                 if automatic_dynamic_stride:
                     constraint_stride = RelaxedUnspecConstraint(warn_only=True)
             else:
-                if not marked_static and should_be_dynamic:
+                if not marked_static and not config.automatic_dynamic_shapes:
                     set_feature_use("dynamo.automatic_dynamic_shapes", False)
-
                 constraint_size = None
                 constraint_stride = None
         else:
