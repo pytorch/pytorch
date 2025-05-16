@@ -555,7 +555,7 @@ def _tree_map_with_path(
             # in which case flatten and recurse
             return tree_map_with_path(
                 f,
-                SUPPORTED_NODES[typ].flatten_fn(t)[0],
+                SUPPORTED_NODES[typ].flatten_func(t)[0],
                 *dynamic_shapes,
                 is_leaf=is_leaf,
             )

@@ -133,19 +133,46 @@ FlattenWithKeysFunc = Callable[[PyTree], tuple[list[tuple[KeyEntry, Any]], Any]]
 
 
 # A NodeDef holds two callables:
-# - flatten_fn should take the collection and return a flat list of values.
+# - flatten_func should take the collection and return a flat list of values.
 #   It can also return some context that is used in reconstructing the
 #   collection.
-# - unflatten_fn should take a flat list of values and some context
-#   (returned by flatten_fn). It returns the collection by reconstructing
+# - unflatten_func should take a flat list of values and some context
+#   (returned by flatten_func). It returns the collection by reconstructing
 #   it from the list and the context.
-# - flatten_with_keys_fn, which is a callable that takes a
+# - flatten_with_keys_func, which is a callable that takes a
 #   pytree and returns a list of (keypath, value) pairs and a context.
 class NodeDef(NamedTuple):
     type: type[Any]
-    flatten_fn: FlattenFunc
-    unflatten_fn: UnflattenFunc
-    flatten_with_keys_fn: Optional[FlattenWithKeysFunc]
+    flatten_func: FlattenFunc
+    unflatten_func: UnflattenFunc
+    flatten_with_keys_func: Optional[FlattenWithKeysFunc] = None
+
+    @property
+    @deprecated(
+        "`NodeDef.flatten_fn` is deprecated. "
+        "Please use `NodeDef.flatten_func` instead.",
+        category=FutureWarning,
+    )
+    def flatten_fn(self) -> FlattenFunc:
+        return self.flatten_func
+
+    @property
+    @deprecated(
+        "`NodeDef.unflatten_fn` is deprecated. "
+        "Please use `NodeDef.unflatten_func` instead.",
+        category=FutureWarning,
+    )
+    def unflatten_fn(self) -> UnflattenFunc:
+        return self.unflatten_func
+
+    @property
+    @deprecated(
+        "`NodeDef.flatten_with_keys_fn` is deprecated. "
+        "Please use `NodeDef.flatten_with_keys_func` instead.",
+        category=FutureWarning,
+    )
+    def flatten_with_keys_fn(self) -> Optional[FlattenWithKeysFunc]:
+        return self.flatten_with_keys_func
 
 
 _NODE_REGISTRY_LOCK = threading.RLock()
@@ -1119,8 +1146,8 @@ class TreeSpec:
                         f"Type mismatch; "
                         f"expected {treespec.type!r}, but got {node_type!r}.",
                     )
-                flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-                children, context = flatten_fn(tree)
+                flatten_func = SUPPORTED_NODES[node_type].flatten_func
+                children, context = flatten_func(tree)
                 if len(children) != treespec.num_children:
                     raise ValueError(
                         f"Node arity mismatch; "
@@ -1171,8 +1198,8 @@ class TreeSpec:
                     children = [tree[key] for key in expected_keys]
                 else:
                     # node_type is treespec.type
-                    flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-                    children, context = flatten_fn(tree)
+                    flatten_func = SUPPORTED_NODES[node_type].flatten_func
+                    children, context = flatten_func(tree)
                     if (
                         node_type is not deque  # ignore mismatch of `maxlen` for deque
                     ) and context != treespec.context:
@@ -1200,7 +1227,7 @@ class TreeSpec:
         if self.is_leaf():
             return leaves[0]
 
-        unflatten_fn = SUPPORTED_NODES[self.type].unflatten_fn
+        unflatten_func = SUPPORTED_NODES[self.type].unflatten_func
 
         # Recursively unflatten the children
         start = 0
@@ -1211,7 +1238,7 @@ class TreeSpec:
             child_pytrees.append(child_spec.unflatten(leaves[start:end]))
             start = end
 
-        return unflatten_fn(child_pytrees, self.context)
+        return unflatten_func(child_pytrees, self.context)
 
     def __hash__(self) -> int:
         node_type = self.type
@@ -1275,8 +1302,8 @@ def tree_flatten(
             return _LEAF_SPEC
 
         node_type = _get_node_type(node)
-        flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-        children, context = flatten_fn(node)
+        flatten_func = SUPPORTED_NODES[node_type].flatten_func
+        children, context = flatten_func(node)
 
         # Recursively flatten the children
         subspecs = [helper(child, leaves) for child in children]
@@ -1308,8 +1335,8 @@ def tree_iter(
         yield tree
     else:
         node_type = _get_node_type(tree)
-        flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-        child_pytrees, _ = flatten_fn(tree)
+        flatten_func = SUPPORTED_NODES[node_type].flatten_func
+        child_pytrees, _ = flatten_func(tree)
 
         # Recursively flatten the children
         for child in child_pytrees:
@@ -1758,8 +1785,8 @@ def _broadcast_to_and_flatten(
     if node_type != treespec.type:
         return None
 
-    flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-    child_pytrees, ctx = flatten_fn(tree)
+    flatten_func = SUPPORTED_NODES[node_type].flatten_func
+    child_pytrees, ctx = flatten_func(tree)
 
     # Check if the Node is different from the spec
     if len(child_pytrees) != treespec.num_children or ctx != treespec.context:
@@ -2013,7 +2040,7 @@ def _generate_key_paths(
         yield key_path, tree
         return
 
-    flatten_with_keys = handler.flatten_with_keys_fn
+    flatten_with_keys = handler.flatten_with_keys_func
     if flatten_with_keys:
         key_children, _ = flatten_with_keys(tree)
         for k, c in key_children:
