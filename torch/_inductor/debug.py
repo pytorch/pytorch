@@ -12,7 +12,6 @@ import os.path
 import pickle
 import pstats
 import shutil
-import subprocess
 import traceback
 from collections.abc import Iterator
 from typing import Any, Callable, IO, Optional, Union
@@ -53,11 +52,7 @@ GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=50
 
 @functools.lru_cache(None)
 def has_dot() -> bool:
-    try:
-        subprocess.check_output(["which", "dot"], stderr=subprocess.PIPE)
-        return True
-    except subprocess.SubprocessError:
-        return False
+    return shutil.which("dot") is not None
 
 
 def draw_buffers(
@@ -559,8 +554,8 @@ class DebugFormatter:
             dot_graph_shape=config.trace.dot_graph_shape,
         )
 
-    def output_code(self, filename: str) -> None:
-        shutil.copy(filename, self.filename("output_code.py"))
+    def output_code(self, filename: str, extension: str = "py") -> None:
+        shutil.copy(filename, self.filename(f"output_code.{extension}"))
 
     def log_inductor_triton_kernel_to_post_grad_node_info(
         self, filename: str = "inductor_triton_kernel_to_post_grad_nodes.json"
@@ -801,13 +796,13 @@ def create_node_mapping(
     except Exception as e:
         # Since this is just logging code, it should never interfere with regular
         # program execution, so we use this try-except to guard against any error
-        log.error("Unexpected error in create_node_mapping: %s", e)
-        log.error("post_to_pre_grad_nodes_json:  %s", post_to_pre_grad_nodes_json)
-        log.error(
+        log.error("Unexpected error in create_node_mapping: %s", e)  # noqa: TRY400
+        log.error("post_to_pre_grad_nodes_json:  %s", post_to_pre_grad_nodes_json)  # noqa: TRY400
+        log.error(  # noqa: TRY400
             "triton_kernel_to_post_grad_json:  %s", triton_kernel_to_post_grad_json
         )
-        log.error("pre_grad_graph_id:  %s", pre_grad_graph_id)
-        log.error(traceback.format_exc())
+        log.error("pre_grad_graph_id:  %s", pre_grad_graph_id)  # noqa: TRY400
+        log.error(traceback.format_exc())  # noqa: TRY400
         return empty_return
 
 
