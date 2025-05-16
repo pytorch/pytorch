@@ -1289,10 +1289,10 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
-        elif isinstance(source, SetItemKeySource):
+        elif istype(source, SetItemKeySource):
             assert base_guard_manager
-            out = base_guard_manager.lambda_manager(
-                python_lambda=lambda x: list(dict.fromkeys(x))[source.index],
+            out = base_guard_manager.set_getitem_manager(
+                index=source.index,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
@@ -1711,6 +1711,10 @@ class GuardBuilder(GuardBuilderBase):
                 Partial,
                 DeviceMesh,
             )
+
+        from torch.export.dynamic_shapes import _IntWrapper
+
+        ok_types = ok_types + (_IntWrapper,)
 
         import torch.utils._pytree as pytree
 
