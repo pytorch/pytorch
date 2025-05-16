@@ -7,16 +7,13 @@
 
 import os
 import sys
-import tempfile
 
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
-from torch.testing._internal.common_distributed import (
-    MultiProcContinousTest,
-    TEST_SKIPS,
-)
+from torch.testing._internal.common_distributed import MultiProcContinousTest
 from torch.testing._internal.common_utils import (
+    run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
 )
@@ -47,21 +44,11 @@ device_module = torch.get_device_module(device_type)
 
 @requires_nvshmem()
 class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
-    def setUp(self) -> None:
-        super().setUp()
+    def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
         device_module.set_device(self.device)
         # NOTE: required for nvshmem allocation
         torch.empty(1, device=self.device)
-
-    # Required by MultiProcContinousTest
-    @classmethod
-    def backend_str(cls) -> str:
-        return "nccl"
-
-    @property
-    def world_size(self) -> int:
-        return device_module.device_count()
 
     @property
     def device(self) -> torch.device:
@@ -69,6 +56,8 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
 
     @skipIfRocm
     def test_nvshmem_all_to_all(self) -> None:
+        self._init_device()
+
         group_name = dist.group.WORLD.group_name
         symm_mem.enable_symm_mem_for_group(group_name)
 
@@ -92,6 +81,8 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
 
     @skipIfRocm
     def test_nvshmem_all_to_all_vdev(self) -> None:
+        self._init_device()
+
         group_name = dist.group.WORLD.group_name
         symm_mem.enable_symm_mem_for_group(group_name)
 
@@ -139,24 +130,4 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
 
 
 if __name__ == "__main__":
-    if not device_module.is_available():
-        sys.exit(TEST_SKIPS["no_cuda"].exit_code)
-
-    # If launched by torchrun, these values would have been set
-    rank = int(os.getenv("RANK", "-1"))
-    world_size = int(os.getenv("WORLD_SIZE", "-1"))
-
-    if rank != -1:
-        # Launched with torchrun or other multi-proc launchers. Directly run the test.
-        NVSHMEMSymmetricMemoryTest.run_rank(rank, world_size)
-    else:
-        # No external launcher, spawn N processes
-        world_size = device_module.device_count()
-        # Launched as a single process. Spawn subprocess to run the tests.
-        # Also need a rendezvous file for `init_process_group` purpose.
-        rdvz_file = tempfile.NamedTemporaryFile(delete=False).name
-        torch.multiprocessing.spawn(
-            NVSHMEMSymmetricMemoryTest.run_rank,
-            nprocs=world_size,
-            args=(world_size, rdvz_file),
-        )
+    run_tests()
