@@ -532,11 +532,12 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
                          MPSShape* mpsShape_,
                          bool gatherTensorData,
                          MPSDataType dataType,
-                         bool useMPSStridedAPI)
+                         bool useMPSStridedAPI,
+                         bool isConst)
     : _tensor(src) {
   TORCH_CHECK(src.is_mps(), "Placeholder storage has not been allocated on MPS device!");
   // extract the pointer to MTLBuffer from the Tensor's storage
-  id<MTLBuffer> srcBuf = getMTLBufferStorage(src);
+  id<MTLBuffer> srcBuf = isConst ? ConstMTLBufferTensor(src).mtl_buffer_unsafe() : getMTLBufferStorage(src);
 
   static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
   // Use gather kernel to solve strides for macOS < 15.0
@@ -556,7 +557,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
         // it in placeholder to be able to retrieve it when we return from constructor
         _tensor = src.clone(MemoryFormat::Contiguous);
       }
-      srcBuf = getMTLBufferStorage(_tensor);
+      srcBuf = isConst ? ConstMTLBufferTensor(_tensor).mtl_buffer_unsafe() : getMTLBufferStorage(_tensor);
     }
   }
 
