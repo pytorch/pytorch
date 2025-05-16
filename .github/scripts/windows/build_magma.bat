@@ -45,12 +45,10 @@ if "%CUVER_NODOT%" == "118" (
   set CUDA_ARCH_LIST= -gencode arch=compute_37,code=sm_37 -gencode arch=compute_50,code=sm_50 -gencode arch=compute_60,code=sm_60 -gencode arch=compute_70,code=sm_70 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90
 )
 
-set CC=cl.exe
-set CXX=cl.exe
-
 cmake .. -DGPU_TARGET="%GPU_TARGET%" ^
-            -G "Visual Studio 16 2019" ^
             -DUSE_FORTRAN=0 ^
+            -DCMAKE_C_COMPILER=cl.exe ^
+            -DCMAKE_CXX_COMPILER=cl.exe ^
             -DCMAKE_CXX_FLAGS="/FS /Zf" ^
             -DCMAKE_BUILD_TYPE=%CONFIG% ^
             -DCMAKE_GENERATOR=Ninja ^
