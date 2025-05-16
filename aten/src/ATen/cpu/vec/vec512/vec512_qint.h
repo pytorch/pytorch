@@ -314,6 +314,9 @@ __FORCE_INLINE void QuantizeAvx512(
 }
 
 template <>
+struct is_vec_specialized_for<c10::qint32> : std::bool_constant<true> {};
+
+template <>
 struct Vectorized<c10::qint32> : public Vectorizedqi {
   using size_type = int;
   static constexpr size_type size() {
@@ -525,6 +528,9 @@ __m512i RequantizeAvx512(
   xyzw_clamped_v = _mm512_permutexvar_epi32(permute_mask_v, xyzw_clamped_v);
   return xyzw_clamped_v;
 }
+
+template <>
+struct is_vec_specialized_for<c10::qint8> : std::bool_constant<true> {};
 
 template <>
 struct Vectorized<c10::qint8> : public Vectorizedqi {
@@ -759,6 +765,9 @@ Vectorized<c10::qint8> inline maximum(
     const Vectorized<c10::qint8>& b) {
   return a.maximum(b);
 }
+
+template <>
+struct is_vec_specialized_for<c10::quint8> : std::bool_constant<true> {};
 
 template <>
 struct Vectorized<c10::quint8> : public Vectorizedqi {
@@ -1079,6 +1088,9 @@ struct VectorizedQuantizedConverter {
 };
 
 template <>
+struct is_vec_specialized_for<c10::qint32> : std::bool_constant<true> {};
+
+template <>
 struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
                                      c10::qint32,
                                      std::array<Vectorized<float>, 1>,
@@ -1228,6 +1240,9 @@ Vectorized<c10::qint32> inline operator+(
 }
 
 template <>
+struct is_vec_specialized_for<c10::qint8> : std::bool_constant<true> {};
+
+template <>
 struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
                                     c10::qint8,
                                     std::array<Vectorized<float>, 4>,
@@ -1364,6 +1379,9 @@ Vectorized<c10::qint8> inline maximum(
     const Vectorized<c10::qint8>& b) {
   return a.maximum(b);
 }
+
+template <>
+struct is_vec_specialized_for<c10::quint8> : std::bool_constant<true> {};
 
 template <>
 struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
