@@ -3385,7 +3385,7 @@
   dispatch:
     CUDA: _cslt_compress
 
-- func: _cslt_sparse_mm(Tensor compressed_A, Tensor dense_B, Tensor? bias=None, Tensor? alpha=None, ScalarType? out_dtype=None, bool transpose_result=False, int alg_id=0, int split_k=1, bool split_k_one_kernel=True) -> Tensor
+- func: _cslt_sparse_mm(Tensor compressed_A, Tensor dense_B, Tensor? bias=None, Tensor? alpha=None, ScalarType? out_dtype=None, bool transpose_result=False, int alg_id=0, int split_k=1, int split_k_mode=-1) -> Tensor
   dispatch:
     CUDA: _cslt_sparse_mm
   tags: needs_fixed_stride_order
@@ -15849,6 +15849,13 @@
   dispatch:
     CPU: _fused_adagrad_kernel_cpu_
   autogen: _fused_adagrad, _fused_adagrad.out
+
+- func: _fused_adagrad_.tensor_lr(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] state_sums, Tensor[] state_steps, *, Tensor lr, float lr_decay, float weight_decay, float eps, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CPU: _fused_adagrad_kernel_cpu_
+  autogen: _fused_adagrad.tensor_lr, _fused_adagrad.tensor_lr_out
 
 # This op is ONLY used by pytorch/XLA in functionalization, and should never show up in vanilla eager mode or in any pytorch tracing contexts.
 - func: _propagate_xla_data(Tensor input, Tensor output) -> ()
