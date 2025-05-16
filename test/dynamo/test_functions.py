@@ -1670,6 +1670,18 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return a - b
 
     @make_test
+    def test_set_invalid_ConstantVariable_op(a, b):
+        s = set({"banana", "apple", "orange"})
+        try:
+            s - 1
+        except TypeError:
+            return a + b
+        except Exception:
+            return a - b
+        else:
+            return a * b
+
+    @make_test
     def test_set_update_bytecode(x):
         # This produces bytecode SET_UPDATE since python 3.9
         var = {"apple", "banana", "cherry"}
