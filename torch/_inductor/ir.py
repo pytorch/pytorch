@@ -499,7 +499,7 @@ def add_symbolic_shapes_for_inputs_to_subgraph(inputs: list[Any], subgraph: Grap
             for stride in inp.stride():
                 if isinstance(stride, SymTypes):
                     sym_vars |= size.node.expr.free_symbols
-    
+
     sym_inputs = []
     for sym_var in sym_vars:
         assert sym_var in V.graph.graph_inputs.values()
@@ -509,8 +509,14 @@ def add_symbolic_shapes_for_inputs_to_subgraph(inputs: list[Any], subgraph: Grap
                 subgraph.graph_inputs[inp] = sym_var
                 subgraph.graph_input_names.append(inp)
                 sym_inputs.append(sym_var)
-    
+
     return sym_inputs
+
+def gm_original_output_strides(gm):
+    output_node = gm.graph.find_nodes(op="output")[0]
+    output_node.meta["user_visible_output_idxs"] = [idx for idx, _ in enumerate(output_node.args)]
+    from torch._inductor.compile_fx import record_original_output_strides
+    record_original_output_strides(gm)
 
 
 class IRNode:
@@ -6111,8 +6117,9 @@ class SubgraphBuffer(ExternKernel):
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
+        gm_original_output_strides(self.gm)
         self.subgraph = V.graph.make_subgraph(
-            self.gm, self.example_inputs, subgraph_name
+            self.gm, example_inputs, subgraph_name
         )
 
         sym_inputs = add_symbolic_shapes_for_inputs_to_subgraph(self.example_inputs, self.subgraph)

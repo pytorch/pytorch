@@ -5,7 +5,7 @@ from typing import Any, Callable
 import torch
 from torch._inductor import ir
 from torch._inductor.codegen.common import KernelTemplate
-from torch._inductor.ir import add_symbolic_shapes_for_inputs_to_subgraph, Buffer, ir_node_to_tensor, Layout
+from torch._inductor.ir import add_symbolic_shapes_for_inputs_to_subgraph, Buffer, gm_original_output_strides, ir_node_to_tensor, Layout
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.virtualized import V
 
@@ -47,6 +47,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         import torch._inductor.config as inductor_config
         from torch._inductor.graph import GraphLowering
 
+        gm_original_output_strides(self.gm)
         bm_graph_lowering = GraphLowering(
             gm=self.gm,
             example_inputs=self.example_inputs,
@@ -72,7 +73,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                     assert isinstance(example_inp, torch.Tensor)
                     assert ar.shape == example_inp.shape
                     assert ar.stride() == example_inp.stride()
-        
+
         with V.set_graph_handler(bm_graph_lowering):
             # Don't bother autotuning on Triton here
             with inductor_config.patch(
