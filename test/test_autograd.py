@@ -76,6 +76,7 @@ from torch.testing._internal.common_utils import (
     skipIfNoLapack,
     skipIfTorchDynamo,
     skipIfWindows,
+    skipIfXpu,
     slowTest,
     TestCase,
 )
@@ -7429,6 +7430,7 @@ for shape in [(1,), ()]:
         self.assertEqual(b_grad, c_grad)
         self.assertEqual(b_grad, d_grad)
 
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_checkpointing_without_reentrant_dataparallel(self):
         """
         Verifies gradient correctness when checkpoint without reentrant autograd
