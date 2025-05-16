@@ -23,8 +23,8 @@ mkdir magma_cuda%CUVER_NODOT%
 cd magma_cuda%CUVER_NODOT%
 
 if not exist magma (
-  :: MAGMA 2.5.4 from http://icl.utk.edu/projectsfiles/magma/downloads/ with applied patches from our magma folder
-  git clone https://github.com/ptrblck/magma_win.git magma
+  :: MAGMA 2.9.0 from https://github.com/icl-utk-edu/magma
+  git clone --single-branch --branch v2.9.0 --depth 1 --recursive https://github.com/icl-utk-edu/magma.git
   if errorlevel 1 exit /b 1
 ) else (
   rmdir /S /Q magma\build
@@ -34,7 +34,7 @@ if not exist magma (
 cd magma
 mkdir build && cd build
 
-set GPU_TARGET=All
+set "GPU_TARGET=Maxwell;Pascal;Volta;Turing;Ampere;Ada;Hopper"
 if "%CUVER_NODOT%" == "128" (
   set CUDA_ARCH_LIST=-gencode arch=compute_50,code=sm_50 -gencode arch=compute_60,code=sm_60 -gencode arch=compute_70,code=sm_70 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_100,code=sm_100 -gencode arch=compute_120,code=sm_120
 )
@@ -42,20 +42,18 @@ if "%CUVER_NODOT:~0,2%" == "12" if NOT "%CUVER_NODOT%" == "128" (
   set CUDA_ARCH_LIST=-gencode arch=compute_50,code=sm_50 -gencode arch=compute_60,code=sm_60 -gencode arch=compute_70,code=sm_70 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90
 )
 if "%CUVER_NODOT%" == "118" (
-  set CUDA_ARCH_LIST= -gencode arch=compute_37,code=sm_37 -gencode arch=compute_50,code=sm_50 -gencode arch=compute_60,code=sm_60 -gencode arch=compute_70,code=sm_70 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90
+  set CUDA_ARCH_LIST=-gencode arch=compute_50,code=sm_50 -gencode arch=compute_60,code=sm_60 -gencode arch=compute_70,code=sm_70 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90
 )
-
-set CC=cl.exe
-set CXX=cl.exe
 
 cmake .. -DGPU_TARGET="%GPU_TARGET%" ^
             -DUSE_FORTRAN=0 ^
+            -DCMAKE_C_COMPILER=cl.exe ^
+            -DCMAKE_CXX_COMPILER=cl.exe ^
             -DCMAKE_CXX_FLAGS="/FS /Zf" ^
             -DCMAKE_BUILD_TYPE=%CONFIG% ^
             -DCMAKE_GENERATOR=Ninja ^
             -DCMAKE_INSTALL_PREFIX=..\install\ ^
-            -DCUDA_ARCH_LIST="%CUDA_ARCH_LIST%" ^
-            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+            -DCUDA_ARCH_LIST="%CUDA_ARCH_LIST%"
 if errorlevel 1 exit /b 1
 
 cmake --build . --target install --config %CONFIG% -- -j%NUMBER_OF_PROCESSORS%
