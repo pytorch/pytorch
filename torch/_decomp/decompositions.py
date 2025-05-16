@@ -710,10 +710,7 @@ def slice_forward(
     end: Optional[int] = None,
     step: int = 1,
 ):
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_size_oblivious,
-        statically_known_true,
-    )
+    from torch.fx.experimental.symbolic_shapes import guard_or_none, statically_known_true, sym_or
 
     ndim = self.dim()
     if ndim == 0:
@@ -728,23 +725,36 @@ def slice_forward(
     start_val = start if start is not None else 0
     end_val = end if end is not None else sys.maxsize  # 2^63 - 1
 
-    if guard_size_oblivious(start_val < 0):
-        start_val += sizes[dim]
+    def generalize_index(idx, end=False):
+        a = guard_or_none(idx >= -sizes[dim])
+        if a is None:
+            lt_clause = torch.sym_ite(idx >= -sizes[dim], sizes[dim] + idx, 0)
+        elif a:
+            lt_clause = sizes[dim] + idx
+        else:
+            lt_clause = 0
 
-    if guard_size_oblivious(end_val < 0):
-        end_val += sizes[dim]
+        if end and statically_known_true(idx == sys.maxsize):
+            gt_clause = sizes[dim]
+        elif (b := guard_or_none(idx <= sizes[dim])) is None:
+            gt_clause = torch.sym_ite(idx <= sizes[dim], idx, sizes[dim])
+        elif b:
+            gt_clause = idx
+        else:
+            gt_clause = sizes[dim]
 
-    if guard_size_oblivious(start_val < 0):
-        start_val = 0
-    elif guard_size_oblivious(start_val > sizes[dim]):
-        start_val = sizes[dim]
+        c = guard_or_none(idx >= 0)
+        if c is None:
+            out = torch.sym_ite(idx >= 0, gt_clause, lt_clause)
+        elif c:
+            out = gt_clause
+        else:
+            out = lt_clause
+        return out
 
-    if guard_size_oblivious(end_val < start_val):
-        end_val = start_val
-    elif statically_known_true(end_val == sys.maxsize) or guard_size_oblivious(
-        end_val > sizes[dim]
-    ):
-        end_val = sizes[dim]
+    start_val = generalize_index(start_val)
+    end_val = generalize_index(end_val, end=True)
+    torch._check(end_val >= start_val)
 
     storage_offset = self.storage_offset() + start_val * strides[dim]
     len = end_val - start_val

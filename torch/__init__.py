@@ -977,10 +977,34 @@ sym_sqrt = globals()["_sym_sqrt"]
 __all__.append("sym_sqrt")
 
 
+def check_same_symtype(t, f):
+    if type(t) == type(f):
+        return True
+    elif (
+        isinstance(t, (SymInt, builtins.int))
+        and isinstance(f, (SymInt, builtins.int))
+    ):
+        return True
+    elif (
+        isinstance(t, (SymFloat, builtins.float))
+        and isinstance(f, (SymFloat, builtins.float))
+    ):
+        return True
+    elif (
+        isinstance(t, (SymBool, builtins.bool))
+        and isinstance(f, (SymBool, builtins.bool))
+    ):
+        return True
+    return False
+
+
 def sym_ite(b, t, f):
     if overrides.has_torch_function((b, t, f)):
         return overrides.handle_torch_function(sym_ite, (b, t, f), b, t, f)
-    assert isinstance(b, (SymBool, builtins.bool)) and type(t) == type(f)
+    assert (
+        isinstance(b, (SymBool, builtins.bool))
+        and check_same_symtype(t, f)
+    )
     if isinstance(b, SymBool):
         return b.__sym_ite__(t, f)
     return t if b else f

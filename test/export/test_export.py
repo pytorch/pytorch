@@ -11494,6 +11494,26 @@ def forward(self, x, b_t, y):
         ][0]
         self.assertEqual(op_node.target._name, "aten::add.Tensor")
 
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    def test_unbacked_slice_forward(self):
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1, u2 = xs.tolist()
+                x = torch.empty(u0)
+                return x[u1:u2]
+            
+        mod = Foo()
+        gm = export(mod, (torch.tensor([9, 1, 8]),)).module()
+        def check(self, sizes):
+            inp = torch.tensor(sizes)
+            self.assertEqual(mod(inp).shape, gm(inp).shape)
+
+        check(self, [9, -8, -1])
+        check(self, [3, 5, 3])
+        check(self, [10, 0, -2])
+        check(self, [10, -1000, 1000])
+
     @testing.expectedFailureRetraceability
     def test_layer_sharing(self):
         N, C, H, W = 1, 2, 2, 3
