@@ -183,6 +183,9 @@ def check_node_safe(node: Node):
         # Tensors always have example values in meta field
         return "example_value" in target.meta
 
+    maybe_name = getattr(node.target, "__name__", "")
+    if 'from_local' in maybe_name or 'to_local' in maybe_name or 'redistribute' in maybe_name:
+        return
     # I'd love to use a match statement here, but it wasn't introduced until py3.10
     if node.op == "call_function":
         # We support only torch.* functions for now

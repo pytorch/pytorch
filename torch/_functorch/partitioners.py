@@ -28,6 +28,7 @@ from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     hint_int,
     is_symbol_binding_fx_node,
+    _is_symbolic_rank,
 )
 from torch.fx.passes import graph_drawer
 from torch.utils._ordered_set import OrderedSet
@@ -324,6 +325,9 @@ def _extract_fwd_bwd_modules(
 
     for node in bwd_graph.find_nodes(op="placeholder"):
         # This is to filter out saved values that don't actually end up being used by the backwards pass
+        if _is_symbolic_rank(node):
+            # if we have a symbolic rank input to fw, always save it for bw
+            continue
         if not node.users:
             _remove_by_name(saved_values, node.name)
             _remove_by_name(saved_sym_nodes, node.name)
@@ -2061,6 +2065,10 @@ def min_cut_rematerialization_partition(
     )
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(is_sym_node, saved_values))
+    if torch._dynamo.config.use_symbolic_rank:
+        for placeholder in joint_graph.find_nodes(op='placeholder'):
+            if _is_symbolic_rank(placeholder):
+                saved_sym_nodes.append(placeholder)
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
 
     # NB: saved_sym_nodes will be mutated to reflect the actual saved symbols

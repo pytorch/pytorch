@@ -412,7 +412,7 @@ enable_faithful_generator_behavior = True
 
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
-    default=True,
+    default=False,
     justknob="pytorch/compiler:inline_inbuilt_nn_modules",
 )
 
@@ -605,6 +605,8 @@ run_gc_after_compile = Config(  # type: ignore[var-annotated]
     justknob="pytorch/compiler:enable_run_gc_after_compile",
     env_name_default="TORCH_DYNAMO_RUN_GC_AFTER_COMPILE",
 )
+
+use_symbolic_rank = True
 
 # Takes the function/module decorated with torch.compile and passes it through a
 # wrapper. This ensures that nn.module hooks are also compiled in the same frame.

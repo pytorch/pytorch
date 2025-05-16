@@ -110,6 +110,10 @@ def _format_import_statement(name: str, obj: Any, importer: Importer) -> str:
         return _custom_builtins[name].import_str
     if _is_from_torch(name):
         return "import torch"
+    # TERRIBLE HACK (not landable)
+    # The real fix is to remove the one-off hacks for DTensor in dynamo
+    if 'from_local' in name or 'to_local' in name or 'redistribute' in name:
+        return ""
     module_name, attr_name = importer.get_name(obj)
     return f"from {module_name} import {attr_name} as {name}"
 

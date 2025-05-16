@@ -1852,7 +1852,7 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[
         if isinstance(arg, fx.Node) and isinstance(arg.meta.get("val"), torch.Tensor)
     )
     cuda_devices: OrderedSet[torch.device] = OrderedSet(
-        device for device in (input_devices | out_devices) if device.type == "cuda"
+        device for device in (input_devices | out_devices) if device.type == "cuda" and not isinstance(device.index, torch.SymInt)
     )
 
     return (

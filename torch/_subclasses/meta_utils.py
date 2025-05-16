@@ -373,6 +373,14 @@ class MetaTensorDescriber:
 
         from torch.nested._internal.nested_tensor import _tensor_symint_registry
 
+        # use symbolic rank for device if it is enabled
+        device = t.device
+        if tracing_context := torch._guards.TracingContext.try_get():
+            if tracing_context.fake_mode.shape_env is not None and tracing_context.fake_mode.shape_env.symbolic_rank is not None:
+                device = torch.device(t.device.type, t.device.index, tracing_context.fake_mode.shape_env.symbolic_rank)
+#        else:
+#            breakpoint()
+
         view_func = ViewFunc.from_tensor(t)
 
         # TODO: Is it important to enable torch.inference_mode before querying
@@ -411,7 +419,7 @@ class MetaTensorDescriber:
             ),
             is_functional=is_functional,
             layout=layout,
-            device=t.device,
+            device=device,
             size=t.size(),
             stride=stride,
             storage_offset=storage_offset,

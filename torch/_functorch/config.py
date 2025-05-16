@@ -255,6 +255,9 @@ strict_autograd_cache = False
 # that any decisions on collectives are made consistently.
 unsafe_allow_optimization_of_collectives = False
 
+
+force_eager_backward_compilation = False
+
 # See Note [AOTAutograd Tangent Subclassness for mutated inputs]
 # TODO(ivankobzarev): Remove this config, being able to deduce it compile time.
 disable_guess_zero_tangent_for_mutated_input_subclass = False

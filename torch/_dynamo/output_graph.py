@@ -52,6 +52,7 @@ from torch._guards import (
     Source,
     TracingContext,
 )
+from torch._dynamo.source import GlobalSource
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
@@ -355,6 +356,7 @@ class OutputGraph:
             prefer_deferred_runtime_asserts_over_guards=config.prefer_deferred_runtime_asserts_over_guards,
             allow_complex_guards_as_runtime_asserts=config.allow_complex_guards_as_runtime_asserts,
             co_fields=self.co_fields,
+            use_symbolic_rank=config.use_symbolic_rank,
         )
 
         # In export mode, we force the shape_env to strictly disallow any constraining
@@ -1442,6 +1444,25 @@ class OutputGraph:
                 # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
                 self.tracing_context.fake_mode = backend_fake_mode
 
+            curr_shape_env = self.tracing_context.fake_mode.shape_env
+            if curr_shape_env.symbolic_rank is not None:
+                from torch._dynamo.source import WeakRefCallSource, AttrSource
+                rank_source=WeakRefCallSource(AttrSource(AttrSource(GlobalSource('torch'), 'distributed'), 'get_rank'))
+                self.symbolic_rank = self.root_tracer.create_graph_input(
+                    "symbolic_rank",
+                    type(curr_shape_env.symbolic_rank),
+                    curr_shape_env.symbolic_rank,
+                    source=rank_source,
+                )
+                # TODO: it feels like i'm using the wrong APIs here
+                self.symbolic_rank.node.meta['grapharg'] = GraphArg(
+                    rank_source,
+                    self.symbolic_rank.node.meta['example_value'],
+                    pass_arg_as_tensor=False,
+                    fake_tensor=None,
+                    is_tensor=False,
+                )
+
             with self.restore_global_state():
                 compiled_fn = self.call_user_compiler(gm)
 
@@ -1508,7 +1529,11 @@ class OutputGraph:
                 placeholders.append(node)
         increment_op_count(tot)
         for pl in placeholders:
-            arg = pl.meta["grapharg"]
+            try:
+                arg = pl.meta["grapharg"]
+            except:
+                breakpoint()
+                arg = pl.meta["grapharg"]
             # TODO: Why isn't this stored in meta :think:
             # NOTE: can't move these into meta: https://github.com/pytorch/pytorch/issues/141640
             pl._dynamo_source = arg.source

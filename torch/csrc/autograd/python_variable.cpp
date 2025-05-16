@@ -129,7 +129,29 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
     } else if (match(c10::MemoryFormatType::Kind)) {
       return py::cast(static_cast<c10::MemoryFormat>(arguments[idx].toInt()));
     } else {
-      return torch::jit::toPyObject(arguments[idx]);
+      // When converting a c10::Device from C++ to Python, check if there is a global
+      // symbolic rank in existence, and plumb it into the Python object.
+      std::optional<c10::SymInt> symbolic_rank = std::nullopt;
+      if (arguments[idx].isDevice()) {
+        auto maybe_mode = c10::impl::TorchDispatchModeTLS::get_mode(c10::impl::TorchDispatchModeKey::FAKE);
+        if (maybe_mode.has_value()) {
+          auto fake_mode_obj = maybe_mode.value()->ptr(getPyInterpreter());
+          py::handle fake_mode_handle(fake_mode_obj);
+          if (py::hasattr(fake_mode_handle, "shape_env")) {
+            py::object shape_env_obj = fake_mode_handle.attr("shape_env");
+            if (py::hasattr(shape_env_obj, "symbolic_rank")) {
+              py::object symbolic_rank_obj = shape_env_obj.attr("symbolic_rank");
+              symbolic_rank = py::cast<c10::SymInt>(symbolic_rank_obj);
+            }
+          }
+        }
+      }
+      auto out = torch::jit::toPyObject(arguments[idx]);
+      if (symbolic_rank.has_value()) {
+        const auto device = reinterpret_cast<THPDevice*>(out.ptr());
+        device->symbolic_rank = symbolic_rank;
+      }
+      return out;
     }
   };
 

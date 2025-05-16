@@ -27,6 +27,17 @@ PyObject* THPDevice_New(const at::Device& device) {
   return self.release();
 }
 
+PyObject* THPDevice_New(const at::Device& device, c10::SymInt symbolic_rank) {
+  auto type = (PyTypeObject*)&THPDeviceType;
+  auto self = THPObjectPtr{type->tp_alloc(type, 0)};
+  if (!self)
+    throw python_error();
+  auto self_ = reinterpret_cast<THPDevice*>(self.get());
+  self_->device = device;
+  self_->symbolic_rank = std::make_optional(symbolic_rank);
+  return self.release();
+}
+
 static PyObject* THPDevice_repr(THPDevice* self) {
   std::ostringstream oss;
   oss << "device(type=\'" << self->device.type() << "\'";
@@ -35,6 +46,9 @@ static PyObject* THPDevice_repr(THPDevice* self) {
     // printing, hence casting it to uint16_t.
     // https://stackoverflow.com/questions/19562103/uint8-t-cant-be-printed-with-cout
     oss << ", index=" << static_cast<uint16_t>(self->device.index());
+  }
+  if (self->symbolic_rank.has_value()) {
+    oss << ", symbolic_rank=" << self->symbolic_rank.value();
   }
   oss << ")";
   return THPUtils_packString(oss.str().c_str());
@@ -53,8 +67,8 @@ static PyObject* THPDevice_pynew(
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser(
       {"device(Device device)",
-       "device(std::string_view type, int64_t? index=-1)"});
-  torch::ParsedArgs<2> parsed_args;
+       "device(std::string_view type, int64_t? index=-1, SymInt? symbolic_index=None)"});
+  torch::ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.has_torch_function()) {
     return handle_torch_function(
@@ -81,6 +95,11 @@ static PyObject* THPDevice_pynew(
     }
     at::Device device(
         as_device.type(), static_cast<c10::DeviceIndex>(device_index));
+    auto sym_rank = r.toSymIntOptional(2);
+    if (sym_rank.has_value()) {
+        TORCH_CHECK(sym_rank.value().is_symbolic(), "symbolic rank must be a symbol");
+        return THPDevice_New(device, sym_rank.value());
+    }
     return THPDevice_New(device);
   }
   Py_RETURN_NONE;
@@ -98,6 +117,9 @@ static PyObject* THPDevice_type(THPDevice* self, PyObject* noargs) {
 
 static PyObject* THPDevice_index(THPDevice* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  if (self->symbolic_rank.has_value()) {
+    return torch::toPyObject(self->symbolic_rank.value());
+  }
   if (self->device.has_index()) {
     return THPUtils_packInt64(self->device.index());
   } else {

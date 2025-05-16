@@ -2295,6 +2295,11 @@ def get_rank(group: Optional[ProcessGroup] = None) -> int:
         -1, if not part of the group
 
     """
+    # TODO: figure out if we should support multiple-process-group symbolic rank
+    if fake_mode := torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE):
+        if fake_mode.shape_env is not None and fake_mode.shape_env.symbolic_rank is not None:
+            return fake_mode.shape_env.symbolic_rank
+
     if _rank_not_in_group(group):
         return -1
 

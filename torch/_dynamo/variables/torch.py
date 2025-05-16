@@ -160,7 +160,7 @@ if torch.distributed.is_available():
     constant_fold_functions.extend(
         [
             torch.distributed.is_initialized,
-            torch.distributed.get_rank,
+            # TODO: support x.device_mesh.get_rank in dynamo
             torch.distributed.get_world_size,
         ]
     )

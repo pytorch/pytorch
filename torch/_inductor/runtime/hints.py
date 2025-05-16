@@ -141,12 +141,23 @@ class DeviceProperties(typing.NamedTuple):
         import torch
         from torch._dynamo.device_interface import get_interface_for_device
 
+        # DeviceProperties are used for compilation, not in the wrapper codegen.
+        # When compiling with symbolic device, we still need a real device index
+        # to pre-compile our triton kernels with
+        if isinstance(device.index, torch.SymInt):
+            # TODO: this is only really ok to do if we can pre-compile the triton kernels themselves.
+            # If we need to jit-compile the triton kernels, then we need to either:
+            # (1) ensure that the distributed job runs with CUDA_VISIBLE_DEVICES=<rank_hint>
+            # (2) get inductor to emit a call to `torch.distributed.get_rank()` in the triton metadata
+            device = torch.device(device.type, device.index.node.hint)
+
         device_type = device.type
 
         if torch.version.hip and device_type == "cuda":
             device_type = "hip"
 
         device_interface = get_interface_for_device(device)
+
         props = device_interface.get_device_properties(device)
         try:
             multi_processor_count = props.multi_processor_count
@@ -160,6 +171,7 @@ class DeviceProperties(typing.NamedTuple):
                 raise
         return cls(
             type=device_type,
+            # don't use symbolic_index
             index=device.index,
             multi_processor_count=multi_processor_count,
             cc=device_interface.get_compute_capability(device),
@@ -170,6 +182,16 @@ class DeviceProperties(typing.NamedTuple):
             ),
             warp_size=getattr(props, "warp_size", 32 if device_type != "cpu" else None),
         )
+
+
+    def __repr__(self):
+        inners = []
+        for k, v in self._asdict().items():
+            if k == 'index':
+                inners.append(f'{k}=torch.distributed.get_rank()')
+            else:
+                inners.append(f'{k}={repr(v)}')
+        return f"DeviceProperties({', '.join(inners)})"
 
 
 class HalideInputSpec(typing.NamedTuple):

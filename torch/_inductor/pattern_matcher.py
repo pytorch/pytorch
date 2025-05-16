@@ -2198,9 +2198,10 @@ def init_once_fakemode(fn: Callable[..., Any]) -> Callable[[], Any]:
     @functools.lru_cache(None)
     @functools.wraps(fn)
     def lazy_init() -> Any:
+        return
         counters_ref = counters["inductor"].copy()
 
-        with torch._guards.tracing(None), unset_fake_temporarily(), FakeTensorMode():
+        with torch._guards.tracing(None), unset_fake_temporarily(), FakeTensorMode(use_symbolic_rank=torch._dynamo.config.use_symbolic_rank):
             result = fn()
 
         # clear view matches encountered during tracing

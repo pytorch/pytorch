@@ -813,7 +813,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def add_device_info(self, device: torch.device) -> None:
         self.device_types.add(device.type)
-        if device.index is not None:
+        if device.index is not None and not isinstance(device.index, torch.SymInt):
             self.device_idxs.add(device.index)
         if V.graph.current_node and device not in self.device_node_mapping:
             self.device_node_mapping[device] = V.graph.current_node

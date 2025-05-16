@@ -1445,15 +1445,24 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_declarations.getvaluewithlinemap(),
         )
 
+    def gen_symbolic_rank_binding(self):
+        fake_mode = V.get_fake_mode()
+        if fake_mode.shape_env is not None and fake_mode.shape_env.symbolic_rank is not None:
+            return f'{fake_mode.shape_env.symbolic_rank.node.expr} = {fake_mode.shape_env.symbolic_rank.node.hint}'
+        return ''
+
     def generate_and_run_autotune_block(self):
         """
         Compose self.kernel_autotune_defs and self.kernel_autotune_calls into a single block of
         code and execute it to trigger Triton kernel compilation and auto-tuning
         """
         self.kernel_autotune_defs.splice(
-            """
+            f"""
             async_compile.wait(globals())
             del async_compile
+
+            {self.gen_symbolic_rank_binding()}
+
         """
         )
         scope = {}  # type: ignore[var-annotated]

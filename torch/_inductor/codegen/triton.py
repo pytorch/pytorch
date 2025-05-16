@@ -155,6 +155,7 @@ def gen_common_triton_imports() -> str:
     imports = IndentedBuffer()
     imports.splice(
         """
+        import torch
         import triton
         import triton.language as tl
         """

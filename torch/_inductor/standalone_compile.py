@@ -114,7 +114,7 @@ class CompiledArtifact:
 
     @staticmethod
     def load(
-        *, path: str, format: Literal["binary", "unpacked"] = "binary"
+        *, path: str, format: Literal["binary", "unpacked"] = "binary", model=None
     ) -> CompiledArtifact:
         with dynamo_timed("CompiledArtifact.load"):
             if format == "binary":
@@ -174,7 +174,8 @@ class CompiledArtifact:
                     compiled_fn = entry.wrap_post_compile(
                         [], entry.sanitized_aot_config, fx_config
                     )
-            return CompiledArtifact(lambda *args: compiled_fn(list(args)), None)
+
+            return CompiledArtifact(lambda *args: compiled_fn(args), None)
 
 
 def standalone_compile(
@@ -185,12 +186,17 @@ def standalone_compile(
     options: Any,
 ) -> CompiledArtifact:
     from torch.compiler._cache import CacheArtifactManager
+    from torch._functorch import config as functorch_config
+    functorch_config.force_eager_backward_compilation = True  # hack
 
     from .compile_fx import compile_fx
 
+    # we should decide the proper way to expose this config
+    use_symbolic_rank = options.pop('use_symbolic_rank', False)
+
     ignore_shape_env = False
     if dynamic_shapes == "from_example_inputs":
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv(use_symbolic_rank=use_symbolic_rank))
         # tells compile_fx to ignore the shape_envs on the ambient context
         # and the graph_module.
         ignore_shape_env = True
@@ -200,7 +206,7 @@ def standalone_compile(
         context = torch._guards.TracingContext.get()
         fake_mode = context.fake_mode
     elif dynamic_shapes == "from_graph":
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv(use_symbolic_rank=use_symbolic_rank))
         # Strategy: find a FakeTensor in the graph output, grab its FakeTensorMode.
         # The graph passed to standalone_compile must be an Inductor-approved graph,
         # which means that there is at least one Tensor output and the output node

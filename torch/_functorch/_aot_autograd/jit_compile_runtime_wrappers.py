@@ -1217,7 +1217,7 @@ def aot_dispatch_autograd(
                     placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_stride)
 
             compiled_bw_func = None
-            if num_symints_saved_for_bw > 0:
+            if num_symints_saved_for_bw > 0 or config.force_eager_backward_compilation:
                 try:
                     # See Note: [Backward graph lazy lowering]
                     compiled_bw_func = aot_config.bw_compiler(

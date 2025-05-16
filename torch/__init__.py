@@ -593,6 +593,7 @@ class SymInt:
             return hash(self.node.nested_int())
         else:
             # We could support constant SymInts as well, but not doing it for now
+            breakpoint()
             raise TypeError("unhashable type: non-nested SymInt")
             # TODO: Force specialization
             # This can't be done because the TypeError here is load bearing

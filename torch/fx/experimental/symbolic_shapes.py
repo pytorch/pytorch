@@ -3193,6 +3193,7 @@ class ShapeEnvSettings:
     prefer_deferred_runtime_asserts_over_guards: bool
     allow_complex_guards_as_runtime_asserts: bool
     trace_asserts: bool
+    use_symbolic_rank: bool
 
 
 @dataclass
@@ -3290,6 +3291,26 @@ class ShapeEnv:
             torch._subclasses.fake_tensor._DispatchCacheEntry,
         ] = {}
 
+        if kwargs.get('use_symbolic_rank', False):
+            from torch._dynamo.source import GlobalSource
+
+            sym_rank_hint = torch.distributed.get_rank() if torch.distributed.is_available() and torch.distributed.distributed_c10d.is_initialized() else 0
+            sym_rank_hint_src = GlobalSource('torch.distributed.get_rank() if torch.distributed.is_available() and torch.distributed.distributed_c10d.is_initialized() else 0')
+            sym_rank_symbol = self.create_symbol(
+                sym_rank_hint,
+                sym_rank_hint_src,
+                do_not_specialize_zero_one=True
+            )
+            symbolic_rank = self.create_symintnode(
+                sym_rank_symbol,
+                hint=sym_rank_hint,
+                source=sym_rank_hint_src,
+            )
+            self.symbolic_rank = symbolic_rank
+        else:
+            self.symbolic_rank = None
+
+
     # Pro-tip: if you add new field to ShapeEnv, this affects some accept
     # tests.  Accept their output with:
     #
@@ -3336,6 +3357,7 @@ class ShapeEnv:
         # XXX Add any new settings that could affect FakeTensor evaluation
         # to: torch._subclasses.fake_tensor._ShapeEnvSettings
         trace_asserts: bool = False,
+        use_symbolic_rank: bool = False,
     ) -> None:
         if duck_shape is None:
             duck_shape = config.use_duck_shape
@@ -3351,6 +3373,7 @@ class ShapeEnv:
             prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
             allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
             trace_asserts=trace_asserts,
+            use_symbolic_rank=use_symbolic_rank,
         )
 
         self.guards: list[ShapeGuard] = []
@@ -7507,3 +7530,13 @@ def _remove_effect_token_unbacked_bindings(
         yield
     finally:
         node.meta["unbacked_bindings"] = old_bindings
+
+def _is_symbolic_rank(node: torch.fx.Node) -> bool:
+    if node.op != 'placeholder':
+        # assumption maintained by dynamo: symbolic_rank is always a graph input
+        return False
+    placeholder_val = node.meta.get('val', None)
+    if isinstance(placeholder_val, torch.SymInt):
+        # There can only be one, global, symbolic rank.
+        global_symbolic_rank = placeholder_val.node.shape_env.symbolic_rank
+        return placeholder_val is global_symbolic_rank
