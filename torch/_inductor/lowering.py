@@ -1500,7 +1500,7 @@ def quantized_decomposed_quantize_per_tensor_tensor(
         input_with_scale = input * ops.reciprocal(_scale)
         if is_integer_dtype(dtype):
             input_with_scale = ops.round(input_with_scale)
-        val = input_with_scale + zero_point
+        val = input_with_scale + _zero_point
         qmin, qmax = _create_constants(quant_min, quant_max, dtype=torch.float32)
         clamped = ops.minimum(ops.maximum(val, qmin), qmax)
         return ops.to_dtype(clamped, dtype)

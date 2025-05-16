@@ -24,6 +24,16 @@ _DTYPE_TO_QVALUE_BOUNDS.update(
 )
 
 
+def _is_float8_type(dtype: torch.dtype) -> bool:
+    fp8_types = {
+        torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
+        torch.float8_e5m2,
+        torch.float8_e5m2fnuz,
+    }
+    return dtype in fp8_types
+
+
 # Helper to check the passed in quant min and max are valid for the dtype
 def _quant_min_max_bounds_check(quant_min, quant_max, dtype):
     if dtype not in _DTYPE_TO_QVALUE_BOUNDS:
@@ -687,6 +697,9 @@ def dequantize_per_channel(
     new_shape[0] = scales.shape[0]
     scales = scales.view(new_shape)
     if zero_points is not None:
+        # not support fp8 sub
+        if _is_float8_type(dtype):
+            input = input.to(out_dtype)
         res = (input - zero_points.view(new_shape)) * scales
     else:
         res = input * scales
