@@ -32,7 +32,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         self.example_inputs = []
         with V.fake_mode:
             for inp in self.input_nodes:
-                inp.data.freeze_layout()  # `type: ignore[attr-defined]`
+                inp.data.freeze_layout() # `type: ignore[misc]`
                 self.example_inputs.append(ir_node_to_tensor(inp))
 
         self.gm = make_fx_graph(*self.example_inputs)

@@ -23,7 +23,7 @@ from .. import config as inductor_config, ir
 from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphTemplate
-from ..ir import FlexibleLayout, is_triton
+from ..ir import FlexibleLayout, ir_node_to_tensor, is_triton
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
