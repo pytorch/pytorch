@@ -257,7 +257,10 @@ def insert_deferred_runtime_asserts(
                 # Convert the sympy expression into a sequence of FX
                 # nodes
                 with _set_node_metadata_hook(gm, _node_metadata_hook):
-                    res = _sympy_interp(expr_to_proxy, ra.expr).node
+                    try:
+                        res = _sympy_interp(expr_to_proxy, ra.expr).node
+                    except:
+                        raise
                     graph.call_function(
                         torch.ops.aten._assert_scalar.default,
                         # TODO: use ra.msg here, but it's pretty

@@ -5967,7 +5967,7 @@ class ShapeEnv:
 
             r = self._find(s)
 
-            if only_specialized_backed and not (r.is_integer or r.is_real):
+            if only_specialized_backed and not (isinstance(r, (int, float))):
                 continue
 
             # Micro-optimization: only do replacements if r and s are different
