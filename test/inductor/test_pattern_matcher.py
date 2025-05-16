@@ -635,6 +635,32 @@ class TestPatternMatcher(TestCase):
 
         self.assertEqual(res1, res2)
 
+    def test_bmm_to_mm(self):
+        def fn(a, b):
+            return torch.bmm(a, b)
+
+        a = torch.randn(1, 16, 8, device=GPU_TYPE)
+        b = torch.randn(1, 8, 32, device=GPU_TYPE)
+
+        result, (code,) = run_and_get_code(torch.compile(fn), a, b)
+
+        expected = fn(a, b)
+        torch.testing.assert_close(result, expected)
+
+        FileCheck().check("mm").check_not("bmm").run(code)
+
+        a_multi = torch.randn(3, 16, 8, device=GPU_TYPE)
+        b_multi = torch.randn(3, 8, 32, device=GPU_TYPE)
+
+        result_multi, (code_multi,) = run_and_get_code(
+            torch.compile(fn), a_multi, b_multi
+        )
+
+        expected_multi = fn(a_multi, b_multi)
+        torch.testing.assert_close(result_multi, expected_multi)
+
+        FileCheck().check("bmm").run(code_multi)
+
     def test_cat_mm(self):
         def fn(a, b, c):
             return torch.cat(

@@ -728,8 +728,8 @@ def bmm_to_mm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
 
     if (
         check_device(mat1.meta["val"], mat2.meta["val"], "cuda")
-        and mat1.meta["val"].shape[0] == 1
-        and mat2.meta["val"].shape[0] == 1
+        and statically_known_true(mat1.meta["val"].shape[0] == 1)
+        and statically_known_true(mat2.meta["val"].shape[0] == 1)
     ):
         match.replace_by_example(repl, [mat1, mat2])
 
