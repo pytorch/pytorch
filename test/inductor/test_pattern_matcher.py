@@ -635,6 +635,11 @@ class TestPatternMatcher(TestCase):
 
         self.assertEqual(res1, res2)
 
+    @inductor_config.patch(
+        {
+            "max_autotune_gemm_backends": "ATEN",
+        }
+    )
     def test_bmm_to_mm(self):
         def fn(a, b):
             return torch.bmm(a, b)
@@ -647,7 +652,14 @@ class TestPatternMatcher(TestCase):
         expected = fn(a, b)
         torch.testing.assert_close(result, expected)
 
-        FileCheck().check("mm").check_not("bmm").run(code)
+        # The mm kernel should use ATen (because we set max_autotune_gemm_backends = ATEN).
+        # Its name should contain `aten.bmm` since this is the original aten op where the bmm came from.
+        if HAS_GPU:
+            FileCheck().check("extern_kernels.mm(").check_not(
+                "extern_kernels.bmm("
+            ).run(code)
+        else:
+            FileCheck().check("extern_kernels.bmm(")
 
         a_multi = torch.randn(3, 16, 8, device=GPU_TYPE)
         b_multi = torch.randn(3, 8, 32, device=GPU_TYPE)
