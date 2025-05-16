@@ -751,6 +751,14 @@ compile_threads: Optional[int] = None if is_fbcode() else decide_compile_threads
 # compiled by triton (instead of using triton's own launcher)
 use_static_cuda_launcher: bool = static_cuda_launcher_default()
 
+# Attempt to statically launch user defined triton kernels
+# Requires use_static_cuda_launcher
+static_launch_user_defined_triton_kernels: bool = Config(
+    justknob="pytorch/inductor:static_launch_user_defined_triton_kernels",
+    env_name_force="TORCHINDUCTOR_STATIC_LAUNCH_USER_DEFINED_TRITON_KERNELS",
+    default=False,
+)
+
 # Raise error if we bypass the launcher
 strict_static_cuda_launcher: bool = (
     os.environ.get("TORCHINDUCTOR_STRICT_STATIC_CUDA_LAUNCHER", "0") == "1"
