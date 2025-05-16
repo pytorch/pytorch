@@ -89,11 +89,11 @@ from torch._subclasses.fake_tensor import (
 from torch._utils_internal import log_cache_bypass
 from torch.compiler import config as cconfig
 from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
+from torch.export.pt2_archive.constants import CUSTOM_OBJ_FILENAME_PREFIX
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 from torch.utils._ordered_set import OrderedSet
 
 from .output_code import CompiledFxGraph
-from .package.pt2_archive_constants import CUSTOM_OBJ_FILENAME_PREFIX
 from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
