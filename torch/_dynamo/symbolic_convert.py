@@ -3564,6 +3564,10 @@ class InstructionTranslator(InstructionTranslatorBase):
         argnames_null = tuple(k for k in all_argnames if k in argnames_null_set)
         if sys.version_info < (3, 12):
             assert len(argnames_null) == 0, "variables should not be NULL in < 3.12"
+        # compile_subgraph did not codegen any NULLs,
+        # so we should not count NullVariables
+        stack_len = len(self.stack) - len(all_stack_locals_metadata[0].stack_null_idxes)
+        nargs = stack_len + len(argnames)
 
         cg = PyCodegen(self)
 
@@ -3579,7 +3583,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             # Replace the current stack var with the context class
             ctx = cast(ContextWrappingVariable, self.stack[i_orig])
             ctx.reconstruct_type(cg)
-            cg.extend_output(create_swap(len(self.stack) - i + 1))
+            cg.extend_output(create_swap(stack_len - i + 1))
             cg.append_output(create_instruction("POP_TOP"))
 
         for name, _ in all_stack_locals_metadata[0].locals_ctx_args:
@@ -3587,11 +3591,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             ctx = cast(ContextWrappingVariable, self.symbolic_locals[name])
             ctx.reconstruct_type(cg)
             cg.append_output(create_instruction("STORE_FAST", argval=name))
-
-        # compile_subgraph did not codegen any NULLs,
-        # so we should not count NullVariables
-        stack_len = len(self.stack) - len(all_stack_locals_metadata[0].stack_null_idxes)
-        nargs = stack_len + len(argnames)
 
         name = unique_id(f"__resume_at_{inst.offset}")
 
