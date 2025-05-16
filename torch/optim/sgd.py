@@ -161,7 +161,10 @@ SGD.__doc__ = (
             \:\textit{ nesterov,}\:\textit{ maximize}                                     \\[-1.ex]
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
-            &\hspace{5mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
+            &\hspace{5mm}\textbf{if} \: \textit{maximize}:                                       \\
+            &\hspace{10mm}g_t           \leftarrow   -\nabla_{\theta} f_t (\theta_{t-1})         \\
+            &\hspace{5mm}\textbf{else}                                                           \\
+            &\hspace{10mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})          \\
             &\hspace{5mm}\textbf{if} \: \lambda \neq 0                                           \\
             &\hspace{10mm} g_t \leftarrow g_t + \lambda  \theta_{t-1}                            \\
             &\hspace{5mm}\textbf{if} \: \mu \neq 0                                               \\
@@ -170,13 +173,10 @@ SGD.__doc__ = (
             &\hspace{10mm}\textbf{else}                                                          \\
             &\hspace{15mm} \textbf{b}_t \leftarrow g_t                                           \\
             &\hspace{10mm}\textbf{if} \: \textit{nesterov}                                       \\
-            &\hspace{15mm} g_t \leftarrow g_{t} + \mu \textbf{b}_t                             \\
+            &\hspace{15mm} g_t \leftarrow g_{t} + \mu \textbf{b}_t                               \\
             &\hspace{10mm}\textbf{else}                                                   \\[-1.ex]
             &\hspace{15mm} g_t  \leftarrow  \textbf{b}_t                                         \\
-            &\hspace{5mm}\textbf{if} \: \textit{maximize}                                          \\
-            &\hspace{10mm}\theta_t \leftarrow \theta_{t-1} + \gamma g_t                   \\[-1.ex]
-            &\hspace{5mm}\textbf{else}                                                    \\[-1.ex]
-            &\hspace{10mm}\theta_t \leftarrow \theta_{t-1} - \gamma g_t                   \\[-1.ex]
+            &\hspace{5mm}\theta_t \leftarrow \theta_{t-1} - \gamma g_t                    \\[-1.ex]
             &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
             &\bf{return} \:  \theta_t                                                     \\[-1.ex]
             &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
@@ -238,7 +238,9 @@ SGD.__doc__ = (
 
         Moreover, the initial value of the momentum buffer is set to the
         gradient value at the first step. This is in contrast to some other
-        frameworks that initialize it to all zeros.
+        frameworks that initialize it to all zeros. One notable side effect
+        of this decision is that the first momentum value will not be scaled
+        by dampening. Dampening will be applied starting at the second step.
 
     """
 )

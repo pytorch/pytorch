@@ -51,7 +51,7 @@ mkdir libtorch\test
 
 mkdir build
 pushd build
-python ../tools/build_libtorch.py
+%PYTHON_EXEC% ../tools/build_libtorch.py
 popd
 
 IF ERRORLEVEL 1 exit /b 1
@@ -86,7 +86,7 @@ copy /Y "%LIBTORCH_PREFIX%-%PYTORCH_BUILD_VERSION%.zip" "%PYTORCH_FINAL_PACKAGE_
 goto build_end
 
 :pytorch
-python setup.py bdist_wheel -d "%PYTORCH_FINAL_PACKAGE_DIR%"
+%PYTHON_EXEC% setup.py bdist_wheel -d "%PYTORCH_FINAL_PACKAGE_DIR%"
 
 :build_end
 IF ERRORLEVEL 1 exit /b 1

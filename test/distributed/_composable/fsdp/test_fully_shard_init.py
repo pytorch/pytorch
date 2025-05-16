@@ -9,13 +9,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import replicate
-from torch.distributed._tensor import (
-    DeviceMesh,
-    distribute_tensor,
-    DTensor,
-    Replicate,
-    Shard,
-)
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.fsdp._fully_shard._fsdp_init import (
@@ -30,6 +23,13 @@ from torch.distributed.fsdp._fully_shard._fully_shard import FSDPModule
 from torch.distributed.fsdp._init_utils import (
     _init_inter_node_process_group,
     _init_intra_node_process_group,
+)
+from torch.distributed.tensor import (
+    DeviceMesh,
+    distribute_tensor,
+    DTensor,
+    Replicate,
+    Shard,
 )
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -840,7 +840,7 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
         # since the ref has a parent mesh, while the `from_group` one does not
         self.assertEqual(dp_mesh.mesh, ref_dp_mesh.mesh)
         self.assertEqual(dp_mesh._coordinate_on_dim, ref_dp_mesh._coordinate_on_dim)
-        self.assertEqual(dp_mesh._dim_group_infos, ref_dp_mesh._dim_group_infos)
+        self.assertEqual(dp_mesh._dim_group_names, ref_dp_mesh._dim_group_names)
 
         # Check 1D FSDP forward/backward parity over the DP mesh
         # NOTE: We cannot use 2D DTensor-based training here because the DP
@@ -916,12 +916,6 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
         )
         self.assertEqual(mesh.mesh, ref_mesh.mesh)
         self.assertEqual(mesh._coordinate_on_dim, ref_mesh._coordinate_on_dim)
-        for (_, ranks, _), (_, ref_ranks, _) in zip(
-            mesh._dim_group_infos, ref_mesh._dim_group_infos
-        ):
-            # Since we manually constructed new subgroups, the test and ref
-            # groups are not the same
-            self.assertEqual(ranks, ref_ranks)
         for mesh_dim_name in mesh_dim_names:
             child_mesh = mesh[mesh_dim_name]
             ref_child_mesh = ref_mesh[mesh_dim_name]

@@ -737,6 +737,7 @@ def _compile(
         )
 
         try:
+            tracer.output.mark_bytecode_tracing_start()
             with tracing(tracer.output.tracing_context), tracer.set_current_tx():
                 tracer.run()
         except exc.UnspecializeRestartAnalysis:
@@ -810,7 +811,10 @@ def _compile(
         for attempt in itertools.count():
             CompileContext.get().attempt = attempt
             try:
-                out_code = transform_code_object(code, transform)
+                with dynamo_timed(
+                    f"compile_attempt_{attempt}", log_pt2_compile_event=True
+                ):
+                    out_code = transform_code_object(code, transform)
                 break
             except exc.RestartAnalysis as e:
                 if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
@@ -919,13 +923,14 @@ def _compile(
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
         nonlocal cache_entry
-        check_fn = CheckFunctionManager(
-            code,
-            output,
-            cache_entry,
-            hooks.guard_fail_fn if hooks else None,
-            hooks.guard_filter_fn if hooks else None,
-        )
+        with dynamo_timed("build_guards", log_pt2_compile_event=True):
+            check_fn = CheckFunctionManager(
+                code,
+                output,
+                cache_entry,
+                hooks.guard_fail_fn if hooks else None,
+                hooks.guard_filter_fn if hooks else None,
+            )
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
         annotation_str = "Torch-Compiled Region: " + compile_id_str

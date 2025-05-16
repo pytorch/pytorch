@@ -457,9 +457,7 @@ class SimpleElasticAgent(ElasticAgent):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def _stop_workers(
-        self, worker_group: WorkerGroup, is_restart: bool = False
-    ) -> None:
+    def _stop_workers(self, worker_group: WorkerGroup) -> None:
         r"""Stop all workers in the given worker group.
 
         Implementors must deal with workers in all states defined by
@@ -477,9 +475,7 @@ class SimpleElasticAgent(ElasticAgent):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def _shutdown(
-        self, death_sig: signal.Signals = signal.SIGTERM, is_restart: bool = False
-    ) -> None:
+    def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM) -> None:
         """Clean up any resources that were allocated during the agent's work.
 
         Args:
@@ -698,7 +694,7 @@ class SimpleElasticAgent(ElasticAgent):
         """Restart (stops, rendezvous, starts) all local workers in the group."""
         role = worker_group.spec.role
         logger.info("[%s] Stopping worker group", role)
-        self._stop_workers(worker_group, is_restart=True)
+        self._stop_workers(worker_group)
         worker_group.state = WorkerState.STOPPED
         self._initialize_workers(worker_group)
 

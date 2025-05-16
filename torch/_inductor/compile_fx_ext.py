@@ -486,7 +486,7 @@ class _SerializedFxCompile(FxCompile):
             # 'make_opaque_unary_fn.<locals>.OpaqueUnaryFn'
 
             # TODO: scuba record about not being able to do this?
-            log.debug("Unable to pickle input graph or example inputs", exc_info=True)
+            log.warning("Unable to pickle input graph or example inputs", exc_info=True)
 
             return None
 

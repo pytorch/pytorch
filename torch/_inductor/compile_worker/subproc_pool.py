@@ -135,7 +135,9 @@ class SubprocPool:
             env={
                 **os.environ,
                 # We need to set the PYTHONPATH so the subprocess can find torch.
-                "PYTHONPATH": os.pathsep.join(sys.path),
+                "PYTHONPATH": os.environ.get(
+                    "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
+                ),
                 # We don't want to re-warm the pool when the subprocess imports
                 # torch._inductor.codecache since the warming process is what
                 # creates the SubprocPool in the first place.

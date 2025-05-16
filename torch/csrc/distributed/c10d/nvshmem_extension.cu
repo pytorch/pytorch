@@ -7,6 +7,8 @@
 #include <torch/csrc/distributed/c10d/SymmetricMemory.hpp>
 
 #include <cuda_awbarrier_primitives.h>
+// Use torch's cub wrapper instead of CUDA's <cub/cub.cuh>, see #55292
+#include <ATen/cuda/cub.cuh>
 #include <nvshmem.h>
 
 namespace c10d::nvshmem_extension {
@@ -138,31 +140,31 @@ at::Tensor nvshmem_all_to_all(
   return out;
 }
 
-// This is a prefix sum function that calculates read (or write) offsets for each peer
-// TODO: currently it is assumed that the number of PE's is smaller than `THREADS_PER_BLOCK` (512)
-__device__ void scan(int64_t *odata, int64_t *idata, int n) {
-  constexpr int N = THREADS_PER_BLOCK;
-  assert (n <= N);
-  __shared__ int64_t temp[N * 2];
-  int thid = threadIdx.x;
-  int pout = 1, pin = 0;
-  // Load input into shared memory scratchpad.
-  // This is exclusive scan, so shift right by one
-  // and set first element to 0
-  if (thid < n) {
-    temp[pout * N + thid] = temp[pin * N + thid] = (thid > 0) ? idata[thid - 1] : 0;
+// This is an exclusive prefix sum function that calculates read (or write) offsets for each peer.
+__device__ void prefixSum(int64_t *odata, int64_t *idata, int n) {
+  // Specialize BlockScan for a 1D block of threads, of type int64_t.
+  // - `BLOCK_SCAN_WARP_SCANS` is a low-latency scan algorithm (instead of high
+  // throughput which we don't need here).
+  // - `at_cuda_detail::cub` is torch's cub wrapper, see #55292.
+  using BlockScanT = at_cuda_detail::cub::BlockScan<int64_t, THREADS_PER_BLOCK, at_cuda_detail::cub::BLOCK_SCAN_WARP_SCANS>;
+  // Allocate shared memory for BlockScan
+  __shared__ typename BlockScanT::TempStorage temp_storage;
+
+  // TODO: currently it is assumed that the number of PE's is smaller than
+  // `THREADS_PER_BLOCK`
+  CUDA_KERNEL_ASSERT(n <= THREADS_PER_BLOCK);
+
+  // Obtain input item for each thread
+  int tid = threadIdx.x;
+  int64_t thread_data = (tid < n) ? idata[tid] : 0;
+
+  // Collectively compute the block-wide exclusive prefix sum
+  BlockScanT(temp_storage).ExclusiveSum(thread_data, thread_data);
+
+  // Store the result
+  if (tid < n) {
+    odata[tid] = thread_data;
   }
-  __syncthreads();
-  for (int offset = 1; offset < n; offset *= 2) {
-    pout = 1 - pout; // swap double buffer indices
-    pin = 1 - pout;
-    if (thid >= offset && thid < n)
-      temp[pout * N + thid] = temp[pin * N + thid] + temp[pin * N + thid - offset];
-    else if (thid < offset)
-      temp[pout * N + thid] = temp[pin * N + thid];
-    __syncthreads();
-  }
-  odata[thid] = temp[pout * N + thid]; // write output
 }
 
 // This kernel is used to exchange output splits and source offsets between peers.
@@ -179,7 +181,7 @@ __global__ void exchangeSplitAndOffset(int64_t* in_out_splits, int mype, int npe
   __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
 
   // Scan input splits to get the source offsets
-  scan(peer_offsets, input_splits, npes);
+  prefixSum(peer_offsets, input_splits, npes);
   __syncthreads();;
 
   // Use 1 block to do the exchange
@@ -194,28 +196,36 @@ __global__ void exchangeSplitAndOffset(int64_t* in_out_splits, int mype, int npe
 
 // This kernel is used to do the actual data exchange.
 // `in_out_splits` has the same definition as in `exchangeSplitAndOffset`.
+// `stride` is the stride at dim 0, unit in byte.
 __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_splits, size_t stride, int mype, int npes) {
   auto output_splits = in_out_splits + npes;
   auto source_offsets = in_out_splits + npes * 2;
   int bid = blockIdx.x;
   int tid = threadIdx.x;
+  int blocks_per_peer = max(gridDim.x / npes, 1);
 
   // Calculate the output offsets
   __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
-  scan(peer_offsets, output_splits, npes);
+  prefixSum(peer_offsets, output_splits, npes);
   __syncthreads();
 
-  // Each block targets a different peer
-  size_t row_size = stride * sizeof(float);  // Assuming float (TODO)
-  for (int i = bid; i < npes; i += gridDim.x) {
+  // Target a different peer based on bid
+  for (int i = bid / blocks_per_peer; i < npes; i += gridDim.x / blocks_per_peer) {
     int peer = (mype + i) % npes;
-    auto size = output_splits[peer] * row_size;
-    auto source_offset = source_offsets[peer] * row_size;
-    auto write_offset = peer_offsets[peer] * row_size;
+    // Total amount from `peer`
+    auto peer_size = output_splits[peer] * stride;
+    // Amount to get from `peer` in this block
+    auto block_size = peer_size / blocks_per_peer;
+    // Being lazy here, we should handle the residual if the division is not exact
+    CUDA_KERNEL_ASSERT(block_size * blocks_per_peer == peer_size);
+    // This block's offset in the data from `peer`
+    auto block_offset = block_size * (bid % blocks_per_peer);
+    auto source_offset = source_offsets[peer] * stride + block_offset;
+    auto write_offset = peer_offsets[peer] * stride + block_offset;
     nvshmemx_getmem_block(
       (char*)recv_data + write_offset,
       (char*)send_data + source_offset,
-      size,
+      block_size,
       peer);
   }
   // Write out the output offsets (to the scratchpad line)
@@ -264,16 +274,31 @@ at::Tensor nvshmem_all_to_all_vdev(
       0,
       stream);
 
-  // All to all data exchange
-  // Limit the number of blocks to 16
-  int num_blocks = std::min(world_size, 16);
+  // CTA Tuning
+  // Intra-node: use multiple blocks per peer to increase data parallelism, up to 8.
+  // Up to 1 MB -> 1 block
+  // Up to 2 MB -> 2 blocks
+  // Up to 4 MB -> 4 blocks
+  // More -> 8 blocks
+  auto input_size = input.numel() * input.element_size();
+  const int max_blocks_per_peer = input_size < 1024 * 1024 ? 1 :
+      (input_size < 2 * 1024 * 1024 ? 2 :
+      (input_size < 4 * 1024 * 1024 ? 4 : 8));
+
+  // Inter-node: limit the total the number of blocks to 8 which is able to
+  // drive 57 GB/s bandwidth in test, enough to drive a 400 Gb/s NIC.
+  // TODO: better intra vs inter detection, currently it is based on world_size
+  int num_blocks = world_size > 8 ? 8 : max_blocks_per_peer * world_size;
+
   // Stride at dim 0 (assuming input is contiguous, TODO)
-  size_t stride = input.stride(0);
+  size_t stride_bytes = input.stride(0) * input.element_size();
+
+  // All to all data exchange
   void* args1[] = {
       &input_ptr,
       &output_ptr,
       &splits_ptr,
-      &stride,
+      &stride_bytes,
       &rank,
       &world_size};
   nvshmemx_collective_launch(

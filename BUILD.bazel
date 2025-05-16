@@ -376,6 +376,7 @@ cc_library(
         ":torch_headers",
         "@fbgemm",
         "@ideep",
+        "@nlohmann",
     ],
     alwayslink = True,
 )

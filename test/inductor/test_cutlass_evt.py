@@ -105,6 +105,7 @@ class MockGraphHandler(GraphLowering):
 
         self.sizevars = torch._inductor.sizevars.SizeVarAllocator()
         self.name_to_buffer = name_to_buffer
+        self.graph_inputs = dict()
         self.mutated_buffers = OrderedSet()
 
 
@@ -207,8 +208,67 @@ return D, tmp_1, tmp_2""",
 
             self.assertExpectedInline(
                 str(result),
-                """Unsupported indexing for buf0 with index 200*i0 + 60000*i1 + i2 and strides [200, 60000, 1]""",
+                """Unsupported indexing for buf0 with index 200*i0 + 60000*i1 + i2, \
+index strides [200, 60000, 1], and layout stride [60000, 200, 1]""",
             )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
+    def test_py_codegen_broadcasting(self):
+        from torch._inductor.codegen.cuda.cutlass_python_evt import CutlassEVTCodegen
+        from torch._inductor.virtualized import V
+
+        size = (100, 300, 200)
+        buf0 = MockComputedBuffer("buf0", None, torch.float32, size)
+        buf1 = MockComputedBuffer("buf1", None, torch.float32, size)
+        buf2 = MockComputedBuffer("buf2", None, torch.float32, size)
+
+        # buf0 is acc
+        # buf1 is external
+        def inner_fn_buf3(index):
+            tmp0 = buf0.make_loader()(index)
+            tmp1 = buf1.make_loader()(index)
+            tmp2 = buf2.make_loader()(index)
+            return tmp0 * tmp1 + tmp2
+
+        def inner_fn_buf4(index):
+            tmp0 = buf0.make_loader()(index)
+            tmp3 = buf3.make_loader()(index)
+            return tmp0 + tmp3 * tmp3
+
+        buf3 = MockComputedBuffer("buf3", inner_fn_buf3, torch.float32, size)
+        buf4 = MockComputedBuffer(
+            "buf4", inner_fn_buf4, torch.float32, (100, 300, 1)
+        )  # broadcast
+        with V.set_graph_handler(
+            MockGraphHandler(
+                {"buf0": buf0, "buf1": buf1, "buf2": buf2, "buf3": buf3, "buf4": buf4}
+            )
+        ):
+            reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code(
+                "buf0",
+                [
+                    MockSchedulerNode(buf3),
+                    MockSchedulerNode(buf4, last_usage=OrderedSet(["buf0"])),
+                ],
+            )
+        self.assertExpectedInline(reads, """['buf0', 'buf1', 'buf2']""")
+        self.assertExpectedInline(writes, """['buf3', 'buf4']""")
+        self.assertExpectedInline(
+            renames, """{'buf3': 'D', 'buf4': 'tmp_3', 'buf0': 'accum'}"""
+        )
+        self.assertExpectedInline(
+            code,
+            """\
+def fn(accum, buf1, buf2):
+    tmp_0 = accum * buf1
+    tmp_1 = tmp_0 + buf2
+    D = tmp_1 # cutlass evt requirement
+    tmp_2 = D * D
+    tmp_3 = accum + tmp_2
+
+return D, tmp_3""",
+        )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")

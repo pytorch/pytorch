@@ -4,20 +4,18 @@
 #include <torch/csrc/inductor/aoti_runtime/model_container.h>
 
 #include <iostream>
-#include <sstream>
-#include <stdexcept>
 #include <vector>
 
-#define CONVERT_EXCEPTION_TO_ERROR_CODE(...)                 \
-  try {                                                      \
-    __VA_ARGS__                                              \
-  } catch (const std::exception& e) {                        \
-    std::cerr << "Error: " << e.what() << std::endl;         \
-    return AOTI_RUNTIME_FAILURE;                             \
-  } catch (...) {                                            \
-    std::cerr << "Unknown exception occurred." << std::endl; \
-    return AOTI_RUNTIME_FAILURE;                             \
-  }                                                          \
+#define CONVERT_EXCEPTION_TO_ERROR_CODE(...)      \
+  try {                                           \
+    __VA_ARGS__                                   \
+  } catch (const std::exception& e) {             \
+    std::cerr << "Error: " << e.what() << '\n';   \
+    return AOTI_RUNTIME_FAILURE;                  \
+  } catch (...) {                                 \
+    std::cerr << "Unknown exception occurred.\n"; \
+    return AOTI_RUNTIME_FAILURE;                  \
+  }                                               \
   return AOTI_RUNTIME_SUCCESS;
 
 #define AOTI_VECTOR_SIZE_CHECK(actual_size, expected_size, name)  \
@@ -36,13 +34,17 @@
 // A RAII, thread local (!) guard that enables or disables grad mode upon
 // construction, and sets it back to the original value upon destruction.
 struct AOTINoGradGuard {
-  AOTINoGradGuard() : prev_mode(aoti_torch_grad_mode_is_enabled()) {
+  AOTINoGradGuard() {
     aoti_torch_grad_mode_set_enabled(false);
   }
+  AOTINoGradGuard(const AOTINoGradGuard&) = delete;
+  AOTINoGradGuard(AOTINoGradGuard&&) noexcept = delete;
   ~AOTINoGradGuard() {
     aoti_torch_grad_mode_set_enabled(prev_mode);
   }
-  bool prev_mode;
+  AOTINoGradGuard& operator=(const AOTINoGradGuard&) = delete;
+  AOTINoGradGuard& operator=(AOTINoGradGuard&&) noexcept = delete;
+  bool prev_mode{aoti_torch_grad_mode_is_enabled()};
 };
 
 extern "C" {
@@ -65,7 +67,7 @@ AOTIRuntimeError AOTInductorModelContainerCreateWithDevice(
     const char* device_str,
     const char* cubin_dir) {
   if (num_models == 0) {
-    std::cerr << "Error: num_models must be positive, but got 0" << std::endl;
+    std::cerr << "Error: num_models must be positive, but got 0\n";
     return AOTI_RUNTIME_FAILURE;
   }
   CONVERT_EXCEPTION_TO_ERROR_CODE({

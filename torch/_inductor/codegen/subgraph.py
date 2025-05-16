@@ -1,3 +1,4 @@
+import itertools
 import logging
 from typing import Any, Callable
 
@@ -63,6 +64,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 bm_graph_lowering.run(*self.example_inputs)
                 mod = bm_graph_lowering.compile_to_module()
                 bm_func = mod.call
+
                 bm_func([*args])
 
         return benchmarker.benchmark_gpu(lambda: bm_func([*args]))
@@ -73,6 +75,11 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 self.name,
                 *[
                     str(arg.shape)
+                    for arg in self.example_inputs
+                    if isinstance(arg, torch.Tensor)
+                ],
+                *[
+                    str(arg.stride())
                     for arg in self.example_inputs
                     if isinstance(arg, torch.Tensor)
                 ],
@@ -111,6 +118,8 @@ class SubgraphTemplate(KernelTemplate):
     optimal implementations for complex operations.
     """
 
+    index_counter = itertools.count()
+
     def __init__(
         self,
         name: str,
@@ -123,7 +132,7 @@ class SubgraphTemplate(KernelTemplate):
             name: The name of this template
             graph: The FX graph
         """
-        self.name = name
+        self.name = f"{name}_{next(SubgraphTemplate.index_counter)}"
         self.make_fx_graph = make_fx_graph
 
     def generate(  # type: ignore[override]

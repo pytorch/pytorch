@@ -17,7 +17,7 @@ from torch import nn
 from torch._dynamo.utils import counters
 from torch._inductor import comms
 from torch._inductor.utils import is_fallback_op, run_and_get_code
-from torch.distributed._tensor import init_device_mesh
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import (
     fully_shard,
     FullyShardedDataParallel as FSDP,
@@ -731,15 +731,17 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             with self._reinplace_all_gather_with_optional_checks(
                 fwd_fullgraph
             ), torch._inductor.config.patch(
-                post_grad_custom_post_pass=functools.partial(
-                    self._check_fsdp_copy_and_resize_ops_count_in_graph,
-                    fwd_copy_count=0,
-                    fwd_resize_count=0,
-                    bwd_copy_count=0,
-                    bwd_resize_count=0,
+                post_grad_custom_post_pass=(
+                    functools.partial(
+                        self._check_fsdp_copy_and_resize_ops_count_in_graph,
+                        fwd_copy_count=0,
+                        fwd_resize_count=0,
+                        bwd_copy_count=0,
+                        bwd_resize_count=0,
+                    )
+                    if fwd_fullgraph
+                    else None
                 )
-                if fwd_fullgraph
-                else None
             ):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
@@ -954,18 +956,20 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             with self._reinplace_all_gather_with_optional_checks(
                 fwd_fullgraph
             ), torch._inductor.config.patch(
-                post_grad_custom_post_pass=functools.partial(
-                    self._check_fsdp_copy_and_resize_ops_count_in_graph,
-                    # NOTE: For the root unsharded params, we don't reshard after forward since for training,
-                    # the parameters would be freed and all-gathered immediately. Hence we still have
-                    # their resize and copy ops in the graph.
-                    fwd_copy_count=4,
-                    fwd_resize_count=4,
-                    bwd_copy_count=0,
-                    bwd_resize_count=4,
+                post_grad_custom_post_pass=(
+                    functools.partial(
+                        self._check_fsdp_copy_and_resize_ops_count_in_graph,
+                        # NOTE: For the root unsharded params, we don't reshard after forward since for training,
+                        # the parameters would be freed and all-gathered immediately. Hence we still have
+                        # their resize and copy ops in the graph.
+                        fwd_copy_count=4,
+                        fwd_resize_count=4,
+                        bwd_copy_count=0,
+                        bwd_resize_count=4,
+                    )
+                    if fwd_fullgraph
+                    else None
                 )
-                if fwd_fullgraph
-                else None
             ):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
@@ -988,9 +992,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 file_check = FileCheck().check("def call(args):")
                 for fwd_ag_block_info in [
                     dict(
-                        overlapped_compute_op_str="triton_"
-                        if all_requires_grad
-                        else None,
+                        overlapped_compute_op_str=(
+                            "triton_" if all_requires_grad else None
+                        ),
                     ),
                     dict(
                         overlapped_compute_op_str="aten.native_dropout.",
@@ -1029,9 +1033,11 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     #     )
                     pass
                 for bwd_rs_block_info in [
-                    dict(overlapped_compute_op_str="extern_kernels.mm(")
-                    if all_requires_grad
-                    else None,
+                    (
+                        dict(overlapped_compute_op_str="extern_kernels.mm(")
+                        if all_requires_grad
+                        else None
+                    ),
                     dict(
                         overlapped_compute_op_str=None
                     ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None

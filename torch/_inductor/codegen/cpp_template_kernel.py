@@ -208,6 +208,19 @@ class CppTemplateKernel(CppKernel):
         numel = f"{cexpr_index(buf.get_numel())}"
         return f"auto _{name} = std::make_unique<{ctype}[]>({numel}); auto {name} = _{name}.get();"
 
+    def define_stack_allocated_buffer(
+        self, name, sizes: list[Any], dtype=torch.float
+    ) -> str:
+        """Define stack-allocated buffer"""
+        sizes = parse_expr_with_index_symbols(sizes)
+        buf = ir.Buffer(
+            name=name, layout=ir.FixedLayout(torch.device("cpu"), dtype, sizes)
+        )
+        self.local_buffers[name] = buf
+        ctype = f"{DTYPE_TO_CPP[dtype]}"
+        numel = f"{cexpr_index(buf.get_numel())}"
+        return f"alignas(64) {ctype} _{name}[{numel}]; {ctype}* {name} = _{name};"
+
     def reinit_buffer_if_null(self, name):
         """Reinit the previously defined local buffer if it is null"""
         assert name in self.local_buffers
@@ -553,7 +566,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(*args, output_tensor=out)
+        return self.bmreq.benchmark(*args, out=out)
 
     def hash_key(self) -> str:
         return "-".join(

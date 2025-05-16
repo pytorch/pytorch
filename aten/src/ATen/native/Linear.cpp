@@ -20,6 +20,7 @@
 #include <ATen/ops/addmm.h>
 #include <ATen/ops/bilinear_native.h>
 #include <ATen/ops/bmm.h>
+#include <ATen/ops/dot.h>
 #include <ATen/ops/einsum_native.h>
 #include <ATen/ops/linear_native.h>
 #include <ATen/ops/matmul.h>
@@ -811,11 +812,35 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
       rsizes.emplace_back(t2.sym_size(i));
     }
   }
-  // permute and reshape for matrix multiplication
-  t1 = t1.permute(p1).reshape_symint({size1, csize});
-  t2 = t2.permute(p2).reshape_symint({csize, size2});
-  // multiply and reshape to target size
-  return at::mm(t1, t2).reshape_symint(rsizes);
+
+  // Full contraction (size1 == 1 and size2 == 1) is much faster when done with dot ...
+  // TODO(@nikitaved): there are other cases where dot outperforms gemms,
+  // like, for example, when the non-contracted dims are relatively small.
+  // NOTE(@nikitaved): contract with gemm when on MPS,
+  // otherwise issues with the tests xpassing/xfailing
+  // when enabling the fast-path with dot.
+  // TODO: resolve that
+  if ((t1.device().type() == at::kMPS || t2.device().type() == at::kMPS) || size1 != 1 || size2 != 1) {
+    // permute and reshape for matrix multiplication
+    t1 = t1.permute(p1).reshape_symint({size1, csize});
+    t2 = t2.permute(p2).reshape_symint({csize, size2});
+    // multiply and reshape to target size
+    return at::mm(t1, t2).reshape_symint(rsizes);
+  } else {
+    // permute to align for contraction
+    t1 = t1.permute(p1);
+    t2 = t2.permute(p2);
+
+    if (t1.is_contiguous() && t2.is_contiguous()) {
+      // If t1 and t2 are both contiguous, then flatten is a view,
+      // then dot is the method of choice
+      return at::dot(t1.flatten(), t2.flatten()).reshape_symint(rsizes);
+    } else {
+      // Otherwise mul + sum can be faster as it avoids at most 2x contiguous() calls
+      // NOTE: t1.dtype == t2.dtype -- check above
+      return (t1.squeeze() * t2.squeeze()).sum(t1.scalar_type()).reshape_symint(rsizes);
+    }
+  }
 }
 
 Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, Tensor& result) {

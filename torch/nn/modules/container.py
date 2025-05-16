@@ -250,11 +250,42 @@ class Sequential(Module):
 
         Args:
             module (nn.Module): module to append
+
+        Example::
+
+            >>> import torch.nn as nn
+            >>> n = nn.Sequential(nn.Linear(1, 2), nn.Linear(2, 3))
+            >>> n.append(nn.Linear(3, 4))
+            Sequential(
+                (0): Linear(in_features=1, out_features=2, bias=True)
+                (1): Linear(in_features=2, out_features=3, bias=True)
+                (2): Linear(in_features=3, out_features=4, bias=True)
+            )
+
         """
         self.add_module(str(len(self)), module)
         return self
 
     def insert(self, index: int, module: Module) -> Self:
+        """
+        Inserts a module into the Sequential container at the specified index.
+
+        Args:
+            index (int): The index to insert the module.
+            module (Module): The module to be inserted.
+
+        Example::
+
+            >>> import torch.nn as nn
+            >>> n = nn.Sequential(nn.Linear(1, 2), nn.Linear(2, 3))
+            >>> n.insert(0, nn.Linear(3, 4))
+            Sequential(
+                (0): Linear(in_features=3, out_features=4, bias=True)
+                (1): Linear(in_features=1, out_features=2, bias=True)
+                (2): Linear(in_features=2, out_features=3, bias=True)
+            )
+
+        """
         if not isinstance(module, Module):
             raise AssertionError(f"module should be of type: {Module}")
         n = len(self._modules)
@@ -268,6 +299,26 @@ class Sequential(Module):
         return self
 
     def extend(self, sequential) -> Self:
+        """
+        Extends the current Sequential container with layers from another Sequential container.
+
+        Args:
+            sequential (Sequential): A Sequential container whose layers will be added to the current container.
+
+        Example::
+
+            >>> import torch.nn as nn
+            >>> n = nn.Sequential(nn.Linear(1, 2), nn.Linear(2, 3))
+            >>> other = nn.Sequential(nn.Linear(3, 4), nn.Linear(4, 5))
+            >>> n.extend(other) # or `n + other`
+            Sequential(
+                (0): Linear(in_features=1, out_features=2, bias=True)
+                (1): Linear(in_features=2, out_features=3, bias=True)
+                (2): Linear(in_features=3, out_features=4, bias=True)
+                (3): Linear(in_features=4, out_features=5, bias=True)
+            )
+
+        """
         for layer in sequential:
             self.append(layer)
         return self

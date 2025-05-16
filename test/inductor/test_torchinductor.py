@@ -862,7 +862,7 @@ def skip_if_not_triton(fn):
 def skip_if_dynamic(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
-        if ifdynstaticdefault(True, False) or torch._dynamo.config.dynamic_shapes:
+        if ifdynstaticdefault(True, False):
             raise unittest.SkipTest("associtaive_scan doesn's support lifted SymInts.")
         return fn(self, *args, **kwargs)
 
@@ -2558,6 +2558,18 @@ class CommonTemplate:
 
         self.common(fn, (torch.ones(32, 32) * 70,))
 
+    @skip_if_halide
+    @xfail_if_mps
+    def test_cummin(self):
+        def fn(x):
+            return x.cummin(0)
+
+        self.common(
+            fn, (torch.rand(16, 32),), check_lowp=not is_halide_backend(self.device)
+        )
+        self.common(fn, (torch.rand(1),), check_lowp=not is_halide_backend(self.device))
+        self.common(fn, (torch.rand(0),), check_lowp=not is_halide_backend(self.device))
+
     def test_cumsum(self):
         def fn(x):
             return x.cumsum(0), x.cumsum(1)
@@ -3192,7 +3204,6 @@ class CommonTemplate:
             (torch.ones([8, 8], dtype=torch.bool), torch.randint(-100, -1, [8, 8])),
         )
 
-    @xfail_if_mps  # 100% of results are wrong
     @skip_if_triton_cpu  # divide by zero; cannot xfail because it crashes process
     def test_div7(self):
         def fn(a, b):
@@ -8813,6 +8824,39 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue((d < 1).all())
 
     @config.patch(implicit_fallbacks=True)
+    def test_needs_contiguous_strides(self):
+        # Construct a custom op whose output strides are not contiguous
+        @torch.library.custom_op("mylib::myop", mutates_args={})
+        def myop(x: torch.Tensor) -> torch.Tensor:
+            return torch.zeros(2, 2).t()
+
+        @myop.register_fake
+        def _(x):
+            return torch.zeros(2, 2).t()
+
+        # custom op that needs contiguous inputs
+        @torch.library.custom_op(
+            "mylib::second_op",
+            mutates_args={},
+            tags=[torch._C.Tag.needs_contiguous_strides],
+        )
+        def second_op(x: torch.Tensor) -> torch.Tensor:
+            assert x.is_contiguous()
+            return torch.ones(2, 2)
+
+        @second_op.register_fake
+        def _(x):
+            return torch.ones(2, 2)
+
+        def f(x):
+            y = myop(x)
+            return second_op(y)
+
+        # Check that the x.is_contiguous() assertion never gets triggered
+        x = torch.randn(2, 2)
+        _ = torch.compile(f, backend="inductor", fullgraph=True)(x)
+
+    @config.patch(implicit_fallbacks=True)
     def test_fallback_mutable_op_basic(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
 
@@ -11545,6 +11589,35 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 check_lowp=False,
             )
 
+    @requires_gpu()
+    @skip_if_gpu_halide
+    @skip_if_not_triton
+    def test_searchsorted_broadcast(self):
+        def fn(sorted_sequence, values):
+            return (
+                torch.searchsorted(
+                    sorted_sequence,
+                    values,
+                )
+                .unsqueeze(-1)
+                .expand(-1, 64)
+                .contiguous()
+            )
+
+        unsorted_sequence = torch.rand((32,))
+        sorted_sequence, sorting_indices = torch.sort(unsorted_sequence)
+        values = torch.rand((64,))
+
+        self.common(fn, (sorted_sequence, values), check_lowp=False)
+        cfn = torch.compile(fn)
+        _, code = run_and_get_code(
+            cfn, sorted_sequence.to(GPU_TYPE), values.to(GPU_TYPE)
+        )
+
+        # make sure that we did not fuse the broadcast and the bucketize,
+        # because bucketize is computationally expensive.
+        FileCheck().check("def triton").check("def triton").run(code[0])
+
     @parametrize("nd_tiling", (False, True))
     def test_bucketize(self, nd_tiling: bool):
         def fn(input, boundaries, out_int32, right):
@@ -11617,6 +11690,29 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         offsets = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9]) - 0.01
 
         self.common(fn, (inp, offsets), check_lowp=False)
+
+    @requires_gpu()
+    @skip_if_gpu_halide
+    @skip_if_not_triton
+    def test_bucketize_broadcast(self):
+        def fn(input, boundaries):
+            return (
+                torch.bucketize(input, boundaries)
+                .unsqueeze(-1)
+                .expand(-1, -1, 64)
+                .contiguous()
+            )
+
+        inp = torch.rand((64, 64)) * 2 - 1
+        boundaries = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+
+        self.common(fn, (inp, boundaries), check_lowp=False)
+        cfn = torch.compile(fn)
+        _, code = run_and_get_code(cfn, inp.to(GPU_TYPE), boundaries.to(GPU_TYPE))
+
+        # make sure that we did not fuse the broadcast and the bucketize,
+        # because bucketize is computationally expensive.
+        FileCheck().check("def triton").check("def triton").run(code[0])
 
     @requires_gpu()
     @config.patch(assume_aligned_inputs=False)
@@ -12651,7 +12747,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue((actual == 1).all())
 
     @skip_if_gpu_halide
-    @xfail_if_mps  # Inductor syntax error
     def test_pattern_matcher_multi_user(self):
         # Reproducer for https://github.com/pytorch/pytorch/issues/129685
 
@@ -12663,6 +12758,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         a = torch.randn(512, 4096, requires_grad=True)
         b = torch.randint(size=(512,), low=0, high=4095)
+
+        if self.device == "mps" and MACOS_VERSION < 13.3:
+            raise unittest.SkipTest("Fails with internal compiler error on MacOS-13")
 
         self.common(forward, (a, b))
 
@@ -12713,7 +12811,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         b = torch.randn(2, 1, requires_grad=True)
         self.common(forward, (a, b))
 
-    @xfail_if_mps
     @config.patch(implicit_fallbacks=True)
     def test_weight_norm_bwd(self):
         """
@@ -13193,6 +13290,30 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     fn_compiled(inps)
 
                 assert len(inps) == 0
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_pad_dynamic(self):
+        def get_same_padding(x: int, k: int, s: int, d: int):
+            return max((math.ceil(x / s) - 1) * s + (k - 1) * d + 1 - x, 0)
+
+        def pad_same(x, k, s, d=(1, 1), value=0):
+            ih, iw = x.size()[-2:]
+            pad_h, pad_w = get_same_padding(ih, k[0], s[0], d[0]), get_same_padding(
+                iw, k[1], s[1], d[1]
+            )
+            if pad_h > 0 or pad_w > 0:
+                x = torch.nn.functional.pad(
+                    x,
+                    [pad_w // 2, pad_w - pad_w // 2, pad_h // 2, pad_h - pad_h // 2],
+                    value=value,
+                )
+            return x
+
+        x = torch.randn(2, 24, 110, 110, device=self.device)
+        opt = torch.compile(pad_same, dynamic=True)
+        res = opt(x, (5, 5), (2, 2))
+        ref = pad_same(x, (5, 5), (2, 2))
+        self.assertEqual(res, ref, atol=0, rtol=0)
 
     def test_remove_noop_view_default(self):
         def f(x):

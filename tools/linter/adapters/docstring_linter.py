@@ -8,7 +8,7 @@ import token
 from enum import Enum
 from functools import cached_property, total_ordering
 from pathlib import Path
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 from typing_extensions import Self
 
 
@@ -34,10 +34,15 @@ MAX_LINES = {"class": 100, "def": 80}
 
 MIN_DOCSTRING = 50  # docstrings shorter than this are too short
 
-ERROR_FMT = "Every {type} with more than {length} lines needs a docstring"
+DESCRIPTION = """
+`docstring_linter` reports on long functions, methods or classes without docstrings
+""".strip()
 
-DESCRIPTION = """`docstring_linter` reports on long functions, methods or classes
-without docstrings"""
+METHOD_OVERRIDE_HINT = (
+    "If the method overrides a method on a parent class, adding the"
+    " `@typing_extensions.override` decorator will make this error"
+    " go away."
+)
 
 
 @total_ordering
@@ -87,7 +92,7 @@ class Block:
     is_method: bool = dc.field(default=False, repr=False)
 
     # A block index to the parent of this block, or None for a top-level block.
-    parent: int | None = None
+    parent: Optional[int] = None
 
     # A list of block indexes for the children
     children: list[int] = dc.field(default_factory=list)
@@ -114,9 +119,25 @@ class Block:
         ending = "" if self.is_class else "()"
         return f"{self.category.value} {self.full_name}{ending}"
 
+    @cached_property
+    def decorators(self) -> list[str]:
+        """A list of decorators for this function or method.
+
+        Each decorator both the @ symbol and any arguments to the decorator
+        but no extra whitespace.
+        """
+        return _get_decorators(self.tokens, self.begin)
+
+    @cached_property
+    def is_override(self) -> bool:
+        return not self.is_class and any(
+            d.rpartition(".")[2] == "override" for d in self.decorators
+        )
+
     DATA_FIELDS = (
         "category",
         "children",
+        "decorators",
         "display_name",
         "docstring",
         "full_name",
@@ -150,6 +171,33 @@ class Block:
     def __lt__(self, o: Self) -> bool:
         assert isinstance(o, Block) and o.tokens is self.tokens
         return o.index < self.index
+
+
+_IGNORE = {token.COMMENT, token.DEDENT, token.INDENT, token.NL}
+
+
+def _get_decorators(tokens: Sequence[TokenInfo], block_start: int) -> list[str]:
+    def decorators() -> Iterator[str]:
+        rev = reversed(range(block_start))
+        newlines = (i for i in rev if tokens[i].type == token.NEWLINE)
+        newlines = itertools.chain(newlines, [-1])  # To account for the first line
+
+        it = iter(newlines)
+        end = next(it, -1)  # Like itertools.pairwise in Python 3.10
+        for begin in it:
+            for i in range(begin + 1, end):
+                t = tokens[i]
+                if t.type == token.OP and t.string == "@":
+                    useful = (t for t in tokens[i:end] if t.type not in _IGNORE)
+                    yield "".join(s.string.strip("\n") for s in useful)
+                    break
+                elif t.type not in _IGNORE:
+                    return  # A statement means no more decorators
+            end = begin
+
+    out = list(decorators())
+    out.reverse()
+    return out
 
 
 class DocstringFile(_linter.PythonFile):
@@ -337,9 +385,13 @@ class DocstringLinter(_linter.FileLinter[DocstringFile]):
         def_name = "function" if b.category == "def" else "class"
         msg = f"docstring found for {def_name} '{b.name}' ({b.line_count} lines)"
         if len(b.docstring):
-            msg = msg + f" was too short ({len(b.docstring)} characters)"
+            s = "" if len(b.docstring) == 1 else "s"
+            needed = f"needed {self.args.min_docstring}"
+            msg = f"{msg} was too short ({len(b.docstring)} character{s}, {needed})"
         else:
-            msg = "No " + msg
+            msg = f"No {msg}"
+            if b.is_method:
+                msg = f"{msg}. {METHOD_OVERRIDE_HINT}"
         return _linter.LintResult(msg, *df.tokens[b.begin].start)
 
     def _display(

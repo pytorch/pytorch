@@ -159,7 +159,7 @@ template <>
 struct VecConvert<int32_t, 1, float, 1> {
   static inline VectorizedN<int32_t, 1> apply(
       const VectorizedN<float, 1>& src) {
-    return  Vectorized<int32_t>(_mm512_cvttps_epi32(src[0]));
+    return Vectorized<int32_t>(_mm512_cvttps_epi32(src[0]));
   }
 };
 
@@ -167,7 +167,7 @@ template <>
 struct VecConvert<float, 1, int32_t, 1> {
   static inline VectorizedN<float, 1> apply(
       const VectorizedN<int32_t, 1>& src) {
-    return  Vectorized<float>(_mm512_cvtepi32_ps(src[0]));
+    return Vectorized<float>(_mm512_cvtepi32_ps(src[0]));
   }
 };
 
@@ -220,13 +220,15 @@ struct VecConvert<
     1,
     float,
     2,
-    typename std::enable_if_t<is_8bit_integer_v<dst_t>,
-        void>> {
+    typename std::enable_if_t<is_8bit_integer_v<dst_t>, void>> {
   static inline VectorizedN<dst_t, 1> apply(const VectorizedN<float, 2>& src) {
     at::vec::Vectorized<dst_t> vec1 = convert_float_to_int8<dst_t>(src[0]);
     at::vec::Vectorized<dst_t> vec2 = convert_float_to_int8<dst_t>(src[1]);
     __m128 lane2 = _mm512_castps512_ps128(_mm512_castsi512_ps(vec2));
-    __m512 result = _mm512_insertf32x4(_mm512_castsi512_ps(vec1), lane2, 1); // Insert lane2 into the second 128-bit lane
+    __m512 result = _mm512_insertf32x4(
+        _mm512_castsi512_ps(vec1),
+        lane2,
+        1); // Insert lane2 into the second 128-bit lane
     return at::vec::Vectorized<dst_t>(_mm512_castps_si512(result));
   }
 };
@@ -237,8 +239,7 @@ struct VecConvert<
     1,
     float,
     1,
-    typename std::enable_if_t<is_8bit_integer_v<dst_t>,
-        void>> {
+    typename std::enable_if_t<is_8bit_integer_v<dst_t>, void>> {
   static inline VectorizedN<dst_t, 1> apply(const VectorizedN<float, 1>& src) {
     return convert_float_to_int8<dst_t>(src[0]);
   }
@@ -250,15 +251,15 @@ struct VecConvert<
     2,
     src_t,
     1,
-    typename std::enable_if_t<is_8bit_integer_v<src_t>,
-        void>> {
+    typename std::enable_if_t<is_8bit_integer_v<src_t>, void>> {
   static inline VectorizedN<float, 2> apply(const VectorizedN<src_t, 1>& src) {
-    __m512i src2 = _mm512_castsi128_si512(
-      _mm_castps_si128(
-        _mm512_extractf32x4_ps(_mm512_castsi512_ps(src[0]), 1) // Extract the second 128-bit lane
-      )
-    );
-    return VectorizedN<float, 2>(convert_int8_to_float<src_t>(src[0]), convert_int8_to_float<src_t>(src2));
+    __m512i src2 =
+        _mm512_castsi128_si512(_mm_castps_si128(_mm512_extractf32x4_ps(
+            _mm512_castsi512_ps(src[0]), 1) // Extract the second 128-bit lane
+                                                ));
+    return VectorizedN<float, 2>(
+        convert_int8_to_float<src_t>(src[0]),
+        convert_int8_to_float<src_t>(src2));
   }
 };
 
@@ -268,8 +269,7 @@ struct VecConvert<
     1,
     src_t,
     1,
-    typename std::enable_if_t<is_8bit_integer_v<src_t>,
-        void>> {
+    typename std::enable_if_t<is_8bit_integer_v<src_t>, void>> {
   static inline VectorizedN<float, 1> apply(const VectorizedN<src_t, 1>& src) {
     return convert_int8_to_float<src_t>(src[0]);
   }
@@ -282,8 +282,7 @@ struct VecConvert<
     int64_t,
     2,
     std::enable_if_t<
-        std::is_same_v<dst_t, int8_t> ||
-        std::is_same_v<dst_t, uint8_t>>> {
+        std::is_same_v<dst_t, int8_t> || std::is_same_v<dst_t, uint8_t>>> {
   static inline VectorizedN<dst_t, 1> apply(
       const VectorizedN<int64_t, 2>& src) {
     return VecConvert<dst_t, 1, int32_t, 1>::apply(

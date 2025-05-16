@@ -312,6 +312,26 @@ class AotEagerAndRecordGraphs:
         )
 
 
+class InductorAndRecordGraphs:
+    def __init__(self) -> None:
+        self.graphs: list[torch.fx.GraphModule] = []
+        self.inductor_graphs: list[torch.fx.GraphModule] = []
+
+    def __call__(self, gm, example_inputs):  # type: ignore[no-untyped-def]
+        import torch._inductor.compile_fx as compile_fx_mod
+
+        self.graphs.append(gm)
+
+        old_compile_fx_inner = compile_fx_mod._compile_fx_inner
+
+        def patched(*args, **kwargs):  # type: ignore[no-untyped-def]
+            self.inductor_graphs.append(args[0])
+            return old_compile_fx_inner(*args, **kwargs)
+
+        with patch.object(compile_fx_mod, "_compile_fx_inner", new=patched):
+            return compile_fx_mod.compile_fx(gm, example_inputs)
+
+
 def strip_comment(code: str) -> str:
     return re.sub(r"(?m)^ *#.*\n?", "", code)
 

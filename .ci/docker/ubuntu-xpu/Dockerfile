@@ -28,7 +28,6 @@ RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 
 # Install conda and other packages (e.g., numpy, pytest)
 ARG ANACONDA_PYTHON_VERSION
-ARG CONDA_CMAKE
 ARG DOCS
 ARG BUILD_ENVIRONMENT
 ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
@@ -83,12 +82,6 @@ COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_
 RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
 RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
 ENV INSTALLED_VISION ${VISION}
-
-# (optional) Install non-default CMake version
-ARG CMAKE_VERSION
-COPY ./common/install_cmake.sh install_cmake.sh
-RUN if [ -n "${CMAKE_VERSION}" ]; then bash ./install_cmake.sh; fi
-RUN rm install_cmake.sh
 
 # (optional) Install non-default Ninja version
 ARG NINJA_VERSION

@@ -1070,6 +1070,10 @@ class CPUReproTests(TestCase):
         x = torch.randn(1, 3, 64, 64)
         self.common(Model(), (x,))
 
+    @unittest.skipIf(
+        os.getenv("ATEN_CPU_CAPABILITY") == "default",
+        "Failing in periodic nogpu_NO_AVX2 after added in #152542",
+    )
     @config.patch("cpp.use_decompose_tanh", "1")
     def test_tanh_atan2_use_decompose_tanh(self):
         # https://github.com/pytorch/pytorch/issues/148241

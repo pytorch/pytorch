@@ -731,8 +731,10 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, list[int], int
             "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
         )
         # TODO: it should run collective in the whole mesh instead of dim 0
-        tag, rankset, _ = group._dim_group_infos[0]
+        pg = group.get_group()
+        rankset = dist.get_process_group_ranks(pg)
         group_size = len(rankset)
+        tag = tag or c10d._get_group_tag(pg)
     elif isinstance(group, tuple):
         if (
             len(group) == 2
@@ -741,8 +743,10 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, list[int], int
         ):
             dmesh = group[0]
             dim = group[1]
-            tag, rankset, _ = dmesh._dim_group_infos[dim]
+            pg = dmesh.get_group(dim)
+            rankset = dist.get_process_group_ranks(pg)
             group_size = len(rankset)
+            tag = tag or c10d._get_group_tag(pg)
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
     else:
@@ -767,7 +771,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
         assert group.ndim == 1, (
             "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
         )
-        return group._dim_group_infos[0][2]
+        return group._dim_group_names[0]
     elif isinstance(group, tuple):
         if (
             len(group) == 2
@@ -776,7 +780,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
         ):
             dmesh = group[0]
             dim = group[1]
-            return dmesh._dim_group_infos[dim][2]
+            return dmesh._dim_group_names[dim]
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
     elif isinstance(group, list):

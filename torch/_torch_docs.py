@@ -792,13 +792,19 @@ Example::
 add_docstr(
     torch.all,
     r"""
-all(input: Tensor) -> Tensor
+all(input: Tensor, *, out=None) -> Tensor
 
 Tests if all elements in :attr:`input` evaluate to `True`.
 
 .. note:: This function matches the behaviour of NumPy in returning
           output of dtype `bool` for all supported dtypes except `uint8`.
           For `uint8` the dtype of output is `uint8` itself.
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -854,6 +860,12 @@ Tests if any element in :attr:`input` evaluates to `True`.
 .. note:: This function matches the behaviour of NumPy in returning
           output of dtype `bool` for all supported dtypes except `uint8`.
           For `uint8` the dtype of output is `uint8` itself.
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -6488,12 +6500,15 @@ Alias for :func:`torch.linalg.matrix_exp`.
 add_docstr(
     torch.max,
     r"""
-max(input) -> Tensor
+max(input, *, out=None) -> Tensor
 
 Returns the maximum value of all elements in the ``input`` tensor.
 
 Args:
     {input}
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -7103,12 +7118,15 @@ Example::
 add_docstr(
     torch.min,
     r"""
-min(input) -> Tensor
+min(input, *, out=None) -> Tensor
 
 Returns the minimum value of all elements in the :attr:`input` tensor.
 
 Args:
     {input}
+
+Keyword args:
+    {out}
 
 Example::
 

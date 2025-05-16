@@ -133,4 +133,49 @@ TEST(tryToTest, Double) {
   EXPECT_FALSE(c10::tryToNumber<double>(nullptr).has_value());
 }
 } // namespace test_try_to
+
+namespace test_split {
+TEST(SplitTest, NormalCase) {
+  std::string str = "torch.ops.aten.linear";
+  auto result = c10::split(str, '.');
+  ASSERT_EQ(4, result.size());
+  EXPECT_EQ("torch", result[0]);
+  EXPECT_EQ("ops", result[1]);
+  EXPECT_EQ("aten", result[2]);
+  EXPECT_EQ("linear", result[3]);
+}
+TEST(SplitTest, EmptyString) {
+  auto result = c10::split("", '.');
+  EXPECT_TRUE(result.empty());
+}
+TEST(SplitTest, NoDelimiter) {
+  std::string str = "single";
+  auto result = c10::split(str, '.');
+  ASSERT_EQ(1, result.size());
+  EXPECT_EQ("single", result[0]);
+}
+TEST(SplitTest, ConsecutiveDelimiters) {
+  std::string str = "atom1..atom2";
+  auto result = c10::split(str, '.');
+  ASSERT_EQ(3, result.size());
+  EXPECT_EQ("atom1", result[0]);
+  EXPECT_EQ("", result[1]);
+  EXPECT_EQ("atom2", result[2]);
+}
+} // namespace test_split
+
+namespace test_str_enum {
+TEST(StringUtilTest, testStrEnum) {
+  enum class Foo { Bar = 1, Baz = 2 };
+  EXPECT_EQ(c10::str(Foo::Baz, Foo::Bar), "21");
+
+  enum UnscopedEnum { Bar2 = 1, Baz2 = 2 };
+  EXPECT_EQ(c10::str(Baz2, Bar2), "21");
+
+  static_assert(c10::detail::Streamable<int>::value);
+  static_assert(!c10::detail::Streamable<Foo>::value);
+
+  static_assert(c10::detail::Streamable<UnscopedEnum>::value);
+}
+} // namespace test_str_enum
 } // namespace

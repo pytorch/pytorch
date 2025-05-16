@@ -7,6 +7,9 @@
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
+#elif defined(USE_ROCM)
+#include <c10/hip/HIPException.h>
+#include <hip/hip_runtime_api.h>
 #endif
 
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemoryUtils.hpp>
@@ -66,17 +69,26 @@ void IpcChannel::send_fd(int dst_pid, int fd) {
   // Because file descriptors are process-local kernel objects, and we can’t
   // pass them via normal socket payloads (like write() or send()).  Unix domain
   // sockets provide a mechanism to pass actual FDs via sendmsg()/recvmsg().
+  // Define destination socket address
   struct sockaddr_un addr = {.sun_family = AF_UNIX};
   auto socket_name = get_socket_name(dst_pid);
   std::copy(socket_name.begin(), socket_name.end(), addr.sun_path);
 
+  // Prepare data to send
+  // Data being sent is "fd", the value of fd will be sent as auxiliary data
+  // (control message)
   struct iovec io = {.iov_base = (void*)("fd"), .iov_len = 2};
 
+  // Prepare control message data buffer and zero it out
   // NOLINTNEXTLINE(*array*)
   char cbuf[CMSG_SPACE(sizeof(int))];
   memset(cbuf, 0, sizeof(cbuf));
 
+  // Create message header
   struct msghdr msg {
+    // destination socket address and size of it
+    // message content in msg_iov and number of such structs (1 in our case)
+    // auxiliary data with the value of fd and size of it
     .msg_name = (void*)&addr, .msg_namelen = sizeof(struct sockaddr_un),
     .msg_iov = &io, .msg_iovlen = 1, .msg_control = cbuf,
     .msg_controllen = sizeof(cbuf)
@@ -87,7 +99,9 @@ void IpcChannel::send_fd(int dst_pid, int fd) {
   // descriptors.
   auto cmsg = CMSG_FIRSTHDR(&msg);
   cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+  // Specify socket level message
   cmsg->cmsg_level = SOL_SOCKET;
+  // SCM_RIGHTS is the type used to pass file descriptors
   cmsg->cmsg_type = SCM_RIGHTS;
 
   if (fd != -1) {
@@ -99,6 +113,7 @@ void IpcChannel::send_fd(int dst_pid, int fd) {
     msg.msg_controllen = 0;
   }
 
+  // Finally send the the message
   TORCH_CHECK(
       sendmsg(socket_, &msg, 0) > 0,
       "Failed to send fd: ",
@@ -106,20 +121,32 @@ void IpcChannel::send_fd(int dst_pid, int fd) {
 }
 
 int IpcChannel::recv_fd() {
+  // Prepare buffer for regular message "fd"
   // NOLINTNEXTLINE(*array*)
   char buf[2];
+  memset(&buf, 0, sizeof(buf));
   struct iovec io = {.iov_base = (void*)buf, .iov_len = sizeof(buf)};
 
+  // Prepare buffer for control message and zero it out
   // NOLINTNEXTLINE(*array*)
   char cbuf[CMSG_SPACE(sizeof(int))];
   memset(cbuf, 0, sizeof(cbuf));
 
+  // Define socket address to receive on: family AF_UNIX means unix domain
+  // socket
+  struct sockaddr_un addr = {.sun_family = AF_UNIX};
+  std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
+
+  // Prepare message header
   struct msghdr msg = {
+      .msg_name = (void*)&addr,
+      .msg_namelen = sizeof(struct sockaddr_un),
       .msg_iov = &io,
       .msg_iovlen = 1,
       .msg_control = cbuf,
       .msg_controllen = sizeof(cbuf)};
 
+  // Recieve message on socket_
   TORCH_CHECK(
       recvmsg(socket_, &msg, 0) > 0,
       "Failed to receive fd: ",
@@ -129,6 +156,7 @@ int IpcChannel::recv_fd() {
     return -1;
   }
 
+  // Extract control message and validate its content
   auto cmsg = CMSG_FIRSTHDR(&msg);
   TORCH_CHECK(cmsg != nullptr);
   TORCH_CHECK(cmsg->cmsg_len == CMSG_LEN(sizeof(int)));
@@ -207,6 +235,27 @@ void map_block(
   desc.location.id = static_cast<int>(device_idx);
   desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemSetAccess_(*dev_ptr, size, &desc, 1));
+#elif defined(USE_ROCM)
+  C10_HIP_CHECK(hipMemAddressReserve(ptr, size, 0ULL, 0, 0ULL));
+  C10_HIP_CHECK(hipMemMap(
+      *ptr,
+      size,
+      0,
+      reinterpret_cast<hipMemGenericAllocationHandle_t>(handle),
+      0ULL));
+  C10_HIP_CHECK(hipMemMap(
+      *ptr,
+      size,
+      0,
+      reinterpret_cast<hipMemGenericAllocationHandle_t>(handle),
+      0ULL));
+
+  hipMemAccessDesc desc;
+  desc.location.type = hipMemLocationTypeDevice;
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+  desc.location.id = static_cast<int>(device_idx);
+  desc.flags = hipMemAccessFlagsProtReadWrite;
+  C10_HIP_CHECK(hipMemSetAccess(*ptr, size, &desc, 1));
 #else
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");

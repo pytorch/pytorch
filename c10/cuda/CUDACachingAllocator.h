@@ -117,14 +117,16 @@ struct TraceEntry {
       cudaStream_t stream,
       MempoolId_t mempool,
       approx_time_t time,
-      std::shared_ptr<GatheredContext> context = nullptr)
+      std::shared_ptr<GatheredContext> context = nullptr,
+      std::string compile_context = "")
       : action_(action),
         device_(device),
         addr_(addr),
         context_(std::move(context)),
         stream_(stream),
         size_(size),
-        mempool_(std::move(mempool)) {
+        mempool_(std::move(mempool)),
+        compile_context_(std::move(compile_context)) {
     time_.approx_t_ = time;
   }
   Action action_;
@@ -135,6 +137,7 @@ struct TraceEntry {
   size_t size_;
   MempoolId_t mempool_;
   trace_time_ time_{};
+  std::string compile_context_{};
 };
 
 // Calls made by record_function will save annotations
@@ -284,6 +287,8 @@ class CUDAAllocator : public Allocator {
       bool clearHistory) = 0;
   virtual void recordAnnotation(
       const std::vector<std::pair<std::string, std::string>>& /*md*/) {}
+  virtual void pushCompileContext(std::string& md) {}
+  virtual void popCompileContext() {}
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
 
   // Attached AllocatorTraceTracker callbacks will be called while the
@@ -440,6 +445,14 @@ inline void recordHistory(
 inline void recordAnnotation(
     const std::vector<std::pair<std::string, std::string>>& md) {
   return get()->recordAnnotation(md);
+}
+
+inline void pushCompileContext(std::string& md) {
+  return get()->pushCompileContext(md);
+}
+
+inline void popCompileContext() {
+  return get()->popCompileContext();
 }
 
 inline bool isHistoryEnabled() {

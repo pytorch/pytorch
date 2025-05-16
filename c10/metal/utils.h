@@ -205,5 +205,21 @@ inline common_dtype<T, U> mul(const T x, const U y) {
   return T(x.x * y.x - x.y * y.y, x.x * y.y + x.y * y.x);
 }
 
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<!is_complex_v<T>, bool> = true>
+inline common_dtype<T, U> div(const T x, const U y) {
+  return x / y;
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<is_complex_v<T> && is_complex_v<U>, bool> = true>
+inline common_dtype<T, U> div(const T x, const U y) {
+  return T(::metal::dot(x, y), x.y * y.x - x.x * y.y) / ::metal::dot(y, y);
+}
+
 } // namespace metal
 } // namespace c10

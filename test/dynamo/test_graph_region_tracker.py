@@ -49,6 +49,10 @@ class GraphRegionTrackerTests(TestCase):
         region_groups = tree_map(lambda n: n.name, region_groups)
         return str(region_groups)
 
+    def get_mutation_tracking(self, fn, *args, **kwargs):
+        _, region_tracker = extract_graph_and_tracker(fn, *args, **kwargs)
+        return str(region_tracker.node_to_mutated_arg_positions)
+
     def test_get_regions_single_region_group(self):
         def inner_fn(x, y):
             x0 = x + 1
@@ -57,12 +61,12 @@ class GraphRegionTrackerTests(TestCase):
             return z
 
         def fn(x, y):
-            _o0 = inner_fn(x, y)
+            o0 = inner_fn(x, y)
             o1 = torch.sin(y)
             o2 = inner_fn(x, o1)
             o3 = inner_fn(x, y)
             o4 = o3 * o3
-            return o2 * o4
+            return o2 * o4 + o0
 
         self.assertExpectedInline(
             self.get_result(
@@ -294,6 +298,45 @@ class GraphRegionTrackerTests(TestCase):
                     """[[['x1_2', 'y1_2', 'sum_3', 'o0'], ['x1_3', 'y1_3', 'sum_4', 'o2']], \
 [['x1', 'y1', 'sum_1', 'o4'], ['x1_1', 'y1_1', 'sum_2', 'o5']]]""",
                 )
+
+    def test_mutation_tracking_simple(self):
+        def fn(x, y, z):
+            x0 = torch.sin(x)
+            y0 = torch.cos(y)
+            z.sin_()
+            y0.add_(z)
+            return x0.sum() + y0.sum()
+
+        self.assertExpectedInline(
+            self.get_mutation_tracking(
+                fn,
+                torch.rand(10, 10),
+                torch.rand(10, 20),
+                torch.ones(10, 20),
+            ),
+            """{sin_: OrderedSet([0]), add_: OrderedSet([0])}""",
+        )
+
+    def test_mutation_tracking_allow_in_graph(self):
+        @torch._dynamo.allow_in_graph
+        def fn_mut(x, y):
+            x.add_(y)
+            return x.sum() + y.sum()
+
+        def fn(x, y):
+            z = x + y
+            o0 = fn_mut(z, y)
+            z.sin_()
+            return x + o0
+
+        self.assertExpectedInline(
+            self.get_mutation_tracking(
+                fn,
+                torch.rand(20, 10),
+                torch.rand(20, 10),
+            ),
+            """{o0: OrderedSet([0]), sin_: OrderedSet([0])}""",
+        )
 
 
 if __name__ == "__main__":

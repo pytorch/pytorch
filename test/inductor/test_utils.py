@@ -3,8 +3,10 @@
 from sympy import Symbol, sympify
 
 import torch
+from torch._inductor.fx_utils import count_flops_fx, countable_fx
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import sympy_str, sympy_subs
+from torch._inductor.virtualized import V
 
 
 class TestUtils(TestCase):
@@ -80,6 +82,111 @@ class TestUtils(TestCase):
         self.assertEqual(sympy_str(sympify("-a")), "-a")
         self.assertEqual(sympy_str(sympify("a-b")), "a - b")
         self.assertEqual(sympy_str(sympify("a+-b")), "a - b")
+
+    def test_flops_fx(self):
+        def create_fx_node(
+            aten: torch._ops.OpOverloadPacket, args, kwargs
+        ) -> tuple[torch.fx.Node, torch.fx.Node]:
+            node1 = torch.fx.Node(
+                graph=torch.fx.Graph(),
+                name="",
+                op="call_function",
+                target=aten,
+                args=args,
+                kwargs=kwargs,
+            )
+            name: str = aten.overloads()[0]
+            op_overload: torch._ops.OpOverload = getattr(aten, name)
+            node2 = torch.fx.Node(
+                graph=torch.fx.Graph(),
+                name="",
+                op="call_function",
+                target=op_overload,
+                args=args,
+                kwargs=kwargs,
+            )
+            return node1, node2
+
+        with V.set_fake_mode(
+            torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+        ):
+            trues = [
+                (
+                    torch.ops.aten.addmm,
+                    (torch.Tensor(4, 4), torch.Tensor(4, 5), torch.Tensor(5, 4)),
+                    {},
+                ),
+                (
+                    torch.ops.aten.bmm,
+                    (torch.Tensor(10, 4, 5), torch.Tensor(10, 5, 4)),
+                    {},
+                ),
+                (torch.ops.aten.mm, (torch.Tensor(2, 3), torch.Tensor(3, 2)), {}),
+                (
+                    torch.ops.aten.convolution,
+                    (
+                        torch.Tensor(2, 3, 3),
+                        torch.Tensor(2, 2, 2),
+                        torch.Tensor(2),
+                        (1, 1),
+                        (0, 0),
+                        (1, 1),
+                        True,
+                        (0, 0),
+                        1,
+                    ),
+                    {},
+                ),
+                (
+                    torch.ops.aten._convolution,
+                    (
+                        torch.Tensor(2, 2, 2),
+                        torch.Tensor(2, 2, 2),
+                        torch.Tensor(2),
+                        (1,),
+                        (0,),
+                        (1,),
+                        True,
+                        (0,),
+                        1,
+                        False,
+                        True,
+                        False,
+                    ),
+                    {},
+                ),
+            ]
+            # we don't support pointwise ops
+            falses = [
+                (
+                    torch.ops.aten.add,
+                    (torch.Tensor(1, 2, 3), torch.Tensor(1, 2, 3)),
+                    {},
+                ),
+                (
+                    torch.ops.aten.mul,
+                    (torch.Tensor(1, 2, 3), torch.Tensor(1, 2, 3)),
+                    {},
+                ),
+            ]
+            for t, args, kwargs in trues:
+                fx_node_1, fx_node_2 = create_fx_node(t, args, kwargs)
+                self.assertTrue(
+                    countable_fx(fx_node_1), f"Expected true {t}: {fx_node_1}"
+                )
+                self.assertTrue(
+                    countable_fx(fx_node_2), f"Expected true {t}: {fx_node_2}"
+                )
+                self.assertNotEqual(count_flops_fx(fx_node_1), None)
+                self.assertNotEqual(count_flops_fx(fx_node_2), None)
+            for f, args, kwargs in falses:
+                fx_node_1, fx_node_2 = create_fx_node(f, args, kwargs)
+                self.assertFalse(
+                    countable_fx(fx_node_1), f"Expected false {f}: {fx_node_1}"
+                )
+                self.assertFalse(
+                    countable_fx(fx_node_2), f"Expected false {f}: {fx_node_2}"
+                )
 
 
 if __name__ == "__main__":

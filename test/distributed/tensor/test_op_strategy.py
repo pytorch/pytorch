@@ -3,15 +3,9 @@
 from itertools import chain
 
 import torch
-from torch.distributed._tensor import DeviceMesh, DTensor
-from torch.distributed._tensor.placement_types import (
-    DTensorSpec,
-    Partial,
-    Replicate,
-    Shard,
-    TensorMeta,
-)
+from torch.distributed.tensor import DeviceMesh, DTensor, Partial, Replicate, Shard
 from torch.distributed.tensor._collective_utils import redistribute_cost
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpSchema, OpStrategy, PlacementStrategy
 from torch.distributed.tensor._ops._einsum_strategy import (
     EinsumDims,

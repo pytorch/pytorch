@@ -448,7 +448,7 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
   at::Tensor output = kSpatialDim == 2
       ? at::_empty_affine_quantized(
             output_shape,
-            device(c10::kCPU)
+            at::device(c10::kCPU)
                 .dtype(c10::kQUInt8)
                 .memory_format(c10::MemoryFormat::ChannelsLast),
             output_scale,
@@ -460,7 +460,7 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
             output_shape[2],
             output_shape[3],
             output_shape[4],
-            device(c10::kCPU).dtype(c10::kQUInt8),
+            at::device(c10::kCPU).dtype(c10::kQUInt8),
             output_scale,
             output_zero_point);
   at::Tensor buffer =
@@ -1225,7 +1225,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
   ideep::dims dst_dims = ideep::dims({output_sizes.cbegin(), output_sizes.cend()});
   at::Tensor output = at::_empty_affine_quantized(
       dst_dims,
-      device(c10::kCPU)
+      at::device(c10::kCPU)
           .dtype(c10::kQUInt8)
           .memory_format(kSpatialDim == 2 ?
               c10::MemoryFormat::ChannelsLast :
@@ -1593,7 +1593,7 @@ static at::Tensor _quantized_convolution_onednn(
     accum.value() :
     at::empty(
       dst_dims,
-      device(c10::kCPU)
+      at::device(c10::kCPU)
           .dtype(fp32_output ? c10::kFloat : (bfloat16_output ? c10::kBFloat16 : c10::kByte))
           .memory_format(kSpatialDim == 2 ?
               c10::MemoryFormat::ChannelsLast :
