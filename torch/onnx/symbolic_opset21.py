@@ -7,18 +7,6 @@ Note [ONNX Operators that are added/updated in opset 20]
 https://github.com/onnx/onnx/blob/main/docs/Changelog.md#version-20-of-the-default-onnx-operator-set
 New operators:
     AffineGrid
-    ConstantOfShape
-    DFT
-    Gelu
-    GridSample
-    ImageDecoder
-    IsInf
-    IsNaN
-    ReduceMax
-    ReduceMin
-    RegexFullMatch
-    StringConcat
-    StringSplit
 """
 
 import functools
@@ -70,23 +58,3 @@ def _grid_sampler(
     )
 
 
-# @_onnx_symbolic("aten::affine_grid_generator")
-# @symbolic_helper.parse_args("v", "v", "b")
-# def _affine_grid_generator(
-#     g: jit_utils.GraphContext,
-#     theta: _C.Value,
-#     size: _C.Value,
-#     align_corners: bool,
-# ):
-#     return g.op(
-#         "AffineGrid",
-#         theta,
-#         size,
-#         align_corners_i=int(align_corners),
-#     )
-
-
-# @_onnx_symbolic("aten::gelu")
-# @symbolic_helper.parse_args("v", "s")
-# def gelu(g: jit_utils.GraphContext, self: _C.Value, approximate: str = "none"):
-#     return g.op("Gelu", self, approximate_s=approximate)

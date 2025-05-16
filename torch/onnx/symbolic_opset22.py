@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
-"""This file exports ONNX ops for opset 20.
+"""This file exports ONNX ops for opset 22.
 
-Note [ONNX Operators that are added/updated in opset 20]
+Note [ONNX Operators that are added/updated in opset 22]
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-https://github.com/onnx/onnx/blob/main/docs/Changelog.md#version-20-of-the-default-onnx-operator-set
+https://github.com/onnx/onnx/blob/main/docs/Changelog.md#version-22-of-the-default-onnx-operator-set
 New operators:
 """
 
@@ -28,7 +28,7 @@ def convert_grid_sample_mode(mode_s):
     )
 
 
-_onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=21)
+_onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=22)
 
 
 @_onnx_symbolic("aten::grid_sampler")
@@ -57,23 +57,3 @@ def _grid_sampler(
     )
 
 
-# @_onnx_symbolic("aten::affine_grid_generator")
-# @symbolic_helper.parse_args("v", "v", "b")
-# def _affine_grid_generator(
-#     g: jit_utils.GraphContext,
-#     theta: _C.Value,
-#     size: _C.Value,
-#     align_corners: bool,
-# ):
-#     return g.op(
-#         "AffineGrid",
-#         theta,
-#         size,
-#         align_corners_i=int(align_corners),
-#     )
-
-
-# @_onnx_symbolic("aten::gelu")
-# @symbolic_helper.parse_args("v", "s")
-# def gelu(g: jit_utils.GraphContext, self: _C.Value, approximate: str = "none"):
-#     return g.op("Gelu", self, approximate_s=approximate)
