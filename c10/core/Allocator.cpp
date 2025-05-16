@@ -20,6 +20,27 @@ void Allocator::default_copy_data(
   std::memcpy(dest, src, count);
 }
 
+void* Allocator::get_cpu_ptr_from_device_ptr(void* device_ptr) const {
+  return nullptr;
+}
+
+const void* Allocator::get_cpu_ptr_from_device_ptr(
+    const void* device_ptr) const {
+  return nullptr;
+}
+
+void* Allocator::get_device_ptr_from_cpu_ptr(void* cpu_ptr) const {
+  return nullptr;
+}
+
+const void* Allocator::get_device_ptr_from_cpu_ptr(const void* cpu_ptr) const {
+  return nullptr;
+}
+
+bool Allocator::has_unified_memory() const {
+  return false;
+}
+
 bool Allocator::is_simple_data_ptr(const DataPtr& data_ptr) const {
   return data_ptr.get() == data_ptr.get_context();
 }
