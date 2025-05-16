@@ -76,6 +76,7 @@ from torch.testing._internal.common_utils import (
     skipIfNoLapack,
     skipIfTorchDynamo,
     skipIfWindows,
+    skipIfXpu,
     slowTest,
     TestCase,
     xfailIfTorchDynamo,
@@ -7432,6 +7433,7 @@ for shape in [(1,), ()]:
 
     # PYTORCH_TEST_WITH_DYNAMO=1 test fails on CI but can't repro locally
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127115")
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_checkpointing_without_reentrant_dataparallel(self):
         """
         Verifies gradient correctness when checkpoint without reentrant autograd
