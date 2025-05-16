@@ -2448,7 +2448,7 @@ def compile(
 
 
 def compile(
-    model: _Optional[_Callable] = None,
+    model: _Optional[_Callable[_InputT, _RetT]] = None,
     *,
     fullgraph: builtins.bool = False,
     dynamic: _Optional[builtins.bool] = None,
@@ -2479,7 +2479,7 @@ def compile(
     function, they will all share the same code cache.
 
     Args:
-       model (Callable): Module/function to optimize
+       model (Callable or None): Module/function to optimize
        fullgraph (bool): If False (default), torch.compile attempts to discover compileable regions
         in the function that it will optimize. If True, then we require that the entire function be
         capturable into a single graph. If this is not possible (that is, if there are graph breaks),
