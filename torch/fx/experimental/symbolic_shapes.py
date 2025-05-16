@@ -2644,7 +2644,9 @@ class DimConstraints:
         # a fix for this issue, we delay raising such failures. See solve().
         if orig_reduced == sympy.false:
             self._inconsistencies.append(f"{orig_expr} is inconsistent!")
-        if isinstance(expr, sympy.Ne) or self._has_unsupported_sympy_function(expr):
+        if isinstance(
+            expr, (sympy.Ne, sympy.Or, sympy.And)
+        ) or self._has_unsupported_sympy_function(expr):
             # we're not going to do anything useful with these, so drop them
             return False
         free_symbols = expr.free_symbols
@@ -3540,6 +3542,8 @@ class ShapeEnv:
         # with something like effect token tracking.
         self.unbacked_alloc_order: dict[sympy.Symbol, int] = {}
 
+        self.specialization_stacks: dict[Source, traceback.StackSummary] = {}
+
         self.trace_asserts = trace_asserts
 
         from torch.fx.experimental.validator import translation_validation_enabled
@@ -3622,6 +3626,7 @@ class ShapeEnv:
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
             "_dde_suppressed",
+            "specialization_stacks",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -5157,10 +5162,16 @@ class ShapeEnv:
                     var_with_range = self._render_range_for_constraint_violation(
                         source, constraint
                     )
+                    user_stack = self.specialization_stacks.get(source, None)
                     msg = (
                         f"You marked {self._debug_name(source)} as dynamic but your code "
                         f"specialized it to be a constant ({val}). Either remove the mark_dynamic "
                         f"or use a less strict API such as maybe_mark_dynamic or Dim.AUTO."
+                        + (
+                            "\n\nUser stack:\n" + "".join(user_stack.format())
+                            if user_stack
+                            else ""
+                        )
                     )
                     record_constraint_violation(
                         constraint.warn_only, self._debug_name(source), msg
@@ -6369,6 +6380,10 @@ class ShapeEnv:
                 },
             )
 
+            for source in self.var_to_sources.get(a, []):
+                if user_tb:
+                    self.specialization_stacks[source] = user_tb
+
             if config.print_specializations:
                 self.log.warning(
                     "Specializing %s to %s", self.var_to_sources[a][0].name(), tgt
@@ -6731,9 +6746,10 @@ class ShapeEnv:
             if (lineno := instr.starts_line) is not None:
                 last_lineno = max(last_lineno, lineno)
             if isinstance(instr.argval, str) and instr.argval in frame.f_locals:
-                frame_locals[instr.argval] = pytree.tree_map(
-                    go, frame.f_locals[instr.argval]  # type: ignore[index]
-                )
+                flat_locals = pytree.tree_flatten(frame.f_locals[instr.argval])[0]
+                frame_locals[instr.argval] = [
+                    go(flat_local) for flat_local in flat_locals
+                ]
 
         # store LOC
         locs = co_lines[frame.f_lineno - offset : last_lineno + 1 - offset]

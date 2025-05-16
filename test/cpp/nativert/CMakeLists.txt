@@ -1,10 +1,12 @@
 set(NATIVERT_TEST_ROOT ${TORCH_ROOT}/test/cpp/nativert)
 
+file(GLOB_RECURSE NATIVERT_ALL_TEST_FILES "${NATIVERT_TEST_ROOT}/test_*.cpp")
+
 # Build the cpp gtest binary containing the cpp-only tests.
 set(NATIVERT_TEST_SRCS
-  ${NATIVERT_TEST_ROOT}/test_tensor_meta.cpp
-  ${NATIVERT_TEST_ROOT}/test_mpmc_queue.cpp
+  ${NATIVERT_ALL_TEST_FILES}
   ${TORCH_ROOT}/torch/nativert/graph/TensorMeta.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/PlacementUtils.cpp
 )
 
 add_executable(test_nativert
@@ -18,6 +20,7 @@ target_compile_definitions(test_nativert PRIVATE USE_GTEST)
 set(NATIVERT_TEST_DEPENDENCIES torch gtest)
 
 target_link_libraries(test_nativert PRIVATE ${NATIVERT_TEST_DEPENDENCIES})
+target_link_libraries(test_nativert PRIVATE fmt::fmt-header-only)
 target_include_directories(test_nativert PRIVATE ${ATen_CPU_INCLUDE})
 
 if(USE_CUDA)
