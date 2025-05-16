@@ -46,6 +46,7 @@ from torch.utils import _pytree as pytree
 from .. import graph_break_hints, variables
 from ..exc import (
     IncorrectUsage,
+    ObservedException,
     UncapturedHigherOrderOpError,
     unimplemented,
     unimplemented_v2,
@@ -72,7 +73,7 @@ def raise_hard_error_if_graph_break(reason):
         def graph_break_as_hard_error(*args, **kwargs):
             try:
                 return fn(*args, **kwargs)
-            except Unsupported as e:
+            except (Unsupported, ObservedException) as e:
                 msg = " Scroll up to find out what causes the graph break."
                 raise UncapturedHigherOrderOpError(reason + msg) from e
 
