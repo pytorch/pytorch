@@ -64,6 +64,7 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
 )
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.types import ConvertFrameReturn, FrameAction, FrameExecStrategy
+from torch._export.utils import _compiling_state_context
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
@@ -342,6 +343,19 @@ class OptimizedModule(torch.nn.Module):
             self._forward = self.forward
             self.forward = self._call_lazy_check
 
+    def __call__(self, *args, **kwargs):
+        if torch.nn.modules.module._has_any_global_hook():
+            warnings.warn(
+                "Using `torch.compile(module)` when there are global hooks on "
+                "modules (e.g., from `register_module_forward_hook`); this will"
+                " cause the hooks to fire an extra time for the "
+                "`OptimizedModule` created by `torch.compile(module)`. If this "
+                "causes undesired behavior, please try using `module.compile()`"
+                ", or use the per-module hooks instead",
+                stacklevel=2,
+            )
+        return super().__call__(*args, **kwargs)
+
     def __reduce__(self):
         return (self.__class__, (self._orig_mod, self.dynamo_ctx))
 
@@ -381,6 +395,15 @@ class OptimizedModule(torch.nn.Module):
         if name in OptimizedModule._opt_mod_attributes:
             return super().__setattr__(name, val)
         return setattr(self._orig_mod, name, val)
+
+    def __delattr__(self, name):
+        # This mirrors `__setattr__`
+        if hasattr(type(self), name):
+            return super().__delattr__(name)
+
+        if name in OptimizedModule._opt_mod_attributes:
+            return super().__delattr__(name)
+        return delattr(self._orig_mod, name)
 
     def _call_lazy_check(self, *args, **kwargs):
         if (
@@ -1685,15 +1708,18 @@ def export(
         constraint_violation_error = None
         if tracing_mode != "symbolic":
             assume_static_by_default = True
-        with config.patch(
-            specialize_int=True,
-            specialize_float=specialize_float,
-            assume_static_by_default=assume_static_by_default,
-            automatic_dynamic_shapes=False,
-            capture_dynamic_output_shape_ops=True,
-            capture_scalar_outputs=True,
-            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
-            allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+        with (
+            config.patch(
+                specialize_int=True,
+                specialize_float=specialize_float,
+                assume_static_by_default=assume_static_by_default,
+                automatic_dynamic_shapes=False,
+                capture_dynamic_output_shape_ops=True,
+                capture_scalar_outputs=True,
+                prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+                allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+            ),
+            _compiling_state_context(),
         ):
             opt_f = optimize_assert(
                 dynamo_normalization_capturing_compiler,
@@ -1877,14 +1903,27 @@ def export(
         return inner
 
 
-def optimize_assert(
+def optimize_assert(*args, **kwargs):
+    if "rebuild_ctx" in kwargs and kwargs["rebuild_ctx"] is not None:
+        # called from optimize
+        rebuild_ctx = kwargs["rebuild_ctx"]
+        del kwargs["rebuild_ctx"]
+    else:
+
+        def rebuild_ctx():
+            return optimize_assert(*args, **kwargs)
+
+    return _optimize_assert(rebuild_ctx, *args, **kwargs)
+
+
+def _optimize_assert(
+    rebuild_ctx: Callable[[], OptimizeContext],
     backend,
     *,
     hooks=Hooks(None, None, None),
     export=False,
     export_constraints=None,
     dynamic=None,
-    rebuild_ctx=None,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
