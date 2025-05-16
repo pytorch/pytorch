@@ -671,7 +671,7 @@ class TestPatternMatcher(TestCase):
         expected_multi = fn(a_multi, b_multi)
         torch.testing.assert_close(result_multi, expected_multi)
 
-        FileCheck().check("bmm").run(code_multi)
+        FileCheck().check("extern_kernels.bmm(").run(code_multi)
 
     def test_cat_mm(self):
         def fn(a, b, c):
