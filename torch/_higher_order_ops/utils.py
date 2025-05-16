@@ -748,10 +748,10 @@ def check_input_alias_and_mutation(
     fake_args: list[FakeTensor],
 ) -> tuple[dict[int, int], dict[int, int], dict[int, int], list[int]]:
     (
-        mutated_inputs,
         inp_inp_alias_map,
         inp_out_alias_map,
         out_out_alias_map,
+        mutated_inputs,
     ) = check_input_alias_and_mutation_return_ouputs(gm, fake_args)[:-1]
     return inp_inp_alias_map, inp_out_alias_map, out_out_alias_map, mutated_inputs
 
@@ -760,10 +760,10 @@ def check_input_alias_and_mutation_return_ouputs(
     gm: torch.fx.GraphModule,
     fake_args: list[FakeTensor],
 ) -> tuple[
+    dict[int, int],
+    dict[int, int],
+    dict[int, int],
     list[int],
-    dict[int, int],
-    dict[int, int],
-    dict[int, int],
     Union[tuple[Any, ...], list[Any]],
 ]:
     # We want to disable active functional, proxy and fake modes if any.
@@ -869,10 +869,10 @@ def check_input_alias_and_mutation_return_ouputs(
             if isinstance(inp, torch.Tensor) and _tensor_storage(inp) in out_storage_map
         }
         return (
-            mutated_inputs,
             inp_inp_alias_map,
             inp_out_alias_map,
             out_out_alias_map,
+            mutated_inputs,
             outputs,
         )
 
