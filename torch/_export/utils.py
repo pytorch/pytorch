@@ -37,13 +37,13 @@ from torch.utils._pytree import (
     _register_pytree_node,
     Context,
     FlattenFunc,
-    FromDumpableContextFn,
+    FromDumpableContextFunc,
     GetAttrKey,
     KeyPath,
     keystr,
     MappingKey,
     SequenceKey,
-    ToDumpableContextFn,
+    ToDumpableContextFunc,
     tree_flatten_with_path,
     UnflattenFunc,
 )
@@ -438,8 +438,8 @@ def register_dataclass_as_pytree_node(
     unflatten_fn: Optional[UnflattenFunc] = None,
     *,
     serialized_type_name: Optional[str] = None,
-    to_dumpable_context: Optional[ToDumpableContextFn] = None,
-    from_dumpable_context: Optional[FromDumpableContextFn] = None,
+    to_dumpable_context: Optional[ToDumpableContextFunc] = None,
+    from_dumpable_context: Optional[FromDumpableContextFunc] = None,
     return_none_fields: bool = False,
 ) -> None:
     assert dataclasses.is_dataclass(
