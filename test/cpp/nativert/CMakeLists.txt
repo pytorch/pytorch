@@ -6,6 +6,7 @@ file(GLOB_RECURSE NATIVERT_ALL_TEST_FILES "${NATIVERT_TEST_ROOT}/test_*.cpp")
 set(NATIVERT_TEST_SRCS
   ${NATIVERT_ALL_TEST_FILES}
   ${TORCH_ROOT}/torch/nativert/graph/TensorMeta.cpp
+  ${TORCH_ROOT}/torch/nativert/graph/GraphSignature.cpp
   ${TORCH_ROOT}/torch/nativert/executor/PlacementUtils.cpp
 )
 
