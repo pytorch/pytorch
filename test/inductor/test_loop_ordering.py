@@ -17,7 +17,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.scheduler import SchedulerNode
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
-from torch._inductor.utils import sympy_index_symbol
+from torch._inductor.utils import run_and_get_code, sympy_index_symbol
 from torch._inductor.virtualized import ops, V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
@@ -520,9 +520,8 @@ class LoopOrderingTest(TestCase):
 
 @inductor_config.patch(
     {
-        "benchmark_kernel": True,
-        "loop_ordering_after_fusion": True,
         "triton.unique_kernel_names": True,
+        "triton.max_tiles": 3,
     }
 )
 @instantiate_parametrized_tests
@@ -867,6 +866,8 @@ class MemoryCoalescingTest(MockSchedulerTest):
             coalesce_analysis = tiling_utils.analyze_memory_coalescing(nodes[0])
             self.assertEqual(coalesce_analysis.suggested_split.tiling_factor, 64)
 
+            return nodes
+
         with torch._inductor.config.patch(_post_fusion_custom_pass=fn), torch.no_grad():
 
             def forward(permute):
@@ -883,7 +884,10 @@ class MemoryCoalescingTest(MockSchedulerTest):
             arg0_1 = torch.randn([XDIM, YDIM], device="cuda", dtype=torch.bfloat16)
             permute = torch.ops.aten.permute.default(arg0_1, [1, 0])
 
-            torch.compile(forward)(permute)
+            out, code = run_and_get_code(torch.compile(forward), (permute))
+
+            self.assertEqual(out, forward(permute))
+            FileCheck().check("YBLOCK").check("XBLOCK").run(code[0])
 
 
 if __name__ == "__main__":
