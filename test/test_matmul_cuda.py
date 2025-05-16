@@ -150,8 +150,10 @@ class TestMatmulCuda(TestCase):
                         torch.float32: xtol(atol=1e-1, rtol=1e-1)})
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("size", [100, 1000, 10000])
-    def test_cublas_addmm(self, size: int, dtype: torch.dtype):
-        self.cublas_addmm(size, dtype, False)
+    @parametrize("backend", ["cublas", "cublaslt"])
+    def test_cublas_addmm(self, size: int, dtype: torch.dtype, backend):
+        with blas_library_context(backend):
+            self.cublas_addmm(size, dtype, False)
 
     @onlyCUDA
     @skipIfRocmVersionLessThan((5, 2))
@@ -160,8 +162,10 @@ class TestMatmulCuda(TestCase):
                         torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("size", [100, 1000, 10000])
-    def test_cublas_addmm_reduced_precision(self, size: int, dtype: torch.dtype):
-        self.cublas_addmm(size, dtype, True)
+    @parametrize("backend", ["cublas", "cublaslt"])
+    def test_cublas_addmm_reduced_precision(self, size: int, dtype: torch.dtype, backend):
+        with blas_library_context(backend):
+            self.cublas_addmm(size, dtype, True)
 
     @onlyCUDA
     @skipIfRocmVersionLessThan((5, 2))
@@ -193,8 +197,10 @@ class TestMatmulCuda(TestCase):
                         torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("size", [100, 1000, 10000])
-    def test_cublas_addmm_reduced_precision_fp16_accumulate(self, size: int, dtype: torch.dtype):
-        self.cublas_addmm(size, dtype, False, True)
+    @parametrize("backend", ["cublas", "cublaslt"])
+    def test_cublas_addmm_reduced_precision_fp16_accumulate(self, size: int, dtype: torch.dtype, backend):
+        with blas_library_context(backend):
+            self.cublas_addmm(size, dtype, False, True)
 
     @onlyCUDA
     @skipIfRocm
