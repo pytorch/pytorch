@@ -36,7 +36,7 @@ class TestMiscCollectiveUtils(TestCase):
 
         backend = dist.get_default_backend_for_device(device)
         dist.init_process_group(
-            backend=backend, rank=0, world_size=1, init_method="env://"
+            backend=backend, rank=0, world_size=1
         )
         pg = dist.distributed_c10d._get_default_group()
         backend_pg = pg._get_backend_name()
