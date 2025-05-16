@@ -4,11 +4,12 @@ from typing import Optional, Union
 
 import torch
 from torch import Size, Tensor
+from torch._C import _add_docstr
 from torch.nn import functional as F, init
+from torch.nn.modules._nn_docs import common_args
 from torch.nn.parameter import Parameter
 
 from ._functions import CrossMapLRN2d as _cross_map_lrn2d
-from ._nn_docs import COMMON_ARGS
 from .module import Module
 
 
@@ -168,9 +169,7 @@ class LayerNorm(Module):
     .. image:: ../_static/img/nn/layer_norm.jpg
         :scale: 50 %
 
-    """.format(
-        COMMON_ARGS
-    )
+    """
 
     __constants__ = ["normalized_shape", "eps", "elementwise_affine"]
     normalized_shape: tuple[int, ...]
@@ -228,6 +227,9 @@ class LayerNorm(Module):
         )
 
 
+add_docstr(LayerNorm, LayerNorm.__doc__.format(**common_args))
+
+
 class GroupNorm(Module):
     r"""Applies Group Normalization over a mini-batch of inputs.
 
@@ -272,9 +274,7 @@ class GroupNorm(Module):
         >>> m = nn.GroupNorm(1, 6)
         >>> # Activating the module
         >>> output = m(input)
-    """.format(
-        COMMON_ARGS
-    )
+    """
 
     __constants__ = ["num_groups", "num_channels", "eps", "affine"]
     num_groups: int
@@ -362,9 +362,7 @@ class RMSNorm(Module):
         >>> input = torch.randn(2, 2, 3)
         >>> rms_norm(input)
 
-    """.format(
-        COMMON_ARGS
-    )
+    """
 
     __constants__ = ["normalized_shape", "eps", "elementwise_affine"]
     normalized_shape: tuple[int, ...]
