@@ -141,8 +141,7 @@ void _calculate_moving_average(
 
   at::Tensor x_min, x_max;
 
-  int64_t observer_on_long = observer_on.item().toInt();
-  int64_t* observer_on_data = &observer_on_long;
+  int64_t* observer_on_data = observer_on.data_ptr<int64_t>();
   float* running_min_data = running_min.data_ptr<float>();
   float* running_max_data = running_max.data_ptr<float>();
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
@@ -197,8 +196,7 @@ void _calc_moving_avg_qparams_helper(
   device_guard.set_index(x.get_device());
 
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
-  int64_t fake_quant_on_long = fake_quant_on.item().toInt();
-  int64_t* fake_quant_on_data = &fake_quant_on_long;
+  int64_t* fake_quant_on_data = fake_quant_on.data_ptr<int64_t>();
   if (per_row_fq) {
     float* running_min_data = running_min.data_ptr<float>();
     float* running_max_data = running_max.data_ptr<float>();
@@ -275,7 +273,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
     }
     _calculate_moving_average(
         y,
-        observer_on,
+        observer_on.to(at::kLong),
         running_min,
         running_max,
         averaging_const,
@@ -284,7 +282,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
   } else {
     _calculate_moving_average(
         x_contig,
-        observer_on,
+        observer_on.to(at::kLong),
         running_min,
         running_max,
         averaging_const,
@@ -297,7 +295,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
 
   _calc_moving_avg_qparams_helper(
       x_contig,
-      fake_quant_on,
+      fake_quant_on.to(at::kLong),
       running_min,
       running_max,
       scale_ptr,
