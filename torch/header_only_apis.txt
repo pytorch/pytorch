@@ -40,10 +40,10 @@ Philox4_32
 randn
 
 # ATen/cpu/vec/vec.h
-vec::Vectorized
+Vectorized
+clamp_min
+convert
 loadu
 maximum
-size
 minimum
-convert
-clamp_min
+size
