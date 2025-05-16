@@ -125,7 +125,7 @@ struct log_functor {
     return T(real, imag);
   }
   inline float operator()(const bool x) {
-      return x ? 0 : -INFINITY;
+    return x ? 0 : -INFINITY;
   }
 };
 
@@ -147,10 +147,9 @@ struct log10_functor {
     return complex_div(T(real, imag), T(::precise::log(10), 0));
   }
   inline float operator()(const bool x) {
-      return x ? 0 : -INFINITY;
+    return x ? 0 : -INFINITY;
   }
 };
-
 
 struct log2_functor {
   template <typename T>
@@ -170,7 +169,7 @@ struct log2_functor {
     return complex_div(T(real, imag), T(::precise::log(2), 0));
   }
   inline float operator()(const bool x) {
-      return x ? 0 : -INFINITY;
+    return x ? 0 : -INFINITY;
   }
 };
 
