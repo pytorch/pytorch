@@ -55,6 +55,14 @@ if TYPE_CHECKING:
 # - (perhaps) Define how it is compared in _HashableTracker._eq_impl
 
 
+def raise_args_mismatch(tx, name):
+    raise_observed_exception(
+        TypeError,
+        tx,
+        args=[ConstantVariable(f"wrong number of arguments for {name}() call")],
+    )
+
+
 def was_instancecheck_override(obj):
     return type(obj).__dict__.get("__instancecheck__", False)
 
@@ -747,7 +755,8 @@ class SetVariable(ConstDictVariable):
         # We foward the calls to the dictionary model
         if name == "add":
             assert not kwargs
-            assert len(args) == 1
+            if len(args) != 1:
+                raise_args_mismatch(tx, name)
             name = "__setitem__"
             args = (args[0], SetVariable._default_value())
         elif name == "pop":

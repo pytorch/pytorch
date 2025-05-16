@@ -1755,6 +1755,19 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             y = a - b
         return x, y
 
+    @parametrize("fn_name", ["add"])
+    def test_set_raise_TypeError(self, fn_name):
+        @make_test
+        def fn(a, b):
+            set1 = {"apple", "banana", "cherry"}
+            try:
+                getattr(set1, fn_name)()
+            except TypeError:
+                return a + b
+            return a - b
+
+        fn(self)
+
     @make_test
     def test_set_difference(a, b):
         set1 = {"apple", "banana", "cherry"}
