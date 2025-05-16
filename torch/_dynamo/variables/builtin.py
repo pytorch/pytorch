@@ -2012,7 +2012,6 @@ class BuiltinVariable(VariableTracker):
                     "assertNotWarns",
                     "assertWarnsRegex",
                     "assertDictEqual",
-                    "assertSequenceEqual",
                     "assertWarns",
                 )
             ):
