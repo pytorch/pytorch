@@ -489,6 +489,29 @@ def try_match_insignificant_strides(
     )
     return TensorBox(ReinterpretView(data=storage, layout=new_layout))
 
+def add_symbolic_shapes_for_inputs_to_subgraph(inputs: list[Any], subgraph: GraphLowering) -> list[Expr]:
+    sym_vars = set()
+    for inp in inputs:
+        if isinstance(inp, torch.Tensor):
+            for size in inp.size():
+                if isinstance(size, SymTypes):
+                    sym_vars |= size.node.expr.free_symbols
+            for stride in inp.stride():
+                if isinstance(stride, SymTypes):
+                    sym_vars |= size.node.expr.free_symbols
+    
+    sym_inputs = []
+    for sym_var in sym_vars:
+        assert sym_var in V.graph.graph_inputs.values()
+
+        for inp in V.graph.graph_inputs:
+            if V.graph.graph_inputs[inp] == sym_var:
+                subgraph.graph_inputs[inp] = sym_var
+                subgraph.graph_input_names.append(inp)
+                sym_inputs.append(sym_var)
+    
+    return sym_inputs
+
 
 class IRNode:
     _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
@@ -6091,6 +6114,10 @@ class SubgraphBuffer(ExternKernel):
         self.subgraph = V.graph.make_subgraph(
             self.gm, self.example_inputs, subgraph_name
         )
+
+        sym_inputs = add_symbolic_shapes_for_inputs_to_subgraph(self.example_inputs, self.subgraph)
+        self.sym_inputs = [sym_var.name for sym_var in sym_inputs]
+
         import torch._inductor.config as inductor_config
 
         with V.set_graph_handler(self.subgraph):
@@ -6109,12 +6136,12 @@ class SubgraphBuffer(ExternKernel):
                 self.name = graph.name
 
         outer_inputs = [t.codegen_reference() for t in self.inputs]
-
         wrapper.codegen_subgraph_with_flattened_outputs(
             CodegenGraph(self.subgraph),
-            outer_inputs,
+            [*self.sym_inputs, *outer_inputs],
             [self.name],
         )
+
 
 
 class UserDefinedTritonKernel(ExternKernel):
