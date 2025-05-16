@@ -68,7 +68,7 @@ jobs:
           find "$PT_RELEASE_NAME" -name '.git*' -exec rm -rv {} \; || true
           # Create archive
           tar -czf "$PT_RELEASE_FILE" "$PT_RELEASE_NAME"
-          echo "Created source archive $PT_RELEASE_FILE with content: $(ls -a "$PT_RELEASE_NAME")"        
+          echo "Created source archive $PT_RELEASE_FILE with content: $(ls -a "$PT_RELEASE_NAME")"
       - name: Create PEP 517 compatible source distribution
         run: |
           pip install build==1.2.2.post1 || exit 1
@@ -78,9 +78,9 @@ jobs:
         if: ${{ github.event_name == 'release' }}
         uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
         with:
-          files:
-            - ${{ env.PT_RELEASE_FILE }}
-            - ${{ env.PT_PEP517_RELEASE_FILE }}
+          files: |
+            ${{ env.PT_RELEASE_FILE }}
+            ${{ env.PT_PEP517_RELEASE_FILE }}
       - name: Upload source distribution to GHA artifacts for release tags
         if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'rc') }}
         uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
