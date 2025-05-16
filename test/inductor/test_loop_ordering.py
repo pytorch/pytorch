@@ -45,7 +45,7 @@ class MockScheduler:
     def get_backend(cls, *args):
         return TritonScheduling(cls)
 
-    def can_buffer_be_removed_through_fusion(*args, **kwargs):
+    def can_buffer_be_removed_through_fusion(self, *args, **kwargs):
         return False
 
 
@@ -773,7 +773,6 @@ class MemoryCoalescingTest(MockSchedulerTest):
 
     @parametrize("downcast_transposed_v", (False, True))
     def test_tiled_coalesce_analysis(self, downcast_transposed_v):
-
         # test one pw var, one red var
         from torch._inductor import tiling_utils
 
@@ -784,7 +783,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
 
             i_vars = coalesce_analysis.norm_read_writes.index_vars
 
-            # because output is contiguous, second dimension should 
+            # because output is contiguous, second dimension should
             # coalesce twice as many bytes as first dimension
             # if not downcasted
             # if downcasted, should be equal, bc larger dtype size
@@ -795,18 +794,19 @@ class MemoryCoalescingTest(MockSchedulerTest):
                 self.assertEqual(cont_reads, t_reads * 2)
             else:
                 self.assertEqual(cont_reads, t_reads)
-            
+
             return nodes
 
         with torch._inductor.config.patch(_post_fusion_custom_pass=fn), torch.no_grad():
 
             @torch.compile()
             def foo(x, y):
-                return (x + y.to(x.dtype))
+                return x + y.to(x.dtype)
 
             y_dtype = torch.float if not downcast_transposed_v else torch.float64
             foo(
-                torch.rand(256, 256, device="cuda"), torch.rand(256, 256, device="cuda", dtype=y_dtype).T
+                torch.rand(256, 256, device="cuda"),
+                torch.rand(256, 256, device="cuda", dtype=y_dtype).T,
             )
 
 

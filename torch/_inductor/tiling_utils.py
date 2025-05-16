@@ -219,6 +219,7 @@ class NodeSplitGetter:
 
         return pw, red
 
+
 if sys.version_info >= (3, 10):
     # On Python 3.10+ we can use zip(strict=True)
     zip_equal = functools.partial(zip, strict=True)
@@ -468,9 +469,9 @@ def analyze_memory_coalescing(
                 byte_multipler += buf.dtype.itemsize
 
         if maybe_coalesced_var:
-            coalesced_by_var[maybe_coalesced_var] += (size * byte_multipler)
+            coalesced_by_var[maybe_coalesced_var] += size * byte_multipler
         else:
-            uncoalesced_addrs[memory_expr] += (size * byte_multipler)
+            uncoalesced_addrs[memory_expr] += size * byte_multipler
 
     return CoalesceVarAnalysis(
         coalesced_by_var=coalesced_by_var, norm_read_writes=norm_read_writes
