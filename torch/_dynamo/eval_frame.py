@@ -343,6 +343,19 @@ class OptimizedModule(torch.nn.Module):
             self._forward = self.forward
             self.forward = self._call_lazy_check
 
+    def __call__(self, *args, **kwargs):
+        if torch.nn.modules.module._has_any_global_hook():
+            warnings.warn(
+                "Using `torch.compile(module)` when there are global hooks on "
+                "modules (e.g., from `register_module_forward_hook`); this will"
+                " cause the hooks to fire an extra time for the "
+                "`OptimizedModule` created by `torch.compile(module)`. If this "
+                "causes undesired behavior, please try using `module.compile()`"
+                ", or use the per-module hooks instead",
+                stacklevel=2,
+            )
+        return super().__call__(*args, **kwargs)
+
     def __reduce__(self):
         return (self.__class__, (self._orig_mod, self.dynamo_ctx))
 
@@ -382,6 +395,15 @@ class OptimizedModule(torch.nn.Module):
         if name in OptimizedModule._opt_mod_attributes:
             return super().__setattr__(name, val)
         return setattr(self._orig_mod, name, val)
+
+    def __delattr__(self, name):
+        # This mirrors `__setattr__`
+        if hasattr(type(self), name):
+            return super().__delattr__(name)
+
+        if name in OptimizedModule._opt_mod_attributes:
+            return super().__delattr__(name)
+        return delattr(self._orig_mod, name)
 
     def _call_lazy_check(self, *args, **kwargs):
         if (
@@ -1881,14 +1903,27 @@ def export(
         return inner
 
 
-def optimize_assert(
+def optimize_assert(*args, **kwargs):
+    if "rebuild_ctx" in kwargs and kwargs["rebuild_ctx"] is not None:
+        # called from optimize
+        rebuild_ctx = kwargs["rebuild_ctx"]
+        del kwargs["rebuild_ctx"]
+    else:
+
+        def rebuild_ctx():
+            return optimize_assert(*args, **kwargs)
+
+    return _optimize_assert(rebuild_ctx, *args, **kwargs)
+
+
+def _optimize_assert(
+    rebuild_ctx: Callable[[], OptimizeContext],
     backend,
     *,
     hooks=Hooks(None, None, None),
     export=False,
     export_constraints=None,
     dynamic=None,
-    rebuild_ctx=None,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
