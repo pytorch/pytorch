@@ -151,21 +151,34 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_inline_lru_cache_fn_with_default_args(a, b):
         return inline_lru_cache_fn_with_default_args(a, 2, b)
 
-
     def test_lru_cache_warning_issued_during_tracing(self):
-        from functools import lru_cache
         import warnings
+        from functools import lru_cache
 
         @lru_cache
         def foo(x):
             return x + 1
 
         with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            torch.compile(foo)(torch.randn(4))
-            self.assertEqual(len(w), 1)
-            self.assertRegex(str(w[0].message), r"Tracing through lru_cache wrapped function that read outside state may not be traced soundly.")
+        warnings.simplefilter("always")
+        torch.compile(foo)(torch.randn(4))
 
+        found_warning = False
+        for warning in w:
+            warning_message = str(warning.message)
+            if "Dynamo detected a call to a `functools.lru_cache` wrapped function" in warning_message:
+                self.assertIn(
+                    "Dynamo currently ignores `functools.lru_cache` and directly traces the wrapped function.",
+                    warning_message,
+                )
+                self.assertIn(
+                    "`functools.lru_cache` wrapped functions that read outside state may not be traced soundly.",
+                    warning_message,
+                )
+                found_warning = True
+                break
+
+        self.assertTrue(found_warning, "Expected warning about lru_cache not found")
 
     @make_test
     def test_add(a, b):
