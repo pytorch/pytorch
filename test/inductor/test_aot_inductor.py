@@ -1322,7 +1322,9 @@ class AOTInductorTestsTemplate:
         self.check_model(Repro(), example_inputs, dynamic_shapes=spec)
 
     def test_size_with_unbacked_add_expr_transitive(self):
-        # We'll have torch._check(expr1, expr2) + torch._check(expr2, unbacked)
+        # Edge case with torch._check(expr1, expr2) + torch._check(expr2, unbacked).
+        # When generating example input sizes for autotuning, it should coalesce
+        # expr1, expr2, unbacked into a single size.
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
 
@@ -1377,6 +1379,8 @@ class AOTInductorTestsTemplate:
 
     @config.patch({"unbacked_symint_fallback": 1024})
     def test_size_with_unbacked_add_and_mul_expr(self):
+        # Edge case with torch._check(add_expr, mul_expr). When generating example
+        # input sizes for autotuning, make sure they coalesce into a single size.
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
 
