@@ -2848,7 +2848,7 @@ class TestGuardsExpressions(TestCase):
             else:
                 return b * 20
 
-        # call with guarding.
+        # eager.
         self.assertEqual(func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10]))
         self.assertEqual(func(torch.tensor([2]), torch.tensor([1])), torch.tensor([20]))
 
@@ -2913,7 +2913,7 @@ class TestGuardsExpressions(TestCase):
             else:
                 return b * 20
 
-        # call with guarding.
+        # eager.
         self.assertEqual(func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10]))
         self.assertEqual(func(torch.tensor([2]), torch.tensor([1])), torch.tensor([20]))
 
