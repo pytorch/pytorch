@@ -1518,7 +1518,7 @@ command = [
 
 [[linter]]
 code = 'RUFF'
-include_patterns = ['**/*.py', '**/*.pyi']
+include_patterns = ['**/*.py', '**/*.pyi', 'torch/utils/data/*.ipynb']
 exclude_patterns = [
     'caffe2/**',
     'functorch/docs/**',
