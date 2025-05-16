@@ -1069,7 +1069,7 @@ void LayerNormKernelImplInternal(
     T_ACC eps,
     Tensor* Y,
     Tensor* mean,
-    Tensor* rstd) {  
+    Tensor* rstd) {
   // assumes input, gamma and beta are of proper shape, this was checked in _check_layer_norm_inputs
   // assumes all tensors are contiguous
   TORCH_CHECK(M <= at::cuda::getCurrentDeviceProperties()->maxGridSize[0], "M should be less than maximum CUDA grid size, \
