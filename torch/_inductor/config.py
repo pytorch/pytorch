@@ -1297,6 +1297,10 @@ class aot_inductor:
 
 
 class cuda:
+    """
+    Config class for CUTLASS backend for Inductor.
+    """
+
     # CUDA arch to use for CUDA template kernel compilation.
     # e.g. "70", "75", "80", "90", etc.
     # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
@@ -1337,7 +1341,7 @@ class cuda:
     cutlass_max_profiling_configs: Optional[int] = None
 
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
-    cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4]
+    cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4, 8]
 
     # Whether to use CUTLASS EVT for epilogue fusion
     cutlass_epilogue_fusion_enabled = False
@@ -1396,6 +1400,11 @@ class cuda:
     # use compile command to create kernel .cu and .so name
     cutlass_hash_with_compile_cmd: bool = (
         os.environ.get("TORCHINDUCTOR_CUTLASS_HASH_WITH_COMPILE_CMD", "0") == "1"
+    )
+
+    # Experimental. Prescreen top x configs before tuning on swizzle.
+    cutlass_prescreening: bool = (
+        os.environ.get("TORCHINDUCTOR_CUTLASS_PRESCREENING", "1") == "1"
     )
 
 
