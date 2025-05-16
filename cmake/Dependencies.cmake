@@ -682,6 +682,10 @@ if(USE_FBGEMM)
     set_property(TARGET fbgemm_avx2 PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm_avx512 PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm PROPERTY POSITION_INDEPENDENT_CODE ON)
+    target_compile_definitions(fbgemm_generic PUBLIC DISABLE_FBGEMM_AUTOVEC)
+    target_compile_definitions(fbgemm_avx2 PUBLIC DISABLE_FBGEMM_AUTOVEC)
+    target_compile_definitions(fbgemm_avx512 PUBLIC DISABLE_FBGEMM_AUTOVEC)
+
     # TODO: Remove next two lines after fbgemm pin is updated
 
     # For more details see https://github.com/pytorch/pytorch/issues/150846
@@ -698,7 +702,7 @@ if(USE_FBGEMM)
       target_compile_options_if_supported(fbgemm -Wno-extra-semi)
     endif()
   endif()
-
+  target_compile_definitions(fbgemm PUBLIC DISABLE_FBGEMM_AUTOVEC)
   if(USE_FBGEMM)
     list(APPEND Caffe2_DEPENDENCY_LIBS fbgemm)
   endif()
