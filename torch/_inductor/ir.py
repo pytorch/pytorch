@@ -489,8 +489,11 @@ def try_match_insignificant_strides(
     )
     return TensorBox(ReinterpretView(data=storage, layout=new_layout))
 
-def add_symbolic_shapes_for_inputs_to_subgraph(inputs: list[Any], subgraph: GraphLowering) -> list[Expr]:
-    sym_vars = set()
+
+def add_symbolic_shapes_for_inputs_to_subgraph(
+    inputs: list[Any], subgraph: GraphLowering
+) -> list[Expr]:
+    sym_vars: OrderedSet[Expr] = OrderedSet()
     for inp in inputs:
         if isinstance(inp, torch.Tensor):
             for size in inp.size():
@@ -498,8 +501,8 @@ def add_symbolic_shapes_for_inputs_to_subgraph(inputs: list[Any], subgraph: Grap
                     sym_vars |= size.node.expr.free_symbols
             for stride in inp.stride():
                 if isinstance(stride, SymTypes):
-                    sym_vars |= size.node.expr.free_symbols
-    
+                    sym_vars |= stride.node.expr.free_symbols
+
     sym_inputs = []
     for sym_var in sym_vars:
         assert sym_var in V.graph.graph_inputs.values()
@@ -509,7 +512,7 @@ def add_symbolic_shapes_for_inputs_to_subgraph(inputs: list[Any], subgraph: Grap
                 subgraph.graph_inputs[inp] = sym_var
                 subgraph.graph_input_names.append(inp)
                 sym_inputs.append(sym_var)
-    
+
     return sym_inputs
 
 
@@ -6115,7 +6118,9 @@ class SubgraphBuffer(ExternKernel):
             self.gm, self.example_inputs, subgraph_name
         )
 
-        sym_inputs = add_symbolic_shapes_for_inputs_to_subgraph(self.example_inputs, self.subgraph)
+        sym_inputs = add_symbolic_shapes_for_inputs_to_subgraph(
+            self.example_inputs, self.subgraph
+        )
         self.sym_inputs = [sym_var.name for sym_var in sym_inputs]
 
         import torch._inductor.config as inductor_config
@@ -6141,7 +6146,6 @@ class SubgraphBuffer(ExternKernel):
             [*self.sym_inputs, *outer_inputs],
             [self.name],
         )
-
 
 
 class UserDefinedTritonKernel(ExternKernel):
