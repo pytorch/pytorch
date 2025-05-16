@@ -4672,11 +4672,7 @@ class AOTInductorTestsTemplate:
         so_path, code = run_and_get_cpp_code(
             AOTIRunnerUtil.legacy_compile, model, example_inputs
         )
-        is_cpu_freezing = (
-            config.freezing is None or config.freezing
-        ) and self.device != GPU_TYPE
-        varname = f"u{int(mark_unbacked) + (2 if is_cpu_freezing else 0)}"
-        lowerbound_check = f"{varname} >= {1 if mark_unbacked else 2}"
+        lowerbound_check = f"u{int(mark_unbacked)} >= {1 if mark_unbacked else 2}"
         FileCheck().check_count(lowerbound_check, 1).run(code)
 
         compiled = AOTIRunnerUtil.legacy_load(self.device, so_path)

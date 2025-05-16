@@ -1096,6 +1096,10 @@ if torch._C._has_mkldnn:
         if input_meta_value is None or weight_meta_value is None:
             return False
         batch_size = input_meta_value.shape[0]
+        # One of our tests attempts to run linear over a zero-element tensor.  This is
+        # not supported by MKLDNN, so refuse to fuse.
+        if input_meta_value.numel() == 0 or weight_meta_value.numel() == 0:
+            return False
         if (
             input_meta_value.dtype == torch.float64
             or weight_meta_value.dtype == torch.float64
