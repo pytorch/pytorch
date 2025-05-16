@@ -112,8 +112,7 @@ def check_schema(schema_str: str, func, *args, **kwargs) -> None:
     arg_type_check_fns = {
         "t": lambda x: isinstance(x, torch.Tensor) and not isinstance(x, NestedTensor),
         "jt": lambda x: isinstance(x, NestedTensor)
-        and x._lengths is None
-        and x._ragged_idx == 1,  # ops with "jt" require contiguous JT only
+        and x.is_contiguous(),  # ops with "jt" require contiguous JT only
         "jt_all": lambda x: isinstance(
             x, NestedTensor
         ),  # ops with "jt_all" can accept all kinds of JT
@@ -966,7 +965,7 @@ def narrow(func, *args, **kwargs):
     return NestedTensor(values, **extract_kwargs(inp))
 
 
-@register_jagged_func(torch.ops.aten.chunk.default, "self: jt, chunks: any, dim: any?")
+@register_jagged_func(torch.ops.aten.chunk.default, "self: jt_all, chunks: any, dim: any?")
 def chunk_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
