@@ -432,23 +432,6 @@ def uninteresting_files():
     return {inspect.getfile(m) for m in mods}
 
 
-def check_overlapping(overlapping, non_overlapping):
-    from torch._functorch._aot_autograd.input_output_analysis import (
-        _tensors_definitely_do_not_overlap,
-    )
-
-    tensors = overlapping + non_overlapping
-    overlapping_indices = set()
-
-    for i in range(len(tensors)):
-        for j in range(i):
-            if not _tensors_definitely_do_not_overlap(tensors[i], tensors[j]):
-                overlapping_indices.add(i)
-                overlapping_indices.add(j)
-
-    return overlapping_indices == set(range(len(overlapping)))
-
-
 _CLOSURE_VARS: Optional[dict[str, object]] = None
 
 
@@ -476,21 +459,7 @@ def _get_closure_vars():
             "___as_tensor": torch._as_tensor_fullprec,
             "torch": torch,
             "inspect": inspect,
-            "check_overlapping": check_overlapping,
         }
-    if torch.distributed.is_available():
-        from torch.distributed.device_mesh import DeviceMesh
-        from torch.distributed.tensor.placement_types import (
-            Partial,
-            Replicate,
-            Shard,
-        )
-        _CLOSURE_VARS.update({
-            "Shard": Shard,
-            "Replicate": Replicate,
-            "Partial": Partial,
-            "DeviceMesh": DeviceMesh,
-        })
     return _CLOSURE_VARS
 
 
@@ -1647,7 +1616,6 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def TENSOR_SUBCLASS_METADATA_MATCH(self, guard: Guard):
-        ref = self.arg_ref(guard)
         value = self.get(guard.name)
         original_metadata = deepcopy(self.get(guard.name).__tensor_flatten__()[1])
         if hasattr(value, "__metadata_guard__"):
@@ -1663,13 +1631,9 @@ class GuardBuilder(GuardBuilderBase):
             def metadata_checker(x):
                 return x.__tensor_flatten__()[1] == original_metadata
 
-        compile_id = CompileContext.current_compile_id()
-        global_name = f"___check_metadata_{id(metadata_checker)}_c{str(compile_id).replace('/', '_')}"
-        global_scope = self.get("G")
-        global_scope[global_name] = metadata_checker
-        code_part = f"G[\"{global_name}\"]({ref})"
+        global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
         self.get_guard_manager(guard).add_lambda_guard(
-            metadata_checker, get_verbose_code_parts(code_part, guard)
+            metadata_checker, get_verbose_code_parts(global_name, guard)
         )
 
     def EQUALS_MATCH(self, guard: Guard):
@@ -3342,9 +3306,11 @@ def get_guard_fail_reason_helper(
 
         if any("Duplicate tensor found" in reason for reason in failure_reasons):
             no_tensor_aliasing_check_failed = True
-        elif len(verbose_code_parts) + len(failure_reasons) == 1:
-            reasons = verbose_code_parts + failure_reasons
+        elif len(verbose_code_parts) == 1:
+            reasons = verbose_code_parts
             verbose_code_parts = []
+        elif len(verbose_code_parts) == 0:
+            reasons = []
 
     if no_tensor_aliasing_check_failed:
         reasons = recompilation_reason_for_no_tensor_aliasing_guard(
@@ -3369,12 +3335,12 @@ def get_guard_fail_reason_helper(
                 fail_reason = part
             if isinstance(fail_reason, str):
                 reasons.append(fail_reason)
-        reasons += failure_reasons
 
+    all_reasons = reasons + failure_reasons
     if is_recompiles_verbose_enabled():
-        reason_str = strip_local_scope(f"{compile_id}: " + "; ".join(reasons))
+        reason_str = strip_local_scope(f"{compile_id}: " + "; ".join(all_reasons))
     else:
-        reason_str = strip_local_scope(f"{compile_id}: " + "; ".join(reasons[:1]))
+        reason_str = strip_local_scope(f"{compile_id}: " + "; ".join(all_reasons[:1]))
     
     if return_all:
         return reason_str, reasons, failure_reasons

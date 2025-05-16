@@ -1755,9 +1755,8 @@ class LENGTH_CHECK : public LeafGuard {
         _length(py::cast<Py_ssize_t>(std::move(value))) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    if (!PySequence_Check(value)) {
-      return false;
-    }
+    // PySequence_Length returns -1 if the object is not a sequence. So, we
+    // don't have to test for PySequence_Check.
     return PySequence_Length(value) == _length;
   }
 
