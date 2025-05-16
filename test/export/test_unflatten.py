@@ -975,6 +975,36 @@ class TestUnflatten(TestCase):
         inp = (torch.randn(2, 3), None)
         self.assertTrue(torch.allclose(M()(*inp)[0], unflattened(*inp)[0]))
 
+    def test_unflatten_empty_branch(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                if x is None:
+                    return torch.ones(3), torch.ones(3)
+                else:
+                    return x + x, x * x
+
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = M()
+
+            def forward(self, x, y):
+                a, b = self.m(x)
+                c, d = self.m(y)
+                return a + b + c + d
+
+        ep = torch.export.export(M1(), (torch.randn(3), None))
+        unf = torch.export.unflatten(ep)
+        inp = (torch.randn(3), None)
+        self.assertTrue(torch.allclose(unf(*inp), M1()(*inp)))
+
+        ep = torch.export.export(
+            M1(), (torch.randn(3), None), preserve_module_call_signature="m"
+        )
+        unf = torch.export.unflatten(ep)
+        inp = (torch.randn(3), None)
+        self.assertTrue(torch.allclose(unf(*inp), M1()(*inp)))
+
 
 if __name__ == "__main__":
     run_tests()
