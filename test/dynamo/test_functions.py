@@ -1755,7 +1755,9 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             y = a - b
         return x, y
 
-    @parametrize("fn_name", ["add"])
+    @parametrize(
+        "fn_name", ["add", "symmetric_difference", "symmetric_difference_update"]
+    )
     def test_set_raise_TypeError(self, fn_name):
         @make_test
         def fn(a, b):
@@ -1778,6 +1780,36 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             x = a - b
         if "banana" in difference_set:
+            y = a + b
+        else:
+            y = a - b
+        return x, y
+
+    @make_test
+    def test_set_symmetric_difference(a, b):
+        set1 = {"apple", "banana", "cherry"}
+        set2 = {"google", "microsoft", "apple"}
+        symmetric_diff_set = set1.difference(set2)
+        if "apple" in symmetric_diff_set:
+            x = a + b
+        else:
+            x = a - b
+        if "banana" in symmetric_diff_set:
+            y = a + b
+        else:
+            y = a - b
+        return x, y
+
+    @make_test
+    def test_set_symmetric_difference_update(a, b):
+        set1 = {"apple", "banana", "cherry"}
+        set2 = {"google", "microsoft", "apple"}
+        set1.difference(set2)
+        if "apple" in set1:
+            x = a + b
+        else:
+            x = a - b
+        if "banana" in set1:
             y = a + b
         else:
             y = a - b

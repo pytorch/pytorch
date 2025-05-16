@@ -101,6 +101,23 @@ def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequenc
     return op(len(left), len(right))
 
 
+def set_symmetric_difference(set1, set2):
+    symmetric_difference_set = set()
+    for x in set1:
+        if x not in set2:
+            symmetric_difference_set.add(x)
+    for x in set2:
+        if x not in set1:
+            symmetric_difference_set.add(x)
+    return symmetric_difference_set
+
+
+def set_symmetric_difference_update(set1, set2):
+    result = set1.symmetric_difference(set2)
+    set1.clear()
+    set1.update(result)
+
+
 def set_isdisjoint(set1, set2):
     for x in set1:
         if x in set2:
