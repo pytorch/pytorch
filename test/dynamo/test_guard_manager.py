@@ -696,7 +696,7 @@ num_guards_executed=0)
         self.assertFalse(guard_manager.check(None))
         debug_info = guard_manager.check_verbose(None)
         self.assertFalse(debug_info.result)
-        self.assertTrue("Test" in debug_info.verbose_code_parts[0])
+        self.assertTrue("Test" in debug_info.failure_reasons[0])
 
     def test_dict_contains_guard(self):
         foo = {"a": 1, "b": 2}
