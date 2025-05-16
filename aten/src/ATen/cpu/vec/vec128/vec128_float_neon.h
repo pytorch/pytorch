@@ -70,6 +70,9 @@ struct BlendRegs<index, false> {
 };
 
 template <>
+struct is_vec_specialized_for<float> : std::bool_constant<true> {};
+
+template <>
 class Vectorized<float> {
  private:
   float32x4_t values;
