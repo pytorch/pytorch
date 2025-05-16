@@ -90,7 +90,7 @@ def _dcp_method_logger(
                     msg_dict["event"] = "exception"
                     msg_dict["error"] = f"{error}"
                     msg_dict["time"] = time.time_ns()
-                    _dcp_logger.error(msg_dict)
+                    _dcp_logger.error(msg_dict)  # noqa: TRY400
                 raise
 
             # end event
