@@ -510,7 +510,7 @@ def run_test(
             )
         )
         unittest_args.extend(test_module.get_pytest_args())
-        replacement = {"-f": "-x"}
+        replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
 
     if options.showlocals:
@@ -1591,6 +1591,13 @@ def get_selected_tests(options) -> list[str]:
                 "functorch/test_memory_efficient_fusion",
                 "torch_np/numpy_tests/core/test_multiarray",
             ]
+        )
+
+    if sys.version_info[:2] < (3, 13):
+        # Skip tests for older Python versions as they may use syntax or features
+        # not supported in those versions
+        options.exclude.extend(
+            [test for test in selected_tests if test.startswith("dynamo/cpython/3_13/")]
         )
 
     selected_tests = exclude_tests(options.exclude, selected_tests)

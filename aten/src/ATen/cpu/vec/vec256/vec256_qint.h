@@ -35,8 +35,8 @@
 // specified by float_vec_return_type.
 //
 // When writing kernels with these vectors, it is expected that floating-
-// point operations will be carried out in a loop over Vectorized<T>::float_num_vecs
-// iterations.
+// point operations will be carried out in a loop over
+// Vectorized<T>::float_num_vecs iterations.
 
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
@@ -103,10 +103,12 @@ inline __m256i pack_saturate_and_clamp<uint8_t>(
 }
 
 template <typename T>
-typename std::enable_if_t<std::is_same_v<T, uint8_t> || std::is_same_v<T, int8_t>, at::vec::Vectorized<float>>
-inline convert_int8_to_float(at::vec::Vectorized<T> src) {
-  // Note: this function only convert inputs number of elements equal to at::vec::Vectorized<float>.size()
-  // Only handle first 8*8 bits
+typename std::enable_if_t<
+    std::is_same_v<T, uint8_t> || std::is_same_v<T, int8_t>,
+    at::vec::Vectorized<
+        float>> inline convert_int8_to_float(at::vec::Vectorized<T> src) {
+  // Note: this function only convert inputs number of elements equal to
+  // at::vec::Vectorized<float>.size() Only handle first 8*8 bits
   __m128i input_128 = _mm256_castsi256_si128(src);
   // Convert from 8*uint8/int8 to 8*int32
   __m256i input_256_int32;
@@ -119,8 +121,10 @@ inline convert_int8_to_float(at::vec::Vectorized<T> src) {
 }
 
 template <typename T>
-typename std::enable_if_t<std::is_same_v<T, uint8_t> || std::is_same_v<T, int8_t>, at::vec::Vectorized<T>>
-inline convert_float_to_int8(at::vec::Vectorized<float> src) {
+typename std::enable_if_t<
+    std::is_same_v<T, uint8_t> || std::is_same_v<T, int8_t>,
+    at::vec::Vectorized<
+        T>> inline convert_float_to_int8(at::vec::Vectorized<float> src) {
   // Convert from float32 to int32 with truncation
   __m256i x_values_int32 = _mm256_cvttps_epi32(src);
 
@@ -131,10 +135,10 @@ inline convert_float_to_int8(at::vec::Vectorized<float> src) {
   constexpr auto max_val = std::numeric_limits<T>::max();
 
   // Convert from int16 to uint8/int8 using unsigned saturation
-  __m256i xyzw_clamped_v = pack_saturate_and_clamp<T>(
-      xy_packed_v, xy_packed_v, min_val, max_val);
+  __m256i xyzw_clamped_v =
+      pack_saturate_and_clamp<T>(xy_packed_v, xy_packed_v, min_val, max_val);
   __m256i permute_mask_v =
-    _mm256_set_epi32(0x07, 0x03, 0x06, 0x02, 0x05, 0x01, 0x04, 0x00);
+      _mm256_set_epi32(0x07, 0x03, 0x06, 0x02, 0x05, 0x01, 0x04, 0x00);
   return _mm256_permutevar8x32_epi32(xyzw_clamped_v, permute_mask_v);
 }
 
@@ -255,135 +259,149 @@ __FORCE_INLINE void QuantizeAvx2(
   }
 }
 
-template<>
+template <>
+struct is_vec_specialized_for<c10::qint32> : std::bool_constant<true> {};
+
+template <>
 struct Vectorized<c10::qint32> : public Vectorizedqi {
-    using size_type = int;
-    static constexpr size_type kSize = Vectorized<int>::size();
-    static constexpr size_type size() {
-        return kSize;
-    }
+  using size_type = int;
+  static constexpr size_type kSize = Vectorized<int>::size();
+  static constexpr size_type size() {
+    return kSize;
+  }
 
-    static constexpr int kFloatNumVecs = kSize / Vectorized<float>::size();
-    static constexpr int float_num_vecs() {
-        return kFloatNumVecs;
-    }
+  static constexpr int kFloatNumVecs = kSize / Vectorized<float>::size();
+  static constexpr int float_num_vecs() {
+    return kFloatNumVecs;
+  }
 
-    static constexpr int int_num_vecs() {
-        return 1;
-    }
+  static constexpr int int_num_vecs() {
+    return 1;
+  }
 
-    using float_vec_return_type = std::array<Vectorized<float>, kFloatNumVecs>;
-    using int_vec_return_type = std::array<Vectorized<c10::qint32>, 1>;
-    using value_type = c10::qint32::underlying;
+  using float_vec_return_type = std::array<Vectorized<float>, kFloatNumVecs>;
+  using int_vec_return_type = std::array<Vectorized<c10::qint32>, 1>;
+  using value_type = c10::qint32::underlying;
 
  public:
-    using Vectorizedqi::Vectorizedqi;
-    Vectorized() {}
+  using Vectorizedqi::Vectorizedqi;
+  Vectorized() {}
 
-    Vectorized(__m256i vals_) { vals = vals_;}
+  Vectorized(__m256i vals_) {
+    vals = vals_;
+  }
 
-    // Broadcast constructor
-    Vectorized(const c10::qint32& val) {
-        value_type uw = val.val_;
-        vals = _mm256_set1_epi32(uw);
+  // Broadcast constructor
+  Vectorized(const c10::qint32& val) {
+    value_type uw = val.val_;
+    vals = _mm256_set1_epi32(uw);
+  }
+
+  void store(void* ptr, int count = size()) const {
+    if (count != size()) {
+      memcpy(ptr, &vals, count * sizeof(value_type));
+    } else {
+      _mm256_storeu_si256((__m256i*)ptr, vals);
     }
+  }
 
-    void store(void* ptr, int count = size()) const {
-      if (count != size()) {
-        memcpy(ptr, &vals, count * sizeof(value_type));
-      } else {
-        _mm256_storeu_si256((__m256i*)ptr, vals);
-      }
+  static Vectorized<c10::qint32> loadu(const void* ptr) {
+    return Vectorized<c10::qint32>(ptr);
+  }
+
+  static Vectorized<c10::qint32> loadu(const void* ptr, int64_t count) {
+    __at_align__ value_type tmp_values[size()];
+    // Ensure uninitialized memory does not change the output value See
+    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
+    // not initialize arrays to zero using "={0}" because gcc would compile it
+    // to two instructions while a loop would be compiled to one instruction.
+    for (const auto i : c10::irange(size())) {
+      tmp_values[i] = 0;
     }
+    std::memcpy(
+        tmp_values,
+        reinterpret_cast<const value_type*>(ptr),
+        count * sizeof(value_type));
+    return _mm256_loadu_si256((const __m256i*)tmp_values);
+  }
 
-    static Vectorized<c10::qint32> loadu(const void* ptr) {
-        return Vectorized<c10::qint32>(ptr);
-    }
+  float_vec_return_type dequantize(
+      Vectorized<float> scale,
+      Vectorized<float> /*zero_point*/,
+      Vectorized<float> scale_zp_premul) const {
+    __m256 float_vals = _mm256_cvtepi32_ps(vals);
+    return {vec::fmadd(scale, Vectorized<float>(float_vals), scale_zp_premul)};
+  }
 
-    static Vectorized<c10::qint32> loadu(const void* ptr, int64_t count) {
-        __at_align__ value_type tmp_values[size()];
-        // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
-        // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
-        // instructions while a loop would be compiled to one instruction.
-        for (const auto i : c10::irange(size())) {
-          tmp_values[i] = 0;
-        }
-        std::memcpy(
-            tmp_values, reinterpret_cast<const value_type*>(ptr), count * sizeof(value_type));
-        return _mm256_loadu_si256((const __m256i*)tmp_values);
-    }
+  float_vec_return_type dequantize(
+      Vectorized<float> scale,
+      Vectorized<float> zero_point) const {
+    __m256 float_vals = _mm256_cvtepi32_ps(vals);
+    return {(Vectorized<float>(float_vals) - zero_point) * scale};
+  }
 
-    float_vec_return_type dequantize(
-        Vectorized<float> scale,
-        Vectorized<float> /*zero_point*/,
-        Vectorized<float> scale_zp_premul) const {
-      __m256 float_vals = _mm256_cvtepi32_ps(vals);
-      return {vec::fmadd(scale, Vectorized<float>(float_vals), scale_zp_premul)};
-    }
+  static Vectorized<c10::qint32> quantize(
+      const float_vec_return_type& rhs,
+      float scale,
+      int32_t zero_point,
+      float /*inverse_scale*/) {
+    Vectorized<c10::qint32> retval;
+    auto rhs_data = (__m256)rhs[0];
+    at::native::quantize_vec<c10::qint32, /*precision=*/32>(
+        scale,
+        zero_point,
+        (float*)&rhs_data,
+        (c10::qint32*)&retval.vals,
+        size());
+    return retval;
+  }
 
-    float_vec_return_type dequantize(
-        Vectorized<float> scale,
-        Vectorized<float> zero_point) const {
-      __m256 float_vals = _mm256_cvtepi32_ps(vals);
-      return {(Vectorized<float>(float_vals) - zero_point) * scale};
-    }
+  Vectorized<c10::qint32> maximum(Vectorized<c10::qint32> b) const {
+    return _mm256_max_epi32(vals, b.vals);
+  }
 
-    static Vectorized<c10::qint32> quantize(
-        const float_vec_return_type& rhs,
-        float scale,
-        int32_t zero_point,
-        float /*inverse_scale*/) {
-      Vectorized<c10::qint32> retval;
-      auto rhs_data = (__m256)rhs[0];
-      at::native::quantize_vec<c10::qint32, /*precision=*/32>(
-          scale, zero_point, (float*)&rhs_data, (c10::qint32*)&retval.vals, size());
-      return retval;
-    }
+  Vectorized<c10::qint32> minimum(Vectorized<c10::qint32> b) const {
+    return _mm256_min_epi32(vals, b.vals);
+  }
 
-    Vectorized<c10::qint32> maximum(Vectorized<c10::qint32> b) const {
-      return _mm256_max_epi32(vals, b.vals);
-    }
+  Vectorized<c10::qint32> relu(Vectorized<c10::qint32> zero_point) const {
+    return maximum(zero_point);
+  }
 
-    Vectorized<c10::qint32> minimum(Vectorized<c10::qint32> b) const {
-      return _mm256_min_epi32(vals, b.vals);
-    }
+  Vectorized<c10::qint32> relu6(
+      Vectorized<c10::qint32> zero_point,
+      Vectorized<c10::qint32> q_six) {
+    return _mm256_min_epi32(
+        _mm256_max_epi32(vals, zero_point.vals), q_six.vals);
+  }
 
-    Vectorized<c10::qint32> relu(Vectorized<c10::qint32> zero_point) const {
-        return maximum(zero_point);
-    }
+  int_vec_return_type widening_subtract(Vectorized<c10::qint32> b) const {
+    return {_mm256_sub_epi32(vals, b)};
+  }
 
-    Vectorized<c10::qint32> relu6(
-        Vectorized<c10::qint32> zero_point,
-        Vectorized<c10::qint32> q_six) {
-      return _mm256_min_epi32(
-          _mm256_max_epi32(vals, zero_point.vals), q_six.vals);
-    }
+  static Vectorized<c10::qint32> requantize_from_int(
+      const int_vec_return_type& inp,
+      float multiplier,
+      int32_t zero_point) {
+    __m256 multiplier_v = _mm256_set1_ps(multiplier);
+    __m256i zero_point_v = _mm256_set1_epi32(zero_point);
 
-    int_vec_return_type widening_subtract(Vectorized<c10::qint32> b) const {
-      return {_mm256_sub_epi32(vals, b)};
-    }
-
-    static Vectorized<c10::qint32> requantize_from_int(
-        const int_vec_return_type& inp,
-        float multiplier,
-        int32_t zero_point) {
-      __m256 multiplier_v = _mm256_set1_ps(multiplier);
-      __m256i zero_point_v = _mm256_set1_epi32(zero_point);
-
-      __m256 scaled = _mm256_mul_ps(_mm256_cvtepi32_ps(inp[0]), multiplier_v);
-      __m256i rounded = _mm256_cvtps_epi32(scaled);
-      return _mm256_add_epi32(rounded, zero_point_v);
-    }
+    __m256 scaled = _mm256_mul_ps(_mm256_cvtepi32_ps(inp[0]), multiplier_v);
+    __m256i rounded = _mm256_cvtps_epi32(scaled);
+    return _mm256_add_epi32(rounded, zero_point_v);
+  }
 
  private:
-    // Load from memory constructor
-    Vectorized(const void* ptr) {
-      vals = _mm256_loadu_si256((const __m256i*)ptr);
-    }
+  // Load from memory constructor
+  Vectorized(const void* ptr) {
+    vals = _mm256_loadu_si256((const __m256i*)ptr);
+  }
 };
 
 template <>
-Vectorized<c10::qint32> inline maximum(const Vectorized<c10::qint32>& a, const Vectorized<c10::qint32>& b) {
+Vectorized<c10::qint32> inline maximum(
+    const Vectorized<c10::qint32>& a,
+    const Vectorized<c10::qint32>& b) {
   return a.maximum(b);
 }
 
@@ -447,78 +465,86 @@ __m256i RequantizeAvx2(
   return xyzw_clamped_v;
 }
 
-template<>
+template <>
+struct is_vec_specialized_for<c10::qint8> : std::bool_constant<true> {};
+
+template <>
 struct Vectorized<c10::qint8> : public Vectorizedqi {
-    static constexpr int kSize = VECTOR_WIDTH;
-    static constexpr int size() {
-        return kSize;
-    }
+  static constexpr int kSize = VECTOR_WIDTH;
+  static constexpr int size() {
+    return kSize;
+  }
 
-    static constexpr int kFloatNumVecs = kSize / Vectorized<float>::size();
-    static constexpr int float_num_vecs() {
-        return kFloatNumVecs;
-    }
+  static constexpr int kFloatNumVecs = kSize / Vectorized<float>::size();
+  static constexpr int float_num_vecs() {
+    return kFloatNumVecs;
+  }
 
-    static constexpr int kIntNumVecs = kSize / Vectorized<int>::size();
-    static constexpr int int_num_vecs() {
-        return kIntNumVecs;
-    }
+  static constexpr int kIntNumVecs = kSize / Vectorized<int>::size();
+  static constexpr int int_num_vecs() {
+    return kIntNumVecs;
+  }
 
-    using float_vec_return_type = std::array<Vectorized<float>, kFloatNumVecs>;
-    using int_vec_return_type = std::array<Vectorized<c10::qint32>, kIntNumVecs>;
-    using value_type = typename c10::qint8::underlying;
+  using float_vec_return_type = std::array<Vectorized<float>, kFloatNumVecs>;
+  using int_vec_return_type = std::array<Vectorized<c10::qint32>, kIntNumVecs>;
+  using value_type = typename c10::qint8::underlying;
 
  public:
-    using Vectorizedqi::Vectorizedqi;
+  using Vectorizedqi::Vectorizedqi;
 
-    Vectorized() {}
-    Vectorized(__m256i vals_) { vals = vals_;}
+  Vectorized() {}
+  Vectorized(__m256i vals_) {
+    vals = vals_;
+  }
 
-    // Broadcast constructor
-    Vectorized(const c10::qint8& val) {
-        value_type uw = val.val_;
-        vals = _mm256_set1_epi8(uw);
+  // Broadcast constructor
+  Vectorized(const c10::qint8& val) {
+    value_type uw = val.val_;
+    vals = _mm256_set1_epi8(uw);
+  }
+
+  // This is needed because the compiler emits awful code for the default
+  // constructor for moving the enum
+  // NOLINTNEXTLINE(clang-diagnostic-deprecated-copy)
+  C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wdeprecated-copy")
+  C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-copy")
+#endif
+  Vectorized(const Vectorized<c10::qint8>& other) : Vectorizedqi(other.vals) {}
+  C10_CLANG_DIAGNOSTIC_POP()
+
+  void store(void* ptr, int count = size()) const {
+    if (count != size()) {
+      memcpy(ptr, &vals, count * sizeof(value_type));
+    } else {
+      _mm256_storeu_si256((__m256i*)ptr, vals);
     }
+  }
 
-    // This is needed because the compiler emits awful code for the default
-    // constructor for moving the enum
-    // NOLINTNEXTLINE(clang-diagnostic-deprecated-copy)
-    C10_CLANG_DIAGNOSTIC_PUSH()
-    #if C10_CLANG_HAS_WARNING("-Wdeprecated-copy")
-    C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-copy")
-    #endif
-    Vectorized(const Vectorized<c10::qint8>& other) : Vectorizedqi(other.vals) { }
-    C10_CLANG_DIAGNOSTIC_POP()
+  static Vectorized<c10::qint8> loadu(const void* ptr) {
+    return Vectorized<c10::qint8>(ptr);
+  }
 
-    void store(void* ptr, int count = size()) const {
-        if (count != size()) {
-            memcpy(ptr, &vals, count * sizeof(value_type));
-        } else {
-            _mm256_storeu_si256((__m256i*)ptr, vals);
-        }
+  static Vectorized<c10::qint8> loadu(const void* ptr, int64_t count) {
+    __at_align__ value_type tmp_values[size()];
+    // Ensure uninitialized memory does not change the output value See
+    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
+    // not initialize arrays to zero using "={0}" because gcc would compile it
+    // to two instructions while a loop would be compiled to one instruction.
+    for (const auto i : c10::irange(size())) {
+      tmp_values[i] = 0;
     }
-
-    static Vectorized<c10::qint8> loadu(const void* ptr) {
-        return Vectorized<c10::qint8>(ptr);
-    }
-
-    static Vectorized<c10::qint8> loadu(const void* ptr, int64_t count) {
-        __at_align__ value_type tmp_values[size()];
-        // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
-        // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
-        // instructions while a loop would be compiled to one instruction.
-        for (const auto i : c10::irange(size())) {
-          tmp_values[i] = 0;
-        }
-        std::memcpy(
-            tmp_values, reinterpret_cast<const value_type*>(ptr), count * sizeof(value_type));
-        return _mm256_loadu_si256((const __m256i*)tmp_values);
-    }
+    std::memcpy(
+        tmp_values,
+        reinterpret_cast<const value_type*>(ptr),
+        count * sizeof(value_type));
+    return _mm256_loadu_si256((const __m256i*)tmp_values);
+  }
 
  private:
-    __m256i cvtepi8_epi32(__m128i epi8_vals) const {
-        return _mm256_cvtepi8_epi32(epi8_vals);
-    }
+  __m256i cvtepi8_epi32(__m128i epi8_vals) const {
+    return _mm256_cvtepi8_epi32(epi8_vals);
+  }
 
  public:
   float_vec_return_type dequantize(
@@ -579,147 +605,157 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
   }
 
   Vectorized<c10::qint8> maximum(Vectorized<c10::qint8> b) const {
-      return _mm256_max_epi8(vals, b.vals);
-    }
+    return _mm256_max_epi8(vals, b.vals);
+  }
 
   Vectorized<c10::qint8> minimum(Vectorized<c10::qint8> b) const {
-      return _mm256_min_epi8(vals, b.vals);
-    }
+    return _mm256_min_epi8(vals, b.vals);
+  }
 
-    Vectorized<c10::qint8> relu(Vectorized<c10::qint8> zero_point) const {
-        return maximum(zero_point);
-    }
+  Vectorized<c10::qint8> relu(Vectorized<c10::qint8> zero_point) const {
+    return maximum(zero_point);
+  }
 
-    Vectorized<c10::qint8> relu6(
-        Vectorized<c10::qint8> zero_point,
-        Vectorized<c10::qint8> q_six) {
-      return _mm256_min_epi8(
-          _mm256_max_epi8(vals, zero_point.vals), q_six.vals);
-    }
+  Vectorized<c10::qint8> relu6(
+      Vectorized<c10::qint8> zero_point,
+      Vectorized<c10::qint8> q_six) {
+    return _mm256_min_epi8(_mm256_max_epi8(vals, zero_point.vals), q_six.vals);
+  }
 
-    int_vec_return_type widening_subtract(Vectorized<c10::qint8> b) const {
-      __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
-      __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
-      __m128i int_val2 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 2));
-      __m128i int_val3 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 3));
+  int_vec_return_type widening_subtract(Vectorized<c10::qint8> b) const {
+    __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
+    __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
+    __m128i int_val2 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 2));
+    __m128i int_val3 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 3));
 
-      __m256i int32_val0 = cvtepi8_epi32(int_val0);
-      __m256i int32_val1 = cvtepi8_epi32(int_val1);
-      __m256i int32_val2 = cvtepi8_epi32(int_val2);
-      __m256i int32_val3 = cvtepi8_epi32(int_val3);
+    __m256i int32_val0 = cvtepi8_epi32(int_val0);
+    __m256i int32_val1 = cvtepi8_epi32(int_val1);
+    __m256i int32_val2 = cvtepi8_epi32(int_val2);
+    __m256i int32_val3 = cvtepi8_epi32(int_val3);
 
-      __m128i int_b0 = _mm_set1_epi64x(_mm256_extract_epi64(b, 0));
-      __m128i int_b1 = _mm_set1_epi64x(_mm256_extract_epi64(b, 1));
-      __m128i int_b2 = _mm_set1_epi64x(_mm256_extract_epi64(b, 2));
-      __m128i int_b3 = _mm_set1_epi64x(_mm256_extract_epi64(b, 3));
+    __m128i int_b0 = _mm_set1_epi64x(_mm256_extract_epi64(b, 0));
+    __m128i int_b1 = _mm_set1_epi64x(_mm256_extract_epi64(b, 1));
+    __m128i int_b2 = _mm_set1_epi64x(_mm256_extract_epi64(b, 2));
+    __m128i int_b3 = _mm_set1_epi64x(_mm256_extract_epi64(b, 3));
 
-      __m256i int32_b0 = cvtepi8_epi32(int_b0);
-      __m256i int32_b1 = cvtepi8_epi32(int_b1);
-      __m256i int32_b2 = cvtepi8_epi32(int_b2);
-      __m256i int32_b3 = cvtepi8_epi32(int_b3);
+    __m256i int32_b0 = cvtepi8_epi32(int_b0);
+    __m256i int32_b1 = cvtepi8_epi32(int_b1);
+    __m256i int32_b2 = cvtepi8_epi32(int_b2);
+    __m256i int32_b3 = cvtepi8_epi32(int_b3);
 
-      __m256i res_0 = _mm256_sub_epi32(int32_val0, int32_b0);
-      __m256i res_1 = _mm256_sub_epi32(int32_val1, int32_b1);
-      __m256i res_2 = _mm256_sub_epi32(int32_val2, int32_b2);
-      __m256i res_3 = _mm256_sub_epi32(int32_val3, int32_b3);
+    __m256i res_0 = _mm256_sub_epi32(int32_val0, int32_b0);
+    __m256i res_1 = _mm256_sub_epi32(int32_val1, int32_b1);
+    __m256i res_2 = _mm256_sub_epi32(int32_val2, int32_b2);
+    __m256i res_3 = _mm256_sub_epi32(int32_val3, int32_b3);
 
-      return {Vectorized<c10::qint32>(res_0),
-              Vectorized<c10::qint32>(res_1),
-              Vectorized<c10::qint32>(res_2),
-              Vectorized<c10::qint32>(res_3)};
-    }
+    return {
+        Vectorized<c10::qint32>(res_0),
+        Vectorized<c10::qint32>(res_1),
+        Vectorized<c10::qint32>(res_2),
+        Vectorized<c10::qint32>(res_3)};
+  }
 
-    static Vectorized<c10::qint8> requantize_from_int(
-        const int_vec_return_type& inp,
-        float multiplier,
-        int32_t zero_point) {
-      __m256 multiplier_v = _mm256_set1_ps(multiplier);
-      __m256i zero_point_v = _mm256_set1_epi32(zero_point);
-      return RequantizeAvx2<value_type>(inp, multiplier_v, zero_point_v);
-    }
+  static Vectorized<c10::qint8> requantize_from_int(
+      const int_vec_return_type& inp,
+      float multiplier,
+      int32_t zero_point) {
+    __m256 multiplier_v = _mm256_set1_ps(multiplier);
+    __m256i zero_point_v = _mm256_set1_epi32(zero_point);
+    return RequantizeAvx2<value_type>(inp, multiplier_v, zero_point_v);
+  }
 
  private:
-    // Load from memory constructor
-    Vectorized(const void* ptr) {
-        vals = _mm256_loadu_si256((const __m256i*)ptr);
-    }
+  // Load from memory constructor
+  Vectorized(const void* ptr) {
+    vals = _mm256_loadu_si256((const __m256i*)ptr);
+  }
 };
 
 template <>
-Vectorized<c10::qint8> inline maximum(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
+Vectorized<c10::qint8> inline maximum(
+    const Vectorized<c10::qint8>& a,
+    const Vectorized<c10::qint8>& b) {
   return a.maximum(b);
 }
 
-template<>
+template <>
+struct is_vec_specialized_for<c10::quint8> : std::bool_constant<true> {};
+
+template <>
 struct Vectorized<c10::quint8> : public Vectorizedqi {
-    static constexpr int kSize = VECTOR_WIDTH;
-    static constexpr int size() {
-        return kSize;
-    }
+  static constexpr int kSize = VECTOR_WIDTH;
+  static constexpr int size() {
+    return kSize;
+  }
 
-    static constexpr int kFloatNumVecs = kSize / Vectorized<float>::size();
-    static constexpr int float_num_vecs() {
-        return kFloatNumVecs;
-    }
+  static constexpr int kFloatNumVecs = kSize / Vectorized<float>::size();
+  static constexpr int float_num_vecs() {
+    return kFloatNumVecs;
+  }
 
-    static constexpr int kIntNumVecs = kSize / Vectorized<int>::size();
-    static constexpr int int_num_vecs() {
-        return kIntNumVecs;
-    }
+  static constexpr int kIntNumVecs = kSize / Vectorized<int>::size();
+  static constexpr int int_num_vecs() {
+    return kIntNumVecs;
+  }
 
-    using float_vec_return_type = std::array<Vectorized<float>, kFloatNumVecs>;
-    using int_vec_return_type = std::array<Vectorized<c10::qint32>, kIntNumVecs>;
-    using value_type = typename c10::quint8::underlying;
+  using float_vec_return_type = std::array<Vectorized<float>, kFloatNumVecs>;
+  using int_vec_return_type = std::array<Vectorized<c10::qint32>, kIntNumVecs>;
+  using value_type = typename c10::quint8::underlying;
 
  public:
-    using Vectorizedqi::Vectorizedqi;
-    Vectorized() {}
+  using Vectorizedqi::Vectorizedqi;
+  Vectorized() {}
 
-    Vectorized(__m256i vals_) { vals = vals_;}
+  Vectorized(__m256i vals_) {
+    vals = vals_;
+  }
 
-    // Broadcast constructor
-    Vectorized(const c10::quint8& val) {
-        value_type uw = val.val_;
-        vals = _mm256_set1_epi8(uw);
+  // Broadcast constructor
+  Vectorized(const c10::quint8& val) {
+    value_type uw = val.val_;
+    vals = _mm256_set1_epi8(uw);
+  }
+
+  // NOLINTNEXTLINE(clang-diagnostic-deprecated-copy)
+  C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wdeprecated-copy")
+  C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-copy")
+#endif
+  Vectorized(const Vectorized<c10::quint8>& other) : Vectorizedqi(other.vals) {}
+  C10_CLANG_DIAGNOSTIC_POP()
+
+  void store(void* ptr, int count = size()) const {
+    if (count != size()) {
+      memcpy(ptr, &vals, count * sizeof(value_type));
+    } else {
+      _mm256_storeu_si256((__m256i*)ptr, vals);
     }
+  }
 
-    // NOLINTNEXTLINE(clang-diagnostic-deprecated-copy)
-    C10_CLANG_DIAGNOSTIC_PUSH()
-    #if C10_CLANG_HAS_WARNING("-Wdeprecated-copy")
-    C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-copy")
-    #endif
-    Vectorized(const Vectorized<c10::quint8>& other) : Vectorizedqi(other.vals) { }
-    C10_CLANG_DIAGNOSTIC_POP()
+  static Vectorized<c10::quint8> loadu(const void* ptr) {
+    return Vectorized<c10::quint8>(ptr);
+  }
 
-    void store(void* ptr, int count = size()) const {
-        if (count != size()) {
-            memcpy(ptr, &vals, count * sizeof(value_type));
-        } else {
-            _mm256_storeu_si256((__m256i*)ptr, vals);
-        }
+  static Vectorized<c10::quint8> loadu(const void* ptr, int64_t count) {
+    __at_align__ value_type tmp_values[size()];
+    // Ensure uninitialized memory does not change the output value See
+    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
+    // not initialize arrays to zero using "={0}" because gcc would compile it
+    // to two instructions while a loop would be compiled to one instruction.
+    for (const auto i : c10::irange(size())) {
+      tmp_values[i] = 0;
     }
-
-    static Vectorized<c10::quint8> loadu(const void* ptr) {
-        return Vectorized<c10::quint8>(ptr);
-    }
-
-    static Vectorized<c10::quint8> loadu(const void* ptr, int64_t count) {
-        __at_align__ value_type tmp_values[size()];
-        // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
-        // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
-        // instructions while a loop would be compiled to one instruction.
-        for (const auto i : c10::irange(size())) {
-          tmp_values[i] = 0;
-        }
-        std::memcpy(
-            tmp_values, reinterpret_cast<const value_type*>(ptr), count * sizeof(value_type));
-        return _mm256_loadu_si256((const __m256i*)tmp_values);
-    }
+    std::memcpy(
+        tmp_values,
+        reinterpret_cast<const value_type*>(ptr),
+        count * sizeof(value_type));
+    return _mm256_loadu_si256((const __m256i*)tmp_values);
+  }
 
  private:
-    __m256i cvtepu8_epi32(__m128i epu8_vals) const {
-        return _mm256_cvtepu8_epi32(epu8_vals);
-    }
+  __m256i cvtepu8_epi32(__m128i epu8_vals) const {
+    return _mm256_cvtepu8_epi32(epu8_vals);
+  }
 
  public:
   float_vec_return_type dequantize(
@@ -780,74 +816,75 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
   }
 
   Vectorized<c10::quint8> maximum(Vectorized<c10::quint8> b) const {
-      return _mm256_max_epu8(vals, b.vals);
-    }
+    return _mm256_max_epu8(vals, b.vals);
+  }
 
   Vectorized<c10::quint8> minimum(Vectorized<c10::quint8> b) const {
-      return _mm256_min_epu8(vals, b.vals);
-    }
+    return _mm256_min_epu8(vals, b.vals);
+  }
 
-    Vectorized<c10::quint8> relu(Vectorized<c10::quint8> zero_point) const {
-        return maximum(zero_point);
-    }
+  Vectorized<c10::quint8> relu(Vectorized<c10::quint8> zero_point) const {
+    return maximum(zero_point);
+  }
 
-    Vectorized<c10::quint8> relu6(
-        Vectorized<c10::quint8> zero_point,
-        Vectorized<c10::quint8> q_six) {
-      return _mm256_min_epu8(
-          _mm256_max_epu8(vals, zero_point.vals), q_six.vals);
-    }
+  Vectorized<c10::quint8> relu6(
+      Vectorized<c10::quint8> zero_point,
+      Vectorized<c10::quint8> q_six) {
+    return _mm256_min_epu8(_mm256_max_epu8(vals, zero_point.vals), q_six.vals);
+  }
 
-    int_vec_return_type widening_subtract(Vectorized<c10::quint8> b) const {
-      __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
-      __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
-      __m128i int_val2 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 2));
-      __m128i int_val3 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 3));
+  int_vec_return_type widening_subtract(Vectorized<c10::quint8> b) const {
+    __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
+    __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
+    __m128i int_val2 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 2));
+    __m128i int_val3 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 3));
 
-      __m256i int32_val0 = cvtepu8_epi32(int_val0);
-      __m256i int32_val1 = cvtepu8_epi32(int_val1);
-      __m256i int32_val2 = cvtepu8_epi32(int_val2);
-      __m256i int32_val3 = cvtepu8_epi32(int_val3);
+    __m256i int32_val0 = cvtepu8_epi32(int_val0);
+    __m256i int32_val1 = cvtepu8_epi32(int_val1);
+    __m256i int32_val2 = cvtepu8_epi32(int_val2);
+    __m256i int32_val3 = cvtepu8_epi32(int_val3);
 
-      __m128i int_b0 = _mm_set1_epi64x(_mm256_extract_epi64(b, 0));
-      __m128i int_b1 = _mm_set1_epi64x(_mm256_extract_epi64(b, 1));
-      __m128i int_b2 = _mm_set1_epi64x(_mm256_extract_epi64(b, 2));
-      __m128i int_b3 = _mm_set1_epi64x(_mm256_extract_epi64(b, 3));
+    __m128i int_b0 = _mm_set1_epi64x(_mm256_extract_epi64(b, 0));
+    __m128i int_b1 = _mm_set1_epi64x(_mm256_extract_epi64(b, 1));
+    __m128i int_b2 = _mm_set1_epi64x(_mm256_extract_epi64(b, 2));
+    __m128i int_b3 = _mm_set1_epi64x(_mm256_extract_epi64(b, 3));
 
-      __m256i int32_b0 = cvtepu8_epi32(int_b0);
-      __m256i int32_b1 = cvtepu8_epi32(int_b1);
-      __m256i int32_b2 = cvtepu8_epi32(int_b2);
-      __m256i int32_b3 = cvtepu8_epi32(int_b3);
+    __m256i int32_b0 = cvtepu8_epi32(int_b0);
+    __m256i int32_b1 = cvtepu8_epi32(int_b1);
+    __m256i int32_b2 = cvtepu8_epi32(int_b2);
+    __m256i int32_b3 = cvtepu8_epi32(int_b3);
 
-      __m256i res_0 = _mm256_sub_epi32(int32_val0, int32_b0);
-      __m256i res_1 = _mm256_sub_epi32(int32_val1, int32_b1);
-      __m256i res_2 = _mm256_sub_epi32(int32_val2, int32_b2);
-      __m256i res_3 = _mm256_sub_epi32(int32_val3, int32_b3);
-      return {Vectorized<c10::qint32>(res_0),
-              Vectorized<c10::qint32>(res_1),
-              Vectorized<c10::qint32>(res_2),
-              Vectorized<c10::qint32>(res_3)};
-    }
+    __m256i res_0 = _mm256_sub_epi32(int32_val0, int32_b0);
+    __m256i res_1 = _mm256_sub_epi32(int32_val1, int32_b1);
+    __m256i res_2 = _mm256_sub_epi32(int32_val2, int32_b2);
+    __m256i res_3 = _mm256_sub_epi32(int32_val3, int32_b3);
+    return {
+        Vectorized<c10::qint32>(res_0),
+        Vectorized<c10::qint32>(res_1),
+        Vectorized<c10::qint32>(res_2),
+        Vectorized<c10::qint32>(res_3)};
+  }
 
-    static Vectorized<c10::quint8> requantize_from_int(
-        const int_vec_return_type& inp,
-        float multiplier,
-        int32_t zero_point) {
-      __m256 multiplier_v = _mm256_set1_ps(multiplier);
-      __m256i zero_point_v = _mm256_set1_epi32(zero_point);
-      return RequantizeAvx2<value_type>(inp, multiplier_v, zero_point_v);
-    }
+  static Vectorized<c10::quint8> requantize_from_int(
+      const int_vec_return_type& inp,
+      float multiplier,
+      int32_t zero_point) {
+    __m256 multiplier_v = _mm256_set1_ps(multiplier);
+    __m256i zero_point_v = _mm256_set1_epi32(zero_point);
+    return RequantizeAvx2<value_type>(inp, multiplier_v, zero_point_v);
+  }
 
  private:
-
-    // Load from memory constructor
-    Vectorized(const void* ptr) {
-        vals = _mm256_loadu_si256((const __m256i*)ptr);
-    }
+  // Load from memory constructor
+  Vectorized(const void* ptr) {
+    vals = _mm256_loadu_si256((const __m256i*)ptr);
+  }
 };
 
 template <>
-Vectorized<c10::quint8> inline maximum(const Vectorized<c10::quint8>& a, const Vectorized<c10::quint8>& b) {
+Vectorized<c10::quint8> inline maximum(
+    const Vectorized<c10::quint8>& a,
+    const Vectorized<c10::quint8>& b) {
   return a.maximum(b);
 }
 
@@ -908,7 +945,9 @@ struct VectorizedQuantizedConverter {
       float tmp_vals[Vectorized<float>::size()];
       for (const auto j : c10::irange(Vectorized<float>::size())) {
         tmp_vals[j] = at::native::dequantize_val<T>(
-            scale[j], zero_point[j], T(vals[Vectorized<float>::size() * i + j]));
+            scale[j],
+            zero_point[j],
+            T(vals[Vectorized<float>::size() * i + j]));
       }
       rv[i] = Vectorized<float>(tmp_vals);
     }
@@ -928,10 +967,10 @@ struct VectorizedQuantizedConverter {
 
 template <>
 struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
-                                 c10::qint32,
-                                 std::array<Vectorized<float>, 1>,
-                                 std::array<Vectorized<c10::qint32>, 1>,
-                                 Vectorized<int>::size()> {
+                                     c10::qint32,
+                                     std::array<Vectorized<float>, 1>,
+                                     std::array<Vectorized<c10::qint32>, 1>,
+                                     Vectorized<int>::size()> {
   using VectorizedQuantizedConverter::VectorizedQuantizedConverter;
 
   static Vectorized<c10::qint32> loadu(const void* ptr) {
@@ -940,14 +979,17 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
 
   static Vectorized<c10::qint32> loadu(const void* ptr, int64_t count) {
     __at_align__ value_type tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
-    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
-    // instructions while a loop would be compiled to one instruction.
+    // Ensure uninitialized memory does not change the output value See
+    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
+    // not initialize arrays to zero using "={0}" because gcc would compile it
+    // to two instructions while a loop would be compiled to one instruction.
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 0;
     }
     std::memcpy(
-        tmp_values, reinterpret_cast<const value_type*>(ptr), count * sizeof(value_type));
+        tmp_values,
+        reinterpret_cast<const value_type*>(ptr),
+        count * sizeof(value_type));
     return Vectorized<c10::qint32>(tmp_values);
   }
 
@@ -989,10 +1031,9 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
     return retval;
   }
 
-  Vectorized<c10::qint32> relu(Vectorized<c10::qint32> zero_point) const  {
+  Vectorized<c10::qint32> relu(Vectorized<c10::qint32> zero_point) const {
     return maximum(zero_point);
   }
-
 
   Vectorized<c10::qint32> relu6(
       Vectorized<c10::qint32> zero_point,
@@ -1028,7 +1069,9 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
 };
 
 template <>
-Vectorized<c10::qint32> inline maximum(const Vectorized<c10::qint32>& a, const Vectorized<c10::qint32>& b) {
+Vectorized<c10::qint32> inline maximum(
+    const Vectorized<c10::qint32>& a,
+    const Vectorized<c10::qint32>& b) {
   return a.maximum(b);
 }
 
@@ -1055,11 +1098,14 @@ Vectorized<c10::qint32> inline operator+(
 }
 
 template <>
+struct is_vec_specialized_for<c10::qint8> : std::bool_constant<true> {};
+
+template <>
 struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
-                                c10::qint8,
-                                std::array<Vectorized<float>, 4>,
-                                std::array<Vectorized<c10::qint32>, 4>,
-                                4 * Vectorized<float>::size()> {
+                                    c10::qint8,
+                                    std::array<Vectorized<float>, 4>,
+                                    std::array<Vectorized<c10::qint32>, 4>,
+                                    4 * Vectorized<float>::size()> {
   using VectorizedQuantizedConverter::VectorizedQuantizedConverter;
 
   static Vectorized<c10::qint8> loadu(const void* ptr) {
@@ -1068,14 +1114,17 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
 
   static Vectorized<c10::qint8> loadu(const void* ptr, int64_t count) {
     __at_align__ value_type tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
-    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
-    // instructions while a loop would be compiled to one instruction.
+    // Ensure uninitialized memory does not change the output value See
+    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
+    // not initialize arrays to zero using "={0}" because gcc would compile it
+    // to two instructions while a loop would be compiled to one instruction.
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 0;
     }
     std::memcpy(
-        tmp_values, reinterpret_cast<const value_type*>(ptr), count * sizeof(value_type));
+        tmp_values,
+        reinterpret_cast<const value_type*>(ptr),
+        count * sizeof(value_type));
     return Vectorized<c10::qint8>(tmp_values);
   }
 
@@ -1166,16 +1215,21 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
 };
 
 template <>
-Vectorized<c10::qint8> inline maximum(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
+Vectorized<c10::qint8> inline maximum(
+    const Vectorized<c10::qint8>& a,
+    const Vectorized<c10::qint8>& b) {
   return a.maximum(b);
 }
 
 template <>
+struct is_vec_specialized_for<c10::quint8> : std::bool_constant<true> {};
+
+template <>
 struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
-                                 c10::quint8,
-                                 std::array<Vectorized<float>, 4>,
-                                 std::array<Vectorized<c10::qint32>, 4>,
-                                 4 * Vectorized<float>::size()> {
+                                     c10::quint8,
+                                     std::array<Vectorized<float>, 4>,
+                                     std::array<Vectorized<c10::qint32>, 4>,
+                                     4 * Vectorized<float>::size()> {
   using VectorizedQuantizedConverter::VectorizedQuantizedConverter;
 
   static Vectorized<c10::quint8> loadu(const void* ptr) {
@@ -1184,14 +1238,17 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
 
   static Vectorized<c10::quint8> loadu(const void* ptr, int64_t count) {
     __at_align__ value_type tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
-    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
-    // instructions while a loop would be compiled to one instruction.
+    // Ensure uninitialized memory does not change the output value See
+    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
+    // not initialize arrays to zero using "={0}" because gcc would compile it
+    // to two instructions while a loop would be compiled to one instruction.
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 0;
     }
     std::memcpy(
-        tmp_values, reinterpret_cast<const value_type*>(ptr), count * sizeof(value_type));
+        tmp_values,
+        reinterpret_cast<const value_type*>(ptr),
+        count * sizeof(value_type));
     return Vectorized<c10::quint8>(tmp_values);
   }
 
@@ -1236,7 +1293,6 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
   Vectorized<c10::quint8> relu(Vectorized<c10::quint8> zero_point) const {
     return maximum(zero_point);
   }
-
 
   Vectorized<c10::quint8> relu6(
       Vectorized<c10::quint8> zero_point,
@@ -1283,52 +1339,59 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
 };
 
 template <>
-Vectorized<c10::quint8> inline maximum(const Vectorized<c10::quint8>& a, const Vectorized<c10::quint8>& b) {
+Vectorized<c10::quint8> inline maximum(
+    const Vectorized<c10::quint8>& a,
+    const Vectorized<c10::quint8>& b) {
   return a.maximum(b);
 }
 
 #endif // if defined(CPU_CAPABILITY_AVX2)
 
 #if (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256))
-std::pair<Vectorized<float>, Vectorized<float>>
-inline convert_int8_to_float(at::vec::Vectorized<int8_t> src) {
-    auto s8x8 = vld1_s8(src.operator const int8_t*());
-    auto s16x8 = vmovl_s8(s8x8);
+std::pair<Vectorized<float>, Vectorized<float>> inline convert_int8_to_float(
+    at::vec::Vectorized<int8_t> src) {
+  auto s8x8 = vld1_s8(src.operator const int8_t*());
+  auto s16x8 = vmovl_s8(s8x8);
 
-    auto s32x4_hi = vmovl_s16(vget_high_s16(s16x8));
-    auto s32x4_lo = vmovl_s16(vget_low_s16(s16x8));
+  auto s32x4_hi = vmovl_s16(vget_high_s16(s16x8));
+  auto s32x4_lo = vmovl_s16(vget_low_s16(s16x8));
 
-    return std::make_pair(Vectorized<float>(vcvtq_f32_s32(s32x4_lo)), Vectorized<float>(vcvtq_f32_s32(s32x4_hi)));
+  return std::make_pair(
+      Vectorized<float>(vcvtq_f32_s32(s32x4_lo)),
+      Vectorized<float>(vcvtq_f32_s32(s32x4_hi)));
 }
 
-std::pair<Vectorized<float>, Vectorized<float>>
-inline convert_int8_to_float(at::vec::Vectorized<uint8_t> src) {
-    auto u8x8 = vld1_u8(src.operator const uint8_t*());
-    auto u16x8 = vmovl_u8(u8x8);
-    auto u32x4_hi = vmovl_u16(vget_high_u16(u16x8));
-    auto u32x4_lo = vmovl_u16(vget_low_u16(u16x8));
+std::pair<Vectorized<float>, Vectorized<float>> inline convert_int8_to_float(
+    at::vec::Vectorized<uint8_t> src) {
+  auto u8x8 = vld1_u8(src.operator const uint8_t*());
+  auto u16x8 = vmovl_u8(u8x8);
+  auto u32x4_hi = vmovl_u16(vget_high_u16(u16x8));
+  auto u32x4_lo = vmovl_u16(vget_low_u16(u16x8));
 
-    return std::make_pair(Vectorized<float>(vcvtq_f32_u32(u32x4_lo)), Vectorized<float>(vcvtq_f32_u32(u32x4_hi)));
+  return std::make_pair(
+      Vectorized<float>(vcvtq_f32_u32(u32x4_lo)),
+      Vectorized<float>(vcvtq_f32_u32(u32x4_hi)));
 }
 
-Vectorized<float>
-inline convert_int8_half_register_to_float(at::vec::Vectorized<int8_t> src) {
-    auto s8x8 = vld1_s8(src.operator const int8_t*());
-    auto s16x8 = vmovl_s8(s8x8);
+Vectorized<float> inline convert_int8_half_register_to_float(
+    at::vec::Vectorized<int8_t> src) {
+  auto s8x8 = vld1_s8(src.operator const int8_t*());
+  auto s16x8 = vmovl_s8(s8x8);
 
-    auto s32x4_lo = vmovl_s16(vget_low_s16(s16x8));
+  auto s32x4_lo = vmovl_s16(vget_low_s16(s16x8));
 
-    return Vectorized<float>(vcvtq_f32_s32(s32x4_lo));
+  return Vectorized<float>(vcvtq_f32_s32(s32x4_lo));
 }
 
-Vectorized<float>
-inline convert_int8_half_register_to_float(at::vec::Vectorized<uint8_t> src) {
-    auto u8x8 = vld1_u8(src.operator const uint8_t*());
-    auto u16x8 = vmovl_u8(u8x8);
-    auto u32x4_lo = vmovl_u16(vget_low_u16(u16x8));
+Vectorized<float> inline convert_int8_half_register_to_float(
+    at::vec::Vectorized<uint8_t> src) {
+  auto u8x8 = vld1_u8(src.operator const uint8_t*());
+  auto u16x8 = vmovl_u8(u8x8);
+  auto u32x4_lo = vmovl_u16(vget_low_u16(u16x8));
 
-    return Vectorized<float>(vcvtq_f32_u32(u32x4_lo));
+  return Vectorized<float>(vcvtq_f32_u32(u32x4_lo));
 }
 
 #endif
-}} // namespace at::vec::CPU_CAPABILITY
+} // namespace CPU_CAPABILITY
+} // namespace at::vec

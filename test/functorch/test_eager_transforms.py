@@ -687,7 +687,7 @@ class TestGradTransform(TestCase):
         expected = (torch.zeros_like(x), torch.ones_like(x))
         self.assertEqual(result, expected)
 
-    # TODO: https://github.com/zou3519/functorch/issues/12
+    # TODO: https://github.com/pytorch/functorch/issues/12
     @onlyCPU
     def test_unrelated_hessian(self, device):
         N = 5

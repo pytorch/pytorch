@@ -830,7 +830,7 @@ class TestAutograd(TestCase):
         x_grad, x_grad_clone = compute_grad(create_graph=False)
         self.assertEqual(x_grad, x_grad_clone * 2)
 
-        # Accumulate out-of-place when create_graph is False
+        # Accumulate out-of-place when create_graph is True
         x_grad, x_grad_clone = compute_grad(create_graph=True)
         self.assertEqual(x_grad, x_grad_clone)
 
@@ -8652,6 +8652,47 @@ for shape in [(1,), ()]:
         ):
             Func.apply(a_clone)
 
+    def test_custom_function_inplace_on_non_default_view(self):
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp):
+                inp.add_(1)
+                ctx.mark_dirty(inp)
+                return inp
+
+            @staticmethod
+            def backward(ctx, gO):
+                pass
+
+        a = torch.tensor([1.0, 2.0], requires_grad=True)
+        a_clone = a.clone()
+        b, c = a.split_with_sizes([1, 1], dim=0)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "output of a function that returns multiple view"
+        ):
+            Func.apply(b)
+
+    def test_custom_function_inplace_on_view_of_leaf(self):
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp):
+                inp.add_(1)
+                ctx.mark_dirty(inp)
+                return inp
+
+            @staticmethod
+            def backward(ctx, gO):
+                pass
+
+        a = torch.tensor([1.0, 2.0], requires_grad=True)
+        b = a.view_as(a)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "a view of a leaf Variable that requires grad"
+        ):
+            Func.apply(b)
+
     def test_named_tensor_for_complex_views(self):
         names = ["batch", "height", "width", "complex"]
         z = torch.ones((2, 1, 2, 2), requires_grad=True)
@@ -9335,10 +9376,14 @@ for shape in [(1,), ()]:
             with set_warn_always_context(True):
                 with warnings.catch_warnings(record=True) as w:
                     tmp.exp().sum().backward(create_graph=True)
-                    self.assertTrue(len(w) == 1)
-                    self.assertTrue(
-                        "Using backward() with create_graph=True" in str(w[0].message)
-                    )
+                    self.assertTrue(w)
+                    found = 0
+                    for warning in w:
+                        if "Using backward() with create_graph=True" in str(
+                            warning.message
+                        ):
+                            found += 1
+                    self.assertEqual(found, 1)
 
             # Remove the backward + create_graph=True cycle
             a.grad = None

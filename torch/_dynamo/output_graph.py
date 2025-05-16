@@ -302,6 +302,7 @@ class OutputGraphGuardsState:
     input_source_to_sizes_strides: dict[Source, dict[str, Any]]
     dual_level: int
     functorch_layers: list[torch._functorch.pyfunctorch.FuncTorchInterpreter]
+    current_device: Optional[torch.device]
 
     export: bool = False
     export_constraints: bool = False
@@ -356,6 +357,7 @@ class OutputGraph(OutputGraphGuardsState):
             input_source_to_sizes_strides={},
             dual_level=torch.autograd.forward_ad._current_level,
             functorch_layers=torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters(),
+            current_device=torch.utils._device.CURRENT_DEVICE,
         )
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
@@ -515,6 +517,19 @@ class OutputGraph(OutputGraphGuardsState):
             self.install_builtins_dict_in_fglobals()
         )
 
+        self.compiler_trace_stack = contextlib.ExitStack()
+
+    def mark_bytecode_tracing_start(self):
+        self.compiler_trace_stack.enter_context(
+            dynamo_timed(
+                "bytecode_tracing",
+                log_pt2_compile_event=True,
+            )
+        )
+
+    def mark_bytecode_tracing_stop(self):
+        self.compiler_trace_stack.close()
+
     def install_builtins_dict_in_fglobals(self):
         # f_globals["__builtins__"] can be a dict or a module. This is an
         # implemenation detail -
@@ -593,6 +608,7 @@ class OutputGraph(OutputGraphGuardsState):
             input_source_to_sizes_strides=self.input_source_to_sizes_strides,
             dual_level=self.dual_level,
             functorch_layers=self.functorch_layers,
+            current_device=self.current_device,
             export=self.export,
             export_constraints=self.export_constraints,
             _guards=self.guards,
@@ -1065,6 +1081,8 @@ class OutputGraph(OutputGraphGuardsState):
         Generate a subgraph to continue execution on user code.
         Automatically restore live variables.
         """
+        # bytecode tracing has finished. Pop the context manager for dynamo_timed
+        self.mark_bytecode_tracing_stop()
         assert reason is not None
 
         from .decorators import disable
@@ -1122,7 +1140,7 @@ class OutputGraph(OutputGraphGuardsState):
         # realize any unrealized tensor VTs in case they
         # need to be added to self.nn_modules as attributes
         for value in stack_values:
-            value.realize()
+            variables.LazyVariableTracker.realize_all(value)
 
         # Use nn.Module "proxies" in the constructed GraphModule so that
         # the resulting GM does not hold additional strong references to the original modules.
@@ -1554,6 +1572,8 @@ class OutputGraph(OutputGraphGuardsState):
             "OutputGraph.call_user_compiler",
             phase_name="backend_compile",
             log_pt2_compile_event=True,
+            log_waitcounter=True,
+            waitcounter_name_override="compile_aot_autograd",
             dynamo_compile_column_us="aot_autograd_cumulative_compile_time_us",
         ):
             return self._call_user_compiler(gm)
@@ -2634,7 +2654,7 @@ class SubgraphTracer(fx.Tracer):
         self, example_value: Union[torch.SymInt, torch.Tensor], src: Optional[Source]
     ):
         # The before arg is for inserting symints in the sizes/strides of a tensor
-        # before the tensor. This odering ensures that when we look at the tensor's
+        # before the tensor. This ordering ensures that when we look at the tensor's
         # symbols, they're already lifted/tracked. E.g. this assumption is used
         # in insert_deferred_runtime_asserts.
         def _lift_symbols_in_symint(
