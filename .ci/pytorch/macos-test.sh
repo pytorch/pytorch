@@ -232,7 +232,8 @@ test_torchbench_smoketest() {
   mkdir -p "$TEST_REPORTS_DIR"
 
   local device=mps
-  local models=(hf_T5 llama BERT_pytorch dcgan hf_GPT2 yolov3 resnet152 sam pytorch_unet stable_diffusion_text_encoder moco speech_transformer)
+  local models=(hf_T5 llama BERT_pytorch dcgan hf_GPT2 yolov3 resnet152 sam pytorch_unet stable_diffusion_text_encoder speech_transformer Super_SloMo)
+  local hf_models=(GoogleFnet YituTechConvBert)
 
   for backend in eager inductor; do
 
@@ -249,6 +250,16 @@ test_torchbench_smoketest() {
           --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv" || true
         if [ "$backend" == "inductor" ]; then
           PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
+            --accuracy --only "$model" --backend "$backend" --inference --devices "$device" "$dtype_arg" \
+            --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_accuracy.csv" || true
+        fi
+      done
+      for model in "${hf_models[@]}"; do
+        if [ "$backend" == "inductor" ]; then
+          PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/huggingface.py \
+            --performance --only "$model" --backend "$backend" --inference --devices "$device" "$dtype_arg" \
+            --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv" || true
+          PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/huggingface.py \
             --accuracy --only "$model" --backend "$backend" --inference --devices "$device" "$dtype_arg" \
             --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_accuracy.csv" || true
         fi

@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 import functools
-import logging
 import os
 import pickle
 import shutil
@@ -8,7 +7,6 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import contextmanager
 from typing import Optional, Union
 from unittest import mock
 
@@ -53,6 +51,7 @@ from torch.testing._internal.inductor_utils import (
     requires_gpu,
     requires_triton,
 )
+from torch.testing._internal.logging_utils import multiple_logs_to_string
 from torch.testing._internal.triton_utils import requires_cuda
 
 
@@ -63,36 +62,6 @@ if HAS_TRITON:
 
 torch._dynamo.config.fake_tensor_cache_enabled = True
 torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
-
-
-class LogCaptureHandler(logging.Handler):
-    def __init__(self, level):
-        super().__init__(level)
-        self.records = []
-
-    def emit(self, record):
-        self.records.append(record)
-
-
-@contextmanager
-def capture_logs(log_name, log_level):
-    try:
-        logger = logging.getLogger(log_name)
-        old_level = logger.level
-        handler = logging.Handler()
-        logger.setLevel(log_level)
-        log_records = []
-
-        def emit(record):
-            log_records.append(record)
-
-        handler.emit = emit
-        logger.addHandler(handler)
-
-        yield log_records
-    finally:
-        logger.removeHandler(handler)
-        logger.setLevel(old_level)
 
 
 class MyModelConv2d(torch.nn.Module):
@@ -2128,15 +2097,13 @@ class TestFxGraphCacheHashing(TestCase):
             torch._dynamo.reset()
             counters.clear()
 
-            with config.patch(
-                {"_fuse_ddp_communication_passes": ["schedule_comm_wait"]}
-            ):
+            # hit
+            mod_compiled(x)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            with config.patch({"_fuse_ddp_communication_passes": ["new_pass_foo_bar"]}):
                 # miss (private config changed)
-                mod_compiled(x)
-                self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
-                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-                self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
-                # hit
                 torch._dynamo.reset()
                 mod_compiled(x)
                 self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
@@ -2145,9 +2112,10 @@ class TestFxGraphCacheHashing(TestCase):
                 torch._dynamo.reset()
                 counters.clear()
 
-            with capture_logs(
-                "torch._inductor.codecache", logging.INFO
-            ) as logs, config.patch(
+            (codecache_stream,), ctx = multiple_logs_to_string(
+                "torch._inductor.codecache", "codecache"
+            )
+            with ctx(), config.patch(
                 {"_fuse_ddp_communication_passes": [lambda *args: None]}
             ):
                 # bypass (custom pass is not serializable)
@@ -2157,12 +2125,10 @@ class TestFxGraphCacheHashing(TestCase):
                 self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
                 counters.clear()
             # assert that our bypass is explicit
+            codecache_logs = codecache_stream.getvalue().strip()
             self.assertTrue(
-                any(
-                    x.getMessage()
-                    == "Bypassing FX Graph Cache because 'Unsupported _fuse_ddp_communication_pass'"
-                    for x in logs
-                )
+                "Bypassing FX Graph Cache because 'Unsupported _fuse_ddp_communication_pass'"
+                in codecache_logs
             )
 
     def test_hash_custom_passes(self):
