@@ -34,7 +34,7 @@ from torch.fx._pytree import (
 )
 from torch.utils._pytree import (
     _deregister_pytree_node,
-    _register_pytree_node,
+    _private_register_pytree_node,
     Context,
     FlattenFunc,
     FromDumpableContextFn,
@@ -434,8 +434,8 @@ def _check_input_constraints_for_graph(
 
 def register_dataclass_as_pytree_node(
     cls: type[Any],
-    flatten_fn: Optional[FlattenFunc] = None,
-    unflatten_fn: Optional[UnflattenFunc] = None,
+    flatten_func: Optional[FlattenFunc] = None,
+    unflatten_func: Optional[UnflattenFunc] = None,
     *,
     serialized_type_name: Optional[str] = None,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
@@ -446,7 +446,7 @@ def register_dataclass_as_pytree_node(
         cls
     ), f"Only dataclasses can be registered with this function: {cls}"
 
-    def default_flatten_fn(obj: Any) -> tuple[list[Any], Context]:
+    def default_flatten_func(obj: Any) -> tuple[list[Any], Context]:
         flattened = []
         flat_names = []
         none_names = []
@@ -459,16 +459,18 @@ def register_dataclass_as_pytree_node(
                 none_names.append(name)
         return flattened, [flat_names, none_names]
 
-    def default_unflatten_fn(values: Iterable[Any], context: Context) -> Any:
+    def default_unflatten_func(values: Iterable[Any], context: Context) -> Any:
         flat_names, none_names = context
         return cls(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
 
     def default_flatten_fn_with_keys(obj: Any) -> tuple[list[Any], Context]:
-        flattened, (flat_names, _none_names) = flatten_fn(obj)  # type: ignore[misc]
+        flattened, (flat_names, _none_names) = flatten_func(obj)  # type: ignore[misc]
         return [(MappingKey(k), v) for k, v in zip(flat_names, flattened)], flat_names
 
-    flatten_fn = flatten_fn if flatten_fn is not None else default_flatten_fn
-    unflatten_fn = unflatten_fn if unflatten_fn is not None else default_unflatten_fn
+    if flatten_func is None:
+        flatten_func = default_flatten_func
+    if unflatten_func is None:
+        unflatten_func = default_unflatten_func
 
     if (to_dumpable_context is None) ^ (from_dumpable_context is None):
         raise ValueError(
@@ -476,12 +478,12 @@ def register_dataclass_as_pytree_node(
             "be None or registered."
         )
 
-    _register_pytree_node(
+    _private_register_pytree_node(
         cls,
-        flatten_fn,
-        unflatten_fn,
+        flatten_func,
+        unflatten_func,
         serialized_type_name=serialized_type_name,
-        flatten_with_keys_fn=default_flatten_fn_with_keys,
+        flatten_with_keys_func=default_flatten_fn_with_keys,
         to_dumpable_context=to_dumpable_context,
         from_dumpable_context=from_dumpable_context,
     )
@@ -1371,7 +1373,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
         def __deepcopy__(self, memo):
             return PrototypeModule(self())
 
-    def default_flatten_fn(obj: Any) -> tuple[list[Any], Context]:
+    def default_flatten_func(obj: Any) -> tuple[list[Any], Context]:
         named_parameters = dict(obj.named_parameters())
         named_buffers = dict(obj.named_buffers())
         params_buffers = {**named_parameters, **named_buffers}
@@ -1380,13 +1382,13 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
             PrototypeModule(obj),
         ]
 
-    def default_unflatten_fn(values: Iterable[Any], context: Context) -> Any:
+    def default_unflatten_func(values: Iterable[Any], context: Context) -> Any:
         flat_names, ref = context
         if ref is None or ref() is None:
             raise RuntimeError("Module has been garbage collected")
         obj = ref()
-        assert flatten_fn is not None
-        flattened, _ = flatten_fn(obj)
+        assert flatten_func is not None
+        flattened, _ = flatten_func(obj)
 
         # NOTE: This helper function will replicate an nn.Module in the exactly same
         #       structure to be used together with _reparametrize_module. This will
@@ -1408,15 +1410,15 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
             ret = obj
         return ret
 
-    def default_flatten_fn_with_keys(obj: Any) -> tuple[list[Any], Context]:
-        flattened, [flat_names, *args] = flatten_fn(obj)  # type: ignore[misc]
+    def default_flatten_func_with_keys(obj: Any) -> tuple[list[Any], Context]:
+        flattened, [flat_names, *args] = flatten_func(obj)  # type: ignore[misc]
         return [(MappingKey(k), v) for k, v in zip(flat_names, flattened)], [
             flat_names,
             *args,
         ]
 
-    flatten_fn = default_flatten_fn
-    unflatten_fn = default_unflatten_fn
+    flatten_func = default_flatten_func
+    unflatten_func = default_unflatten_func
 
     serialized_type_name = cls.__module__ + "." + cls.__qualname__
 
@@ -1429,18 +1431,18 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
         s[1] = PrototypeModule(torch.nn.Module())
         return s
 
-    _register_pytree_node(
+    _private_register_pytree_node(
         cls,
-        flatten_fn,
-        unflatten_fn,
+        flatten_func,
+        unflatten_func,
         serialized_type_name=serialized_type_name,
-        flatten_with_keys_fn=default_flatten_fn_with_keys,
         to_dumpable_context=to_dumpable_context,
         from_dumpable_context=from_dumpable_context,
+        flatten_with_keys_func=default_flatten_func_with_keys,
     )
 
     def default_flatten_fn_spec(obj, spec) -> list[Any]:
-        flats, context = flatten_fn(obj)
+        flats, context = flatten_func(obj)
         assert context == spec.context
         return flats
 
