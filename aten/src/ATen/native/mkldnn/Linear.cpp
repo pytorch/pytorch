@@ -586,13 +586,15 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
   }
   ideep::tensor src_scales_t = ideep::tensor(ideep::scale_t(1, input_scale));
   ideep::tensor wei_scales_t = ideep::tensor(ideep::scale_t(1, weight_scale));
+  ideep::tensor dst_scales_t = ideep::tensor(ideep::scale_t(1, output_scale));
 
   if (input_scale != 1.0f) {
     args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_scales_t});
   }
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, wei_scales_t});
-  ideep::tensor dst_scales_t = ideep::tensor(ideep::scale_t(1, output_scale));
-  args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, dst_scales_t});
+  if (output_scale != 1.0f) {
+    args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, dst_scales_t});
+  }
 
   primitive.execute(ideep::stream::default_stream(), args);
   return out;
