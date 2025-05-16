@@ -262,16 +262,15 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   return outputs;
 }
 
-// AARON NOTE: make sure this works lol, normalized shape was originally c10::SymIntArrayRef
 std::tuple<Tensor, Tensor> rms_norm_cpu(
     const Tensor& input,
     IntArrayRef normalized_shape,
     const std::optional<Tensor>& weight_opt /* optional */,
     std::optional<double> eps) {
   // See [Note: hacky wrapper removal for optional tensor]
-  // c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  // const Tensor& weight = *weight_maybe_owned;
-  // _check_rms_norm_inputs_symint(input, normalized_shape, weight);
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  _check_layer_norm_inputs(input, normalized_shape, weight, weight);
 
   std::vector<int64_t> dims_to_reduce;
   for (const auto i : c10::irange(normalized_shape.size())) {
