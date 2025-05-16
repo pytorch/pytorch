@@ -3160,7 +3160,7 @@ def _automatic_dynamic(
                     constraint_size = RelaxedUnspecConstraint(warn_only=False)
             elif marked_strict_unbacked:
                 constraint_size = RelaxedUnspecConstraint(warn_only=False)
-            elif not marked_static and automatic_dynamic == config.automatic_dynamic_shapes:
+            elif not marked_static and automatic_dynamic:
                 set_feature_use("dynamo.automatic_dynamic_shapes", True)
                 if automatic_dynamic_size:
                     constraint_size = RelaxedUnspecConstraint(warn_only=True)
