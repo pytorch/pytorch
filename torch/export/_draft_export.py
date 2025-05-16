@@ -11,10 +11,16 @@ from typing import Any, Callable, Optional, Union
 import torch
 import torch._logging._internal
 import torch._logging.structured
-from torch._export.passes.insert_custom_op_guards import insert_custom_op_guards
-from torch.export import ExportedProgram
-from torch.export._trace import _export
-from torch.export.dynamic_shapes import refine_dynamic_shapes_from_suggested_fixes
+import torch.utils._pytree as pytree
+from torch._export.passes.insert_custom_op_guards import (
+    get_op_profiles,
+    insert_custom_op_guards,
+    OpProfile,
+)
+
+from ._trace import _export
+from .dynamic_shapes import _DimHint, _DimHintType, Dim
+from .exported_program import ExportedProgram
 
 
 log = logging.getLogger(__name__)
@@ -23,7 +29,7 @@ log = logging.getLogger(__name__)
 class FailureType(IntEnum):
     MISSING_FAKE_KERNEL = 1
     DATA_DEPENDENT_ERROR = 2
-    CONSTRAINT_VIOLATION_ERROR = 3
+    GUARD_ADDED = 3
     MISMATCHED_FAKE_KERNEL = 4
 
     def __str__(self) -> str:
@@ -94,17 +100,19 @@ class FailureReport:
     Please refer to https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit#heading=h.ahugy69p2jmz for more detailed instructions on how to write a meta implementation.
 """  # noqa: B950
 
-        elif self.failure_type == FailureType.CONSTRAINT_VIOLATION_ERROR:
+        elif self.failure_type == FailureType.GUARD_ADDED:
             locals_info = (
                 prettify_frame_locals(**self.data["frame_locals"])
                 if self.data["frame_locals"]
                 else ""
             )
-            return f"""Constraint violation error.
-    The specified input dynamic_shapes spec was found to be incorrect during tracing.
+            return f"""Guard Added.
+    A guard was added during tracing, which might've resulted in some incorrect
+    tracing or constraint violation error.
     Specifically, this guard was added: {self.data["expr"]}, where {self.data["symbol_to_sources"]}.
-    This occurred at the following stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}:
+    This occurred at the following stacktrace: {prettify_stack(self.data["user_stack"], str_to_filename)}:
         {locals_info}
+    And the following framework stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}\n
     Because of this, we have modified the dynamic shapes structure to be the
     following. You can also use torch.export.Dim.AUTO instead to specify your
     dynamic shapes, and we will automatically infer the dynamism for you.
@@ -151,10 +159,12 @@ class DraftExportReport:
         failures: list[FailureReport],
         str_to_filename: dict[int, str],
         expressions_created: dict[int, dict[str, Any]],
+        op_profiles: dict[str, set[OpProfile]],
     ):
         self.failures: list[FailureReport] = failures
         self.str_to_filename = str_to_filename
         self.expressions_created: dict[int, dict[str, Any]] = expressions_created
+        self.op_profiles = op_profiles
 
     def successful(self) -> bool:
         return len(self.failures) == 0 or all(
@@ -215,6 +225,8 @@ class LogRecord:
         elif key == "mismatched_fake_kernel":
             return hash((key, data["op"], data["reason"]))
         elif key == "propagate_real_tensors_provenance":
+            return hash((key, json.dumps(data["user_stack"])))
+        elif key == "guard_added":
             return hash((key, json.dumps(data["user_stack"])))
         elif key == "create_unbacked_symbol":
             return hash((key, json.dumps(data["user_stack"])))
@@ -355,7 +367,7 @@ def draft_export(
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     preserve_module_call_signature: tuple[str, ...] = (),
     strict: bool = False,
-    pre_dispatch: bool = False,
+    pre_dispatch: bool = True,
 ) -> ExportedProgram:
     kwargs = kwargs or {}
     dynamic_shapes = dynamic_shapes or {}
@@ -377,10 +389,16 @@ def draft_export(
                 pre_dispatch=pre_dispatch,
                 preserve_module_call_signature=preserve_module_call_signature,
             )
-        except torch._dynamo.exc.UserError as exc:
-            new_shapes = refine_dynamic_shapes_from_suggested_fixes(
-                exc.msg, dynamic_shapes
-            )
+        except torch._dynamo.exc.UserError:
+
+            def convert_dim_to_auto(dim: Any) -> Any:
+                if isinstance(dim, Dim):
+                    return Dim.AUTO(min=dim.min, max=dim.max)
+                elif isinstance(dim, _DimHint) and dim.type == _DimHintType.DYNAMIC:
+                    return Dim.AUTO(min=dim.min, max=dim.max)
+                return dim
+
+            new_shapes = pytree.tree_map(convert_dim_to_auto, dynamic_shapes)
             ep = _export(
                 mod,
                 args,
@@ -395,9 +413,7 @@ def draft_export(
 
         str_to_filename: dict[int, str] = {}
         failures: list[FailureReport] = []
-        custom_ops_logs: dict[
-            Any, tuple[dict[str, Any], FailureType]
-        ] = {}  # For adding in assertions before custom ops
+        incorrect_custom_ops: set[str] = set()
         expressions_created: dict[int, dict[str, Any]] = {}
 
         for log_name, log_contents in capture_structured_log.log_record.logs:
@@ -420,18 +436,15 @@ def draft_export(
                 if new_shapes is None:
                     continue
 
-                failure_type = FailureType.CONSTRAINT_VIOLATION_ERROR
+                failure_type = FailureType.GUARD_ADDED
                 log_contents["new_dynamic_shapes"] = new_shapes
             elif log_name == "missing_fake_kernel":
                 failure_type = FailureType.MISSING_FAKE_KERNEL
-                custom_ops_logs[log_contents["op"]] = (log_contents, failure_type)
+                incorrect_custom_ops.add(log_contents["op"])
 
             elif log_name == "mismatched_fake_kernel":
                 failure_type = FailureType.MISMATCHED_FAKE_KERNEL
-                custom_ops_logs[(log_contents["op"], log_contents["reason"])] = (
-                    log_contents,
-                    failure_type,
-                )
+                incorrect_custom_ops.add(log_contents["op"])
 
             else:
                 continue
@@ -448,27 +461,41 @@ def draft_export(
             if v.visited:
                 expressions_created[k] = v.record
 
-        report = DraftExportReport(failures, str_to_filename, expressions_created)
+        op_profiles = get_op_profiles(ep.graph_module, incorrect_custom_ops)
+        report = DraftExportReport(
+            failures, str_to_filename, expressions_created, op_profiles
+        )
 
         # Add asserts around custom ops
-        insert_custom_op_guards(ep.graph_module, list(custom_ops_logs.keys()))
+        insert_custom_op_guards(ep.graph_module, incorrect_custom_ops)
 
     ep._report = report
     if not report.successful():
         log_filename = capture_structured_log.stream.name
 
-        log.warning(
-            """
+        warning_msg = f"""
 ###################################################################################################
-WARNING: %s issue(s) found during export, and it was not able to soundly produce a graph.
+WARNING: {len(report.failures)} issue(s) found during export, and it was not able to soundly produce a graph.
 To view the report of failures in an html page, please run the command:
-    `tlparse %s --export`
+    `tlparse {log_filename} --export`
 Or, you can view the errors in python by inspecting `print(ep._report)`.
-###################################################################################################
-        """,
-            len(report.failures),
-            log_filename,
-        )
+"""
+
+        if len(report.op_profiles) > 0:
+            warning_msg += f"""
+While tracing we found {len(report.op_profiles)} operator(s) which do not have a fake kernel registered.
+If you intend to retrace the exported graph or run it with fake tensors, please run it under the
+following context manager, which will register a fake kernel for those operators.
+```
+with torch._library.fake_profile.unsafe_generate_fake_kernels(ep._report.op_profiles):
+    # run with fake tensors
+```
+"""
+
+        warning_msg += """#################################################################################################"""
+
+        log.warning(warning_msg)
+
     else:
         log.info(
             """

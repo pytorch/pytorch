@@ -28,21 +28,30 @@ inline Vectorized<bool> Vectorized<bool>::loadu(const void* ptr) {
 }
 
 template <>
-inline Vectorized<bool> Vectorized<bool>::loadu(const void* ptr, int64_t count) {
+inline Vectorized<bool> Vectorized<bool>::loadu(
+    const void* ptr,
+    int64_t count) {
   // See NOTE [Loading boolean values]
   return convert_to_bool(Vectorized<int8_t>::loadu(ptr, count));
 }
 
 template <typename VT>
-struct VecHoldType { using hold_type = typename VT::value_type; };
+struct VecHoldType {
+  using hold_type = typename VT::value_type;
+};
 
 template <>
-struct VecHoldType<Vectorized<BFloat16>> { using hold_type = BFloat16; };
+struct VecHoldType<Vectorized<BFloat16>> {
+  using hold_type = BFloat16;
+};
 
 template <>
-struct VecHoldType<Vectorized<Half>> {using hold_type = Half; };
+struct VecHoldType<Vectorized<Half>> {
+  using hold_type = Half;
+};
 
 template <typename VT>
 using vechold_type = typename VecHoldType<VT>::hold_type;
 
-}} // namespace at::vec::CPU_CAPABILITY
+} // namespace CPU_CAPABILITY
+} // namespace at::vec
