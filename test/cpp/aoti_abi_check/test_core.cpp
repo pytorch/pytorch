@@ -5,6 +5,7 @@
 namespace torch {
 namespace standalone {
 TEST(TestCore, TestDeviceType) {
+  // clang-format off
   constexpr DeviceType expected_device_types[] = {
     kCPU,
     kCUDA,
@@ -28,6 +29,7 @@ TEST(TestCore, TestDeviceType) {
     kMTIA,
     kPrivateUse1,
   };
+  // clang-format on
   for (int8_t i = 0;
        i < static_cast<int8_t>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES);
        ++i) {

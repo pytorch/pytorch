@@ -16,7 +16,8 @@
 
 namespace c10 {
 using torch::standalone::DeviceType;
-
+// clang-format off
+// Turn off clang-format for this section to avoid reordering
 using torch::standalone::kCPU;
 using torch::standalone::kCUDA;
 using torch::standalone::kMKLDNN;
@@ -39,6 +40,7 @@ using torch::standalone::kIPU;
 using torch::standalone::kMTIA;
 using torch::standalone::kPrivateUse1;
 using torch::standalone::COMPILE_TIME_MAX_DEVICE_TYPES;
+// clang-format on
 
 C10_API std::string DeviceTypeName(DeviceType d, bool lower_case = false);
 
