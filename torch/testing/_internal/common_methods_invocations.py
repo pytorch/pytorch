@@ -15451,8 +15451,6 @@ op_db: list[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
-        #    supports_forward_ad=False,
-        #    supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_rms_norm,
            error_inputs_func=error_inputs_rms_norm,),
     OpInfo('nn.functional.local_response_norm',
