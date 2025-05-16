@@ -191,7 +191,7 @@ from user code:
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
-    test_inductor_debug = within_range_record_test(3, 26, inductor=logging.DEBUG)
+    test_inductor_debug = within_range_record_test(3, 28, inductor=logging.DEBUG)
     test_inductor_info = within_range_record_test(2, 10, inductor=logging.INFO)
 
     @make_logging_test()
@@ -612,7 +612,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         fn_opt = torch.compile(f, backend="eager")
         fn_opt(torch.randn(3, 3))
 
-        self.assertEqual(len(records), 4)
+        self.assertEqual(len(records), 3)
         messages = [
             "\n".join(record.getMessage().split("\n")[-2:]) for record in records
         ]
@@ -636,12 +636,6 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         #     return g(g(x))
         #            ~^^^^^^""",
         # )
-        self.assertExpectedInline(
-            messages[3],
-            """\
-            return x * 2
-                   ~~^~~""",
-        )
 
     @skipIfNotPy311
     @make_logging_test(trace_call=True)

@@ -87,8 +87,10 @@ class TestLazyCloneDeviceType(TestCase):
         if op == "_lazy_clone":
             b = a._lazy_clone(device=dest_device)
         elif op == "to":
-            if torch.device(device).type != "mps":
-                self.skipTest("op='to' only runs if device='mps'")
+            if torch.device(device).type != "mps" or case == "to_same_device":
+                self.skipTest(
+                    "op='to' only runs if device='mps' and if source and dest devices differ"
+                )
             b = a.to(device=dest_device)
         else:
             raise AssertionError(f"op='{op}' not recognized")
@@ -193,8 +195,10 @@ class TestLazyCloneDeviceType(TestCase):
         if op == "_lazy_clone":
             b = a._lazy_clone(device=dest_device)
         elif op == "to":
-            if torch.device(device).type != "mps":
-                self.skipTest("op='to' only runs if device='mps'")
+            if torch.device(device).type != "mps" or case == "to_same_device":
+                self.skipTest(
+                    "op='to' only runs if device='mps' and if source and dest devices differ"
+                )
             b = a.to(device=dest_device)
         else:
             raise AssertionError(f"op='{op}' not recognized")
@@ -229,6 +233,9 @@ class TestLazyCloneDeviceType(TestCase):
         self.assertTrue((b == orig_tensor.to(b.device)).all())
         self.assertEqual(a.cpu(), b.cpu())
         self.assertEqual(a, b)
+        self.assertTrue((a.clone() == orig_tensor.to(a.device)).all())
+        self.assertTrue((b.clone() == orig_tensor.to(b.device)).all())
+        self.assertEqual(a.clone().cpu(), b.clone().cpu())
 
         self.assertEqual(a.device, src_device_check)
         self.assertEqual(b.device, dest_device_check)
@@ -255,8 +262,12 @@ class TestLazyCloneDeviceType(TestCase):
         self.assertEqual(torch._C._data_address_resolve_unified(a), orig_data_ptr)
         self.assertEqual(torch._C._data_address_resolve_unified(b), orig_data_ptr)
 
-        self.assertEqual(b.clone(), c)
-        self.assertEqual(a.clone(), c)
+        self.assertTrue((b == c).all())
+        self.assertTrue((a == c).all())
+        self.assertTrue((b.clone() == c).all())
+        self.assertTrue((a.clone() == c).all())
+        self.assertTrue((b.clone() == c.clone()).all())
+        self.assertTrue((a.clone() == c.clone()).all())
 
         self.assertTrue(torch._C._is_cow_tensor(a))
         self.assertTrue(torch._C._is_cow_tensor(b))

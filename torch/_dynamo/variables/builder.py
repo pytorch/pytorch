@@ -78,7 +78,7 @@ from torch.utils.weak import TensorWeakRef
 
 from .. import config, graph_break_hints, mutation_guard, replay_record, trace_rules
 from ..device_interface import get_registered_device_interfaces
-from ..exc import InternalTorchDynamoError, unimplemented_v2
+from ..exc import InternalTorchDynamoError, raise_observed_exception, unimplemented_v2
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..pgo import (
     auto_dynamic,
@@ -675,7 +675,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
 
-            # For all_const, we dont have to guard on anything yet. We guard on
+            # For all_const, we don't have to guard on anything yet. We guard on
             # keys lazily by adding a dict_getitem entry for each accessed key.
             # For cases where we need to guard on all keys, we lazily put guards
             # during the dict call_method (check dicts.py)
@@ -1456,6 +1456,15 @@ class VariableBuilder:
         return self.tx.output.side_effects.track_object_existing(value, result)
 
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
+        for item in value:
+            if item is value:
+                unimplemented_v2(
+                    gb_type="list elements are pointing to the list itself",
+                    context="",
+                    explanation="Dynamo does not support lists whose items reference to itself",
+                    hints=["Avoid using self referential list"],
+                )
+
         if config.specialize_int and type(value) is torch.Size:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value)
@@ -1677,6 +1686,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             if torch._dynamo.config.inline_inbuilt_nn_modules:
                 freezing = is_parameter_freezing()
+
                 # Guard against the case where user may overwrite named parameters
                 # / named buffers
                 # NOTE: This is not likely to happen but worth guarding to avoid
@@ -1686,15 +1696,21 @@ class VariableBuilder:
                     and value.named_parameters.__func__
                     is og_module_named_parameters_fn_ptr
                 ):
-                    for _, p in value.named_parameters():
-                        self.mark_static_input(p, guard=freezing)
+                    try:  # catch TypeErrors in named_parameters() from unserializable nn modules
+                        for _, p in value.named_parameters():
+                            self.mark_static_input(p, guard=freezing)
+                    except TypeError as e:
+                        raise_observed_exception(type(e), self.tx, args=list(e.args))
 
                 if (
                     callable(value.named_buffers)
                     and value.named_buffers.__func__ is og_module_named_buffers_fn_ptr
                 ):
-                    for _, b in value.named_buffers():
-                        self.mark_static_input(b, guard=freezing)
+                    try:  # catch TypeErrors in named_parameters() from unserializable nn modules
+                        for _, b in value.named_buffers():
+                            self.mark_static_input(b, guard=freezing)
+                    except TypeError as e:
+                        raise_observed_exception(type(e), self.tx, args=list(e.args))
 
                 if freezing:
                     # we need to add the module to tracing context
@@ -1728,7 +1744,7 @@ class VariableBuilder:
 
     def wrap_literal(self, value):
         if type(value) is int:
-            # allowlist has higher precendence over specialization control.
+            # allowlist has higher precedence over specialization control.
             if is_dynamic_source(self.source.name()):
                 return self.wrap_symint(value, True)
 
