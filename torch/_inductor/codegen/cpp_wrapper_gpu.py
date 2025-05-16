@@ -58,6 +58,9 @@ class DeferredTritonCallWrapper:
     arg_types: list[Any]
 
     def generate(self, wrapper: CppWrapperGpu):
+        """
+        Generate the GPU kernel definition, as well as load and launch code.
+        """
         prefix = wrapper.prefix
         if self.kernel_name.startswith("multi_kernel_"):
             # MultiKernel will select one kernel after running the autotune block
