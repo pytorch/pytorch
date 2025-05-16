@@ -844,38 +844,21 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   PyObject* item = nullptr;
   PyObject* size = nullptr;
   PyObject* stride = nullptr;
-  const char* op_name = nullptr;
-
-  if (!PyArg_ParseTuple(args, "OOO|s", &item, &size, &stride, &op_name)) {
+  if (!PyArg_ParseTuple(args, "OOO", &item, &size, &stride)) {
     return nullptr;
   }
   if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
-    std::stringstream msg;
-    msg << "expected Tensor()";
-    if (op_name) {
-      msg << " for op: " << op_name;
-    }
-    PyErr_SetString(PyExc_TypeError, msg.str().c_str());
+    PyErr_SetString(PyExc_TypeError, "expected Tensor()");
     return nullptr;
   }
   if (!PyTuple_CheckExact(size) || !PyTuple_CheckExact(stride)) {
-    std::stringstream msg;
-    msg << "expected tuple()";
-    if (op_name) {
-      msg << " for op: " << op_name;
-    }
-    PyErr_SetString(PyExc_TypeError, msg.str().c_str());
+    PyErr_SetString(PyExc_TypeError, "expected tuple()");
     return nullptr;
   }
   at::Tensor tensor = THPVariable_Unpack(item);
   int64_t ndim = tensor.ndimension();
   if (PyTuple_GET_SIZE(size) != ndim || PyTuple_GET_SIZE(stride) != ndim) {
-    std::stringstream msg;
-    msg << "wrong number of dimensions" << ndim;
-    if (op_name) {
-      msg << " for op: " << op_name;
-    }
-    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
+    PyErr_SetString(PyExc_AssertionError, "wrong number of dimensions");
     return nullptr;
   }
 
@@ -904,9 +887,6 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   }
 
   if (num_errors) {
-    if (op_name) {
-      msg << "\nError in op: " << op_name;
-    }
     msg << "\nThis error most often comes from a incorrect fake (aka meta) kernel for a custom op.";
     msg << "\nUse torch.library.opcheck to test your custom op.";
     msg << "\nSee https://pytorch.org/docs/stable/library.html#torch.library.opcheck";
@@ -924,27 +904,15 @@ static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
    */
   PyObject* item = nullptr;
   unsigned long alignment = 0;
-  const char* op_name = nullptr;
-
-  if (!PyArg_ParseTuple(args, "Ok|s", &item, &alignment, &op_name)) {
+  if (!PyArg_ParseTuple(args, "Ok", &item, &alignment)) {
     return nullptr;
   }
   if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
-    std::stringstream msg;
-    msg << "expected Tensor()";
-    if (op_name) {
-      msg << " for op: " << op_name;
-    }
-    PyErr_SetString(PyExc_TypeError, msg.str().c_str());
+    PyErr_SetString(PyExc_TypeError, "expected Tensor()");
     return nullptr;
   }
   if (alignment == 0) {
-    std::stringstream msg;
-    msg << "alignment cannot be 0";
-    if (op_name) {
-      msg << " in op: " << op_name;
-    }
-    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
+    PyErr_SetString(PyExc_AssertionError, "alignment can not be 0");
     return nullptr;
   }
 
@@ -954,10 +922,7 @@ static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
   size_t itemsize = tensor.itemsize();
   if (storage_offset * itemsize % alignment != 0) {
     std::stringstream msg;
-    if (op_name) {
-      msg << "\nError in op: " << op_name;
-    }
-    msg << "\nExpect the tensor to be " << alignment
+    msg << "Expect the tensor to be " << alignment
         << " bytes aligned. Fail due to storage_offset=" << storage_offset
         << " itemsize=" << itemsize;
     PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
@@ -4175,6 +4140,81 @@ class ListGetItemGuardAccessor : public GuardAccessor {
 };
 
 /**
+ * Represents set[index] accessor by converting the set into a dictionary.
+ */
+class SetGetItemGuardAccessor : public GuardAccessor {
+ public:
+  SetGetItemGuardAccessor(
+      RootGuardManager* root,
+      const py::object& index,
+      std::string source,
+      py::handle example_value,
+      py::handle guard_manager_enum)
+      : GuardAccessor(
+            root,
+            index,
+            std::move(source),
+            example_value,
+            guard_manager_enum),
+        _index(py::cast<Py_ssize_t>(index)) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
+    PyObject* PyDict = (PyObject*)&PyDict_Type;
+    PyObject* dict =
+        PyObject_CallMethod(PyDict, "fromkeys", "OO", obj, Py_None);
+
+    PyObject* keys_list = PyMapping_Keys(dict);
+    PyObject* x = PyList_GetItem(keys_list, _index); // borrowed ref
+    if (x == nullptr) {
+      PyErr_Clear();
+      return false;
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* x = PyList_GetItem(obj, _index); // borrowed ref
+    if (x == nullptr) {
+      PyErr_Clear();
+      return GuardDebugInfo(
+          false, std::string("IndexError on ") + get_source(), 0);
+    }
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    return result;
+  }
+
+  std::string repr() const override {
+    return "SetGetItemGuardAccessor(" + std::to_string(_index) + ")";
+  }
+
+ public: // cloning functions
+  SetGetItemGuardAccessor(
+      GuardManager* guard_manager,
+      SetGetItemGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<SetGetItemGuardAccessor>(cloned_root, clone_filter_fn);
+  }
+
+  void clone_visitor(SetGetItemGuardAccessor* to) {
+    to->_index = _index;
+  }
+
+ private:
+  Py_ssize_t _index{-1};
+};
+
+/**
  * Represents tuple[index] accessor. It is faster than generic
  * GetItemGuardAccessor.
  */
@@ -6137,6 +6177,14 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "tuple_iterator_getitem_manager",
           &GuardManager::get_child_manager<TupleIteratorGetItemAccessor>,
+          py::arg("index"),
+          py::arg("source"),
+          py::arg("example_value"),
+          py::arg("guard_manager_enum"),
+          py::return_value_policy::reference)
+      .def(
+          "set_getitem_manager",
+          &GuardManager::get_child_manager<SetGetItemGuardAccessor>,
           py::arg("index"),
           py::arg("source"),
           py::arg("example_value"),

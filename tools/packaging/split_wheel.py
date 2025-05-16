@@ -47,15 +47,11 @@ def requirements_installed() -> bool:
 
         return True
     except ImportError:
-        logger.error(  # noqa: TRY400
-            "Requirements not installed, run the following command to install:",
-            exc_info=False,
+        logger.error(
+            "Requirements not installed, run the following command to install:"
         )
-        logger.error(  # noqa: TRY400
-            "    > %s -m pip install -r %s/requirements.txt",
-            sys.executable,
-            ROOT_PATH,
-            exc_info=False,
+        logger.error(
+            "    > %s -m pip install -r %s/requirements.txt", sys.executable, ROOT_PATH
         )
         return False
 
