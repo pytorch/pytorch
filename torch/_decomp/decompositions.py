@@ -754,10 +754,12 @@ def slice_forward(
 
     start_val = generalize_index(start_val)
     end_val = generalize_index(end_val, end=True)
-    torch._check(end_val >= start_val)
 
     storage_offset = self.storage_offset() + start_val * strides[dim]
-    len = end_val - start_val
+    if guard_or_none(end_val >= start_val) is None:
+        len = torch.sym_max(end_val - start_val, 0)
+    else:
+        len = end_val - start_val
     sizes[dim] = (len + step - 1) // step
     strides[dim] *= step
 
