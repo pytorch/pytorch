@@ -2215,6 +2215,10 @@ def _is_valid_scaled_mm_pattern(dtype):
         )
         assert dequant_node.target is quantized_decomposed.dequantize_per_tensor.tensor
 
+        # only support float8_e4m3 input
+        if dequant_node.meta["eager_input_vals"][0][0].dtype != torch.float8_e4m3fn:
+            return False
+
         if len(list(dequant_node.users)) != 1:
             # Ensure the dequant pattern only has 1 user
             # since we will delete the dequant pattern here
