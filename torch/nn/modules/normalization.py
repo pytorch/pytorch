@@ -136,6 +136,8 @@ class LayerNorm(Module):
             and zeros (for biases). Default: ``True``.
         bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
             :attr:`elementwise_affine` is ``True``). Default: ``True``.
+        {device}
+        {dtype}
 
     Attributes:
         weight: the learnable weights of the module of shape
@@ -227,7 +229,7 @@ class LayerNorm(Module):
         )
 
 
-add_docstr(LayerNorm, LayerNorm.__doc__.format(**common_args))
+LayerNorm.__doc__ = LayerNorm.__doc__.format(**common_args)
 
 
 class GroupNorm(Module):
