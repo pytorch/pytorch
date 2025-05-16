@@ -895,8 +895,6 @@ class SetVariable(ConstDictVariable):
         pass
 
     def install_dict_contains_guard(self, tx, args):
-        breakpoint()
-        # but for set
         if not self.source:
             return
 

@@ -2148,7 +2148,7 @@ def torchscript(model, example_inputs, verbose=False):
             if verbose:
                 log.exception("jit error")
             else:
-                log.error("Both torch.jit.trace and torch.jit.script failed")  # noqa: TRY400
+                log.error("Both torch.jit.trace and torch.jit.script failed")
     return None
 
 
@@ -2526,7 +2526,9 @@ def dict_keys_getitem(d, n):
     return next(itertools.islice(dict_class.keys(d), n, n + 1))
 
 
-def set_keys_getitem(s, n):
+def set_getitem(s, n):
+    # Mimic set.__getitem__ by converting the set to a dict to have a partial
+    # ordering.
     return list(dict.fromkeys(s))[n]
 
 
