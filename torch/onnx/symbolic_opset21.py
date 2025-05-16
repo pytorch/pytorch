@@ -6,10 +6,7 @@ Note [ONNX Operators that are added/updated in opset 21]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 https://github.com/onnx/onnx/blob/main/docs/Changelog.md#version-21-of-the-default-onnx-operator-set
 New operators:
-    - Cosh
-    - Erf
-    - GridSample (updated)
-    - Trunc
+    - Gelu
 """
 
 import functools
@@ -23,12 +20,7 @@ from torch.onnx._internal import jit_utils, registration
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
 __all__ = [
-    "_grid_sampler",
-    "_affine_grid_generator",
     "gelu",
-    "cosh",
-    "erf",
-    "trunc"
 ]
 
 def convert_grid_sample_mode(mode_s):
@@ -39,68 +31,7 @@ def convert_grid_sample_mode(mode_s):
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=21)
 
 
-@_onnx_symbolic("aten::grid_sampler")
-@symbolic_helper.parse_args("v", "v", "i", "i", "b")
-def _grid_sampler(
-    g: jit_utils.GraphContext,
-    input: _C.Value,
-    grid: _C.Value,
-    mode_enum: int,
-    padding_mode_enum: int,
-    align_corners: bool,
-):
-    mode_s = {v: k for k, v in F.GRID_SAMPLE_INTERPOLATION_MODES.items()}[
-        mode_enum
-    ]
-    mode_s = convert_grid_sample_mode(mode_s)
-    padding_mode_s = {v: k for k, v in F.GRID_SAMPLE_PADDING_MODES.items()}[
-        padding_mode_enum
-    ]
-    return g.op(
-        "GridSample",
-        input,
-        grid,
-        align_corners_i=int(align_corners),
-        mode_s=mode_s,
-        padding_mode_s=padding_mode_s,
-    )
-
-
-@_onnx_symbolic("aten::affine_grid_generator")
-@symbolic_helper.parse_args("v", "v", "b")
-def _affine_grid_generator(
-    g: jit_utils.GraphContext,
-    theta: _C.Value,
-    size: _C.Value,
-    align_corners: bool,
-):
-    return g.op(
-        "AffineGrid",
-        theta,
-        size,
-        align_corners_i=int(align_corners),
-    )
-
-
 @_onnx_symbolic("aten::gelu")
 @symbolic_helper.parse_args("v", "s")
 def gelu(g: jit_utils.GraphContext, self: _C.Value, approximate: str = "none"):
     return g.op("Gelu", self, approximate_s=approximate)
-
-
-@_onnx_symbolic("aten::cosh")
-@symbolic_helper.parse_args("v")
-def cosh(g: jit_utils.GraphContext, self: _C.Value):
-    return g.op("Cosh", self)
-
-
-@_onnx_symbolic("aten::erf")
-@symbolic_helper.parse_args("v")
-def erf(g: jit_utils.GraphContext, self: _C.Value):
-    return g.op("Erf", self)
-
-
-@_onnx_symbolic("aten::trunc")
-@symbolic_helper.parse_args("v")
-def trunc(g: jit_utils.GraphContext, self: _C.Value):
-    return g.op("Trunc", self)
