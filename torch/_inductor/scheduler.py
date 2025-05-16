@@ -502,7 +502,6 @@ class BaseSchedulerNode:
 
             return True
 
-
         for buf in self.get_outputs():
             buf_node = buf.node
             assert buf_node is not None

@@ -706,8 +706,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         groups: Iterable[sympy.Expr],
         lengths: Sequence[Sequence[sympy.Expr]],
         reduction_numel: sympy.Expr = sympy.S.One,
-    ) -> bool:
-        # Fill in the reduction numel, in case the node is missing it.
+    ) -> Sequence[Sequence[sympy.Expr]]:
+        "Fill in the reduction numel of lengths if missing"
         sizevars = V.graph.sizevars
         if len(lengths[1]) == 0 and (
             not sizevars.is_expr_static_and_true(reduction_numel == sympy.S.One)
