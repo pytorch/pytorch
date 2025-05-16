@@ -205,6 +205,8 @@ class TestAOTInductorPackage(TestCase):
 
             options = {
                 "aot_inductor.package_cpp_only": self.package_cpp_only,
+                # Require kernels to be compiled into .o files
+                "aot_inductor.embed_cubin": True,
             }
             ep = torch.export.export(model, example_inputs, strict=True)
             package_path = torch._inductor.aoti_compile_and_package(
@@ -216,6 +218,10 @@ class TestAOTInductorPackage(TestCase):
                 zip_ref.extractall(tmp_dir)
                 tmp_path = Path(tmp_dir) / "data" / "aotinductor" / "model"
                 self.assertTrue(tmp_path.exists())
+                if self.device == GPU_TYPE:
+                    self.assertTrue(not list(tmp_path.glob("*.cubin")))
+                    self.assertTrue(list(tmp_path.glob("*.cubin.o")))
+
                 build_path = tmp_path / "build"
                 self.assertTrue(not build_path.exists())
 
