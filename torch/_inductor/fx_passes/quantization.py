@@ -2144,6 +2144,16 @@ def _register_qconv_weight_prepack():
             )
 
 def _generate_dequant_fp8_linear_node_pattern(dtype):
+    #   + - - - - | - - - - - - | - - - - - +
+   #   |    dq_per_tensor  dq_per_tensor   |
+   #   |         |              |          |
+   #   |    OPT(to_bf16)    OPT(to_bf16)   |
+   #   |          \             |          |
+   #   |                     permute       |
+   #   |                     /             |
+   #   |             addmm/mm              |
+   #   |                |                  |
+   #   |      OPT(quant_per_tensor)        |
     assert dtype in [torch.float32, torch.bfloat16]
     dequant_wgt_pattern = CallFunction(
         quantized_decomposed.dequantize_per_tensor.tensor,
