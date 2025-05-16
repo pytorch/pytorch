@@ -786,9 +786,8 @@ class SetVariable(ConstDictVariable):
             ).call_function(tx, [self, *args], {})
         elif name == "union":
             assert not kwargs
-            assert len(args) == 1
             return variables.UserFunctionVariable(polyfills.set_union).call_function(
-                tx, [self, args[0]], {}
+                tx, [self, *args], {}
             )
         elif name == "difference":
             assert not kwargs
@@ -814,11 +813,10 @@ class SetVariable(ConstDictVariable):
             return variables.UserFunctionVariable(
                 polyfills.set_symmetric_difference_update
             ).call_function(tx, [self, *args], {})
-        elif name == "update" and len(args) == 1 and self.is_mutable():
+        elif name == "update" and self.is_mutable():
             assert not kwargs
-            assert len(args) == 1
             return variables.UserFunctionVariable(polyfills.set_update).call_function(
-                tx, [self, args[0]], {}
+                tx, [self, *args], {}
             )
         elif name == "remove":
             assert not kwargs

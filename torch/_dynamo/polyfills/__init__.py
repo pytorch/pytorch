@@ -145,17 +145,22 @@ def set_intersection_update(set1, *others):
     set1.update(result)
 
 
-def set_union(set1, set2):
-    union_set = set1.copy()
-    set_update(union_set, set2)
-    return union_set
+def set_union(set1, *others):
+    # frozenset also uses this function
+    union_set = set(set1.copy())
+    for set2 in others:
+        set_update(union_set, set2)
+    return type(set1)(union_set)
 
 
-def set_update(set1, set2):
-    for x in set2:
-        if x not in set1:
-            set1.add(x)
-    return set1
+def set_update(set1, *others):
+    if len(others) == 0:
+        return set1
+
+    for set2 in others:
+        for x in set2:
+            if x not in set1:
+                set1.add(x)
 
 
 def set_difference(set1, *others):
