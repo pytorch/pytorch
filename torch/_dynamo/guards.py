@@ -445,7 +445,6 @@ def _get_closure_vars():
             "___key_to_id": key_to_id,
             "___dict_version": dict_version,
             "___dict_contains": lambda a, b: dict.__contains__(b, a),
-            "___set_contains": lambda s, e: set.__contains__(s, e),
             "___tuple_iterator_len": tuple_iterator_len,
             "___normalize_range_iter": normalize_range_iter,
             "___tuple_iterator_getitem": tuple_iterator_getitem,
@@ -1294,7 +1293,6 @@ class GuardBuilder(GuardBuilderBase):
             assert base_guard_manager
             out = base_guard_manager.lambda_manager(
                 python_lambda=lambda x: list(dict.fromkeys(x))[source.index],
-                # index=source.index,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
