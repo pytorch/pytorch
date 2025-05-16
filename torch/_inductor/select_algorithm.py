@@ -2269,14 +2269,15 @@ class AlgorithmSelectorCache(PersistentCache):
 
                 if not isinstance(choice, CUDATemplateCaller):
                     log.error(
-                        "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
+                        "CUDA runtime error during autotuning: \n%s. \nIgnoring this choice.",
                         e,
                     )
                 msg = str(e)
                 if "invalid argument" in msg:
                     msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
-                elif "illegal memory access" in msg:
-                    msg += "\n\nEither error in template or triton bug.\n"
+                else:
+                    if "illegal memory access" in msg:
+                        msg += "\n\nEither error in template or triton bug.\n"
 
                 if isinstance(choice, CUDATemplateCaller):
                     log.debug(

@@ -733,11 +733,11 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         except RuntimeError as e:
             err_msg = str(e)
 
-            def dummy_function():
+            def raise_runtime_error():
                 raise RuntimeError(err_msg)
 
             self.cleanup_run_fn()
-            return dummy_function
+            return raise_runtime_error
 
         return ret
 
