@@ -245,7 +245,7 @@ def apply_var_mapping(
             assert len(var_group) == 0
             continue
 
-        iter_vars_to_flat_vars = {v: g for g, v in zip(group, var_group)}
+        iter_vars_to_flat_vars.update({v: g for g, v in zip(group, var_group)})
 
     count = 0
     flat_vars_to_new_vars = {}
