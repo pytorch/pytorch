@@ -2,8 +2,11 @@
 
 #include <torch/csrc/inductor/aoti_runtime/mini_array_ref.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
+#ifdef AOTI_STANDALONE
+#include <torch/csrc/inductor/aoti_standalone/c/shim.h>
+#else
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-
+#endif // AOTI_STANDALONE
 #include <cassert>
 #include <cstdint>
 #include <cstring>

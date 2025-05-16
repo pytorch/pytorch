@@ -257,7 +257,7 @@ class AOTInductorModelContainer {
       bool inactive_buffer,
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
-    AOTInductorModel* model;
+    AOTInductorModel* model = nullptr;
     ConstantState& const_folded = inactive_buffer == use_secondary_
         ? constant_folded_
         : constant_folded_secondary_;
@@ -463,8 +463,8 @@ class AOTInductorModelContainer {
       // Move the data to container handled blob.
       uint8_t* internal_constants_ptr =
           constants_blob_ptr + constants_internal_offset_[idx];
-      void* user_constant_ptr;
-      int64_t constant_size;
+      void* user_constant_ptr = nullptr;
+      int64_t constant_size = 0;
       aoti_torch_get_data_ptr(tensor, &user_constant_ptr);
       aoti_torch_get_storage_size(tensor, &constant_size);
 #ifdef USE_XPU
@@ -485,15 +485,15 @@ class AOTInductorModelContainer {
       // Generate Tensor from container handled blob.
       // We extract stride and offset from provided Tensor since we do not
       // guarantee that the tensor is contiguous.
-      AtenTensorHandle tensor_handle;
-      int64_t* stride;
-      int64_t offset;
+      AtenTensorHandle tensor_handle = nullptr;
+      int64_t* stride = nullptr;
+      int64_t offset = 0;
       int device_type = models_[0]->get_device_type();
       int device_idx = models_[0]->get_device_idx();
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(tensor, &stride));
       AOTI_TORCH_ERROR_CODE_CHECK(
           aoti_torch_get_storage_offset(tensor, &offset));
-      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob_v2(
           internal_constants_ptr,
           models_[0]->constant_ndim(idx),
           models_[0]->constant_shape(idx),
@@ -502,7 +502,10 @@ class AOTInductorModelContainer {
           models_[0]->constant_dtype(idx),
           device_type,
           device_idx,
-          &tensor_handle));
+          &tensor_handle,
+          models_[0]->constant_layout(idx),
+          models_[0]->opaque_metadata(idx),
+          models_[0]->opaque_metadata_size(idx)));
 
       // Now place the tensor to constants_map. Note at this point the
       // ownership of the tensor_handle will be taken over.
@@ -606,7 +609,7 @@ class AOTInductorModelContainer {
   RAIIDataPtr constant_blob_;
   RAIIDataPtr constant_blob_secondary_;
 
-  size_t blob_size_;
+  size_t blob_size_{0};
   std::vector<size_t> constants_internal_offset_;
 
   // Determine which constants is being used for the model.

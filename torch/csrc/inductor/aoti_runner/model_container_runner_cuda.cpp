@@ -1,6 +1,13 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 
+namespace {
+void deleter(void* ptr) {
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+  cudaFree(ptr);
+}
+} // namespace
+
 namespace torch::inductor {
 
 AOTIModelContainerRunnerCuda::AOTIModelContainerRunnerCuda(
@@ -34,6 +41,16 @@ std::vector<at::Tensor> AOTIModelContainerRunnerCuda::run_with_cuda_stream(
   return run(inputs, reinterpret_cast<void*>(cuda_stream.stream()));
 }
 
+std::vector<at::Tensor> AOTIModelContainerRunnerCuda::slim_tensor_run(
+    std::vector<at::Tensor>&& inputs,
+    void* stream_handle) {
+  if (stream_handle == nullptr) {
+    at::cuda::CUDAStream cuda_stream = c10::cuda::getCurrentCUDAStream();
+    stream_handle = reinterpret_cast<void*>(cuda_stream.stream());
+  }
+  return slim_tensor_run_impl(std::move(inputs), stream_handle, deleter);
+}
+
 namespace {
 std::unique_ptr<AOTIModelContainerRunner> create_aoti_runner_cuda(
     const std::string& model_so_path,
@@ -46,7 +63,9 @@ std::unique_ptr<AOTIModelContainerRunner> create_aoti_runner_cuda(
 }
 } // namespace
 
-RegisterAOTIModelRunner register_cuda_runner("cuda", &create_aoti_runner_cuda);
+static RegisterAOTIModelRunner register_cuda_runner(
+    "cuda",
+    &create_aoti_runner_cuda);
 
 } // namespace torch::inductor
 #endif

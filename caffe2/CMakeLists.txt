@@ -1301,7 +1301,9 @@ target_include_directories(torch_cpu PRIVATE
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/nlohmann/include)
 
-install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
+install(DIRECTORY
+  "${TORCH_SRC_DIR}/csrc"
+  "${TORCH_SRC_DIR}/standalone"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
   FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
 install(FILES

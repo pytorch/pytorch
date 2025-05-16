@@ -29,6 +29,10 @@ class TORCH_CUDA_CPP_API AOTIModelContainerRunnerCuda
   std::vector<at::Tensor> run_with_cuda_stream(
       const std::vector<at::Tensor>& inputs,
       const at::cuda::CUDAStream& cuda_stream);
+
+  std::vector<at::Tensor> slim_tensor_run(
+      std::vector<at::Tensor>&& inputs,
+      void* stream_handle = nullptr) override;
 };
 
 } // namespace torch::inductor

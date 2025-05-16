@@ -4,6 +4,9 @@
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
+#include <torch/standalone/slim_tensor/slim_tensor.h>
+
+#include <ATen/ops/from_blob.h>
 
 #ifndef _WIN32
 #include <sys/stat.h>
@@ -20,6 +23,11 @@ bool file_exists(std::string& path) {
   struct stat rc {};
   return lstat(path.c_str(), &rc) == 0;
 #endif
+}
+
+void deleter(void* ptr) {
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+  free(ptr);
 }
 } // namespace
 
@@ -170,6 +178,74 @@ std::vector<at::Tensor> AOTIModelContainerRunner::boxed_run(
       torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
   std::move(inputs).clear();
   return run_impl(input_handles, stream_handle);
+}
+
+std::vector<at::Tensor> AOTIModelContainerRunner::slim_tensor_run_impl(
+    std::vector<at::Tensor>&& inputs,
+    void* stream_handle,
+    const std::function<void(void*)>& deleter) {
+  std::vector<AtenTensorHandle> input_handles;
+  input_handles.reserve(inputs.size());
+  // Convert AtenTensor to SlimTensor
+  for (const at::Tensor& tensor : std::move(inputs)) {
+    // Unsafe allocation, object will be released by run_func_.
+    // reinterpret_cast to AtenTensorHandle to match the interface.
+    input_handles.push_back(reinterpret_cast<AtenTensorHandle>(
+        new torch::standalone::SlimTensor(create_tensor_from_blob(
+            tensor.data_ptr(),
+            torch::standalone::ArrayRef(
+                tensor.sizes().data(), tensor.sizes().size()),
+            torch::standalone::ArrayRef(
+                tensor.strides().data(), tensor.strides().size()),
+            tensor.scalar_type(),
+            tensor.device(),
+            tensor.storage_offset()))));
+  }
+
+  size_t num_outputs = 0;
+  AOTI_RUNTIME_ERROR_CODE_CHECK(
+      get_num_outputs_func_(container_handle_, &num_outputs));
+  std::vector<AtenTensorHandle> output_handles(num_outputs);
+
+  // Compiled model uses SlimTensor for the forward function
+  AOTI_RUNTIME_ERROR_CODE_CHECK(run_func_(
+      container_handle_,
+      input_handles.data(),
+      input_handles.size(),
+      output_handles.data(),
+      output_handles.size(),
+      reinterpret_cast<AOTInductorStreamHandle>(stream_handle),
+      nullptr)); // ProxyExecutor not supported in this mode
+
+  std::vector<at::Tensor> result;
+  result.reserve(num_outputs);
+  // Convert SlimTensor to AtenTensor
+  for (size_t i = 0; i < num_outputs; i++) {
+    torch::standalone::SlimTensor* stensor =
+        reinterpret_cast<torch::standalone::SlimTensor*>(output_handles[i]);
+    c10::IntArrayRef sizes(stensor->sizes().data(), stensor->sizes().size());
+    c10::IntArrayRef strides(
+        stensor->strides().data(), stensor->strides().size());
+    c10::TensorOptions options =
+        c10::TensorOptions().device(stensor->device()).dtype(stensor->dtype());
+
+    result.push_back(at::for_blob(stensor->data_ptr(), sizes)
+                         .strides(strides)
+                         .storage_offset(stensor->storage_offset())
+                         .options(options)
+                         .deleter(deleter)
+                         .make_tensor());
+    // Storage ownership has been transferred to AtenTensor
+    stensor->storage()->unsafe_set_to_non_owning();
+    delete stensor;
+  }
+  return result;
+}
+
+std::vector<at::Tensor> AOTIModelContainerRunner::slim_tensor_run(
+    std::vector<at::Tensor>&& inputs,
+    void* stream_handle) {
+  return slim_tensor_run_impl(std::move(inputs), stream_handle, deleter);
 }
 
 std::unordered_map<std::string, std::string> AOTIModelContainerRunner::

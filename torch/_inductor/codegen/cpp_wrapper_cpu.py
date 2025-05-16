@@ -172,7 +172,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # present.
         self.header.splice(self.get_device_include_path(device))
         extend_aoti_c_shim_include = (
-            f"torch/csrc/inductor/aoti_torch/generated/extend/c_shim_{self.device}.h"
+            f"torch/csrc/inductor/aoti_standalone/{self.device}/c_shim_{self.device}.h"
+            if config.aot_inductor.codegen_standalone
+            else f"torch/csrc/inductor/aoti_torch/generated/extend/c_shim_{self.device}.h"
         )
         extend_aoti_c_shim_path = os.path.join(
             os.path.dirname(torch.__file__),
@@ -942,6 +944,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.codegen_const_run_driver()
             aot_mode_decls.writeline("} // namespace torch::aot_inductor")
             aot_mode_decls.writeline("using namespace torch::aot_inductor;")
+            if config.aot_inductor.codegen_standalone:
+                aot_mode_decls.writeline("using namespace torch::standalone;")
 
         self.prefix = cache_decls = IndentedBuffer()
         for dtype in self.used_cached_dtypes:
