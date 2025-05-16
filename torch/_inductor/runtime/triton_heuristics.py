@@ -30,6 +30,7 @@ from typing import (
 )
 
 import torch
+from torch._dynamo.utils import set_feature_use
 from torch._prims_common import compute_required_storage_length
 from torch.utils._ordered_set import OrderedSet
 
@@ -85,7 +86,7 @@ class NoTritonConfigsError(RuntimeError):
 
 
 if TYPE_CHECKING:
-    from collections.abc import Container, Hashable, Sequence
+    from collections.abc import Container, Hashable
 
     from torch._guards import CompileId
 
@@ -505,6 +506,16 @@ class CachingAutotuner(KernelInterface):
         self.fn.repr = _ConstRepr(self.fn.repr(self.fn))
         self.launchers = []
         return old_values
+
+    def prepare_for_caching(self) -> None:
+        """
+        Statically Launched CUDA Kernels have a raw cubin on them
+        that we don't need to store in the cache(since TritonBundler handles the collection for us)
+        """
+        for result in self.compile_results:
+            if isinstance(result, StaticTritonCompileResult):
+                # Don't save this in the inductor cache, as it is very large
+                result.kernel.cubin_raw = None
 
     def __getstate__(self) -> dict[str, Any]:
         assert not self.launchers, (
@@ -1068,7 +1079,7 @@ class CachingAutotuner(KernelInterface):
             dict(
                 zip(
                     [
-                        *self.fn.arg_names,
+                        *self.triton_meta["signature"].keys(),
                         *self.inductor_meta.get("extra_launcher_args", ()),
                     ],
                     args,
@@ -1268,12 +1279,19 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
             f"{self.kernel.name}.cubin",
         )
         if not os.path.exists(cubin_location):
-            raise RuntimeError(
-                "Cubin file saved by TritonBundler not found at %s", cubin_location
-            )
+            if self.kernel.cubin_raw is not None:
+                # We saved the raw cubin, so write it to he appropriate location
+                self.kernel.reload_cubin_from_raw(cubin_location)
+            else:
+                raise RuntimeError(
+                    "Cubin file saved by TritonBundler not found at %s", cubin_location
+                )
         self.kernel.cubin_path = cubin_location
 
     def make_launcher(self) -> LauncherType:
+        # If at least one static make_launcher call occurs,
+        # we're sure static cuda launcher was used for this compile
+        set_feature_use("static_cuda_launcher", True)
         # Load the binary on the parent
         if not self.kernel.cubin_path:
             self.reload_cubin_path()
@@ -2564,7 +2582,7 @@ class GridExpr:
 
     inductor_meta: dict[str, Any]
     mode: Literal["python", "cpp"] = "python"
-    prefix: Sequence[str] = ()
+    prefix: list[str] = dataclasses.field(default_factory=list)
     x_grid: Union[str, int] = 1
     y_grid: Union[str, int] = 1
     z_grid: Union[str, int] = 1
@@ -2666,12 +2684,16 @@ class Grid3D(GridExpr):
 class Grid2DWithYZOverflow(GridExpr):
     def generate(self, meta: dict[str, int]) -> None:
         self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
-        self.prefix = [
-            self.assign_tmp("y_grid_raw_", self.ceildiv("ynumel", meta.get("YBLOCK"))),
-            self.assign_tmp(
-                "y_grid_div_", self.ceildiv("y_grid_raw_", get_max_y_grid())
-            ),
-        ]
+        self.prefix.extend(
+            [
+                self.assign_tmp(
+                    "y_grid_raw_", self.ceildiv("ynumel", meta.get("YBLOCK"))
+                ),
+                self.assign_tmp(
+                    "y_grid_div_", self.ceildiv("y_grid_raw_", get_max_y_grid())
+                ),
+            ]
+        )
         self.y_grid = self.ceildiv("y_grid_raw_", "y_grid_div_")
         self.z_grid = "y_grid_div_"
 

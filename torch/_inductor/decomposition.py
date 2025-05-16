@@ -390,7 +390,17 @@ def cat(
     filtered_tensors = list(filter(non_empty_tensor, tensors))
 
     if len(filtered_tensors) == 1:
-        return filtered_tensors[0].clone()
+        # check dtype promotion
+        promoted_dtype = elementwise_dtypes(
+            *tensors,
+            type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        )[1]
+        filtered_t = filtered_tensors[0]
+        return (
+            filtered_t.clone()
+            if promoted_dtype == filtered_t.dtype
+            else filtered_t.to(dtype=promoted_dtype)
+        )
     elif 1 < len(filtered_tensors) < len(tensors):
         # on the first call, when we remove empty tensors, we redispatch recursively
         return aten.cat.default(filtered_tensors, dim)
