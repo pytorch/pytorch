@@ -6,54 +6,69 @@ Note [ONNX Operators that are added/updated in opset 22]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 https://github.com/onnx/onnx/blob/main/docs/Changelog.md#version-22-of-the-default-onnx-operator-set
 New operators:
+    - DFT
+    - IDFT
+    - HammingWindow
+    - HannWindow
+    - BlackmanWindow
 """
 
 import functools
-
-import torch.nn.functional as F
+import torch
 from torch import _C
 from torch.onnx import symbolic_helper
 from torch.onnx._internal import jit_utils, registration
 
-
-# EDITING THIS FILE? READ THIS FIRST!
-# see Note [Edit Symbolic Files] in symbolic_helper.py
-
-__all__ = ["_grid_sampler", "_affine_grid_generator", "gelu"]
-
-
-def convert_grid_sample_mode(mode_s):
-    return (
-        "linear" if mode_s == "bilinear" else "cubic" if mode_s == "bicubic" else mode_s
-    )
-
+__all__ = [
+    "dft",
+    "idft",
+    "hamming_window",
+    "hann_window",
+    "blackman_window",
+]
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=22)
 
 
-@_onnx_symbolic("aten::grid_sampler")
-@symbolic_helper.parse_args("v", "v", "i", "i", "b")
-def _grid_sampler(
-    g: jit_utils.GraphContext,
-    input: _C.Value,
-    grid: _C.Value,
-    mode_enum: int,
-    padding_mode_enum: int,
-    align_corners: bool,
-):
-    mode_s = {v: k for k, v in F.GRID_SAMPLE_INTERPOLATION_MODES.items()}[mode_enum]  # type: ignore[call-arg, index]
-    # mode string changes at https://onnx.ai/onnx/operators/text_diff_GridSample_16_20.html
-    mode_s = convert_grid_sample_mode(mode_s)
-    padding_mode_s = {v: k for k, v in F.GRID_SAMPLE_PADDING_MODES.items()}[  # type: ignore[call-arg, index]
-        padding_mode_enum  # type: ignore[index]
-    ]
+@_onnx_symbolic("aten::fft_fft")
+@symbolic_helper.parse_args("v", "i", "s", "i")
+def dft(g, input, dim, norm, lastdim):
+    return g.op("DFT", input, axis_i=dim, inverse_i=0, norm_s=norm)
+
+
+@_onnx_symbolic("aten::fft_ifft")
+@symbolic_helper.parse_args("v", "i", "s", "i")
+def idft(g, input, dim, norm, lastdim):
+    return g.op("DFT", input, axis_i=dim, inverse_i=1, norm_s=norm)
+
+
+@_onnx_symbolic("aten::hamming_window")
+@symbolic_helper.parse_args("i", "b", "f", "i")
+def hamming_window(g, window_length, periodic, alpha, dtype):
     return g.op(
-        "GridSample",
-        input,
-        grid,
-        align_corners_i=int(align_corners),
-        mode_s=mode_s,
-        padding_mode_s=padding_mode_s,
+        "HammingWindow",
+        g.op("Constant", value_t=torch.tensor(window_length)),
+        alpha_f=alpha,
+        periodic_i=int(periodic)
     )
 
 
+@_onnx_symbolic("aten::hann_window")
+@symbolic_helper.parse_args("i", "b", "i")
+def hann_window(g, window_length, periodic, dtype):
+    return g.op(
+        "HannWindow",
+        g.op("Constant", value_t=torch.tensor(window_length)),
+        periodic_i=int(periodic)
+    )
+
+
+@_onnx_symbolic("aten::blackman_window")
+@symbolic_helper.parse_args("i", "b", "f", "i")
+def blackman_window(g, window_length, periodic, beta, dtype):
+    return g.op(
+        "BlackmanWindow",
+        g.op("Constant", value_t=torch.tensor(window_length)),
+        beta_f=beta,
+        periodic_i=int(periodic)
+    )

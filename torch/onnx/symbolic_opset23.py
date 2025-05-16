@@ -6,54 +6,49 @@ Note [ONNX Operators that are added/updated in opset 23]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 https://github.com/onnx/onnx/blob/main/docs/Changelog.md#version-23-of-the-default-onnx-operator-set
 New operators:
-    Attention
+    - Attention
 """
 
 import functools
-
-import torch.nn.functional as F
 from torch import _C
 from torch.onnx import symbolic_helper
 from torch.onnx._internal import jit_utils, registration
 
-
-# EDITING THIS FILE? READ THIS FIRST!
-# see Note [Edit Symbolic Files] in symbolic_helper.py
-
-__all__ = ["_grid_sampler", "_affine_grid_generator", "gelu"]
-
-
-def convert_grid_sample_mode(mode_s):
-    return (
-        "linear" if mode_s == "bilinear" else "cubic" if mode_s == "bicubic" else mode_s
-    )
-
+__all__ = ["attention"]
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=23)
 
-
-@_onnx_symbolic("aten::grid_sampler")
-@symbolic_helper.parse_args("v", "v", "i", "i", "b")
-def _grid_sampler(
+@_onnx_symbolic("aten::attention")
+@symbolic_helper.parse_args("v", "v", "v", "v", "v", "v", "v", "v", "v", "v", "v", "v", "v")
+def attention(
     g: jit_utils.GraphContext,
-    input: _C.Value,
-    grid: _C.Value,
-    mode_enum: int,
-    padding_mode_enum: int,
-    align_corners: bool,
+    query: _C.Value,
+    key: _C.Value,
+    value: _C.Value,
+    bias: _C.Value,
+    mask_index: _C.Value,
+    past_key: _C.Value,
+    past_value: _C.Value,
+    static_kv: _C.Value,
+    use_past: _C.Value,
+    unidirectional: _C.Value,
+    num_heads: _C.Value,
+    scale: _C.Value,
+    dropout: _C.Value,
 ):
-    mode_s = {v: k for k, v in F.GRID_SAMPLE_INTERPOLATION_MODES.items()}[mode_enum]  # type: ignore[call-arg, index]
-    # mode string changes at https://onnx.ai/onnx/operators/text_diff_GridSample_16_20.html
-    mode_s = convert_grid_sample_mode(mode_s)
-    padding_mode_s = {v: k for k, v in F.GRID_SAMPLE_PADDING_MODES.items()}[  # type: ignore[call-arg, index]
-        padding_mode_enum  # type: ignore[index]
-    ]
     return g.op(
-        "GridSample",
-        input,
-        grid,
-        align_corners_i=int(align_corners),
-        mode_s=mode_s,
-        padding_mode_s=padding_mode_s,
+        "Attention",
+        query,
+        key,
+        value,
+        bias,
+        mask_index,
+        past_key,
+        past_value,
+        static_kv,
+        use_past,
+        unidirectional,
+        num_heads,
+        scale,
+        dropout,
     )
-
