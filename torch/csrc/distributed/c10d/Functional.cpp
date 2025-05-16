@@ -266,21 +266,21 @@ TORCH_LIBRARY(_c10d_functional, m) {
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           ::all_gather_into_tensor_out),
-      {at::Tag::pt2_compliant_tag});
+      {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
   m.def(
       "all_gather_into_tensor(Tensor input, int group_size, str group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           ::all_gather_into_tensor),
-      {at::Tag::pt2_compliant_tag});
+      {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
   m.def(
       "all_gather_into_tensor_coalesced(Tensor[] inputs, int group_size, str group_name) -> Tensor[]",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           ::all_gather_into_tensor_coalesced),
-      {at::Tag::pt2_compliant_tag});
+      {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
   m.def(
       "reduce_scatter_tensor(Tensor input, str reduce_op, int group_size, str group_name) -> Tensor",
@@ -293,7 +293,7 @@ TORCH_LIBRARY(_c10d_functional, m) {
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           ::reduce_scatter_tensor_coalesced),
-      {at::Tag::pt2_compliant_tag});
+      {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
   m.def(
       "all_to_all_single("
@@ -303,7 +303,7 @@ TORCH_LIBRARY(_c10d_functional, m) {
       "str group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, ::all_to_all_single),
-      {at::Tag::pt2_compliant_tag});
+      {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
   m.def(
       "broadcast(Tensor input, int src, str group_name) -> Tensor",
