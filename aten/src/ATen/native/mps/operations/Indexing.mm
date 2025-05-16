@@ -167,8 +167,8 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
                   index_size,
                   index_stride,
                   kernelDataOffsets,
-                  ConstMTLTensor(inputTensor),
-                  // inputTensor,
+                  // ConstMTLBufferTensor(inputTensor),
+                  inputTensor,
                   outputTensor,
                   num_indices);
       MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);

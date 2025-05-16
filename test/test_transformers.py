@@ -2493,6 +2493,31 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(output_math, output_cudnn)
 
+    @skipIfRocm  # No cuDNN Attention
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
+    def test_cudnn_attention_d256_heuristic(self, device):
+        dtype = torch.bfloat16
+        make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
+        batch, num_heads, head_dim_k, head_dim_v = 32, 16, 256, 64
+        seq_len = 640
+        q_shape = SdpaShape(batch, num_heads, seq_len, head_dim_k)
+        k_shape = SdpaShape(batch, num_heads, seq_len, head_dim_k)
+        v_shape = SdpaShape(batch, num_heads, seq_len, head_dim_v)
+        query, key, value = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
+
+        with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION, SDPBackend.MATH], set_priority=True):
+            actual = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+            actual.backward(torch.randn_like(actual))
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            math_ref = torch.nn.functional.scaled_dot_product_attention(
+                query.contiguous().to(torch.float32),
+                key.contiguous().to(torch.float32),
+                value.contiguous().to(torch.float32),
+                attn_mask=None, dropout_p=0.0, is_causal=False)
+
+        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
+
     @skipIfRocm(msg="No cuDNN on ROCm")
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_fused_attention_different_dk_dv(self, device):
@@ -3978,6 +4003,28 @@ class TestSDPAXpuOnly(NNTestCase):
         with sdpa_kernel(backends=[SDPBackend.OVERRIDEABLE]):
             with self.assertRaisesRegex(RuntimeError, "No available kernel."):
                 _ = F.scaled_dot_product_attention(q, k, v)
+
+    def test_fused_attention_broadcasted_input(self, device):
+        dtype = torch.bfloat16
+        make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=False)
+        batch, num_heads, seqlen, head_dim = 32, 16, 128, 32
+        q_shape = SdpaShape(batch, num_heads, seqlen, head_dim)
+        k_shape = SdpaShape(batch, num_heads, seqlen, head_dim)
+        v_shape = SdpaShape(batch, num_heads, seqlen, head_dim)
+        query, key, value = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
+
+        attn_mask_shape = (1, seqlen)
+        attn_mask = make_tensor(attn_mask_shape)
+        attn_mask = attn_mask.expand(1, 1, seqlen, seqlen)
+
+        # test that we do not dispatch to onednn for an unsupported case
+        actual = F.scaled_dot_product_attention(
+            query, key, value, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
+
+        math_ref = torch.ops.aten._scaled_dot_product_attention_math(
+            query.float(), key.float(), value.float(), attn_mask=attn_mask, dropout_p=0.0, is_causal=False)[0]
+
+        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
     @parametrize("type", ["dense"])
     @parametrize("is_contiguous", [True, False])
