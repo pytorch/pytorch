@@ -1080,7 +1080,7 @@ def _log_export_wrapper(fn):
             error_type = t.__module__ + "." + t.__qualname__
             case_name = get_class_if_classified_error(e)
             if case_name is not None:
-                log.error(exportdb_error_message(case_name))
+                log.error(exportdb_error_message(case_name))  # noqa: TRY400
                 log_export_usage(
                     event="export.error.classified",
                     type=error_type,
