@@ -2,7 +2,7 @@
 
 import itertools
 import os
-import tempfile
+from contextlib import nullcontext
 from unittest import skip, skipIf
 
 import torch
@@ -16,7 +16,7 @@ from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
     _fused_all_gather_scaled_matmul_fallback,
     _fused_matmul_reduce_scatter_fallback,
-    _fused_scaled_matmul_reduce_scatter_fallback,
+    _test_mode,
     enable_symm_mem_for_group,
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
@@ -27,19 +27,22 @@ from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
     requires_multicast_support,
     skip_if_lt_x_gpu,
-    TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     MI300_ARCH,
     parametrize,
     requires_cuda,
+    run_tests,
     runOnRocmArch,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
     TEST_WITH_ROCM,
+    TestCase,
 )
 
+
+test_contexts = [nullcontext, _test_mode]
 
 # So that tests are written in device-agnostic way
 device_type = "cuda"
@@ -110,7 +113,7 @@ class SymmetricMemoryTest(MultiProcContinousTest):
         return (shape, stride, dtype, device, group_name)
 
     def _verify_symmetric_memory(self, symm_mem_hdl):
-        self.assertEqual(symm_mem_hdl.world_size, 2)
+        self.assertEqual(symm_mem_hdl.world_size, self.world_size)
 
         buf = symm_mem_hdl.get_buffer(
             0, (symm_mem_hdl.buffer_size // 4,), torch.float32
@@ -412,6 +415,7 @@ class SymmetricMemoryTest(MultiProcContinousTest):
 
         torch.testing.assert_close(ag_target, ag_baseline)
         torch.testing.assert_close(mm_target[0], mm_baseline[0])
+        os.environ["TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP"] = "0"
 
     @skip_if_lt_x_gpu(2)
     @requires_multicast_support()
@@ -591,29 +595,28 @@ class SymmetricMemoryTest(MultiProcContinousTest):
             A_scale = torch.tensor(0.1, device="cuda")
             B_scale = torch.tensor(0.1, device="cuda")
 
-        output_0 = _fused_scaled_matmul_reduce_scatter_fallback(
-            A,
-            B,
-            A_scale,
-            B_scale,
-            "avg",
-            scatter_dim,
-            group.group_name,
-            out_dtype=torch.bfloat16,
-        )
-        output_1 = torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter(
-            A,
-            B,
-            A_scale,
-            B_scale,
-            "avg",
-            scatter_dim,
-            group.group_name,
-            out_dtype=torch.bfloat16,
-        )
+        output_shape = [*A.shape[:-1], B.shape[1]]
 
-        assert torch.allclose(output_0, output_1)
-        assert output_0.stride() == output_1.stride()
+        outputs = []
+        for context in test_contexts:
+            with context():
+                outputs.append(
+                    torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter(
+                        A,
+                        B,
+                        A_scale,
+                        B_scale,
+                        "avg",
+                        scatter_dim,
+                        scatter_dim,
+                        group.group_name,
+                        output_shape,
+                        out_dtype=torch.bfloat16,
+                    )
+                )
+
+        assert outputs[0].stride() == outputs[1].stride()
+        assert torch.allclose(outputs[0], outputs[1]), (outputs[0], outputs[1])
 
     @runOnRocmArch(MI300_ARCH)
     @parametrize("dim", [0, 1, 2])
@@ -730,14 +733,13 @@ class SymmetricMemoryTest(MultiProcContinousTest):
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmMemCollectiveTest(MultiProcContinousTest):
-    def setUp(self) -> None:
-        super().setUp()
-        torch.cuda.set_device(self.device)
-        torch.manual_seed(42 + self.rank)
-
     @property
     def device(self) -> torch.device:
         return torch.device(f"cuda:{self.rank}")
+
+    def _init_process(self):
+        torch.cuda.set_device(self.device)
+        torch.manual_seed(42 + self.rank)
 
     @skip_if_lt_x_gpu(4)
     @requires_multicast_support()
@@ -747,6 +749,7 @@ class SymmMemCollectiveTest(MultiProcContinousTest):
     def test_multimem_all_reduce(
         self, dtype: torch.dtype, size_bytes: int, align_bytes: int
     ) -> None:
+        self._init_process()
         group_name = dist.group.WORLD.group_name
 
         t = symm_mem.empty((16384), dtype=dtype, device=self.device)
@@ -777,6 +780,7 @@ class SymmMemCollectiveTest(MultiProcContinousTest):
     def test_multimem_one_shot_all_reduce(
         self, dtype: torch.dtype, size_bytes: int, align_bytes: int
     ) -> None:
+        self._init_process()
         group_name = dist.group.WORLD.group_name
 
         inp = symm_mem.empty(
@@ -796,6 +800,7 @@ class SymmMemCollectiveTest(MultiProcContinousTest):
     @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_one_shot_all_reduce(self) -> None:
+        self._init_process()
         group_name = dist.group.WORLD.group_name
 
         for dtype, size_bytes, align_bytes, copy, offset in itertools.product(
@@ -826,6 +831,7 @@ class SymmMemCollectiveTest(MultiProcContinousTest):
     @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_two_shot_all_reduce(self) -> None:
+        self._init_process()
         group_name = dist.group.WORLD.group_name
 
         for dtype, size_bytes, align_bytes, inplace in itertools.product(
@@ -875,6 +881,7 @@ class SymmMemCollectiveTest(MultiProcContinousTest):
     @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_reduce_scatter(self) -> None:
+        self._init_process()
         group_name = dist.group.WORLD.group_name
 
         for dtype, size_bytes, align_bytes, split_last_dim in itertools.product(
@@ -911,6 +918,7 @@ class SymmMemCollectiveTest(MultiProcContinousTest):
     @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_reduce_scatter_corner_cases(self) -> None:
+        self._init_process()
         dtype = torch.bfloat16
         group_name = dist.group.WORLD.group_name
         t = symm_mem.empty(16384, dtype=dtype, device=self.device).fill_(0)
@@ -946,6 +954,7 @@ class SymmMemCollectiveTest(MultiProcContinousTest):
     @requires_multicast_support()
     @parametrize("align_bytes", [4, 8, 16])
     def test_multimem_all_gather(self, align_bytes: int) -> None:
+        self._init_process()
         group_name = dist.group.WORLD.group_name
 
         input_numel = 32
@@ -971,8 +980,7 @@ class SymmMemCollectiveTest(MultiProcContinousTest):
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class LoweringTest(MultiProcContinousTest):
-    def setUp(self) -> None:
-        super().setUp()
+    def _init_process(self) -> None:
         torch.cuda.set_device(self.device)
         enable_symm_mem_for_group(dist.group.WORLD.group_name)
         torch.manual_seed(42 + self.rank)
@@ -987,6 +995,7 @@ class LoweringTest(MultiProcContinousTest):
     @skip_if_lt_x_gpu(2)
     @fresh_inductor_cache()
     def test_lowering_one_shot_all_reduce(self):
+        self._init_process()
         arg = torch.rand(4, 4, device=self.device)
 
         def func_0(x):
@@ -1036,10 +1045,7 @@ class LoweringTest(MultiProcContinousTest):
         self.assertNotIn("return (buf0", code_3)
 
 
-# TODO: currently we make `SymmMemSingleProcTest` a subclass of
-# `MultiProcContinousTest` so that we can use the same launcher in main; but
-# we'd need to find a better way to support such mix.
-class SymmMemSingleProcTest(MultiProcContinousTest):
+class SymmMemSingleProcTest(TestCase):
     @requires_cuda
     @skipIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 0),
@@ -1047,10 +1053,6 @@ class SymmMemSingleProcTest(MultiProcContinousTest):
     )
     @runOnRocmArch(MI300_ARCH)
     def test_stream_write_value32(self):
-        # See TODO
-        if self.rank > 0:
-            return
-
         tensor = torch.zeros(4, dtype=torch.uint32, device="cuda")
         expect = torch.tril(torch.ones(4, 4, device="cuda")).to(torch.uint32)
 
@@ -1067,10 +1069,6 @@ class SymmMemSingleProcTest(MultiProcContinousTest):
     @requires_cuda
     @runOnRocmArch(MI300_ARCH)
     def test_memset32(self):
-        # See TODO
-        if self.rank > 0:
-            return
-
         t = _SymmetricMemory.empty_strided_p2p(
             (64,),
             (1,),
@@ -1125,23 +1123,4 @@ class SymmMemSingleProcTest(MultiProcContinousTest):
 
 
 if __name__ == "__main__":
-    if not device_module.is_available():
-        os._exit(TEST_SKIPS["no_cuda"].exit_code)
-
-    # Use device count as world size
-    world_size = device_module.device_count()
-    # Also need a rendezvous file for `init_process_group` purpose.
-    rdvz_file = tempfile.NamedTemporaryFile(delete=False).name
-    # Spawn subprocess to run the tests.
-    # `run_tests()` will be called under `run_rank`
-    torch.multiprocessing.spawn(
-        MultiProcContinousTest.run_rank,  # entry point
-        nprocs=world_size,
-        args=(world_size, rdvz_file),
-    )
-
-    # Clear up the rendezvous file
-    try:
-        os.remove(rdvz_file)
-    except OSError:
-        pass
+    run_tests()
