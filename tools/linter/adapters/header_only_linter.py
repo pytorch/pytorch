@@ -56,7 +56,8 @@ def find_matched_symbols(symbols_regex: str) -> set[str]:
         for test_file in REPO_ROOT.glob(cpp_test_glob):
             with open(test_file) as tf:
                 for test_file_line in tf:
-                    if test_file_line.startswith("//"):
+                    test_file_line = test_file_line.strip()
+                    if test_file_line.startswith("//") or test_file_line == "":
                         continue
                     matches = re.findall(symbols_regex, test_file_line)
                     for m in matches:
