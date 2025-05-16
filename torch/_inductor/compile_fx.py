@@ -181,7 +181,7 @@ def _fx_compile_mode_default() -> tuple[FxCompileMode, bool]:
         import logging
 
         log = logging.getLogger(__name__)
-        log.error(  # noqa: TRY400
+        log.error(
             "Invalid value of %s for %s. Expected one of %s. Using default.",
             value,
             name,

@@ -542,9 +542,8 @@ class GraphModule(torch.nn.Module):
         if self.graph._tracer_extras:
             self._tracer_extras = self.graph._tracer_extras
 
-        # Dictionary to store metadata.  Initialize with the root metadata, if present,
-        # to avoid losing information when doing fx transformations.
-        self.meta: dict[str, Any] = root.meta if isinstance(root, GraphModule) else {}
+        # Dictionary to store metadata
+        self.meta: dict[str, Any] = {}
         self._replace_hooks: list[Callable] = []
         self._create_node_hooks: list[Callable] = []
         self._erase_node_hooks: list[Callable] = []

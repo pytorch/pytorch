@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     parametrize,
+    serialTest,
     skipIfRocm,
     skipIfXpu,
     TEST_WITH_ROCM,
@@ -121,10 +122,6 @@ except (unittest.SkipTest, ImportError):
     if __name__ == "__main__":
         sys.exit(0)
     raise
-
-
-def _is_cpu_freezing(self):
-    return (config.freezing is None or config.freezing) and self.device != GPU_TYPE
 
 
 class AOTInductorTestsTemplate:
@@ -235,6 +232,9 @@ class AOTInductorTestsTemplate:
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
+    # freezing uses different sets of parameters, but would be tested via the same
+    # mechanism
+    @config.patch(freezing=False)
     def test_constant_folding_with_update(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -629,6 +629,8 @@ class AOTInductorTestsTemplate:
         self.assertTrue(same(optimized(runtime_input), model(runtime_input)))
 
     @torch._inductor.config.patch(
+        # freezing fuses operations differently than this test expects
+        freezing=False,
         pre_grad_fusion_options={
             "normalization_pass": {},
             "remove_split_with_size_one_pass": {},
@@ -2568,6 +2570,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(3, 10, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @serialTest()
     def test_repeated_calling(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -3371,6 +3374,9 @@ class AOTInductorTestsTemplate:
         inputs = (torch.tensor([3.14], dtype=torch.float, device=self.device),)
         self.check_model(Model(), inputs)
 
+    # freezing uses different sets of parameters, but would be tested via the same
+    # mechanism
+    @config.patch(freezing=False)
     def test_constant_original_fqn_and_dtype(self):
         class FooBarModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -4252,6 +4258,9 @@ class AOTInductorTestsTemplate:
         }
         self.check_model(model, example_inputs, dynamic_shapes=dynamic_shapes)
 
+    # freezing uses different sets of parameters, but would be tested via the same
+    # mechanism
+    @config.patch(freezing=False)
     def test_aoti_debug_printer_codegen(self):
         # basic addmm model to test codegen for aoti intermediate debug printer
         class Model(torch.nn.Module):
@@ -4271,16 +4280,16 @@ class AOTInductorTestsTemplate:
         a = torch.randn(batch, M, K, device=self.device)
         example_inputs = (a,)
 
-        is_cpu_freezing = _is_cpu_freezing(self)
-        if self.device == GPU_TYPE:
-            kernel_calls = [
+        kernel_calls = (
+            [
                 ("triton_poi_fused_0", 1),
                 (f"aoti_torch_{GPU_TYPE}_addmm_out", 2),
             ]
-        elif is_cpu_freezing:
-            kernel_calls = [("cpp_fused_0", 1)]
-        else:
-            kernel_calls = [("aoti_torch_cpu_addmm_out", 2)]
+            if self.device == GPU_TYPE
+            else [
+                ("aoti_torch_cpu_addmm_out", 2),
+            ]
+        )
 
         # test default debug printing all tensor values codegen
         with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
@@ -4304,9 +4313,7 @@ class AOTInductorTestsTemplate:
                 ).run(code)
 
         # test printing selected kernel's tensor values codegen
-        filtered_kernel_name = (
-            "cpp_fused_0" if is_cpu_freezing else f"aoti_torch_{self.device}_addmm_out"
-        )
+        filtered_kernel_name = f"aoti_torch_{self.device}_addmm_out"
         with config.patch(
             {
                 "aot_inductor.debug_intermediate_value_printer": "2",
@@ -4317,7 +4324,7 @@ class AOTInductorTestsTemplate:
                 AOTIRunnerUtil.legacy_compile, model, example_inputs
             )
             filtered_kernel_calls = [
-                (filtered_kernel_name, 1 if is_cpu_freezing else 2),
+                (filtered_kernel_name, 2),
             ]
             for kernel_call, count in filtered_kernel_calls:
                 FileCheck().check_count(
@@ -4338,6 +4345,9 @@ class AOTInductorTestsTemplate:
                 FileCheck().check_not(f"before_launch - {kernel_name}").run(code)
                 FileCheck().check_not(f"after_launch - {kernel_name}").run(code)
 
+    # freezing uses different sets of parameters, but would be tested via the same
+    # mechanism
+    @config.patch(freezing=False)
     @common_utils.parametrize("enable_kernel_profile", (True, False))
     def test_aoti_profiler(self, enable_kernel_profile):
         # basic addmm model
@@ -4362,18 +4372,17 @@ class AOTInductorTestsTemplate:
         batch = 2
         a = torch.randn(batch, M, K, device=self.device)
         example_inputs = (a,)
-
-        kernel_call = (
-            "graph_1_cpp_fused_0"
-            if _is_cpu_freezing(self)
-            else f"aoti_torch_{self.device}_addmm_out"
+        kernel_calls = (
+            f"aoti_torch_{GPU_TYPE}_addmm_out"
+            if self.device == GPU_TYPE
+            else "aoti_torch_cpu_addmm_out"
         )
         with config.patch({"cpp.enable_kernel_profile": enable_kernel_profile}):
             _, code = run_and_get_cpp_code(
                 AOTIRunnerUtil.compile, model, example_inputs
             )
             shim_fn_codes = (
-                f'RECORD_FUNCTION("{kernel_call}", c10::ArrayRef<c10::IValue>());'
+                f'RECORD_FUNCTION("{kernel_calls}", c10::ArrayRef<c10::IValue>());'
             )
             if enable_kernel_profile:
                 FileCheck().check(shim_fn_codes).run(code)
@@ -4663,7 +4672,10 @@ class AOTInductorTestsTemplate:
         so_path, code = run_and_get_cpp_code(
             AOTIRunnerUtil.legacy_compile, model, example_inputs
         )
-        varname = f"u{int(mark_unbacked) + (2 if _is_cpu_freezing(self) else 0)}"
+        is_cpu_freezing = (
+            config.freezing is None or config.freezing
+        ) and self.device != GPU_TYPE
+        varname = f"u{int(mark_unbacked) + (2 if is_cpu_freezing else 0)}"
         lowerbound_check = f"{varname} >= {1 if mark_unbacked else 2}"
         FileCheck().check_count(lowerbound_check, 1).run(code)
 
@@ -4769,9 +4781,9 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(2, 128, 4096, device=self.device),)
         self.check_model(Model(), example_inputs, dynamic_shapes={"x": {0: bs}})
 
-    # when freezing, we have no a priori way of knowing which weights to update, or what
-    # they're expected to contain
-    @config.patch("freezing", False)
+    # freezing uses different sets of parameters, but would be tested via the same
+    # mechanism
+    @config.patch(freezing=False)
     def test_so_without_weight(self):
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -4842,6 +4854,9 @@ class AOTInductorTestsTemplate:
         output = runner_call(test_inputs)
         self.assertEqual(expected, output)
 
+    # freezing uses different sets of parameters, but would be tested via the same
+    # mechanism
+    @config.patch(freezing=False)
     def test_extract_constants_map(self):
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -4906,6 +4921,9 @@ class AOTInductorTestsTemplate:
         self.assertEqual(original_weights, extracted_inactive_weights)
         self.assertEqual(new_weights, extracted_active_weights)
 
+    # freezing uses different sets of parameters, but would be tested via the same
+    # mechanism
+    @config.patch(freezing=False)
     def test_update_constant_buffer(self):
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -4930,14 +4948,8 @@ class AOTInductorTestsTemplate:
         runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
 
         # Let's check whether the model has correct constant name mapping.
-        is_freezing = config.freezing is None or config.freezing
-        weight_param = (
-            "L__self___weight"
-            if not is_freezing
-            else ("_frozen_param0" if self.device == GPU_TYPE else "_frozen_param1")
-        )
         expected_original_fqns = {
-            weight_param: weight_param,
+            "L__self___weight": "L__self___weight",
             "L__self___bias": "L__self___bias",
         }
         self.assertEqual(
@@ -4960,21 +4972,20 @@ class AOTInductorTestsTemplate:
         output = runner_call(test_inputs)
         self.assertEqual(expected, output)
 
-        new_weights = {"L__self___bias": torch.randn(N, device=self.device)}
-        # If we're freezing, skip updating self.weight (which gets frozen in all
-        # configurations).
-        if not is_freezing:
-            new_weights[weight_param] = torch.randn(N, K, device=self.device)
+        new_weights = {
+            "L__self___weight": torch.randn(N, K, device=self.device),
+            "L__self___bias": torch.randn(N, device=self.device),
+        }
         runner.update_constant_buffer(new_weights, False, False)
-
         new_output = runner_call(test_inputs)
         new_expected = torch.nn.functional.linear(
-            test_inputs,
-            new_weights[weight_param] if not is_freezing else model.weight,
-            new_weights["L__self___bias"],
+            test_inputs, new_weights["L__self___weight"], new_weights["L__self___bias"]
         )
         self.assertEqual(new_expected, new_output)
 
+    # freezing uses different sets of parameters, but would be tested via the same
+    # mechanism
+    @config.patch(freezing=False)
     def test_update_inactive_constant_buffer(self):
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -5029,6 +5040,9 @@ class AOTInductorTestsTemplate:
         self.assertEqual(expected, output_before_swap)
         self.assertEqual(new_expected, output_after_swap)
 
+    # freezing uses different sets of parameters, but would be tested via the same
+    # mechanism
+    @config.patch(freezing=False)
     def test_free_inactive_buffer(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -5103,6 +5117,9 @@ class AOTInductorTestsTemplate:
 
         runner.free_inactive_constant_buffer()
 
+    # freezing uses different sets of parameters, but would be tested via the same
+    # mechanism
+    @config.patch(freezing=False)
     def test_update_user_managed_buffer(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
