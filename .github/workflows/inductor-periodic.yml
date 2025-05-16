@@ -159,6 +159,30 @@ jobs:
         ]}
     secrets: inherit
 
+  linux-jammy-cpu-py3_9-gcc11-periodic-dynamo-benchmarks-build-amd:
+    name: linux-jammy-cpu-py3.9-gcc11-periodic-dynamo-benchmarks
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-default-label-prefix
+    with:
+      build-environment: linux-jammy-py3.9-gcc11-build
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
+      runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
+      test-matrix: |
+        { include: [
+          { config: "cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amd" },
+          { config: "cpu_inductor_timm", shard: 1, num_shards: 2, runner: "linux.8xlarge.amd" },
+          { config: "cpu_inductor_timm", shard: 2, num_shards: 2, runner: "linux.8xlarge.amd" },
+          { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amd" },
+          { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "linux.8xlarge.amd" },
+          { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "linux.8xlarge.amd" },
+          { config: "cpu_inductor_freezing_avx2_huggingface", shard: 1, num_shards: 1, runner: "linux.12xlarge.amd" },
+          { config: "cpu_inductor_freezing_avx2_torchbench", shard: 1, num_shards: 2, runner: "linux.12xlarge.amd" },
+          { config: "cpu_inductor_freezing_avx2_torchbench", shard: 2, num_shards: 2, runner: "linux.12xlarge.amd" },
+          { config: "cpu_inductor_freezing_avx2_timm", shard: 1, num_shards: 2, runner: "linux.12xlarge.amd" },
+          { config: "cpu_inductor_freezing_avx2_timm", shard: 2, num_shards: 2, runner: "linux.12xlarge.amd" },
+        ]}
+    secrets: inherit
+
   linux-jammy-cpu-py3_9-gcc11-periodic-dynamo-benchmarks-test:
     name: linux-jammy-cpu-py3.9-gcc11-periodic-dynamo-benchmarks
     uses: ./.github/workflows/_linux-test.yml
