@@ -2265,16 +2265,31 @@ class AlgorithmSelectorCache(PersistentCache):
                 log.warning("Not yet implemented: %s", e)
                 timing = float("inf")
             except RuntimeError as e:
+                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+
+                if not isinstance(choice, CUDATemplateCaller):
+                    log.error(
+                        "CUDA runtime error during autotuning: \n%s. \nIgnoring this choice.",
+                        e,
+                    )
                 msg = str(e)
                 if "invalid argument" in msg:
                     msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
                 else:
                     if "illegal memory access" in msg:
                         msg += "\n\nEither error in template or triton bug.\n"
-                log.error(
-                    "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
-                    msg,
-                )
+
+                if isinstance(choice, CUDATemplateCaller):
+                    log.debug(
+                        "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
+                        msg,
+                        exc_info=True,
+                    )
+                else:
+                    log.error(
+                        "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
+                        msg,
+                    )
                 timing = float("inf")
             except AssertionError as e:
                 raise AssertionError(  # noqa: B904
