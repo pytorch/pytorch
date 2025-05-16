@@ -5,7 +5,12 @@ from typing import Any, Callable
 import torch
 from torch._inductor import ir
 from torch._inductor.codegen.common import KernelTemplate
-from torch._inductor.ir import add_symbolic_shapes_for_inputs_to_subgraph, Buffer, gm_original_output_strides, ir_node_to_tensor, Layout
+from torch._inductor.ir import (
+    add_symbolic_shapes_for_inputs_to_subgraph,
+    Buffer,
+    ir_node_to_tensor,
+    Layout,
+)
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.virtualized import V
 
@@ -32,7 +37,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         self.example_inputs = []
         with V.fake_mode:
             for inp in self.input_nodes:
-                inp.data.freeze_layout() # `type: ignore[misc]`
+                inp.data.freeze_layout()  # type: ignore[attr-defined]
                 self.example_inputs.append(ir_node_to_tensor(inp))
 
         self.gm = make_fx_graph(*self.example_inputs)
@@ -60,8 +65,23 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             name=f"benchmark_{self.name}",
         )
 
-        sym_inputs = add_symbolic_shapes_for_inputs_to_subgraph(self.example_inputs, bm_graph_lowering)
-        sym_inputs = [int(V.graph.sizevars.shape_env.size_hint(sym_var)) for sym_var in sym_inputs]
+        sym_inputs = add_symbolic_shapes_for_inputs_to_subgraph(
+            self.example_inputs, bm_graph_lowering
+        )
+        sym_inputs = [
+            int(V.graph.sizevars.shape_env.size_hint(sym_var)) for sym_var in sym_inputs
+        ]
+
+        if len(sym_inputs) == 0:
+            # Sanity check that args are same layout as example inputs
+            # Only do it if there are no symbolic inputs, otherwise
+            # the dynamic dim will be realized to the same size as args
+            for ar, example_inp in zip(args, self.example_inputs):
+                # Sanity check that args are same layout as example inputs
+                if isinstance(ar, torch.Tensor):
+                    assert isinstance(example_inp, torch.Tensor)
+                    assert ar.shape == example_inp.shape
+                    assert ar.stride() == example_inp.stride()
 
         if len(sym_inputs) == 0:
             # Sanity check that args are same layout as example inputs
@@ -84,7 +104,6 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 bm_graph_lowering.run(*self.example_inputs)
                 mod = bm_graph_lowering.compile_to_module()
                 bm_func = mod.call
-
 
                 bm_func([*sym_inputs, *args])
         return benchmarker.benchmark_gpu(lambda: bm_func([*sym_inputs, *args]))
