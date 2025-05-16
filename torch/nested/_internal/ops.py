@@ -908,7 +908,7 @@ def prod_default(func, *args, **kwargs):
 
 
 @register_jagged_func(
-    torch.ops.aten.split.Tensor, "self: jt, split_size: any, dim: any?"
+    torch.ops.aten.split.Tensor, "self: jt_all, split_size: any, dim: any?"
 )
 def split_tensor(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -928,7 +928,7 @@ def split_tensor(func, *args, **kwargs):
 
 
 @register_jagged_func(
-    torch.ops.aten.split_with_sizes.default, "self: jt, split_sizes: any, dim: any?"
+    torch.ops.aten.split_with_sizes.default, "self: jt_all, split_sizes: any, dim: any?"
 )
 def split_with_sizes_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -948,7 +948,7 @@ def split_with_sizes_default(func, *args, **kwargs):
 
 
 @register_jagged_func(
-    torch.ops.aten.narrow.default, "self: jt, dim: any, start: any, length: any"
+    torch.ops.aten.narrow.default, "self: jt_all, dim: any, start: any, length: any"
 )
 def narrow(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -966,7 +966,7 @@ def narrow(func, *args, **kwargs):
     return NestedTensor(values, **extract_kwargs(inp))
 
 
-@register_jagged_func(torch.ops.aten.chunk.default, "self: jt, chunks: any, dim: any?")
+@register_jagged_func(torch.ops.aten.chunk.default, "self: jt_all, chunks: any, dim: any?")
 def chunk_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -979,6 +979,11 @@ def chunk_default(func, *args, **kwargs):
     )
 
     if operating_on_batch:
+        if inp._ragged_idx != 1 or inp._lengths is not None:
+            raise RuntimeError(
+                "chunk(): not yet supported on dim = 0 for NJTs with holes or ragged dim != 1"
+            )
+
         chunks = new_kwargs["chunks"]
 
         # get _offsets of the chunks
@@ -1373,7 +1378,7 @@ def where_self(func, *args, **kwargs):
     )
 
 
-@register_jagged_func(torch.ops.aten._pin_memory.default, "self: jt, device: any?")
+@register_jagged_func(torch.ops.aten._pin_memory.default, "self: jt_all, device: any?")
 def _pin_memory_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -1384,7 +1389,7 @@ def _pin_memory_default(func, *args, **kwargs):
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
 
-@register_jagged_func(torch.ops.aten.is_pinned.default, "self: jt, device: any?")
+@register_jagged_func(torch.ops.aten.is_pinned.default, "self: jt_all, device: any?")
 def is_pinned_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -1813,7 +1818,7 @@ def select_int(func, *args, **kwargs):
 
 @register_jagged_func(
     torch.ops.aten.slice.Tensor,
-    "self: jt, dim: any?, start: any?, end: any?, step: any?",
+    "self: jt_all, dim: any?, start: any?, end: any?, step: any?",
 )
 def slice_tensor(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
