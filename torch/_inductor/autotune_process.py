@@ -125,7 +125,9 @@ class TuningProcess:
         ]
         extra_env = {
             # We need to set the PYTHONPATH so the subprocess can find torch.
-            "PYTHONPATH": os.pathsep.join(sys.path),
+            "PYTHONPATH": os.environ.get(
+                "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
+            ),
             # We shouldn't be using the Triton async compile subprocess pool,
             # but as a precaution set the env var that disables its creation.
             "TORCH_WARM_POOL": "0",
@@ -772,6 +774,7 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     def cleanup_run_fn(self) -> None:
         if self.DLL is not None:
             self.DLL.close()
+            self.DLL = None
         self.workspace = None
 
     def __str__(self) -> str:

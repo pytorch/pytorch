@@ -2362,7 +2362,7 @@ class AlgorithmSelectorCache(PersistentCache):
     @staticmethod
     def prescreen_choices(
         choices: list[ChoiceCaller],
-    ):
+    ) -> list[ChoiceCaller]:
         """
         Add prescreening phase. Motivation is to reduce the number of autotuning needed,
         for example, when there are runtime params.
@@ -2385,46 +2385,44 @@ class AlgorithmSelectorCache(PersistentCache):
                 ]
             )
 
+        # skip prescreening if the number of candidates is too small
         if len(candidates) < 10:
             return []
 
-        return candidates
+        return candidates  # type: ignore[return-value]
 
     @staticmethod
     def prune_choices_postscreen(
         choices: list[ChoiceCaller],
-        timings: dict[ChoiceCaller, float],
+        candidate_timings: dict[ChoiceCaller, float],
     ) -> list[ChoiceCaller]:
         """
         Prune the choices after prescreening.
         """
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
-        if len(timings) < 10:
+        if len(candidate_timings) < 10:
             return []
 
         log.debug("Before pruning using prescreening timings, %d choices", len(choices))
-        sorted_choices = sorted(timings.keys(), key=lambda choice: timings[choice])
+        sorted_choices = sorted(
+            candidate_timings.keys(), key=lambda choice: candidate_timings[choice]
+        )
         num_to_keep = max(int(math.sqrt(len(choices)) / 4), 8)
 
-        choices_to_keep = [
-            choice.hash_key()
-            for choice in sorted_choices[:num_to_keep]
-            if timings[choice] != float("inf")
-        ]
-        # reopen DLL
-        for choice in choices_to_keep:
-            if isinstance(choice, CUDATemplateCaller):
-                choice.bmreq.ensure_dll_loaded()
-
         # prune choices based on prescreening timings
-        choices_to_prune = OrderedSet(
-            choice.hash_key()
-            for pos, choice in enumerate(sorted_choices)
-            if pos > num_to_keep or timings[choice] == float("inf")
+        candidates_to_prune = OrderedSet(
+            candidate.bmreq.hash_key for candidate in sorted_choices[num_to_keep:]
         )
+        for candidate in sorted_choices[:num_to_keep]:
+            if candidate_timings[candidate] == float("inf"):
+                candidates_to_prune.add(candidate.bmreq.hash_key)
+            else:
+                if isinstance(candidate, CUDATemplateCaller):
+                    candidate.bmreq.ensure_dll_loaded()
+
         choices = [
-            choice for choice in choices if choice.hash_key() not in choices_to_prune
+            choice for choice in choices if choice.bmreq.hash_key not in candidates_to_prune
         ]
 
         log.debug("After pruning using prescreening timings, %d choices", len(choices))
