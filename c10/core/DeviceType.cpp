@@ -104,11 +104,6 @@ bool isValidDeviceType(DeviceType d) {
   }
 }
 
-std::ostream& operator<<(std::ostream& stream, DeviceType type) {
-  stream << DeviceTypeName(type, /* lower case */ true);
-  return stream;
-}
-
 // We use both a mutex and an atomic here because:
 // (1) Mutex is needed during writing:
 //     We need to first check the value and potentially error,
@@ -166,3 +161,10 @@ bool is_privateuse1_backend_registered() {
 }
 
 } // namespace c10
+
+namespace torch::standalone {
+std::ostream& operator<<(std::ostream& stream, DeviceType type) {
+  stream << c10::DeviceTypeName(type, /* lower case */ true);
+  return stream;
+}
+} // namespace torch::standalone
