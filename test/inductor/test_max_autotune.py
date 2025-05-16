@@ -1008,7 +1008,7 @@ class TestMaxAutotune(TestCase):
     def test_max_autotune_decompose_k_output_stride(self):
         def f(a, b):
             a = a.transpose(0, 1)
-            return (a @ b)
+            return a @ b
 
         a = torch.randn((32768, 256), device="cuda", dtype=torch.bfloat16)
         b = torch.randn((32768, 1152), device="cuda", dtype=torch.bfloat16)
@@ -1016,7 +1016,11 @@ class TestMaxAutotune(TestCase):
         b = b[:, :1096]
 
         # Force only decomposeK choice
-        with mock.patch("torch._inductor.kernel.mm.V.choices.get_base_mm_configs") as base_mm_mock, mock.patch("torch._inductor.kernel.mm.use_decompose_k_choice") as decompose_mock:
+        with mock.patch(
+            "torch._inductor.kernel.mm.V.choices.get_base_mm_configs"
+        ) as base_mm_mock, mock.patch(
+            "torch._inductor.kernel.mm.use_decompose_k_choice"
+        ) as decompose_mock:
             mm_configs_mock = MagicMock()
             mm_configs_mock.return_value = []
             base_mm_mock.return_value = mm_configs_mock
@@ -1030,7 +1034,9 @@ class TestMaxAutotune(TestCase):
 
             FileCheck().check_not("extern_kernels.bmm_dtype").check(
                 "decompose_k"
-            ).check(" empty_strided_cuda((256, 1096), (1096, 1), torch.bfloat16)").run(code[0])
+            ).check(" empty_strided_cuda((256, 1096), (1096, 1), torch.bfloat16)").run(
+                code[0]
+            )
 
     @skipIfXpu
     @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")

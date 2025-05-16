@@ -8,6 +8,7 @@ from torch._inductor.codegen.common import KernelTemplate
 from torch._inductor.ir import (
     add_symbolic_shapes_for_inputs_to_subgraph,
     Buffer,
+    gm_original_output_strides,
     ir_node_to_tensor,
     Layout,
 )
