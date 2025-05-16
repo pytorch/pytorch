@@ -51,6 +51,7 @@ import torch
 import torch._logging
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._guards import tracing, TracingContext
+from torch._logging.structured import dump_file
 from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
 
@@ -1217,10 +1218,8 @@ class InstructionTranslatorBase(
         TracingContext.set_current_loc(
             self.f_code.co_filename, lineno, self.f_code.co_name
         )
-        from torch._logging.structured import dump_file
 
-        dump_file(self.f_code.co_filename)
-        if trace_source_log.isEnabledFor(logging.DEBUG):
+        if self.is_trace_source_log_enabled:
             trace_source_log.debug("%s", LazyString(self.get_log_starts_line_log_str))
 
     def step(self):
@@ -1243,7 +1242,7 @@ class InstructionTranslatorBase(
             if self.current_speculation.failed:
                 return self.step_graph_break(inst)
 
-        if trace_bytecode_log.isEnabledFor(logging.DEBUG):
+        if self.is_trace_bytecode_log_enabled:
             trace_bytecode_log.debug(
                 "TRACE %s %s %s", inst.opname, inst.argval, self.stack
             )
@@ -1339,6 +1338,7 @@ class InstructionTranslatorBase(
 
     def run(self):
         with self.run_ctx_mgr():
+            dump_file(self.f_code.co_filename)
             try:
                 self.output.push_tx(self)
                 self.start_point = self.instruction_pointer
@@ -1651,6 +1651,9 @@ class InstructionTranslatorBase(
         self.DUP_TOP(inst)
         self._load_attr(inst)
 
+    # Cache note: This cache only exists for the duration of this
+    # InstructionTranslator - so it should be safe to do.
+    @cache_method
     def load_builtin_from_argval(self, argval):
         if argval not in self.f_builtins:
             raise Unsupported(f"name '{argval}' is not defined")
@@ -1661,13 +1664,13 @@ class InstructionTranslatorBase(
                 self.output.name_of_builtins_dict_key_in_fglobals
             )
             var_source = DictGetItemSource(builtins_source, argval)
-            self.push(VariableTracker.build(self, val, var_source))
+            return VariableTracker.build(self, val, var_source)
         else:
             assert is_builtin_constant(val)
-            self.push(ConstantVariable.create(value=val))
+            return ConstantVariable.create(value=val)
 
     def load_builtin(self, inst):
-        self.load_builtin_from_argval(inst.argval)
+        self.push(self.load_builtin_from_argval(inst.argval))
 
     def jump(self, inst):
         assert self.instruction_pointer is not None
@@ -2809,7 +2812,7 @@ class InstructionTranslatorBase(
                 self.push(ConstantVariable.create(False))
 
     def LOAD_ASSERTION_ERROR(self, inst):
-        self.load_builtin_from_argval("AssertionError")
+        self.push(self.load_builtin_from_argval("AssertionError"))
 
     def LOAD_BUILD_CLASS(self, inst):
         unimplemented_v2(
@@ -3282,6 +3285,13 @@ class InstructionTranslatorBase(
         self.inconsistent_side_effects = False
         self._constants_cache: list[Optional[VariableTracker]] = [None] * len(
             f_code.co_consts
+        )
+
+        self.is_trace_bytecode_log_enabled: Optional[bool] = (
+            trace_bytecode_log.isEnabledFor(logging.DEBUG)
+        )
+        self.is_trace_source_log_enabled: Optional[bool] = (
+            trace_source_log.isEnabledFor(logging.DEBUG)
         )
         linecache.lazycache(f_code.co_filename, f_globals)
 
@@ -3985,8 +3995,25 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         f_builtins = f_globals["__builtins__"]
         if not isinstance(f_builtins, dict):
             f_builtins = f_builtins.__dict__
-        instructions = cleaned_instructions(code)
-        propagate_line_nums(instructions)
+
+        # Get the cached instructions. These instructions are safe to cache
+        # because we dont mutate them in transform_code_object (those
+        # instructions are for the top most Instruction translator).  Also, we
+        # have to be careful about not using _cached_cleaned_instructions here
+        # because that function is global, while we want the the cache to be
+        # alive only during a compmilation.
+        tracing_ctx = parent.output.tracing_context
+        instructions = None
+        if tracing_ctx:
+            if tracing_ctx.previously_cleaned_instructions.get(code):
+                instructions = tracing_ctx.previously_cleaned_instructions[code]
+
+        if instructions is None:
+            instructions = cleaned_instructions(code)
+            propagate_line_nums(instructions)
+            if tracing_ctx:
+                tracing_ctx.previously_cleaned_instructions[code] = instructions
+
         super().__init__(
             output=parent.output,
             f_locals={},
