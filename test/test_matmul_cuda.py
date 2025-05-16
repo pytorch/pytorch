@@ -595,7 +595,7 @@ class TestMatmulCuda(TestCase):
                         if output_dtype == torch.float32:
                             baseline = torch.addmm(c_fp32, a_fp32, b_fp32)
                         else:
-                            baselone = torch.addmm(c, a, b)
+                            baseline = torch.addmm(c, a, b)
 
                     self.assertEqual(out.dtype, output_dtype)
                     torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
