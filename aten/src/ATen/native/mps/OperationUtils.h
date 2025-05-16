@@ -100,6 +100,7 @@ MPSGraphTensor* castFromIHFTypes(MPSGraph* mpsGraph,
                                  const TensorBase& input,
                                  bool includesInt64 = false);
 
+MPSNDArray* getStridedMPSNDArray(const TensorBase& src, MPSNDArray* srcNDArray);
 MPSNDArray* getMPSNDArray(const TensorBase& t, const IntArrayRef& sizes = {}, const IntArrayRef& strides = {});
 MPSNDArray* getMPSNDArray(const TensorBase& t, MPSShape* sizes = nil, MPSShape* strides = nil);
 // The MPSShape could vary based on memory format
@@ -108,39 +109,22 @@ MPSShape* getMPSShape(const TensorBase& t, c10::MemoryFormat memory_format = Mem
 MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
 
 static inline id<MTLBuffer> getMTLBufferStorage(const TensorBase& tensor) {
-  // return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().mutable_data());
-  return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
+  return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().mutable_data());
 }
 
-// Marks a tensor argument as const so that COW materialization is not triggered
-// when the `id<MTLBuffer>` is obtained. Unfortunately, there is no way to mark
-// the data that an `id<MTLBuffer>` points to as const, so this should only be
-// used on tensor arguments that we know will not be written to.
-class ConstMTLTensor {
+// This class wraps a tensor with an API that can obtain the underlying
+// `id<MTLBuffer>` while preventing COW materialization and attempting to
+// prevent mutations to the data. Unfortunately, there is no way to make the
+// compiler actually prevent mutating the data in the MPS code because Metal
+// APIs operate on `id<MTLBuffer>`, which resolves to `struct objc_object *`, a
+// pointer to non-const data.
+class ConstMTLBufferTensor {
  public:
-  ConstMTLTensor(const TensorBase& tensor) : _tensor(tensor) {}
+  ConstMTLBufferTensor(const TensorBase& tensor) : _tensor(tensor) {}
 
   // WARNING: Do not write to the buffer returned by this function.
   id<MTLBuffer> mtl_buffer_unsafe() const {
     return __builtin_bit_cast(id<MTLBuffer>, _tensor.storage().data());
-  }
-
-  const TensorBase& tensor() const {
-    return _tensor;
-  }
-
- private:
-  const TensorBase& _tensor;
-};
-
-// Marks a tensor argument as mutable so that COW materialization is triggered
-// when the `id<MTLBuffer>` is obtained.
-class MutableMTLTensor {
- public:
-  MutableMTLTensor(const TensorBase& tensor) : _tensor(tensor) {}
-
-  id<MTLBuffer> mtl_buffer() const {
-    return __builtin_bit_cast(id<MTLBuffer>, _tensor.storage().mutable_data());
   }
 
   const TensorBase& tensor() const {
@@ -161,7 +145,8 @@ class Placeholder {
               MPSShape* mpsShape = nullptr,
               bool gatherTensorData = true,
               MPSDataType dataType = MPSDataTypeInvalid,
-              bool useMPSStridedAPI = true);
+              bool useMPSStridedAPI = true,
+              bool isConst = false);
   MPSGraphTensor* getMPSGraphTensor() {
     return _placeholder;
   }
@@ -199,6 +184,26 @@ MPSGraphTensor* mpsGraphScalarPlaceHolder(MPSGraph* mpsGraph, const Scalar& scal
 std::string get_mem_format_string(c10::MemoryFormat memory_format);
 
 using MPSCacheKey = uint64_t;
+
+struct MPSCachedKernel {
+  MPSCachedKernel(NSObject* object) : _object([object retain]) {}
+  virtual ~MPSCachedKernel() {
+    [_object release];
+    _object = nullptr;
+  }
+
+  // Delete copy constructor and assignment
+  MPSCachedKernel(const MPSCachedKernel&) = delete;
+  void operator=(const MPSCachedKernel&) = delete;
+
+  template <typename T>
+  inline T* kernel() const {
+    return (T*)_object;
+  }
+
+ private:
+  NSObject* _object = nullptr;
+};
 
 // derive this class to cache a graph and its inputs/outputs
 // can be used to store any NSObject
@@ -253,6 +258,97 @@ struct MPSBinaryGradCachedGraph : public MPSCachedGraph {
   MPSGraphTensor* otherTensor_ = nil;
   MPSGraphTensor* gradInputTensor_ = nil;
 };
+
+struct MPSKernelCache {
+  typedef MPSCachedKernel* (^CreateCachedKernelBlock)();
+
+  struct CacheEntry {
+    CacheEntry(const std::string& key, MPSCachedKernel* cachedKernel) : cachedKernel_(cachedKernel), key_(key) {}
+    MPSCachedKernel* cachedKernel_ = nullptr;
+    std::string key_;
+  };
+
+ public:
+  static MPSKernelCache* getInstance() {
+    if (_instance_cache == nullptr) {
+      _instance_cache = new MPSKernelCache();
+    }
+    return _instance_cache;
+  }
+
+  ~MPSKernelCache() {
+    dispatch_release(serialQueue_);
+    for (const auto& i : cache_) {
+      delete i.second.cachedKernel_;
+    }
+  }
+
+  // Disallow the copy constructor and operator= functions
+  MPSKernelCache(const MPSKernelCache&) = delete;
+  void operator=(const MPSKernelCache&) = delete;
+
+  MPSCachedKernel* CreateCachedKernel(const std::string& key, CreateCachedKernelBlock createCacheBlock) {
+    __block MPSCachedKernel* cachedKernel = nil;
+    MPSCacheKey hash = std::hash<std::string>{}(key);
+    dispatch_sync_with_rethrow(serialQueue_, ^() {
+      if (cache_.count(hash) != 0) {
+        auto& entry = cache_.at(hash);
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached kernel!\n");
+        cachedKernel = entry.cachedKernel_;
+      } else {
+        cachedKernel = createCacheBlock();
+        CacheEntry entry(key, cachedKernel);
+        cache_.emplace(hash, entry);
+      }
+    });
+    return cachedKernel;
+  }
+  template <typename T>
+  inline T* CreateCachedKernelAs(const std::string& key, CreateCachedKernelBlock createCacheBlock) {
+    return static_cast<T*>(CreateCachedKernel(key, createCacheBlock));
+  }
+
+  MPSCachedKernel* LookUp(const std::string& key) const {
+    __block MPSCachedKernel* cachedKernel = nil;
+
+    MPSCacheKey hash = std::hash<std::string>{}(key);
+    dispatch_sync_with_rethrow(serialQueue_, ^() {
+      if (cache_.count(hash) != 0) {
+        auto& entry = cache_.at(hash);
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached kernel!\n");
+        cachedKernel = entry.cachedKernel_;
+      }
+    });
+    return cachedKernel;
+  }
+
+  template <typename T>
+  inline T* LookUpAs(const std::string& key) const {
+    return static_cast<T*>(LookUp(key));
+  }
+
+ private:
+  MPSKernelCache() {
+    serialQueue_ = dispatch_queue_create("kernel cache queue", DISPATCH_QUEUE_SERIAL);
+  }
+
+  static MPSKernelCache* _instance_cache;
+  std::unordered_map<MPSCacheKey, CacheEntry> cache_;
+  dispatch_queue_t serialQueue_ = nullptr;
+};
+
+// Common template for creating cached kernel if missing
+template <typename T>
+inline T* LookUpOrCreateCachedKernel(const std::string& key, std::function<MPSKernel*()> instantiate) {
+  auto cache_ = MPSKernelCache::getInstance();
+  if (auto rc = cache_->LookUpAs<T>(key)) {
+    return rc;
+  }
+  return cache_->CreateCachedKernelAs<T>(key, ^mps::MPSCachedKernel*() {
+    auto k_ = new mps::MPSCachedKernel(instantiate());
+    return k_;
+  });
+}
 
 // TODO: Improve the overall design of MPSGraphCache.
 // https://github.com/pytorch/pytorch/issues/77176
@@ -392,12 +488,16 @@ template <typename encoder_t,
           typename = std::enable_if_t<std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t> ||
                                       std::is_same_v<id<MTLArgumentEncoder>, encoder_t>>>
 static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigned idx) {
-  // TODO: Maybe should add a static assert here saying that all tensor args
-  // should be wrapped in either `ConstMTLTensor` or `MutableMTLTensor`.
   if (C10_UNLIKELY(t.device().type() == kCPU)) {
     if constexpr (std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t>) {
       TORCH_CHECK(t.dim() == 0, "Passed CPU tensor to MPS op");
-      [encoder setBytes:t.storage().data() length:t.element_size() atIndex:idx];
+      // MPS does not support doubles, silently downcast CPU scalar to float
+      if (C10_UNLIKELY(t.scalar_type() == kDouble)) {
+        auto val = static_cast<float>(*reinterpret_cast<const double*>(t.const_data_ptr()));
+        [encoder setBytes:&val length:sizeof(val) atIndex:idx];
+        return;
+      }
+      [encoder setBytes:t.storage().mutable_data() length:t.element_size() atIndex:idx];
     } else {
       TORCH_CHECK(false, "Passed CPU tensor to MPS op");
     }
@@ -409,7 +509,7 @@ static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigne
 template <typename encoder_t,
           typename = std::enable_if_t<std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t> ||
                                       std::is_same_v<id<MTLArgumentEncoder>, encoder_t>>>
-static inline void mtl_setBuffer(encoder_t encoder, ConstMTLTensor b, unsigned idx) {
+static inline void mtl_setBuffer(encoder_t encoder, ConstMTLBufferTensor b, unsigned idx) {
   const TensorBase& t = b.tensor();
   if (C10_UNLIKELY(t.device().type() == kCPU)) {
     if constexpr (std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t>) {
@@ -421,23 +521,6 @@ static inline void mtl_setBuffer(encoder_t encoder, ConstMTLTensor b, unsigned i
     return;
   }
   [encoder setBuffer:b.mtl_buffer_unsafe() offset:t.storage_offset() * t.element_size() atIndex:idx];
-}
-
-template <typename encoder_t,
-          typename = std::enable_if_t<std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t> ||
-                                      std::is_same_v<id<MTLArgumentEncoder>, encoder_t>>>
-static inline void mtl_setBuffer(encoder_t encoder, MutableMTLTensor b, unsigned idx) {
-  const TensorBase& t = b.tensor();
-  if (C10_UNLIKELY(t.device().type() == kCPU)) {
-    if constexpr (std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t>) {
-      TORCH_CHECK(t.dim() == 0, "Passed CPU tensor to MPS op");
-      [encoder setBytes:b.mtl_buffer() length:t.element_size() atIndex:idx];
-    } else {
-      TORCH_CHECK(false, "Passed CPU tensor to MPS op");
-    }
-    return;
-  }
-  [encoder setBuffer:b.mtl_buffer() offset:t.storage_offset() * t.element_size() atIndex:idx];
 }
 
 // Implementation of setBytes for containers vs trivially copiable types must be separate
@@ -471,18 +554,12 @@ inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, id<MTLBuffer> val, 
   [encoder setBuffer:val offset:0 atIndex:idx];
 }
 
-inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, ConstMTLTensor val, unsigned idx) {
-  mtl_setBuffer(encoder, val, idx);
-}
-
-inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, MutableMTLTensor val, unsigned idx) {
+inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, ConstMTLBufferTensor val, unsigned idx) {
   mtl_setBuffer(encoder, val, idx);
 }
 
 template <>
 inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const Tensor& val, unsigned idx) {
-  // TODO: Probably should add a static assert here saying that all tensor args
-  // should be wrapped in either `ConstMTLTensor` or `MutableMTLTensor`.
   mtl_setBuffer(encoder, val, idx);
 }
 
