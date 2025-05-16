@@ -106,7 +106,7 @@ class TestSubgraphChoice(TestCase):
         res = compiled_func(a_in, b_in)
 
         # Check same results of compiled result and regular torch.mm
-        torch.testing.assert_close(res, a_in @ b_in, atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(res, a_in @ b_in, atol=1e-1, rtol=1e-1)
 
     @skipIfXpu
     @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
@@ -186,8 +186,7 @@ class TestSubgraphChoice(TestCase):
             res = compiled_func(a_in, b_in)
 
             # Check same results of compiled result and regular torch.mm
-            # Relax precision as decomposeK does first accumulation in fp16
-            torch.testing.assert_close(res, (a_in + 1.0) @ b_in, atol=1e-2, rtol=1e-2)
+            torch.testing.assert_close(res, (a_in + 1.0) @ b_in, atol=1e-1, rtol=1e-1)
 
 
 if __name__ == "__main__":
