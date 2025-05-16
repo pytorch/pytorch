@@ -66,6 +66,8 @@ from torch.fx.experimental.symbolic_shapes import (
     StatefulSymbolicContext,
     SubclassSymbolicContext,
     SymbolicContext,
+    SymIntSymbolicContext,
+    TrackedFake,
 )
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.nn.utils._expanded_weights import ExpandedWeight
@@ -260,6 +262,7 @@ from .torch_function import (
 )
 from .user_defined import (
     FrozenDataClassVariable,
+    IntWrapperVariable,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
     SourcelessGraphModuleVariable,
@@ -1444,6 +1447,23 @@ class VariableBuilder:
                         "Ensure your dict_keys keys are constants (e.g. int, float, strings)",
                     ],
                 )
+        elif IntWrapperVariable.is_matching_object(value):
+            from torch.export.dynamic_shapes import _DimHintType
+
+            if value.dynamism is None or value.dynamism.type == _DimHintType.STATIC:
+                return self.wrap_symint(value.val)
+            elif value.dynamism.type == _DimHintType.DYNAMIC:
+                return self.wrap_symint(
+                    value.val,
+                    dynamism=DimDynamic.DYNAMIC,
+                    context=SymIntSymbolicContext(
+                        constraint=RelaxedUnspecConstraint(warn_only=False)
+                    ),
+                )
+            elif value.dynamism.type == _DimHintType.AUTO:
+                return self.wrap_symint(value.val, dynamism=DimDynamic.DYNAMIC)
+            else:
+                raise RuntimeError(f"Undefined dynamism {value.dynamism}")
         else:
             return self.wrap_user_defined(value)
 
@@ -2093,7 +2113,13 @@ class VariableBuilder:
 
         return numpy_ndarray_variable
 
-    def wrap_symint(self, value, is_forced_allow_list_dynamic=False):
+    def wrap_symint(
+        self,
+        value,
+        is_forced_allow_list_dynamic=False,
+        dynamism: Optional[DimDynamic] = None,
+        context: Optional[SymIntSymbolicContext] = None,
+    ):
         assert type(value) is int
 
         if self.name in self.tx.output.unspec_variable_map:
@@ -2112,10 +2138,11 @@ class VariableBuilder:
         # but the general idea is that we generate kernels that can
         # take unspecialized floats and use them in sizevar computation
         elif not is_constant_source(self.get_source()):
-            if torch._dynamo.config.specialize_int:
+            if dynamism is None and torch._dynamo.config.specialize_int:
                 # If specialize_int is False, also return
                 # a constant (but this should have been handled
-                # in the caller, TBH)
+                # in the caller, TBH). But if `dynamism` is set, then actually
+                # turn it into a symint
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value, source=self.source)
 
@@ -2137,7 +2164,10 @@ class VariableBuilder:
             if isinstance(base_source, ChainedSource):
                 base_source = base_source.get_base()
 
-            if is_forced_allow_list_dynamic:
+            if dynamism == DimDynamic.DYNAMIC:
+                log.debug("%s marked %s via IntWrapper", self.source.name(), dynamism)
+                dynamic_dim = dynamism
+            elif is_forced_allow_list_dynamic:
                 log.debug("%s marked dynamic via source whitelist", self.source.name())
                 dynamic_dim = DimDynamic.DYNAMIC
             elif (
@@ -2166,7 +2196,7 @@ class VariableBuilder:
             )
 
             self.tx.output.tracked_fakes.append(
-                TrackedFake(wrapped_value, self.source, None)
+                TrackedFake(wrapped_value, self.source, context)
             )
         else:
             assert is_constant_source(self.get_source())
@@ -2193,11 +2223,6 @@ class VariableBuilder:
         self.tx.output.unspec_variable_map[self.name] = unspec_var
 
         if not is_constant_source(self.get_source()):
-            if self.tx.export and not isinstance(self.get_source(), LocalSource):
-                raise AssertionError(
-                    f"Dynamo attempts to add additional input during export: value={wrapped_value}, source={self.get_source()}"
-                )
-
             proxy.node.meta["grapharg"] = GraphArg(
                 self.get_source(),
                 wrapped_value,
@@ -2907,23 +2932,6 @@ def is_dynamic_source(source_name: str) -> bool:
             )
             return True
     return False
-
-
-# Tracks the sources of all fake tensors we wrap in Dynamo.
-# Used by shape guard computation.
-@dataclasses.dataclass
-class TrackedFake:
-    fake: Union[FakeTensor, SymInt]
-    source: Source
-    symbolic_context: Optional[SymbolicContext]
-
-    def __hash__(self) -> int:
-        return hash((self.fake, self.source.name()))
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, TrackedFake):
-            return self.fake is other.fake and self.source.name() == other.source.name()
-        return False
 
 
 # Performs automatic dynamic dim determination.
