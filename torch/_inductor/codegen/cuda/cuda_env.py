@@ -1,5 +1,6 @@
 import functools
 import logging
+import shutil
 from typing import Optional
 
 import torch
@@ -21,8 +22,8 @@ def get_cuda_arch() -> Optional[str]:
             major, minor = torch.cuda.get_device_capability(0)
             return str(major * 10 + minor)
         return str(cuda_arch)
-    except Exception as e:
-        log.error("Error getting cuda arch: %s", e)
+    except Exception:
+        log.exception("Error getting cuda arch")
         return None
 
 
@@ -34,18 +35,11 @@ def get_cuda_version() -> Optional[str]:
         if cuda_version is None:
             cuda_version = torch.version.cuda
         return cuda_version
-    except Exception as e:
-        log.error("Error getting cuda version: %s", e)
+    except Exception:
+        log.exception("Error getting cuda version")
         return None
 
 
 @functools.lru_cache(None)
-def nvcc_exist(nvcc_path: str = "nvcc") -> bool:
-    if nvcc_path is None:
-        return False
-    import subprocess
-
-    res = subprocess.call(
-        ["which", nvcc_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-    )
-    return res == 0
+def nvcc_exist(nvcc_path: Optional[str] = "nvcc") -> bool:
+    return nvcc_path is not None and shutil.which(nvcc_path) is not None

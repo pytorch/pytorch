@@ -6,6 +6,7 @@ import dataclasses
 import functools
 import hashlib
 import importlib
+import importlib.resources
 import io
 import itertools
 import json
@@ -97,6 +98,7 @@ from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .triton_bundler import TritonBundler
+from .virtualized import V
 
 
 if config.is_fbcode():
@@ -974,7 +976,7 @@ class GuardedCache(Generic[T]):
         remote_cache: Optional[RemoteCache[JsonDataTy]],
         evaluate_guards: Callable[[str, Union[list[int], list[torch.SymInt]]], bool],
         hints: list[int],
-    ) -> tuple[Optional[T], Optional[bytes], str]:
+    ) -> tuple[Optional[T], Optional[bytes], dict[str, str]]:
         """
         Find the first cache entry in iterate_over_candidates that passes `evaluate_guards`.
 
@@ -992,6 +994,7 @@ class GuardedCache(Generic[T]):
         graph = None
         pickled_content = None
         result_status = "full_miss"
+        sample_guards_expr = None
 
         # Iterate over any entries in the subdir for this key and evaluate
         # guards to determine whether there's a hit.
@@ -1014,12 +1017,17 @@ class GuardedCache(Generic[T]):
                 graph = candidate
                 pickled_content = content
                 result_status = "hit"
+                sample_guards_expr = candidate.guards_expr
                 break
             else:
-                # At least one guard missed
+                # At least one guard missed, log this
                 result_status = "guard_miss"
+                sample_guards_expr = candidate.guards_expr
 
-        return graph, pickled_content, result_status
+        info = {"cache_status_detailed": result_status}
+        if sample_guards_expr is not None:
+            info["cache_status_guard_expr"] = sample_guards_expr
+        return graph, pickled_content, info
 
     @classmethod
     def _filter_backed_symints(
@@ -1200,11 +1208,11 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         cache_info: dict[str, Any] = dict()
 
         # Use the find_graph_for_key method to find a graph for the given key
-        graph, pickled_content, result_status = FxGraphCache.find_guarded_entry(
+        graph, pickled_content, guard_info = FxGraphCache.find_guarded_entry(
             key, local, remote_cache, evaluate_guards, hints
         )
+        cache_info.update(guard_info)
         if graph is None:
-            cache_info["miss_type"] = result_status
             return None, cache_info
 
         if pickled_content is not None:
@@ -1596,6 +1604,12 @@ class AotCodeCompiler:
             extra=cpp_command,
             specified_dir=specified_output_path,
         )
+
+        # Log the AOTInductor wrapper and kernel code, if needed.
+        with tempfile.NamedTemporaryFile("w+") as t:
+            t.writelines((wrapper_code, "\n", kernel_code, "\n"))
+            t.flush()
+            V.debug.output_code(t.name, extension="cpp")
 
         if config.aot_inductor.package:
             generated_files.append(wrapper_path)
@@ -3116,7 +3130,27 @@ def _cutlass_include_paths() -> list[str]:
     ]
 
 
+@torch_key_cache
+def cutlass_key() -> bytes:
+    """
+    Compute a key representing the state of the CUTLASS library.
+
+    Note: OSS and fbcode will have different keys.
+    """
+    if config.is_fbcode():
+        with importlib.resources.path("cutlass", "src_hash.txt") as resource_path:
+            with open(resource_path) as resource_file:
+                return resource_file.read().encode()
+
+    combined_hash = hashlib.sha256()
+    build_code_hash([config.cuda.cutlass_dir], "", combined_hash)
+    return combined_hash.digest()
+
+
 def _cuda_lib_options() -> list[str]:
+    """
+    Util function for CUTLASS backend to find the correct CUDA libraries.
+    """
     _set_gpu_runtime_env()  # cpp_extension consults the env
     from torch.utils import cpp_extension
 
@@ -3125,6 +3159,9 @@ def _cuda_lib_options() -> list[str]:
     if is_linux():
         _transform_cuda_paths(lpaths)
         for path in lpaths:
+            if "torch/lib" in path:
+                # don't want to depend on pytorch
+                continue
             # -rpath ensures the DLL can find its dependencies when loaded, even
             # if the library path is non-standard.
             extra_ldflags.extend([f"-L{path}", "-Xlinker", f"-rpath={path}"])
@@ -3306,6 +3343,13 @@ class DLLWrapper:
 
 @clear_on_fresh_inductor_cache
 class CUDACodeCache:
+    """
+    A cache for managing the compilation and loading of CUDA source code specifically for CUTLASS.
+    This class handles writing source code to files, compiling them into shared objects, and caching
+    the results to avoid redundant compilations. It also manages error handling and logging for the
+    compilation process.
+    """
+
     @dataclasses.dataclass
     class CacheEntry:
         input_path: str
@@ -3326,9 +3370,26 @@ class CUDACodeCache:
         cuda_command = repr(
             cuda_compile_command(["dummy_input"], "dummy_output", dst_file_ext)
         )
-        key, input_path = write(
-            source_code, cls._SOURCE_CODE_SUFFIX, extra=cuda_command
-        )
+        if config.cuda.cutlass_hash_with_compile_cmd:
+            extra = cuda_command
+        else:
+            extra = repr(
+                [
+                    # nvcc and cuda hash
+                    _cuda_compiler(),
+                    # cutlass flags and gcc hash
+                    _nvcc_compiler_options(),
+                    # flags
+                    _nvcc_host_compiler_options(),
+                    # cutlass key
+                    cutlass_key(),
+                    # hack to deal with AOTI .o compilation
+                ]
+                + [dst_file_ext]
+                if dst_file_ext == "o"
+                else []
+            )
+        key, input_path = write(source_code, cls._SOURCE_CODE_SUFFIX, extra=extra)
         return key, input_path
 
     @classmethod

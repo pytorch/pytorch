@@ -980,6 +980,8 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
       text = `${text}, Total memory used after allocation: ${formatSize(
         elem.max_allocated_mem,
       )}`;
+      const context = elem?.compile_context ?? 'None';
+      text = `${text}, Compile context: ${context}`;
       if (elem.stream !== null) {
         text = `${text}, stream ${elem.stream}`;
       }
@@ -1226,6 +1228,7 @@ function create_trace_view(
   dst.selectAll('svg').remove();
   dst.selectAll('div').remove();
 
+  max_entries = Math.min(max_entries, data.elements_length);
   const d = dst.append('div');
   d.append('input')
     .attr('type', 'range')
@@ -1235,7 +1238,9 @@ function create_trace_view(
     .on('change', function () {
       create_trace_view(dst, snapshot, device, plot_segments, this.value);
     });
-  d.append('label').text('Detail');
+  d.append('label').text(
+    `Detail: ${max_entries} of ${data.elements_length} entries`,
+  );
 
   const grid_container = dst
     .append('div')
@@ -1292,6 +1297,19 @@ function create_settings_view(dst, snapshot, device) {
 }
 
 function unpickle(buffer) {
+  try {
+    const decoder = new TextDecoder();
+    const jsonString = decoder.decode(new Uint8Array(buffer));
+    const data = JSON.parse(jsonString);
+
+    return data;
+  } catch (e) {
+    console.log('Failed to decode the data as JSON, fall back to pickle', e);
+  }
+  return unpickleData(buffer);
+}
+
+function unpickleData(buffer) {
   const bytebuffer = new Uint8Array(buffer);
   const decoder = new TextDecoder();
 
