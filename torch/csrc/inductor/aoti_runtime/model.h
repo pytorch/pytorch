@@ -609,6 +609,7 @@ class AOTInductorModelBase {
     auto magic_number =
         reinterpret_cast<const uint64_t*>(_binary_constants_bin_start)[1];
     auto weights_offset = fsize - weights_size;
+
     AOTI_RUNTIME_CHECK(
         (weights_offset & 0x3fff) == 0,
         "weights_offset must be aligned to 16K boundary");

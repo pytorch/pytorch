@@ -29,7 +29,11 @@
 #include <c10/util/irange.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
+#ifdef AOTI_STANDALONE
+#include <torch/csrc/inductor/aoti_standalone/c/shim.h>
+#else
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#endif // AOTI_STANDALONE
 
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON) || defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_SVE256)
 #define INDUCTOR_USE_VECTOR_TYPES() 1

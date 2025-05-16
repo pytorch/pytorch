@@ -483,8 +483,8 @@ class BuildOptionsBase:
             json.dump(attrs, f)
 
 
-def _get_warning_all_cflag(warning_all: bool = True) -> list[str]:
-    if not _IS_WINDOWS:
+def _get_warning_all_cflag(cpp_compiler: str, warning_all: bool = True) -> list[str]:
+    if not _IS_WINDOWS and "nvcc" not in cpp_compiler:
         return ["Wall"] if warning_all else []
     else:
         return []
@@ -521,6 +521,8 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
             "EHsc",
         ]
     else:
+        if "nvcc" in cpp_compiler:
+            return []
         cflags = ["Wno-unused-variable", "Wno-unknown-pragmas"]
         if _is_clang(cpp_compiler):
             ignored_optimization_argument = (
@@ -565,6 +567,11 @@ def _get_optimization_cflags(
             if config.aot_inductor.debug_compile
             else [wrapper_opt_level if min_optimize else "O3", "DNDEBUG"]
         )
+        if "nvcc" in cpp_compiler:
+            from .codecache import _nvcc_get_arch_option
+
+            return [_nvcc_get_arch_option()]
+
         cflags += _get_ffast_math_flags()
         cflags.append("fno-finite-math-only")
         if not config.cpp.enable_unsafe_math_opt_flag:
@@ -586,7 +593,7 @@ def _get_optimization_cflags(
         return cflags
 
 
-def _get_shared_cflag(compile_only: bool) -> list[str]:
+def _get_shared_cflag(cpp_compiler: str, compile_only: bool) -> list[str]:
     if _IS_WINDOWS:
         """
         MSVC `/MD` using python `ucrtbase.dll` lib as runtime.
@@ -595,7 +602,7 @@ def _get_shared_cflag(compile_only: bool) -> list[str]:
         SHARED_FLAG = ["DLL", "MD"]
     else:
         if compile_only:
-            return ["fPIC"]
+            return ["Xcompiler", "fPIC"] if "nvcc" in cpp_compiler else ["fPIC"]
         if platform.system() == "Darwin" and "clang" in get_cpp_compiler():
             # This causes undefined symbols to behave the same as linux
             return ["shared", "fPIC", "undefined dynamic_lookup"]
@@ -621,9 +628,9 @@ def get_cpp_options(
     passthrough_args: list[str] = []
 
     cflags = (
-        _get_shared_cflag(compile_only)
+        _get_shared_cflag(cpp_compiler, compile_only)
         + _get_optimization_cflags(cpp_compiler, min_optimize)
-        + _get_warning_all_cflag(warning_all)
+        + _get_warning_all_cflag(cpp_compiler, warning_all)
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
     )
@@ -705,7 +712,10 @@ def _get_glibcxx_abi_build_flags() -> list[str]:
 
 
 def _get_torch_cpp_wrapper_definition() -> list[str]:
-    return ["TORCH_INDUCTOR_CPP_WRAPPER", "STANDALONE_TORCH_HEADER"]
+    macros = ["TORCH_INDUCTOR_CPP_WRAPPER", "STANDALONE_TORCH_HEADER"]
+    if config.aot_inductor.codegen_standalone:
+        macros.append("AOTI_STANDALONE")
+    return macros
 
 
 def _use_custom_generated_macros() -> list[str]:
@@ -797,7 +807,11 @@ def _get_torch_related_args(
     include_dirs = include_paths()
     libraries_dirs = [TORCH_LIB_PATH]
     libraries = []
-    if sys.platform != "darwin" and not config.is_fbcode():
+    if (
+        sys.platform != "darwin"
+        and not config.is_fbcode()
+        and not config.aot_inductor.codegen_standalone
+    ):
         libraries = ["torch", "torch_cpu"]
         if not aot_mode:
             libraries.append("torch_python")
@@ -1062,7 +1076,9 @@ def get_cpp_torch_options(
         sys_libs_passthrough_args,
     ) = _setup_standard_sys_libs(cpp_compiler, aot_mode, use_relative_path)
 
-    isa_macros, isa_ps_args_build_flags = _get_build_args_of_chosen_isa(vec_isa)
+    isa_macros, isa_ps_args_build_flags = (
+        ([], []) if "nvcc" in cpp_compiler else _get_build_args_of_chosen_isa(vec_isa)
+    )
 
     (
         torch_include_dirs,
@@ -1099,7 +1115,7 @@ def get_cpp_torch_options(
         + torch_include_dirs
         + omp_include_dir_paths
     )
-    cflags = sys_libs_cflags + omp_cflags
+    cflags = [] if "nvcc" in cpp_compiler else sys_libs_cflags + omp_cflags
     ldflags = omp_ldflags
     libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
     libraries = torch_libraries + omp_lib
@@ -1249,6 +1265,7 @@ def get_cpp_torch_device_options(
 
     include_dirs = cpp_extension.include_paths(device_type)
     libraries_dirs = cpp_extension.library_paths(device_type)
+
     if device_type == "cuda":
         definitions.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
 
@@ -1259,13 +1276,14 @@ def get_cpp_torch_device_options(
                 libraries += ["c10_hip", "torch_hip"]
             definitions.append(" __HIP_PLATFORM_AMD__")
         else:
-            if config.is_fbcode():
-                libraries += ["cuda"]
-            else:
-                libraries += ["c10_cuda", "cuda", "torch_cuda"]
+            libraries.append("cuda")
+            if config.aot_inductor.codegen_standalone:
+                libraries.append("cublas")
+            if not config.is_fbcode() and not config.aot_inductor.codegen_standalone:
+                libraries.extend(["c10_cuda", "torch_cuda"])
             _transform_cuda_paths(libraries_dirs)
 
-    if device_type == "xpu":
+    elif device_type == "xpu":
         definitions.append(" USE_XPU")
         # Suppress multi-line comment warnings in sycl headers
         cflags += ["Wno-comment"]
@@ -1312,6 +1330,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
 
     def __init__(
         self,
+        compiler: str = "",
         vec_isa: VecISA = invalid_vec_isa,
         include_pytorch: bool = False,
         device_type: str = "cuda",
@@ -1326,6 +1345,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
         preprocessing: bool = False,
     ) -> None:
         super().__init__(
+            compiler=compiler,
             vec_isa=vec_isa,
             include_pytorch=include_pytorch,
             aot_mode=aot_mode,

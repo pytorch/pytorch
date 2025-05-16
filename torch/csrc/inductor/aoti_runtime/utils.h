@@ -11,7 +11,11 @@
 // in model.so, and should not refer to any aten/c10 headers except the stable
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
+#ifdef AOTI_STANDALONE
+#include <torch/csrc/inductor/aoti_standalone/c/shim.h>
+#else
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#endif // AOTI_STANDALONE
 
 #if defined(__GNUC__) || defined(__clang__)
 #define AOTI_NOINLINE __attribute__((noinline))
@@ -351,6 +355,7 @@ inline AtenTensorHandle wrap_with_raii_handle_if_needed(
 // This should only be called in cases where the C-shim API expects an optional
 // input argument (passed by pointer), and a temporary needs to be passed to it.
 template <class T>
+// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
 T& temporary_reference(T&& t) {
   return t;
 }
