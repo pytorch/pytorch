@@ -860,6 +860,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
             else:
                 raise_observed_exception(RuntimeError, tracer)
             return retval
+        elif name == "__contains__":
+            return self.force_unpack_var_sequence(tx).call_method(
+                tx, "__contains__", [args[0]], {}
+            )
 
         super().call_method(tx, name, args, kwargs)
 
