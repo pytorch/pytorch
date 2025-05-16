@@ -312,7 +312,7 @@ def record_shapeenv_event(
                 if not shape_env.should_record_events or shape_env.is_recording:
                     # If ShapeEnv is disabled or already recording an event, re-raise the exception without logging.
                     raise
-                log.error(  # noqa: G201
+                log.error(  # noqa: G201, TRY400
                     "failed while running %s(*%s, **%s)",
                     name,
                     args[1:],
@@ -349,7 +349,7 @@ def replay_shape_env_events(events):
             # change after each event is replayed.
             event.run(shape_env)
         except Exception:
-            log.error("failed when running event: %s", event)
+            log.error("failed when running event: %s", event)  # noqa: TRY400
             raise
 
     return shape_env
