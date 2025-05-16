@@ -147,7 +147,7 @@ class CUDATemplate(KernelTemplate):
 
         return CUDATemplateCaller(
             kernel_name,
-            self.name,
+            "cutlass_gemm",
             self.input_nodes,
             self.output_node.get_layout(),
             make_kernel_render,
