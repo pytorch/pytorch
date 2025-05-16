@@ -151,6 +151,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_inline_lru_cache_fn_with_default_args(a, b):
         return inline_lru_cache_fn_with_default_args(a, 2, b)
 
+
+    def test_lru_cache_warning_issued_during_tracing(self):
+        from functools import lru_cache
+        import warnings
+
+        @lru_cache
+        def foo(x):
+            return x + 1
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            torch.compile(foo)(torch.randn(4))
+            self.assertEqual(len(w), 1)
+            self.assertRegex(str(w[0].message), r"Tracing through lru_cache wrapped function that read outside state may not be traced soundly.")
+
+
     @make_test
     def test_add(a, b):
         return a + b
