@@ -1747,7 +1747,8 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_set_intersection(a, b):
         set1 = {"apple", "banana", "cherry"}
         set2 = {"google", "microsoft", "apple"}
-        intersection_set = set1.intersection(set2)
+        set3 = {"shoes", "flipflops", "apple"}
+        intersection_set = set1.intersection(set2, set3)
         if "apple" in intersection_set:
             x = a + b
         else:
@@ -1756,7 +1757,31 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             y = a + b
         else:
             y = a - b
-        return x, y
+        if "shoes" in intersection_set:
+            z = a + b
+        else:
+            z = a - b
+        return x, y, z
+
+    @make_test
+    def test_set_intersection_update(a, b):
+        set1 = {"apple", "banana", "cherry"}
+        set2 = {"google", "microsoft", "apple"}
+        set3 = {"shoes", "flipflops", "apple"}
+        set1.intersection_update(set2, set3)
+        if "apple" in set1:
+            x = a + b
+        else:
+            x = a - b
+        if "banana" in set1:
+            y = a + b
+        else:
+            y = a - b
+        if "shoes" in set1:
+            z = a + b
+        else:
+            z = a - b
+        return x, y, z
 
     @make_test
     def test_set_union(a, b):

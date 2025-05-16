@@ -125,12 +125,24 @@ def set_isdisjoint(set1, set2):
     return True
 
 
-def set_intersection(set1, set2):
+def set_intersection(set1, *others):
+    if len(others) == 0:
+        return set1.copy()
+
     intersection_set = set()
     for x in set1:
-        if x in set2:
+        for set2 in others:
+            if x not in set2:
+                break
+        else:
             intersection_set.add(x)
     return intersection_set
+
+
+def set_intersection_update(set1, *others):
+    result = set1.intersection(*others)
+    set1.clear()
+    set1.update(result)
 
 
 def set_union(set1, set2):
