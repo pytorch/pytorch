@@ -18,6 +18,9 @@ inline namespace CPU_CAPABILITY {
 #if defined(CPU_CAPABILITY_AVX2)
 
 template <>
+struct is_vec_specialized_for<float> : std::bool_constant<true> {};
+
+template <>
 class Vectorized<float> {
  private:
   __m256 values;

@@ -1126,7 +1126,7 @@ class OutputGraph(OutputGraphGuardsState):
                     () if value.target_values is None else tuple(value.target_values)
                 )
                 # NOTE: track index in stack after NULLs have been removed
-                meta.stack_ctx_args.append((len(stack_values), target_values))
+                meta.stack_ctx_args.append((len(stack_values) - 1, target_values))
                 meta.stack_ctx_idxes_orig.append(i)
 
         # Add all the local vars to the "stack" so restore at the end
