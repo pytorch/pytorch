@@ -4198,11 +4198,10 @@ Tensor ravel(const Tensor& self) {
 }
 
 static inline void handle_unflatten_exception(
-    const std::runtime_error& e,
+    const std::exception& e,
     const Tensor& self,
     int64_t dim,
-    SymIntArrayRef sizes,
-    std::optional<DimnameList> names) {
+    SymIntArrayRef sizes) {
   if (!strstr(e.what(), "is invalid for input of size")) {
     TORCH_CHECK(false, "unflatten got an unexpected error:\n", e.what());
   }
@@ -4252,11 +4251,11 @@ static Tensor unflatten_impl(
   SymDimVector inferred_size;
   try {
     inferred_size = at::infer_size_dv(sizes, self.sym_size(dim));
-  } catch (const std::runtime_error& e) {
+  } catch (const std::exception& e) {
     // at::infer_size would throw std::runtime_error for invalid size,
     // catch the runtime_error and display the error message in a more
     // user-friendly way for both tensors and named tensors
-    handle_unflatten_exception(e, self, dim, sizes, names);
+    handle_unflatten_exception(e, self, dim, sizes);
   }
 
   SymDimVector shape(self.sym_sizes().begin(), self.sym_sizes().end());
