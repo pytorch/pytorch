@@ -163,15 +163,15 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             warnings.simplefilter("always")
             torch.compile(foo, backend="eager")(torch.randn(4))
 
-            for warning in w:
-                warning_message = str(warning.message)
-                if (
-                    "Dynamo detected a call to a `functools.lru_cache` wrapped function"
-                    in warning_message
-                ):
-                    break
-                else:
-                    self.assertTrue(False, "Expected warning about lru_cache not found")
+        for warning in w:
+            warning_message = str(warning.message)
+            if (
+                "Dynamo detected a call to a `functools.lru_cache` wrapped function"
+                in warning_message
+            ):
+                break
+            else:
+                self.assertTrue(False, "Expected warning about lru_cache not found")
 
     @make_test
     def test_add(a, b):
