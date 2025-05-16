@@ -178,6 +178,7 @@ compile_commands.json
 *.egg-info/
 docs/source/scripts/activation_images/
 docs/source/scripts/quantization_backend_configs/
+docs/source/scripts/lr_scheduler_images/
 
 ## General
 
@@ -210,15 +211,6 @@ docs/source/scripts/quantization_backend_configs/
 
 # Compiled MATLAB
 *.mex*
-
-# IPython notebook checkpoints
-.ipynb_checkpoints
-
-# Editor temporaries
-*.swn
-*.swo
-*.swp
-*~
 
 # NFS handle files
 **/.nfs*

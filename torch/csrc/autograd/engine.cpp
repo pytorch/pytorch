@@ -289,8 +289,10 @@ void Engine::stop() {
   stopped_ = true;
   // Under some conditions, autograd threads can hang on shutdown
   // Do not wait for them to shutdown indefinitely but rely on timeout
-  auto wait_duration_str = getenv("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
-  auto wait_duration = wait_duration_str ? std::atof(wait_duration_str) : 10.0;
+  auto wait_duration_str =
+      c10::utils::get_env("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
+  auto wait_duration =
+      wait_duration_str ? std::atof(wait_duration_str->c_str()) : 10.0;
   bool noBackward = true;
   for (auto& queue : device_ready_queues_) {
     noBackward = noBackward && queue->empty();
@@ -1305,8 +1307,8 @@ auto Engine::execute(
 
   auto graph_task = std::make_shared<GraphTask>(
       /* keep_graph */ keep_graph,
-      /* create_graph */ create_graph,
-      /* depth */ not_reentrant_backward_call ? 0 : total_depth + 1,
+      /* grad_mode */ create_graph,
+      /* reentrant_depth */ not_reentrant_backward_call ? 0 : total_depth + 1,
       /* cpu_ready_queue */ local_ready_queue,
       /* graph_roots */ std::move(temp_roots));
 
@@ -1327,8 +1329,6 @@ auto Engine::execute(
 
   if (compiled_autograd != nullptr) {
     // see [Note: Compiled Autograd]
-    TORCH_CHECK(
-        !create_graph, "compiled_autograd does not support create_graph");
     _thread_check.release();
     GraphTaskGuard guard(graph_task);
     CheckpointValidGuard cpvguard(graph_task);

@@ -36,7 +36,6 @@ from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
-    disable_translation_validation_if_dynamic_shapes,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -2242,7 +2241,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             return x - 1
 
-    @disable_translation_validation_if_dynamic_shapes
     @make_test
     def test_torch_distributions_functions(x):
         normal = torch.distributions.Normal(x, torch.tensor(1))
@@ -3820,6 +3818,26 @@ class GraphModule(torch.nn.Module):
     def test_map_unpack_vars(a, b):
         x, y = map(lambda x: x + 1, [a, b])
         return x + y
+
+    @make_test
+    def test_map_list_extend(a):
+        y = [1]
+
+        def inner(z):
+            return z + y[-1]
+
+        y.extend(map(inner, range(3)))
+        return a + 1, y
+
+    @make_test
+    def test_map_deque_extendleft(a):
+        y = collections.deque([1])
+
+        def inner(z):
+            return z + y[0]
+
+        y.extendleft(map(inner, range(3)))
+        return a + 1, y
 
     def test_unsqueeze_inplace(self):
         def fn(x):
