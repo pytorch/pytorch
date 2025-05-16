@@ -711,8 +711,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         groups: Iterable[sympy.Expr],
         lengths: Sequence[Sequence[sympy.Expr]],
         reduction_numel: sympy.Expr = sympy.S.One,
-    ) -> bool:
-        # Fill in the reduction numel, in case the node is missing it.
+    ) -> Sequence[Sequence[sympy.Expr]]::
+        "Fill in the reduction numel of lengths if missing"
         sizevars = V.graph.sizevars
         if len(lengths[1]) == 0 and (
             not sizevars.is_expr_static_and_true(reduction_numel == sympy.S.One)
@@ -1349,7 +1349,6 @@ class SIMDScheduling(BaseScheduling):
 
         nodes: list[scheduler.SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
 
-        # sam
         coalesce_analysis = analyze_memory_coalescing(node)
         _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
 
@@ -2017,7 +2016,7 @@ class SIMDScheduling(BaseScheduling):
         coalesce_analysis: CoalesceVarAnalysis,
     ) -> tuple[dict[str, sympy.Expr], Optional[dict[str, sympy.Expr]]]:
         """
-        Generates a tiling, and a score of each tile according to each tiles coalesced memory accesses.
+        Generates a tiling, and a score of each tile according to each tile's coalesced memory accesses.
         """
         tiling_var: Optional[sympy.Expr] = (
             None
