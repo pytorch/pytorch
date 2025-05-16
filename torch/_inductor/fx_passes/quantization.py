@@ -2185,40 +2185,30 @@ def _generate_dequant_fp8_linear_node_pattern(dtype):
 
 def _is_valid_scaled_mm_pattern(dtype):
     def _inner(match):
-        # import pdb
-        # pdb.set_trace()
-        # if has_quant:
-        #     quant_node = match.output_node()
-        #     otype = quant_node.meta.get("tensor_meta").dtype
-        #     if (
-        #         quant_node.target is not quantized_decomposed.quantize_per_tensor.tensor
-        #         or otype is not torch.float8_e4m3fn
-        #     ):
-        #         return False
-        # input_dim_exceeds_two = False
-        # input_contiguous = True
-        # # Check dequant pattern has only 1 user.
-        # (
-        #     linear_node,
-        #     _,
-        # ) = _get_linear_node(match, input_dim_exceeds_two, input_contiguous)
+        input_dim_exceeds_two = False
+        input_contiguous = True
+        # Check dequant pattern has only 1 user.
+        (
+            linear_node,
+            _,
+        ) = _get_linear_node(match, input_dim_exceeds_two, input_contiguous)
 
-        # input_index = 1 if linear_node.target is aten.addmm.default else 0
-        # assert dtype in [torch.float32, torch.bfloat16]
-        # (
-        #     dequant_node,
-        #     _,
-        #     _,
-        #     _,
-        # ) = _get_linear_dq_node(
-        #     linear_node, input_index, dtype, input_dim_exceeds_two, input_contiguous
-        # )
-        # assert dequant_node.target is quantized_decomposed.dequantize_per_tensor.tensor
+        input_index = 1 if linear_node.target is aten.addmm.default else 0
+        assert dtype in [torch.float32, torch.bfloat16]
+        (
+            dequant_node,
+            _,
+            _,
+            _,
+        ) = _get_linear_dq_node(
+            linear_node, input_index, dtype, input_dim_exceeds_two, input_contiguous
+        )
+        assert dequant_node.target is quantized_decomposed.dequantize_per_tensor.tensor
 
-        # if len(list(dequant_node.users)) != 1:
-        #     # Ensure the dequant pattern only has 1 user
-        #     # since we will delete the dequant pattern here
-        #     return False
+        if len(list(dequant_node.users)) != 1:
+            # Ensure the dequant pattern only has 1 user
+            # since we will delete the dequant pattern here
+            return False
 
         return True
 
@@ -2289,7 +2279,6 @@ def _register_scaled_mm_pass(pattern, dtype):
             # For dynamic shape case, we can't get activation shape ahead of runtime.
             x_shape = None
         graph = match.graph
-        print(graph)
         with graph.inserting_before(linear_node):
             # Insert weight prepack node and the qlinear node
             permute_weight_inputs = (
@@ -2365,36 +2354,6 @@ def _register_scaled_mm():
         patterns = _generate_dequant_fp8_linear_node_pattern(dtype)
         for pattern in patterns:
             _register_scaled_mm_pass(pattern, dtype)
-
-def _generate_qembeddingbag_patterns(dtype):
-    #assert dtype in [torch.float32, torch.bfloat16]
-    assert dtype in [torch.float32]
-    t_pattern = CallFunction(
-        aten._embedding_bag_forward_only.default,
-        dequantize_per_channel_weight_pattern,
-        KeywordArg("indices"),
-        KeywordArg("offsets"),
-        KeywordArg("scale_grad_by_freq"),
-        KeywordArg("mode"),
-    )
-    return t_pattern
-
-
-def _register_qembeddingbag_pass(pattern, dtype):
-    @register_freezing_graph_pattern(
-        pattern,
-        pass_number=1,
-    )
-    def qlinear_weight_prepack(match: Match, *args, **kwargs):
-        import pdb
-        pdb.set_trace()
-        print(111)
-
-
-def _register_qembeddingbag():
-    dtype = torch.float32
-    pattern = _generate_qembeddingbag_patterns(dtype)
-    _register_qembeddingbag_pass(pattern, dtype=dtype)
 
 
 def _register_qlinear_weight_prepack():
@@ -3771,9 +3730,7 @@ def _register_quantization_weight_pack_pass():
         _register_qlinear_unary_fusion()
         _register_qlinear_binary_fusion()
 
-    # Step 6: QEmbeddingbag
-    _register_qembeddingbag()
-
+    # Step 6: scaled_mm
     _register_scaled_mm()
 
 
