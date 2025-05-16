@@ -7179,12 +7179,12 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_module_attribute_error(self):
         @torch.compile(backend="eager")
         def f1(x):
-            return torch.smoge(x)
+            return torch._bar(x)
 
         @torch.compile(backend="eager")
         def f2(x):
             try:
-                return torch.smoge(x)
+                return torch._bar(x)
             except AttributeError:
                 return x + 1
 
