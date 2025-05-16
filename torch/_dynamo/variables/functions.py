@@ -33,11 +33,11 @@ import warnings
 from collections.abc import Sequence
 from types import FunctionType
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
+from typing_extensions import Never
 from unittest.mock import patch
 from weakref import WeakKeyDictionary
 
 import torch
-from typing_extensions import Never
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
@@ -288,7 +288,6 @@ class BaseUserFunctionVariable(VariableTracker):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-
         return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
 
     def call_obj_hasattr(
@@ -1537,10 +1536,11 @@ class WrapperUserFunctionVariable(VariableTracker):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-
         if hasattr(self.wrapper_obj, "cache_info"):
             warnings.warn(
-                "Tracing through lru_cache wrapped function that read outside state may not be traced soundly."
+                "Dynamo detected a call to a `functools.lru_cache` wrapped function."
+                "Dynamo currently ignores `functools.lru_cache` and directly traces the wrapped function."
+                "`functools.lru_cache` wrapped functions that read outside state may not be traced soundly."
             )
         return variables.UserFunctionVariable(
             polyfills.getattr_and_trace

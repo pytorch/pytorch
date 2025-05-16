@@ -32,7 +32,6 @@ from typing import (
     TypeVar as _TypeVar,
     Union as _Union,
 )
-
 from typing_extensions import ParamSpec as _ParamSpec
 
 
@@ -71,8 +70,9 @@ if _running_with_deploy():
         _TypeIs = typing_extensions.TypeGuard
         typing_extensions.TypeIs = _TypeIs
 else:
-    from torch.torch_version import __version__ as __version__
     from typing_extensions import TypeIs as _TypeIs
+
+    from torch.torch_version import __version__ as __version__
 
 __all__ = [
     "BoolStorage",
@@ -2607,9 +2607,7 @@ def compile(
         dynamic=dynamic,
         disable=disable,
         guard_filter_fn=guard_filter_fn,
-    )(
-        model
-    )  # type: ignore[return-value]
+    )(model)  # type: ignore[return-value]
 
 
 def _register_device_module(device_type, module):
