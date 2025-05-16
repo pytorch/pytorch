@@ -30,6 +30,7 @@ def decomposeK(a, b, kPartitions):
     reduced_buf = torch.sum(result_fp32, 0)
     return reduced_buf.to(a.dtype)
 
+
 class TestSubgraphChoice(TestCase):
     def setUp(self):
         super().setUp()
@@ -45,6 +46,7 @@ class TestSubgraphChoice(TestCase):
     def test_subgraph_decompose_k(self):
         from torch._inductor.kernel.mm import aten_mm
         from torch._inductor.kernel.mm_common import mm_args
+
         mat1_shape, mat2_shape = (32, 4096), (4096, 32)
 
         @torch.library.custom_op("mylib::matmul_decompose", mutates_args={})
@@ -171,11 +173,9 @@ class TestSubgraphChoice(TestCase):
                 "test_subgraph_choice", choices, [a, b], layout
             )
 
-
         def func(mat1, mat2):
             return torch.ops.mylib.matmul_decompose_padding((mat1 + 1.0), mat2)
 
-        get_node_mock = MagicMock()
         with mock.patch("torch._inductor.ir.V.get_current_node") as get_node_mock:
             node_mock = MagicMock()
             node_mock.meta = {"dislike_padding": False}
