@@ -128,7 +128,7 @@ jobs:
           docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
 
       - uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
-        name: Push to https://https://ghcr.io/
+        name: Push to https://ghcr.io/
         id: push-to-ghcr-io
         if: ${{ github.event_name == 'push' }}
         env:

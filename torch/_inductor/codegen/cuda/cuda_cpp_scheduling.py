@@ -1,8 +1,14 @@
 # mypy: allow-untyped-defs
+import hashlib
 import logging
 from collections.abc import Sequence
 from typing import cast
 
+from torch._inductor.codegen.cuda.cutlass_python_evt import (
+    CutlassEVTCodegen,
+    MockCutlassHandler,
+)
+from torch._inductor.utils import Placeholder
 from torch.utils._ordered_set import OrderedSet
 
 from ...._dynamo.utils import counters
@@ -16,7 +22,7 @@ from ...scheduler import (
     SchedulerNode,
     WhyNoFuse,
 )
-from ...utils import get_fused_kernel_name, get_kernel_metadata, sympy_product
+from ...utils import get_kernel_metadata, sympy_product
 from ...virtualized import V
 from ..common import BackendFeature, IndentedBuffer
 
@@ -85,15 +91,11 @@ class CUDACPPScheduling(BaseScheduling):
         if src_code in wrapper.src_to_kernel:
             kernel_name = wrapper.src_to_kernel[src_code]
         else:
-            fused_name = (
-                get_fused_kernel_name(node_schedule, config.triton.descriptive_names)
-                if config.triton.descriptive_names
-                else ""
-            )
-            kernel_name = "_".join(["cuda", fused_name, wrapper.next_kernel_suffix()])
             # use the original src_code as the key
+            kernel_hash = hashlib.sha256(src_code.encode("utf-8")).hexdigest()[:8]
+            kernel_name = f"cutlass_{kernel_hash}"
             wrapper.src_to_kernel[src_code] = kernel_name
-            src_code = src_code.replace("KERNEL_NAME", kernel_name)
+            src_code = src_code.replace(str(Placeholder.KERNEL_NAME), kernel_name)
 
             _, _, kernel_path = get_path(code_hash(src_code), "py")
 
@@ -138,6 +140,18 @@ class CUDACPPScheduling(BaseScheduling):
         with kernel:
             for node in [template_node, *epilogue_nodes]:
                 node.mark_run()
+
+            # typically there is a codegen pass which runs after mark_run
+            # for this kernel we've already generated the C++ code, but we still
+            # need to let the kernel know about loads/stores that occur in the fused
+            # kernel for memory planning to properly optimize allocations
+            ctb.emulate_store_fn()
+            for node in epilogue_ir_nodes:
+                with V.set_ops_handler(MockCutlassHandler(V.get_ops_handler())):
+                    assert isinstance(
+                        node, ComputedBuffer
+                    )  # Not sure why we need to do this again
+                    node.get_store_function()(CutlassEVTCodegen.get_index_vars(node))
             src_code = render()
 
         with V.set_kernel_handler(kernel):
@@ -224,8 +238,11 @@ differs from {node_name}'s size: {ir_node_to_fuse.get_size()}"
         elif node_to_fuse.is_reduction():
             why(f"{node_name} is a reduction which is not yet supported by EVT")
             return False
-        elif not config.epilogue_fusion:
-            why("epilogue fusion is not enabled")
+        elif (
+            not config.cuda.cutlass_epilogue_fusion_enabled
+            or not config.epilogue_fusion
+        ):
+            why("cutlass epilogue fusion is not enabled")
             return False
 
         try:

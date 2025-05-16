@@ -136,6 +136,49 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
         hstart += dilation_h;
       while(wstart < 0)
         wstart += dilation_w;
+
+#if defined (USE_ROCM)
+// Max h,w and c for using prefetch path
+#define MAXh 3
+#define MAXw 3
+#define MAXc 1
+      // Prefetch if conditions met...
+      if (kernel_h<=MAXh &&
+          kernel_w<=MAXw &&
+          channels<=MAXc*(blockDim.x*kernel_stride_C)) {
+        scalar_t val [MAXh][MAXw][MAXc] = {{0}};
+        for (int ih = 0; ih < MAXh; ih++) {
+          int ih_ = ih*dilation_h+hstart;
+          for (int iw = 0; iw < MAXw; iw++) {
+            int iw_ = iw*dilation_w+wstart;
+            const scalar_t *ptr_input = bottom_data + ih_ * in_stride_h + iw_ * in_stride_w;
+            for(int c = 0; c < MAXc; c++) {
+              int c_ = c*blockDim.x*kernel_stride_C+channel_offset;
+              if (ih_>=hend || iw_>=wend || c_>=channels) continue;
+              val[ih][iw][c] = ptr_input[c_*in_stride_c];
+            }
+          }
+        }
+        for (int ih = 0; ih < MAXh; ih++) {
+          int ih_ = ih*dilation_h+hstart;
+          for (int iw = 0; iw < MAXw; iw++) {
+            int iw_ = iw*dilation_w+wstart;
+            int cached_index = threadIdx.x;
+            for(int c = 0; c < MAXc; c++) {
+              int c_ = c*blockDim.x*kernel_stride_C+channel_offset;
+              if (ih_>=hend || iw_>=wend || c_>=channels) continue;
+              if ((val[ih][iw][c] > out_cached[cached_index]) || at::_isnan(val[ih][iw][c])) {
+                out_cached[cached_index] = val[ih][iw][c];
+                out_mask_cached[cached_index] = ih_ * width + iw_;
+              }
+              cached_index += blockDim.x;
+            }
+          }
+        }
+      }
+      // Else do it Non-Prefetch...
+      else
+#endif
       for (int ih = hstart; ih < hend; ih += dilation_h) {
         for (int iw = wstart; iw < wend; iw += dilation_w) {
           int cached_index = threadIdx.x;
@@ -150,6 +193,7 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
           }
         }
       }
+
       scalar_t *ptr_output_data = top_data + (oh * pooled_width + ow) * channels;
       int64_t *ptr_output_mask = top_mask + (oh * pooled_width + ow) * channels;
 
@@ -253,6 +297,51 @@ __global__ void max_pool_backward_nhwc(const scalar_t* top_diff,
       int pwend = p_end(iw, pad_w, pooled_width, stride_w);
       int index_shift = ih * width + iw;
       if ((phstart + 1 != phend) || (pwstart + 1 != pwend)) {
+
+#if defined (USE_ROCM)
+#define _MAXh 2
+#define _MAXw 2
+        if (phend-phstart<=_MAXh && pwend-pwstart<=_MAXw) {
+          int msk[_MAXh][_MAXw];
+          scalar_t tpd[_MAXh][_MAXw];
+          int cached_index = threadIdx.x;
+#pragma unroll
+          for (int c = channel_offset; c < channels; c += blockDim.x*kernel_stride_C) {
+#pragma unroll
+            for(int oh = 0; oh < _MAXh; ++oh) {
+#pragma unroll
+              for(int ow = 0; ow < _MAXw; ++ow) {
+                int oh_ = oh+phstart;
+                int ow_ = ow+pwstart;
+                const int64_t* ptr_top_mask = top_mask + oh_ * out_stride_h + ow_ * out_stride_w;
+                if (oh_ >= phend || ow_ >= pwend) {
+                  msk[oh][ow] = ~index_shift;
+                } else {
+                  msk[oh][ow] = ptr_top_mask[c*out_stride_c];
+                  tpd[oh][ow] = top_diff[oh_ * out_stride_h + ow_ * out_stride_w + c*out_stride_c];
+                }
+              }
+            }
+
+            accscalar_t acm = 0;
+#pragma unroll
+            for(int oh = 0; oh < _MAXh; ++oh) {
+#pragma unroll
+              for(int ow = 0; ow < _MAXw; ++ow) {
+                if (msk[oh][ow] == index_shift) {
+                  acm += static_cast<accscalar_t>(tpd[oh][ow]);
+                }
+              }
+            }
+            out_cached[cached_index] += acm;
+            cached_index += blockDim.x;
+          }
+        }
+        else
+#undef _MAXh
+#undef _MAXw
+#endif
+
         for(int oh = phstart; oh < phend; ++oh) {
           for(int ow = pwstart; ow < pwend; ++ow) {
             int cached_index = threadIdx.x;
