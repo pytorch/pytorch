@@ -1420,7 +1420,7 @@ point ``dtype``.
 
 Args:
     input (Tensor): the input tensor of probability values for the Bernoulli distribution
-    p (float): should be a scalar containing probabilities to be used 
+    p (float): should be a scalar containing probabilities to be used
             for drawing the binary random number.
 
 Keyword args:
