@@ -88,7 +88,7 @@ __global__ void RowwiseMomentsCUDAKernel(
       mean[i] = m1;
       rstd[i] = c10::cuda::compat::rsqrt(m2 + eps);
     } else {
-      // AARON NOTE: confirm my jank ass math is correct??
+      // AARON NOTE: the math should be correct here, not sure about numeric stability
       rstd[i] = c10::cuda::compat::rsqrt(m2 + m1 * m1 + eps);
     }
 
@@ -440,7 +440,7 @@ __device__ __inline__ void compute_gI(
         } else {
           f_grad_input -= (x) * rstd_val * stats_x2;
         }
-        
+
         f_grad_input *= term1;
         dX_i[l] = f_grad_input;
     }
@@ -1083,7 +1083,7 @@ void LayerNormKernelImplInternal(
     T_ACC eps,
     Tensor* Y,
     Tensor* mean,
-    Tensor* rstd) {  
+    Tensor* rstd) {
   // assumes input, gamma and beta are of proper shape, this was checked in _check_layer_norm_inputs
   // assumes all tensors are contiguous
   TORCH_CHECK(M <= at::cuda::getCurrentDeviceProperties()->maxGridSize[0], "M should be less than maximum CUDA grid size, \
@@ -1367,7 +1367,7 @@ void cuComputeGradGammaBeta(
     }
 }
 
-template<typename T, typename T_ACC> __global__
+template<typename T, typename T_ACC, bool rms_norm> __global__
 void cuComputeGradInput(
     const T* __restrict__ dout,
     const T* __restrict__ input,
@@ -1381,7 +1381,10 @@ void cuComputeGradInput(
   for (int i1=blockIdx.y; i1 < M; i1 += gridDim.y) {
     T_ACC sum_loss1 = T_ACC(0);
     T_ACC sum_loss2 = T_ACC(0);
-    T_ACC c_mean = mean[i1];
+    T_ACC c_mean = 0;
+    if(!rms_norm){
+      c_mean = mean[i1];
+    }
     const T_ACC c_rstd = rstd[i1];
     const T* k_input = input + i1*N;
     const T* k_dout = dout + i1*N;
@@ -1394,16 +1397,24 @@ void cuComputeGradInput(
         const T_ACC gamma_idx = static_cast<T_ACC>((idx<N) ? gamma[idx] : T(0));
         const T_ACC c_h = static_cast<T_ACC>((idx<N) ? k_input[idx] : T(0));
         const T_ACC c_loss = static_cast<T_ACC>((idx<N) ? k_dout[idx] : T(0));
-        sum_loss1 += c_loss * gamma_idx;
-        sum_loss2 += c_loss * gamma_idx * (c_h - c_mean) * c_rstd;
+        if(!rms_norm){
+          sum_loss1 += c_loss * gamma_idx;
+          sum_loss2 += c_loss * gamma_idx * (c_h - c_mean) * c_rstd;
+        } else{
+          sum_loss2 += c_loss * gamma_idx * (c_h) * c_rstd;
+        }
       }
     } else {
       for( int l = 0; l < N ; l += numx) {
         int idx = l + thrx;
         const T_ACC c_h = static_cast<T_ACC>((idx<N) ? k_input[idx] : T(0));
         const T_ACC c_loss = static_cast<T_ACC>((idx<N) ? k_dout[idx] : T(0));
-        sum_loss1 += c_loss;
-        sum_loss2 += c_loss * (c_h - c_mean) * c_rstd;
+        if(!rms_norm){
+          sum_loss1 += c_loss;
+          sum_loss2 += c_loss * (c_h - c_mean) * c_rstd;
+        } else {
+          sum_loss2 += c_loss * (c_h) * c_rstd;
+        }
       }
     }
     // intra-warp reductions
@@ -1450,8 +1461,12 @@ void cuComputeGradInput(
         const T_ACC c_h = static_cast<T_ACC>(k_input[l]);
         const T_ACC c_loss = static_cast<T_ACC>(k_dout[l]);
         T_ACC f_grad_input = fH * c_loss * gamma[l];
-        f_grad_input -= sum_loss1;
-        f_grad_input -= (c_h - c_mean) * c_rstd * sum_loss2;
+        if(!rms_norm){
+          f_grad_input -= sum_loss1;
+          f_grad_input -= (c_h - c_mean) * c_rstd * sum_loss2;
+        } else {
+          f_grad_input -= (c_h) * c_rstd * sum_loss2;
+        }
         f_grad_input *= term1;
         k_grad_input[l] = static_cast<T>(f_grad_input);
       }
@@ -1460,8 +1475,12 @@ void cuComputeGradInput(
         const T_ACC c_h = static_cast<T_ACC>(k_input[l]);
         const T_ACC c_loss = static_cast<T_ACC>(k_dout[l]);
         T_ACC f_grad_input = fH * c_loss;
-        f_grad_input -= sum_loss1;
-        f_grad_input -= (c_h - c_mean) * c_rstd * sum_loss2;
+        if(!rms_norm){
+          f_grad_input -= sum_loss1;
+          f_grad_input -= (c_h - c_mean) * c_rstd * sum_loss2;
+        } else {
+          f_grad_input -= (c_h) * c_rstd * sum_loss2;
+        }
         f_grad_input *= term1;
         k_grad_input[l] = static_cast<T>(f_grad_input);
       }
@@ -1513,7 +1532,7 @@ void LayerNormBackwardKernelImplInternal(
               threads1.y > 1 ?
               threads1.y*threads1.x*sizeof(T_ACC) :
               0;
-      cuComputeGradInput<<<blocks1, threads1, nshared, cuda_stream>>>(
+      cuComputeGradInput<T, T_ACC, rms_norm><<<blocks1, threads1, nshared, cuda_stream>>>(
               dY_data,
               X_data,
               M, N,
@@ -1525,7 +1544,7 @@ void LayerNormBackwardKernelImplInternal(
     } else {
       const dim3 blocks(M);
       int nshared = (num_threads()/warp_size) * sizeof(T_ACC);
-      layer_norm_grad_input_kernel<<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
+      layer_norm_grad_input_kernel<T, T_ACC, rms_norm><<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
       X_data, mean_data, rstd_data, gamma_data, dX_data, N);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
@@ -1793,7 +1812,7 @@ std::tuple<Tensor, Tensor> rms_norm_cuda(
     IntArrayRef normalized_shape,
     const std::optional<Tensor>& weight_opt /* optional */,
     std::optional<double> eps){
-  
+
   c10::MaybeOwned<Tensor> weight_maybe_owned =
       at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
@@ -1819,7 +1838,7 @@ std::tuple<Tensor, Tensor> rms_norm_cuda(
   if (M > 0) {
     RmsNormKernelImpl(*X, *gamma, M, N, eps_val, &Y, &rstd);
   }
-  
+
   const auto input_shape = input.sizes();
   const size_t axis = input.dim() - normalized_shape.size();
 
@@ -1836,7 +1855,7 @@ std::tuple<Tensor, Tensor> rms_norm_cuda(
   return std::make_tuple(std::move(Y), std::move(rstd));
 }
 
-  
+
 std::tuple<Tensor, Tensor> rms_norm_backward_cuda(
     const Tensor& dY,
     const Tensor& input,

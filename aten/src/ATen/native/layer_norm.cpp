@@ -267,10 +267,20 @@ std::tuple<Tensor, Tensor> rms_norm_cpu(
     IntArrayRef normalized_shape,
     const std::optional<Tensor>& weight_opt /* optional */,
     std::optional<double> eps) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  _check_layer_norm_inputs(input, normalized_shape, weight, weight);
+#ifdef USE_MPS
+  if (input.device().type() == DeviceType::MPS && weight_opt.has_value()) {
+    const Tensor weight = weight_opt.value();
+    const bool any_nested = input.is_nested() || weight.is_nested();
+    const bool any_inputs_require_grad = input.requires_grad() || weight.requires_grad();
+    const bool is_input_fp = isFloatingType(input.scalar_type());
+    const bool is_weight_fp = isFloatingType(weight.scalar_type());
+
+    if (!(GradMode::is_enabled() && any_inputs_require_grad) && !any_nested && is_input_fp && is_weight_fp) {
+      auto eps_val = eps.value_or(std::numeric_limits<double>::epsilon());
+      return at::_fused_rms_norm(input.contiguous(), normalized_shape.size(), weight.contiguous(), eps_val);
+    }
+  }
+#endif
 
   std::vector<int64_t> dims_to_reduce;
   for (const auto i : c10::irange(normalized_shape.size())) {
@@ -321,8 +331,14 @@ Tensor rms_norm_symint(
     c10::SymIntArrayRef normalized_shape,
     const std::optional<Tensor>& weight_opt /* optional */,
     const std::optional<double> eps) {
+  // See [Note: hacky wrapper removal for optional tensor]
 
-    return std::get<0>(at::native_rms_norm_symint(input, normalized_shape, weight_opt, eps));
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  _check_rms_norm_inputs_symint(input, normalized_shape, weight);
+
+    // maybe dispatch to cpu if type isnt supported by the cuda impl
+  return std::get<0>(at::native_rms_norm_symint(input, normalized_shape, weight_opt, eps));
 }
 
 } // namespace at::native
