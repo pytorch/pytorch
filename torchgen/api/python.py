@@ -451,19 +451,17 @@ class PythonSignature:
         ]
         # vararg only applies to pyi signatures. vararg variants are not generated for all signatures
         num_args = self.arguments_count()
+        if num_args == 0:
+            return None
+
         num_positionalargs = len(self.input_args)
 
-        have_vararg_version = False
-        if num_args > 0:
-            vararg_type = args[0].type
-            if (
-                isinstance(vararg_type, ListType)
-                and str(vararg_type.elem) in ["int", "SymInt"]
-                and num_positionalargs == 1
-            ):
-                have_vararg_version = True
-
-        if not have_vararg_version:
+        vararg_type = args[0].type
+        if not (
+            isinstance(vararg_type, ListType)
+            and str(vararg_type.elem) in ["int", "SymInt"]
+            and num_positionalargs == 1
+        ):
             return None
 
         # Below are the major changes in vararg vs. regular pyi signatures
@@ -935,6 +933,7 @@ def argument_type_str_pyi(t: Type) -> str:
         t = t.elem
         add_optional = True
 
+    ret = ""
     if isinstance(t, BaseType):
         if t.name in [BaseTy.int, BaseTy.DeviceIndex]:
             ret = "_int"
