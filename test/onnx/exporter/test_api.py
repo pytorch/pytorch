@@ -384,6 +384,7 @@ class TestCustomTranslationTable(common_utils.TestCase):
             )
 
             @torch.library.impl("mylib::foo", "CompositeImplicitAutograd", lib=lib)
+            @torch.library.register_fake("mylib::foo")
             def foo_impl(a, b):
                 return a + b
 
