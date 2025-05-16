@@ -346,6 +346,8 @@ class RMSNorm(Module):
         eps: a value added to the denominator for numerical stability. Default: :func:`torch.finfo(x.dtype).eps`
         elementwise_affine: a boolean value that when set to ``True``, this module
             has learnable per-element affine parameters initialized to ones (for weights). Default: ``True``.
+        device: the device on which the parameters will be allocated. Default: None.
+        dtype: the data type of the parameters. Default: None.
 
     Shape:
         - Input: :math:`(N, *)`
@@ -358,6 +360,7 @@ class RMSNorm(Module):
         >>> rms_norm(input)
 
     """
+
     __constants__ = ["normalized_shape", "eps", "elementwise_affine"]
     normalized_shape: tuple[int, ...]
     eps: Optional[float]
