@@ -59,6 +59,16 @@ def was_instancecheck_override(obj):
     return type(obj).__dict__.get("__instancecheck__", False)
 
 
+def raise_unhashable(arg, tx=None):
+    if tx is None:
+        from torch._dynamo.symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+    raise_observed_exception(
+        TypeError, tx, args=[ConstantVariable(f"unhashable type: {type(arg)}")]
+    )
+
+
 def is_hashable(x):
     # NB - performing isinstance check on a LazVT realizes the VT, accidentally
     # inserting the guard. To avoid this, lazyVT `is_hashable` methods looks at
@@ -127,7 +137,7 @@ class ConstDictVariable(VariableTracker):
             # TODO Temorarily remove to figure out what keys are we breaking on
             # and add proper support for them
             if not is_hashable(vt):
-                unimplemented(f"Dict key of type {type(vt)}. Key: {vt}")
+                raise_unhashable(vt)
             self.vt = vt
 
         @property
@@ -446,7 +456,10 @@ class ConstDictVariable(VariableTracker):
             assert not (args or kwargs)
             self.install_dict_keys_match_guard()
             return ConstantVariable.create(len(self.items))
-        elif name == "__setitem__" and arg_hashable and self.is_mutable():
+        elif name == "__setitem__" and self.is_mutable():
+            if not arg_hashable:
+                raise_unhashable(args[0])
+
             self.install_dict_keys_match_guard()
             assert not kwargs and len(args) == 2
             tx.output.side_effects.mutation(self)
@@ -507,6 +520,9 @@ class ConstDictVariable(VariableTracker):
             # Key guarding - Nothing to do.
             return self.getitem_const(tx, args[0])
         elif name == "__contains__" and len(args) == 1:
+            if not arg_hashable:
+                raise_unhashable(args[0])
+
             self.install_dict_contains_guard(tx, args)
             contains = args[0] in self
             return ConstantVariable.create(contains)

@@ -1802,6 +1802,23 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x = torch.rand(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    @parametrize("method", ["add", "__contains__"])
+    def test_set_raise_TypeError_on_unshashable_obj(self, method):
+        @make_test
+        def fn(a, b):
+            s = set({1, 2, 3, 4})
+            try:
+                m = getattr(s, method)
+                m([[]])
+            except TypeError:
+                return a + b
+            except Exception:
+                return a - b
+            else:
+                return a * b
+
+        fn(self)
+
     def test_constant_set(self):
         s = set([1, 2])
 
