@@ -375,48 +375,48 @@ class TestCustomTranslationTable(common_utils.TestCase):
         self.assertNotIn("Add", all_nodes)
 
     def test_custom_translation_table_supports_custom_op_with_its_decomp(self):
-        # Define the custom op and use it in the model
-        @torch.library.custom_op("custom::add", mutates_args=())
-        def custom_add(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-            return a + b
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor a, Tensor b) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
 
-        @custom_add.register_fake
-        def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-            return torch.empty_like(a) + torch.empty_like(b)
+            @torch.library.impl("mylib::foo", "CompositeImplicitAutograd", lib=lib)
+            def foo_impl(a, b):
+                return a + b
 
-        class Model(torch.nn.Module):
-            def forward(self, x, y):
-                return custom_add(x, y)
+            class M(torch.nn.Module):
+                def forward(self, x, y):
+                    return torch.ops.mylib.foo(x, y)
 
-        @torch.library.custom_op("custom::_add", mutates_args=())
-        def _custom_add(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-            return a + b
+            def onnx_add(self: FLOAT, other: FLOAT) -> FLOAT:
+                # Replace add with Sub
+                return op.Sub(self, other)
 
-        @_custom_add.register_fake
-        def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-            return torch.empty_like(a) + torch.empty_like(b)
+            # With the custom op defined, we can use it in the model
+            # and replace it with a custom translation table
+            custom_translation_table = {
+                torch.ops.mylib.foo.default: onnx_add,
+            }
+            onnx_program = torch.onnx.export(
+                M(),
+                (torch.ones(3, 3), torch.ones(3, 3)),
+                custom_translation_table=custom_translation_table,
+                dynamo=True,
+            )
+            all_nodes = [n.op_type for n in onnx_program.model.graph]
+            self.assertIn("Sub", all_nodes)
+            self.assertNotIn("Add", all_nodes)
 
-        @torch._decomp.register_decomposition(torch.ops.custom.add.default)
-        def custom_add_decomp(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-            return torch.ops.custom._add.default(a, b)
-
-        def onnx_add(self: FLOAT, other: FLOAT) -> FLOAT:
-            # Replace add with Sub
-            return op.Sub(self, other)
-
-        custom_translation_table = {
-            torch.ops.custom.add.default: onnx_add,
-        }
-
-        onnx_program = torch.onnx.export(
-            Model(),
-            (torch.tensor(1, dtype=torch.bool), torch.tensor(1, dtype=torch.bool)),
-            custom_translation_table=custom_translation_table,
-            dynamo=True,
-        )
-        all_nodes = [n.op_type for n in onnx_program.model.graph]
-        self.assertIn("Sub", all_nodes)
-        self.assertNotIn("Add", all_nodes)
+            # Without the custom op defined, it's going to be decomposed
+            onnx_program_decomp = torch.onnx.export(
+                M(), (torch.ones(3, 3), torch.ones(3, 3)), dynamo=True
+            )
+            all_nodes_decomp = [n.op_type for n in onnx_program_decomp.model.graph]
+            self.assertIn("Add", all_nodes_decomp)
+            self.assertNotIn("Sub", all_nodes_decomp)
 
 
 class TestFakeTensorExport(common_utils.TestCase):
