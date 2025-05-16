@@ -711,7 +711,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         groups: Iterable[sympy.Expr],
         lengths: Sequence[Sequence[sympy.Expr]],
         reduction_numel: sympy.Expr = sympy.S.One,
-    ) -> Sequence[Sequence[sympy.Expr]]::
+    ) -> Sequence[Sequence[sympy.Expr]]:
         "Fill in the reduction numel of lengths if missing"
         sizevars = V.graph.sizevars
         if len(lengths[1]) == 0 and (
@@ -2130,6 +2130,7 @@ class SIMDScheduling(BaseScheduling):
             )
 
         # TODO, add tests, reduction splits if config.triton.tile_reductions
+        # TODO: we should ignore tiny increases in score for extra splits
         overlapping_iter_vars = (
             all_iter_vars & coalesce_analysis.coalesced_by_var.keys()
         )

@@ -885,6 +885,8 @@ class MemoryCoalescingTest(MockSchedulerTest):
             permute = torch.ops.aten.permute.default(arg0_1, [1, 0])
 
             out, code = run_and_get_code(torch.compile(forward), (permute))
+
+            self.assertEqual(out, forward(permute))
             FileCheck().check("YBLOCK").check("XBLOCK").run(code[0])
 
 
