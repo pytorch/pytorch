@@ -257,9 +257,9 @@ static bool isSupportedHipLtROCmArch(int index) {
     hipDeviceProp_t* prop = at::cuda::getDeviceProperties(index);
     std::string device_arch = prop->gcnArchName;
     static const std::vector<std::string> archs = {
-        "gfx90a", "gfx942",
+        "gfx90a", "gfx942"
 #if ROCM_VERSION >= 60300
-        "gfx1100", "gfx1101", "gfx1200", "gfx1201"
+        , "gfx1200", "gfx1201"
 #endif
 #if ROCM_VERSION >= 60500
         "gfx950"
