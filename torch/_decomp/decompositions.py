@@ -759,7 +759,7 @@ def slice_forward(
     if guard_or_none(end_val >= start_val) is None:
         len = torch.sym_max(end_val - start_val, 0)
     else:
-        len = end_val - start_val
+        len = max(end_val - start_val, 0)
     sizes[dim] = (len + step - 1) // step
     strides[dim] *= step
 
