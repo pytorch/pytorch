@@ -17,6 +17,7 @@ from typing import Callable, TYPE_CHECKING, Union
 
 import torch
 from torch import sym_float, sym_int
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, graph_break_hints, polyfills, variables
@@ -1527,7 +1528,7 @@ class BuiltinVariable(VariableTracker):
                         and isinstance(obj, ConstDictVariable)
                         and not istype(obj, SetVariable)
                     ):
-                        tx.output.guard_on_key_order.add(obj.source.name())
+                        tx.output.guard_on_key_order.add(obj.source)
 
                     install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
@@ -1804,6 +1805,9 @@ class BuiltinVariable(VariableTracker):
                 isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value)
             )
 
+        if isinstance(arg, variables.UserDefinedExceptionClassVariable):
+            return ConstantVariable.create(isinstance(arg_type, isinstance_type))
+
         isinstance_type_tuple: tuple[type, ...]
         if isinstance(isinstance_type, type) or callable(
             # E.g. isinstance(obj, typing.Sequence)
@@ -1988,14 +1992,27 @@ class BuiltinVariable(VariableTracker):
                 )
             ):
                 unimplemented_v2(
-                    gb_type="Failed to trace builtin operator",
+                    gb_type="Failed to trace unittest method",
                     context=f"function: unittest.TestCase.{name}",
-                    explanation=f"Dynamo does not know how to trace builtin operator `{name}` ",
+                    explanation=f"Dynamo does not know how to trace unittest method `{name}` ",
                     hints=[
-                        f"Avoid calling builtin `{name}`. "
+                        f"Avoid calling `TestCase.{name}`. "
                         "Please report an issue to PyTorch.",
                     ],
                 )
+            if isinstance(obj, TensorVariable):
+                fake_val = obj.proxy.node.meta["example_value"]
+                if (
+                    isinstance(fake_val, torch.Tensor)
+                    and is_sparse_any(fake_val)
+                    and (not tx.export or not config.capture_sparse_compute)
+                ):
+                    unimplemented_v2(
+                        gb_type="Attempted to wrap sparse Tensor",
+                        context="",
+                        explanation="torch.compile does not support sparse Tensors",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
 
             try:
                 return obj.var_getattr(tx, name)

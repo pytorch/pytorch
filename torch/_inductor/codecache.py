@@ -6,6 +6,7 @@ import dataclasses
 import functools
 import hashlib
 import importlib
+import importlib.resources
 import io
 import itertools
 import json
@@ -47,6 +48,7 @@ from typing_extensions import Self
 import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
+from torch._dynamo.exc import SkipFrame
 from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
@@ -96,6 +98,7 @@ from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .triton_bundler import TritonBundler
+from .virtualized import V
 
 
 if config.is_fbcode():
@@ -973,7 +976,7 @@ class GuardedCache(Generic[T]):
         remote_cache: Optional[RemoteCache[JsonDataTy]],
         evaluate_guards: Callable[[str, Union[list[int], list[torch.SymInt]]], bool],
         hints: list[int],
-    ) -> tuple[Optional[T], Optional[bytes], str]:
+    ) -> tuple[Optional[T], Optional[bytes], dict[str, str]]:
         """
         Find the first cache entry in iterate_over_candidates that passes `evaluate_guards`.
 
@@ -991,6 +994,7 @@ class GuardedCache(Generic[T]):
         graph = None
         pickled_content = None
         result_status = "full_miss"
+        sample_guards_expr = None
 
         # Iterate over any entries in the subdir for this key and evaluate
         # guards to determine whether there's a hit.
@@ -1013,12 +1017,17 @@ class GuardedCache(Generic[T]):
                 graph = candidate
                 pickled_content = content
                 result_status = "hit"
+                sample_guards_expr = candidate.guards_expr
                 break
             else:
-                # At least one guard missed
+                # At least one guard missed, log this
                 result_status = "guard_miss"
+                sample_guards_expr = candidate.guards_expr
 
-        return graph, pickled_content, result_status
+        info = {"cache_status_detailed": result_status}
+        if sample_guards_expr is not None:
+            info["cache_status_guard_expr"] = sample_guards_expr
+        return graph, pickled_content, info
 
     @classmethod
     def _filter_backed_symints(
@@ -1086,6 +1095,82 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         return os.path.join(FxGraphCache._get_tmp_dir(), key[1:3], key)
 
     @staticmethod
+    def cache_hit_post_compile(
+        graph: CompiledFxGraph,
+        cache_info: dict[str, Any],
+        constants: CompiledFxGraphConstants,
+    ) -> tuple[Optional[CompiledFxGraph], dict[str, Any]]:
+        """
+        Cache specific post compile steps that need to run if we find a graph in the cache
+        This includes putting bundled triton artifacts in the right place,
+        reloading the PyCodeCache artifact, etc.
+
+        These don't always happen (i.e. on a cache miss, so they are in a separate function from
+        CompiledFxGraph.post_compile)
+        """
+        if bundle := graph._triton_bundle:
+            triton_bundler_meta = TritonBundler.read_and_emit(bundle)
+            if (meta := triton_bundler_meta) is not None:
+                cache_info["triton_bundler_meta"] = str(meta)
+                CompileEventLogger.try_add_pt2_compile(
+                    "inductor_compile", cached_kernel_names=meta.cached_kernel_names
+                )
+                CompileEventLogger.try_add_pt2_compile(
+                    "AOTAutogradCache.inductor_load",
+                    cached_kernel_names=meta.cached_kernel_names,
+                )
+                if len(meta.cached_kernel_names) > 0:
+                    CompileEventLogger.try_(
+                        CompileEventLogger.increment_toplevel, "num_triton_bundles"
+                    )
+
+        try:
+            artifact_path = graph.after_deserialization(constants)
+
+            from .graph import GraphLowering
+
+            # This is used by tests to check the output for specific details.
+            if GraphLowering.save_output_code is not None:
+                GraphLowering.save_output_code(graph.source_code)
+
+        except OSError:
+            # Not expected, but in case the PyCodeCache entry is removed from
+            # underneath us, treat it as a cache miss and recompile.
+            return None, cache_info
+
+        inductor_meta = autotune_cache.inductor_meta_from_config()
+        code = graph.source_code
+        AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
+
+        # Increment the cached metrics/counters by the amounts recorded when the FX
+        # graph was compiled for this cache entry. Pretending these counters
+        # were incremented normally is useful for testing with the cache enabled.
+        metrics.CachedMetricsHelper.apply_deltas(graph.metrics_deltas)
+        counters["inductor"] += graph.counter_deltas
+
+        output_code_log.debug("Output code: \n%s", code)
+        output_code_log.debug("Output code written to: %s", artifact_path)
+        # On cache hit, use artifact path as filename
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "fx_graph_runnable",
+                "encoding": "string",
+            },
+            payload_fn=lambda: graph.runnable_graph_str,
+        )
+        trace_structured(
+            "inductor_post_grad_graph",
+            payload_fn=lambda: graph.inductor_post_grad_graph_str,
+        )
+        trace_structured(
+            "inductor_output_code",
+            lambda: {"filename": artifact_path},
+            payload_fn=lambda: code,
+        )
+        return graph, cache_info
+
+    @staticmethod
     def _lookup_graph(
         key: str,
         example_inputs: Sequence[InputType],
@@ -1123,51 +1208,17 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         cache_info: dict[str, Any] = dict()
 
         # Use the find_graph_for_key method to find a graph for the given key
-        graph, pickled_content, result_status = FxGraphCache.find_guarded_entry(
+        graph, pickled_content, guard_info = FxGraphCache.find_guarded_entry(
             key, local, remote_cache, evaluate_guards, hints
         )
+        cache_info.update(guard_info)
         if graph is None:
-            cache_info["miss_type"] = result_status
             return None, cache_info
 
         if pickled_content is not None:
             CacheArtifactManager.record_artifact(
                 CacheArtifactType.INDUCTOR, key, pickled_content
             )
-
-        if bundle := graph._triton_bundle:
-            triton_bundler_meta = TritonBundler.read_and_emit(bundle)
-            if (meta := triton_bundler_meta) is not None:
-                cache_info["triton_bundler_meta"] = str(meta)
-                CompileEventLogger.try_add_pt2_compile(
-                    "inductor_compile", cached_kernel_names=meta.cached_kernel_names
-                )
-                CompileEventLogger.try_add_pt2_compile(
-                    "AOTAutogradCache.inductor_load",
-                    cached_kernel_names=meta.cached_kernel_names,
-                )
-                if len(meta.cached_kernel_names) > 0:
-                    CompileEventLogger.try_(
-                        CompileEventLogger.increment_toplevel, "num_triton_bundles"
-                    )
-
-        try:
-            artifact_path = graph.after_deserialization(constants)
-
-            from .graph import GraphLowering
-
-            # This is used by tests to check the output for specific details.
-            if GraphLowering.save_output_code is not None:
-                GraphLowering.save_output_code(graph.source_code)
-
-        except OSError:
-            # Not expected, but in case the PyCodeCache entry is removed from
-            # underneath us, treat it as a cache miss and recompile.
-            return None, cache_info
-
-        inductor_meta = autotune_cache.inductor_meta_from_config()
-        code = graph.source_code
-        AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
 
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
@@ -1177,33 +1228,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
                 "fx graph cache key %s post-load guards: %s", key, shape_env.guards
             )
 
-        # Increment the cached metrics/counters by the amounts recorded when the FX
-        # graph was compiled for this cache entry. Pretending these counters
-        # were incremented normally is useful for testing with the cache enabled.
-        metrics.CachedMetricsHelper.apply_deltas(graph.metrics_deltas)
-        counters["inductor"] += graph.counter_deltas
-
-        output_code_log.debug("Output code: \n%s", code)
-        output_code_log.debug("Output code written to: %s", artifact_path)
-        # On cache hit, use artifact path as filename
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "fx_graph_runnable",
-                "encoding": "string",
-            },
-            payload_fn=lambda: graph.runnable_graph_str,
-        )
-        trace_structured(
-            "inductor_post_grad_graph",
-            payload_fn=lambda: graph.inductor_post_grad_graph_str,
-        )
-        trace_structured(
-            "inductor_output_code",
-            lambda: {"filename": artifact_path},
-            payload_fn=lambda: code,
-        )
-        return graph, cache_info
+        return FxGraphCache.cache_hit_post_compile(graph, cache_info, constants)
 
     @staticmethod
     def _write_to_local_cache(key: str, content: bytes) -> None:
@@ -1580,6 +1605,12 @@ class AotCodeCompiler:
             specified_dir=specified_output_path,
         )
 
+        # Log the AOTInductor wrapper and kernel code, if needed.
+        with tempfile.NamedTemporaryFile("w+") as t:
+            t.writelines((wrapper_code, "\n", kernel_code, "\n"))
+            t.flush()
+            V.debug.output_code(t.name, extension="cpp")
+
         if config.aot_inductor.package:
             generated_files.append(wrapper_path)
             if not config.aot_inductor.package_cpp_only:
@@ -1860,7 +1891,14 @@ class AotCodeCompiler:
                 wrapper_builder.save_src_to_cmake(cmake_path, wrapper_path)
                 generated_files.append(cmake_path)
             else:
-                wrapper_builder.build()
+                try:
+                    wrapper_builder.build()
+                except (exc.CppCompileError, SkipFrame) as e:
+                    if " is too big to optimize" in str(e):
+                        raise RuntimeError(
+                            "Please use torch._inductor.config.aot_inductor.compile_wrapper_opt_level = 'O0' flag."
+                        ) from e
+                    raise e
                 kernel_builder.build()
 
             if not use_mmap_weights:
@@ -3092,7 +3130,27 @@ def _cutlass_include_paths() -> list[str]:
     ]
 
 
+@torch_key_cache
+def cutlass_key() -> bytes:
+    """
+    Compute a key representing the state of the CUTLASS library.
+
+    Note: OSS and fbcode will have different keys.
+    """
+    if config.is_fbcode():
+        with importlib.resources.path("cutlass", "src_hash.txt") as resource_path:
+            with open(resource_path) as resource_file:
+                return resource_file.read().encode()
+
+    combined_hash = hashlib.sha256()
+    build_code_hash([config.cuda.cutlass_dir], "", combined_hash)
+    return combined_hash.digest()
+
+
 def _cuda_lib_options() -> list[str]:
+    """
+    Util function for CUTLASS backend to find the correct CUDA libraries.
+    """
     _set_gpu_runtime_env()  # cpp_extension consults the env
     from torch.utils import cpp_extension
 
@@ -3101,6 +3159,9 @@ def _cuda_lib_options() -> list[str]:
     if is_linux():
         _transform_cuda_paths(lpaths)
         for path in lpaths:
+            if "torch/lib" in path:
+                # don't want to depend on pytorch
+                continue
             # -rpath ensures the DLL can find its dependencies when loaded, even
             # if the library path is non-standard.
             extra_ldflags.extend([f"-L{path}", "-Xlinker", f"-rpath={path}"])
@@ -3282,6 +3343,13 @@ class DLLWrapper:
 
 @clear_on_fresh_inductor_cache
 class CUDACodeCache:
+    """
+    A cache for managing the compilation and loading of CUDA source code specifically for CUTLASS.
+    This class handles writing source code to files, compiling them into shared objects, and caching
+    the results to avoid redundant compilations. It also manages error handling and logging for the
+    compilation process.
+    """
+
     @dataclasses.dataclass
     class CacheEntry:
         input_path: str
@@ -3302,9 +3370,26 @@ class CUDACodeCache:
         cuda_command = repr(
             cuda_compile_command(["dummy_input"], "dummy_output", dst_file_ext)
         )
-        key, input_path = write(
-            source_code, cls._SOURCE_CODE_SUFFIX, extra=cuda_command
-        )
+        if config.cuda.cutlass_hash_with_compile_cmd:
+            extra = cuda_command
+        else:
+            extra = repr(
+                [
+                    # nvcc and cuda hash
+                    _cuda_compiler(),
+                    # cutlass flags and gcc hash
+                    _nvcc_compiler_options(),
+                    # flags
+                    _nvcc_host_compiler_options(),
+                    # cutlass key
+                    cutlass_key(),
+                    # hack to deal with AOTI .o compilation
+                ]
+                + [dst_file_ext]
+                if dst_file_ext == "o"
+                else []
+            )
+        key, input_path = write(source_code, cls._SOURCE_CODE_SUFFIX, extra=extra)
         return key, input_path
 
     @classmethod
