@@ -1682,6 +1682,24 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return a * b
 
     @make_test
+    def test_set_issubset(a, b):
+        vals1 = {"a", "b", "c"}
+        vals2 = {"b", "c"}
+        vals3 = {"b", "e", "f"}
+        if vals2.issubset(vals1) and not vals2.issubset(vals3):
+            return a + b
+        return a - b
+
+    @make_test
+    def test_set_issuperset(a, b):
+        vals1 = {"a", "b", "c"}
+        vals2 = {"b", "c"}
+        vals3 = {"b", "e", "f"}
+        if vals1.issuperset(vals2) and not vals1.issuperset(vals3):
+            return a + b
+        return a - b
+
+    @make_test
     def test_set_update_bytecode(x):
         # This produces bytecode SET_UPDATE since python 3.9
         var = {"apple", "banana", "cherry"}

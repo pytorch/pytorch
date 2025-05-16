@@ -23,6 +23,7 @@ None values for efficiency and code reuse.
 import collections
 import functools
 import inspect
+import operator
 import types
 from collections.abc import Hashable as py_Hashable
 from typing import Optional, TYPE_CHECKING
@@ -39,6 +40,7 @@ from ..utils import (
     dict_items,
     dict_keys,
     dict_values,
+    istype,
     specialize_symnode,
 )
 from .base import ValueMutationNew, VariableTracker
@@ -823,6 +825,17 @@ class SetVariable(ConstDictVariable):
                 return super().call_method(tx, "pop", args, kwargs)
             else:
                 return ConstantVariable.create(value=None)
+        elif name in ("issubset", "issuperset"):
+            op = {
+                "issubset": operator.le,
+                "issuperset": operator.ge,
+            }
+            other = args[0].realize()
+            if not istype(other, SetVariable):
+                other = variables.BuiltinVariable(set).call_function(tx, [other], {})
+            return variables.BuiltinVariable(op.get(name)).call_function(
+                tx, [self, other], {}
+            )
         return super().call_method(tx, name, args, kwargs)
 
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
