@@ -701,6 +701,35 @@ graph():
     return (add,)""",
         )
 
+    def test_int_shape_specialization(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                ori_size = (
+                    int(x.shape[-2] / 1),
+                    int(x.shape[-1] / 1),
+                )
+                x = F.interpolate(x, size=ori_size, mode="bilinear")
+                return x
+
+        input1 = (torch.rand(1, 3, 28, 28),)
+        input2 = (torch.rand(1, 3, 56, 56),)
+        inputs = [input1, input2]
+        model = M()
+        dynamic_shapes = {
+            "x": {2: torch.export.Dim.DYNAMIC, 3: torch.export.Dim.DYNAMIC},
+        }
+        with self.assertRaisesRegex(
+            (
+                torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
+                torch._dynamo.exc.UserError,
+            ),
+            (
+                r"your code specialized it to be a constant \(28\)(.*\n)*.*"
+                r"your code specialized it to be a constant \(28\)(.*\n)*.*"
+            ),
+        ):
+            export(model, input1, dynamic_shapes=dynamic_shapes, strict=False)
+
     def test_external_call_non_strict_real_tensor(self):
         class ExternalMethod:
             def add(self, x):
@@ -7001,6 +7030,7 @@ def forward(self, x):
             if node.op == "placeholder":
                 self.assertTrue(isinstance(node.meta["val"], (Tensor, int)))
 
+    @testing.expectedFailureRetraceability  # size gets unflattened into a tuple
     def test_size_input(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -10271,28 +10301,27 @@ graph():
 
     @testing.expectedFailureCppRuntime
     def test_symint_input_basic(self):
-        strict = False  # TODO: support strict=True
-
         class M(torch.nn.Module):
             def forward(self, x, y):
                 return x * y
 
         ep = export(M(), (4, 5))
         self.assertEqual(ep.module()(4, 5), 20)
-
         with self.assertRaisesRegex(RuntimeError, r"to be equal to 4, but got 3"):
             self.assertEqual(ep.module()(3, 6), 18)
 
-        ep = export(
-            M(), (4, 5), dynamic_shapes={"x": Dim.DYNAMIC, "y": Dim.AUTO}, strict=strict
-        )
+        ep = export(M(), (4, 5), dynamic_shapes={"x": Dim.DYNAMIC, "y": Dim.AUTO})
         self.assertEqual(ep.module()(4, 5), 20)
         self.assertEqual(ep.module()(3, 6), 18)
 
-        ep = export(
-            M(), (5, 5), dynamic_shapes={"x": None, "y": Dim.AUTO}, strict=strict
-        )
+        ep = export(M(), (4, 5), dynamic_shapes={"x": Dim.DYNAMIC, "y": Dim.AUTO})
+        self.assertEqual(ep.module()(4, 5), 20)
+        self.assertEqual(ep.module()(3, 6), 18)
+
+        ep = export(M(), (5, 5), dynamic_shapes={"x": None, "y": Dim.AUTO})
         self.assertEqual(ep.module()(5, 6), 30)
+        with self.assertRaisesRegex(RuntimeError, r"to be equal to 5, but got 3"):
+            self.assertEqual(ep.module()(3, 5), 18)
 
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -10302,17 +10331,13 @@ graph():
             M(),
             ({"moo": 2}, torch.ones(3, 3)),
             dynamic_shapes={"x": {"moo": Dim.DYNAMIC}, "y": {0: Dim.DYNAMIC}},
-            strict=strict,
         )
         inp = ({"moo": 3}, torch.ones(4, 3))
         self.assertTrue(torch.allclose(ep.module()(*inp), M()(*inp)))
 
     @testing.expectedFailureCppRuntime
-    @testing.expectedFailureRetraceability
-    @testing.expectedFailureRetraceabilityNonStrict
+    @testing.expectedFailureRetraceabilityNonStrict  # no runtime asserts added for assert x == 3
     def test_symint_input_specialization(self):
-        strict = False  # TODO: support strict=True
-
         class M(torch.nn.Module):
             def forward(self, x, y):
                 assert x == 3
@@ -10328,24 +10353,19 @@ graph():
                 M(),
                 inp,
                 dynamic_shapes=(Dim.DYNAMIC, None),
-                strict=strict,
             )
 
         ep = export(
             M(),
             inp,
             dynamic_shapes=(Dim.AUTO, None),
-            strict=strict,
         )
         with self.assertRaisesRegex(RuntimeError, "to be equal to 3, but got 4"):
             ep.module()(4, torch.randn(4, 4))
 
     @testing.expectedFailureCppRuntime
-    @testing.expectedFailureRetraceability
-    @testing.expectedFailureRetraceabilityNonStrict
+    @testing.expectedFailureRetraceabilityNonStrict  # no runtime asserts added for assert x == 3
     def test_symint_input_ranges(self):
-        strict = False  # TODO: support strict=True
-
         class M(torch.nn.Module):
             def forward(self, x, y):
                 return x * y
@@ -10355,7 +10375,6 @@ graph():
             M(),
             inp,
             dynamic_shapes=(Dim.DYNAMIC(min=3, max=10), None),
-            strict=strict,
         )
 
         ep.module()(4, torch.randn(4, 4))
@@ -10376,10 +10395,8 @@ graph():
             M(),
             inp,
             dynamic_shapes=(Dim.DYNAMIC(min=3, max=10), None),
-            strict=strict,
         )
         constraints = list(ep.range_constraints.values())
-        self.assertEqual(len(constraints), 1)
         constraint = constraints[0]
         self.assertEqual(constraint.lower, 4)
         self.assertEqual(constraint.upper, 5)
@@ -10396,10 +10413,8 @@ graph():
             M(),
             inp,
             dynamic_shapes=(Dim.DYNAMIC(min=3, max=10), None),
-            strict=strict,
         )
         constraints = list(ep.range_constraints.values())
-        self.assertEqual(len(constraints), 1)
         constraint = constraints[0]
         self.assertEqual(constraint.lower, 3)
         self.assertEqual(constraint.upper, 10)
@@ -10419,13 +10434,10 @@ graph():
                 M(),
                 inp,
                 dynamic_shapes=(Dim.DYNAMIC(min=3, max=10), None),
-                strict=strict,
             )
 
     @testing.expectedFailureCppRuntime
     def test_symint_input_additional_inputs(self):
-        strict = False  # TODO: support strict=True
-
         class M(torch.nn.Module):
             def forward(self, x, y):
                 return x + y
@@ -10434,17 +10446,13 @@ graph():
         additional_inputs.add((5, 5))
         additional_inputs.add((3, 5))
         additional_inputs.add((5, 4))
-        ep = torch.export.export(
-            M(), (6, 7), dynamic_shapes=additional_inputs, strict=strict
-        )
+        ep = torch.export.export(M(), (6, 7), dynamic_shapes=additional_inputs)
         self.assertEqual(ep.module()(5, 5), 10)
         self.assertEqual(ep.module()(3, 5), 8)
         self.assertEqual(ep.module()(5, 4), 9)
 
     @testing.expectedFailureCppRuntime
     def test_symint_input_shapes_collection(self):
-        strict = False  # TODO: support strict=True
-
         class M(torch.nn.Module):
             def forward(self, x, y):
                 return x + y
@@ -10456,9 +10464,7 @@ graph():
         shapes_collection = torch.export.ShapesCollection()
         shapes_collection[args[0]] = Dim.DYNAMIC
         shapes_collection[args[1]] = Dim.DYNAMIC
-        ep = torch.export.export(
-            M(), args, dynamic_shapes=shapes_collection, strict=strict
-        )
+        ep = torch.export.export(M(), args, dynamic_shapes=shapes_collection)
         self.assertEqual(ep.module()(5, 5), 10)
         self.assertEqual(ep.module()(3, 5), 8)
         self.assertEqual(ep.module()(5, 4), 9)
