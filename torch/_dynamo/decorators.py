@@ -286,6 +286,12 @@ def graph_break(msg=""):
     """Force a graph break"""
 
 
+# NOTE: primarily used for internal debugging purposes!
+@_disallow_in_graph_helper(throw_if_not_allowed=False)
+def skip_frame(msg=""):
+    """Force a skipped frame"""
+
+
 def forbid_in_graph(fn):
     """
     Customize which functions TorchDynamo will assert are not present while tracing.
