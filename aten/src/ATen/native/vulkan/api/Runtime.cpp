@@ -80,7 +80,7 @@ VkInstance create_instance(const RuntimeConfiguration& config) {
 #endif /* VK_EXT_debug_report */
 #ifdef __APPLE__
         VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
-#endif __APPLE__
+#endif // __APPLE__
     };
 
     find_requested_layers_and_extensions(
