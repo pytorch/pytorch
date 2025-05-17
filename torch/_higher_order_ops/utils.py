@@ -1,5 +1,8 @@
 # mypy: allow-untyped-defs
+import contextlib
 import functools
+import itertools
+from collections.abc import Sequence
 from contextlib import contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Union
@@ -7,9 +10,11 @@ from typing import Any, Callable, Optional, Union
 import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
+from torch._dispatch.python import suspend_functionalization
 from torch._guards import detect_fake_mode
 from torch._ops import OperatorBase
 from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
     disable_proxy_modes_tracing,
@@ -641,6 +646,92 @@ def saved_tensors_and_symints(ctx):
             s_idx += 1
     assert t_idx + s_idx == len(ctx.pos)
     return tuple(args)
+
+
+def split_into_chunks(iterable: Sequence[Any], chunk_sizes: list[int]) -> list[Any]:
+    it = iter(iterable)
+    assert sum(chunk_sizes) == len(
+        iterable
+    ), "the sum of all chunks needs to match the length of the iterable."
+    return [list(itertools.islice(it, size)) for size in chunk_sizes]
+
+
+def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
+    """
+    For a fn that accepts flat inputs and returns flat outputs:
+        fw_out = fn(*args),
+    this function returns:
+        grad_args = bw_fn(*args_and_grad_output)
+    with the following invariants:
+      1. args + fw_out has an 1-1 correspondence to args_and_grad_output
+      2. grad_args has an 1-1 corresponsence to args
+      3. for tensor arg whose requires_grad is False, its corresponding grad in
+         grad_args will be a zero tensor with the same shape.
+    """
+
+    from torch._functorch.aot_autograd import AOTConfig, create_joint
+    from torch._higher_order_ops.utils import prepare_fw_with_masks_all_requires_grad
+
+    dummy_aot_config = AOTConfig(
+        fw_compiler=None,  # type: ignore[arg-type]
+        bw_compiler=None,  # type: ignore[arg-type]
+        partition_fn=None,  # type: ignore[arg-type]
+        decompositions={},
+        num_params_buffers=0,
+        aot_id=0,
+        keep_inference_input_mutations=False,
+    )
+    n_primals = len(args)
+
+    bw_fn = create_joint(
+        prepare_fw_with_masks_all_requires_grad(fn), aot_config=dummy_aot_config
+    )
+
+    def flat_fn(*args_and_grad_outs):
+        primals = args_and_grad_outs[:n_primals]
+        tangents = args_and_grad_outs[n_primals:]
+        grad_args = bw_fn(primals, tangents)[1]
+        assert len(args) == len(grad_args)
+        return [
+            (
+                torch.zeros_like(arg)
+                if isinstance(arg, torch.Tensor) and grad is None
+                else grad
+            )
+            for grad, arg in zip(grad_args, primals)
+        ]
+
+    return flat_fn
+
+
+def materialize_as_graph(
+    fn: Callable,
+    args: tuple[Any],
+    include_key_set: Optional[torch._C.DispatchKeySet] = None,
+    exclude_key_set: Optional[torch._C.DispatchKeySet] = None,
+    force_enable_grad=False,
+) -> torch.fx.GraphModule:
+    if include_key_set is None:
+        include_key_set = torch._C._dispatch_tls_local_include_set()
+    if exclude_key_set is None:
+        exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
+
+    @torch._dynamo.disable(recursive=True, reason=None)
+    def _materialize_as_graph_inner():
+        with suspend_functionalization(), disable_functional_mode():
+            with disable_proxy_modes_tracing():
+                unfunc_t = [_from_fun(arg) for arg in args]
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(
+                torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
+            )
+            if force_enable_grad:
+                stack.enter_context(torch.enable_grad())
+            return _maybe_reenter_make_fx(fn)(*unfunc_t)
+
+    gm = _materialize_as_graph_inner()
+    assert gm is not None
+    return gm
 
 
 def get_dummy_aot_autograd_config():
