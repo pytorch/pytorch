@@ -4,7 +4,6 @@ from typing import Optional, Union
 
 import torch
 from torch import Size, Tensor
-from torch._C import _add_docstr
 from torch.nn import functional as F, init
 from torch.nn.modules._nn_docs import common_args
 from torch.nn.parameter import Parameter
@@ -227,9 +226,6 @@ class LayerNorm(Module):
             "{normalized_shape}, eps={eps}, "
             "elementwise_affine={elementwise_affine}".format(**self.__dict__)
         )
-
-
-LayerNorm.__doc__ = LayerNorm.__doc__.format(**common_args)
 
 
 class GroupNorm(Module):
