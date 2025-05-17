@@ -526,7 +526,7 @@ def optim_inputs_func_adam(device, dtype=None):
             params=None,
             kwargs={
                 "lr": torch.tensor(0.001),
-                "betas": (torch.tensor(0.9), torch.tensor(0.99)),
+                "betas": (torch.tensor([[[0.9]]]), torch.tensor([[0.99]])),
                 "amsgrad": True,
                 "capturable": True,
             },
@@ -541,6 +541,27 @@ def optim_inputs_func_adam(device, dtype=None):
                 "capturable": True,
             },
             desc="Tensor lr, Tensor betas, with capturable",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "lr": torch.tensor(0.001),
+                "betas": (torch.tensor([[[0.9]]]), torch.tensor([[0.99]])),
+                "amsgrad": False,
+                "capturable": True,
+            },
+            desc="non-scalar betas",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "lr": torch.tensor(0.001),
+                "betas": (torch.tensor([[[0.9]]]), torch.tensor([[0.99]])),
+                "amsgrad": False,
+                "capturable": True,
+                "fused": True,
+            },
+            desc="non-scalar betas with fused",
         ),
     ]
     mps_supported_configs = [
