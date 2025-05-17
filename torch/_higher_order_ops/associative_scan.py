@@ -10,10 +10,10 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
-    _maybe_run_with_interpreter,
     autograd_not_implemented,
     check_meta_consistency,
     first_slice_copy,
+    FunctionalizeCtxWrapper,
     reenter_make_fx,
     unique_graph_id,
     validate_subgraph_args_types,
@@ -437,9 +437,7 @@ def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
     with ctx.redispatch_to_next():
-        functional_combine_fn = ctx.functionalize(
-            _maybe_run_with_interpreter(combine_fn)
-        )
+        functional_combine_fn = FunctionalizeCtxWrapper(ctx, combine_fn)
         ret = associative_scan_op(
             functional_combine_fn,
             unwrapped_xs,
