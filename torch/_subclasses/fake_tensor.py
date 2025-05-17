@@ -1426,14 +1426,26 @@ class FakeTensorMode(TorchDispatchMode):
         Lookup a cache entry for the given arguments. If none exists, dispatch
         and cache the result (if the result is eligible for caching).
         """
+        state = None
+        key = None
         try:
             state = _CacheKeyState(self.shape_env)
             key = self._cache_key(state, func, args, kwargs)
         except _BypassDispatchCache as e:
             # We couldn't create the cache key at all
             FakeTensorMode.cache_bypasses[e.reason] += 1
+
+        if key is None:
+            # In theory this could be done within the above `except` but then
+            # the exception generated within _dispatch_impl() will have a
+            # context related to the _BypassDispatchCache - which we don't
+            # really want.
+            #
+            # (Without this TestAOTExport.test_aot_export_predispatch_outdtype
+            # fails.)
             return self._dispatch_impl(func, types, args, kwargs)
 
+        assert state is not None
         if state.cache_on_shape_env():
             assert state.shape_env is not None
             cache = state.shape_env.fake_tensor_cache
