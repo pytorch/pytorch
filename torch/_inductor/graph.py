@@ -64,6 +64,7 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
+from .fx_utils import count_flops_fx
 from .ir import (
     Constant,
     DonatedBuffer,
@@ -652,32 +653,24 @@ class GraphLowering(torch.fx.Interpreter):
 
         # only grouped convolutions benchmarked as slower in conv samples for inference only
         if is_inference:
-            from torch.utils.flop_counter import FlopCounterMode
-
             flop_counts: dict[str, float] = defaultdict(float)
             for node in conv_nodes:
-                success, args, kwargs = torch._inductor.fx_utils.get_fake_args_kwargs(
-                    node
-                )
+                counted_flops = count_flops_fx(node)
+                if counted_flops is None:
+                    continue
 
-                if success:
-                    with FlopCounterMode(display=False) as flop_counter_mode:
-                        with V.fake_mode:
-                            node.target(*args, **kwargs)
-
-                    counted_flops = flop_counter_mode.get_total_flops()
-                    if is_grouped(node):
-                        node_type = "grouped"
-                    elif is_small_channel(node):
-                        node_type = "small"
-                    elif is_in_out_channel(node):
-                        node_type = "in_out"
-                    else:
-                        node_type = "default"
-
-                    flop_counts[node_type] += counted_flops
+                if is_grouped(node):
+                    node_type = "grouped"
+                elif is_small_channel(node):
+                    node_type = "small"
+                elif is_in_out_channel(node):
+                    node_type = "in_out"
                 else:
-                    log.debug("Conv inputs meta not found")
+                    node_type = "default"
+
+                flop_counts[node_type] += counted_flops
+            else:
+                log.debug("Conv inputs meta not found")
 
             # average benchmarked channels last speedup / slowdown, < 1 is speedup.
             # taken from the set of convolution inputs in benchmarks/dynamo/microbenchmarks/operator_inp_logs/torchbench_train/

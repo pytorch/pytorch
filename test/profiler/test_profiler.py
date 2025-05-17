@@ -27,6 +27,7 @@ import torch.nn as nn
 import torch.optim
 import torch.utils.data
 from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall
+from torch._inductor.ir import FixedLayout
 from torch.autograd.profiler import KinetoStepTracker, profile as _profile
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
@@ -2997,6 +2998,64 @@ aten::mm""",
             assert len(key_averages) == 3
             assert "Overload Name" in key_averages.table()
             validate_json(prof)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    # this tests to see if we can only use a Triton backend for max autotune
+    @unittest.skipIf(
+        torch.cuda.is_available()
+        and not torch._inductor.utils.use_triton_template(
+            FixedLayout(torch.device("cuda"), torch.float16, [400, 800])
+        ),
+        "Solo triton backend not possible",
+    )
+    def test_profiler_debug_autotuner(self):
+        """
+        This test makes sure that profiling events will be present when the kernel is run using the DebugAutotuner.
+        """
+        in1 = torch.randn((400, 600), device="cuda", dtype=torch.float16)
+        in2 = torch.randn((600, 800), device="cuda", dtype=torch.float16)
+
+        def mm():
+            return torch.mm(in1, in2)
+
+        pb_mm = torch.compile(
+            mm,
+            options={
+                "benchmark_kernel": True,
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "profile_bandwidth": True,
+            },
+        )
+        comp_mm = torch.compile(
+            mm,
+            options={
+                "benchmark_kernel": True,
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
+        )
+
+        with profile() as prof1:
+            pb_mm()
+        with profile() as prof2:
+            comp_mm()
+
+        def names(prof):
+            return {
+                ev.name
+                for ev in prof.events()
+                if "mm" in ev.name or "triton" in ev.name
+            }
+
+        trace1 = "/tmp/trace1_pb.json"
+        trace2 = "/tmp/trace2_nopb.json"
+        prof1.export_chrome_trace(trace1)
+        prof2.export_chrome_trace(trace2)
+
+        n1 = names(prof1)
+        n2 = names(prof2)
+        self.assertEqual(n1, n2)
 
 
 if __name__ == "__main__":
