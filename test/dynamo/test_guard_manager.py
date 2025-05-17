@@ -309,9 +309,8 @@ num_guards_executed=0)
         x = torch.randn(4, 4)
         x.t_()
         debug_info = guard_manager.check_verbose(x)
-        print(debug_info.verbose_code_parts[0])
         self.assertTrue(
-            "tensor 'x' stride mismatch" in debug_info.verbose_code_parts[0]
+            "tensor 'x' stride mismatch" in debug_info.failure_reasons[0]
         )
 
     def test_no_tensor_aliasing_guard(self):
