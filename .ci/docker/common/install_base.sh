@@ -2,6 +2,9 @@
 
 set -ex
 
+ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
+OS_VERSION=$(grep -oP '(?<=^VERSION_ID=).+' /etc/os-release | tr -d '"')
+
 install_ubuntu() {
   # NVIDIA dockers for RC releases use tag names like `11.0-cudnn9-devel-ubuntu18.04-rc`,
   # for this case we will set UBUNTU_VERSION to `18.04-rc` so that the Dockerfile could
@@ -95,11 +98,18 @@ install_ubuntu() {
 install_centos() {
   # Need EPEL for many packages we depend on.
   # See http://fedoraproject.org/wiki/EPEL
-  yum --enablerepo=extras install -y epel-release
+  # extras repo is not there for CentOS 9 and epel-release is already part of repo list
+  if [[ $OS_VERSION == 9 ]]; then
+      yum install -y epel-release
+      ALLOW_ERASE="--allowerasing"
+  else
+      yum --enablerepo=extras install -y epel-release
+      ALLOW_ERASE=""
+  fi
 
   ccache_deps="asciidoc docbook-dtds docbook-style-xsl libxslt"
   numpy_deps="gcc-gfortran"
-  yum install -y \
+  yum install -y $ALLOW_ERASE \
     $ccache_deps \
     $numpy_deps \
     autoconf \
@@ -116,15 +126,21 @@ install_centos() {
     glibc-headers \
     glog-devel \
     libstdc++-devel \
-    libsndfile-devel \
     make \
-    opencv-devel \
     sudo \
     wget \
     vim \
     unzip \
     gdb
-
+  if [[ $OS_VERSION == 9 ]]
+  then
+	  dnf --enablerepo=crb -y install libsndfile-devel
+	  yum install -y procps
+  else
+	  yum install -y \
+            opencv-devel \
+	    libsndfile-devel
+  fi
   # Cleanup
   yum clean all
   rm -rf /var/cache/yum
