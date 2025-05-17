@@ -435,7 +435,8 @@ void batch_norm_calc_invstd(const Tensor& out_invstd, const Tensor& running_var,
 std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(const Tensor& self, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt, bool train, double momentum, double epsilon, Tensor& output, Tensor& save_mean, Tensor& save_invstd) {
   const bool has_running_mean = (running_mean_opt.has_value() && running_mean_opt->defined());
   const bool has_running_var = (running_var_opt.has_value() && running_var_opt->defined());
-  TORCH_CHECK(has_running_mean == has_running_var);
+  TORCH_CHECK_VALUE(has_running_mean == has_running_var,
+    "running_mean and running_var must either both be None or neither be None");
 
   if (train) {
     batch_norm_mean_var(self, save_mean, save_invstd);
