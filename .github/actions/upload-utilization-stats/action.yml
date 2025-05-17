@@ -1,6 +1,6 @@
 name: upload-utilization-stats
 
-description: Upload utilization stats to artifacts
+description: Upload utilization stats to artifacts.
 
 inputs:
     workflow_run_id:
@@ -23,7 +23,11 @@ inputs:
       type: string
       description: 'the job name of the test'
       required: True
-
+    local_path:
+      type: string
+      description: 'the local path to the utilization stats file'
+      required: False
+      default: ''
 runs:
   using: composite
   steps:
@@ -53,4 +57,5 @@ runs:
           --workflow-name "${{inputs.workflow_name}}" \
           --workflow-run-attempt "${{inputs.workflow_attempt}}" \
           --job-id "${{inputs.job_id}}" \
-          --job-name "${{inputs.job_name}}"
+          --job-name "${{inputs.job_name}}" \
+          --local-path "${{inputs.local_path}}"

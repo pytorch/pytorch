@@ -53,6 +53,7 @@ class UtilizationRecord(DataClassJsonMixin):
     cmd_names: Optional[list[str]] = None
     error: Optional[str] = None
     log_duration: Optional[str] = None
+    logs: Optional[list[str]] = None
 
 
 # the db schema related to this is:
