@@ -8585,6 +8585,7 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
             ("gloo/hip_allreduce_halving_doubling_pipelined.h", API_PYTORCH),
         ),
         ("gloo/cuda_allreduce_ring.h", ("gloo/hip_allreduce_ring.h", API_PYTORCH)),
+        ("gloo/cuda_allreduce_ring_chunked.h", ("gloo/hip_allreduce_ring_chunked.h", API_PYTORCH)),
         (
             "gloo/cuda_broadcast_one_to_all.h",
             ("gloo/hip_broadcast_one_to_all.h", API_PYTORCH),
@@ -8592,6 +8593,10 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
         (
             "gloo::CudaAllreduceHalvingDoublingPipelined",
             ("gloo::HipAllreduceHalvingDoublingPipelined", API_PYTORCH),
+        ),
+        (
+            "gloo::CudaAllreduceRingChunked",
+            ("gloo::HipAllreduceRingChunked", API_PYTORCH),
         ),
         ("gloo::CudaBroadcastOneToAll", ("gloo::HipBroadcastOneToAll", API_PYTORCH)),
         ("gloo::CudaHostWorkspace", ("gloo::HipHostWorkspace", API_PYTORCH)),
