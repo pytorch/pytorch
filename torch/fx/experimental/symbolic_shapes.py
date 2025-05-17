@@ -2331,7 +2331,8 @@ class RuntimeAssert:
     def expr(self) -> SympyBoolean:
         # Whenever we access expr we want to replace specialized backed symbols with their corresponding
         # specialized values.
-        return self.shape_env.replace(self._expr, only_specialized_backed=True)
+        return self._expr
+        # return self.shape_env.replace(self._expr, only_specialized_backed=True)
 
 
 # Used for printing SymExprs in compile_fx
@@ -5954,7 +5955,7 @@ class ShapeEnv:
         return r
 
     @_lru_cache
-    def replace(self, expr: _SympyT, only_specialized_backed: bool = False) -> _SympyT:
+    def replace(self, expr: _SympyT) -> _SympyT:
         """
         Apply symbol replacements to any symbols in the given expression
         If only_specialized_backed is set, only repalce backed symbols that
@@ -5962,13 +5963,7 @@ class ShapeEnv:
         """
         replacements = {}
         for s in expr.free_symbols:
-            if only_specialized_backed and self.is_unbacked(s):
-                continue
-
             r = self._find(s)
-
-            if only_specialized_backed and not r.is_Number:
-                continue
 
             # Micro-optimization: only do replacements if r and s are different
             # Otherwise, xreplace is not a no-op and will trigger expensive

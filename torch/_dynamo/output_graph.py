@@ -1675,16 +1675,24 @@ class OutputGraph(OutputGraphGuardsState):
                 self.remove_node(node)
 
     def remove_unused_graphargs(self) -> None:
-        # NB: It's always OK to drop GraphArg for symbols that ended up being
-        # specialized.  You don't even have to make a guard for it, because
-        # ShapeEnv produce_guards operates on tracked_fakes, which never gets
-        # pruned.  That being said, you'll get marginally better generated
+        # NB: It's OK to drop GraphArg for symbols that ended up being
+        # specialized iff they are not used in runtime assertions.  You don't
+        # even have to make a guard for it, because ShapeEnv produce_guards 
+        # operates on tracked_fakes, which never gets pruned.  
+        # That being said, you'll get marginally better generated
         # guard code if you promote the guard into a Dynamo guard (since that
         # allows for the guard to be done using C++ guards.)  If we get
         # ShapeEnv guards to go into C++ guards, this will stop being a thing
         # though!
 
         assert self.should_exit
+
+        # Preserve all symbols that appears in original expressions of a deferred_runtime_asserts.
+        # as place holders.
+        ras_symbols : set[sympy.Symbol] = set()
+        for assertion_list in self.shape_env.deferred_runtime_asserts.values():
+            for assertion in assertion_list:
+                ras_symbols |= free_symbols(assertion.expr)
 
         # Miniature DCE pass, but only for obviously trivial operations
         def is_static_true(b_node: fx.node.Argument):
@@ -1769,11 +1777,15 @@ class OutputGraph(OutputGraphGuardsState):
             self.remove_node(node)
             self.real_value_cache.pop(node, None)
 
-        used_symbols: set[sympy.Symbol] = set()
+        used_symbols: set[sympy.Symbol] = ras_symbols
 
         def update_used_symbols(used_symbols, fake: Union[torch.SymInt, torch.Tensor]):
             used_symbols |= free_symbols(fake)
 
+        def placeholder_used_in_ras(node):
+            # access the orignal expr value and check if its a symbol that is used in a runtime assertion.
+            return node.meta["example_value"].node._expr in ras_symbols
+            
         recheck_placeholders = []
         for node in self.placeholders:
             binds_symbol = placeholder_binds_symbol(node) is not None
@@ -1782,10 +1794,10 @@ class OutputGraph(OutputGraphGuardsState):
                 if not node.users:
                     recheck_placeholders.append(node)
             else:
-                if not node.users and not isinstance(
+                if not node.users and not placeholder_used_in_ras(node) and not isinstance(
                     node.meta["grapharg"], BackwardStateGraphArg
-                ):
-                    remove_unused(node)
+                ):  
+                        remove_unused(node)
                 else:
                     # Register the free symbols as uses
                     arg = node.meta["grapharg"]
@@ -1812,11 +1824,6 @@ class OutputGraph(OutputGraphGuardsState):
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
                     )
                     update_used_symbols(used_symbols, fake)
-
-        # Preserve all symbols that appears in original expressions of a deferred_runtime_asserts.
-        for assertion_list in self.shape_env.deferred_runtime_asserts.values():
-            for assertion in assertion_list:
-                used_symbols |= free_symbols(assertion.expr)
 
         # After removing unused graphargs, prune unused binds_symbol
         for node in recheck_placeholders:
