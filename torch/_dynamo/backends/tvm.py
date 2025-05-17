@@ -32,6 +32,7 @@ from types import MappingProxyType
 from typing import Optional
 
 import torch
+from torch._vendor.packaging.version import Version
 
 from .common import device_from_inputs, fake_tensor_unsupported
 from .registry import register_backend
@@ -50,7 +51,19 @@ def tvm(
         {"scheduler": None, "trials": 20000, "opt_level": 3}
     ),
 ):
-    import tvm  # type: ignore[import]
+    try:
+        import tvm  # type: ignore[import]
+    except ImportError as exc:
+        raise ImportError(
+            "TVM is not installed. Please install it using the instructions at "
+            "https://tvm.apache.org/docs/install/index.html"
+        ) from exc
+
+    if Version(tvm.__version__) >= Version("0.20.0"):
+        raise RuntimeError(
+            f"TVM v{tvm.__version__} is not supported yet. Please use v0.19.0 or earlier."
+        )
+
     from tvm import relay  # type: ignore[import]
     from tvm.contrib import graph_executor  # type: ignore[import]
 
