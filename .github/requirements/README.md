@@ -11,14 +11,6 @@ jobs, but it also allows them to be cached properly to improve CI
 reliability.
 
 The list of support files are as follows:
-
-* Conda:
-  * conda-env-iOS. This is used by iOS build and test jobs to setup the
-    conda environment
-  * conda-env-macOS-ARM64. This is used by MacOS (m1, arm64) build and
-    test jobs to setup the conda environment
-  * conda-env-Linux-X64. This is used by Linux buck build and test jobs
-    to setup the conda environment
 * Pip:
   * pip-requirements-iOS.txt. This is used by iOS build and test jobs to
     setup the pip environment
