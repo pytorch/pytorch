@@ -102,10 +102,10 @@ def build_triton(
             print("ROCm libraries setup for triton installation...")
 
         check_call(
-            [sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir, env=env
+            [sys.executable, "setup.py", "bdist_wheel"], cwd=triton_basedir, env=env
         )
 
-        whl_path = next(iter((triton_pythondir / "dist").glob("*.whl")))
+        whl_path = next(iter((triton_basedir / "dist").glob("*.whl")))
         shutil.copy(whl_path, Path.cwd())
 
         if device == "rocm":
