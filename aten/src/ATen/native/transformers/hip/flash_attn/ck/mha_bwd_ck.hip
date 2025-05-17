@@ -3,6 +3,7 @@
  ******************************************************************************/
 
 #include <ATen/native/transformers/hip/flash_attn/flash_common_hip.hpp>
+#include <mha_bwd.h>
 #include <fmha_bwd.hpp>
 #include <mask.hpp>
 
@@ -26,6 +27,26 @@ fmha_bwd_traits get_ck_fmha_bwd_traits(const mask_info &mask,
                            has_dropout,
                            false, // s_randval
                            deterministic};
+}
+
+
+
+aiter::mha_bwd_traits get_mha_bwd_traits(fmha_bwd_traits t, mask_info mask)
+{
+    return aiter::mha_bwd_traits(t.hdim_q,
+                          t.hdim_v,
+                          t.data_type,
+                          t.is_group_mode,
+                          mask,
+                          t.bias_type,
+                          t.has_dbias,
+                          t.has_dropout,
+                          t.is_store_randval,
+                          t.is_deterministic,
+                          true,                  // use_ext_asm
+                          true,                  // is_v3_atomic_fp32,
+                          1);                    // how_v3_bf16_cvt
+
 }
 
 fmha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
@@ -376,14 +397,6 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
     if (seqlen_q > 0) {
         ck_tile::stream_config stream_config{stream};
         dq.zero_(); // ck use atomic operation on dq
-        auto traits =
-            get_ck_fmha_bwd_traits(mask,
-                                   q_dtype_str,
-                                   head_size_8x,
-                                   is_dropout,
-                                   attn_bias_.has_value(),
-                                   deterministic,
-                                   bias_requires_grad);
 
         auto args =
             get_ck_fmha_bwd_args(
@@ -411,7 +424,23 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
                 softmax_scale,
                 p_dropout,
                 drop_seed_offset);
-        float t = fmha_bwd(traits, args, stream_config);
+
+        float t = aiter::mha_bwd(args,
+                                 stream_config,
+                                 q_dtype_str,
+                                 false,             // is_group_mode
+                                 mask,
+                                 attn_bias_.has_value() ? bias_enum::elementwise_bias : bias_enum::no_bias,
+                                 bias_requires_grad,
+                                 false,             // is_store_randval
+                                 deterministic,
+                                 true,              // use_ext_asm
+                                 true,             // is_v3_atomic_fp32
+                                 1);                // how_v3_bf16_cvt
+
+
+
+
         TORCH_CHECK(t >= 0, "invalid argument for fmha_bwd");
     } else {
         // If seqlen_q == 0, then we have an empty tensor. We need to set the output to 0.
