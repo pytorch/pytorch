@@ -136,10 +136,10 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             for ph in subgraph.graph.find_nodes(op="placeholder")
         ]
         (
-            mutated_inp_idx,
             inp_inp_alias,
             inp_out_alias,
             out_out_alias,
+            mutated_inp_idx,
             output,
         ) = check_input_alias_and_mutation_return_ouputs(subgraph, fake_args)
 

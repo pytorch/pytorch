@@ -570,7 +570,7 @@ class CondTests(TestCase):
                 return torch.cond(p, true_fn, false_fn, [a, b])
 
         # AssertionError: Output aliasing is currently not supported...
-        with self.assertRaises(torch._dynamo.exc.BackendCompilerFailed):
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
             torch.compile(Model())(
                 torch.tensor(True),
                 torch.randn(10, 20),
