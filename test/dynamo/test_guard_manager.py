@@ -77,7 +77,8 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
                 """\
 GuardDebugInfo(
 result=0,
-verbose_code_parts=['GLOBAL_STATE changed: default_dtype '],
+verbose_code_parts=[],
+failure_reasons=['GLOBAL_STATE changed: default_dtype '],
 num_guards_executed=0)
 """,
             )
@@ -92,7 +93,8 @@ num_guards_executed=0)
                 """\
 GuardDebugInfo(
 result=0,
-verbose_code_parts=['GLOBAL_STATE changed: deterministic_algorithms '],
+verbose_code_parts=[],
+failure_reasons=['GLOBAL_STATE changed: deterministic_algorithms '],
 num_guards_executed=0)
 """,
             )
@@ -307,9 +309,8 @@ num_guards_executed=0)
         x = torch.randn(4, 4)
         x.t_()
         debug_info = guard_manager.check_verbose(x)
-        print(debug_info.verbose_code_parts[0])
         self.assertTrue(
-            "tensor 'x' stride mismatch" in debug_info.verbose_code_parts[0]
+            "tensor 'x' stride mismatch" in debug_info.failure_reasons[0]
         )
 
     def test_no_tensor_aliasing_guard(self):
@@ -694,7 +695,7 @@ num_guards_executed=0)
         self.assertFalse(guard_manager.check(None))
         debug_info = guard_manager.check_verbose(None)
         self.assertFalse(debug_info.result)
-        self.assertTrue("Test" in debug_info.verbose_code_parts[0])
+        self.assertTrue("Test" in debug_info.failure_reasons[0])
 
     def test_dict_contains_guard(self):
         foo = {"a": 1, "b": 2}

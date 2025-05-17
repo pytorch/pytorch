@@ -31,6 +31,7 @@ import io
 import logging
 import math
 import pickle
+import re
 import sys
 import textwrap
 import types
@@ -3273,11 +3274,13 @@ def get_guard_fail_reason_helper(
     guard_manager: GuardFn,
     f_locals: dict[str, object],
     compile_id: CompileId,
-) -> str:
+    return_all: bool = False,
+) -> Union[str, tuple[str, list[str], list[str]]]:
     """
     Return the reason why `guard_manager` failed.
     Updates `guard_failures` with the generated reason.
-    Only the first failed check of guard_manager is reported.
+    Only the first failed check of guard_manager is reported,
+    unless TORCH_LOGS="recompiles_verbose" is specified.
     """
     scope = {"L": f_locals, "G": guard_manager.global_scope["G"]}
     scope.update(guard_manager.closure_vars)
@@ -3285,6 +3288,7 @@ def get_guard_fail_reason_helper(
 
     no_tensor_aliasing_check_failed = False
 
+    failure_reasons: list[str] = []
     verbose_code_parts: list[str] = []
     guard_debug_info = guard_manager.check_verbose(f_locals)  # type: ignore[attr-defined]
     # For test_export_with_map_cond, the check_verbose fail even without the
@@ -3292,19 +3296,21 @@ def get_guard_fail_reason_helper(
     # assert not guard_debug_info.result
     if not guard_debug_info.result:
         verbose_code_parts = guard_debug_info.verbose_code_parts
-        # verbose_code_parts is either the actual reason (e.g. in case of
-        # TENSOR_MATCH) or it could be a list of verbose_code_part that we
+        failure_reasons = guard_debug_info.failure_reasons
+        # verbose_code_parts is a list of verbose_code_part that we
         # passed to the leaf guard at construction time. If its a list, we
         # walk through this list and find the guard that failed. This is
         # very important for symbolic shape guards which are currently
         # installed as a lambda guard and can encompass a long list of code_parts.
+        # failure_reasons is a list of non-eval-able strings in plain english.
 
-        if len(verbose_code_parts) == 1:
-            if "Duplicate tensor found" in verbose_code_parts[0]:
-                no_tensor_aliasing_check_failed = True
-            else:
-                reasons = verbose_code_parts
-                verbose_code_parts = []
+        if any("Duplicate tensor found" in reason for reason in failure_reasons):
+            no_tensor_aliasing_check_failed = True
+        elif len(verbose_code_parts) == 1:
+            reasons = verbose_code_parts
+            verbose_code_parts = []
+        elif len(verbose_code_parts) == 0:
+            reasons = []
 
     if no_tensor_aliasing_check_failed:
         reasons = recompilation_reason_for_no_tensor_aliasing_guard(
@@ -3329,11 +3335,16 @@ def get_guard_fail_reason_helper(
                 fail_reason = part
             if isinstance(fail_reason, str):
                 reasons.append(fail_reason)
-                if not is_recompiles_verbose_enabled():
-                    break
 
-    reason_str = f"{compile_id}: " + "; ".join(reasons)
-    return strip_local_scope(reason_str)
+    all_reasons = reasons + failure_reasons
+    if is_recompiles_verbose_enabled():
+        reason_str = strip_local_scope(f"{compile_id}: " + "; ".join(all_reasons))
+    else:
+        reason_str = strip_local_scope(f"{compile_id}: " + "; ".join(all_reasons[:1]))
+    
+    if return_all:
+        return reason_str, reasons, failure_reasons
+    return reason_str
 
 
 def get_guard_fail_reason(
@@ -3341,10 +3352,10 @@ def get_guard_fail_reason(
     code: types.CodeType,
     f_locals: dict[str, object],
     compile_id: CompileId,
-) -> str:
+) -> tuple[str, list[str], list[str]]:
     if isinstance(guard_manager, DeletedGuardManagerWrapper):
-        return f"{compile_id}: {guard_manager.invalidation_reason}"
-    reason_str = get_guard_fail_reason_helper(guard_manager, f_locals, compile_id)
+        return f"{compile_id}: {guard_manager.invalidation_reason}", [], []
+    reason_str, code_reasons, fail_reasons = get_guard_fail_reason_helper(guard_manager, f_locals, compile_id, return_all=True)
     guard_failures[orig_code_map[code]].append(reason_str)
 
     try:
@@ -3357,6 +3368,49 @@ def get_guard_fail_reason(
             "Failure in guard_fail_fn callback - raising here will cause a NULL Error on guard eval",
         )
 
+    return reason_str, code_reasons, fail_reasons
+
+
+def _extract_recompiled_dynamic_sources(fail_reasons: list[str], frame_locals: dict[str, object], guard_manager: GuardFn) -> tuple[list[str], bool]:
+    """
+    Goes through a list of guard failure reasons, and extracts source names for tensors we've dynamically recompiled.
+    Returns a list of sources, and a boolean indicating whether a parameter was included.
+    """
+    scope = {"L": frame_locals, "G": guard_manager.global_scope["G"]}
+    scope.update(guard_manager.closure_vars)
+    has_parameter = False
+    shape_sources = OrderedSet()
+    pattern = r"tensor '(.*)' size mismatch at index .* expected (\d+), actual (\d+).*"
+    for reason in fail_reasons:
+        if (match := re.search(pattern, reason)) is not None:
+            name, size_orig, size_new = match.groups()
+            tensor = eval(name, scope)
+            size_orig, size_new = int(size_orig), int(size_new)
+            if size_orig >= 2 and size_new >= 2:  # these suggestions won't help for 0/1 specialization.
+                if isinstance(tensor, torch.nn.Parameter):
+                    has_parameter = True
+                shape_sources.add(name)
+    return list(shape_sources), has_parameter
+
+
+def _suggest_dynamic_whitelist(dynamic_sources: OrderedSet, has_dynamic_parameter: bool) -> str:
+    """
+    Adds suggested dynamic whitelist to recompile logging, based on detected sources.
+    """
+    reason_str = ""
+    if dynamic_sources:
+        reason_str += "\n"
+        if len(dynamic_sources) > 1:
+            reason_str += "\nMultiple size mismatches found. "
+        reason_str += (
+            f"The following environment variable would enable dynamic compilation to start, avoiding this recompile: "
+            + f"TORCH_COMPILE_DYNAMIC_SOURCES=\"{','.join(dynamic_sources)}\""
+        )
+    if has_dynamic_parameter:
+        reason_str += (
+            "\nSize guard failed on a parameter, consider using torch._dynamo.config.force_parameter_static_shapes = False "
+            + "to allow dynamism on parameters."
+        )
     return reason_str
 
 
@@ -3369,8 +3423,10 @@ def get_and_maybe_log_recompilation_reasons(
     Raises a RecompileError if `config.error_on_recompile` is enabled.
     """
     reasons = []
+    dynamic_sources = OrderedSet()
+    has_dynamic_parameter = False
     while cache_entry is not None:
-        reason = get_guard_fail_reason(
+        reason, _, fail_reasons = get_guard_fail_reason(
             cache_entry.guard_manager,
             cache_entry.code,
             frame.f_locals,
@@ -3378,6 +3434,10 @@ def get_and_maybe_log_recompilation_reasons(
         )
         if reason:
             reasons.append(reason)
+            if not isinstance(cache_entry.guard_manager, DeletedGuardManagerWrapper):
+                new_dynamic_sources, dynamic_param = _extract_recompiled_dynamic_sources(fail_reasons, frame.f_locals, cache_entry.guard_manager)
+                dynamic_sources.update(new_dynamic_sources)
+                has_dynamic_parameter |= dynamic_param
         cache_entry = cache_entry.next
 
     code = frame.f_code
@@ -3396,6 +3456,7 @@ def get_and_maybe_log_recompilation_reasons(
         guard_failure_details = (
             f"triggered by the following guard failure(s):\n{failures}"
         )
+        guard_failure_details += _suggest_dynamic_whitelist(dynamic_sources, has_dynamic_parameter)
         message = (
             f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}\n"
             f"{textwrap.indent(guard_failure_details, '    ')}"
