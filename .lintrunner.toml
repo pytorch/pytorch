@@ -1719,3 +1719,15 @@ include_patterns = [
    'torch/_dynamo/**',
 ]
 is_formatter = false
+
+[[linter]]
+code = 'TEST_DEVICE_BIAS'
+command = [
+    'python3',
+    'tools/linter/adapters/test_device_bias_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
+include_patterns = [
+    'test/**/test_*.py',
+]
