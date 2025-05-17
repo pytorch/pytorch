@@ -10,7 +10,7 @@ from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
 
 from .ir import MultiOutputLayout, NoneLayout
-from .utils import get_dtype_size
+from .utils import get_dtype_size, is_wait
 from .virtualized import V
 
 
@@ -140,8 +140,23 @@ def compute_size_for_scheduler_buffer(
         sched_buf: SchedulerBuffer, user_of_MultiOutputLayout: bool = False
     ) -> int:
         if isinstance(sched_buf.node.layout, NoneLayout):
-            sched_buf_to_size[sched_buf.get_name()] = (0, 0)
-            return 0
+            _size = 0
+            # for a wait tensor op, its schedulerBuffer NoneLayout layout. However,
+            # the schedulerBuffer is treated as a mutation of the collective output
+            # so it needs to inherit the size of the collectives
+            if (
+                sched_buf.defining_op
+                and is_wait(sched_buf.defining_op.node)
+                and sched_buf.get_mutations()
+            ):
+                mutated_buf_name = sched_buf.get_mutations()[0]
+                _size = (
+                    sched_buf_to_size[mutated_buf_name][1]
+                    if mutated_buf_name in sched_buf_to_size
+                    else 0
+                )
+            sched_buf_to_size[sched_buf.get_name()] = (_size, _size)
+            return _size
         elif isinstance(sched_buf.node.layout, MultiOutputLayout):
             size_alloc = 0
             for user in sched_buf.users:
@@ -193,12 +208,6 @@ def assign_memory_planning_info_for_scheduler_buffers(
     for node in nodes:
         for dep in node.unmet_dependencies:
             dep_name_to_succ_nodes[dep.name].add(node)
-            # add successors due to mutations
-            if dep.name in name_to_buf:
-                buf = name_to_buf[dep.name]
-                if buf.get_mutations():
-                    mutated_buf_name = buf.get_mutations()[0]
-                    dep_name_to_succ_nodes[mutated_buf_name].add(node)
 
     # populate the MemoryPlanningInfoForBuffer attribute to each scheduler buffer
     # note: there are scheduler buffers not in dep_name_to_succ_nodes (e.g., graph outputs)
@@ -228,11 +237,6 @@ def assign_memory_planning_info_for_scheduler_nodes(
             if dep.name in name_to_buf and dep in node.unmet_dependencies:
                 pred_buf = name_to_buf[dep.name]
                 pred_buffers.add(pred_buf)
-                # add predecessors due to mutations
-                if pred_buf.get_mutations():
-                    mutated_buf_name = pred_buf.get_mutations()[0]
-                    if mutated_buf_name in name_to_buf:
-                        pred_buffers.add(name_to_buf[mutated_buf_name])
             elif dep.name in name_to_freeable_input_buf:
                 pred_buffers.add(name_to_freeable_input_buf[dep.name])
         pred_nodes = OrderedSet(
