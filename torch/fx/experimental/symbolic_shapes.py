@@ -1287,6 +1287,10 @@ def guard_or_true(a: BoolLikeType) -> bool:
     return _guard_or(a, True)
 
 
+def guard_or_none(a: BoolLikeType) -> bool:
+    return _guard_or(a, None)
+
+
 def _static_eval_sym_bool(x: SymBool) -> Optional[bool]:
     assert isinstance(x, SymBool)
     expr = x.node.expr
