@@ -79,6 +79,8 @@ def define_targets(rules):
         aten_ufunc_generated_cuda_sources()
     )
 
+    gen_aten_outs_mtia = GENERATED_H_MTIA + GENERATED_CPP_MTIA
+
     gen_aten_outs = (
         GENERATED_H + GENERATED_H_CORE +
         GENERATED_CPP + GENERATED_CPP_CORE +
@@ -86,7 +88,7 @@ def define_targets(rules):
         aten_ufunc_generated_cpu_sources() +
         aten_ufunc_generated_cpu_kernel_sources() + [
             "Declarations.yaml",
-        ] + gen_aten_outs_cuda
+        ] + gen_aten_outs_cuda + gen_aten_outs_mtia
     )
 
     rules.genrule(
@@ -206,6 +208,15 @@ GENERATED_CPP_CUDA = [
     "RegisterSparseCUDA_0.cpp",
     "RegisterSparseCsrCUDA_0.cpp",
     "RegisterQuantizedCUDA_0.cpp",
+]
+
+GENERATED_H_MTIA = [
+    "MTIAFunctions.h",
+    "MTIAFunctions_inl.h",
+]
+
+GENERATED_CPP_MTIA = [
+    "RegisterMTIA_0.cpp",
 ]
 
 GENERATED_CPP = [
