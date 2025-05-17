@@ -24,6 +24,7 @@
 #include <ATen/ops/pow.h>
 #include <ATen/ops/rsqrt.h>
 #include <ATen/ops/rms_norm.h>
+#include <ATen/ops/native_rms_norm.h>
 #include <ATen/ops/zeros_like_native.h>
 #endif
 
@@ -261,16 +262,11 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   return outputs;
 }
 
-Tensor rms_norm_symint(
+std::tuple<Tensor, Tensor> rms_norm_cpu(
     const Tensor& input,
-    c10::SymIntArrayRef normalized_shape,
+    IntArrayRef normalized_shape,
     const std::optional<Tensor>& weight_opt /* optional */,
     std::optional<double> eps) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  _check_rms_norm_inputs_symint(input, normalized_shape, weight);
-
 #ifdef USE_MPS
   if (input.device().type() == DeviceType::MPS && weight_opt.has_value()) {
     const Tensor weight = weight_opt.value();
@@ -321,10 +317,28 @@ Tensor rms_norm_symint(
       upcasted_result = upcasted_result.mul(weight_opt.value());
     }
 
-    return upcasted_result;
+    return std::make_tuple(upcasted_result, rqrst_input);
   });
 
-  return result.type_as(input);
-
+  return std::make_tuple(
+    std::get<0>(result).type_as(input), // Cast normalized result to original input type
+    std::get<1>(result)                 // rsqrt_val (often kept in higher precision or as computed)
+  );
 }
+
+Tensor rms_norm_symint(
+    const Tensor& input,
+    c10::SymIntArrayRef normalized_shape,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    const std::optional<double> eps) {
+  // See [Note: hacky wrapper removal for optional tensor]
+
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  _check_rms_norm_inputs_symint(input, normalized_shape, weight);
+
+    // maybe dispatch to cpu if type isnt supported by the cuda impl
+  return std::get<0>(at::native_rms_norm_symint(input, normalized_shape, weight_opt, eps));
+}
+
 } // namespace at::native
