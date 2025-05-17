@@ -1436,13 +1436,9 @@ class FakeTensorMode(TorchDispatchMode):
             FakeTensorMode.cache_bypasses[e.reason] += 1
 
         if key is None:
-            # In theory this could be done within the above `except` but then
-            # the exception generated within _dispatch_impl() will have a
-            # context related to the _BypassDispatchCache - which we don't
-            # really want.
-            #
-            # (Without this TestAOTExport.test_aot_export_predispatch_outdtype
-            # fails.)
+            # Do this dispatch outside the above except handler so if it
+            # generates its own exception there won't be a __context__ caused by
+            # the caching mechanism.
             return self._dispatch_impl(func, types, args, kwargs)
 
         assert state is not None
