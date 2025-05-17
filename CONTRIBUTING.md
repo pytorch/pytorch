@@ -103,7 +103,6 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
    Afterwards rebuilding a library (for example to rebuild `libtorch_cpu.so` issue `ninja torch_cpu` from `build` folder),
    would be sufficient to make change visible in `torch` package.
 
-
   To reinstall, first uninstall all existing PyTorch installs. You may need to run `pip
   uninstall torch` multiple times. You'll know `torch` is fully
   uninstalled when you see `WARNING: Skipping torch as it is not
@@ -182,6 +181,7 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 
 Or if you would like to re-use an existing conda environment, you can pass in
 the prefix argument (`--prefix`):
+
 
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch -p my-env
@@ -754,7 +754,6 @@ same. Using ccache in a situation like this is a real time-saver.
 Before building pytorch, install ccache from your package manager of choice:
 
 ```bash
-conda install ccache -c conda-forge
 sudo apt install ccache
 sudo yum install ccache
 brew install ccache
