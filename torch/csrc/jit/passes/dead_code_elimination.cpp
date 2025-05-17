@@ -30,14 +30,12 @@ class DeadCodeEliminator {
   void run(Block* block, bool recurse) {
     // clean up unused fork inputs before starting the main algorithm
     eliminateDeadForkInputs(block, recurse);
-
     // Initialize by marking the return node and all its consumed values as live
     mark(block->return_node());
 
     mark(block);
 
     deleteCallback_(liveValues_);
-
     sweep(block, recurse);
   }
 
@@ -95,10 +93,12 @@ class DeadCodeEliminator {
   // returns, we only mark producers for values that "live" (i.e. used outside
   // the block).
   //
-  // Returns true iff this marked something we haven't marked before.
-  bool markReturnNode(Node* node) {
+  // Returned MarkResult is composed by two values.
+  // markUpdated = true iff this marked something we haven't marked before.
+  // fullyMarked = true iff this node is marked.
+  MarkResult markReturnNode(Node* node) {
     if (marked_.count(node)) {
-      return false;
+      return MarkResult(false, true);
     }
 
     AT_ASSERT(node->owningBlock()->return_node() == node);
@@ -146,7 +146,7 @@ class DeadCodeEliminator {
     }
 
     marked_.insert(node);
-    return true;
+    return MarkResult(true, true);
   }
 
   // Loops are special, because we need to run them to convergence.
@@ -165,55 +165,97 @@ class DeadCodeEliminator {
   // We need to mark the loop again with the information that `a` is live, and
   // repeat until we're not marking new stuff anymore.
   //
-  // Returns true iff this marked something we haven't marked before.
-  bool markLoop(Node* node) {
+  // Returned MarkResult is composed by two values.
+  // markUpdated = true iff this marked something we haven't marked before.
+  // fullyMarked = true iff this node is marked.
+  MarkResult markLoop(Node* node) {
     TORCH_INTERNAL_ASSERT(node->kind() == prim::Loop);
     // Did a single iteration over the loop block mark anything new?
     // If this is false, we've converged.
-    bool marked = false;
     // Did we ever mark anything new?
+    bool markUpdated = false;
     bool anyMarked = false;
+    // Did we mark everything already?
+    bool allMarked = false;
     do {
-      marked = mark(node->blocks().at(0));
-      anyMarked |= marked;
-    } while (marked);
-    return anyMarked;
+      auto markedResult = mark(node->blocks().at(0));
+      markUpdated = markedResult.markUpdated_;
+      // Consider every iteration of the loop, as any of them is updated, marked
+      // this flag.
+      anyMarked |= markUpdated;
+      // Consider only the last iteration of the loop, as it has the highest
+      // mark coverage.
+      allMarked = markedResult.fullyMarked_;
+      // this markLoop would iterate until nothing is updated.
+    } while (markUpdated);
+    return MarkResult(anyMarked, allMarked);
   }
 
-  // Returns true iff this marked something we haven't marked before.
-  bool mark(Block* block) {
+  // Returned MarkResult is composed by two values.
+  // markUpdated = true iff this marked something we haven't marked before.
+  // fullyMarked = true iff this block is fully marked.
+  MarkResult mark(Block* block) {
     bool anyMarked = false;
+    bool allMarked = true;
+
+    // If all nodes within this block are already marked, we can safely bypass
+    // revisiting it. This check is the primary driver of our performance
+    // optimization.
+    if (alreadyAllMarked_.count(block)) {
+      return MarkResult(false, true);
+    }
+
     // Mark all nodes with side effects.
     for (auto node : block->nodes()) {
       if (sideEffectPolicy_ ==
               DCESideEffectPolicy::DONT_DELETE_NODES_WITH_SIDE_EFFECTS &&
           hasSideEffects(node)) {
-        anyMarked |= mark(node);
+        auto markNodeResult = mark(node);
+        // if any node is updated/marked, anyMarked becomes True
+        anyMarked |= markNodeResult.markUpdated_;
+        // if any node is not fully marked, allMarked becomes False
+        allMarked &= markNodeResult.fullyMarked_;
       }
     }
 
     // Initialize by marking the return node
-    anyMarked |= markReturnNode(block->return_node());
+    auto markReturnNodeResult = markReturnNode(block->return_node());
+    anyMarked |= markReturnNodeResult.markUpdated_;
+    allMarked &= markReturnNodeResult.fullyMarked_;
 
     for (auto it = block->nodes().rbegin(); it != block->nodes().rend(); ++it) {
       auto node = *it;
       if (node->kind() == prim::Loop) {
         // Special casing for loops, see comment in markLoop.
-        anyMarked |= markLoop(node);
+        auto markLoopResult = markLoop(node);
+        anyMarked |= markLoopResult.markUpdated_;
+        allMarked &= markLoopResult.fullyMarked_;
       } else {
         // Other nodes with sub-blocks get marked normally.
         for (auto subBlock : node->blocks()) {
-          anyMarked |= mark(subBlock);
+          auto markSubBlockResult = mark(subBlock);
+          anyMarked |= markSubBlockResult.markUpdated_;
+          allMarked &= markSubBlockResult.fullyMarked_;
         }
       }
-      anyMarked |= markIfLive(node);
+      auto markIfLiveResult = markIfLive(node);
+      anyMarked |= markIfLiveResult.markUpdated_;
+      allMarked &= markIfLiveResult.fullyMarked_;
     }
-    return anyMarked;
+    // If allMarked is true, it indicates that all nodes within this block have
+    // already been marked. To prevent redundant checks, add this block to the
+    // alreadyAllMarked_ set.
+    if (allMarked) {
+      alreadyAllMarked_.insert(block);
+    }
+    return MarkResult(anyMarked, allMarked);
   }
 
   // If we output or write to a live memory location, mark this node
-  // Returns true iff this marked something we haven't marked before.
-  bool markIfLive(Node* node) {
+  // Returned MarkResult is composed by two values.
+  // markUpdated = true iff this marked something we haven't marked before.
+  // fullyMarked = true iff this node is marked.
+  MarkResult markIfLive(Node* node) {
     for (const auto output : node->outputs()) {
       if (liveValues_.count(output)) {
         return mark(node);
@@ -226,15 +268,17 @@ class DeadCodeEliminator {
       }
     }
 
-    return false;
+    return MarkResult(false, false);
   }
 
   // Mark this node as live and add this node's inputs and aliases to the live
   // value sets.
-  // Returns true iff this marked something we haven't marked before.
-  bool mark(Node* node) {
+  // Returned MarkResult is composed by two values.
+  // markUpdated = true iff this marked something we haven't marked before.
+  // fullyMarked = true iff this node is marked.
+  MarkResult mark(Node* node) {
     if (marked_.count(node)) {
-      return false;
+      return MarkResult(false, true);
     }
 
     marked_.insert(node);
@@ -257,7 +301,7 @@ class DeadCodeEliminator {
       }
       liveValues_.insert(input);
     }
-    return true;
+    return MarkResult(true, true);
   }
 
   // Delete all unmarked nodes.
@@ -427,6 +471,7 @@ class DeadCodeEliminator {
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
   std::unordered_map<Node*, bool> memo_;
   std::unordered_set<Node*> marked_;
+  std::unordered_set<Block*> alreadyAllMarked_;
   std::unordered_set<const Value*> liveValues_;
   std::function<void(const std::unordered_set<const Value*>&)> deleteCallback_ =
       [](const std::unordered_set<const Value*>&) {};
