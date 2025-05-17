@@ -84,7 +84,7 @@ class _SubprocessFxCompile(_OutOfProcessFxCompile):
         # incremented when we clear the cache, send the clock to the worker and
         # only clear caches if the clock changed since last time.
         #
-        clear_inductor_caches()
+        # clear_inductor_caches()
         torch._inductor.metrics.reset()
 
         # TODO: turn off config.fx_graph_async_compile
