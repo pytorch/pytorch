@@ -80,6 +80,7 @@ from .utils import (
     triton_type,
     triton_type_to_torch,
     unique,
+    do_bench_using_profiling,
 )
 from .virtualized import V
 
@@ -1498,9 +1499,10 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             allowed_prologue_inps if allowed_prologue_inps is not None else OrderedSet()
         )
 
-    def benchmark(self, *args, out):
-        assert self.bmreq is not None
-        return self.bmreq.benchmark(*args, out=out)
+    def benchmark(self, *args, out, using_profiler=False):
+        if using_profiler:
+            algo = self.bmreq.make_run_fn(*args, out=out)
+            return do_bench_using_profiling(algo)
 
     def precompile(self):
         assert self.bmreq is not None
@@ -1570,12 +1572,12 @@ class ExternKernelCaller(ChoiceCaller):
     def __str__(self) -> str:
         return f"ExternKernelCaller({self.choice.call_name()})"
 
-    def benchmark(self, *args, out):
+    def benchmark(self, *args, out, using_profiler=False):
         if out.numel() == 0:
             # no need to run the kerrnel of do benchmarking
             return 0.0
         if self.has_out_variant:
-            return super().benchmark(*args, out=out)
+            return super().benchmark(*args, out=out, using_profiler=using_profiler)
         else:
             algo = self.to_callable()
             out_new = algo(*args)
@@ -1583,7 +1585,10 @@ class ExternKernelCaller(ChoiceCaller):
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
-            return benchmarker.benchmark(algo, args, {})
+            if using_profiler:
+                return do_bench_using_profiling(lambda: algo(*args))
+            else:
+                return benchmarker.benchmark(algo, args, {})
 
     def to_callable(self):
         fn = self.choice.to_callable()
@@ -1787,6 +1792,13 @@ def create_precompile_key(
         + [choice.hash_key() for choice in choices]
     )
 
+# Args to FeedbackFunctions
+# timings: mapping from choices to the benchmark time
+# name: name of the op
+# input_nodes: list of input ir.py Nodes
+# choices: list of choices
+# size_hints: Callable that resolves sympy expressions in context of the graph.
+FeedbackFunction = Callable[[dict[ChoiceCaller, float], str, list[Any], list[ChoiceCaller], Callable[[], dict[ChoiceCaller, float]]], None]
 
 class AlgorithmSelectorCache(PersistentCache):
     def __init__(self, *args, **kwargs) -> None:
@@ -1798,11 +1810,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # of a particular key
         self.precompile_cache: dict[str, Callable[[], None]] = {}
         # list of callbacks that are called after benchmarking
-        self.feedback_saver_fns: list[
-            Callable[
-                [dict[ChoiceCaller, float], str, list[Any], list[ChoiceCaller]], None
-            ]
-        ] = []
+        self.feedback_saver_fns: list[FeedbackFunction] = []
 
         clear_on_fresh_inductor_cache(self)
 
@@ -1879,8 +1887,8 @@ class AlgorithmSelectorCache(PersistentCache):
                 return choices[0].output_node()
 
         @functools.lru_cache(None)
-        def make_benchmark_fn():
-            return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
+        def make_benchmark_fn(using_profiler = False):
+            return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns, using_profiler)
 
         inputs_key = create_inputs_key(input_nodes)
 
@@ -1935,8 +1943,10 @@ class AlgorithmSelectorCache(PersistentCache):
                     name, input_nodes, timings, autotune_elapse, precompile_elapse
                 )
 
+
             for feedback_fn in self.feedback_saver_fns:
-                feedback_fn(timings, name, input_nodes, choices)
+                # re-benchmarking the same choices with profiler is a bit expensive, so pass it in as a thunk.
+                feedback_fn(timings, name, input_nodes, choices, lambda: make_benchmark_fn(using_profiler=True)(choices))
 
             return timings
 
@@ -2169,6 +2179,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes: list[ir.IRNode],
         layout: ir.Layout,
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
+        using_profiler: bool = False,
     ) -> AutotuneArgs:
         """
         Factory method to create AutotuneArgs from a list of ChoiceCallers.
@@ -2210,7 +2221,7 @@ class AlgorithmSelectorCache(PersistentCache):
         )
         expected = None
         if VERIFY:
-            choices[0].benchmark(*example_inputs_extern, out=out_extern)
+            choices[0].benchmark(*example_inputs_extern, out=out_extern, using_profiler=using_profiler)
             expected = out_extern.clone()
 
         return AutotuneArgs.from_choice_args(
@@ -2223,7 +2234,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
     @classmethod
     def benchmark_choice(
-        cls, choice: ChoiceCaller, autotune_args: AutotuneArgs
+        cls, choice: ChoiceCaller, autotune_args: AutotuneArgs, using_profiler: bool = False
     ) -> float:
         is_extern = isinstance(choice, (ExternKernelCaller, SubgraphChoiceCaller))
         benchmark_tensors = autotune_args.get_benchmark_tensors(is_extern)
@@ -2303,8 +2314,9 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes: list[ir.IRNode],
         layout: ir.Layout,
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
+        using_profiler: bool = False,
     ) -> dict[ChoiceCaller, float]:
-        inputs = cls.get_inputs(choices, input_nodes, layout, input_gen_fns)
+        inputs = cls.get_inputs(choices, input_nodes, layout, input_gen_fns, using_profiler=using_profiler)
         return cls.benchmark_choices(choices, inputs)
 
     @classmethod
@@ -2314,6 +2326,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes: list[ir.IRNode],
         layout: ir.Layout,
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
+        using_profiler: bool = False,
     ):
         from . import autotune_process
 
@@ -2323,9 +2336,9 @@ class AlgorithmSelectorCache(PersistentCache):
         triton = [c for c in choices if not isinstance(c, ExternKernelCaller)]
 
         timings = cls.benchmark_in_current_process(
-            extern, input_nodes, layout, input_gen_fns
+            extern, input_nodes, layout, input_gen_fns, using_profiler
         )
-        timings.update(autotune_process.benchmark_in_sub_process(triton))  # type: ignore[arg-type]
+        timings.update(autotune_process.benchmark_in_sub_process(triton, using_profiler=using_profiler))  # type: ignore[arg-type]
         return timings
 
     @classmethod
@@ -2335,6 +2348,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes: list[ir.IRNode],
         layout: ir.Layout,
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
+        using_profiler: bool = False,
     ):
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
@@ -2345,6 +2359,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 input_nodes=input_nodes,
                 layout=layout,
                 input_gen_fns=input_gen_fns,
+                using_profiler=using_profiler,
             )
         else:
             return functools.partial(
@@ -2352,6 +2367,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 input_nodes=input_nodes,
                 layout=layout,
                 input_gen_fns=input_gen_fns,
+                using_profiler=using_profiler,
             )
 
     @staticmethod
@@ -2536,12 +2552,7 @@ class AlgorithmSelectorCache(PersistentCache):
             ),
         )
 
-    def add_feedback_saver(
-        self,
-        fn: Callable[
-            [dict[ChoiceCaller, float], str, list[Any], list[ChoiceCaller]], None
-        ],
-    ):
+    def add_feedback_saver(self, fn: FeedbackFunction):
         self.feedback_saver_fns.append(fn)
 
 
@@ -2562,7 +2573,7 @@ def autotune_select_algorithm(*args, **kwargs):
 
 
 def add_feedback_saver(
-    fn: Callable[[dict[ChoiceCaller, float], str, list[Any], list[ChoiceCaller]], None],
+    fn: FeedbackFunction,
 ):
     global _ALGORITHM_SELECTOR_CACHE
     if _ALGORITHM_SELECTOR_CACHE is None:

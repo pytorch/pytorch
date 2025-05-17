@@ -100,6 +100,7 @@ from .utils import (
     sympy_product,
     sympy_subs,
     tensor_is_aligned,
+    do_bench_using_profiling,
 )
 from .virtualized import ops, OpsValue, V
 
@@ -4664,9 +4665,12 @@ class ChoiceCaller:
         # knowing what autotuning is choosing)
         self.description = description
 
-    def benchmark(self, *args, out) -> float:  # type: ignore[no-untyped-def]
+    def benchmark(self, *args, out, using_profiler=False) -> float:  # type: ignore[no-untyped-def]
         algo = self.to_callable()
-        return benchmarker.benchmark(algo, args, {"out": out})
+        if using_profiler:
+            return do_bench_using_profiling(lambda: algo(*args))
+        else:
+            return benchmarker.benchmark(algo, args, {"out": out})
 
     def call_name(self) -> str:
         raise NotImplementedError
