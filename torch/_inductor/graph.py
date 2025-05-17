@@ -1061,7 +1061,9 @@ class GraphLowering(torch.fx.Interpreter):
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         target = self.qualify_name(target)
         if isinstance(example, SymTypes):
-            expr = example.node.expr
+            # if an input node represents a runtime assertion, use the original symbol and do not
+            # apply replacement on it if it was used in rutime assertions(TODO update the PR to add that part).
+            expr = example.node._expr
             self.graph_inputs[target] = expr
             self.graph_input_names.append(target)
             return expr
