@@ -1511,7 +1511,7 @@ class MultiProcContinousTest(TestCase):
     timeout: timedelta = timedelta(seconds=120)
 
     @classmethod
-    def backend_str(cls) -> str | None:
+    def backend_str(cls) -> Optional[str]:
         """
         ProcessGroup backend str.
         To be customized by sub test classes, e.g. "nccl".
