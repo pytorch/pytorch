@@ -7770,6 +7770,27 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         finally:
             torch._C._set_cpu_allow_fp16_reduced_precision_reduction(prev)
 
+    @onlyCPU
+    @dtypes(torch.bfloat16)
+    @parametrize("m", [32, 35, 36, 40, 64, 128])
+    @parametrize("k", [32, 35, 36, 40, 64, 128])
+    # NOTE: This is intended to cover sbgemv_ testcase in CPUBlas.cpp.
+    def test_lowprecision_gemv_cpu(self, device, dtype, m, k):
+        torch.manual_seed(1)
+        a = torch.rand((m, k), dtype=dtype, device=device)
+        b = torch.rand((k, 1), dtype=dtype, device=device)
+
+        ref = torch.mm(a.to(torch.float32), b.to(torch.float32))
+        res = torch.mm(a, b).to(torch.float32)
+        torch.testing.assert_close(res, ref, atol=1e-2, rtol=1e-2)
+
+        a = torch.rand((k, m), dtype=dtype, device=device)
+        b = torch.rand((k, 1), dtype=dtype, device=device)
+
+        ref = torch.mm(a.t().to(torch.float32), b.to(torch.float32))
+        res = torch.mm(a.t(), b).to(torch.float32)
+        torch.testing.assert_close(res, ref, atol=1e-2, rtol=1e-2)
+
     @slowTest
     @onlyNativeDeviceTypes
     # bfloat16 doesn't have sufficient precision to pass this test
