@@ -453,6 +453,11 @@ Tensor isinf(const Tensor& self) {
     return at::isinf(at::real(self)).__ior__(at::isinf(at::imag(self)));
   }
 
+  if (self.scalar_type() == at::ScalarType::Float8_e4m3fn ||
+  self.scalar_type() == at::ScalarType::Float8_e4m3fnuz) {
+    return at::isinf(self.to(at::kFloat));
+  }
+
   return _AT_DISPATCH_INF_TYPES(self.scalar_type(), "isinf", [&]() {
     return self.abs() == std::numeric_limits<scalar_t>::infinity();
   });
@@ -468,6 +473,11 @@ Tensor isfinite(const Tensor& self) {
   // Note: a complex value is finite iff both parts are finite
   if (self.is_complex()) {
     return at::isfinite(at::real(self)).__iand__(at::isfinite(at::imag(self)));
+  }
+
+  if (self.scalar_type() == at::ScalarType::Float8_e4m3fn ||
+  self.scalar_type() == at::ScalarType::Float8_e4m3fnuz) {
+    return at::isfinite(self.to(at::kFloat));
   }
 
   return _AT_DISPATCH_INF_TYPES(self.scalar_type(), "isfinite", [&]() {

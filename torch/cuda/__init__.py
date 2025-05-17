@@ -218,9 +218,12 @@ def _check_bf16_tensor_supported(device: _device_t):
 
 def is_tf32_supported() -> bool:
     r"""Return a bool indicating if the current CUDA/ROCm device supports dtype tf32."""
-    # Check for ROCm.  If true, return false, since PyTorch does not currently support
-    # tf32 on ROCm.
     if torch.version.hip:
+        prop_name = torch.cuda.get_device_properties().gcnArchName
+        archs = ("gfx94", "gfx95")
+        for arch in archs:
+            if arch in prop_name:
+                return True
         return False
 
     # Otherwise, tf32 is supported on CUDA platforms that natively (i.e. no emulation)
