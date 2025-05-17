@@ -25,6 +25,7 @@ from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrL
 from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
+    MultiProcessTestCase,
     requires_multicast_support,
     skip_if_lt_x_gpu,
 )
@@ -75,7 +76,7 @@ def requires_cuda_p2p_access():
 class SymmetricMemoryTest(MultiProcContinousTest):
     @property
     def device(self) -> torch.device:
-        return torch.device(f"cuda:{self.rank}")
+        return torch.device(device_type, self.rank)
 
     def _init_process(self, set_device: bool = True):
         if set_device:
@@ -224,90 +225,6 @@ class SymmetricMemoryTest(MultiProcContinousTest):
         signal_pad.fill_(42)
         t.fill_(0)
         self.assertTrue(signal_pad.eq(42).all())
-
-    # These timeout tests are skipped on ROCm because timeout calls trap(), which
-    # is handled differently inside hip runtime. It collects gpu coredump and causes
-    # the linux kernel to create a core dump of the host application. The funcitonality
-    # is there, meaning timeout is happening correctly. However, there isn't a nice way
-    # to test it as the current executing thread will coredump and exit.
-    @skip("Exit not supported yet, TODO")
-    @skipIfRocm
-    @skip_if_lt_x_gpu(2)
-    def test_barrier_timeout(self) -> None:
-        self._init_process()
-
-        t = symm_mem.empty(1, device="cuda")
-        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
-
-        if self.rank == 0:
-            with self.assertRaises(RuntimeError):
-                symm_mem_hdl.barrier(timeout_ms=1000)
-                torch.cuda.synchronize()
-        else:
-            torch.cuda.synchronize()
-
-        # The device-side timeout triggers a __trap() that causes all
-        # subsequent host/device interactions to result in an "unspecified
-        # launch failure." Using os._exit(0) to abort the test, as it's
-        # impossible to terminate the process in this state.
-        os._exit(0)
-
-    # These timeout tests are skipped on ROCm because timeout calls trap(), which
-    # is handled differently inside hip runtime. It collects gpu coredump and causes
-    # the linux kernel to create a core dump of the host application. The funcitonality
-    # is there, meaning timeout is happening correctly. However, there isn't a nice way
-    # to test it as the current executing thread will coredump and exit.
-    @skip("Exit not supported yet, TODO")
-    @skipIfRocm
-    @skip_if_lt_x_gpu(2)
-    def test_put_signal_timeout(self) -> None:
-        self._init_process()
-
-        t = symm_mem.empty(1, device="cuda")
-        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
-
-        if self.rank == 0:
-            with self.assertRaises(RuntimeError):
-                # First, put a signal into rank 1's signal pad. Since rank 1
-                # doesn't wait on this signal, the subsequent put will timeout.
-                symm_mem_hdl.put_signal(dst_rank=1)
-                symm_mem_hdl.put_signal(dst_rank=1, timeout_ms=1000)
-                torch.cuda.synchronize()
-        else:
-            torch.cuda.synchronize()
-
-        # The device-side timeout triggers a __trap() that causes all
-        # subsequent host/device interactions to result in an "unspecified
-        # launch failure." Using os._exit(0) to abort the test, as it's
-        # impossible to terminate the process in this state.
-        os._exit(0)
-
-    # These timeout tests are skipped on ROCm because timeout calls trap(), which
-    # is handled differently inside hip runtime. It collects gpu coredump and causes
-    # the linux kernel to create a core dump of the host application. The funcitonality
-    # is there, meaning timeout is happening correctly. However, there isn't a nice way
-    # to test it as the current executing thread will coredump and exit.
-    @skip("Exit not supported yet, TODO")
-    @skipIfRocm
-    @skip_if_lt_x_gpu(2)
-    def test_wait_signal_timeout(self) -> None:
-        self._init_process()
-
-        t = symm_mem.empty(1, device="cuda")
-        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
-
-        if self.rank == 0:
-            with self.assertRaises(RuntimeError):
-                symm_mem_hdl.wait_signal(src_rank=1, timeout_ms=1000)
-                torch.cuda.synchronize()
-        else:
-            torch.cuda.synchronize()
-
-        # The device-side timeout triggers a __trap() that causes all
-        # subsequent host/device interactions to result in an "unspecified
-        # launch failure." Using os._exit(0) to abort the test, as it's
-        # impossible to terminate the process in this state.
-        os._exit(0)
 
     @runOnRocmArch(MI300_ARCH)
     @requires_cuda
@@ -730,12 +647,122 @@ class SymmetricMemoryTest(MultiProcContinousTest):
             self.assertTrue(buf.eq(peer_rank + world.size() // 2).all())
 
 
+# This Test class is used to test the error handling of SymmetricMemory APIs.
+# Since a process restart is often needed after each test, we use the
+# MultiProcessTestCase instead of MultiProcContinousTest.
+@requires_cuda_p2p_access()
+class SymmMemNegativeTest(MultiProcessTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    @property
+    def world_size(self) -> int:
+        return device_module.device_count()
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    def _init_process(self):
+        torch.cuda.set_device(self.device)
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        torch.manual_seed(42 + self.rank)
+
+    # These timeout tests are skipped on ROCm because timeout calls trap(), which
+    # is handled differently inside hip runtime. It collects gpu coredump and causes
+    # the linux kernel to create a core dump of the host application. The funcitonality
+    # is there, meaning timeout is happening correctly. However, there isn't a nice way
+    # to test it as the current executing thread will coredump and exit.
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_barrier_timeout(self) -> None:
+        self._init_process()
+
+        t = symm_mem.empty(1, device="cuda")
+        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        if self.rank == 0:
+            with self.assertRaises(RuntimeError):
+                symm_mem_hdl.barrier(timeout_ms=1000)
+                torch.cuda.synchronize()
+        else:
+            torch.cuda.synchronize()
+
+        # The device-side timeout triggers a __trap() that causes all
+        # subsequent host/device interactions to result in an "unspecified
+        # launch failure." Using os._exit(0) to abort the test, as it's
+        # impossible to terminate the process in this state.
+        os._exit(0)
+
+    # These timeout tests are skipped on ROCm because timeout calls trap(), which
+    # is handled differently inside hip runtime. It collects gpu coredump and causes
+    # the linux kernel to create a core dump of the host application. The funcitonality
+    # is there, meaning timeout is happening correctly. However, there isn't a nice way
+    # to test it as the current executing thread will coredump and exit.
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_put_signal_timeout(self) -> None:
+        self._init_process()
+
+        t = symm_mem.empty(1, device="cuda")
+        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        if self.rank == 0:
+            with self.assertRaises(RuntimeError):
+                # First, put a signal into rank 1's signal pad. Since rank 1
+                # doesn't wait on this signal, the subsequent put will timeout.
+                symm_mem_hdl.put_signal(dst_rank=1)
+                symm_mem_hdl.put_signal(dst_rank=1, timeout_ms=1000)
+                torch.cuda.synchronize()
+        else:
+            torch.cuda.synchronize()
+
+        # The device-side timeout triggers a __trap() that causes all
+        # subsequent host/device interactions to result in an "unspecified
+        # launch failure." Using os._exit(0) to abort the test, as it's
+        # impossible to terminate the process in this state.
+        os._exit(0)
+
+    # These timeout tests are skipped on ROCm because timeout calls trap(), which
+    # is handled differently inside hip runtime. It collects gpu coredump and causes
+    # the linux kernel to create a core dump of the host application. The funcitonality
+    # is there, meaning timeout is happening correctly. However, there isn't a nice way
+    # to test it as the current executing thread will coredump and exit.
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_wait_signal_timeout(self) -> None:
+        self._init_process()
+
+        t = symm_mem.empty(1, device="cuda")
+        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        if self.rank == 0:
+            with self.assertRaises(RuntimeError):
+                symm_mem_hdl.wait_signal(src_rank=1, timeout_ms=1000)
+                torch.cuda.synchronize()
+        else:
+            torch.cuda.synchronize()
+
+        # The device-side timeout triggers a __trap() that causes all
+        # subsequent host/device interactions to result in an "unspecified
+        # launch failure." Using os._exit(0) to abort the test, as it's
+        # impossible to terminate the process in this state.
+        os._exit(0)
+
+
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmMemCollectiveTest(MultiProcContinousTest):
     @property
     def device(self) -> torch.device:
-        return torch.device(f"cuda:{self.rank}")
+        return torch.device(device_type, self.rank)
 
     def _init_process(self):
         torch.cuda.set_device(self.device)
@@ -988,7 +1015,7 @@ class LoweringTest(MultiProcContinousTest):
 
     @property
     def device(self) -> torch.device:
-        return torch.device(f"cuda:{self.rank}")
+        return torch.device(device_type, self.rank)
 
     @skip("Fails with 'one_shot_all_reduce' not found in AOT graph, TODO: fix")
     @skipIfRocm  # requires registered-buffer support
