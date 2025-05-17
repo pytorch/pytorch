@@ -532,6 +532,9 @@ def tuned_scaled_grouped_mm(
 
     _, is_nonzero = _is_static_problem(layout)
 
+    # Checking only for the equality of correspoding dims of
+    # multiplicands here, relying on meta function checks for
+    # everything else.
     if is_nonzero and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result):
         if len(m1_size) == 2:
             if len(m2_size) == 2:
