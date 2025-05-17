@@ -877,6 +877,10 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
         if value.__name__ == "cond":
             return CondHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "if_op":
+            return IfHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "merge_op":
+            return MergeHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "while_loop":
             return WhileLoopHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in ("map", "map_impl"):
@@ -957,6 +961,106 @@ class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable
             ),
             source=AttrSource(AttrSource(self.source, "__call__"), "__func__"),
         ).call_function(tx, args, kwargs)
+
+
+class IfHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    supports_input_mutation = False
+    supports_aliasing = False
+
+    @raise_hard_error_if_graph_break(
+        reason="IF doesn't work unless it is captured completely with torch.compile."
+    )
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+
+        assert len(kwargs) == 0
+        pred, then_func, *operands = args
+        (
+            (ret_val, ret_treespec),
+            then_graph,
+            ret_lifted_freevars,
+        ) = speculate_subgraph(
+            tx,
+            then_func,
+            operands,
+            {},
+            "IF",
+            source_target=self.value,
+            should_flatten_outputs=True,
+            supports_input_mutation=self.supports_input_mutation,
+            supports_aliasing=self.supports_aliasing,
+        )
+
+        then_name = tx.output.install_subgraph(
+            "then_graph",
+            torch.fx.GraphModule(dict(tx.output.nn_modules), then_graph),
+        )
+        then_node = make_attr(tx, then_name)
+        p_args = (
+            pred.as_proxy(),
+            then_node,
+            *tuple(ret_lifted_freevars.keys()),
+        )
+        return _call_function_and_unflatten_output(
+            tx,
+            torch.ops.higher_order.if_op,
+            p_args,
+            {},
+            None,
+            ret_treespec,
+        )
+
+
+class MergeHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    supports_input_mutation = False
+    supports_aliasing = False
+
+    @raise_hard_error_if_graph_break(
+        reason="IF doesn't work unless it is captured completely with torch.compile."
+    )
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+
+        assert len(kwargs) == 0
+        pred, then_vars, else_vars = args
+        then_results, then_spec = _make_inlined(tx, pytree.tree_flatten)(
+            then_vars
+        ).unpack_var_sequence(tx)
+        else_results, else_spec = _make_inlined(tx, pytree.tree_flatten)(
+            else_vars
+        ).unpack_var_sequence(tx)
+
+        if not _make_inlined(tx, pytree.TreeSpec.__eq__)(
+            then_spec, else_spec
+        ).as_python_constant():
+            unimplemented(
+                f"Cannot merge two branches output. then branch spec: {then_spec.as_python_constant()} "
+                f", else branch spec: {else_spec.as_python_constant()}"
+            )
+
+        p_args = (
+            pred.as_proxy(),
+            tuple(res.as_proxy() for res in then_results.unpack_var_sequence(tx)),
+            tuple(res.as_proxy() for res in else_results.unpack_var_sequence(tx)),
+        )
+        return _call_function_and_unflatten_output(
+            tx,
+            torch.ops.higher_order.merge_op,
+            p_args,
+            {},
+            None,
+            then_spec,
+        )
 
 
 class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):

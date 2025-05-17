@@ -581,6 +581,74 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         "Use `torch.cond` to express dynamic control flow.",
     ]
 
+    def rewrite_control_flow(self, inst, value, extra_msg=""):
+        cg = PyCodegen(self)
+        # store the predicate on the stack
+        self.push(value)
+        pred_var = self.output.new_var("pred_tmp")
+        not_pred_var = self.output.new_var("not_pred_tmp")
+        cg.extend_output([cg.create_store(pred_var)])
+        cg.extend_output([cg.create_load(pred_var)])
+        cg.extend_output([cg.create_load_const(True)])
+        cg.extend_output([create_instruction("COMPARE_OP", argval="==")])
+        cg.extend_output([cg.create_store(not_pred_var)])
+        self.pop()
+
+        then_out_var = self.output.new_var("then_out_tmp")
+        else_out_var = self.output.new_var("else_out_tmp")
+
+        def create_if(pred_var, out_var, inst):
+            cg.add_push_null(
+                lambda: cg.load_import_from(
+                    "torch._higher_order_ops.auto_rewrite", "IF"
+                )
+            )
+            cg.extend_output([cg.create_load(pred_var)])
+            nargs, argnames, instructions = self.create_resume_fn(inst)
+            cg.extend_output(instructions)
+            cg.extend_output([cg.create_load(arg) for arg in argnames])
+            cg.extend_output(create_call_function(len(argnames) + 2, False))
+            cg.extend_output([cg.create_store(out_var)])
+
+        def create_merge(pred_var, then_var, else_var):
+            cg.add_push_null(
+                lambda: cg.load_import_from(
+                    "torch._higher_order_ops.auto_rewrite", "MERGE"
+                )
+            )
+            cg.extend_output([cg.create_load(pred_var)])
+            cg.extend_output([cg.create_load(then_var)])
+            cg.extend_output([cg.create_load(else_var)])
+            cg.extend_output(create_call_function(3, False))
+
+        create_if(pred_var, then_out_var, self.next_instruction)
+        create_if(not_pred_var, else_out_var, inst.target)
+        create_merge(pred_var, then_out_var, else_out_var)
+        cg.extend_output([create_instruction("RETURN_VALUE")])
+        new_instructions = cg.get_instructions()
+        self.instruction_pointer -= 1
+        self.instructions = (
+            self.instructions[: self.instruction_pointer] + new_instructions
+        )
+        self.push(value)
+        return
+
+    def data_dependent_jump(self, inst, value, extra_msg=""):
+        if torch._dynamo.config.enable_auto_rewrite_data_dependent_control_flow:
+            return rewrite_control_flow(self, inst, value, extra_msg)
+        if self.should_compile_partial_graph():
+            return jump_graph_break(self, inst, value, extra_msg)
+        else:
+            unimplemented_v2(
+                gb_type=_gb_type,
+                context=f"attempted to jump with {value}",
+                explanation=_explanation,
+                hints=_hints
+                + [
+                    "Set torch._dynamo.config.enable_auto_rewrite_data_dependent_control_flow=True"
+                ],
+            )
+
     def jump_graph_break(self, inst, value, extra_msg=""):
         log_graph_break(
             self.code_options,
@@ -714,10 +782,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 if push:
                     self.push(value)
                 self.jump(inst)
-        elif (
-            isinstance(value, (TensorVariable)) and self.should_compile_partial_graph()
-        ):
-            jump_graph_break(self, inst, value)
+        elif isinstance(value, (TensorVariable)):
+            data_dependent_jump(self, inst, value)
         elif isinstance(value, NNModuleVariable):
             # Equivalent of "self.nn_module is not None"
             mod = self.output.get_submodule(value.module_key)
@@ -2151,7 +2217,11 @@ class InstructionTranslatorBase(
 
     @break_graph_if_unsupported(push=1)
     def CALL_FUNCTION(self, inst):
-        args = self.popn(inst.argval)
+        n = inst.argval
+        if not isinstance(n, int):
+            n = inst.arg
+        assert isinstance(n, int)
+        args = self.popn(n)
         fn = self.pop()
         self.call_function(fn, args, {})
 
@@ -3522,8 +3592,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
 
     def create_resume_fn(self, inst) -> tuple[int, tuple[str, ...], list[Instruction]]:
-        self.instruction_pointer = None
-
         cg = PyCodegen(self)
 
         reads = livevars_analysis(self.instructions, inst)
@@ -3645,6 +3713,8 @@ class InstructionTranslator(InstructionTranslatorBase):
             return [create_instruction("RETURN_VALUE")]
         elif inst.opname == "RETURN_CONST":
             return [create_instruction("RETURN_CONST", argval=inst.argval)]
+
+        self.instruction_pointer = None
 
         nargs, argnames, instructions = self.create_resume_fn(inst)
         instructions.extend(
