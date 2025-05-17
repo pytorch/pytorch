@@ -194,9 +194,13 @@ static size_t _parseChosenWorkspaceSize() {
   }
   size_t workspace_size = 76*1024; /* Use 76 MB for hipBLASLt */
 #else
+#if defined(FBCODE_CAFFE2)
   size_t workspace_size = 1024; /* default size in KiB according to #73328 */
+#else
+  // default to CUBLAS_WORKSPACE_CONFIG workspace size
+  size_t workspace_size = at::cuda::getChosenWorkspaceSize() / 1024;
 #endif
-
+#endif
   if (val.has_value()) {
     try {
       workspace_size = std::stoi(val.value());
@@ -236,7 +240,12 @@ struct CublasLtWorkspace {
   CublasLtWorkspace() {
     size = _getWorkspaceSize();
 #ifndef USE_ROCM
-    static bool unified = c10::utils::check_env("TORCH_CUBLASLT_UNIFIED_WORKSPACE") == true;
+    constexpr auto envvar = "TORCH_CUBLASLT_UNIFIED_WORKSPACE";
+#if defined(FBCODE_CAFFE2)
+    static bool unified = c10::utils::check_env(envvar) == true;
+#else
+    static bool unified = c10::utils::has_env(envvar) ? c10::utils::check_env(envvar) == true : true;
+#endif
     if (unified) {
       auto cublasWorkspaceSize = at::cuda::getChosenWorkspaceSize();
       if (cublasWorkspaceSize < size) {

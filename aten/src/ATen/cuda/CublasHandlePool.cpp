@@ -127,10 +127,13 @@ size_t parseChosenWorkspaceSize() {
   const bool gfx94_95 = at::detail::getCUDAHooks().isGPUArch({"gfx94", "gfx95"});
   const size_t default_size = gfx94_95 ? 1024 * 128 * 1024 : 1024 * 32 * 1024;
 #else
-  /* :4096:2:16:8 default, 32MiB for Hopper */
+  /* :4096:2:16:8 default, 32MiB for Hopper/Blackwell, 12MiB for GeForce Blackwell */
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
-  const bool sm90 = properties != nullptr && properties->major == 9 && properties->minor == 0;
-  const size_t default_size = sm90 ? 4096 * 8 * 1024 : 4096 * 1024 * 2 + 16 * 1024 * 8;
+  const bool sm90or100 = properties != nullptr && (properties->major == 9 || properties->major == 10) && properties->minor == 0;
+  const bool sm120 = properties != nullptr && properties->major == 12 && properties->minor == 0;
+  constexpr size_t sm90or100size = 32768 * 1024;
+  constexpr size_t sm120size = 12288 * 1024;
+  const size_t default_size = sm90or100 ? sm90or100size : sm120 ? sm120size : 4096 * 1024 * 2 + 16 * 1024 * 8;
 #endif
 
   if (val) {
