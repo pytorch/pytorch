@@ -288,7 +288,7 @@ class CUDATemplateKernel(CUDAKernel):
                 self.named_nodes[name] = node
                 self.args.output_buffers[node.get_name()] = name
 
-        arg_defs, *_ = self.args.cpp_argdefs()
+        arg_defs, *_ = self.args.cpp_argdefs(DTYPE_TO_CUTLASS_TYPE)
 
         self.init_layout_args()
         size_args = [
