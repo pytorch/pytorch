@@ -16,8 +16,7 @@ requires = [
     "typing-extensions>=4.10.0",
     "requests",
 ]
-# Use legacy backend to import local packages in setup.py
-build-backend = "setuptools.build_meta:__legacy__"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "torch"
@@ -213,9 +212,14 @@ select = [
     "RUF017",
     "RUF018", # no assignment in assert
     "RUF019", # unnecessary-key-check
+    "RUF020", # never union
     "RUF024", # from keys mutable
     "RUF026", # default factory kwarg
     "RUF030", # No print statement in assert
+    "RUF033", # default values __post_init__ dataclass
+    "RUF041", # simplify nested Literal
+    "RUF048", # properly parse `__version__`
+    "RUF200", # validate pyproject.toml
     "S324", # for hashlib FIPS compliance
     "SLOT",
     "TC",
@@ -223,6 +227,7 @@ select = [
     "TRY203",
     "TRY401", # verbose-log-message
     "UP",
+    "YTT",
 ]
 
 [tool.ruff.lint.per-file-ignores]
