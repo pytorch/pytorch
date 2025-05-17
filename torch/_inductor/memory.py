@@ -23,6 +23,13 @@ torch_log = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
+class PeakMemoryResult:
+    order: list[BaseSchedulerNode]
+    peak_memory: int
+    method: str
+
+
+@dataclasses.dataclass
 class MemoryPlanningInfoForBuffer:
     size_alloc: int = 0
     size_free: int = 0
@@ -235,8 +242,7 @@ def assign_memory_planning_info_for_scheduler_nodes(
         pred_buffers = OrderedSet[Union[SchedulerBuffer, FreeableInputBuffer]]()
         for dep in node.read_writes.reads:
             if dep.name in name_to_buf and dep in node.unmet_dependencies:
-                pred_buf = name_to_buf[dep.name]
-                pred_buffers.add(pred_buf)
+                pred_buffers.add(name_to_buf[dep.name])
             elif dep.name in name_to_freeable_input_buf:
                 pred_buffers.add(name_to_freeable_input_buf[dep.name])
         pred_nodes = OrderedSet(
@@ -594,6 +600,35 @@ def topological_sort_dfs(nodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNo
     return result
 
 
+def prepare_planning_info(
+    nodes: list[BaseSchedulerNode],
+    name_to_buf: dict[str, SchedulerBuffer],
+    name_to_fused_node: dict[str, BaseSchedulerNode],
+    graph_inputs: OrderedSet[str],
+    graph_outputs: OrderedSet[str],
+) -> tuple[int, dict[str, FreeableInputBuffer]]:
+    """
+    Prepare planning info. As nodes are scheduled one at a time, these help
+    keep track of when a buffer can be freed, and when a node can be scheduled
+
+    Returns:
+        int: peak memory estimation
+        dict[str, FreeableInputBuffer]: name to freeable input buffer
+    """
+    name_to_freeable_input_buf = get_freeable_input_buf(nodes, graph_inputs)
+    assign_memory_planning_info_for_scheduler_buffers(nodes, name_to_buf)
+    assign_memory_planning_info_for_scheduler_nodes(
+        nodes, name_to_fused_node, name_to_buf, name_to_freeable_input_buf
+    )
+
+    # the default
+    estimated_peak_memory, _ = estimate_peak_memory(
+        nodes, name_to_freeable_input_buf, graph_outputs
+    )
+
+    return estimated_peak_memory, name_to_freeable_input_buf
+
+
 def reorder_for_peak_memory(
     nodes: list[BaseSchedulerNode],
     name_to_buf: dict[str, SchedulerBuffer],
@@ -613,29 +648,16 @@ def reorder_for_peak_memory(
 
     torch_log.info("Reordering for peak memory -- %d nodes", len(nodes))
 
-    @dataclasses.dataclass
-    class PeakMemoryResult:
-        order: list[BaseSchedulerNode]
-        peak_memory: int
-        method: str
-
-    # preparation --  as nodes are scheduled one at a time, these help
-    # keep track of when a buffer can be freed, and when a node can be scheduled
-    name_to_freeable_input_buf: dict[str, FreeableInputBuffer] = get_freeable_input_buf(
-        nodes, graph_inputs
-    )
-    assign_memory_planning_info_for_scheduler_buffers(nodes, name_to_buf)
-    assign_memory_planning_info_for_scheduler_nodes(
-        nodes, name_to_fused_node, name_to_buf, name_to_freeable_input_buf
+    estimated_peak_memory, name_to_freeable_input_buf = prepare_planning_info(
+        nodes,
+        name_to_buf,
+        name_to_fused_node,
+        graph_inputs,
+        graph_outputs,
     )
 
     # keep track of the peak memory estimates of different methods
     peak_memory_diff_methods: list[PeakMemoryResult] = []
-
-    # the default
-    estimated_peak_memory, _ = estimate_peak_memory(
-        nodes, name_to_freeable_input_buf, graph_outputs
-    )
     peak_memory_diff_methods.append(
         PeakMemoryResult(nodes, estimated_peak_memory, "baseline")
     )
