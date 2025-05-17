@@ -698,15 +698,10 @@ def tuned_mm(mat1, mat2, *, layout=None):
                         ),
                     )
 
-                with V.fake_mode:
-                    mat1_tensor = ir_node_to_tensor(mat1)
-                    mat2_tensor = ir_node_to_tensor(mat2)
-
                 decompose_k_subgraph_template.maybe_append_choice(
                     choices,
                     input_nodes=(mat1, mat2),
                     layout=layout,
-                    example_inputs=[mat1_tensor, mat2_tensor],
                 )
 
     if is_nonzero and use_cutlass_template(layout, m, n, k):
