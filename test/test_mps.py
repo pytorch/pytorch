@@ -8735,6 +8735,8 @@ class TestPad(TestCaseMPS):
         helper((2, 4, 4), (1, 3), nn.ReflectionPad1d)
         # Replication 1D
         helper((2, 1, 6), 3, nn.ReplicationPad1d)
+        # Replication 1D with large batch size (>= 2**16)
+        helper((65539, 1, 6), 3, nn.ReplicationPad1d)
         # Constant Pad 1D
         helper((2, 3, 4), 2, nn.ConstantPad1d)
         # Constant Pad 1D with single dimension input
@@ -8748,6 +8750,8 @@ class TestPad(TestCaseMPS):
         helper((2, 1, 6, 8), 2, nn.ReplicationPad2d)
         # verify if a change in shape of padding would cause problems with graph caching
         helper((2, 1, 6, 8), (2, 4, 3, 5), nn.ReplicationPad2d)
+        # verify 2d padding with the 2nd dimension >= 2**16
+        helper((2, 65539, 6, 8), (2, 4, 3, 5), nn.ReplicationPad2d)
         # Constant Pad 2D
         helper((2, 1, 6, 8), (2, 4, 3, 5), nn.ConstantPad2d)
         # input size < pad size
