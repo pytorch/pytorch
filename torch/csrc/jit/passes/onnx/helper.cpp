@@ -169,7 +169,8 @@ Node* createONNXUnsqueeze(
   Node* unsqueeze_node = graph->create(onnx::Unsqueeze, 1);
   unsqueeze_node->addInput(input);
   unsqueeze_node->insertBefore(n_to_insert_before);
-  if (opset_version >= OPSET_VERSION_13) {
+  if (opset_version >= OPSET_VERSION_13) 
+  {
     // ONNX spec sets `axes` as input for opset >= 13.
     Node* unsqueeze_axes = graph->create(onnx::Constant, 1);
     unsqueeze_axes->insertBefore(unsqueeze_node);
