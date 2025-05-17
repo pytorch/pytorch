@@ -216,7 +216,19 @@ class DynamoExporterTest(common_utils.TestCase):
                 input = input.to(float8_type)
                 return input
 
-        _ = self.export(Float8Module(), (torch.randn(1, 2),))
+        onnx_program = self.export(Float8Module(), (torch.randn(1, 2),))
+        self.assertEqual(onnx_program.model.graph.outputs[0].dtype, onnx_type)
+
+    def test_float4_support(self):
+        class Float4Module(torch.nn.Module):
+            def forward(self):
+                return torch.empty([1], dtype=torch.float4_e2m1fn_x2)
+
+        onnx_program = self.export(Float4Module())
+        output = onnx_program.model.graph.outputs[0]
+        self.assertEqual(output.dtype, ir.DataType.FLOAT4E2M1)
+        # The shape is [*shape, 2] because ONNX stores the shape of the unpacked tensor
+        self.assertEqual(output.shape.dims, [1, 2])
 
     def test_bfloat16_support(self):
         class BfloatModel(torch.nn.Module):
