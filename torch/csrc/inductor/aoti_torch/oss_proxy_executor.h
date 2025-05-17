@@ -12,24 +12,9 @@
 
 namespace torch::aot_inductor {
 
-enum class DynamicArgType : int {
-  TensorType = 0,
-  ListTensorType = 1,
-  ListOptionalTensorType = 2,
-  IntType = 3,
-  ListIntType = 4,
-  NoneType = 5,
-};
-
 inline std::ostream& operator<<(std::ostream& os, DynamicArgType arg_type) {
   os << static_cast<int>(arg_type);
   return os;
-}
-
-inline bool isTensorType(DynamicArgType arg_type) {
-  return arg_type == DynamicArgType::TensorType ||
-      arg_type == DynamicArgType::ListTensorType ||
-      arg_type == DynamicArgType::ListOptionalTensorType;
 }
 
 struct OSSDynamicArg {
@@ -118,7 +103,7 @@ class OSSProxyExecutor : public ProxyExecutor {
  public:
   explicit OSSProxyExecutor(
       const std::string& json_path,
-      bool is_cpu,
+      const std::string& device_str,
       std::optional<std::unordered_map<std::string, c10::IValue>> custom_objs =
           std::nullopt);
 
