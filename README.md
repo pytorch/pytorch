@@ -35,6 +35,7 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
     - [Using pre-built images](#using-pre-built-images)
     - [Building the image yourself](#building-the-image-yourself)
   - [Building the Documentation](#building-the-documentation)
+    - [Building a PDF](#building-a-pdf)
   - [Previous Versions](#previous-versions)
 - [Getting Started](#getting-started)
 - [Resources](#resources)
@@ -426,8 +427,6 @@ make -f docker.Makefile
 To build documentation in various formats, you will need [Sphinx](http://www.sphinx-doc.org)
 and the pytorch_sphinx_theme2.
 
-
-
 Before you build the documentation locally, ensure `torch` is
 installed in your environment. For small fixes, you can install the
 nightly version as described in [Getting Started](https://pytorch.org/get-started/locally/).
@@ -466,10 +465,44 @@ If you get a katex error run `npm install katex`.  If it persists, try
 When you make changes to the dependencies run by CI, edit the
 `.ci/docker/requirements-docs.txt` file.
 
+#### Building a PDF
+
+To compile a PDF of all PyTorch documentation, ensure you have
+`texlive` and LaTeX installed. On macOS, you can install them using:
+
+```
+brew install --cask mactex
+```
+
+To create the PDF:
+
+1. Run:
+
+   ```
+   make latexpdf
+   ```
+
+   This will generate the necessary files in the `build/latex` directory.
+
+2. Navigate to this directory and execute:
+
+   ```
+   make LATEXOPTS="-interaction=nonstopmode"
+   ```
+
+   This will produce a `pytorch.pdf` with the desired content. Run this
+   command one more time so that it generates the correct table
+   of contents and index.
+
+> [!NOTE]
+> To view the Table of Contents, switch to the **Table of Contents**
+> view in your PDF viewer.
+
+
 ### Previous Versions
 
 Installation instructions and binaries for previous PyTorch versions may be found
-on [our website](https://pytorch.org/previous-versions).
+on [our website](https://pytorch.org/get-started/previous-versions).
 
 
 ## Getting Started

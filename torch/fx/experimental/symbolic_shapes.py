@@ -17,6 +17,7 @@ need to make use of these APIs to setup dynamic shapes support appropriately.
 import abc
 import atexit
 import collections
+import contextlib
 import dis
 import functools
 import hashlib
@@ -77,11 +78,13 @@ from torch.utils._sympy.functions import (
     CleanDiv,
     FloorDiv,
     FloorToInt,
+    IntTrueDiv,
     IsNonOverlappingAndDenseIndicator,
     Max,
     Min,
     Mod,
     PythonMod,
+    TruncToInt,
 )
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.printers import CppPrinter, PythonPrinter
@@ -156,6 +159,7 @@ __all__ = [
     "StatefulSymbolicContext",
     "SubclassSymbolicContext",
     "SymIntSymbolicContext",
+    "TrackedFake",
     "statically_known_true",
     "guard_size_oblivious",
     "check_consistent",
@@ -308,8 +312,6 @@ def uninteresting_files() -> set[str]:
         torch.fx.experimental.recording,
         torch.fx.experimental.sym_node,
         torch.fx.interpreter,
-        torch.fx.proxy,
-        torch.fx._symbolic_trace,
         torch,
         torch._compile,
         torch._dynamo.eval_frame,
@@ -1216,101 +1218,91 @@ def compute_unbacked_bindings(
     return symbol_to_path
 
 
+def _log_suppressed_dde(a: SymBool, assumed_value: bool) -> None:
+    sloc, extra = a.node.shape_env._get_stack_summary(True)
+    log.info(
+        "could not evaluate %s due to data dependency, it was assumed to be %s with no runtime assertions %s %s",
+        a,
+        assumed_value,
+        sloc,
+        extra,
+    )
+
+
 # The following two functions are common utilities used while defining unbacked semantics
 # of various framework code. Those would be used in situations you prefer to guard and know
 # the result of the expression over not guarding, but in case you hit a data dependent error
 # you are ok with just returning true or false.
-# Some reasons you might be ok with returning true/false instead could be:
-#  (1) It's an optimization/additional check I do not want to fail for not performing it.
-#  (2) I am willing to deviate from the normal semantics when I have unbacked for the
-#      benefit of not failing.
+#
+# When to use this?
+# (1) If you can use a higher level combinator prefer using those instead, they are definitely safe (modulo short-circuiting).
+#
+# (2) It can be used if the program would behave equivalently if _guard_or returned true or false.
+# Many inductor optimizations fall in this bracket for example.
+#
+# (3) Finally, it's even be OK if the program wouldn't behave equivalently, so long as the
+# change is semantics preserving.  It can be semantics preserving if the program errors in more
+# cases than it did previously (but otherwise behaves identically), or if it changes some quantity
+# in a way that doesn't matter (e.g., strides often fall in this bucket.)
+#
+# (4) Specialize for the general case and add a runtime assertion that would fail during
+#     runtime if the conditions for the general case are not satisfied. Examples for this are;
+#      assuming expand/reshape inputs are not -1. or assuming the non-broadcasting path.
+#
+def _guard_or(a: BoolLikeType, default: bool) -> bool:
+    if not isinstance(a, SymBool):
+        assert isinstance(a, bool)
+        return a
+
+    # if backed_size_oblivious is True we treat backed as unbacked here.
+    if torch.fx.experimental._config.backed_size_oblivious:
+        result = _static_eval_sym_bool(a)
+        return result if result is not None else default
+
+    shape_env = getattr(a.node, "shape_env", None)
+
+    # xla symnode path.
+    if shape_env is None:
+        return guard_bool(a)
+
+    with a.node.shape_env.dde_suppressed():
+        try:
+            return guard_bool(a)
+        except GuardOnDataDependentSymNode:
+            _log_suppressed_dde(a, default)
+            return default
+
+
 def guard_or_false(a: BoolLikeType) -> bool:
     """
     Try to guard a, if data dependent error encountered just return false.
     """
-    if torch.fx.experimental._config.backed_size_oblivious:
-        return statically_known_true(a)
-    else:
-        try:
-            return bool(guard_bool(a))
-        except GuardOnDataDependentSymNode:
-            return False
+    return _guard_or(a, False)
 
 
 def guard_or_true(a: BoolLikeType) -> bool:
     """
     Try to guard a, if data dependent error encountered just return true.
     """
-    if torch.fx.experimental._config.backed_size_oblivious:
-        result = _static_eval(a)
-        if result is not None:
-            return result
-        else:
-            return True
-    else:
-        try:
-            return bool(guard_bool(a))
-        except GuardOnDataDependentSymNode:
-            return True
+    return _guard_or(a, True)
 
 
-def definitely_true(a: BoolLikeType) -> bool:
-    """
-    Returns True only if we can tell that a is True, possibly introducing
-    a guard in the process.  If a depends on some unbacked SymInt, we may
-    return False even though there may exist a possible value of the SymInt
-    that would cause the expression to return True.
+def _static_eval_sym_bool(x: SymBool) -> Optional[bool]:
+    assert isinstance(x, SymBool)
+    expr = x.node.expr
 
-    When is it appropriate to use definitely_true?  First, if you can use
-    a higher level combinator prefer using those instead, they are definitely
-    safe (modulo short-circuiting).
-    Second, it can be used if the program would behave equivalently if
-    definitely_true always returned False. Finally, it even
-    be OK if the program wouldn't behave equivalently, so long as the
-    change is semantics preserving.  It can be semantics preserving if
-    the program errors in more cases than it did previously (but otherwise
-    behaves identically), or if it changes some quantity in a way that
-    doesn't matter (e.g., strides often fall in this bucket.)
-    """
-    if isinstance(a, SymBool):
-        if a.node.has_hint():
-            return guard_bool(a)
-        else:
-            return False
-    return bool(a)
-
-
-def definitely_false(a: BoolLikeType) -> bool:
-    """
-    Returns True only if we can tell that a is False, possibly introducing
-    a guard in the process.  If a depends on some unbacked SymInt, we may
-    return False even though there may exist a possible value of the SymInt
-    that would cause the expression a to be False.  See definitely_true
-    for more usage guidance.
-    """
-    if isinstance(a, SymBool):
-        if a.node.has_hint():
-            return not guard_bool(a)
-        else:
-            return False
-    return not bool(a)
-
-
-def _static_eval(x: BoolLikeType) -> Optional[bool]:
-    if isinstance(x, SymBool):
-        expr = x.node.expr
+    try:
+        # Shape env access is inside the try on purpose. xla symnode does not
+        # have it on its attributes.
         shape_env = x.node.shape_env
-        try:
-            simplified = shape_env._maybe_evaluate_static(expr)
-            if simplified is not None:
-                return bool(simplified)
-            else:
-                return None
-        except Exception:
-            log.debug("Could not simplify %s", expr)
+        simplified = shape_env._maybe_evaluate_static(expr)
+        if simplified is not None:
+            return bool(simplified)
+        else:
             return None
-    assert isinstance(x, bool)
-    return x
+    except Exception:
+        log.debug("Could not simplify %s", expr)
+        return None
 
 
 def statically_known_true(x: BoolLikeType) -> bool:
@@ -1324,11 +1316,15 @@ def statically_known_true(x: BoolLikeType) -> bool:
     Args:
         x (bool, SymBool): The expression to try statically evaluating
     """
-    result = _static_eval(x)
+    if not isinstance(x, SymBool):
+        assert isinstance(x, bool)
+        return x
+
+    result = _static_eval_sym_bool(x)
     if result is None:
         return False
-    else:
-        return result
+
+    return result
 
 
 def sym_and(x: BoolLikeType, *others: BoolLikeType) -> BoolLikeType:
@@ -1973,12 +1969,12 @@ class StatefulSymbolicContext(StatelessSymbolicContext):
     other values - dynamic_sizes and constraint_sizes will not be read if we cache
     hit.
 
-    It is the cache owners responsibility to maintain the lifecycle of the cache
-    w/r/t different shape_envs, clearing, etc.
+    It is the cache owner's responsibility to maintain the lifecycle of the cache
+    with respect to different shape_envs, clearing, etc.
     """
 
     tensor_source: Source = None  # type: ignore[assignment]
-    # Why is this keyd on int first?
+    # Why is this keyed on int first?
     # That integer is actually the id of the shape_env. This cache short-circuits symbol
     # creation, and we must store it per shape env. Now, while tracing invariants are a single
     # shape env per tracing context, and every new frame gets a new shape_env. So where would we have
@@ -2011,6 +2007,23 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
         super().__post_init__()
         if self.inner_contexts is None:
             self.inner_contexts = {}
+
+
+# Tracks the sources of all fake tensors we wrap in Dynamo.
+# Used by shape guard computation.
+@dataclass
+class TrackedFake:
+    fake: Union[FakeTensor, SymInt]
+    source: Source
+    symbolic_context: Optional[SymbolicContext]
+
+    def __hash__(self) -> int:
+        return hash((self.fake, self.source.name()))
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, TrackedFake):
+            return self.fake is other.fake and self.source.name() == other.source.name()
+        return False
 
 
 def is_symbolic(
@@ -2651,7 +2664,9 @@ class DimConstraints:
         # a fix for this issue, we delay raising such failures. See solve().
         if orig_reduced == sympy.false:
             self._inconsistencies.append(f"{orig_expr} is inconsistent!")
-        if isinstance(expr, sympy.Ne) or self._has_unsupported_sympy_function(expr):
+        if isinstance(
+            expr, (sympy.Ne, sympy.Or, sympy.And)
+        ) or self._has_unsupported_sympy_function(expr):
             # we're not going to do anything useful with these, so drop them
             return False
         free_symbols = expr.free_symbols
@@ -3301,6 +3316,10 @@ class ShapeEnv:
             else []
         )
 
+        # Set true when data dependent errors are handled by caller side and not thrown. Ex: guard_or_false
+        # and guard_or_true. When its true, a different error message is produced.
+        self._dde_suppressed = False
+
         # FakeTensor per-ShapeEnv operation cache. This is used for caching
         # operations that contain symbolic shapes which have guards on the
         # ShapeEnv (so are ShapeEnv-dependent).
@@ -3312,6 +3331,18 @@ class ShapeEnv:
             torch._subclasses.fake_tensor._DispatchCacheKey,
             torch._subclasses.fake_tensor._DispatchCacheEntry,
         ] = {}
+
+    @contextlib.contextmanager
+    def dde_suppressed(self) -> Iterator[None]:
+        """Suppressed GuardOnDataDependent error logs"""
+
+        # We do not expect this to be called recursively.
+        assert not self._dde_suppressed, "not expected value for _dde_suppressed"
+        self._dde_suppressed = True
+        try:
+            yield
+        finally:
+            self._dde_suppressed = False
 
     # Pro-tip: if you add new field to ShapeEnv, this affects some accept
     # tests.  Accept their output with:
@@ -3531,6 +3562,8 @@ class ShapeEnv:
         # with something like effect token tracking.
         self.unbacked_alloc_order: dict[sympy.Symbol, int] = {}
 
+        self.specialization_stacks: dict[Source, traceback.StackSummary] = {}
+
         self.trace_asserts = trace_asserts
 
         from torch.fx.experimental.validator import translation_validation_enabled
@@ -3612,6 +3645,8 @@ class ShapeEnv:
             "replacements_slocs",
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
+            "_dde_suppressed",
+            "specialization_stacks",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -3926,7 +3961,8 @@ class ShapeEnv:
             node.meta[SHAPEENV_EVENT_KEY] = self._last_event_index()
             node.meta[CURRENT_NODE_KEY] = get_current_node()
 
-    def _suppress_guards_tls(self) -> bool:
+    @staticmethod
+    def _suppress_guards_tls() -> bool:
         return getattr(TLS, "suppress_guards", False)
 
     @record_shapeenv_event()
@@ -5146,9 +5182,16 @@ class ShapeEnv:
                     var_with_range = self._render_range_for_constraint_violation(
                         source, constraint
                     )
+                    user_stack = self.specialization_stacks.get(source, None)
                     msg = (
-                        f"Not all values of {var_with_range} are valid because "
-                        f"{self._debug_name(source)} was inferred to be a constant ({val})."
+                        f"You marked {self._debug_name(source)} as dynamic but your code "
+                        f"specialized it to be a constant ({val}). Either remove the mark_dynamic "
+                        f"or use a less strict API such as maybe_mark_dynamic or Dim.AUTO."
+                        + (
+                            "\n\nUser stack:\n" + "".join(user_stack.format())
+                            if user_stack
+                            else ""
+                        )
                     )
                     record_constraint_violation(
                         constraint.warn_only, self._debug_name(source), msg
@@ -5966,7 +6009,16 @@ class ShapeEnv:
                         min_max_replacements[atom] = a if atom.func is Max else b
             if min_max_replacements:
                 expr = expr.xreplace(min_max_replacements)
-                expr = safe_expand(expr)
+
+        if expr.has(TruncToInt):
+            trunc_replacements = {}
+            for atom in expr.atoms(TruncToInt):
+                if isinstance(atom.args[0], IntTrueDiv):
+                    base, divisor = atom.args[0].args
+                    if base % divisor == 0:
+                        trunc_replacements[atom] = base // divisor
+            if trunc_replacements:
+                expr = expr.xreplace(trunc_replacements)
 
         # TODO it would seem that this pass is not necessary given the
         # below replacement of // with /, but for nested FloorDivs
@@ -6102,6 +6154,12 @@ class ShapeEnv:
         size_oblivious_result: Optional[sympy.Basic] = None,
         expr_sym_node_id: Optional[int] = None,
     ) -> GuardOnDataDependentSymNode:
+        if self._dde_suppressed:
+            return GuardOnDataDependentSymNode(
+                expr,
+                "This data dependent error is suppressed and handled by the caller",
+            )
+
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
         size_like_symbols = []
@@ -6351,6 +6409,10 @@ class ShapeEnv:
                     ),
                 },
             )
+
+            for source in self.var_to_sources.get(a, []):
+                if user_tb:
+                    self.specialization_stacks[source] = user_tb
 
             if config.print_specializations:
                 self.log.warning(
@@ -6714,9 +6776,10 @@ class ShapeEnv:
             if (lineno := instr.starts_line) is not None:
                 last_lineno = max(last_lineno, lineno)
             if isinstance(instr.argval, str) and instr.argval in frame.f_locals:
-                frame_locals[instr.argval] = pytree.tree_map(
-                    go, frame.f_locals[instr.argval]  # type: ignore[index]
-                )
+                flat_locals = pytree.tree_flatten(frame.f_locals[instr.argval])[0]
+                frame_locals[instr.argval] = [
+                    go(flat_local) for flat_local in flat_locals
+                ]
 
         # store LOC
         locs = co_lines[frame.f_lineno - offset : last_lineno + 1 - offset]
@@ -6795,8 +6858,6 @@ class ShapeEnv:
             sym_node.expr, sym_node.hint, sym_node.fx_node, size_oblivious
         )
 
-    @lru_cache(256)
-    @record_shapeenv_event(save_tracked_fakes=True)
     def evaluate_expr(
         self,
         orig_expr: sympy.Basic,
@@ -6806,6 +6867,27 @@ class ShapeEnv:
         *,
         forcing_spec: bool = False,
     ) -> sympy.Basic:
+        """
+        Given an expression, evaluates it, adding guards if necessary
+        """
+
+        # Add extra state that evaluate_expr() depends on.
+        suppress_guards_tls = ShapeEnv._suppress_guards_tls()
+        return self._inner_evaluate_expr(
+            orig_expr, hint, fx_node, size_oblivious, forcing_spec, suppress_guards_tls
+        )
+
+    @lru_cache(256)
+    @record_shapeenv_event(save_tracked_fakes=True, name="evaluate_expr")
+    def _inner_evaluate_expr(
+        self,
+        orig_expr: sympy.Basic,
+        hint: Optional[Union[int, bool, float]],
+        fx_node: Optional[torch.fx.Node],
+        size_oblivious: bool,
+        forcing_spec: bool,
+        _suppress_guards_tls: bool,
+    ) -> sympy.Basic:
         try:
             return self._evaluate_expr(
                 orig_expr,
@@ -6814,14 +6896,17 @@ class ShapeEnv:
                 size_oblivious,
                 forcing_spec=forcing_spec,
             )
-        except Exception:
-            self.log.warning(
-                "failed during evaluate_expr(%s, hint=%s, size_oblivious=%s, forcing_spec=%s",
-                orig_expr,
-                hint,
-                size_oblivious,
-                forcing_spec,
-            )
+        except Exception as e:
+            if isinstance(e, GuardOnDataDependentSymNode) and self._dde_suppressed:
+                pass
+            else:
+                self.log.warning(
+                    "failed during evaluate_expr(%s, hint=%s, size_oblivious=%s, forcing_spec=%s",
+                    orig_expr,
+                    hint,
+                    size_oblivious,
+                    forcing_spec,
+                )
             raise
 
     def _evaluate_expr(
@@ -6833,10 +6918,6 @@ class ShapeEnv:
         *,
         forcing_spec: bool = False,
     ) -> sympy.Basic:
-        """
-        Given an expression, evaluates it, adding guards if necessary
-        """
-
         # TODO: split conjunctions and evaluate them separately
 
         if isinstance(
@@ -7504,7 +7585,8 @@ def _suggest_fixes_for_data_dependent_error_non_strict(
 
         # add suggested torch.check()s based on `src_map` to the error message
         # replacing unbacked symints in the unresolved condition in the error
-        _suggest_torch_checks(e, src_map)
+        if isinstance(e.cond, sympy.logic.boolalg.Boolean):
+            _suggest_torch_checks(e, src_map)
 
 
 @contextmanager
