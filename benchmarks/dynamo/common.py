@@ -1,3 +1,6 @@
+warning: Selection `RUF033` has no effect because preview is not enabled.
+warning: Selection `RUF041` has no effect because preview is not enabled.
+warning: Selection `RUF048` has no effect because preview is not enabled.
 #!/usr/bin/env python3
 
 from __future__ import annotations
