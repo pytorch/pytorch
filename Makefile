@@ -2,18 +2,16 @@
 PYTHON = python3
 PIP = $(PYTHON) -m pip
 NIGHTLY_TOOL_OPTS := pull
+BUILD_TARGETS := android ios local
+PLATFORMS := cuda rocm
+SETUP_ENVS := $(PLATFORMS:%=setup-env-%)
+SETUP_ENV_PLATFORMS := $(PLATFORMS:%=setup_env_%)
 
 all:
 	@mkdir -p build && cd build && cmake .. $(shell $(PYTHON) ./scripts/get_python_cmake_flags.py) && $(MAKE)
 
-local:
-	@./scripts/build_local.sh
-
-android:
-	@./scripts/build_android.sh
-
-ios:
-	@./scripts/build_ios.sh
+$(BUILD_TARGETS): %:
+	@./scripts/build_$*.sh
 
 clean: # This will remove ALL build folders.
 	@rm -r build*/
@@ -32,15 +30,11 @@ ensure-branch-clean:
 setup-env: ensure-branch-clean
 	$(PYTHON) tools/nightly.py $(NIGHTLY_TOOL_OPTS)
 
-setup-env-cuda:
-	$(MAKE) setup-env PYTHON="$(PYTHON)" NIGHTLY_TOOL_OPTS="$(NIGHTLY_TOOL_OPTS) --cuda"
-
-setup-env-rocm:
-	$(MAKE) setup-env PYTHON="$(PYTHON)" NIGHTLY_TOOL_OPTS="$(NIGHTLY_TOOL_OPTS) --rocm"
+$(SETUP_ENVS): setup-env-%:
+	$(MAKE) setup-env PYTHON="$(PYTHON)" NIGHTLY_TOOL_OPTS="$(NIGHTLY_TOOL_OPTS) --$*"
 
 setup_env: setup-env
-setup_env_cuda: setup-env-cuda
-setup_env_rocm: setup-env-rocm
+$(SETUP_ENV_PLATFORMS): setup_env_%: setup-env-%
 
 setup-lint:
 	$(PIP) install lintrunner
@@ -48,10 +42,7 @@ setup-lint:
 
 setup_lint: setup-lint
 
-lint:
-	lintrunner
-
-quicklint:
+lint quicklint:
 	lintrunner
 
 triton:
