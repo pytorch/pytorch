@@ -283,4 +283,6 @@ TORCH_LIBRARY(onednn, m) {
   // int8 add
   m.def(TORCH_SELECTIVE_SCHEMA("onednn::qadd.tensor(Tensor self, float self_scale, int self_zero_point, Tensor other, float other_scale, int other_zero_point, float output_scale, int output_zero_point, ScalarType output_dtype) -> Tensor"));
   m.def(TORCH_SELECTIVE_SCHEMA("onednn::qadd_relu.tensor(Tensor self, float self_scale, int self_zero_point, Tensor other, float other_scale, int other_zero_point, float output_scale, int output_zero_point, ScalarType output_dtype) -> Tensor"));
+  // int8 batch_norm2d
+  m.def(TORCH_SELECTIVE_SCHEMA("onednn::qbatch_norm2d(Tensor qx, float qx_scale, int qx_zero_point, Tensor weight, Tensor bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point, ScalarType output_dtype) -> Tensor"));
 }
