@@ -11,7 +11,7 @@ import torch._inductor.virtualized as virtualized
 from torch._inductor.ir import ComputedBuffer, Pointwise
 from torch._inductor.ops_handler import DefaultHandler, WrapperHandler
 from torch._inductor.scheduler import BaseSchedulerNode
-from torch._inductor.utils import IndentedBuffer, OrderedSet
+from torch._inductor.utils import DelayReplaceLine, IndentedBuffer, OrderedSet
 from torch._inductor.virtualized import OpsValue
 
 from ...virtualized import V
@@ -96,7 +96,14 @@ class _AssignmentFormatter(DefaultHandler):
                 return OpsValue(line)
             else:
                 var = self.parent_handler._tmp_var()
-                self.parent_handler.body.writeline(f"{var} = {line}")
+                line = DelayReplaceLine(
+                    var,
+                    lambda: "D"
+                    if var == self.parent_handler.last_stored_var_name
+                    else var,
+                    f"{var} = {line}",
+                )
+                self.parent_handler.body.writeline(line)
                 return OpsValue(var)
         else:
             raise NotImplementedError(name)
@@ -138,6 +145,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         self.cur_node: Optional[ComputedBuffer] = None
         self.name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
         self.is_D_assigned = False
+        self.D_var_name = None
 
         if accumulator_node_name not in removed_buffers:
             # cannot return accumulator directly, so alias it
@@ -162,6 +170,8 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
                     index_vars = CutlassEVTCodegen.get_index_vars(node)
                     node.get_store_function()(index_vars)
 
+        codegen.finalize()
+
         return (
             codegen.get_reads(),
             codegen.get_writes(),
@@ -177,6 +187,17 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
                 self._render_return_statement(),
             ]
         )
+
+    def finalize(self) -> None:
+        # Rename the last store to D
+        # no other code references this store
+        # to workaround https://github.com/NVIDIA/cutlass/issues/2288
+        # Note: the delayed line will automatically rewrite the last assignment to
+        # be to D
+        buffer_name = self.var_name_to_buffer_name[self.last_stored_var_name]
+        self.var_name_to_buffer_name.pop(self.last_stored_var_name)
+        self.var_name_to_buffer_name["D"] = buffer_name
+        self.store_name_to_value[buffer_name] = OpsValue("D")
 
     @contextmanager
     def set_cur_node(self, node: ComputedBuffer) -> Generator[None, Any, Any]:
@@ -213,22 +234,12 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         if name not in self.removed_buffers:
             if index:
                 self._check_indexing(name, index)
-
-            value_to_write = value
-            if not self.is_D_assigned and name != self.accumulator_node_name:
-                # EVT requires an output to be named D lol
-                # so rename the first store to D
-                # accumulator cannot be assigned to D
-                # see https://github.com/NVIDIA/cutlass/issues/2288
-                self.body.writeline(f"D = {value} # cutlass evt requirement")
-                value_to_write = OpsValue("D")
-                self.is_D_assigned = True
-
-            assert value_to_write.value != _ACCUMULATOR_ARG_NAME, (
+            assert value.value != _ACCUMULATOR_ARG_NAME, (
                 "Cannot store accumulator arg name"
             )
-            self.var_name_to_buffer_name[value_to_write.value] = name
-            self.store_name_to_value[name] = value_to_write
+            self.var_name_to_buffer_name[value.value] = name
+            self.store_name_to_value[name] = value
+            self.last_stored_var_name = value.value
         return None
 
     def _get_cur_node(self) -> ComputedBuffer:

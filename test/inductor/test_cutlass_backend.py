@@ -1536,14 +1536,14 @@ class TestCutlassBackend(TestCase):
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
-    @unittest.skip("Needs fused scheduler node fusion support, (upcoming PR)")
     def test_evt_multi_output(self, op):
         class TestModel(torch.nn.Module):
             def forward(self, a, b, extra_args):
                 acc = a @ b
-                z = op(acc.relu(), *extra_args)
-                y = z + 1
-                return acc, y
+                z0 = acc.relu()
+                z = op(z0, *extra_args)
+                y = z + z0
+                return z, y
 
         M = 1024
         N = 512
@@ -1556,7 +1556,7 @@ class TestCutlassBackend(TestCase):
         ref_result = model(a, b, extra_args)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 2
         )
         torch.testing.assert_close(result, ref_result)
 
