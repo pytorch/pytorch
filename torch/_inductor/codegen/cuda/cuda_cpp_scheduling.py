@@ -162,9 +162,9 @@ class CUDACPPScheduling(BaseScheduling):
                         node, ComputedBuffer
                     )  # Not sure why we need to do this again
                     node.get_store_function()(CutlassEVTCodegen.get_index_vars(node))
-            src_code = render()
 
         with V.set_kernel_handler(kernel):
+            src_code = render()
             node_schedule = [template_node, *epilogue_nodes]
             kernel_name = self.define_kernel(src_code, node_schedule)
 
@@ -211,7 +211,6 @@ class CUDACPPScheduling(BaseScheduling):
         - bool: True if the given node can be fused with the epilogue, False otherwise.
 
         """
-
         why = WhyNoFuseNames(cuda_template_buffer.get_name(), node_to_fuse.get_name())
 
         ir_node_to_fuse = node_to_fuse.node
@@ -254,6 +253,9 @@ differs from {node_name}'s size: {ir_node_to_fuse.get_size()}"
         ):
             why("cutlass epilogue fusion is not enabled")
             return False
+        elif not cuda_template_buffer.supports_epilogue_fusion:
+            why("epilogue fusion is only supported for TMA-enabled gemm ops")
+            return False
 
         try:
             from torch._inductor.codegen.cuda.cutlass_python_evt import (
@@ -263,6 +265,7 @@ differs from {node_name}'s size: {ir_node_to_fuse.get_size()}"
             CutlassEVTCodegen.ir_to_evt_python_code(
                 cuda_template_buffer.get_name(),
                 existing_epilogue_nodes + [node_to_fuse],
+                OrderedSet(),
             )
 
         except NotImplementedError as e:
