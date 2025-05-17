@@ -2320,19 +2320,11 @@ def _lru_cache(
 # and is exclusively used for things that MUST be true (unlike guards,
 # which can evaluate False, in which case you just choose not to use
 # a particular specialization)
-@dataclass()
+@dataclass(frozen=True)
 class RuntimeAssert:
-    _expr: SympyBoolean
+    expr: SympyBoolean
     msg: str = field(repr=False)
     stack: CapturedTraceback = field(repr=False)
-    shape_env: ShapeEnv
-
-    @property
-    def expr(self) -> SympyBoolean:
-        # Whenever we access expr we want to replace specialized backed symbols with their corresponding
-        # specialized values.
-        return self._expr
-        # return self.shape_env.replace(self._expr, only_specialized_backed=True)
 
 
 # Used for printing SymExprs in compile_fx
@@ -4490,12 +4482,6 @@ class ShapeEnv:
     def is_unbacked_symint(self, symbol: sympy.Symbol) -> bool:
         """Check if a sympy symbol matches the naming convention for unbacked symbols"""
         return symbol_is_type(symbol, SymT.UNBACKED_INT)
-
-    def is_unbacked(self, symbol: sympy.Symbol) -> bool:
-        """Check if a sympy symbol matches the naming convention for unbacked symbols"""
-        return symbol_is_type(symbol, SymT.UNBACKED_INT) or symbol_is_type(
-            symbol, SymT.UNBACKED_FLOAT
-        )
 
     @record_shapeenv_event()
     def create_unbacked_symbool(self) -> SymBool:
@@ -7315,7 +7301,7 @@ class ShapeEnv:
             orig_expr = expr
             expr = canonicalize_bool_expr(expr)
             stack = CapturedTraceback.extract(skip=1)
-            ra = RuntimeAssert(expr, msg, stack, self)
+            ra = RuntimeAssert(expr, msg, stack)
             # TODO: Do this in a way that is less janky than int(s.name[1:])
             cands = sorted(
                 (s for s in expr.free_symbols if symbol_is_type(s, SymT.UNBACKED_INT)),

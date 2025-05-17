@@ -1677,8 +1677,8 @@ class OutputGraph(OutputGraphGuardsState):
     def remove_unused_graphargs(self) -> None:
         # NB: It's OK to drop GraphArg for symbols that ended up being
         # specialized iff they are not used in runtime assertions.  You don't
-        # even have to make a guard for it, because ShapeEnv produce_guards 
-        # operates on tracked_fakes, which never gets pruned.  
+        # even have to make a guard for it, because ShapeEnv produce_guards
+        # operates on tracked_fakes, which never gets pruned.
         # That being said, you'll get marginally better generated
         # guard code if you promote the guard into a Dynamo guard (since that
         # allows for the guard to be done using C++ guards.)  If we get
@@ -1782,10 +1782,6 @@ class OutputGraph(OutputGraphGuardsState):
         def update_used_symbols(used_symbols, fake: Union[torch.SymInt, torch.Tensor]):
             used_symbols |= free_symbols(fake)
 
-        # def placeholder_used_in_ras(node):
-        #     # access the orignal expr value and check if its a symbol that is used in a runtime assertion.
-        #     return node.meta["example_value"].node._expr in ras_symbols
-            
         recheck_placeholders = []
         for node in self.placeholders:
             binds_symbol = placeholder_binds_symbol(node) is not None
@@ -1796,8 +1792,8 @@ class OutputGraph(OutputGraphGuardsState):
             else:
                 if not node.users and not isinstance(
                     node.meta["grapharg"], BackwardStateGraphArg
-                ):  
-                        remove_unused(node)
+                ):
+                    remove_unused(node)
                 else:
                     # Register the free symbols as uses
                     arg = node.meta["grapharg"]
