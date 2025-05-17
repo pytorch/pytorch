@@ -487,6 +487,10 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   TORCH_INTERNAL_ASSERT((scale_a.numel() == 1 && scale_b.numel() == 1), "Now _scaled_mm only supports per-tensor scaling for CPU backend.");
+  TORCH_CHECK(
+      !scale_result ||
+          (scale_result->numel() == 1 && scale_result->scalar_type() == kFloat),
+      "scale_result must be a float scalar");
   TORCH_CHECK(!bias || bias->numel() == mat2.sizes()[1], "Bias must be size ", mat2.sizes()[1],
        " but got ", bias->numel());
 
@@ -504,6 +508,12 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
 
   float input_scale = scale_a.item<float>();
   float weight_scale = scale_b.item<float>();
+  float output_scale = float(1.0);
+  if (scale_result.has_value() &&
+      (*out_dtype == ScalarType::Float8_e4m3fn ||
+       *out_dtype == ScalarType::Float8_e5m2)) {
+    output_scale = scale_result.value().item<float>();
+  }
   auto src = at::native::itensor_view_from_dense(mat1_c);
   auto weight_t = at::native::itensor_view_from_dense(mat2_c);
   bool with_bias = bias.has_value();
@@ -550,6 +560,9 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
   if (weight_scale != 1.0f) {
     op_attr.set_scales_mask(DNNL_ARG_WEIGHTS, 0);
   }
+  if (output_scale != 1.0f) {
+    op_attr.set_scales_mask(DNNL_ARG_DST, 0);
+  }
 
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   auto engine = ideep::engine::cpu_engine();
@@ -573,11 +586,15 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
   }
   ideep::tensor src_scales_t = ideep::tensor(ideep::scale_t(1, input_scale));
   ideep::tensor wei_scales_t = ideep::tensor(ideep::scale_t(1, weight_scale));
+  ideep::tensor dst_scales_t = ideep::tensor(ideep::scale_t(1, output_scale));
 
   if (input_scale != 1.0f) {
     args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_scales_t});
   }
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, wei_scales_t});
+  if (output_scale != 1.0f) {
+    args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, dst_scales_t});
+  }
 
   primitive.execute(ideep::stream::default_stream(), args);
   return out;
