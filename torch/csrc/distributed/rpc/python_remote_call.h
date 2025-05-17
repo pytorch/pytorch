@@ -3,7 +3,6 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/distributed/rpc/types.h>
-#include <torch/csrc/jit/serialization/pickler.h>
 namespace torch::distributed::rpc {
 
 class TORCH_API PythonRemoteCall : public RpcCommandBase {
