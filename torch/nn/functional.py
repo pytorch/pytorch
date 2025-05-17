@@ -442,6 +442,11 @@ Args:
 )
 
 
+def _probability_checking(p):
+    if p < 0.0 or p > 1.0:
+        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+
+
 def fractional_max_pool2d_with_indices(
     input: Tensor,
     kernel_size: BroadcastingList2[int],
@@ -1428,8 +1433,7 @@ def dropout(
         return handle_torch_function(
             dropout, (input,), input, p=p, training=training, inplace=inplace
         )
-    if p < 0.0 or p > 1.0:
-        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+    _probability_checking(p)
     return (
         _VF.dropout_(input, p, training) if inplace else _VF.dropout(input, p, training)
     )
@@ -1449,8 +1453,7 @@ def alpha_dropout(
         return handle_torch_function(
             alpha_dropout, (input,), input, p=p, training=training, inplace=inplace
         )
-    if p < 0.0 or p > 1.0:
-        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+    _probability_checking(p)
     return (
         _VF.alpha_dropout_(input, p, training)
         if inplace
@@ -1482,8 +1485,7 @@ def dropout1d(
         return handle_torch_function(
             dropout1d, (input,), input, p=p, training=training, inplace=inplace
         )
-    if p < 0.0 or p > 1.0:
-        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+    _probability_checking(p)
     inp_dim = input.dim()
     if inp_dim not in (2, 3):
         raise RuntimeError(
@@ -1533,8 +1535,7 @@ def dropout2d(
         return handle_torch_function(
             dropout2d, (input,), input, p=p, training=training, inplace=inplace
         )
-    if p < 0.0 or p > 1.0:
-        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+    _probability_checking(p)
     inp_dim = input.dim()
     if inp_dim not in (3, 4):
         warn_msg = (
@@ -1592,8 +1593,7 @@ def dropout3d(
         return handle_torch_function(
             dropout3d, (input,), input, p=p, training=training, inplace=inplace
         )
-    if p < 0.0 or p > 1.0:
-        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+    _probability_checking(p)
     inp_dim = input.dim()
     if inp_dim not in (4, 5):
         warn_msg = (
@@ -1654,8 +1654,7 @@ def feature_alpha_dropout(
             training=training,
             inplace=inplace,
         )
-    if p < 0.0 or p > 1.0:
-        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+    _probability_checking(p)
     return (
         _VF.feature_alpha_dropout_(input, p, training)
         if inplace
