@@ -5943,9 +5943,7 @@ class ShapeEnv:
     @_lru_cache
     def replace(self, expr: _SympyT) -> _SympyT:
         """
-        Apply symbol replacements to any symbols in the given expression
-        If only_specialized_backed is set, only repalce backed symbols that
-        got specialized i.e: s0:10.
+        Apply symbol replacements to any symbols in the given expression.
         """
         replacements = {}
         for s in expr.free_symbols:
@@ -6384,9 +6382,6 @@ class ShapeEnv:
                     ),
                 },
             )
-
-            # when specializing to a constant, runtime assertions that uses a, need to
-            # be updated to remove a from them, since a will no longer be a graph input.
 
             for source in self.var_to_sources.get(a, []):
                 if user_tb:

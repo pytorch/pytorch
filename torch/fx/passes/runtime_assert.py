@@ -291,7 +291,7 @@ def insert_deferred_runtime_asserts(
                     if (
                         isinstance(symint, torch.SymInt)
                         and isinstance(symint.node, SymNode)
-                        # we access the original expr hence _expr and not expr. Since specializations can
+                        # Access the original expr hence _expr and not expr. Since specializations can
                         # override expr with specialized integers.
                         # using expr will result in missing some runtime assertions in the graph.
                         and isinstance(s := symint.node._expr, sympy.Symbol)
