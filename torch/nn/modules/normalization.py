@@ -5,6 +5,7 @@ from typing import Optional, Union
 import torch
 from torch import Size, Tensor
 from torch.nn import functional as F, init
+from torch.nn.modules._nn_docs import common_args
 from torch.nn.parameter import Parameter
 
 from ._functions import CrossMapLRN2d as _cross_map_lrn2d
@@ -134,6 +135,8 @@ class LayerNorm(Module):
             and zeros (for biases). Default: ``True``.
         bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
             :attr:`elementwise_affine` is ``True``). Default: ``True``.
+        {device}
+        {dtype}
 
     Attributes:
         weight: the learnable weights of the module of shape
@@ -358,6 +361,7 @@ class RMSNorm(Module):
         >>> rms_norm(input)
 
     """
+
     __constants__ = ["normalized_shape", "eps", "elementwise_affine"]
     normalized_shape: tuple[int, ...]
     eps: Optional[float]
