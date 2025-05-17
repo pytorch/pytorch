@@ -1562,6 +1562,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
+        combine_freevars_proxy = tuple(combine_lifted_freevars.keys())
 
         from torch._higher_order_ops.utils import (
             _has_potential_branch_input_alias,
@@ -1579,13 +1580,14 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             additional_fake = [
                 leaf.proxy.node.meta["example_value"].clone()
                 for leaf in additional_inputs_vars
-            ] + [
+            ]
+            lifted_fake = [
                 leaf.node.meta["example_value"].clone()
                 if isinstance(leaf.node.meta["example_value"], FakeTensor)
                 else leaf.node.meta["example_value"]
                 for leaf in combine_lifted_freevars.keys()
             ]
-            sub_args_fake = xs_fake + additional_fake
+            sub_args_fake = xs_fake + additional_fake + lifted_fake
             pre_dispatch = False
 
             fx = _maybe_fake_tracing(
