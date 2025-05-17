@@ -17,6 +17,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.value_ranges import ValueRanges
+from torch.utils._triton import has_triton_tma_device
 
 from .. import config
 from ..ir import (
@@ -1614,7 +1615,7 @@ def flex_attention(
     original_kernel_options = kernel_options.copy()
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
-
+    USE_TMA = has_triton_tma_device()
     for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0 or SPARSE_Q_BLOCK_SIZE % BLOCK_M != 0:
             if len(configs) == 1:
@@ -1642,8 +1643,7 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        # Disabling TMA by default, only explicit kernel_options supported for now
-        cur_kernel_options.setdefault("USE_TMA", False)
+        cur_kernel_options.setdefault("USE_TMA", USE_TMA)
 
         cur_kernel_options.setdefault("BLOCK_M", BLOCK_M)
         cur_kernel_options.setdefault("BLOCK_N", BLOCK_N)
