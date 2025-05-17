@@ -36,8 +36,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfTorchDynamo,
-    TEST_CUDA,
-    TEST_HPU,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -86,6 +84,7 @@ aot_eager_graph = aot_autograd(
 
 
 class TestDTensorCompile(torch._dynamo.test_case.TestCase):
+    device = torch.accelerator.current_accelerator()
     def setUp(self):
         super(
             type(self), self
@@ -103,7 +102,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
     @property
     def device_type(self) -> str:
-        return "cuda" if TEST_CUDA else "hpu" if TEST_HPU else "cpu"
+        return f"{self.device.type}" if self.device is not None else "cpu"
 
     @property
     def world_size(self) -> int:
@@ -122,9 +121,9 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = fn(x)
         res.to_local().sum().backward()
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipIf(not torch.accelerator.is_available(), "accelerator not available")
     def test_dtensor_basic_export(self):
-        mesh = DeviceMesh("cuda", torch.arange(self.world_size))
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         param = torch.randn(4, 4)
         param_x = DTensor.from_local(param, mesh, [Shard(0)], run_check=False)
@@ -150,10 +149,10 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         )
         self.assertExpectedInline(
             str(ep.graph_module.code).strip(),
-            """\
+            f"""\
 def forward(self, b_buffer, x):
     _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(x, dtype = torch.float64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default = None
-    to = torch.ops.aten.to.dtype_layout(x, dtype = torch.float64, layout = torch.strided, device = device(type='cuda'));  x = None
+    to = torch.ops.aten.to.dtype_layout(x, dtype = torch.float64, layout = torch.strided, device = device(type='{self.device_type}'));  x = None
     view_as = torch.ops.aten.view_as.default(to, to);  to = None
     dtensor___init__0 = self.dtensor___init__0
     dtensor_const_func_spec0 = self.dtensor_const_func_spec0
@@ -166,10 +165,10 @@ def forward(self, b_buffer, x):
 
         self.assertExpectedInline(
             str(ep.run_decompositions({}).graph_module.code).strip(),
-            """\
+            f"""\
 def forward(self, b_parametrizations_buffer_original0, x):
     _assert_tensor_metadata = torch.ops.aten._assert_tensor_metadata.default(x, None, None, torch.float64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata = None
-    _to_copy = torch.ops.aten._to_copy.default(x, dtype = torch.float64, layout = torch.strided, device = device(type='cuda', index=0));  x = None
+    _to_copy = torch.ops.aten._to_copy.default(x, dtype = torch.float64, layout = torch.strided, device = device(type='{self.device_type}', index=0));  x = None
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
     add = torch.ops.aten.add.Tensor(b_parametrizations_buffer_original0, view);  b_parametrizations_buffer_original0 = view = None
     view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
@@ -602,13 +601,13 @@ def forward(self, b_parametrizations_buffer_original0, x):
             out = layer_norm.permute(0, 2, 1)
             return out
 
-        x = torch.randn(4, 2, 4, requires_grad=True, device="cuda")
+        x = torch.randn(4, 2, 4, requires_grad=True, device=self.device_type)
         x_dt = DTensor.from_local(x, mesh, [Shard(1)], run_check=False)
 
-        y = torch.randn(4, requires_grad=True, device="cuda")
+        y = torch.randn(4, requires_grad=True, device=self.device_type)
         y_dt = DTensor.from_local(y, mesh, [Replicate()], run_check=False)
 
-        z = torch.randn(4, requires_grad=True, device="cuda")
+        z = torch.randn(4, requires_grad=True, device=self.device_type)
         z_dt = DTensor.from_local(z, mesh, [Replicate()], run_check=False)
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
@@ -705,7 +704,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         # pass in tensor as inputs/outputs, create DTensor and run redistribute
         # (allgather collective) inside the fn
         def fn(x_dt):
-            if x_dt.device_mesh.device_type == "cuda":
+            if x_dt.device_mesh.device_type == f"{self.device_type}":
                 return x_dt + 1
             else:
                 return x_dt + 2
@@ -838,7 +837,7 @@ def forward(self, primals_1):
 
         model = FakeTransformer().to(self.device_type)
 
-        tp_mesh = init_device_mesh("cuda", (2,), mesh_dim_names=("tp",))
+        tp_mesh = init_device_mesh(self.device_type, (2,), mesh_dim_names=("tp",))
 
         # apply sequence parallel
         parallel_plan = {
@@ -959,7 +958,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
         # 2-D mesh is [dp, tp]
         twod_mesh = init_device_mesh(
-            "cuda",
+            self.device_type,
             (data_parallel_size, self.world_size // data_parallel_size),
             mesh_dim_names=["dp", "tp"],
         )
@@ -1012,7 +1011,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
         # 2-D mesh is [dp, tp]
         mesh_2d = init_device_mesh(
-            "cuda", mesh_shape=(dp_degree, tp_degree), mesh_dim_names=("dp", "tp")
+            self.device_type, mesh_shape=(dp_degree, tp_degree), mesh_dim_names=("dp", "tp")
         )
 
         inp = torch.rand(20, 10, device=self.device_type)
@@ -1058,7 +1057,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @parametrize("use_ca", [True, False])
     def test_compile_dtensor_redistribute_backward(self, use_ca):
-        mesh = DeviceMesh(device_type="cuda", mesh=torch.arange(self.world_size))
+        mesh = DeviceMesh(device_type=self.device_type, mesh=torch.arange(self.world_size))
 
         def fn(x, y):
             dt = DTensor.from_local(x.reshape(2, 4), mesh, [Shard(0)], run_check=False)

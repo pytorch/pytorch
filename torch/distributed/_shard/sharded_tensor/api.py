@@ -636,7 +636,7 @@ class ShardedTensor(ShardedTensorBase):
         elif self._process_group._get_backend_name() == "gloo":
             current_device = torch.device("cpu")
         else:
-            current_device = torch.device(torch.cuda.current_device())
+            current_device = torch.device(torch.accelerator.current_device_index())
         current_dtype = self.dtype
         device_to = current_device
         dtype_to = current_dtype
@@ -662,10 +662,10 @@ class ShardedTensor(ShardedTensorBase):
             torch.device(device_to) if isinstance(device_to, (str, int)) else device_to
         )
 
-        if device_to.type == "cuda":
+        if torch.accelerator.is_available() and device_to.type == torch.accelerator.current_accelerator().type:
             # if device_to set to cuda, set to current device even
             # if user specify the device index.
-            current_idx = torch.cuda.current_device()
+            current_idx = torch.accelerator.current_device_index()
             if device_to.index != current_idx:
                 warnings.warn(
                     "ShardedTensor.to only move tensor to its current device"
