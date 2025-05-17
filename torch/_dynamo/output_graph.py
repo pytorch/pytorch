@@ -1687,12 +1687,12 @@ class OutputGraph(OutputGraphGuardsState):
 
         assert self.should_exit
 
-        # Preserve all symbols that appears in original expressions of a deferred_runtime_asserts.
-        # as place holders.
-        ras_symbols : set[sympy.Symbol] = set()
-        for assertion_list in self.shape_env.deferred_runtime_asserts.values():
-            for assertion in assertion_list:
-                ras_symbols |= free_symbols(assertion.expr)
+        # # Preserve all symbols that appears in original expressions of a deferred_runtime_asserts.
+        # # as place holders.
+        # ras_symbols : set[sympy.Symbol] = set()
+        # for assertion_list in self.shape_env.deferred_runtime_asserts.values():
+        #     for assertion in assertion_list:
+        #         ras_symbols |= free_symbols(assertion.expr)
 
         # Miniature DCE pass, but only for obviously trivial operations
         def is_static_true(b_node: fx.node.Argument):
@@ -1777,14 +1777,14 @@ class OutputGraph(OutputGraphGuardsState):
             self.remove_node(node)
             self.real_value_cache.pop(node, None)
 
-        used_symbols: set[sympy.Symbol] = ras_symbols
+        used_symbols: set[sympy.Symbol] = set()
 
         def update_used_symbols(used_symbols, fake: Union[torch.SymInt, torch.Tensor]):
             used_symbols |= free_symbols(fake)
 
-        def placeholder_used_in_ras(node):
-            # access the orignal expr value and check if its a symbol that is used in a runtime assertion.
-            return node.meta["example_value"].node._expr in ras_symbols
+        # def placeholder_used_in_ras(node):
+        #     # access the orignal expr value and check if its a symbol that is used in a runtime assertion.
+        #     return node.meta["example_value"].node._expr in ras_symbols
             
         recheck_placeholders = []
         for node in self.placeholders:
@@ -1794,7 +1794,7 @@ class OutputGraph(OutputGraphGuardsState):
                 if not node.users:
                     recheck_placeholders.append(node)
             else:
-                if not node.users and not placeholder_used_in_ras(node) and not isinstance(
+                if not node.users and not isinstance(
                     node.meta["grapharg"], BackwardStateGraphArg
                 ):  
                         remove_unused(node)
