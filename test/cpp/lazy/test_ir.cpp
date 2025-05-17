@@ -82,7 +82,7 @@ TEST(IrTest, MetaDataTest) {
   dummySourceLocation.file = "file";
   dummySourceLocation.function = "function";
   dummySourceLocation.line = 10;
-  GetPythonFramesFunction() = [&]() -> std::vector<SourceLocation> {
+  GetPythonFramesFunction() = [=]() -> std::vector<SourceLocation> {
     return {dummySourceLocation};
   };
   node = MakeNode<TestLeafNode>(1);
