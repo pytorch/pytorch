@@ -21,6 +21,7 @@ from torch.torch_version import TorchVersion
 
 from .. import config as inductor_config, ir
 from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
+from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphTemplate
 from ..ir import FlexibleLayout, ir_node_to_tensor, is_triton
@@ -714,6 +715,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
+        CKTileGemmTemplate.add_choices(choices, layout, [mat1, mat2])
 
     if use_cpp_gemm_template(layout, mat1, mat2):
         CppGemmTemplate.add_choices(

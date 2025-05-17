@@ -1442,8 +1442,16 @@ class rocm:
         os.environ.get("INDUCTOR_CK_BACKEND_GENERATE_TEST_RUNNER_CODE", "0") == "1"
     )
 
-    # Number of op instance choices to trade off between runtime perf and compilation time
+    # Deprecated, use CK and/or CK-tile specific settings
     n_max_profiling_configs: Optional[int] = None
+
+    # Number of op instance choices to trade off between runtime perf and compilation time
+    # For CK Kernels
+    ck_max_profiling_configs: Optional[int] = None
+
+    # Number of op instance choices to trade off between runtime perf and compilation time
+    # For CK-Tile Kernels
+    ck_tile_max_profiling_configs: Optional[int] = None
 
     # Flag to use a short list of CK instances which perform well across a variety of shapes.
     # Currently RCR and F16 only
