@@ -316,7 +316,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
     }
   } else {
     return at::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
-        x, scale, zero_point, fake_quant_on, qmin, qmax);
+        x, scale, zero_point, fake_quant_on.to(at::kLong), qmin, qmax);
   }
 }
 } // namespace at::native
