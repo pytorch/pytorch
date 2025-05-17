@@ -8675,6 +8675,15 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (op.full_name in {"cdouble", "cfloat", "chalf"}),
         name="unimplemented_view_as_real",
     ),
+    # https://github.com/pytorch/pytorch/issues/152962
+    XFailRule(
+        error_type=torch._dynamo.exc.UserError,
+        # Eq(27, u0) (unhinted: Eq(s27, u0)).  (Size-like symbols: u0)
+        error_msg="Could not guard on data-dependent expression",
+        op_match_fn=lambda device, op: op.full_name == "matmul",
+        sample_match_fn=lambda device, sample: "3D_noncontig_transposed_with_seqlen_cache" in sample.name,
+        name="3D_noncontig_transposed_with_seqlen_cache_matmul_compile_backward_issue",
+    ),
     *COMPILE_FORWARD_SKIPS_AND_XFAILS,
     *BACKWARD_SKIPS_AND_XFAILS,
 ]
