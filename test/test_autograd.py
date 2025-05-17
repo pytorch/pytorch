@@ -76,9 +76,9 @@ from torch.testing._internal.common_utils import (
     skipIfNoLapack,
     skipIfTorchDynamo,
     skipIfWindows,
+    skipIfXpu,
     slowTest,
     TestCase,
-    xfailIfTorchDynamo,
 )
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -7430,8 +7430,7 @@ for shape in [(1,), ()]:
         self.assertEqual(b_grad, c_grad)
         self.assertEqual(b_grad, d_grad)
 
-    # PYTORCH_TEST_WITH_DYNAMO=1 test fails on CI but can't repro locally
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127115")
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_checkpointing_without_reentrant_dataparallel(self):
         """
         Verifies gradient correctness when checkpoint without reentrant autograd
@@ -7489,8 +7488,6 @@ for shape in [(1,), ()]:
         # should only call hook once
         self.assertEqual(count, 1)
 
-    # https://github.com/pytorch/pytorch/issues/127115
-    @xfailIfTorchDynamo
     def test_checkpointing_without_reentrant_arbitrary_input_output(self):
         """
         Ensures checkpointing without reentrant autograd works with functions
@@ -13135,14 +13132,12 @@ class TestAutogradStreamSynchronization(TestCase):
         for _ in range(2):
             test()
 
-    # This fails because we currently sync to the default stream
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
     @skipIfMPS
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
-    @unittest.expectedFailure
     def test_consumer_to_single_producer_case_3_correctness_non_default_ambient_stream(
         self,
     ):
@@ -13316,7 +13311,6 @@ class TestAutogradStreamSynchronization(TestCase):
     # This test may spuriously fail on non-cuda accelerators (since we won't
     # be calling sleep)
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
-    @unittest.expectedFailure
     def test_side_stream_backward_overlap(self):
         # In case 2/3, we would designate the consumer as the accumulation
         # stream and naively, one might have the consumer wait for the producer
