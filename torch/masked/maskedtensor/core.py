@@ -2,10 +2,11 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import warnings
-from typing import Any
+from typing import Any, get_args
 from typing_extensions import TypeIs
 
 import torch
+from torch._prims_common import canonicalize_device, DeviceLikeType
 from torch.overrides import get_default_nowrap_functions
 
 
@@ -357,3 +358,17 @@ class MaskedTensor(torch.Tensor):
     @property
     def is_sparse(self):
         return self.is_sparse_coo() or self.is_sparse_csr()
+
+    def to(self, *args, **kwargs):
+        current_device = self._masked_data.device
+        device_to = current_device
+        if len(args) == 1:
+            arg = args[0]
+            if isinstance(arg, get_args(DeviceLikeType)):
+                device_to = canonicalize_device(arg)
+            elif isinstance(arg, torch.Tensor):
+                device_to = arg.device
+        else:
+            device_to = kwargs.get("device", current_device)
+        self._masked_mask = self._masked_mask.to(device=device_to)
+        return super().to(*args, **kwargs)
