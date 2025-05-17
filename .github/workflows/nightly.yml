@@ -34,7 +34,6 @@ jobs:
     with:
       runner: ${{ needs.get-label-type.outputs.label-type }}
       ref:    ${{ github.sha }}
-      run-url-lint: true
     secrets: inherit
 
   docs-build:
