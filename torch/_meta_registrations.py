@@ -6221,8 +6221,8 @@ def meta__efficient_attention_backward(
 def meta_scaled_mm(
     self: torch.Tensor,
     mat2: torch.Tensor,
-    scale_a: torch.Tensor,
-    scale_b: torch.Tensor,
+    scale_a: Optional[torch.Tensor],
+    scale_b: Optional[torch.Tensor],
     bias: Optional[torch.Tensor] = None,
     scale_result: Optional[torch.Tensor] = None,
     out_dtype: Optional[torch.dtype] = None,
@@ -7273,7 +7273,7 @@ def sigmoid(self: Tensor) -> Tensor:
     return torch.empty_like(self, dtype=result_dtype)
 
 
-def _compute_grouped_gemm_output_size(mat1, mat2, offs):
+def _compute_grouped_mm_output_size(mat1, mat2, offs):
     mat1_is_2d = mat1.dim() == 2
     mat2_is_2d = mat2.dim() == 2
 
@@ -7297,53 +7297,36 @@ def _compute_grouped_gemm_output_size(mat1, mat2, offs):
             return mat1.size(0), mat1.size(1), mat2.size(-1)
 
 
-@register_meta(aten._grouped_mm)
-@out_wrapper()
-def grouped_mm(
-    mat1: Tensor,
-    mat2: Tensor,
+def _meta_grouped_mm_common(
+    mat_a: Tensor,
+    mat_b: Tensor,
+    scale_a: Optional[torch.Tensor],
+    scale_b: Optional[torch.Tensor],
     offs: Optional[Tensor] = None,
     bias: Optional[Tensor] = None,
-    out_dtype: Optional[torch.dtype] = None,
-) -> Tensor:
-    torch._check(mat1.dim() == 2 or mat1.dim() == 3, lambda: "mat1 must be 2d or 3d")
-    torch._check(mat2.dim() == 2 or mat2.dim() == 3, lambda: "mat2 must be 2d or 3d")
-    torch._check(
-        (offs is not None) == (mat1.dim() == 2 or mat2.dim() == 2),
-        lambda: "Have to provide offsets if there is a 2d matrix, or no offset if both matrices are 3d",
-    )
-
-    if offs is not None:
-        torch._check(offs.dim() == 1, lambda: "offsets must be 1d")
-
-    out_dtype = out_dtype or mat1.dtype
-    torch._check(bias is None, lambda: "bias not supported yet")
-
-    out_size = _compute_grouped_gemm_output_size(mat1, mat2, offs)
-    out = mat1.new_empty(out_size, dtype=out_dtype)
-
-    return out
-
-
-@register_meta([aten._scaled_grouped_mm.default])
-def meta_scaled_grouped_mm(
-    mat_a: torch.Tensor,
-    mat_b: torch.Tensor,
-    scale_a: torch.Tensor,
-    scale_b: torch.Tensor,
-    offs: Optional[torch.Tensor] = None,
-    bias: Optional[torch.Tensor] = None,
     scale_result: Optional[torch.Tensor] = None,
     out_dtype: Optional[torch.dtype] = None,
     use_fast_accum: bool = False,
 ):
-    # Implementing all the checks from _scaled_grouped_mm_cuda() code
-    # in aten/src/ATen/native/cuda/Blas.cpp.
-
     torch._check(
-        mat_a.dtype == torch.float8_e4m3fn and mat_b.dtype == torch.float8_e4m3fn,
-        lambda: f"Expected inputs of E4M3 FP8 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
+        (scale_a is None) == (scale_b is None),
+        lambda: "Either both scale factors are given, or none",
     )
+
+    # Implementing all the checks from
+    # _grouped_mm_cuda()/_scaled_grouped_mm_cuda() code in
+    # aten/src/ATen/native/cuda/Blas.cpp.
+
+    if scale_a is None and scale_b is None:
+        torch._check(
+            mat_a.dtype == torch.bfloat16 and mat_b.dtype == torch.bfloat16,
+            lambda: f"Expected inputs of BF16 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
+        )
+    else:
+        torch._check(
+            mat_a.dtype == torch.float8_e4m3fn and mat_b.dtype == torch.float8_e4m3fn,
+            lambda: f"Expected inputs of E4M3 FP8 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
+        )
 
     torch._check(
         mat_a.dim() in [2, 3] and mat_b.dim() in [2, 3],
@@ -7406,48 +7389,54 @@ def meta_scaled_grouped_mm(
     check_valid_strides("mat_a", mat_a)
     check_valid_strides("mat_b", mat_b)
 
-    torch._check(
-        scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32,
-        lambda: "Both scale_a and scale_b must be float (fp32) tensors, but got scale_a.dtype={scale_a.dtype} and scale_b.dtype={scale_b.dtype}.",  # noqa: B950
-    )
+    if scale_a is not None and scale_b is not None:
+        torch._check(
+            scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32,
+            lambda: "Both scale_a and scale_b must be float (fp32) tensors, but got scale_a.dtype={scale_a.dtype} and scale_b.dtype={scale_b.dtype}.",  # noqa: B950
+        )
 
-    def check_scale(scale_name, scale, mat, scaled_dim, scale_multiplier=1):
-        if mat.dim() == 2:
-            torch._check(
-                scale.dim() == 1,
-                lambda: f"Expected {scale_name} to be 1D tensor, but got {scale.dim()}D tensor.",
-            )
-            torch._check(
-                scale.is_contiguous(),
-                lambda: f"Expected {scale_name} to be contiguous.",
-            )
-            torch._check(
-                scale.shape[0] == mat.shape[scaled_dim] * scale_multiplier,
-                lambda: f"Expected {scale_name} to have {mat.shape[scaled_dim] * scale_multiplier} elements, got {scale.shape[0]} elements.",  # noqa: B950
-            )
-        else:
-            torch._check(
-                scale.dim() == 2,
-                lambda: f"Expected {scale_name} to be 2D tensor, but got {scale.dim()}D tensor.",
-            )
-            torch._check(
-                scale.stride(1) == 1,
-                lambda: f"Expected {scale_name} to be contiguous in the last dimension.",
-            )
-            torch._check(
-                scale.shape[0] == mat.shape[0],
-                lambda: f"Expected {scale_name} batch dimension to be {mat.shape[0]}, got {scale.shape[0]}.",
-            )
-            torch._check(
-                scale.shape[1] == mat.shape[1 + scaled_dim],
-                lambda: f"Expected {scale_name} non-batch dimension to be {mat.shape[1 + scaled_dim]}, got {scale.shape[1]}.",
-            )
+        def check_scale(scale_name, scale, mat, scaled_dim, scale_multiplier=1):
+            if mat.dim() == 2:
+                torch._check(
+                    scale.dim() == 1,
+                    lambda: f"Expected {scale_name} to be 1D tensor, but got {scale.dim()}D tensor.",
+                )
+                torch._check(
+                    scale.is_contiguous(),
+                    lambda: f"Expected {scale_name} to be contiguous.",
+                )
+                torch._check(
+                    scale.shape[0] == mat.shape[scaled_dim] * scale_multiplier,
+                    lambda: f"Expected {scale_name} to have {mat.shape[scaled_dim] * scale_multiplier} elements, got {scale.shape[0]} elements.",  # noqa: B950
+                )
+            else:
+                torch._check(
+                    scale.dim() == 2,
+                    lambda: f"Expected {scale_name} to be 2D tensor, but got {scale.dim()}D tensor.",
+                )
+                torch._check(
+                    scale.stride(1) == 1,
+                    lambda: f"Expected {scale_name} to be contiguous in the last dimension.",
+                )
+                torch._check(
+                    scale.shape[0] == mat.shape[0],
+                    lambda: f"Expected {scale_name} batch dimension to be {mat.shape[0]}, got {scale.shape[0]}.",
+                )
+                torch._check(
+                    scale.shape[1] == mat.shape[1 + scaled_dim],
+                    lambda: f"Expected {scale_name} non-batch dimension to be {mat.shape[1 + scaled_dim]}, got {scale.shape[1]}.",
+                )
 
-    scale_multiplier = (
-        offs.shape[0] if offs is not None and mat_a_is_2d and mat_b_is_2d else 1
-    )
-    check_scale("scale_a", scale_a, mat_a, 0, scale_multiplier)
-    check_scale("scale_b", scale_b, mat_b, 1, scale_multiplier)
+        scale_multiplier = (
+            offs.shape[0] if offs is not None and mat_a_is_2d and mat_b_is_2d else 1
+        )
+        check_scale("scale_a", scale_a, mat_a, 0, scale_multiplier)
+        check_scale("scale_b", scale_b, mat_b, 1, scale_multiplier)
+
+        torch._check(
+            scale_result is None,
+            lambda: "Scale result tensor provided, but it is not supported yet.",
+        )
 
     if mat_a_is_2d or mat_b_is_2d:
         torch._check(
@@ -7479,9 +7468,55 @@ def meta_scaled_grouped_mm(
         lambda: "If output dtype provided, it must be torch.bfloat16.",
     )
 
-    out_size = _compute_grouped_gemm_output_size(mat_a, mat_b, offs)
+    out_size = _compute_grouped_mm_output_size(mat_a, mat_b, offs)
     out_dtype = out_dtype or mat_a.dtype
     return torch.empty(out_size, dtype=out_dtype, device=mat_a.device)
+
+
+@register_meta(aten._grouped_mm)
+@out_wrapper()
+def grouped_mm(
+    mat_a: Tensor,
+    mat_b: Tensor,
+    offs: Optional[Tensor] = None,
+    bias: Optional[Tensor] = None,
+    out_dtype: Optional[torch.dtype] = None,
+) -> Tensor:
+    return _meta_grouped_mm_common(
+        mat_a,
+        mat_b,
+        scale_a=None,
+        scale_b=None,
+        offs=offs,
+        bias=bias,
+        scale_result=None,
+        out_dtype=out_dtype,
+    )
+
+
+@register_meta([aten._scaled_grouped_mm.default])
+def meta_scaled_grouped_mm(
+    mat_a: torch.Tensor,
+    mat_b: torch.Tensor,
+    scale_a: torch.Tensor,
+    scale_b: torch.Tensor,
+    offs: Optional[torch.Tensor] = None,
+    bias: Optional[torch.Tensor] = None,
+    scale_result: Optional[torch.Tensor] = None,
+    out_dtype: Optional[torch.dtype] = None,
+    use_fast_accum: bool = False,
+):
+    return _meta_grouped_mm_common(
+        mat_a,
+        mat_b,
+        scale_a=scale_a,
+        scale_b=scale_b,
+        offs=offs,
+        bias=bias,
+        scale_result=scale_result,
+        out_dtype=out_dtype,
+        use_fast_accum=use_fast_accum,
+    )
 
 
 @register_meta(aten._softmax)
