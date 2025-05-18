@@ -793,6 +793,10 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ("hipErrorSetOnActiveProcess", CONV_TYPE, API_RUNTIME, HIP_UNSUPPORTED),
         ),
         (
+            "cudaErrorContextIsDestroyed",
+            ("hipErrorContextIsDestroyed", CONV_TYPE, API_RUNTIME),
+        ),
+        (
             "cudaErrorInvalidSurface",
             ("hipErrorInvalidSurface", CONV_TYPE, API_RUNTIME, HIP_UNSUPPORTED),
         ),
@@ -2920,6 +2924,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             "cuFuncSetBlockShape",
             ("hipFuncSetBlockShape", CONV_MODULE, API_DRIVER, HIP_UNSUPPORTED),
         ),
+        ("cudaLaunchKernel", ("hipLaunchKernel", CONV_MODULE, API_DRIVER)),
         (
             "cuFuncSetSharedSize",
             ("hipFuncSetSharedSize", CONV_MODULE, API_DRIVER, HIP_UNSUPPORTED),
