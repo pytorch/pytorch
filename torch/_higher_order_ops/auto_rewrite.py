@@ -63,8 +63,13 @@ def if_fake_tensor_mode(mode, pred, then_func, *operands):
 
 @if_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def if_dense(pred, then_func, *operands):
-    if pred:
-        return then_func(*operands)
+    # Note: we still wants to execute the subgraph even
+    # if pred is False. The reason is that we cannot
+    # evaluate the pred in fake tensor mode because of
+    # pred is data dependent. Therefore, the graph we
+    # captured assume the output is valid so we have
+    # to return the same output.
+    return then_func(*operands)
 
 
 if_op.py_autograd_impl(autograd_not_implemented)
