@@ -248,11 +248,11 @@ if(CAFFE2_USE_CUFILE)
   if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
       set_property(
           TARGET torch::cufile PROPERTY INTERFACE_LINK_LIBRARIES
-          CUDA::cuFile_static)
+          CUDA::cuFile_static CUDA::culibos)
   else()
       set_property(
           TARGET torch::cufile PROPERTY INTERFACE_LINK_LIBRARIES
-          CUDA::cuFile)
+          CUDA::cuFile CUDA::culibos)
   endif()
 else()
   message(STATUS "USE_CUFILE is set to 0. Compiling without cuFile support")
