@@ -116,7 +116,7 @@ inline C10_HOST_DEVICE bool _isinf(at::Float8_e5m2 val) {
 }
 
 inline C10_HOST_DEVICE bool _isinf(at::Float8_e4m3fn val) {
-  return at::_isinf(val.to(at::kFloat));
+  return at::_isinf(static_cast<float>(val));
 }
 
 inline C10_HOST_DEVICE bool _isinf(at::Float8_e5m2fnuz val [[maybe_unused]]) {
@@ -124,7 +124,7 @@ inline C10_HOST_DEVICE bool _isinf(at::Float8_e5m2fnuz val [[maybe_unused]]) {
 }
 
 inline C10_HOST_DEVICE bool _isinf(at::Float8_e4m3fnuz val) {
-  return at::_isinf(val.to(at::kFloat));
+  return at::_isinf(static_cast<float>(val));
 }
 
 template <typename T>

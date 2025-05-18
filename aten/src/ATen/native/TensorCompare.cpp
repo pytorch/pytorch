@@ -454,7 +454,7 @@ Tensor isinf(const Tensor& self) {
   }
 
   if (self.scalar_type() == at::ScalarType::Float8_e4m3fn ||
-  self.scalar_type() == at::ScalarType::Float8_e4m3fnuz) {
+      self.scalar_type() == at::ScalarType::Float8_e4m3fnuz) {
     return at::isinf(self.to(at::kFloat));
   }
 
@@ -476,7 +476,7 @@ Tensor isfinite(const Tensor& self) {
   }
 
   if (self.scalar_type() == at::ScalarType::Float8_e4m3fn ||
-  self.scalar_type() == at::ScalarType::Float8_e4m3fnuz) {
+      self.scalar_type() == at::ScalarType::Float8_e4m3fnuz) {
     return at::isfinite(self.to(at::kFloat));
   }
 
