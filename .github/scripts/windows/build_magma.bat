@@ -17,7 +17,6 @@ if errorlevel 1 exit /b 1
 
 set "PATH=C:\Tools;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUVER%\bin;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUVER%\libnvvp;%PATH%"
 set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUVER%
-set NVTOOLSEXT_PATH=C:\Program Files\NVIDIA Corporation\NvToolsExt
 
 mkdir magma_cuda%CUVER_NODOT%
 cd magma_cuda%CUVER_NODOT%
