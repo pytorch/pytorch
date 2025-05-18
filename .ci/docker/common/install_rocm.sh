@@ -126,7 +126,7 @@ install_centos() {
   fi
 
   if [[ $OS_VERSION == 9 ]]; then
-      local rocm_baseurl="invalid-url"
+      local rocm_baseurl="https://repo.radeon.com/rocm/rhel9/${ROCM_VERSION}/main/"
   else
       local rocm_baseurl="http://repo.radeon.com/rocm/yum/${ROCM_VERSION}/main"
   fi
