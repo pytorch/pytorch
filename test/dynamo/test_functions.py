@@ -37,6 +37,7 @@ from torch.nn import functional as F
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    make_dynamo_test,
     parametrize,
 )
 
@@ -52,6 +53,10 @@ flag = True
 
 
 class CustomDictSubclass(collections.OrderedDict):
+    pass
+
+
+class SetSubclass(set):
     pass
 
 
@@ -2045,6 +2050,48 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x = torch.rand(4)
         self.assertEqual(fn(x), opt_fn(x))
         self.assertEqual(len(s), 3)
+
+    @parametrize("_type", [set, frozenset, SetSubclass], name_fn=lambda x: x.__name__)
+    @parametrize("op", ["and_", "or_", "sub", "xor"])
+    @make_dynamo_test
+    def test_set_binary_ops(self, _type, op):
+        s1 = _type({"a", "b", "c"})
+        s2 = _type({"b", "c", "d"})
+        set_op = {
+            "and_": "intersection",
+            "or_": "union",
+            "sub": "difference",
+            "xor": "symmetric_difference",
+        }.get(op)
+        r1 = getattr(s1, set_op)(s2)
+        r2 = getattr(operator, op)(s1, s2)
+        assert r1 == r2
+
+    @parametrize("_type", [set, SetSubclass], name_fn=lambda x: x.__name__)
+    @parametrize("op", ["iand", "ior", "isub", "ixor"])
+    @make_dynamo_test
+    def test_set_inplace_binary_ops(self, _type, op):
+        s1 = _type({"a", "b", "c"})
+        s2 = _type({"b", "c", "d"})
+        set_op = {
+            "iand": "intersection_update",
+            "ior": "update",
+            "isub": "difference_update",
+            "ixor": "symmetric_difference_update",
+        }.get(op)
+        r1 = s1.copy()
+        r2 = s1.copy()
+        getattr(r1, set_op)(s2)
+        getattr(operator, op)(r2, s2)
+        assert r1 == r2
+
+    @parametrize("_type", [set, frozenset, SetSubclass], name_fn=lambda x: x.__name__)
+    @make_dynamo_test
+    def test_set___eq__(self, _type):
+        s1 = _type({"a", "b", "c"})
+        s2 = _type({"b", "c", "d"})
+        assert s1 == s1
+        assert s1 != s2
 
     @make_test
     def test_tuple_iadd(a, b):

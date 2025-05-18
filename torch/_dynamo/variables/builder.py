@@ -272,7 +272,6 @@ from .user_defined import (
     UserDefinedExceptionClassVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
-    UserDefinedSetVariable,
     UserDefinedTupleVariable,
 )
 
