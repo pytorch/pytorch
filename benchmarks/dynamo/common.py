@@ -1700,8 +1700,8 @@ def maybe_snapshot_memory(should_snapshot_memory, suffix):
                         f"{output_filename.rstrip('.csv')}_{suffix}.pickle",
                     )
                 )
-            except Exception:
-                log.exception("Failed to save memory snapshot")
+            except Exception as e:
+                log.error("Failed to save memory snapshot, %s", e)
 
             torch.cuda.memory._record_memory_history(enabled=None)
 
@@ -2742,7 +2742,7 @@ class BenchmarkRunner:
         try:
             shutil.move("repro.py", f"{repro_dir}/{name}_repro.py")
         except OSError:
-            log.exception("Could not find repro script for model %s", name)
+            log.error("Could not find repro script for model %s", name)
         else:
             log.info(
                 "Repro script for model %s with minified graph saved to %s",

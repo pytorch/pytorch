@@ -140,7 +140,8 @@ struct VecReduceAllSIMD<float, std::plus<Vectorized<float>>> {
     return vaddvq_f32(acc_vec);
   }
 };
-#endif // defined(__aarch64__)
+#endif // defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
+       // && !defined(CPU_CAPABILITY_SVE)
 
 #if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && \
     defined(CPU_CAPABILITY_SVE256)
@@ -166,7 +167,8 @@ struct VecReduceAllSIMD<float, Op> {
     return svlasta(svpfalse(), v);
   }
 };
-#endif // defined(__aarch64__)
+#endif // defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
+       // && defined(CPU_CAPABILITY_SVE256)
 
 template <typename scalar_t, typename Op>
 inline scalar_t vec_reduce_all(
