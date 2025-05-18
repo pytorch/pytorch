@@ -156,3 +156,9 @@ def convert_conv3d_weight_memory_format(
     for child in module.children():
         convert_conv3d_weight_memory_format(child, memory_format)
     return module
+
+
+__all__ = [
+    "convert_conv2d_weight_memory_format",
+    "convert_conv3d_weight_memory_format",
+]
