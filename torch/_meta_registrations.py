@@ -6221,8 +6221,8 @@ def meta__efficient_attention_backward(
 def meta_scaled_mm(
     self: torch.Tensor,
     mat2: torch.Tensor,
-    scale_a: Optional[torch.Tensor],
-    scale_b: Optional[torch.Tensor],
+    scale_a: torch.Tensor,
+    scale_b: torch.Tensor,
     bias: Optional[torch.Tensor] = None,
     scale_result: Optional[torch.Tensor] = None,
     out_dtype: Optional[torch.dtype] = None,
