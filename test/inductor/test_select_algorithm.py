@@ -249,6 +249,7 @@ class TestSelectAlgorithm(TestCase):
 
     @expectedFailureDynamicWrapper
     @patches
+    @skipIfXpu(msg="https://github.com/intel/intel-xpu-backend-for-triton/issues/4232")
     def test_convolution1(self):
         @torch.compile
         def foo(x, w, b):
@@ -264,11 +265,6 @@ class TestSelectAlgorithm(TestCase):
                 groups=1,
             )
 
-        if GPU_TYPE == "xpu":
-            patcher = patch.object(
-                select_algorithm, "VERIFY", dict(atol=1e-3, rtol=1e-3)
-            )
-            foo = patcher(foo)
         foo(
             torch.randn(2, 33, 34, 41, device=GPU_TYPE),
             torch.randn(34, 33, 3, 3, device=GPU_TYPE),
