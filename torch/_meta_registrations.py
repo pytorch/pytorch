@@ -7312,20 +7312,21 @@ def _meta_grouped_mm_common(
         (scale_a is None) == (scale_b is None),
         lambda: "Either both scale factors are given, or none",
     )
+    scaled = scale_a is not None and scale_b is not None
 
     # Implementing all the checks from
     # _grouped_mm_cuda()/_scaled_grouped_mm_cuda() code in
     # aten/src/ATen/native/cuda/Blas.cpp.
 
-    if scale_a is None and scale_b is None:
-        torch._check(
-            mat_a.dtype == torch.bfloat16 and mat_b.dtype == torch.bfloat16,
-            lambda: f"Expected inputs of BF16 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
-        )
-    else:
+    if scaled:
         torch._check(
             mat_a.dtype == torch.float8_e4m3fn and mat_b.dtype == torch.float8_e4m3fn,
             lambda: f"Expected inputs of E4M3 FP8 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
+        )
+    else:
+        torch._check(
+            mat_a.dtype == torch.bfloat16 and mat_b.dtype == torch.bfloat16,
+            lambda: f"Expected inputs of BF16 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
         )
 
     torch._check(
@@ -7345,22 +7346,24 @@ def _meta_grouped_mm_common(
         lambda: f"Expected mat_b.shape[-2] and mat_b.shape[-1] to be both divisble by 16 but got {mat_b.shape[-2]} and {mat_b.shape[-1]}",  # noqa: B950
     )
 
-    def is_row_major(mat):
-        mat_stride = mat.stride()
-        return mat_stride[-2] > 1 and mat_stride[-1] == 1
+    if scaled:
 
-    def is_col_major(mat):
-        mat_stride = mat.stride()
-        return mat_stride[-2] == 1 and mat_stride[-1] > 1
+        def is_row_major(mat):
+            mat_stride = mat.stride()
+            return mat_stride[-2] > 1 and mat_stride[-1] == 1
 
-    torch._check(
-        is_row_major(mat_a),
-        lambda: f"Expected mat_a tensor to be row major in the last two dimensions, got strides {mat_a.stride()[-2:]}",
-    )
-    torch._check(
-        is_col_major(mat_b),
-        lambda: f"Expectedmat_b tensor to be column major in the last two dimensions, got strides {mat_b.stride()[-2:]}",
-    )
+        def is_col_major(mat):
+            mat_stride = mat.stride()
+            return mat_stride[-2] == 1 and mat_stride[-1] > 1
+
+        torch._check(
+            is_row_major(mat_a),
+            lambda: f"Expected mat_a tensor to be row major in the last two dimensions, got strides {mat_a.stride()[-2:]}",
+        )
+        torch._check(
+            is_col_major(mat_b),
+            lambda: f"Expected mat_b tensor to be column major in the last two dimensions, got strides {mat_b.stride()[-2:]}",
+        )
 
     def check_valid_strides(mat_name, mat):
         end_dim = mat.dim() - 1
