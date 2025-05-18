@@ -1295,6 +1295,9 @@ class aot_inductor:
     # Experimental.  Controls automatic precompiling of common AOTI include files.
     precompile_headers: bool = not is_fbcode()
 
+    # Embed generated .cubin files into the .so
+    embed_cubin: bool = False
+
 
 class cuda:
     """Settings for cuda backend, today this consists of cutlass"""
