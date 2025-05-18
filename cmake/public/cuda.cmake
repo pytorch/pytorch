@@ -1,9 +1,6 @@
 # ---[ cuda
 
-# Poor man's include guard
-if(TARGET torch::cudart)
-  return()
-endif()
+include_guard(GLOBAL)
 
 # sccache is only supported in CMake master and not in the newest official
 # release (3.11.3) yet. Hence we need our own Modules_CUDA_fix to enable sccache.
@@ -151,12 +148,6 @@ endif()
 # libraries installed. This flag should only be used for binary builds, so
 # end-users should never have this flag set.
 
-# cuda
-add_library(caffe2::cuda INTERFACE IMPORTED)
-set_property(
-    TARGET caffe2::cuda PROPERTY INTERFACE_LINK_LIBRARIES
-    CUDA::cuda_driver)
-
 # cudart
 add_library(torch::cudart INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
@@ -293,9 +284,15 @@ endif()
 
 # nvrtc
 add_library(caffe2::nvrtc INTERFACE IMPORTED)
-set_property(
-    TARGET caffe2::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
-    CUDA::nvrtc caffe2::cuda)
+if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
+  set_property(
+      TARGET caffe2::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
+      CUDA::nvrtc_static)
+else()
+  set_property(
+      TARGET caffe2::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
+      CUDA::nvrtc)
+endif()
 
 # Add onnx namepsace definition to nvcc
 if(ONNX_NAMESPACE)
