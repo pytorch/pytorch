@@ -277,7 +277,9 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
     ) -> bool:
         return all(
             sympy.Eq(l, r) or sympy.Eq(l, 0) or sympy.Eq(r, 0)
-            for l, r in (zip(left, right))
+            for l, r in (
+                itertools.zip_longest(reversed(left), reversed(right), fillvalue=1)
+            )  # fill with non-zero to verify the other side is zero
         )
 
     def _render_input_signature(self) -> str:

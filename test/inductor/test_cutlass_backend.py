@@ -1585,6 +1585,38 @@ class TestCutlassBackend(TestCase):
         )
         torch.testing.assert_close(result, ref_result)
 
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    def test_evt_dynamic_batch_size(self):
+        op = torch.add
+
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, extra_args):
+                acc = a @ b
+                return op(acc.relu(), *extra_args)
+
+        B = 3
+        M = 1024
+        N = 512
+        K = 512
+
+        def run_model(B, M, N, K):
+            a = torch.ones(B, M, K).cuda().half()
+            b = torch.ones(B, K, N).cuda().half()
+            extra_args = gen_args(op, (M, N))
+            model = TestModel().cuda()
+
+            result = torch.compile(model)(a, b, extra_args)
+            ref_result = model(a, b, extra_args)
+
+            self.assertEqual(
+                torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+            )
+            torch.testing.assert_close(result, ref_result)
+
+        run_model(B, M, N, K)
+        run_model(B + 1, M, N, K)
+
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
