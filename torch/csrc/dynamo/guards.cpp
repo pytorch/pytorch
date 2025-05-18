@@ -1933,7 +1933,8 @@ class SET_CONTAINS : public LeafGuard {
         _item(std::move(item)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    int result = PySet_Check(value) && PySet_Contains(value, _item.ptr());
+    int result = (PySet_Check(value) || PyFrozenSet_Check(value)) &&
+        PySet_Contains(value, _item.ptr());
     if (result == -1) {
       PyErr_Clear();
       return false;
@@ -4178,7 +4179,11 @@ class SetGetItemGuardAccessor : public GuardAccessor {
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
-    PyObject* x = PyList_GetItem(obj, _index); // borrowed ref
+    PyObject* PyDict = (PyObject*)&PyDict_Type;
+    PyObject* dict =
+        PyObject_CallMethod(PyDict, "fromkeys", "OO", obj, Py_None);
+    PyObject* keys_list = PyMapping_Keys(dict);
+    PyObject* x = PyList_GetItem(keys_list, _index); // borrowed ref
     if (x == nullptr) {
       PyErr_Clear();
       return GuardDebugInfo(

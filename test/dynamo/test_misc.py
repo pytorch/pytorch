@@ -9046,30 +9046,157 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(result, eager_result)
 
-    def test_input_set_graph_break(self):
-        def foo(x):
-            return x.pop() * x.pop()
+    def test_set_recompile_on_key_pop(self):
+        s = {
+            torch._C._set_grad_enabled,
+            torch.amp._enter_autocast,
+            torch.amp._exit_autocast,
+        }
 
-        x = torch.randn(10, 10)
-        y = torch.randn(10, 10)
+        cnts = torch._dynamo.testing.CompileCounter()
 
-        counter = CompileCounter()
+        def fn(x, s):
+            if torch.amp._exit_autocast in s:
+                return x.sin()
+            return x.cos()
 
-        inp = {x, x, x, x, y, y}
-        foo = torch.compile(foo, backend=counter, fullgraph=True)
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x, s)
+        opt_fn(x, s)
+        self.assertEqual(res, fn(x, s))
+        # No recompilation
+        self.assertEqual(cnts.frame_count, 1)
 
-        # There's a lot of stuff about sets that cannot work without a good deal of exertion on our part.
-        # Specifically, getting a set as input won't ever work with how GetItemSource works (Can't arbitrary access set contents)
-        # and so the guard story for the objects passed into input just isn't there atm.
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "Unsupported method call",
-        ):
-            foo(inp)
+        # Pop a value
+        s.remove(torch.amp._exit_autocast)
 
-        foo = torch.compile(foo, backend=counter, fullgraph=False)
-        foo(inp)
-        self.assertEqual(counter.frame_count, 1)
+        res = opt_fn(x, s)
+        # Check recompilation
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(res, fn(x, s))
+
+    def test_set_recompile_on_key_change(self):
+        s = {
+            torch._C._set_grad_enabled,
+            torch.amp._enter_autocast,
+            torch.amp._exit_autocast,
+        }
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, s):
+            if torch.amp._exit_autocast in s:
+                return x.sin()
+            return x.cos()
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x, s)
+        opt_fn(x, s)
+        self.assertEqual(res, fn(x, s))
+        # No recompilation
+        self.assertEqual(cnts.frame_count, 1)
+
+        # Pop a value
+        s.remove(torch.amp._exit_autocast)
+        # Add a different value
+        s.add(torch._C._set_autograd_fallback_mode)
+
+        res = opt_fn(x, s)
+        # Check recompilation
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(res, fn(x, s))
+
+    def test_set_guard_on_keys_change(self):
+        # This test guarantee that we're not triggering any of the dict guards
+        # on sets
+        s = {
+            torch._C._set_grad_enabled,
+            torch.amp._enter_autocast,
+            torch.amp._exit_autocast,
+        }
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, s):
+            for e in s:
+                x = x * len(str(e))
+            return x
+
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        opt_fn(torch.randn(4), s)
+        opt_fn(torch.randn(4), s)
+        # No recompilation
+        self.assertEqual(cnts.frame_count, 1)
+
+        # pop and add the same item
+        s.remove(torch.amp._exit_autocast)
+        s.add(torch.amp._exit_autocast)
+
+        x = torch.randn(4)
+        res = opt_fn(x, s)
+        # Check Dynamo don't recompile
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(res, fn(x, s))
+
+    def test_set_guard_on_keys_change_2(self):
+        # This test guarantee that we're not triggering any of the dict guards
+        # on sets
+        class Int(int):
+            def __init__(self, x):
+                self.x = x
+
+        s = {Int(1), Int(2), Int(3)}
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, s):
+            for e in s:
+                x *= e.x
+            return x
+
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        opt_fn(torch.randn(4), s)
+        opt_fn(torch.randn(4), s)
+        # No recompilation
+        self.assertEqual(cnts.frame_count, 1)
+
+        # pop and add the same item
+        e = s.pop()
+        e.x = 100
+        s.add(e)
+
+        x = torch.randn(4)
+        res = opt_fn(x, s)
+        # Check Dynamo recompiles
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(res, fn(x, s))
+
+    # def test_input_set_graph_break(self):
+    #     def foo(x):
+    #         return x.pop() * x.pop()
+
+    #     x = torch.randn(10, 10)
+    #     y = torch.randn(10, 10)
+
+    #     counter = CompileCounter()
+
+    #     inp = {x, x, x, x, y, y}
+    #     foo = torch.compile(foo, backend=counter, fullgraph=True)
+
+    #     # There's a lot of stuff about sets that cannot work without a good deal of exertion on our part.
+    #     # Specifically, getting a set as input won't ever work with how GetItemSource works (Can't arbitrary access set contents)
+    #     # and so the guard story for the objects passed into input just isn't there atm.
+    #     with self.assertRaisesRegex(
+    #         torch._dynamo.exc.Unsupported,
+    #         "Unsupported method call",
+    #     ):
+    #         foo(inp)
+
+    #     foo = torch.compile(foo, backend=counter, fullgraph=False)
+    #     foo(inp)
+    #     self.assertEqual(counter.frame_count, 1)
 
     def test_reconstruct_set_across_graph_break(self):
         def foo(x, y):
