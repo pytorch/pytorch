@@ -70,11 +70,12 @@ function install_rhel() {
     # To add the online network package repository for the GPU Driver
     dnf config-manager --add-repo \
         https://repositories.intel.com/gpu/rhel/${VERSION_ID}${XPU_DRIVER_VERSION}/unified/intel-gpu-${VERSION_ID}.repo
+    ONEAPI_BASEURL="https://yum.repos.intel.com/oneapi"  # @lint-ignore
     # To add the online network network package repository for the Intel Support Packages
     tee > /etc/yum.repos.d/oneAPI.repo << EOF
 [oneAPI]
 name=Intel for Pytorch GPU dev repository
-baseurl=https://yum.repos.intel.com/oneapi
+baseurl=${ONEAPI_BASEURL}
 enabled=1
 gpgcheck=1
 repo_gpgcheck=1
@@ -118,7 +119,7 @@ function install_sles() {
         https://repositories.intel.com/gpu/sles/${VERSION_SP}${XPU_DRIVER_VERSION}/unified/intel-gpu-${VERSION_SP}.repo
     rpm --import https://repositories.intel.com/gpu/intel-graphics.key
     # To add the online network network package repository for the Intel Support Packages
-    zypper addrepo https://yum.repos.intel.com/oneapi oneAPI
+    zypper addrepo https://yum.repos.intel.com/oneapi oneAPI  # @lint-ignore
     rpm --import https://yum.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB
 
     # The xpu-smi packages
