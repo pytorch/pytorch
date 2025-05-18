@@ -170,7 +170,9 @@ void _record_memory_history(
     when = c10::cuda::CUDACachingAllocator::RecordContext::STATE;
   }
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
-  _initRecordAnnotations();
+  if (enabled) {
+    _initRecordAnnotations();
+  }
   if (compileContext) {
     _initCompileContexts();
   }
