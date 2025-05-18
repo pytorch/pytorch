@@ -3,6 +3,8 @@ import importlib
 import os
 import sys
 
+import numpy as np
+
 import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes
@@ -132,7 +134,7 @@ class MPSBasicTests(TestCase):
             "chebyshev_polynomial_u",
             "chebyshev_polynomial_v",
             "chebyshev_polynomial_w",
-            "hermite_polynomial_h",
+            "hermite_polynomial_he",
         ],
     )
     def test_pointwise_binary_op(self, op_name):
@@ -151,6 +153,20 @@ class MPSBasicTests(TestCase):
             return x
 
         self.common(inc_, (torch.rand(1024),))
+
+    def test_rms_norm_nograd(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/150629
+        def fn(x, w):
+            with torch.no_grad():
+                return torch.nn.functional.rms_norm(x, x.shape, w)
+
+        self.common(fn, (torch.rand(10), torch.ones(10)))
+
+    def test_compile_numpy_scalar(self):
+        def fn(x, y):
+            return x / y
+
+        self.common(fn, (torch.rand(10), np.exp(0.3)))
 
 
 if __name__ == "__main__":

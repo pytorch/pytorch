@@ -92,6 +92,8 @@ from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
+from .graph_utils import _get_flat_args
+
 
 if typing.TYPE_CHECKING:
     from collections.abc import (
@@ -112,7 +114,7 @@ except ModuleNotFoundError:
 try:
     import torch._logging
     import torch._numpy as tnp
-    from torch._guards import detect_fake_mode  # noqa: F401n
+    from torch._guards import detect_fake_mode  # noqa: F401
     from torch._logging import LazyString
 
     from . import config
@@ -608,6 +610,9 @@ class CompileEventLogger:
         method_fn(*args, **kwargs)
 
 
+_dynamo_timed_tls = threading.local()
+
+
 @contextmanager
 def dynamo_timed(
     key: str,
@@ -616,7 +621,6 @@ def dynamo_timed(
     log_pt2_compile_event: bool = False,
     metadata: Optional[dict[str, object]] = None,
     dynamo_compile_column_us: Optional[str] = None,
-    dynamo_compile_runtime_column_us: Optional[str] = None,
     compile_id: Optional[CompileId] = None,
     is_backward: Optional[bool] = None,
     log_waitcounter: bool = False,
@@ -655,9 +659,6 @@ def dynamo_timed(
     - dynamo_compile_column_us: If provided, updates the specified CompilationMetrics
       field to be logged to dyname_compile column. We expect all columns to be _us;
       therefore, the field name must end with "_us".
-    - dynamo_compile_runtime_column_us: Like 'dynamo_compile_column_us', but should
-      be used for those columns captured outside of a compile context, e.g.,
-      runtime autotuning.
     - compile_id: In the typical case, this parameter should not be needed. Use to
       supply the compile_id for those cases where we want to log a compile_id where
       it's not naturally available, e.g., for runtime autotuning.
@@ -666,13 +667,6 @@ def dynamo_timed(
       that support it.
     - log_waitcounter: If set, we'll log a waitcounter of the form "pytorch.dynamo_timed.{key}"
     """
-    # We're standardizing on microseconds for dynamo_compile timings.
-    if dynamo_compile_column_us is not None:
-        assert dynamo_compile_column_us.endswith("_us")
-
-    # Only one of these should be set.
-    assert dynamo_compile_column_us is None or dynamo_compile_runtime_column_us is None
-
     if phase_name:
         event_name = phase_name
         fn_name = key
@@ -697,21 +691,34 @@ def dynamo_timed(
         event_name, start_ns, event_metadata, log_pt2_compile_event, compile_id
     )
 
-    cx_managers: list[typing.Any] = [
+    cx_mgrs: list[typing.Any] = [
         torch.profiler.record_function(f"{key} (dynamo_timed)")
     ]
-    wait_counter_name = key
-    if waitcounter_name_override:
-        wait_counter_name = waitcounter_name_override
-
     if log_waitcounter:
-        cx_managers.append(
-            _WaitCounter(f"pytorch.wait_counter.{wait_counter_name}").guard()
-        )
+        wc_name = waitcounter_name_override if waitcounter_name_override else key
+        cx_mgrs.append(_WaitCounter(f"pytorch.wait_counter.{wc_name}").guard())
+
+    is_compile_time = torch._guards.CompileContext.current_compile_id() is not None
+    if dynamo_compile_column_us:
+        # We're standardizing on microseconds for dynamo_compile timings.
+        assert dynamo_compile_column_us.endswith("_us")
+
+        # Track nested dynamo_timed calls that update CompilationMetrics so we can
+        # bump a total duration only for the outermost metric.
+        if not hasattr(_dynamo_timed_tls, "depth"):
+            _dynamo_timed_tls.depth = 0
+        _dynamo_timed_tls.depth += 1
+
+        # The corresponding WaitCounters that we bump for all overheads
+        if _dynamo_timed_tls.depth == 1:
+            cx_mgrs.append(_WaitCounter("pytorch.wait_counter.dynamo_compile").guard())
+            if not is_compile_time:
+                runtime_wc = "pytorch.wait_counter.compile_runtime_overheads"
+                cx_mgrs.append(_WaitCounter(runtime_wc).guard())
 
     try:
         with contextlib.ExitStack() as stack:
-            for cx in cx_managers:
+            for cx in cx_mgrs:
                 stack.enter_context(cx)
             yield
     finally:
@@ -722,11 +729,6 @@ def dynamo_timed(
             event_name, end_ns, {}, start_ns, log_pt2_compile_event, compile_id
         )
         if dynamo_compile_column_us:
-            metrics_context = get_metrics_context()
-            if metrics_context.in_progress():
-                metrics_context.increment(
-                    dynamo_compile_column_us, time_spent_ns // 1000
-                )
             # TODO: the events that we capture in calculate_time_spent() seem a little
             # arbitrary. Currently, it's only those fields that are present in
             # CompilationMetrics (but note that we accumulate by the associated event
@@ -734,17 +736,27 @@ def dynamo_timed(
             # this way?
             cumulative_time_spent_ns[event_name] += time_spent_ns
 
-        if dynamo_compile_runtime_column_us:
-            get_runtime_metrics_context().increment(
-                dynamo_compile_runtime_column_us,
-                time_spent_ns // 1000,
-                extra={
-                    "compile_id": compile_id,
-                    "is_runtime": True,
-                    "is_forward": not is_backward,
-                },
-            )
-            cumulative_time_spent_ns[event_name] += time_spent_ns
+            # Bump the total duration for every outer event.
+            _dynamo_timed_tls.depth -= 1
+            is_outer_event = _dynamo_timed_tls.depth == 0
+
+            duration_us = time_spent_ns // 1000
+            if is_compile_time:
+                metrics_context = get_metrics_context()
+                if metrics_context.in_progress():
+                    metrics_context.increment(dynamo_compile_column_us, duration_us)
+                    if is_outer_event:
+                        metrics_context.increment("duration_us", duration_us)
+            else:
+                runtime_context = get_runtime_metrics_context()
+                runtime_context.increment(dynamo_compile_column_us, duration_us)
+                if is_outer_event:
+                    extra = {
+                        "compile_id": compile_id,
+                        "is_runtime": True,
+                        "is_forward": not is_backward,
+                    }
+                    runtime_context.increment("duration_us", duration_us, extra)
 
 
 @overload
@@ -1233,7 +1245,6 @@ class CompilationMetrics:
     runtime_cudagraphify_time_us: Optional[int] = None
     runtime_triton_autotune_time_us: Optional[int] = None
     dynamo_compile_time_before_restart_us: Optional[int] = None
-    cuda_synchronize_time_us: Optional[int] = None  # TODO: instrument
     distributed_ephemeral_timeout_us: Optional[int] = None
     structured_logging_overhead_us: Optional[int] = None
     remote_fx_graph_cache_get_time_us: Optional[int] = None
@@ -1269,6 +1280,15 @@ class CompilationMetrics:
     python_version: Optional[str] = None
     pgo_put_remote_code_state_time_us: Optional[int] = None
     pgo_get_remote_code_state_time_us: Optional[int] = None
+    # The number of elements within parameters. This is classically what people
+    # think of when they think of parameters in a ML model.
+    param_numel: Optional[int] = None
+    # The number of elements counted by bytes - i.e. a float32 is 4 bytes
+    # per element.
+    param_bytes: Optional[int] = None
+    # The number of parameters counted by fields. This is mostly a proxy for
+    # the number of distinct type of params.
+    param_count: Optional[int] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -1519,7 +1539,6 @@ def record_compilation_metrics(
         "compile_id": compile_id,
         "start_time_us": start_time_ns // 1000,
         "end_time_us": end_time_ns // 1000,
-        "duration_us": (end_time_ns - start_time_ns) // 1000,
         "fail_type": exc_type.__qualname__ if exc_type else None,
         "fail_reason": str(exc_value) if exc_value else None,
         "structured_logging_overhead_us": to_int_us(
@@ -3133,6 +3152,20 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         tx, (node.args, node.kwargs), allow_non_graph_fake
     )
 
+    if (
+        torch._dynamo.config.use_graph_deduplication
+        or torch._dynamo.config.track_nodes_for_deduplication
+    ):
+        flat_args_kwargs = get_fake_values_from_nodes(
+            tx, _get_flat_args(node, {}), allow_non_graph_fake
+        )
+        id_to_initial_version = {
+            id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
+        }
+    else:
+        flat_args_kwargs = []
+        id_to_initial_version = {}
+
     nnmodule = None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
         # If the first argument is nn.Module, should copy to fake mode.
@@ -3272,6 +3305,17 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         _ = pytree.tree_map_only(
             torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
         )
+
+    if (
+        torch._dynamo.config.use_graph_deduplication
+        or torch._dynamo.config.track_nodes_for_deduplication
+    ):
+        tx.output.region_tracker.track_node_mutations(
+            node,
+            flat_args_kwargs,
+            id_to_initial_version,
+        )
+
     return ret_val
 
 
@@ -4513,6 +4557,7 @@ def set_feature_use(feature: str, usage: bool):
 _ddp_optimization_mode: tuple[str, ...] = (
     "ddp_optimizer",
     "python_reducer",  # experimental mode
+    "python_reducer_without_compiled_forward",
     "no_optimization",
 )
 
@@ -4570,3 +4615,7 @@ def maybe_disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
             yield
     else:
         yield
+
+
+def is_node_meta_valid(node: Optional[torch.fx.Node]) -> bool:
+    return node is None or "example_value" in node.meta or "val" in node.meta

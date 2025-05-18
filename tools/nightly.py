@@ -141,9 +141,9 @@ PIP_SOURCES = {
         supported_platforms={"Linux", "Windows"},
         accelerator="cuda",
     ),
-    "rocm-6.2.4": PipSource(
-        name="rocm-6.2.4",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm6.2.4",
+    "rocm-6.4": PipSource(
+        name="rocm-6.4",
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm6.4",
         supported_platforms={"Linux"},
         accelerator="rocm",
     ),
@@ -595,7 +595,7 @@ def logging_manager(*, debug: bool = False) -> Generator[logging.Logger, None, N
         print(f"log file: {log_file}")
         yield root_logger
     except Exception as e:
-        logging.exception("Fatal exception")
+        logging.exception("Fatal exception")  # noqa: LOG015
         logging_record_exception(e)
         print(f"log file: {log_file}")
         sys.exit(1)
@@ -603,7 +603,7 @@ def logging_manager(*, debug: bool = False) -> Generator[logging.Logger, None, N
         # You could logging.debug here to suppress the backtrace
         # entirely, but there is no reason to hide it from technically
         # savvy users.
-        logging.info("", exc_info=True)
+        logging.info("", exc_info=True)  # noqa: LOG015
         logging_record_exception(e)
         print(f"log file: {log_file}")
         sys.exit(1)
