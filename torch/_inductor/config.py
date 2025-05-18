@@ -1,4 +1,4 @@
-import os  # noqa: C101
+import os
 import sys
 from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 
@@ -40,11 +40,18 @@ def bundle_triton_into_fx_graph_cache_default() -> Optional[bool]:
 
 
 def static_cuda_launcher_default() -> bool:
-    result = get_tristate_env(
-        "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER", True if not is_fbcode() else False
-    )
-    assert result is not None
-    return result
+    STATIC_CUDA_LAUNCHER_VERSION = 0
+
+    if "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER" in os.environ:
+        return os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER") == "1"
+    elif is_fbcode():
+        version = torch._utils_internal.justknobs_getval_int(
+            "pytorch/inductor:static_cuda_launcher_version"
+        )
+        return version <= STATIC_CUDA_LAUNCHER_VERSION
+    else:
+        # Default true in OSS
+        return True
 
 
 def prologue_fusion_enabled() -> bool:
@@ -157,7 +164,7 @@ cpp_wrapper: bool = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 # Controls automatic precompiling of common include files for codecache.CppCodeCache
 # (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
 # controlled by a separate flag.
-cpp_cache_precompile_headers: bool = True
+cpp_cache_precompile_headers: bool = not is_fbcode()
 
 online_softmax = os.environ.get("TORCHINDUCTOR_ONLINE_SOFTMAX", "1") == "1"
 
@@ -1286,10 +1293,12 @@ class aot_inductor:
     package_constants_in_so: bool = True
 
     # Experimental.  Controls automatic precompiling of common AOTI include files.
-    precompile_headers: bool = False
+    precompile_headers: bool = not is_fbcode()
 
 
 class cuda:
+    """Settings for cuda backend, today this consists of cutlass"""
+
     # CUDA arch to use for CUDA template kernel compilation.
     # e.g. "70", "75", "80", "90", etc.
     # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
@@ -1331,6 +1340,12 @@ class cuda:
 
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4]
+
+    # Whether to use CUTLASS EVT for epilogue fusion
+    cutlass_epilogue_fusion_enabled = False
+
+    # Whether to only use TMA-compatible kernels in CUTLASS
+    cutlass_tma_only = False
 
     # Path to CUDA NVCC.
     # NVCC search order:
@@ -1382,6 +1397,11 @@ class cuda:
     # Format looks like: "0,1,3" for using presets 0, 1, and 3. Presets can be
     # controlled by some cutlass instantiation level flags (e.g. 0, 1111, 2222, ...)
     cutlass_presets: Optional[str] = os.environ.get("TORCHINDUCTOR_CUTLASS_PRESETS")
+
+    # use compile command to create kernel .cu and .so name
+    cutlass_hash_with_compile_cmd: bool = (
+        os.environ.get("TORCHINDUCTOR_CUTLASS_HASH_WITH_COMPILE_CMD", "0") == "1"
+    )
 
 
 class rocm:
@@ -1552,6 +1572,8 @@ _save_config_ignore: list[str] = [
     "pre_grad_custom_pass",
     "aot_inductor.repro_level",
     "aot_inductor.dump_aoti_minifier",
+    "post_grad_custom_pre_pass",
+    "post_grad_custom_post_pass",
 ]
 
 _cache_config_ignore_prefix: list[str] = [

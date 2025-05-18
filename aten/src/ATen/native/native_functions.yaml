@@ -1832,8 +1832,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: cos_out
-    MPS: cos_out_mps
+    CPU, CUDA, MPS: cos_out
   tags: pointwise
 
 - func: cosh(Tensor self) -> Tensor
@@ -2609,8 +2608,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: exp2_out
-    MPS: exp2_out_mps
+    CPU, CUDA, MPS: exp2_out
   tags: pointwise
 
 - func: expm1(Tensor self) -> Tensor
@@ -3387,7 +3385,7 @@
   dispatch:
     CUDA: _cslt_compress
 
-- func: _cslt_sparse_mm(Tensor compressed_A, Tensor dense_B, Tensor? bias=None, Tensor? alpha=None, ScalarType? out_dtype=None, bool transpose_result=False, int alg_id=0, int split_k=1, bool split_k_one_kernel=True) -> Tensor
+- func: _cslt_sparse_mm(Tensor compressed_A, Tensor dense_B, Tensor? bias=None, Tensor? alpha=None, ScalarType? out_dtype=None, bool transpose_result=False, int alg_id=0, int split_k=1, int split_k_mode=-1) -> Tensor
   dispatch:
     CUDA: _cslt_sparse_mm
   tags: needs_fixed_stride_order
@@ -3512,8 +3510,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: log_out
-    MPS: log_out_mps
+    CPU, CUDA, MPS: log_out
   tags: pointwise
 
 - func: log10(Tensor self) -> Tensor
@@ -3533,8 +3530,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: log10_out
-    MPS: log10_out_mps
+    CPU, CUDA, MPS: log10_out
   tags: pointwise
 
 - func: log1p(Tensor self) -> Tensor
@@ -3583,8 +3579,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: log2_out
-    MPS: log2_out_mps
+    CPU, CUDA, MPS: log2_out
   tags: pointwise
 
 - func: logaddexp.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -4923,8 +4918,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: neg_out
-    MPS: neg_out_mps
+    CPU, CUDA, MPS: neg_out
     SparseCPU, SparseCUDA: neg_out_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: neg_sparse_csr_out
   tags: pointwise
@@ -5205,8 +5199,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: rsqrt_out
-    MPS: rsqrt_out_mps
+    CPU, CUDA, MPS: rsqrt_out
   tags: pointwise
 
 - func: select.Dimname(Tensor(a) self, Dimname dim, int index) -> Tensor(a)
@@ -5391,8 +5384,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: sin_out
-    MPS: sin_out_mps
+    CPU, CUDA, MPS: sin_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sin_sparse_csr_out
     SparseCPU, SparseCUDA: sin_sparse_out
   tags: pointwise
@@ -6048,8 +6040,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: tan_out
-    MPS: tan_out_mps
+    CPU, CUDA, MPS: tan_out
     SparseCPU, SparseCUDA: tan_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: tan_sparse_csr_out
   tags: pointwise
@@ -15855,6 +15846,13 @@
   dispatch:
     CPU: _fused_adagrad_kernel_cpu_
   autogen: _fused_adagrad, _fused_adagrad.out
+
+- func: _fused_adagrad_.tensor_lr(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] state_sums, Tensor[] state_steps, *, Tensor lr, float lr_decay, float weight_decay, float eps, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CPU: _fused_adagrad_kernel_cpu_
+  autogen: _fused_adagrad.tensor_lr, _fused_adagrad.tensor_lr_out
 
 # This op is ONLY used by pytorch/XLA in functionalization, and should never show up in vanilla eager mode or in any pytorch tracing contexts.
 - func: _propagate_xla_data(Tensor input, Tensor output) -> ()
