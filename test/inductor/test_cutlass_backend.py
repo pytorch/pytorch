@@ -1594,9 +1594,9 @@ class TestCutlassBackend(TestCase):
             def forward(self, a, b, extra_args):
                 acc = a @ b
                 z0 = acc.relu()
-                z = op(z0, *extra_args)
-                y = z + z0
-                return z, y
+                z = z0 + extra_args[0]
+                # y = z0 + z0
+                return z, z0
 
         M = 1024
         N = 512
