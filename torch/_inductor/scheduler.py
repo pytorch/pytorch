@@ -502,74 +502,76 @@ class BaseSchedulerNode:
 
             return True
 
-        for buf in self.get_outputs():
-            buf_node = buf.node
-            assert buf_node is not None
-            if (
-                not buf_node.should_allocate()
-                or buf_node.get_inputs_that_alias_output()
-                or buf_node.get_mutation_names()
-                or buf.get_name() in V.graph.removed_buffers
-            ):
-                continue
+        # for buf in self.get_outputs():
+        #     buf_node = buf.node
+        #     assert buf_node is not None
+        #     if (
+        #         not buf_node.should_allocate()
+        #         or buf_node.get_inputs_that_alias_output()
+        #         or buf_node.get_mutation_names()
+        #         or buf.get_name() in V.graph.removed_buffers
+        #     ):
+        #         continue
 
-            for read in self.read_writes.reads:
-                input_buf: Optional[Union[SchedulerBuffer, SchedulerDonatedBuffer]]
-                if read.name in self.scheduler.name_to_donated_buffer:
-                    input_buf = self.scheduler.name_to_donated_buffer[read.name]
-                else:
-                    input_buf = self.scheduler.name_to_buf.get(read.name)
+        #     for read in self.read_writes.reads:
+        #         input_buf: Optional[Union[SchedulerBuffer, SchedulerDonatedBuffer]]
+        #         if read.name in self.scheduler.name_to_donated_buffer:
+        #             input_buf = self.scheduler.name_to_donated_buffer[read.name]
+        #         else:
+        #             input_buf = self.scheduler.name_to_buf.get(read.name)
 
-                if (
-                    input_buf
-                    and V.graph.wrapper_code.can_reuse(input_buf, self)
-                    and not isinstance(input_buf.defining_op, NopKernelSchedulerNode)
-                ):
-                    assert input_buf.users is not None
-                    remaining_uses = [
-                        x
-                        for x in input_buf.users
-                        if x.node.get_name() not in inconsequential_nodes
-                    ]
-                    if (
-                        len(remaining_uses) == 1
-                        and remaining_uses[0].can_inplace
-                        and remaining_uses[0].node is self
-                        and input_buf.node is not None
-                        and not isinstance(
-                            input_buf.node.get_output_spec(),
-                            (
-                                ir.NoneLayout,
-                                ir.MultiOutputLayout,
-                                ir.MutationLayoutSHOULDREMOVE,
-                            ),
-                        )
-                        and not (
-                            input_buf.defining_op
-                            and isinstance(
-                                input_buf.defining_op.node,
-                                (ir.FallbackKernel, ir.MultiOutput),
-                            )
-                            and len(input_buf.node.get_inputs_that_alias_output()) > 0
-                        )
-                        and can_match_buffer_size(input_buf.node, buf.node)
-                        and single_index_in_fused_node(input_buf)
-                    ):
-                        # if there isn't a triton kernel, then we don't need to call triton-specific things.
-                        # but TODO this might be a convenient place to signal to the Collective kernels to inplace
-                        # (and, can we make "kernel" less generic of a name?)
-                        V.kernel.args.make_inplace(input_buf.get_name(), buf.get_name())
-                        # mutations not tracked in cpp kernels
-                        if isinstance(
-                            V.kernel, torch._inductor.codegen.simd.SIMDKernel
-                        ):
-                            V.kernel.mutations.add(input_buf.get_name())
-                            V.kernel.mutations.add(buf.get_name())
+        #         if (
+        #             input_buf
+        #             and V.graph.wrapper_code.can_reuse(input_buf, self)
+        #             and not isinstance(input_buf.defining_op, NopKernelSchedulerNode)
+        #         ):
+        #             assert input_buf.users is not None
+        #             remaining_uses = [
+        #                 x
+        #                 for x in input_buf.users
+        #                 if x.node.get_name() not in inconsequential_nodes
+        #             ]
+        #             if (
+        #                 len(remaining_uses) == 1
+        #                 and remaining_uses[0].can_inplace
+        #                 and remaining_uses[0].node is self
+        #                 and input_buf.node is not None
+        #                 and not isinstance(
+        #                     input_buf.node.get_output_spec(),
+        #                     (
+        #                         ir.NoneLayout,
+        #                         ir.MultiOutputLayout,
+        #                         ir.MutationLayoutSHOULDREMOVE,
+        #                     ),
+        #                 )
+        #                 and not (
+        #                     input_buf.defining_op
+        #                     and isinstance(
+        #                         input_buf.defining_op.node,
+        #                         (ir.FallbackKernel, ir.MultiOutput),
+        #                     )
+        #                     and len(input_buf.node.get_inputs_that_alias_output()) > 0
+        #                 )
+        #                 and can_match_buffer_size(input_buf.node, buf.node)
+        #                 and single_index_in_fused_node(input_buf)
+        #             ):
+        #                 input_buf_name = input_buf.get_name()
+        #                 input_buf_name = self.scheduler.mutation_real_name.get(input_buf_name, input_buf_name)
+        #                 # if there isn't a triton kernel, then we don't need to call triton-specific things.
+        #                 # but TODO this might be a convenient place to signal to the Collective kernels to inplace
+        #                 # (and, can we make "kernel" less generic of a name?)
+        #                 V.kernel.args.make_inplace(input_buf_name, buf.get_name())
+        #                 # mutations not tracked in cpp kernels
+        #                 if isinstance(
+        #                     V.kernel, torch._inductor.codegen.simd.SIMDKernel
+        #                 ):
+        #                     V.kernel.mutations.add(input_buf_name)
+        #                     V.kernel.mutations.add(buf.get_name())
 
-                        V.kernel.inplace_update_buffers[buf.get_name()] = (
-                            input_buf.get_name()
-                        )
-                        break
+        #                 V.kernel.inplace_update_buffers[buf.get_name()] = (
+        #                     input_buf_name
+        #                 )
+        #                 break
 
     def codegen_originating_info(
         self, buffer: IndentedBuffer, only_once: bool = True
@@ -2062,7 +2064,7 @@ class Scheduler:
         # mutation_real_name: Maps back to the original name for codegen
         # Example:
         # If you mutate buf0 inside of buf1's kernel, then:
-        # mutation_real_name = {"buf0" : "buf1"}
+        # mutation_real_name = {"buf1" : "buf0"}
         # all subsequent uses of buf0 become buf1's usage in dependency graph
         self.mutation_real_name: dict[str, str] = {}
 
@@ -2072,8 +2074,8 @@ class Scheduler:
         #                   (changed once per mutation)
         # Example:
         # If you mutate buf0 inside of buf1's kernel, then:
-        # mutation_renames = {"buf1" : "buf0"}
-        # in codegen we only use buf0, never buf1
+        # mutation_renames = {"buf0" : "buf1"}
+        # in codegen we only use buf1, never buf0
         self.mutation_renames: dict[str, str] = {}
 
         # Must run first to correctly set dependencies, before all other passes that rely on
@@ -2327,7 +2329,8 @@ class Scheduler:
 
         for node in self.nodes:
             log.debug("scheduling %s", node.node)
-
+            # if node.get_name() == "op115":
+            #     print(f"ckpt1. node:{node}, node.node:{node.node}, read_writes:{node.read_writes}")
             # unbacked symbols don't follow ordinary buffer dependencies, so
             # we track their def/uses separately
             assert node.node is not None
@@ -2353,6 +2356,9 @@ class Scheduler:
                 if (r := unbacked_symbol_to_origin_node[s]) is not None:
                     for buf in self.name_to_node[r].get_outputs():
                         node.add_fake_dep(StarDep(buf.get_name()))
+            # if node.get_name() == "op115":
+            #     print(f"ckpt2. node:{node}, node.node:{node.node}, read_writes:{node.read_writes}")
+            # breakpoint()
 
             if (
                 len(node.read_writes.writes) == 1
@@ -2362,6 +2368,8 @@ class Scheduler:
                 node_mode = dep.mode
             else:
                 node_mode = None
+            # if node.get_name() == "op115":
+            #     print(f"ckpt3. node:{node}, node.node:{node.node}, read_writes:{node.read_writes}")
 
             # Handle output mutations
             for buf in node.get_outputs():
@@ -2384,13 +2392,21 @@ class Scheduler:
                                 WeakDep(other_name, mutating_buf=buf.get_name())
                             )
                             add_user(other_name, node, is_weak=True)
+            # if node.get_name() == "op115":
+            #     print(f"ckpt4. node:{node}, node.node:{node.node}, read_writes:{node.read_writes}")
 
             # add normal non-mutation dependencies
             for read in node.read_writes.reads:
                 if not isinstance(read, WeakDep):
                     add_user(read.name, node, node.can_inplace(read))
+            # if node.get_name() == "op115":
+            #     print(f"ckpt5. node:{node}, node.node:{node.node}, read_writes:{node.read_writes}")
 
             node.update_mutated_names(self.mutation_renames)
+            # if node.get_name() == "op115":
+            #     print(f"mutation_renames:{self.mutation_renames}")
+
+            #     print(f"ckpt6. node:{node}, node.node:{node.node}, read_writes:{node.read_writes}")
 
             # update our renaming scheme for the next iteration
             for buf in node.get_outputs():
@@ -4286,6 +4302,15 @@ class Scheduler:
         for partition, skip_cudagraph in zip(
             reversed(partitions), reversed(skip_cudagraphs)
         ):
+            if not skip_cudagraph:
+                i += 1
+
+            # for node in partition:
+            #     if node.get_name() == "op292":
+            #         print(f"partition idx: {10-i}, node.get_name():{node.get_name()}, node.last_usage:{node.last_usage}, \n node.node:{node.node}, \n node.read_writes:{node.read_writes}, \n mutation_real_name:{self.mutation_real_name}")
+            #         v = self.name_to_buf.get("buf218", None)
+            #         print(f"self.name_to_buf[buf218]:{v}")
+
             output_names: OrderedSet[str] = OrderedSet()
 
             for node in partition:
@@ -4361,6 +4386,23 @@ class Scheduler:
             symbol_inputs = self.get_graph_partition_symbol_inputs(
                 partition, input_nodes
             )
+
+            # if 10 - i == 1 and not skip_cudagraph:
+            #     print(f"partition idx: {10-i}, partition:{partition}, \npartition_input_names:{partition_input_names}\noutput_names:{output_names}, \nunmet_output_names:{unmet_output_names}, \nreturned_output_names:{returned_output_names}\n extra_output_names:{extra_output_names}\n read_writes:{read_writes}")
+            #     for node in partition:
+            #         print(f"partition idx: {10-i}, node.node:{node.node}, node.read_writes:{node.read_writes}")
+
+            #     __buf37 = self.name_to_buf["buf37"]
+            #     print(f"partition idx: {10-i}, __buf37:{__buf37}, \n __buf37 defining op:{__buf37.defining_op.node}")
+            #     print(f"partition idx: {10-i}, self.mutation_renames:{self.mutation_renames}")
+            #     __buf24 = self.name_to_buf["buf24"]
+            #     __buf24_name = "buf24"
+            #     print(f"partition idx: {10-i}, __buf24:{__buf24}, \n __buf24 defining op:{__buf24.defining_op.node}, is_none_layout(x.name):{is_none_layout(__buf24_name)}")
+
+            # if not skip_cudagraph:
+
+            # for node in partition:
+            #     print(f"node:{node}, node.node:{node.node}, node.read_writes:{node.read_writes}")
 
             partition_signature = GraphPartitionSignature(
                 symbol_inputs,
