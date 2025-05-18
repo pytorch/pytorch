@@ -875,11 +875,12 @@ class SetVariable(ConstDictVariable):
 
         contains = args[0] in self
 
-        item = (
-            args[0].fn
-            if isinstance(args[0], variables.BuiltinVariable)
-            else args[0].value
-        )
+        if isinstance(args[0], variables.BuiltinVariable):
+            item = args[0].fn
+        elif isinstance(args[0], variables.SymNodeVariable):
+            item = args[0].sym_num
+        else:
+            item = args[0].value
 
         install_guard(
             self.make_guard(
