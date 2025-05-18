@@ -109,7 +109,7 @@ install_centos() {
       # Add amdgpu repository
       local amdgpu_baseurl
       if [[ $OS_VERSION == 9 ]]; then
-          amdgpu_baseurl="https://repo.radeon.com/amdgpu/${AMDGPU_VERSIONS[$ROCM_VERSION]}/rhel/9.1/main/x86_64"
+          amdgpu_baseurl="https://repo.radeon.com/amdgpu/${ROCM_VERSION}/rhel/9.1/main/x86_64"
       else
         if [[ $(ver $ROCM_VERSION) -ge $(ver 5.3) ]]; then
           amdgpu_baseurl="https://repo.radeon.com/amdgpu/${ROCM_VERSION}/rhel/7.9/main/x86_64"
