@@ -1297,6 +1297,8 @@ class aot_inductor:
 
 
 class cuda:
+    """Settings for cuda backend, today this consists of cutlass"""
+
     # CUDA arch to use for CUDA template kernel compilation.
     # e.g. "70", "75", "80", "90", etc.
     # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
@@ -1341,6 +1343,9 @@ class cuda:
 
     # Whether to use CUTLASS EVT for epilogue fusion
     cutlass_epilogue_fusion_enabled = False
+
+    # Whether to only use TMA-compatible kernels in CUTLASS
+    cutlass_tma_only = False
 
     # Path to CUDA NVCC.
     # NVCC search order:
