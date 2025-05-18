@@ -124,24 +124,6 @@ endif()
 
 # ---[ CUDA libraries wrapper
 
-# find lbnvrtc.so
-set(CUDA_NVRTC_LIB "${CUDA_nvrtc_LIBRARY}" CACHE FILEPATH "")
-if(CUDA_NVRTC_LIB AND NOT CUDA_NVRTC_SHORTHASH)
-  find_package(Python COMPONENTS Interpreter)
-  execute_process(
-    COMMAND Python::Interpreter -c
-    "import hashlib;hash=hashlib.sha256();hash.update(open('${CUDA_NVRTC_LIB}','rb').read());print(hash.hexdigest()[:8])"
-    RESULT_VARIABLE _retval
-    OUTPUT_VARIABLE CUDA_NVRTC_SHORTHASH)
-  if(NOT _retval EQUAL 0)
-    message(WARNING "Failed to compute shorthash for libnvrtc.so")
-    set(CUDA_NVRTC_SHORTHASH "XXXXXXXX")
-  else()
-    string(STRIP "${CUDA_NVRTC_SHORTHASH}" CUDA_NVRTC_SHORTHASH)
-    message(STATUS "${CUDA_NVRTC_LIB} shorthash is ${CUDA_NVRTC_SHORTHASH}")
-  endif()
-endif()
-
 # Create new style imported libraries.
 # Several of these libraries have a hardcoded path if CAFFE2_STATIC_LINK_CUDA
 # is set. This path is where sane CUDA installations have their static
@@ -283,15 +265,15 @@ else()
 endif()
 
 # nvrtc
-add_library(caffe2::nvrtc INTERFACE IMPORTED)
+add_library(torch::nvrtc INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
   set_property(
-      TARGET caffe2::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
-      CUDA::nvrtc_static)
+      TARGET torch::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
+      CUDA::nvrtc_static CUDA::cuda_driver)
 else()
   set_property(
-      TARGET caffe2::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
-      CUDA::nvrtc)
+      TARGET torch::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
+      CUDA::nvrtc CUDA::cuda_driver)
 endif()
 
 # Add onnx namepsace definition to nvcc
