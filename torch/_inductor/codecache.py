@@ -89,11 +89,11 @@ from torch._subclasses.fake_tensor import (
 from torch._utils_internal import log_cache_bypass
 from torch.compiler import config as cconfig
 from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
+from torch.export.pt2_archive.constants import CUSTOM_OBJ_FILENAME_PREFIX
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 from torch.utils._ordered_set import OrderedSet
 
 from .output_code import CompiledFxGraph
-from .package.pt2_archive_constants import CUSTOM_OBJ_FILENAME_PREFIX
 from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
@@ -112,16 +112,16 @@ if config.is_fbcode():
     )
 else:
 
-    def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
+    def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:
         pass
 
-    def log_global_cache_stats(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
+    def log_global_cache_stats(*args: Any, **kwargs: Any) -> None:
         pass
 
-    def log_global_cache_vals(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
+    def log_global_cache_vals(*args: Any, **kwargs: Any) -> None:
         pass
 
-    def use_global_cache() -> bool:  # type: ignore[misc]
+    def use_global_cache() -> bool:
         return False
 
 
@@ -2451,7 +2451,8 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         assert spec is not None
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
-        spec.loader.exec_module(module)  # type: ignore[union-attr]
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
         return module
 
     @classmethod
@@ -2945,6 +2946,7 @@ def _worker_task_halide(lockfile: str, jobs: list[partial[Any]]) -> None:
                 job()
     except subprocess.SubprocessError as e:
         if os.environ.get("HALIDE_REPRO") == "1":
+            cmd: list[Any]
             python, script, *cmd = getattr(e, "cmd", ("", "", ""))
             if os.path.basename(python).startswith("python"):
                 code = open(script).read()
@@ -2955,7 +2957,9 @@ def _worker_task_halide(lockfile: str, jobs: list[partial[Any]]) -> None:
                     def __repr__(self) -> str:
                         return "out"
 
-                cmd[cmd.index("-o") + 1] = Out()  # type: ignore[call-overload]
+                ci = cmd.index("-o")
+                assert isinstance(ci, int)
+                cmd[ci + 1] = Out()
                 repl = textwrap.indent(
                     textwrap.dedent(
                         f"""\
@@ -3565,7 +3569,7 @@ class LambdaFuture(CodeCacheFuture):
         self.result_fn = result_fn
         self.future = future
 
-    def result(self) -> Callable[..., Any]:  # type: ignore[override]
+    def result(self) -> Callable[..., Any]:
         return self.result_fn()
 
 
