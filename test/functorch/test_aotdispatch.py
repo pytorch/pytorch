@@ -4560,9 +4560,7 @@ class <lambda>(torch.nn.Module):
             add: "f32[2, 2]" = torch.ops.aten.add.Tensor(sin, 5);  sin = None
 
             cos: "f32[2, 2]" = torch.ops.aten.cos.default(add);  add = None
-
             sum_1: "f32[]" = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
-
             add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
             return (add_1,)
 
