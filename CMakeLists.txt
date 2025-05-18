@@ -1312,7 +1312,7 @@ if(BUILD_SHARED_LIBS)
     DESTINATION share/cmake/Caffe2/public
     COMPONENT dev)
   install(
-    DIRECTORY ${PROJECT_SOURCE_DIR}/cmake/Modules_CUDA_fix
+    FILES ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUDNN.cmake
     DESTINATION share/cmake/Caffe2/
     COMPONENT dev)
   install(
