@@ -29,7 +29,6 @@ import inspect
 import itertools
 import sys
 import types
-import warnings
 from collections.abc import Sequence
 from types import FunctionType
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
@@ -446,7 +445,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # Handle patch_dynamo_config call
-
         if self.fn is torch._dynamo.patch_dynamo_config:
             try:
                 args_const = [arg.as_python_constant() for arg in args]
@@ -1536,12 +1534,6 @@ class WrapperUserFunctionVariable(VariableTracker):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if hasattr(self.wrapper_obj, "cache_info"):
-            warnings.warn(
-                "Dynamo detected a call to a `functools.lru_cache` wrapped function."
-                "Dynamo currently ignores `functools.lru_cache` and directly traces the wrapped function."
-                "`functools.lru_cache` wrapped functions that read outside state may not be traced soundly."
-            )
         return variables.UserFunctionVariable(
             polyfills.getattr_and_trace
         ).call_function(
