@@ -87,27 +87,11 @@ EOF
 
 install_centos() {
 
-  yum update -y
-  yum install -y kmod
-  yum install -y wget
-  
-  if [[ $OS_VERSION == 9 ]]; then 
-      dnf install -y openblas-serial
-      dnf install -y dkms kernel-headers kernel-devel
-  else
-      yum install -y openblas-devel
-      yum install -y dkms kernel-headers-`uname -r` kernel-devel-`uname -r`
-  fi
-
-  yum install -y epel-release
+  dnf update -y
+  dnf install -y kmod wget openblas-serial dkms kernel-headers kernel-devel epel-release
 
   # Add amdgpu repository
-  local amdgpu_baseurl
-  if [[ $OS_VERSION == 9 ]]; then
-      amdgpu_baseurl="https://repo.radeon.com/amdgpu/${ROCM_VERSION}/rhel/9.1/main/x86_64"
-  else
-      amdgpu_baseurl="https://repo.radeon.com/amdgpu/${ROCM_VERSION}/rhel/7.9/main/x86_64"
-  fi
+  local amdgpu_baseurl="https://repo.radeon.com/amdgpu/${ROCM_VERSION}/rhel/9.1/main/x86_64"
   echo "[AMDGPU]" > /etc/yum.repos.d/amdgpu.repo
   echo "name=AMDGPU" >> /etc/yum.repos.d/amdgpu.repo
   echo "baseurl=${amdgpu_baseurl}" >> /etc/yum.repos.d/amdgpu.repo
@@ -115,11 +99,7 @@ install_centos() {
   echo "gpgcheck=1" >> /etc/yum.repos.d/amdgpu.repo
   echo "gpgkey=http://repo.radeon.com/rocm/rocm.gpg.key" >> /etc/yum.repos.d/amdgpu.repo
   
-  if [[ $OS_VERSION == 9 ]]; then
-      local rocm_baseurl="https://repo.radeon.com/rocm/rhel9/${ROCM_VERSION}/main/"
-  else
-      local rocm_baseurl="http://repo.radeon.com/rocm/yum/${ROCM_VERSION}/main"
-  fi
+  local rocm_baseurl="https://repo.radeon.com/rocm/rhel9/${ROCM_VERSION}/main/"
   echo "[ROCm]" > /etc/yum.repos.d/rocm.repo
   echo "name=ROCm" >> /etc/yum.repos.d/rocm.repo
   echo "baseurl=${rocm_baseurl}" >> /etc/yum.repos.d/rocm.repo
@@ -127,24 +107,17 @@ install_centos() {
   echo "gpgcheck=1" >> /etc/yum.repos.d/rocm.repo
   echo "gpgkey=http://repo.radeon.com/rocm/rocm.gpg.key" >> /etc/yum.repos.d/rocm.repo
 
-  if [[ $OS_VERSION == 9 ]]; then
-      yum update -y --nogpgcheck
-      dnf --enablerepo=crb install -y perl-File-BaseDir python3-wheel
-      yum install -y --nogpgcheck rocm-ml-sdk rocm-developer-tools
-  else
-      yum update -y
-      yum install -y \
-                   rocm-dev \
-                   rocm-libs
-  fi
+  dnf update -y --nogpgcheck
+  dnf --enablerepo=crb install -y perl-File-BaseDir python3-wheel
+  dnf install -y --nogpgcheck rocm-ml-sdk rocm-developer-tools
 
   # precompiled miopen kernels; search for all unversioned packages
   # if search fails it will abort this script; use true to avoid case where search fails
-  MIOPENHIPGFX=$(yum -q search miopen-hip-gfx | grep miopen-hip-gfx | awk '{print $1}'| grep -F kdb. || true)
+  MIOPENHIPGFX=$(dnf -q search miopen-hip-gfx | grep miopen-hip-gfx | awk '{print $1}'| grep -F kdb. || true)
   if [[ "x${MIOPENHIPGFX}" = x ]]; then
     echo "miopen-hip-gfx package not available" && exit 1
   else
-    yum install -y ${MIOPENHIPGFX}
+    dnf install -y ${MIOPENHIPGFX}
   fi
 
   # ROCm 6.0 had a regression where journal_mode was enabled on the kdb files resulting in permission errors at runtime
@@ -154,7 +127,7 @@ install_centos() {
   done
 
   # Cleanup
-  yum clean all
+  dnf clean all
   rm -rf /var/cache/yum
   rm -rf /var/lib/yum/yumdb
   rm -rf /var/lib/yum/history
