@@ -7,4 +7,3 @@ int main() {
   // bbb
   return symDef() + var;
 }
-   
