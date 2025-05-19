@@ -2448,7 +2448,7 @@ class WrapGenericHigherOrderVariable(WrapHigherOrderVariable):
             func = func_var.as_python_constant()
         else:
             raise RuntimeError(
-                f"WrapGenericHigherOrderVariable: Unsupported function {type(x)}"
+                f"WrapGenericHigherOrderVariable: Unsupported function {type(func_var)}"
             )
         gmod_kwargs = {
             name: kwargs[name] for name in kwargs.keys() if name != "wrapper_fn"
