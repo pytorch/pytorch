@@ -62,6 +62,7 @@ jobs:
           { config: "slow", shard: 2, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "slow", shard: 3, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
+      allow-reuse-old-whl: true
     secrets: inherit
 
   linux-focal-cuda12_6-py3_10-gcc11-sm86-test:
@@ -89,6 +90,7 @@ jobs:
           { config: "slow", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
           { config: "slow", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
         ]}
+      allow-reuse-old-whl: true
     secrets: inherit
 
   linux-focal-py3_9-clang10-test:
