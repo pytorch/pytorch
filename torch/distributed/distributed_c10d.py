@@ -17,6 +17,7 @@ from collections import namedtuple
 from datetime import timedelta
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from typing_extensions import deprecated
+from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 
 import torch
 from torch._C import _DistStoreError as DistStoreError
@@ -3012,43 +3013,6 @@ def reduce(
         work.wait()
     # Otherwise, the backend has sync'ed at CPP level
 
-
-def _object_to_tensor(obj, device, group):
-    with _WaitCounter("pytorch.wait_counter.c10d._object_to_tensor").guard():
-        f = io.BytesIO()
-        _pickler(f).dump(obj)
-        byte_storage = torch.ByteStorage._from_buffer(f.getvalue())  # type: ignore[attr-defined]
-        # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
-        # Otherwise, it will casue 100X slowdown.
-        # See: https://github.com/pytorch/pytorch/issues/65696
-        byte_tensor = torch.ByteTensor(byte_storage).to(device)
-        if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
-            backend = get_backend(group)
-            if backend == Backend.NCCL:
-                hash = torch._C._distributed_c10d._hash_tensors([byte_tensor])
-                logger.warning(
-                    "_object_to_tensor size: %s hash value: %s",
-                    byte_tensor.numel(),
-                    hash,
-                )
-        local_size = torch.LongTensor([byte_tensor.numel()]).to(device)
-        return byte_tensor, local_size
-
-
-def _tensor_to_object(tensor, tensor_size, group):
-    with _WaitCounter("pytorch.wait_counter.c10d._tensor_to_object").guard():
-        if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
-            backend = get_backend(group)
-            if backend == Backend.NCCL:
-                hash = torch._C._distributed_c10d._hash_tensors([tensor])
-                logger.warning(
-                    "_tensor_to_object size: %s hash value: %s", tensor.numel(), hash
-                )
-        tensor = tensor.cpu()
-        buf = tensor.numpy().tobytes()[:tensor_size]
-        return _unpickler(io.BytesIO(buf)).load()
-
-
 @_exception_logger
 def all_gather_object(object_list, obj, group=None):
     """
@@ -5596,3 +5560,246 @@ def _get_process_group_name(pg: ProcessGroup) -> str:
 
 def _get_process_group_store(pg: ProcessGroup) -> Store:
     return _world.pg_map[pg][1]
+
+
+def _object_to_tensor(obj, device, group):
+    with _WaitCounter("pytorch.wait_counter.c10d._object_to_tensor").guard():
+        f = io.BytesIO()
+        _pickler(f).dump(obj)
+        byte_storage = torch.ByteStorage._from_buffer(f.getvalue())  # type: ignore[attr-defined]
+        # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
+        # Otherwise, it will casue 100X slowdown.
+        # See: https://github.com/pytorch/pytorch/issues/65696
+        byte_tensor = torch.ByteTensor(byte_storage).to(device)
+        if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
+            backend = get_backend(group)
+            if backend == Backend.NCCL:
+                hash = torch._C._distributed_c10d._hash_tensors([byte_tensor])
+                logger.warning(
+                    "_object_to_tensor size: %s hash value: %s",
+                    byte_tensor.numel(),
+                    hash,
+                )
+        local_size = torch.LongTensor([byte_tensor.numel()]).to(device)
+        return byte_tensor, local_size
+
+
+def _tensor_to_object(tensor, tensor_size, group):
+    with _WaitCounter("pytorch.wait_counter.c10d._tensor_to_object").guard():
+        if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
+            backend = get_backend(group)
+            if backend == Backend.NCCL:
+                hash = torch._C._distributed_c10d._hash_tensors([tensor])
+                logger.warning(
+                    "_tensor_to_object size: %s hash value: %s", tensor.numel(), hash
+                )
+        tensor = tensor.cpu()
+        buf = tensor.numpy().tobytes()[:tensor_size]
+        return _unpickler(io.BytesIO(buf)).load()
+
+class TensorAwareWrapper:
+    """
+    A wrapper class that recursively detects tensors in arbitrary objects and replaces them with placeholders.
+    This allows for efficient communication of objects containing tensors.
+    """
+    def __init__(self, obj):
+        self.tensors = []
+        self.tensor_metadata = []  # Store shape, dtype, device info
+        self.wrapped_obj = self._process_object(obj)
+    
+    def _process_object(self, obj):
+        if isinstance(obj, torch.Tensor):
+            # Replace tensor with placeholder
+            idx = len(self.tensors)
+            self.tensors.append(obj)
+            self.tensor_metadata.append({
+                'shape': list(obj.shape),
+                'dtype': str(obj.dtype),
+                'device': str(obj.device)
+            })
+            return {"__tensor_placeholder__": idx}
+        elif hasattr(obj, "__dict__"):
+            # Handle custom classes by processing their __dict__
+            dict_copy = obj.__dict__.copy()
+            processed_dict = {k: self._process_object(v) for k, v in dict_copy.items()}
+            # Create a new instance of the same class
+            new_obj = type(obj).__new__(type(obj))
+            new_obj.__dict__.update(processed_dict)
+            return new_obj
+        elif isinstance(obj, dict):
+            return {k: self._process_object(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._process_object(v) for v in obj]
+        elif isinstance(obj, tuple):
+            return tuple(self._process_object(v) for v in obj)
+        else:
+            return obj
+
+    def restore_object(self, tensors=None):
+        """
+        Restore the original object structure, replacing placeholders with actual tensors.
+        If tensors is provided, use those instead of the stored tensors.
+        """
+        tensors_to_use = tensors if tensors is not None else self.tensors
+        return self._restore_object(self.wrapped_obj, tensors_to_use)
+
+    def _restore_object(self, obj, tensors):
+        if isinstance(obj, dict) and "__tensor_placeholder__" in obj:
+            idx = obj["__tensor_placeholder__"]
+            return tensors[idx]
+        elif hasattr(obj, "__dict__"):
+            # Handle custom classes by restoring their __dict__
+            dict_copy = obj.__dict__.copy()
+            restored_dict = {k: self._restore_object(v, tensors) for k, v in dict_copy.items()}
+            # Update the object's __dict__ with restored values
+            obj.__dict__.update(restored_dict)
+            return obj
+        elif isinstance(obj, dict):
+            return {k: self._restore_object(v, tensors) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._restore_object(v, tensors) for v in obj]
+        elif isinstance(obj, tuple):
+            return tuple(self._restore_object(v, tensors) for v in obj)
+        else:
+            return obj
+
+    def to_tensor(self, device, group=None):
+        """
+        Convert the wrapped object and metadata to tensors for communication.
+        
+        Args:
+            device (torch.device): Device to place the tensors on
+            group (ProcessGroup, optional): Process group for serialization
+            
+        Returns:
+            tuple: (wrapped_obj_tensor, wrapped_obj_size, metadata_tensor, metadata_size)
+        """
+        # Create a structure with the wrapped object and tensor metadata
+        data = {
+            'wrapped_obj': self.wrapped_obj,
+            'tensor_metadata': self.tensor_metadata
+        }
+        
+        # Serialize the data
+        obj_tensor, obj_size = _object_to_tensor(data, device, group)
+
+        # Concatenate all tensors if there are any
+        concatenated_tensors = None
+        if self.tensors:
+            # Move all tensors to the same device and flatten them
+            flat_tensors = [t.to(device).reshape(-1) for t in self.tensors]
+            concatenated_tensors = torch.cat(flat_tensors) if flat_tensors else None
+    
+        return obj_tensor, obj_size, concatenated_tensors
+
+    @classmethod
+    def from_tensor(cls, tensor, tensor_size, concatenated_tensors=None, group=None):
+        """
+        Create a TensorAwareWrapper from a tensor containing serialized data and tensors.
+        
+        Args:
+            tensor (Tensor): Tensor containing serialized wrapper data
+            tensor_size (int): Size of the serialized data portion
+            concatenated_tensors (Tensor, optional): Concatenated tensor containing all flattened tensors
+            group (ProcessGroup, optional): Process group for deserialization
+            
+        Returns:
+            TensorAwareWrapper: A new wrapper instance with restored tensors
+        """
+        # Make sure tensor_size is an integer
+        if isinstance(tensor_size, torch.Tensor):
+            tensor_size = tensor_size.item()
+        
+        # Deserialize the data portion
+        data = _tensor_to_object(tensor, tensor_size, group)
+        
+        # Create a new wrapper instance
+        wrapper = cls(None)
+        wrapper.wrapped_obj = data['wrapped_obj']
+        wrapper.tensor_metadata = data['tensor_metadata']
+        
+        # Reconstruct tensors from concatenated_tensors using metadata
+        if concatenated_tensors is not None and wrapper.tensor_metadata:
+            wrapper.tensors = []
+            offset = 0
+            for meta in wrapper.tensor_metadata:
+                # Calculate tensor size from shape
+                shape = meta['shape']
+                numel = 1
+                for dim in shape:
+                    numel *= dim
+                
+                # Extract tensor from concatenated_tensors
+                tensor_flat = concatenated_tensors[offset:offset + numel]
+                offset += numel
+                
+                # Reshape and convert to correct dtype and device
+                dtype = getattr(torch, meta['dtype'].split('.')[-1])
+                device = torch.device(meta['device'])
+                tensor_reshaped = tensor_flat.reshape(shape).to(dtype=dtype, device=device)
+                wrapper.tensors.append(tensor_reshaped)
+        else:
+            wrapper.tensors = []
+        
+        return wrapper
+
+@_exception_logger
+def broadcast_object_list2(
+    object_list: list[Any],
+    src: Optional[int] = None,
+    group: Optional[ProcessGroup] = None,
+    device: Optional[torch.device] = None,
+    group_src: Optional[int] = None,
+):
+    group = _group_or_default_group(group)
+    if src is None and group_src is None:
+        src = 0
+    group_src = _canonicalize_group_rank(group, src, group_src, return_global=False)
+    if _rank_not_in_group(group):
+        _warn_not_in_group("broadcast_object_list")
+        return
+
+    # Current device selection
+    current_device = device or _get_object_coll_device(group)
+    my_group_rank = group.rank()
+    
+    # Wrap and extract tensors on src rank
+    object_tensor_list = []
+    concat_tensor_list = []
+    if my_group_rank == group_src:
+        wrapped_objects = [TensorAwareWrapper(obj) for obj in object_list]
+        size_list = []
+        for wrapped_obj in wrapped_objects:
+            obj_tensor, obj_size, concatenated_tensors = wrapped_obj.to_tensor(current_device)
+            object_tensor_list.append(obj_tensor)
+            size_list.append(obj_size)
+            concat_tensor_list.append(concatenated_tensors)
+
+        object_sizes_tensor = torch.cat(size_list).to(current_device)
+    else:
+        object_sizes_tensor = torch.empty(
+            len(object_list), dtype=torch.long, device=current_device
+        )
+    
+    # Collective 1: Broadcast object sizes
+    broadcast(object_sizes_tensor, group_src=group_src, group=group)
+
+    if my_group_rank == group_src:
+        if len(object_tensor_list) == 1:
+            object_tensor = object_tensor_list[0]
+        else:
+            object_tensor = torch.cat(object_tensor_list)
+    else:
+        object_tensor = torch.empty( # type: ignore[call-overload]
+            torch.sum(object_sizes_tensor).item(), # type: ignore[arg-type]
+            dtype=torch.uint8,
+            device=current_device,
+        )
+
+    # Collective 2: Broadcast object_tensor_list
+    broadcast(object_tensor, group_src=group_src, group=group)
+
+    # Collective 3: Broadcast real tensors
+    # concat all the object_tensors together to form a single tensor
+    
+    
