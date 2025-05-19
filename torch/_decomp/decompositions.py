@@ -1786,15 +1786,26 @@ def native_rms_norm_backward(
     inner = a - b - c3
     d_input: Optional[Tensor] = None
     d_weight: Optional[Tensor] = None
+
     if output_mask[0]:
-        d_input = (rstd / N) * inner
+        # Formula: d_input = rstd * grad_x_hat - (input * rstd^3 / N) * sum(input * grad_x_norm)
+        sum_input_times_grad_x_norm = torch.sum(
+            input_cast * grad_x_hat,
+            dim=inner_dim_indices,
+            keepdim=True
+        )
+        d_input = rstd * grad_x_hat - ((input_cast * rstd.pow(3)) / N) * sum_input_times_grad_x_norm
 
     if output_mask[1] and weight_cast is not None:
+        x_norm_cast = input_cast * rstd
+        d_weight_full_shape = grad_out_cast * x_norm_cast
+        
         if len(outer_dim_indices) > 0:
-            d_weight = torch.sum(grad_out_cast * x_hat, outer_dim_indices, False)
+            d_weight_val = torch.sum(d_weight_full_shape, dim=outer_dim_indices, keepdim=False)
         else:
-            d_weight = grad_out_cast * x_hat
-
+            d_weight_val = d_weight_full_shape
+        
+        d_weight = d_weight_val
 
     return (
         _maybe_cast(d_input, input.dtype),
