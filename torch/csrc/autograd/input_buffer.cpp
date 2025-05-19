@@ -188,7 +188,7 @@ void InputBuffer::add(
     size_t pos,
     Variable&& var,
     const std::optional<c10::Stream>& opt_producer_stream_,
-    const std::optional<c10::Stream>& opt_consumer_stream) {
+    const std::optional<c10::Stream>& opt_consumer_stream_) {
   TORCH_INTERNAL_ASSERT(pos < buffer.size());
 
   if (!var.defined()) {
@@ -196,7 +196,9 @@ void InputBuffer::add(
   }
   const auto device = var.device();
   const auto device_type = device.type();
-  bool is_accelerator = at::accelerator::isAccelerator(device.type());
+  // TODO: Use at::accelerator::isAccelerator(device->type()) instead
+  bool is_accelerator =
+      device.is_cuda() || device.is_mtia() || device.is_privateuseone();
   //
   // Non-accelerator case
   //
@@ -214,6 +216,15 @@ void InputBuffer::add(
   const std::optional<c10::Stream>& opt_producer_stream =
       (opt_producer_stream_.has_value()
            ? opt_producer_stream_
+           : std::optional<c10::Stream>(
+                 at::accelerator::getCurrentStream(device.index())));
+
+  // opt_consumer_stream is always non-null when is_accelerator is true
+  // when InputBuffer is used in the engine. InputBuffer is also called
+  // elsewhere however! (e.g. other engine implementations)
+  const std::optional<c10::Stream>& opt_consumer_stream =
+      (opt_consumer_stream_.has_value()
+           ? opt_consumer_stream_
            : std::optional<c10::Stream>(
                  at::accelerator::getCurrentStream(device.index())));
 
