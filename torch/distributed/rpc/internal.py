@@ -199,14 +199,22 @@ class _InternalRPCPickler:
 
 # Create _internal_rpc_pickler only once to initialize _dispatch_table only once
 _internal_rpc_pickler = _InternalRPCPickler()
+_default_pickler = _internal_rpc_pickler
+
+def get_default_pickler():
+    return _default_pickler
+
+def set_default_pickler(pickler):
+    global _default_pickler
+    _default_pickler = pickler
 
 
 def serialize(obj):
-    return _internal_rpc_pickler.serialize(obj)
+    return _default_pickler.serialize(obj)
 
 
 def deserialize(binary_data, tensor_table):
-    return _internal_rpc_pickler.deserialize(binary_data, tensor_table)
+    return _default_pickler.deserialize(binary_data, tensor_table)
 
 
 def _run_function(python_udf):
