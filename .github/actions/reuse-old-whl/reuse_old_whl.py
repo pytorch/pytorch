@@ -32,10 +32,12 @@ def get_head_sha() -> str:
 
 
 def is_main_branch() -> bool:
-    print(
-        f"Checking if we are on main branch: merge base {get_merge_base()}, head {get_head_sha()}"
-    )
-    return get_merge_base() == get_head_sha()
+    return False
+    # Testing on main branch for now
+    # print(
+    #     f"Checking if we are on main branch: merge base {get_merge_base()}, head {get_head_sha()}"
+    # )
+    # return get_merge_base() == get_head_sha()
 
 
 def query_github_api(url: str) -> Any:
