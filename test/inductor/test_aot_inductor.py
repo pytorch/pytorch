@@ -124,7 +124,8 @@ except (unittest.SkipTest, ImportError):
 
 
 class AOTInductorTestsTemplate:
-    def test_simple(self):
+    @common_utils.parametrize("embed_cubin", [False, True])
+    def test_simple(self, embed_cubin):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -138,7 +139,18 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
         )
         model = Model()
-        self.check_model(model, example_inputs)
+        with config.patch({"aot_inductor.embed_cubin": embed_cubin}):
+            self.check_model(model, example_inputs)
+
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+            if self.device == GPU_TYPE:
+                FileCheck().check("launchKernel(").run(code)
+                if config.aot_inductor.embed_cubin:
+                    # Not expect to see launchKernel("CUBIN_FILE_NAME"
+                    FileCheck().check_not('launchKernel("').run(code)
+
         if self.use_minimal_arrayref_interface:
             self.code_check_count(
                 model, example_inputs, "AOTInductorModelRunMinimalArrayrefInterface(", 1
@@ -1158,7 +1170,6 @@ class AOTInductorTestsTemplate:
         )
 
     # scaled_dot_product_flash_attention
-    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(not SM80OrLater, "bfloat16 only supported in sm80+")
     def test_sdpa(self):
         class Model(torch.nn.Module):
@@ -1175,7 +1186,6 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
-    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(not SM80OrLater, "bfloat16 only supported in sm80+")
     def test_sdpa_2(self):
         class Model(torch.nn.Module):
@@ -3236,7 +3246,8 @@ class AOTInductorTestsTemplate:
 
             self.check_model(Model(), inputs)
 
-    def test_repeated_user_defined_triton_kernel(self):
+    @common_utils.parametrize("embed_cubin", [False, True])
+    def test_repeated_user_defined_triton_kernel(self, embed_cubin):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
 
@@ -3250,7 +3261,14 @@ class AOTInductorTestsTemplate:
                 return x
 
         inputs = (torch.randn(4, 4, device=self.device),)
-        self.check_model(Model(), inputs)
+        with config.patch({"aot_inductor.embed_cubin": embed_cubin}):
+            model = Model()
+            self.check_model(model, inputs)
+            _, code = run_and_get_cpp_code(AOTIRunnerUtil.compile, model, inputs)
+            FileCheck().check("launchKernel(").run(code)
+            if config.aot_inductor.embed_cubin:
+                # Not expect to see launchKernel("CUBIN_FILE_NAME"
+                FileCheck().check_not('launchKernel("').run(code)
 
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"

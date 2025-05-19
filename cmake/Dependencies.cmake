@@ -620,39 +620,8 @@ if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)
   # need to install it.
   set(INSTALL_GTEST OFF CACHE BOOL "Install gtest." FORCE)
   set(BUILD_GMOCK ON CACHE BOOL "Build gmock." FORCE)
-  # For Windows, we will check the runtime used is correctly passed in.
-  if(NOT CAFFE2_USE_MSVC_STATIC_RUNTIME)
-      set(gtest_force_shared_crt ON CACHE BOOL "force shared crt on gtest" FORCE)
-  endif()
-  # We need to replace googletest cmake scripts too.
-  # Otherwise, it will sometimes break the build.
-  # To make the git clean after the build, we make a backup first.
-  if((MSVC AND MSVC_Z7_OVERRIDE) OR USE_CUDA)
-    execute_process(
-      COMMAND ${CMAKE_COMMAND}
-              "-DFILENAME=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake"
-              "-DBACKUP=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake.bak"
-              "-DREVERT=0"
-              "-P"
-              "${CMAKE_CURRENT_LIST_DIR}/GoogleTestPatch.cmake"
-      RESULT_VARIABLE _exitcode)
-    if(NOT _exitcode EQUAL 0)
-      message(WARNING "Patching failed for Google Test. The build may fail.")
-    endif()
-  endif()
 
-  # Add googletest subdirectory but make sure our INCLUDE_DIRECTORIES
-  # don't bleed into it. This is because libraries installed into the root conda
-  # env (e.g. MKL) add a global /opt/conda/include directory, and if there's
-  # gtest installed in conda, the third_party/googletest/**.cc source files
-  # would try to include headers from /opt/conda/include/gtest/**.h instead of
-  # its own. Once we have proper target-based include directories,
-  # this shouldn't be necessary anymore.
-  get_property(INC_DIR_temp DIRECTORY PROPERTY INCLUDE_DIRECTORIES)
-  set_property(DIRECTORY PROPERTY INCLUDE_DIRECTORIES "")
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest)
-  set_property(DIRECTORY PROPERTY INCLUDE_DIRECTORIES ${INC_DIR_temp})
-
   include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/include)
   include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googlemock/include)
 
@@ -671,34 +640,9 @@ if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)
     message("-- Found benchmark: ${BENCHMARK_LIBRARY}")
     set_property(TARGET benchmark PROPERTY IMPORTED_LOCATION ${BENCHMARK_LIBRARY})
   endif()
-  include_directories(${CMAKE_CURRENT_LIST_DIR}/../third_party/benchmark/include)
 
   # Recover build options.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
-
-  # To make the git clean after the build, we revert the changes here.
-  if(MSVC AND MSVC_Z7_OVERRIDE)
-    execute_process(
-      COMMAND ${CMAKE_COMMAND}
-              "-DFILENAME=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake"
-              "-DBACKUP=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake.bak"
-              "-DREVERT=1"
-              "-P"
-              "${CMAKE_CURRENT_LIST_DIR}/GoogleTestPatch.cmake"
-      RESULT_VARIABLE _exitcode)
-    if(NOT _exitcode EQUAL 0)
-      message(WARNING "Reverting changes failed for Google Test. The build may fail.")
-    endif()
-  endif()
-
-  # Cacheing variables to enable incremental build.
-  # Without this is cross compiling we end up having to blow build directory
-  # and rebuild from scratch.
-  if(CMAKE_CROSSCOMPILING)
-    if(COMPILE_HAVE_STD_REGEX)
-      set(RUN_HAVE_STD_REGEX 0 CACHE INTERNAL "Cache RUN_HAVE_STD_REGEX output for cross-compile.")
-    endif()
-  endif()
 endif()
 
 # ---[ FBGEMM
@@ -1221,6 +1165,10 @@ if(USE_GLOO)
       set(USE_IBVERBS ON)
     endif()
 
+    # Build BFloat16 cuda kernels
+    set(GLOO_USE_TORCH_DTYPES 1)
+    set(GLOO_TORCH_DIR ${PROJECT_SOURCE_DIR} ${CMAKE_BINARY_DIR})
+
     # Temporarily override variables to avoid building Gloo tests/benchmarks
     set(__BUILD_TEST ${BUILD_TEST})
     set(__BUILD_BENCHMARK ${BUILD_BENCHMARK})
@@ -1234,13 +1182,17 @@ if(USE_GLOO)
         get_target_property(_include_dirs uv_a INCLUDE_DIRECTORIES)
         set_target_properties(uv_a PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${_include_dirs}")
       endif()
-      if(USE_NCCL AND NOT USE_SYSTEM_NCCL)
-        # Tell Gloo build system to use bundled NCCL, see
-        # https://github.com/pytorch/gloo/blob/950c0e23819779a9e0c70b861db4c52b31d1d1b2/cmake/Dependencies.cmake#L123
-        set(NCCL_EXTERNAL ON)
-      endif()
       set(GLOO_USE_CUDA_TOOLKIT ON CACHE BOOL "" FORCE)
+
+      # Disable NCCL/RCCL since we don't use Gloo+NCCL, make sure to reenable it!
+      set(USE_NCCL_SAVED ${USE_NCCL})
+      set(USE_RCCL_SAVED ${USE_RCCL})
+      set(USE_NCCL OFF)
+      set(USE_RCCL OFF)
       add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
+      set(USE_NCCL ${USE_NCCL_SAVED})
+      set(USE_RCCL ${USE_RCCL_SAVED})
+
       # Here is a little bit hacky. We have to put PROJECT_BINARY_DIR in front
       # of PROJECT_SOURCE_DIR with/without conda system. The reason is that
       # gloo generates a new config.h in the binary diretory.
@@ -1526,29 +1478,12 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   if(USE_KLEIDIAI)
-    if(CMAKE_C_COMPILER_ID STREQUAL "Clang" AND CMAKE_C_COMPILER_VERSION VERSION_LESS "11" )
-        message(WARNING "KleidiAI: Using non-supported Clang version. Expected 11 or newer, received ${CMAKE_C_COMPILER_VERSION}.")
-    endif()
-    if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_LESS "11" )
-        message(WARNING "KleidiAI: Using non-supported GCC version. Expected 11 or newer, received ${CMAKE_C_COMPILER_VERSION}.")
-    endif()
     set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
     set(AT_KLEIDIAI_ENABLED 1)
     set(KLEIDIAI_BUILD_TESTS OFF) # Disable building KLEIDIAI tests
     set(KLEIDIAI_SRC "${PROJECT_SOURCE_DIR}/third_party/kleidiai")
     add_subdirectory(${KLEIDIAI_SRC})
-    set(KLEIDIAI_INCLUDE_DIRS
-    ${KLEIDIAI_SRC}/
-    ${KLEIDIAI_SRC}/kai/
-    ${KLEIDIAI_SRC}/kai/ukernels/
-    ${KLEIDIAI_SRC}/kai/ukernels/matmul/
-    ${KLEIDIAI_SRC}/kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4cxp/
-    ${KLEIDIAI_SRC}/kai/ukernels/matmul/matmul_clamp_f32_qsi8d32p_qsi4c32p/
-    ${KLEIDIAI_SRC}/kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4c32p/
-    ${KLEIDIAI_SRC}/kai/ukernels/matmul/pack/
-    )
-    include_directories(SYSTEM INTERFACE ${KLEIDIAI_INCLUDE_DIRS})
     list(APPEND Caffe2_DEPENDENCY_LIBS kleidiai)
     # Recover build options.
     set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
