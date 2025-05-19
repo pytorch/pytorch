@@ -25,8 +25,8 @@ function install_ubuntu() {
     # To add the online network network package repository for the Intel Support Packages
     wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
         | gpg --dearmor > /usr/share/keyrings/oneapi-archive-keyring.gpg.gpg
-    echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg.gpg] \
-        https://apt.repos.intel.com/oneapi all main"  # @lint-ignore \
+    ONEAPI_BASEURL="https://apt.repos.intel.com/oneapi"  # @lint-ignore
+    echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg.gpg] ${ONEAPI_BASEURL} all main" \
         | tee /etc/apt/sources.list.d/oneAPI.list
 
     # Update the packages list and repository index
