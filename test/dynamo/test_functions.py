@@ -15,7 +15,6 @@ import typing
 import unittest
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar
-from typing_extensions import NamedTuple
 from unittest.mock import patch
 
 import numpy as np
@@ -39,6 +38,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from typing_extensions import NamedTuple
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
@@ -170,8 +170,8 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
                 in warning_message
             ):
                 break
-            else:
-                self.assertTrue(False, "Expected warning about lru_cache not found")
+        else:
+            self.assertTrue(False, "Expected warning about lru_cache not found")
 
     @make_test
     def test_add(a, b):
