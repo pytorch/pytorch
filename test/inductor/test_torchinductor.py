@@ -30,7 +30,6 @@ import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.aoti_eager
 import torch.nn as nn
-from torch._C._dynamo.guards import assert_alignment, assert_size_stride
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.debug_utils import aot_graph_input_parser
 from torch._dynamo.device_interface import get_interface_for_device
@@ -50,7 +49,6 @@ from torch._inductor.aoti_eager import (
     aoti_eager_cache_dir,
     load_aoti_eager_cache,
 )
-from torch._inductor.codecache import cpp_prefix_path
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.fx_passes import pad_mm
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -1411,10 +1409,9 @@ class CommonTemplate:
             )
             _, code = run_and_get_code(fn, x, y)
             code = " ".join(code)
-            if config.cpp_wrapper:
-                self.assertEqual(code.count("view_dtype"), 3)
-            else:
-                self.assertEqual(code.count("aten.view"), 9)
+            self.assertEqual(
+                code.count("view_dtype" if config.cpp_wrapper else "aten.view"), 3
+            )
 
     def test_add_complex5(self):
         def fn(a, b, alpha):
@@ -6673,7 +6670,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             )
 
     @xfail_if_mps_unimplemented
-    @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     def test_deterministic_codegen(self):
@@ -6722,7 +6718,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(coda_b0, coda_b2)
         self.assertEqual(coda_c0, coda_c2)
 
-    @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     @xfail_if_mps
@@ -6744,7 +6739,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         _, (code0, code1) = _run_and_get_stripped_kernels(b, x)
         self.assertEqual(code0, code1)
 
-    @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     @xfail_if_mps
@@ -11884,82 +11878,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp=False,
         )
 
-    @requires_gpu()
-    @skip_if_not_triton
-    @skip_if_cpp_wrapper("skip cpp_wrapper tests")
-    @config.patch(implicit_fallbacks=True)
-    def test_generated_code_has_size_stride_assert(self):
-        def foo(x):
-            return 3 * x
-
-        def foo_meta(x):
-            return torch.empty_like(x)
-
-        define_custom_op_for_test("foo", foo, foo_meta)
-
-        def fn(x):
-            a = torch.nn.functional.relu(x)
-            b = torch.ops.test.foo(a)
-            return b
-
-        a = torch.randn((16, 32), device=self.device)
-
-        _, code = run_and_get_code(
-            torch.compile(fn),
-            a,
-        )
-        if not is_dynamic_shape_enabled():
-            FileCheck().check(
-                "assert_size_stride(buf2, (16, 32), (32, 1), 'torch.ops.test.foo.default')"
-            ).run(code[0])
-
-    @requires_gpu()
-    @skip_if_not_triton
-    @skip_if_cpp_wrapper("skip cpp_wrapper tests")
-    @config.patch(implicit_fallbacks=True)
-    def test_generated_code_has_alignment_assert(self):
-        def foo(x):
-            return 3 * x
-
-        def foo_meta(x):
-            return torch.empty_like(x)
-
-        define_custom_op_for_test("foo", foo, foo_meta)
-
-        def fn(x):
-            a = torch.nn.functional.relu(x)
-            b = torch.ops.test.foo(a)
-            return b
-
-        a = torch.randn((16, 32), device=self.device)
-
-        _, code = run_and_get_code(
-            torch.compile(fn),
-            a,
-        )
-        if not is_dynamic_shape_enabled():
-            FileCheck().check(
-                "assert_alignment(buf2, 16, 'torch.ops.test.foo.default')"
-            ).run(code[0])
-
-    def test_assert_size_stride_op_name_pass(self):
-        tensor = torch.empty((16, 32))
-        assert_size_stride(tensor, (16, 32), (32, 1), "torch.ops.dummy.op_name")
-
-    def test_assert_size_stride_op_name_fail(self):
-        tensor = torch.empty((16, 32))
-        with self.assertRaisesRegex(AssertionError, "torch.ops.dummy.op_name"):
-            assert_size_stride(tensor, (32, 64), (32, 1), "torch.ops.dummy.op_name")
-
-    def test_assert_alignment_op_name_pass(self):
-        tensor = torch.empty((16, 32))
-        assert_alignment(tensor, 16, "torch.ops.dummy.op_name")
-
-    def test_assert_alignment_op_name_fail(self):
-        tensor = torch.empty((16, 32))
-        with self.assertRaisesRegex(AssertionError, "torch.ops.dummy.op_name"):
-            assert_alignment(tensor, 0, "torch.ops.dummy.op_name")
-
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_custom_op_unbacked_symints(self):
@@ -13092,12 +13010,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         code = run_and_get_triton_code(f, x)
 
         if is_dynamic_shape_enabled():
-            FileCheck().check("assert_size_stride(buf1, (s77, s27), (s27, 1)").check(
-                "assert_size_stride(buf2, (s77, s27), (s27, 1)"
+            FileCheck().check("assert_size_stride(buf1, (s77, s27), (s27, 1))").check(
+                "assert_size_stride(buf2, (s77, s27), (s27, 1))"
             ).run(code)
         else:
-            FileCheck().check("assert_size_stride(buf1, (16, 32), (32, 1)").check(
-                "assert_size_stride(buf2, (16, 32), (32, 1)"
+            FileCheck().check("assert_size_stride(buf1, (16, 32), (32, 1))").check(
+                "assert_size_stride(buf2, (16, 32), (32, 1))"
             ).run(code)
 
     @requires_cuda
