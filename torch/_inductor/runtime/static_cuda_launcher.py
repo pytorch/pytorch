@@ -78,6 +78,7 @@ class StaticallyLaunchedCudaKernel:
         self.function: Optional[int] = (
             None  # Loaded by load_kernel(on the parent process)
         )
+        self.cta_args = None
         num_ctas = 1
         if hasattr(kernel, "num_ctas"):
             num_ctas = kernel.num_ctas
@@ -85,9 +86,13 @@ class StaticallyLaunchedCudaKernel:
             num_ctas = kernel.metadata.num_ctas
 
         if num_ctas != 1:
-            raise NotImplementedError(
-                "Static cuda launcher only supports num_ctas == 1"
-            )
+            if hasattr(kernel, "cluster_dims"):
+                cluster_dims = kernel.cluster_dims
+            elif hasattr(kernel, "clusterDims"):
+                cluster_dims = kernel.clusterDims
+            elif hasattr(kernel, "metadata"):
+                cluster_dims = kernel.metadata.cluster_dims
+            self.cta_args = (num_ctas, cluster_dims)
 
     def reload_cubin_from_raw(self, filepath: str) -> str:
         """
@@ -224,6 +229,10 @@ class StaticallyLaunchedCudaKernel:
 
         # TODO: can handle grid functions here or in C++, so
         # that we don't need the grid handler above.
+        if self.cta_args:
+            (num_ctas, (clusterDimX, clusterDimY, clusterDimZ)) = self.cta_args
+        else:
+            num_ctas = clusterDimX = clusterDimY = clusterDimZ = 1
         _StaticCudaLauncher._launch_kernel(
             self.function,
             grid_x,
@@ -234,4 +243,8 @@ class StaticallyLaunchedCudaKernel:
             arg_tys,
             args,
             stream,
+            num_ctas,
+            clusterDimX,
+            clusterDimY,
+            clusterDimZ,
         )

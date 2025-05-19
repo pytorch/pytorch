@@ -2718,4 +2718,8 @@ class _StaticCudaLauncher:
         arg_types: str,
         args: tuple[Any, ...],
         stream: _int,
+        num_ctas: _int,
+        cluster_dim_x: _int,
+        cluster_dim_y: _int,
+        cluster_dim_z: _int,
     ) -> None: ...
