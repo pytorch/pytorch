@@ -92,13 +92,20 @@ class _InternalRPCPickler:
         torch.jit.save(script_module, f)
         return (_InternalRPCPickler._script_module_receiver, (f.getvalue(),))
 
+    def _pickler(self, f):
+        """
+        User-defined RPCPickler could derive from this class and overide
+        `_pickler` and `_unpickler` to change the underlying pickler.
+        """
+        return _pickler(f)
+
     def serialize(self, obj):
         r"""
         Serialize non tensor data into binary string, tensor data into
         tensor table
         """
         f = io.BytesIO()
-        p = _pickler(f)
+        p = self._pickler(f)
         p.dispatch_table = self._dispatch_table
 
         # rpc api could accept user picklers inheriting from _InternalRPCPickler to serialize rref,
@@ -145,6 +152,13 @@ class _InternalRPCPickler:
 
         return (f.getvalue(), tensors)
 
+    def _unpickler(self, f):
+        """
+        User-defined RPCPickler could derive from this class and overide
+        `_pickler` and `_unpickler` to change the underlying pickler.
+        """
+        return _unpickler(f)
+
     def deserialize(self, binary_data, tensor_table):
         r"""
         Deserialize binary string + tensor table to original obj
@@ -158,7 +172,7 @@ class _InternalRPCPickler:
         _thread_local_tensor_tables.recv_tables = tensor_table
 
         try:
-            unpickler = _unpickler(io.BytesIO(binary_data))
+            unpickler = self._unpickler(io.BytesIO(binary_data))
             ret = unpickler.load()
         except AttributeError as e:
             # Occurs when function is not found on module/class during
