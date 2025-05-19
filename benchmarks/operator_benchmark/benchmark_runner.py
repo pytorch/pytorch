@@ -58,6 +58,7 @@ def parse_args():
     parser.add_argument(
         "--output-json",
         "--output_json",
+        "--output",
         help="JSON file path to write the results to",
         default=None,
     )
