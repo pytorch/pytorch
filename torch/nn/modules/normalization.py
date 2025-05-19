@@ -229,6 +229,7 @@ class LayerNorm(Module):
         )
 
 docstr = LayerNorm.__doc__.format(**common_args)
+
 add_docstr(LayerNorm, docstr)
 
 class GroupNorm(Module):
