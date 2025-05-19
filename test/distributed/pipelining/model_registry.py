@@ -105,7 +105,6 @@ class MLPKWargModule(torch.nn.Module):
             return x, unused_kwarg
         else:
             return x
-        return x
 
 
 # Multi-MLP model
@@ -143,7 +142,6 @@ class MultiMLPKwargs(torch.nn.Module):
                 x, _ = layer(x, unused_kwarg)
             else:
                 x = layer(x)
-            x = layer(x)
         return x
 
 

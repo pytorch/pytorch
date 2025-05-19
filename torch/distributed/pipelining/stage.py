@@ -483,7 +483,9 @@ class _PipelineStageBase(ABC):
             if grad is None and grad_recv_stage is not None:
                 # TODO: create 0s of the same shape and send, this sends extra data but is a workaround for
                 # having an input in forward that is unused
-                grad = torch.zeros_like(self.args_recv_info[bwd_chunk_id][idx].buffer)
+                recv_info = self.args_recv_info[bwd_chunk_id][idx]
+                assert isinstance(recv_info, _RecvInfo)
+                grad = torch.zeros_like(recv_info.buffer)
 
             if isinstance(grad, torch.Tensor) and grad_recv_stage is not None:
                 logger.debug(
