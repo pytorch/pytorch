@@ -1687,6 +1687,10 @@ class GuardBuilder(GuardBuilderBase):
                 DeviceMesh,
             )
 
+        from torch.export.dynamic_shapes import _IntWrapper
+
+        ok_types = ok_types + (_IntWrapper,)
+
         import torch.utils._pytree as pytree
 
         assert istype(val, ok_types) or pytree.is_constant_class(type(val)), (

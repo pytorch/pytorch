@@ -28,6 +28,13 @@ inputs:
       description: 'the local path to the utilization stats file'
       required: False
       default: ''
+    artifact_prefix:
+      type: string
+      description: |
+          'the prefix of the raw utilization data, for data stored in zip file, this is the prefix of the parent zip file'
+      default: ""
+      required: False
+
 runs:
   using: composite
   steps:
@@ -39,6 +46,7 @@ runs:
         echo "workflow_Name: ${{inputs.workflow_name}}"
         echo "job_id: ${{inputs.job_id}}"
         echo "job_name:  ${{inputs.job_name}}"
+        echo "artifact_prefix: ${{inputs.artifact_prefix}}"
     - uses: nick-fields/retry@v3.0.0
       name: Setup dependencies
       with:
@@ -59,3 +67,4 @@ runs:
           --job-id "${{inputs.job_id}}" \
           --job-name "${{inputs.job_name}}" \
           --local-path "${{inputs.local_path}}"
+          --artifact-prefix "${{inputs.artifact_prefix}}"

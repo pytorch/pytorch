@@ -483,6 +483,7 @@ def parse_args() -> argparse.Namespace:
         required=False,
         help="path of the raw utilizarion data from local location",
     )
+
     return parser.parse_args()
 
 
