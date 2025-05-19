@@ -2099,14 +2099,15 @@ class AlgorithmSelectorCache(PersistentCache):
             return None, elapsed_ns // 1000
 
         def on_complete(future):
-            _, precompile_elapsed_us = future.result()
-            elapsed_seconds = precompile_elapsed_us / 1e6
-            elapsed_times[future] = elapsed_seconds
-            log.debug(
-                "Precompilation complete for future: %s, elapsed time: %.02fs",
-                future,
-                elapsed_seconds,
-            )
+            if not future.exception():
+                _, precompile_elapsed_us = future.result()
+                elapsed_seconds = precompile_elapsed_us / 1e6
+                elapsed_times[future] = elapsed_seconds
+                log.debug(
+                    "Precompilation complete for future: %s, elapsed time: %.02fs",
+                    future,
+                    elapsed_seconds,
+                )
 
         executor = ThreadPoolExecutor(max_workers=num_workers)
         async_compile = torch._inductor.async_compile.AsyncCompile()
@@ -2153,9 +2154,23 @@ class AlgorithmSelectorCache(PersistentCache):
                 timeout=precompilation_timeout_seconds,
             ):
                 if e := future.exception():
-                    log.error(
-                        "Exception %s for benchmark choice %s", e, futures[future]
+                    from torch._inductor.codegen.cuda.cuda_kernel import (
+                        CUDATemplateCaller,
                     )
+
+                    if isinstance(e, CUDACompileError) and isinstance(
+                        futures[future], CUDATemplateCaller
+                    ):
+                        log.debug(
+                            "Exception %s for benchmark choice %s",
+                            e,
+                            futures[future],
+                            exc_info=True,
+                        )
+                    else:
+                        log.error(
+                            "Exception %s for benchmark choice %s", e, futures[future]
+                        )
                 else:
                     counters["inductor"]["select_algorithm_num_precompiles"] += 1
                     log.info(
@@ -2261,10 +2276,13 @@ class AlgorithmSelectorCache(PersistentCache):
             try:
                 timing = cls.benchmark_choice(choice, autotune_args)
             except CUDACompileError as e:
-                log.error(
-                    "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
-                    str(e),
-                )
+                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+
+                if not isinstance(choice, CUDATemplateCaller):
+                    log.error(
+                        "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
+                        e,
+                    )
                 timing = float("inf")
             except NotImplementedError as e:
                 log.warning("Not yet implemented: %s", e)
@@ -2412,17 +2430,20 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # prune choices based on prescreening timings
         candidates_to_prune = OrderedSet(
-            candidate.bmreq.hash_key for candidate in sorted_choices[num_to_keep:]
+            candidate.bmreq.hash_key  # type: ignore[attr-defined]
+            for candidate in sorted_choices[num_to_keep:]
         )
         for candidate in sorted_choices[:num_to_keep]:
             if candidate_timings[candidate] == float("inf"):
-                candidates_to_prune.add(candidate.bmreq.hash_key)
+                candidates_to_prune.add(candidate.bmreq.hash_key)  # type: ignore[attr-defined]
             else:
                 if isinstance(candidate, CUDATemplateCaller):
                     candidate.bmreq.ensure_dll_loaded()
 
         choices = [
-            choice for choice in choices if choice.bmreq.hash_key not in candidates_to_prune
+            choice
+            for choice in choices
+            if choice.bmreq.hash_key not in candidates_to_prune  # type: ignore[attr-defined]
         ]
 
         log.debug("After pruning using prescreening timings, %d choices", len(choices))
