@@ -225,15 +225,15 @@ The ``mmap`` argument in :func:`torch.load` allows for lazy loading of tensor st
 In addition, there are some advanced features that allow for more fine-grained
 control and manipulation of a ``torch.save`` checkpoint.
 
-The :class:`~torch.serialization.skip_data` context manager enables
+The :class:`torch.serialization.skip_data` context manager enables
   * Saving a checkpoint with ``torch.save`` that includes empty space for data bytes
     to be written later.
   * Loading a checkpoint with ``torch.load`` and filling in the data bytes of tensors later.
 
-To access tensor metadata in a ``torch.save`` checkpoint without loading storage data,
-use ``torch.load`` within the ``FakeTensorMode`` context manager. This additionally
-tags storages with their offset within the checkpoint, allowing direct checkpoint
-manipulation.
+To inspect tensor metadata in a ``torch.save`` checkpoint without allocating memory for storage
+data, use ``torch.load`` within the ``FakeTensorMode`` context manager. On top of skipping loading
+storage data similar to ``skip_data`` above, it additionally tags storages with their offset within
+the checkpoint, enabling direct checkpoint manipulation.
 
 .. code-block:: python
 
