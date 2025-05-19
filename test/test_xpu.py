@@ -1,5 +1,6 @@
 # Owner(s): ["module: intel"]
 
+import re
 import subprocess
 import sys
 import tempfile
@@ -734,8 +735,14 @@ class TestXPUAPISanity(TestCase):
 
     def test_torch_config(self):
         config = torch.__config__.show()
-        self.assertIn(f"USE_XPU={int(torch.xpu._is_compiled())}", config)
-        self.assertIn(f"USE_XCCL={int(torch.distributed.is_xccl_available())}", config)
+        value = re.search(r"USE_XPU=([^,]+)", config)
+        self.assertIsNotNone(value)
+        self.assertEqual(value.group(1) in ["ON", "1"], torch. xpu._is_compiled())
+        value = re.search(r"USE_XCCL=([^,]+)", config)
+        self.assertIsNotNone(value)
+        self.assertEqual(
+            value.group(1) in ["ON", "1"], torch.distributed.is_xccl_available()
+        )
 
 
 if __name__ == "__main__":
