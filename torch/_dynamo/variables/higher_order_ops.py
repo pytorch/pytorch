@@ -2427,10 +2427,8 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
 
 # Copy paste of the above class, but enables an arbitrary callable
 class WrapGenericHigherOrderVariable(WrapHigherOrderVariable):
-    def __init__(self, hop, source, func=None) -> None:
+    def __init__(self, hop, source) -> None:
         super().__init__(hop, source)
-        assert func is not None
-        self.func = func
 
     def call_function(
         self,
@@ -2440,36 +2438,21 @@ class WrapGenericHigherOrderVariable(WrapHigherOrderVariable):
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 
-        fn_fqn = self.func.__module__ + "." + self.func.__qualname__
+        func_var = kwargs["wrapper_fn"]
 
-        def get_val(x):
-            if isinstance(x, variables.ConstantVariable):
-                return x.value
-
-            if isinstance(x, torch._dynamo.variables.UserFunctionVariable):
-                return x.fn
-            elif isinstance(
-                x, torch._dynamo.variables.functions.FunctoolsPartialVariable
-            ):
-                return x.as_python_constant()
-            else:
-                raise RuntimeError(
-                    f"Unsupported argument type {type(x)} for HOP {fn_fqn}"
-                )
-
-        hop_kwarg_keys = torch._dynamo.config._hopify_generic_wrap_fn_kwarg_keys[
-            self.func
-        ]
-
-        hop_kwargs = {
-            name: kwargs[name] for name in kwargs.keys() if name in hop_kwarg_keys
-        }
+        if isinstance(func_var, torch._dynamo.variables.UserFunctionVariable):
+            func = func_var.fn
+        elif isinstance(
+            func_var, torch._dynamo.variables.functions.FunctoolsPartialVariable
+        ):
+            func = func_var.as_python_constant()
+        else:
+            raise RuntimeError(
+                f"WrapGenericHigherOrderVariable: Unsupported function {type(x)}"
+            )
         gmod_kwargs = {
-            name: kwargs[name] for name in kwargs.keys() if name not in hop_kwarg_keys
+            name: kwargs[name] for name in kwargs.keys() if name != "wrapper_fn"
         }
-
-        # Here we use checkpoint_kwargs (and not gmod kwargs). gmod_kwargs are
-        # already flattened above and managed inside the fx graph.
         (
             p_args,
             _,
@@ -2483,13 +2466,12 @@ class WrapGenericHigherOrderVariable(WrapHigherOrderVariable):
             args[0],
             args[1:],
             gmod_kwargs,
-            fn_fqn,
+            str(func),
         )
 
-        gmod.meta["_wrap_generic_fqn"] = fn_fqn
-        gmod.meta["_wrap_generic_kwarg_values"] = {
-            k: get_val(v) for k, v in hop_kwargs.items()
-        }
+        # Alternatively, we could've stored only the function's fqn and
+        # reconstructed, but that requires the function to be a global.
+        gmod.meta["_wrap_generic_wrapper_fn"] = func
 
         # Store the invocation as a call
         variable = wrap_fx_proxy(
