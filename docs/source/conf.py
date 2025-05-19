@@ -1,3 +1,5 @@
+warning: Selection `RUF041` has no effect because preview is not enabled.
+warning: Selection `RUF048` has no effect because preview is not enabled.
 #
 # PyTorch documentation build configuration file, created by
 # sphinx-quickstart on Fri Dec 23 13:31:47 2016.
@@ -3460,6 +3462,7 @@ source_suffix = ".rst"
 # The master toctree document.
 master_doc = "index"
 
+
 # Use the linkcode extension to override [SOURCE] links to point
 # to the repo. Use the torch_version variable defined above to
 # determine link
@@ -3483,9 +3486,7 @@ def linkcode_resolve(domain, info):
 
     # Determine the tag based on the torch_version
     if RELEASE:
-        version_parts = torch_version.split(
-            "."
-        ) 
+        version_parts = torch_version.split(".")
         if "-rc" in torch_version:
             # Use the actual git version for RC builds
             version_path = torch_version
