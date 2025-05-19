@@ -37,6 +37,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         self.example_inputs = []
         with V.fake_mode:
             for inp in self.input_nodes:
+                # Here there will be no unbacked symbols, as SubgraphBuffer does not support them
+                assert len(inp.get_free_symbol_uses()) == 0
+
                 inp.data.freeze_layout()  # type: ignore[attr-defined]
                 self.example_inputs.append(ir_node_to_tensor(inp))
 
@@ -65,8 +68,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         )
 
         sym_inputs = add_symbolic_shapes_for_inputs_to_subgraph(
-            self.example_inputs, bm_graph_lowering
+            self.input_nodes, bm_graph_lowering
         )
+
         sym_inputs = [
             int(V.graph.sizevars.shape_env.size_hint(sym_var)) for sym_var in sym_inputs
         ]
