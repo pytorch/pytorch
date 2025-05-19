@@ -4942,8 +4942,8 @@ def split_group(
     """
     Create a new process group splitted from the given parent process group.
 
-    warning:: This is an experimental API and only the ``NCCL`` backend supports this API.
-    Other backends will raise an error.
+    warning:: This is an experimental API. Only the ``NCCL`` and custom plugin backends
+    are supported. Other backends will raise an error.
     Users of this API must gurantee that all ranks in the parent group enter this API call,
     and the split of the sub groups is the same across all ranks in the parent group.
 
@@ -4959,12 +4959,9 @@ def split_group(
             [[0, 1], [2, 3]]. Note [[0,1]] is also a valid split, in which case ranks 2, 3 would
             return a non-group member.
         timeout (timedelta, optional): see `init_process_group` for details and default value.
-        pg_options (ProcessGroupOptions, optional): only ProcessGroupNCCLOptions is supported now.
-            specifying what additional options need to be passed in during
+        pg_options (ProcessGroupOptions, optional): Additional options need to be passed in during
             the construction of specific process groups. i.e.``is_high_priority_stream``
             can be specified so that process group can pick up high priority cuda streams.
-            For other availble options to config nccl,
-            See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
         group_desc (str, optional): a string to describe the process group.
 
     Returns:
@@ -5008,18 +5005,14 @@ def split_group(
 
     # if the parent backend does not support splitting, raise error
     # currently this API only support NCCL backend
-    if (
-        not parent_backend
-        or not parent_backend.supports_splitting
-        or not isinstance(parent_backend, ProcessGroupNCCL)
-    ):
+    if not parent_backend or not parent_backend.supports_splitting:
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
         )
 
     # set the group_desc before the color or no_cloor split
     group_desc = (
-        f"{parent_pg.group_desc}:split:{parent_backend.comm_split_count()}"
+        f"{parent_pg.group_desc}:split:{parent_backend.comm_split_count()}"  # type: ignore[attr-defined]
         if group_desc is None
         else group_desc
     )
@@ -5029,11 +5022,7 @@ def split_group(
     backend = Backend(parent_backend_str)
     backend_config = BackendConfig(backend)
 
-    if pg_options is not None:
-        assert isinstance(pg_options, ProcessGroupNCCL.Options), (
-            "Expected pg_options argument to be of type ProcessGroupNCCL.Options"
-        )
-    else:
+    if pg_options is None:
         # default pg_options same as the parent process group
         pg_options = parent_backend.options
 
@@ -5064,7 +5053,7 @@ def split_group(
     # if my rank does not belong to any sub group,
     # no_color split should be called
     if my_group is None or group_rank == -1:
-        parent_backend.perform_nocolor_split(device_id)
+        parent_backend.perform_nocolor_split(device_id)  # type: ignore[attr-defined]
         return None
 
     group_name = _process_group_name(my_group, use_hashed_name=False)
@@ -5077,18 +5066,40 @@ def split_group(
         group_rank,
         len(my_group),
     )
-    backend_type = ProcessGroup.BackendType.NCCL
-    pg.bound_device_id = device_id
-    pg._set_default_backend(backend_type)
+    pg.bound_device_id = device_id  # type: ignore[union-attr]
+    pg_options._timeout = timeout  # type: ignore[union-attr]
+    pg_options.split_from = parent_backend  # type: ignore[union-attr]
+    pg_options.split_color = _process_group_color(my_group)  # type: ignore[union-attr]
+    pg_options.global_ranks_in_group = global_ranks_in_my_group  # type: ignore[union-attr]
+    pg_options.group_name = group_name  # type: ignore[union-attr]
 
-    pg_options._timeout = timeout
-    pg_options.split_from = parent_backend
-    pg_options.split_color = _process_group_color(my_group)
-    pg_options.global_ranks_in_group = global_ranks_in_my_group
-    pg_options.group_name = group_name
-    backend_class = ProcessGroupNCCL(
-        prefix_store, group_rank, len(my_group), pg_options
-    )
+    if parent_backend_str == Backend.NCCL:
+        backend_type = ProcessGroup.BackendType.NCCL
+        if not isinstance(pg_options, ProcessGroupNCCL.Options):
+            raise RuntimeError(
+                "Expected pg_options argument to be of type ProcessGroupNCCL.Options"
+            )
+        backend_class = ProcessGroupNCCL(
+            prefix_store, group_rank, len(my_group), pg_options
+        )
+    else:
+        assert parent_backend_str.upper() in Backend._plugins, (
+            f"Unknown c10d backend type {parent_backend_str.upper()}"
+        )
+        backend_plugin = Backend._plugins[parent_backend_str.upper()]
+        creator_fn = backend_plugin.creator_fn
+        extended_api = backend_plugin.extended_api
+        backend_type = ProcessGroup.BackendType.CUSTOM
+        if not extended_api:
+            backend_class = creator_fn(prefix_store, group_rank, len(my_group), timeout)
+        else:
+            dist_backend_opts = _DistributedBackendOptions()
+            dist_backend_opts.store = prefix_store
+            dist_backend_opts.group_rank = group_rank
+            dist_backend_opts.group_size = len(my_group)
+            backend_class = creator_fn(dist_backend_opts, pg_options)
+
+    pg._set_default_backend(backend_type)
     backend_class._set_sequence_number_for_group()
 
     pg._register_backend(torch.device("cuda"), backend_type, backend_class)
@@ -5444,7 +5455,7 @@ def new_subgroups(
         )
         subgroups.append(subgroup)
 
-        if rank := get_rank(group=group) in ranks_in_subgroup:
+        if rank := get_rank() in ranks_in_subgroup:
             cur_subgroup = subgroup
             logger.info("Rank %s is assigned to subgroup %s", rank, ranks_in_subgroup)
 
