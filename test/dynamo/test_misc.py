@@ -9185,7 +9185,6 @@ def ___make_guard_fn():
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(res, fn(x, s))
 
-
     # def test_input_set_graph_break(self):
     #     def foo(x):
     #         return x.pop() * x.pop()
