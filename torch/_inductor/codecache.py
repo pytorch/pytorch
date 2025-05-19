@@ -3140,7 +3140,7 @@ def _cutlass_paths() -> list[str]:
     ]
 
 
-def _clone_cutlass_paths(build_root: str) -> str:
+def _clone_cutlass_paths(build_root: str) -> list[str]:
     paths = _cutlass_paths()
     cutlass_root = _cutlass_path()
     for path in _cutlass_paths():
@@ -3469,7 +3469,11 @@ class CUDACodeCache:
                         if use_re_build():
                             from triton.fb.re_build_helper import run_build_command
 
-                            run_build_command(cmd_parts, os.path.dirname(input_path), os.path.basename(output_path))
+                            run_build_command(
+                                cmd_parts,
+                                os.path.dirname(input_path),
+                                os.path.basename(output_path),
+                            )
                         else:
                             subprocess.check_output(
                                 cmd_parts, stderr=subprocess.STDOUT, env=os.environ
