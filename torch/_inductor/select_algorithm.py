@@ -1790,6 +1790,16 @@ def create_precompile_key(
 
 
 class AlgorithmSelectorCache(PersistentCache):
+    """
+    A persistent cache for algorithm selection results used in autotuning of GEMMs
+    and convolutions.
+
+    This classes includes precompilation and benchmarking of the kernels.
+
+    The cache is keyed by input characteristics (sizes, strides, dtypes, etc.) but
+    doesn't depend on the output layout.
+    """
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
