@@ -103,6 +103,12 @@ struct TORCH_API ExperimentalConfig {
   bool capture_overload_names;
 
   /*
+   * A custom_profiler_config option is introduced to allow custom backends
+   * to apply custom configurations as needed.
+   */
+  std::string custom_profiler_config;
+
+  /*
    * Controls whether or not timestamp adjustment occurs after profiling.
    * The purpose of this is to adjust Vulkan event timelines to align with those
    * of their parent CPU events.
@@ -113,12 +119,6 @@ struct TORCH_API ExperimentalConfig {
    * information instead of the original information.
    */
   bool adjust_timestamps;
-
-  /*
-   * A custom_profiler_config option is introduced to allow custom backends
-   * to apply custom configurations as needed.
-   */
-  std::string custom_profiler_config;
 };
 
 struct TORCH_API ProfilerConfig {
