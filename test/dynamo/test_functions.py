@@ -15,6 +15,7 @@ import typing
 import unittest
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar
+from typing_extensions import NamedTuple
 from unittest.mock import patch
 
 import numpy as np
@@ -38,7 +39,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from typing_extensions import NamedTuple
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
