@@ -222,6 +222,7 @@ option(
   BUILD_MOBILE_TEST
   "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)"
   OFF)
+option(BUILD_JNI "Build JNI bindings" OFF)
 option(BUILD_MOBILE_AUTOGRAD
        "Build autograd function in mobile build (in development)" OFF)
 cmake_dependent_option(INSTALL_TEST "Install test binaries if BUILD_TEST is on"
@@ -1347,6 +1348,16 @@ endif()
 # built in the previous Modules section above).
 if(BUILD_BINARY)
   add_subdirectory(binaries)
+endif()
+
+# ---[ JNI
+if(BUILD_JNI)
+  if(NOT MSVC)
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-variable")
+  endif()
+  set(BUILD_LIBTORCH_WITH_JNI 1)
+  set(FBJNI_SKIP_TESTS 1)
+  add_subdirectory(android/pytorch_android)
 endif()
 
 include(cmake/Summary.cmake)

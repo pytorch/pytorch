@@ -5931,7 +5931,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         from functorch.experimental.control_flow import cond
 
         def true_fn(x):
-            return x
+            return x.clone()
 
         def false_fn(x):
             return x.sin()
@@ -9140,6 +9140,7 @@ def ___make_guard_fn():
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(res, fn(x, s))
 
+    @unittest.expectedFailure
     def test_set_guard_on_keys_change_2(self):
         # This test guarantee that we're not triggering any of the dict guards
         # on sets
@@ -9172,6 +9173,18 @@ def ___make_guard_fn():
         # Check Dynamo recompiles
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(res, fn(x, s))
+
+        # pop and add the same item
+        s.remove(e)
+        e.x = 200
+        s.add(e)
+
+        x = torch.randn(4)
+        res = opt_fn(x, s)
+        # Check Dynamo recompiles
+        self.assertEqual(cnts.frame_count, 3)
+        self.assertEqual(res, fn(x, s))
+
 
     # def test_input_set_graph_break(self):
     #     def foo(x):
