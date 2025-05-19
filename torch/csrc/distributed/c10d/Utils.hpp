@@ -653,7 +653,11 @@ void sendBytes(
     SYSCHECK_ERR_RETURN_NEG1(
         bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
-      C10_THROW_ERROR(DistNetworkError, "failed to send, sent 0 bytes");
+      C10_THROW_ERROR(
+          DistNetworkError,
+          "Failed to send, sent 0 bytes. "
+          "Connection was likely closed. "
+          "Did the remote server shutdown or crash?");
     }
 
     bytesToSend -= bytesSent;
@@ -675,7 +679,11 @@ void recvBytes(int socket, T* buffer, size_t length) {
     SYSCHECK_ERR_RETURN_NEG1(
         bytesReceived = recv(socket, currentBytes, bytesToReceive, 0))
     if (bytesReceived == 0) {
-      C10_THROW_ERROR(DistNetworkError, "failed to recv, got 0 bytes");
+      C10_THROW_ERROR(
+          DistNetworkError,
+          "Failed to recv, got 0 bytes. "
+          "Connection was likely closed. "
+          "Did the remote server shutdown or crash?");
     }
 
     bytesToReceive -= bytesReceived;

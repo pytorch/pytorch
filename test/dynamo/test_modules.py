@@ -3047,6 +3047,19 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(model.x, compiled_model.x)
 
+    def test_delattr_on_compiled_module(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        model = Mod()
+        compiled_model = torch.compile(model)
+        compiled_model.foo = 42
+        del compiled_model.foo
+
+        self.assertFalse(hasattr(model, "foo"))
+        self.assertFalse(hasattr(compiled_model, "foo"))
+
     def test_globals_change_in_other_file(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
@@ -3345,6 +3358,24 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         ref = module(input_tensor)
         res = compiled_module(input_tensor)
         self.assertEqual(ref, res)
+
+    def test_unhashable_nn_submodule(self):
+        class UnhashableModule(torch.nn.Module):
+            def __hash__(self):
+                raise TypeError("Unhashable module")
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.unhashable_attr = UnhashableModule()
+
+            def forward(self, x):
+                return x
+
+        mod = MyModule()
+        x = torch.randn(1)
+        compiled_mod = torch.compile(mod, backend="eager")
+        compiled_mod(x)
 
 
 devices = ["cuda", "hpu"]
