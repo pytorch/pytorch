@@ -11,13 +11,13 @@ import torch._inductor.virtualized as virtualized
 from torch._inductor.ir import ComputedBuffer, Pointwise
 from torch._inductor.ops_handler import DefaultHandler, WrapperHandler
 from torch._inductor.scheduler import BaseSchedulerNode
-from torch._inductor.utils import IndentedBuffer, OrderedSet
+from torch._inductor.utils import DelayReplaceLine, IndentedBuffer, OrderedSet
 from torch._inductor.virtualized import OpsValue
 
 from ...virtualized import V
 
 
-_ACCUMULATOR_ALIAS = "accum"
+_ACCUMULATOR_ARG_NAME = "accum"
 
 
 class CutlassEVTOpsMixIn:
@@ -68,7 +68,7 @@ class CutlassEVTOpsMixIn:
 
     @staticmethod
     def sigmoid(x0: str) -> str:
-        return CutlassEVTOpsMixIn._prefix_un_op("sigmoid", x0)
+        raise NotImplementedError("sigmoid is not supported in CUTLASS python evt")
 
     @staticmethod
     def sub(x0: str, x1: str) -> str:
@@ -76,7 +76,7 @@ class CutlassEVTOpsMixIn:
 
     @staticmethod
     def tanh(x0: str) -> str:
-        return CutlassEVTOpsMixIn._prefix_un_op("tanh", x0)
+        raise NotImplementedError("tanh is not supported in CUTLASS python evt")
 
 
 class MockCutlassHandler(CutlassEVTOpsMixIn, WrapperHandler):
@@ -96,7 +96,14 @@ class _AssignmentFormatter(DefaultHandler):
                 return OpsValue(line)
             else:
                 var = self.parent_handler._tmp_var()
-                self.parent_handler.output.writeline(f"{var} = {line}")
+                line = DelayReplaceLine(
+                    var,
+                    lambda: "D"
+                    if var == self.parent_handler.last_stored_var_name
+                    else var,
+                    f"{var} = {line}",
+                )
+                self.parent_handler.body.writeline(line)
                 return OpsValue(var)
         else:
             raise NotImplementedError(name)
@@ -112,7 +119,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         * Extend this with more _op_<whatever> nodes to add support for new pointwise operations.
     """
 
-    def __init__(self, accumulator_node_name: str, last_usages: OrderedSet[str]):
+    def __init__(self, accumulator_node_name: str, removed_buffers: OrderedSet[str]):
         """
 
         Initializes a CutlassEVTEpilogueArgumentFormatter object. Do not instantiate directly.
@@ -124,28 +131,35 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
             epilogue_nodes: The list of scheduler nodes to be fused into the epilogue
         """
         self.accumulator_node_name: str = accumulator_node_name  #
-        self.output: IndentedBuffer = IndentedBuffer(1)  # The output buffer for codegen
+        self.body: IndentedBuffer = IndentedBuffer(1)  # The body buffer for codegen
         self.var_counter: Iterator[int] = itertools.count()
         self.store_name_to_value: dict[str, OpsValue] = (
             dict()
         )  # Aliases for subexpression functors
-        self.reads: OrderedSet[str] = OrderedSet()
-        self.last_usages: OrderedSet[str] = OrderedSet()
+        self.reads: OrderedSet[str] = OrderedSet([])
+        # Used for creating example tensors
+        self.var_name_to_buffer_name: dict[str, str] = {
+            _ACCUMULATOR_ARG_NAME: accumulator_node_name
+        }
+        self.removed_buffers: OrderedSet[str] = removed_buffers
         self.cur_node: Optional[ComputedBuffer] = None
         self.name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
+        self.is_D_assigned = False
+        self.D_var_name = None
 
-        if accumulator_node_name not in last_usages:
-            self.store(accumulator_node_name, value=OpsValue(_ACCUMULATOR_ALIAS))
+        if accumulator_node_name not in removed_buffers:
+            # cannot return accumulator directly, so alias it
+            var = self._tmp_var()
+            self.body.writeline(f"{var} = {_ACCUMULATOR_ARG_NAME}")
+            self.store(accumulator_node_name, value=OpsValue(var))
 
     @staticmethod
     def ir_to_evt_python_code(
         cuda_template_node_name: str,
         epilogue_nodes: list[BaseSchedulerNode],
+        removed_buffers: OrderedSet[str],
     ) -> tuple[list[str], list[str], dict[str, Any], str]:
-        last_usages = OrderedSet(
-            itertools.chain(*[node.last_usage for node in epilogue_nodes])
-        )
-        codegen = CutlassEVTCodegen(cuda_template_node_name, last_usages)
+        codegen = CutlassEVTCodegen(cuda_template_node_name, removed_buffers)
         handler = _AssignmentFormatter(codegen)
 
         with virtualized.V.set_ops_handler(handler):
@@ -155,6 +169,8 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
                 with codegen.set_cur_node(node):
                     index_vars = CutlassEVTCodegen.get_index_vars(node)
                     node.get_store_function()(index_vars)
+
+        codegen.finalize()
 
         return (
             codegen.get_reads(),
@@ -167,10 +183,21 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         return linesep.join(
             [
                 self._render_input_signature(),
-                self.output.getvalue(),
+                self.body.getvalue(),
                 self._render_return_statement(),
             ]
         )
+
+    def finalize(self) -> None:
+        # Rename the last store to D
+        # no other code references this store
+        # to workaround https://github.com/NVIDIA/cutlass/issues/2288
+        # Note: the delayed line will automatically rewrite the last assignment to
+        # be to D
+        buffer_name = self.var_name_to_buffer_name[self.last_stored_var_name]
+        self.var_name_to_buffer_name.pop(self.last_stored_var_name)
+        self.var_name_to_buffer_name["D"] = buffer_name
+        self.store_name_to_value[buffer_name] = OpsValue("D")
 
     @contextmanager
     def set_cur_node(self, node: ComputedBuffer) -> Generator[None, Any, Any]:
@@ -182,9 +209,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
             self.cur_node = prev_node
 
     def get_renames(self) -> dict[str, str]:
-        renames = {k: v.value for k, v in self.store_name_to_value.items()}
-        renames[self.accumulator_node_name] = _ACCUMULATOR_ALIAS
-        return renames
+        return dict(self.var_name_to_buffer_name)
 
     def get_reads(self) -> list[str]:
         return list(self.reads)
@@ -194,30 +219,27 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
 
     def load(self, name: str, index: Any) -> str:
         self._check_indexing(name, index)
-        if name == self.accumulator_node_name:
-            self.reads.add(name)
-            return _ACCUMULATOR_ALIAS
-        elif name in self.store_name_to_value:
+        if name in self.store_name_to_value:
             return self.store_name_to_value[name].value
+        elif name == self.accumulator_node_name:
+            return _ACCUMULATOR_ARG_NAME
         else:
             self.reads.add(name)
+            self.var_name_to_buffer_name[name] = name
             return name
 
     def store(
         self, name: Any, index: Any = None, value: Any = None, mode: Any = None
     ) -> None:
-        if name not in self.last_usages:
+        if name not in self.removed_buffers:
             if index:
                 self._check_indexing(name, index)
-
-            value_to_write = value
-            if not self.store_name_to_value:
-                # EVT requires an output to be named D lol
-                # so rename the first store to D
-                self.output.writeline(f"D = {value} # cutlass evt requirement")
-                value_to_write = OpsValue("D")
-
-            self.store_name_to_value[name] = value_to_write
+            assert value.value != _ACCUMULATOR_ARG_NAME, (
+                "Cannot store accumulator arg name"
+            )
+            self.var_name_to_buffer_name[value.value] = name
+            self.store_name_to_value[name] = value
+            self.last_stored_var_name = value.value
         return None
 
     def _get_cur_node(self) -> ComputedBuffer:
@@ -237,7 +259,9 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
     def _check_indexing(self, name: str, index: sympy.Expr) -> None:
         # We only support indexing that matches the layout today because
         # CUTLASS doesn't support arbitrary indexing
-        buffer_name = self.accumulator_node_name if name == _ACCUMULATOR_ALIAS else name
+        buffer_name = (
+            self.accumulator_node_name if name == _ACCUMULATOR_ARG_NAME else name
+        )
         buffer = self.name_to_buffer[buffer_name]
         index_strides = V.graph.sizevars.stride_vars(
             index, self._get_current_index_vars()
@@ -258,7 +282,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
 
     def _render_input_signature(self) -> str:
         arguments = ", ".join(
-            [_ACCUMULATOR_ALIAS]
+            [_ACCUMULATOR_ARG_NAME]
             + [name for name in self.reads if name != self.accumulator_node_name]
         )
         return f"def fn({arguments}):"
