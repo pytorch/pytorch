@@ -88,6 +88,27 @@ class MLPModule(torch.nn.Module):
         return x
 
 
+class MLPKWargModule(torch.nn.Module):
+    def __init__(self, d_hid: int, layer_num):
+        super().__init__()
+        self.net1 = torch.nn.Linear(d_hid, d_hid)
+        self.relu = torch.nn.ReLU()
+        self.net2 = torch.nn.Linear(d_hid, d_hid)
+        self.layer_num = layer_num
+
+    def forward(self, x, unused_kwarg: torch.Tensor = torch.zeros(1)):
+        x = self.net1(x)
+        x = self.relu(x)
+        x = self.net2(x)
+        # Test when only 1 module has extra outputs
+        # TODO: handle this case later
+        # if self.layer_num == 0:
+        #     return x, unused_kwarg
+        # else:
+        #     return x
+        return x
+
+
 # Multi-MLP model
 class MultiMLP(torch.nn.Module):
     def __init__(self, d_hid: int, n_layers: int = 2):
@@ -100,6 +121,29 @@ class MultiMLP(torch.nn.Module):
 
     def forward(self, x):
         for layer in self.layers:
+            x = layer(x)
+        return x
+
+
+# Multi-MLP with kwargs model
+class MultiMLPKwargs(torch.nn.Module):
+    def __init__(self, d_hid: int, n_layers: int = 2):
+        super().__init__()
+        self.layers = torch.nn.ModuleList(
+            [MLPKWargModule(d_hid, i) for i in range(n_layers)]
+        )
+        # For testing purpose only, this should be defined by user
+        self.split_spec = {
+            f"layers.{i}": SplitPoint.BEGINNING for i in range(1, n_layers)
+        }
+
+    def forward(self, x, unused_kwarg: torch.Tensor = torch.zeros(1)):
+        for layer in self.layers:
+            # TODO: handle this case later
+            # if layer.layer_num == 0:
+            #     x, _ = layer(x, unused_kwarg)
+            # else:
+            #     x = layer(x)
             x = layer(x)
         return x
 
