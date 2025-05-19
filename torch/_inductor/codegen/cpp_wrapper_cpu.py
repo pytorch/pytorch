@@ -666,7 +666,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
             signature = kernel.get_signature().replace(name, kernel_ptr)
             self.prefix.writeline(f"    {signature} = torch::aot_inductor::{name};")
         self.prefix.writeline("};")
-        self.prefix.writeline("}  // namespace")
+        self.prefix.writeline("}  // namespace\n\n")
+
+        if config.aot_inductor.embed_cubin:
+            self.prefix.writeline('extern "C" {')
+            for name in sorted(declare_kernel):
+                self.prefix.writeline(
+                    f"    extern const unsigned char __{name}_start[];"
+                )
+            self.prefix.writeline("}")
 
     def codegen_model_constructor(self):
         """
