@@ -955,6 +955,8 @@ class AOTConfig:
     # specializing on example_inputs.
     # Used only by standalone_compile.
     ignore_shape_env: bool = False
+    # This is where we contain the metadata if available from the first pass
+    fw_metadata: Optional[ViewAndMutationMeta] = None
 
     def __post_init__(self):
         if self.pre_dispatch:

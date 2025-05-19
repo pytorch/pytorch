@@ -1639,7 +1639,6 @@ class OutputGraph(OutputGraphGuardsState):
 
             for register_finalizer in self.register_finalizer_fns:
                 register_finalizer(gm)
-
             gm.compile_subgraph_reason = self.compile_subgraph_reason
             gm.meta["dynamo_flat_name_to_original_fqn"] = (
                 self.dynamo_flat_name_to_original_fqn.copy()
@@ -2951,7 +2950,8 @@ class SubgraphTracer(fx.Tracer):
         # Sort the symbols so that we can have a deterministic lifting order
         return sorted(to_be_bound, key=lambda s: s.name)
 
-    def has_input_mutation(self):
+
+    def get_mutated_inputs(self) -> list[fx.Node]:
         input_versions_at_beginning = self._input_versions_at_beginning
         input_nodes = []
 
@@ -2965,26 +2965,29 @@ class SubgraphTracer(fx.Tracer):
             else:
                 break
 
-        mutated_inputs = [
+        mutated_idxes = [
             i
             for i, (v1, v2) in enumerate(
                 zip(input_versions_at_beginning, input_versions_at_end)
             )
             if v1 != v2
         ]
+        mutated_nodes = [input_nodes[i] for i in mutated_idxes]
+        return mutated_nodes
 
-        if len(mutated_inputs):
-            mutated_nodes = [input_nodes[i] for i in mutated_inputs]
+    def has_input_mutation(self):
+        mutated_nodes = self.get_mutated_inputs()
+        if len(mutated_nodes):
             msg = f"Input mutation detected at {mutated_nodes}"
             return MutationInfo(True, msg)
 
         return MutationInfo(False, "")
 
-    def has_aliasing(self):
+    def get_aliased_nodes(self) -> tuple[list[tuple[fx.Node]], list[tuple[fx.Node]], list[tuple[fx.Node]]]:
         from torch._higher_order_ops.utils import _collect_fake_inputs
 
         input_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
-
+        input_to_input = []
         for node in self.graph.nodes:
             if node.op == "placeholder":
                 example_value = _collect_fake_inputs([node])[0]
@@ -2993,11 +2996,12 @@ class SubgraphTracer(fx.Tracer):
                     if storage in input_storages:
                         # input-input aliasing
                         msg = f"Input-to-input aliasing detected at nodes {input_storages[storage]} and {node}"
-                        return AliasingInfo(True, msg)
+                        input_to_input.append((input_storages[storage], node))
                     input_storages[storage] = node
             else:
                 break
 
+        output_to_output = []
         output_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
         out_nodes = self.graph.find_nodes(op="output")[0]
         for out_node in pytree.tree_leaves(out_nodes.args[0]):
@@ -3008,17 +3012,31 @@ class SubgraphTracer(fx.Tracer):
                     storage = StorageWeakRef(example_value._typed_storage())
                     if storage in output_storages:
                         # output-output aliasing
-                        msg = f"Output-to-output aliasing detected at nodes {output_storages[storage]} and {out_node}"
-                        return AliasingInfo(True, msg)
+                        output_to_output.append((output_storages[storage], out_node))
                     output_storages[storage] = out_node
 
-        intersected_storages = input_storages.keys() & output_storages.keys()
-        if len(intersected_storages) > 0:
+        input_to_output_set = input_storages.keys() & output_storages.keys()
+        input_to_output = []
+        for storage in input_to_output_set:
             # input-output aliasing
-            aliased = [
-                (input_storages[s], output_storages[s]) for s in intersected_storages
-            ]
-            aliased = ", ".join([f"{i} and {o}" for i, o in aliased])
+            input_to_output.append((input_storages[storage], output_storages[storage]))
+        return input_to_input, output_to_output, input_to_output
+
+    def has_aliasing(self):
+        input_to_input, output_to_output, input_to_output = self.get_aliased_nodes()
+        if len(input_to_input) > 0:
+            # input-input aliasing
+            aliased = ", ".join([f"{i} and {o}" for i, o in input_to_input])
+            msg = f"Input-to-input aliasing detected at nodes {aliased}"
+            return AliasingInfo(True, msg)
+        if len(output_to_output) > 0:
+            # output-output aliasing
+            aliased = ", ".join([f"{i} and {o}" for i, o in output_to_output])
+            msg = f"Output-to-output aliasing detected at nodes {aliased}"
+            return AliasingInfo(True, msg)
+        if len(input_to_output) > 0:
+            # input-output aliasing
+            aliased = ", ".join([f"{i} and {o}" for i, o in input_to_output])
             msg = f"Input-to-output aliasing detected at nodes {aliased}"
             return AliasingInfo(True, msg)
 

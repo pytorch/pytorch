@@ -82,6 +82,12 @@ from torch._inductor.utils import (
     should_use_remote_fx_graph_cache,
     tensor_is_aligned,
 )
+from torch._functorch._aot_autograd.schemas import (
+    InputAliasInfo,
+    OutputAliasInfo,
+    OutputType,
+    ViewAndMutationMeta
+)
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import trace_structured
 from torch._utils_internal import compile_time_strobelight_meta
@@ -2100,7 +2106,64 @@ def compile_fx(
                 )
                 + f"\n\n # graph id: {id(model_.graph)}",
             )
-
+            input_info = []
+            output_info = []
+            keep_input_mutations = True
+            # TODO: Need to find where the subgraph tracer is called to move this logic to there!
+            # aliased_input_to_input, aliased_output_to_output, aliased_input_to_output = get_aliased_nodes(model.graph)
+            aliased_input_to_input, aliased_output_to_output, aliased_input_to_output = [], [], []
+            # mutated_inputs = model_.get_mutated_inputs()
+            mutated_inputs = []
+            for node in model_.graph.nodes:
+                if node.op == "placeholder":
+                    # TODO: inspect Node here, as well as the fields above
+                    import pdb; pdb.set_trace()
+                    mutates_data = node in mutated_inputs
+                    # NOTE: Not sure if this is actually correct :/
+                    mutates_metadata = node in aliased_input_to_output
+                    mutates_storage_metadata = node in aliased_input_to_input
+                    requires_grad = isinstance(node.value, torch.Tensor) and f_arg.requires_grad 
+                    input_info.append(
+                        InputAliasInfo(
+                            is_leaf=isinstance(node.value, Tensor) and safe_is_leaf(node.value),
+                            mutates_data=mutates_data,
+                            mutates_metadata=mutates_metadata,
+                            mutations_hidden_from_autograd=False, # TODO: Fill in,
+                            mutates_storage_metadata=mutates_storage_metadata,
+                            mutations_under_no_grad_or_inference_mode=False, # TODO: Fill in,
+                            mutation_inductor_storage_resize=False, # TODO: Fill in,
+                            requires_grad=requires_grad,
+                            keep_input_mutations=keep_input_mutations,
+                        )
+                    )
+                # TODO: Split this in two since that is what is done when iterating - makes faster
+                elif node.op == "output":
+                    base_idx = None
+                    output_type = OutputType.unsafe_view_alias
+                    o = node.value
+                    if isinstance(o, torch.Tensor):
+                        dynamic_dims = {
+                            i for i, s in enumerate(o.shape) if not is_concrete_int(s)
+                        }
+                    else:
+                        dynamic_dims = None
+                    output_info.append(
+                        OutputAliasInfo(
+                            output_type=output_type,
+                            raw_type=type(o),
+                            base_idx=base_idx,
+                            dynamic_dims=dynamic_dims,
+                            requires_grad=isinstance(o, torch.Tensor) and o.requires_grad,
+                            functional_tensor=functional_tensor,
+                        )
+                    )
+            # Setup what metadata we can here 
+            model_.meta["view_and_mutation_data"] = (
+                None
+                # ViewAndMutationMeta(
+                #     input_info=input_info, output_info=output_info, num_intermediate_bases=0, keep_input_mutations=False, traced_tangents=[], subclass_inp_meta=[], subclass_fw_graph_out_meta=[], subclass_tangent_meta=[]
+                # )
+            )
         # TODO: Move this before recursive pre-grad passes
         # NB: This short circuit never occurs for Dynamo produced graphs
         # (which are pre-flattened)
