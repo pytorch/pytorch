@@ -287,6 +287,7 @@ class TestStaticCudaLauncher(TestCase):
         launcher.run(1, 1, 1, stream)
 
     @skipIfRocm
+    @unittest.skipIf(torch.cuda.get_device_capability() < (9, 0), "Requires compute capability >= 9 for NV")
     def test_multi_cta(self):
         @triton.jit
         def kernel_multi_cta(ptrs, BLOCK_SIZE: tl.constexpr):
