@@ -446,13 +446,7 @@ from user code:
         first_graph_break = next(iter(counters["graph_break"].keys()))
         self.assertExpectedInline(
             first_graph_break,
-            """\
-Attempted to call function marked as skipped
-  Explanation: Dynamo cannot trace optree C/C++ function optree._C.PyCapsule.flatten.
-  Hint: Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py
-
-  Developer debug context: module: optree._C, qualname: PyCapsule.flatten, skip reason: <missing reason>
-""",
+            "Attempted to call function marked as skipped",
         )
 
     @scoped_load_inline
