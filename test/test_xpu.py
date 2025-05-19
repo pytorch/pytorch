@@ -733,7 +733,7 @@ class TestXPUAPISanity(TestCase):
         if not torch.xpu._is_compiled():
             self.assertEqual(len(torch.xpu.get_arch_list()), 0)
 
-    def test_torch_config(self):
+    def test_torch_config_for_xpu(self):
         config = torch.__config__.show()
         value = re.search(r"USE_XPU=([^,]+)", config)
         self.assertIsNotNone(value)
