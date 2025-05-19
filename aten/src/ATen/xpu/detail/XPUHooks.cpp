@@ -3,7 +3,6 @@
 #include <ATen/xpu/XPUDevice.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
 #include <ATen/xpu/detail/XPUHooks.h>
-#include <c10/util/CallOnce.h>
 #include <c10/util/Logging.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 
@@ -25,10 +24,10 @@ std::string XPUHooks::showConfig() const {
 
 int32_t XPUHooks::getGlobalIdxFromDevice(const at::Device& device) const {
   TORCH_CHECK(device.is_xpu(), "Only the XPU device type is expected.");
-#ifdef _WIN32
-  TORCH_CHECK(
+#if defined(_WIN32) && SYCL_COMPILER_VERSION < 20250000
+  TORCH_CHECK_NOT_IMPLEMENTED(
       false,
-      "Default context is not supported on XPU on Windows. So we can NOT find its global index of the ATen device.");
+      "Default context is not supported on XPU by default on Windows for SYCL compiler versions earlier than 2025.0.0. So we can NOT find its global index of the ATen device.");
 #else
   return at::xpu::getGlobalIdxFromDevice(device.index());
 #endif
@@ -43,10 +42,10 @@ Generator XPUHooks::getNewGenerator(DeviceIndex device_index) const {
 }
 
 Device XPUHooks::getDeviceFromPtr(void* data) const {
-#ifdef _WIN32
-  TORCH_CHECK(
+#if defined(_WIN32) && SYCL_COMPILER_VERSION < 20250000
+  TORCH_CHECK_NOT_IMPLEMENTED(
       false,
-      "Default context is not supported on XPU on Windows. So we can NOT find the ATen device of a pointer.");
+      "Default context is not supported on XPU by default on Windows for SYCL compiler versions earlier than 2025.0.0. So we can NOT find the ATen device of a pointer.");
 #else
   return at::xpu::getDeviceFromPtr(data);
 #endif
@@ -85,9 +84,14 @@ bool XPUHooks::isPinnedPtr(const void* data) const {
       sycl::get_pointer_type(data, c10::xpu::get_device_context());
 }
 
+bool XPUHooks::isAvailable() const {
+  return at::xpu::is_available();
+}
+
 bool XPUHooks::hasPrimaryContext(DeviceIndex device_index) const {
-  // The default context is utilized for each device. So it always returns true.
-  return true;
+  // The default context is utilized for each device.
+  // So it always returns true if a device is available.
+  return isAvailable();
 }
 
 DeviceIndex XPUHooks::deviceCount() const {

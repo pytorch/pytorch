@@ -71,6 +71,14 @@ class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
 
   virtual int get_rank() = 0;
   virtual int get_world_size() = 0;
+
+  virtual std::vector<int> get_rank_to_global_rank() {
+    TORCH_CHECK(false, "NYI");
+  };
+
+  virtual int* get_rank_to_global_rank_dev() {
+    TORCH_CHECK(false, "NYI");
+  };
 };
 
 class SymmetricMemoryAllocator : public c10::intrusive_ptr_target {
@@ -95,6 +103,8 @@ C10_EXPORT bool is_finalizing();
 C10_EXPORT void register_allocator(
     c10::DeviceType device_type,
     c10::intrusive_ptr<SymmetricMemoryAllocator> allocator);
+
+C10_EXPORT bool has_allocator(c10::DeviceType device_type);
 
 C10_EXPORT c10::intrusive_ptr<SymmetricMemoryAllocator> get_allocator(
     c10::DeviceType device_type);

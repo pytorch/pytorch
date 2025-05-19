@@ -43,7 +43,7 @@ struct TORCH_API Function {
   Function(Function&&) noexcept = default;
   Function& operator=(Function&&) noexcept = default;
   virtual std::string_view doc_string() const {
-    static constexpr std::string_view no_doc_string = "";
+    static constexpr std::string_view no_doc_string;
     return no_doc_string;
   }
 

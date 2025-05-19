@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <sstream>
 #include <unordered_map>
 
@@ -6,15 +7,6 @@
 #include <caffe2/utils/threadpool/WorkersPool.h>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
-
-// NS: TODO: Use `std::filesystem` regardless of OS when it's possible
-// to use it without leaking symbols on PRECXX11 ABI Linux OSes
-// See https://github.com/pytorch/pytorch/issues/133437 for more details
-#ifdef _WIN32
-#include <filesystem>
-#else
-#include <sys/stat.h>
-#endif
 
 namespace c10d::control_plane {
 
@@ -32,6 +24,7 @@ class RequestImpl : public Request {
   }
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const httplib::Request& req_;
 };
 
@@ -49,6 +42,7 @@ class ResponseImpl : public Response {
   }
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   httplib::Response& res_;
 };
 
@@ -69,7 +63,7 @@ std::string jsonStrEscape(const std::string& str) {
       ostream << "\\r";
     } else if (ch == '\t') {
       ostream << "\\t";
-    } else if ('\x00' <= ch && ch <= '\x1f') {
+    } else if (ch <= '\x1f') {
       ostream << "\\u" << std::hex << std::setw(4) << std::setfill('0')
               << static_cast<int>(ch);
     } else {
@@ -78,15 +72,6 @@ std::string jsonStrEscape(const std::string& str) {
   }
   return ostream.str();
 }
-
-bool file_exists(const std::string& path) {
-#ifdef _WIN32
-  return std::filesystem::exists(path);
-#else
-  struct stat rc {};
-  return lstat(path.c_str(), &rc) == 0;
-#endif
-}
 } // namespace
 
 WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
@@ -94,9 +79,8 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
       "/",
       [](const httplib::Request& req [[maybe_unused]], httplib::Response& res) {
         res.set_content(
-            R"BODY(<h1>torch.distributed.WorkerServer</h1>
-<a href="/handler/">Handler names</a>
-)BODY",
+            "<h1>torch.distributed.WorkerServer</h1>\n"
+            "<a href=\"/handler/\">Handler names</a>\n",
             "text/html");
       });
   server_.Get(
@@ -161,7 +145,7 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
     // using unix sockets
     server_.set_address_family(AF_UNIX);
 
-    if (file_exists(hostOrFile)) {
+    if (std::filesystem::exists(hostOrFile)) {
       throw std::runtime_error(fmt::format("{} already exists", hostOrFile));
     }
 

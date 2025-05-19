@@ -2,8 +2,8 @@
 # Helper utilities for build
 # Script used only in CD pipeline
 
-OPENSSL_DOWNLOAD_URL=https://www.openssl.org/source/old/1.1.1/
-CURL_DOWNLOAD_URL=https://curl.askapache.com/download
+OPENSSL_DOWNLOAD_URL=https://www.openssl.org/source/old/1.1.1/  # @lint-ignore
+CURL_DOWNLOAD_URL=https://curl.se/download
 
 AUTOCONF_DOWNLOAD_URL=https://ftp.gnu.org/gnu/autoconf
 

@@ -1,7 +1,5 @@
-# mypy: allow-untyped-decorators
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
-from typing import List
 
 import torch
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
@@ -33,9 +31,9 @@ def convolution_rules(op_schema: OpSchema) -> OutputSharding:
     assert weight_spec.tensor_meta is not None
     in_shape = input_spec.tensor_meta.shape
     weight_shape = weight_spec.tensor_meta.shape
-    assert isinstance(stride, List)
-    assert isinstance(padding, List)
-    assert isinstance(dilation, List)
+    assert isinstance(stride, list)
+    assert isinstance(padding, list)
+    assert isinstance(dilation, list)
     assert isinstance(weight_shape, torch.Size)
     N, H_in, W_in = in_shape[0], in_shape[2], in_shape[3]
     C_out = weight_shape[0]
@@ -85,7 +83,7 @@ def convolution_backward_rules(op_schema: OpSchema) -> OutputSharding:
     assert isinstance(grad_output_spec, DTensorSpec)
     assert isinstance(input_spec, DTensorSpec)
     assert isinstance(weight_spec, DTensorSpec)
-    assert isinstance(bias_shape_opt, List)
+    assert isinstance(bias_shape_opt, list)
     assert input_spec.tensor_meta is not None
     weight_tensor_meta = weight_spec.tensor_meta
     bias_tensor_meta = TensorMeta(
@@ -107,4 +105,8 @@ def convolution_backward_rules(op_schema: OpSchema) -> OutputSharding:
         [0],
         tensor_meta=bias_tensor_meta,
     )
+    # TODO: actually the output_mask is not respected here, we should
+    # set the corresponding spec to `None` if the output_mask is not `False`
+    # for a certain output Tensor. This also applies to the conv handler
+    # in torch/distributed/tensor/_tp_conv.py
     return OutputSharding([grad_input_spec, grad_weight_spec, grad_bias_spec])

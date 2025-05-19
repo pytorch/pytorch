@@ -14,6 +14,7 @@ export USE_CUDA_STATIC_LINK=1
 export INSTALL_TEST=0 # dont install test binaries into site-packages
 export USE_CUPTI_SO=0
 export USE_CUSPARSELT=${USE_CUSPARSELT:-1} # Enable if not disabled by libtorch build
+export USE_CUFILE=${USE_CUFILE:-1}
 
 # Keep an array of cmake variables to add to
 if [[ -z "$CMAKE_ARGS" ]]; then
@@ -43,13 +44,6 @@ if [[ -n "$DESIRED_CUDA" ]]; then
         fi
     fi
     echo "Using CUDA $CUDA_VERSION as determined by DESIRED_CUDA"
-
-    # There really has to be a better way to do this - eli
-    # Possibly limiting builds to specific cuda versions be delimiting images would be a choice
-    if [[ "$OS_NAME" == *"Ubuntu"* ]]; then
-        echo "Switching to CUDA version ${DESIRED_CUDA}"
-        /builder/conda/switch_cuda_version.sh "${DESIRED_CUDA}"
-    fi
 else
     CUDA_VERSION=$(nvcc --version|grep release|cut -f5 -d" "|cut -f1 -d",")
     echo "CUDA $CUDA_VERSION Detected"
@@ -59,23 +53,15 @@ cuda_version_nodot=$(echo $CUDA_VERSION | tr -d '.')
 
 TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6"
 case ${CUDA_VERSION} in
+    12.8)
+        TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0+PTX" #removing sm_50-sm_70 as these architectures are deprecated in CUDA 12.8 and will be removed in future releases
+        EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
+        ;;
     12.6)
-        if [[ "$GPU_ARCH_TYPE" = "cuda-aarch64" ]]; then
-            TORCH_CUDA_ARCH_LIST="9.0"
-        else
-            TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0+PTX"
-        fi
+        TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0"
         EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
         ;;
     12.4)
-        if [[ "$GPU_ARCH_TYPE" = "cuda-aarch64" ]]; then
-            TORCH_CUDA_ARCH_LIST="9.0"
-        else
-            TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0"
-        fi
-        EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
-        ;;
-    12.1)
         TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0"
         EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
         ;;
@@ -133,7 +119,16 @@ if [[ $USE_CUSPARSELT == "1" && $CUDA_VERSION == "11.8" ]]; then
         )
 fi
 
-if [[ $CUDA_VERSION == "12.4" || $CUDA_VERSION == "12.6" ]]; then
+
+# Turn USE_CUFILE off for CUDA 11.8, 12.4 since nvidia-cufile-cu11 and 1.9.0.20 are
+# not available in PYPI
+if [[ $CUDA_VERSION == "11.8" || $CUDA_VERSION == "12.4" ]]; then
+    export USE_CUFILE=0
+fi
+
+
+# CUDA_VERSION 12.4, 12.6, 12.8
+if [[ $CUDA_VERSION == 12* ]]; then
     export USE_STATIC_CUDNN=0
     # Try parallelizing nvcc as well
     export TORCH_NVCC_FLAGS="-Xfatbin -compress-all --threads 2"
@@ -174,6 +169,16 @@ if [[ $CUDA_VERSION == "12.4" || $CUDA_VERSION == "12.6" ]]; then
             "libnvrtc.so.12"
             "libnvrtc-builtins.so"
         )
+        if [[ $USE_CUFILE == 1 ]]; then
+            DEPS_LIST+=(
+                "/usr/local/cuda/lib64/libcufile.so.0"
+                "/usr/local/cuda/lib64/libcufile_rdma.so.1"
+            )
+            DEPS_SONAME+=(
+                "libcufile.so.0"
+                "libcufile_rdma.so.1"
+            )
+        fi
     else
         echo "Using nvidia libs from pypi."
         CUDA_RPATHS=(
@@ -190,6 +195,11 @@ if [[ $CUDA_VERSION == "12.4" || $CUDA_VERSION == "12.6" ]]; then
             '$ORIGIN/../../nvidia/nccl/lib'
             '$ORIGIN/../../nvidia/nvtx/lib'
         )
+        if [[ $USE_CUFILE == 1 ]]; then
+            CUDA_RPATHS+=(
+                '$ORIGIN/../../nvidia/cufile/lib'
+            )
+        fi
         CUDA_RPATHS=$(IFS=: ; echo "${CUDA_RPATHS[*]}")
         export C_SO_RPATH=$CUDA_RPATHS':$ORIGIN:$ORIGIN/lib'
         export LIB_SO_RPATH=$CUDA_RPATHS':$ORIGIN'
@@ -275,7 +285,7 @@ else
     exit 1
 fi
 
-# builder/test.sh requires DESIRED_CUDA to know what tests to exclude
+# run_tests.sh requires DESIRED_CUDA to know what tests to exclude
 export DESIRED_CUDA="$cuda_version_nodot"
 
 # Switch `/usr/local/cuda` to the desired CUDA version

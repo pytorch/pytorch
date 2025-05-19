@@ -4,7 +4,7 @@ import inspect
 import itertools
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -83,11 +83,11 @@ class ShapeEnvEvent:
     f: Callable
 
     # Arguments and keyword arguments called with.
-    args: Optional[List[Any]] = None
-    kwargs: Optional[Dict[str, Any]] = None
+    args: Optional[list[Any]] = None
+    kwargs: Optional[dict[str, Any]] = None
 
     # List of tracked_fakes at the time the method was called.
-    tracked_fakes: Optional[List[Any]] = None
+    tracked_fakes: Optional[list[Any]] = None
 
     # Name of the captured event.
     # Used for special handling of particular methods.
@@ -214,6 +214,10 @@ def _extract_shape_env_and_assert_equal(args, kwargs):
 # save_tracked_fakes: saves a snapshot of the TrackedFake list.
 # This is used when calling ShapeEnv.produce_guards at arbitrary points in time.
 #
+# name: the name of the function being recorded. Normally (and by default) this
+# is taken from the decorated function but can be set if you need to override
+# it.
+#
 # When to save the list of TrackedFake?
 # =====================================
 # We should save the list of TrackedFake whenever the translation validation
@@ -225,7 +229,9 @@ def _extract_shape_env_and_assert_equal(args, kwargs):
 # At the moment, there are 2 methods that save the list:
 #   - ShapeEnv.evaluate_expr
 #   - ShapeEnv.defer_runtime_assert
-def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
+def record_shapeenv_event(
+    *, save_tracked_fakes: bool = False, name: Optional[str] = None
+) -> Callable:
     def decorator(fn: Callable) -> Callable:
         assert callable(fn)
         args = inspect.getfullargspec(fn).args
@@ -233,7 +239,9 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
             "record_shapeenv_event should only wrap methods on ShapeEnv; refactor your "
             "code so that it calls into a method on ShapeEnv"
         )
-        name = fn.__name__
+        nonlocal name
+        if name is None:
+            name = fn.__name__
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
@@ -252,8 +260,9 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                 trace_shape_events_log.debug("%s-> %s", " " * (NEST - 1), r)
                 return r
 
+            shape_env = args[0]
+
             try:
-                shape_env = args[0]
                 if not shape_env.should_record_events or shape_env.is_recording:  # type: ignore[has-type]
                     # If ShapeEnv is already recording an event, call the wrapped
                     # function directly.
@@ -280,7 +289,11 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                     )
                     # Record the event for 'fn'.
                     event = ShapeEnvEvent(
-                        fn, list(args), kwargs, tracked_fakes, name=fn.__name__
+                        fn,
+                        list(args),
+                        kwargs,
+                        tracked_fakes,
+                        name=name,
                     )
                     # Play the event on this ShapeEnv.
                     # NB: It's important to put the event first, because running
@@ -296,6 +309,9 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                         raise
 
             except Exception:
+                if not shape_env.should_record_events or shape_env.is_recording:
+                    # If ShapeEnv is disabled or already recording an event, re-raise the exception without logging.
+                    raise
                 log.error(  # noqa: G201
                     "failed while running %s(*%s, **%s)",
                     name,
@@ -344,15 +360,15 @@ def replay_shape_env_events(events):
 # ShapeEnv.produce_guards.
 @dataclass
 class FakeTensorMeta:
-    tensor_size: Tuple[Union[int, torch.SymInt], ...]
-    tensor_stride: Tuple[Union[int, torch.SymInt], ...]
+    tensor_size: tuple[Union[int, torch.SymInt], ...]
+    tensor_stride: tuple[Union[int, torch.SymInt], ...]
     tensor_storage_offset: Union[int, torch.SymInt]
     is_nested: bool
 
-    def size(self) -> Tuple[Union[int, torch.SymInt], ...]:
+    def size(self) -> tuple[Union[int, torch.SymInt], ...]:
         return self.tensor_size
 
-    def stride(self) -> Tuple[Union[int, torch.SymInt], ...]:
+    def stride(self) -> tuple[Union[int, torch.SymInt], ...]:
         return self.tensor_stride
 
     def storage_offset(self) -> Union[int, torch.SymInt]:
@@ -445,7 +461,7 @@ def shape_env_check_state_equal(env1, env2, non_state_variable_names, map_value)
     # compare the two values.
     def compare_vars(
         map_value: Callable[[str, Any], Any]
-    ) -> List[Tuple[str, str, str]]:
+    ) -> list[tuple[str, str, str]]:
         env1_set, env2_set = set(env1_vars), set(env2_vars)
 
         # First, compare the set of keys in each vars dictionary.
@@ -489,7 +505,7 @@ class NotEqualError(Exception):
     def __init__(
         self,
         msg: str,
-        mismatched: List[Tuple[str, str, str]],
+        mismatched: list[tuple[str, str, str]],
     ) -> None:
         details = "\n".join(
             [

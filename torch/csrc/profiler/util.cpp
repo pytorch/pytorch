@@ -377,14 +377,24 @@ std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
 static constexpr int32_t kTruncatLength = 30;
 
 template <typename ListLikeType>
-inline std::string format_list(
+static inline std::string format_list(
     ListLikeType list,
     bool truncate,
     bool with_escaped_quotes = true) {
   if (truncate && list.size() > kTruncatLength) {
-    return fmt::format(
-        "\"[{}, ...]\"",
-        fmt::join(list.begin(), list.begin() + kTruncatLength, ", "));
+    if (with_escaped_quotes == true) {
+      auto x = fmt::format(
+          "\"[{}, ..., {}]\"",
+          fmt::join(list.begin(), list.begin() + kTruncatLength - 1, ", "),
+          *std::prev(list.end()));
+      return x;
+    } else {
+      auto x = fmt::format(
+          "[{}, ..., {}]",
+          fmt::join(list.begin(), list.begin() + kTruncatLength - 1, ", "),
+          *std::prev(list.end()));
+      return x;
+    }
   }
   if (with_escaped_quotes == true) {
     auto x = fmt::format("\"[{}]\"", fmt::join(list.begin(), list.end(), ", "));
@@ -411,7 +421,7 @@ std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(
     for (const auto j : c10::irange(tuple_size)) {
       auto [is_list, res] = findStartAddrForTensors(val_tuple[j]);
       if (is_list) {
-        auto vec_res = std::get<std::vector<int>>(res);
+        const auto& vec_res = std::get<std::vector<int>>(res);
         responses.insert(responses.end(), vec_res.begin(), vec_res.end());
       } else {
         responses.push_back(std::get<int>(res));
@@ -426,7 +436,7 @@ std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(
     for (const auto j : c10::irange(list_size)) {
       auto [is_list, res] = findStartAddrForTensors(val_list[j]);
       if (is_list) {
-        auto vec_res = std::get<std::vector<int>>(res);
+        auto const& vec_res = std::get<std::vector<int>>(res);
         responses.insert(responses.end(), vec_res.begin(), vec_res.end());
       } else {
         responses.push_back(std::get<int>(res));
@@ -515,7 +525,7 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
           const c10::IValue& val = inputs[i];
           auto [is_list, result] = findStartAddrForTensors(val);
           if (is_list) {
-            auto list_result = std::get<std::vector<int>>(result);
+            auto const& list_result = std::get<std::vector<int>>(result);
             addressList.push_back(
                 format_list(list_result, config.truncate, false));
           } else {
@@ -533,7 +543,7 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
       }
     }
     if (config.introspectOutputs) {
-      const auto outputs = fn.outputs();
+      const auto& outputs = fn.outputs();
       auto num_outputs = fn.num_outputs();
       if (checkFunctionOutputsForLogging(fn)) {
         // need to account for Stack mode where the outputs are at the end.
@@ -542,7 +552,7 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
           const c10::IValue& val = outputs[i];
           auto [is_list, result] = findStartAddrForTensors(val);
           if (is_list) {
-            auto list_result = std::get<std::vector<int>>(result);
+            auto const& list_result = std::get<std::vector<int>>(result);
             addressList.push_back(
                 format_list(list_result, config.truncate, false));
           } else {
@@ -949,5 +959,4 @@ bool checkFunctionInputsForLogging(const at::RecordFunction& fn) {
   }
   return true;
 }
-
 } // namespace torch::profiler::impl

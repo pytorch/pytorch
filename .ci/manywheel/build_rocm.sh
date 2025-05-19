@@ -107,17 +107,29 @@ if [[ $ROCM_INT -ge 60200 ]]; then
 fi
 
 OS_NAME=`awk -F= '/^NAME/{print $2}' /etc/os-release`
-if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
+if [[ "$OS_NAME" == *"CentOS Linux"* || "$OS_NAME" == *"AlmaLinux"* ]]; then
     LIBGOMP_PATH="/usr/lib64/libgomp.so.1"
     LIBNUMA_PATH="/usr/lib64/libnuma.so.1"
     LIBELF_PATH="/usr/lib64/libelf.so.1"
-    LIBTINFO_PATH="/usr/lib64/libtinfo.so.5"
+    if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
+        LIBTINFO_PATH="/usr/lib64/libtinfo.so.5"
+    else
+        LIBTINFO_PATH="/usr/lib64/libtinfo.so.6"
+    fi
     LIBDRM_PATH="/opt/amdgpu/lib64/libdrm.so.2"
     LIBDRM_AMDGPU_PATH="/opt/amdgpu/lib64/libdrm_amdgpu.so.1"
-    if [[ $ROCM_INT -ge 60100 ]]; then
+    if [[ $ROCM_INT -ge 60100 && $ROCM_INT -lt 60300 ]]; then
         # Below libs are direct dependencies of libhipsolver
         LIBSUITESPARSE_CONFIG_PATH="/lib64/libsuitesparseconfig.so.4"
-        LIBCHOLMOD_PATH="/lib64/libcholmod.so.2"
+        if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
+            LIBCHOLMOD_PATH="/lib64/libcholmod.so.2"
+            # Below libs are direct dependencies of libsatlas
+            LIBGFORTRAN_PATH="/lib64/libgfortran.so.3"
+        else
+            LIBCHOLMOD_PATH="/lib64/libcholmod.so.3"
+            # Below libs are direct dependencies of libsatlas
+            LIBGFORTRAN_PATH="/lib64/libgfortran.so.5"
+        fi
         # Below libs are direct dependencies of libcholmod
         LIBAMD_PATH="/lib64/libamd.so.2"
         LIBCAMD_PATH="/lib64/libcamd.so.2"
@@ -125,7 +137,6 @@ if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
         LIBCOLAMD_PATH="/lib64/libcolamd.so.2"
         LIBSATLAS_PATH="/lib64/atlas/libsatlas.so.3"
         # Below libs are direct dependencies of libsatlas
-        LIBGFORTRAN_PATH="/lib64/libgfortran.so.3"
         LIBQUADMATH_PATH="/lib64/libquadmath.so.0"
     fi
     MAYBE_LIB64=lib64
@@ -140,7 +151,7 @@ elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
     fi
     LIBDRM_PATH="/usr/lib/x86_64-linux-gnu/libdrm.so.2"
     LIBDRM_AMDGPU_PATH="/usr/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1"
-    if [[ $ROCM_INT -ge 60100 ]]; then
+    if [[ $ROCM_INT -ge 60100 && $ROCM_INT -lt 60300 ]]; then
         # Below libs are direct dependencies of libhipsolver
         LIBCHOLMOD_PATH="/lib/x86_64-linux-gnu/libcholmod.so.3"
         # Below libs are direct dependencies of libcholmod
@@ -174,12 +185,6 @@ do
     file_name="${lib##*/}" # Substring removal of path to get filename
     OS_SO_FILES[${#OS_SO_FILES[@]}]=$file_name # Append lib to array
 done
-
-# PyTorch-version specific
-# AOTriton dependency only for PyTorch >= 2.4
-if (( $(echo "${PYTORCH_VERSION} 2.4" | awk '{print ($1 >= $2)}') )); then
-    ROCM_SO_FILES+=("libaotriton_v2.so")
-fi
 
 # rocBLAS library files
 ROCBLAS_LIB_SRC=$ROCM_HOME/lib/rocblas/library

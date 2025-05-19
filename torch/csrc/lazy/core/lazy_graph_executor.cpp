@@ -447,7 +447,6 @@ void LazyGraphExecutor::WaitDeviceOps(c10::ArrayRef<BackendDevice> devices) {
   // The LockDevices() API returns a vector of
   // ExceptionCleanup object, which is going to be freed
   // immediately, turning this operation into a lock barrier.
-  // NOLINTNEXTLINE
   DeviceLockerArena::Get()->LockDevices(wait_devices);
 }
 
@@ -1072,6 +1071,18 @@ hash_t LazyGraphExecutor::GetGraphHash(
   auto po_data = RunPostOrder(ir_values, &coll);
   coll.hash = HashCombine(coll.hash, Hash(po_data.parameter_sequence));
   return coll.hash;
+}
+
+void LazyGraphExecutor::ClearComputationCache() {
+  VLOG(4) << "Clearing the computation cache";
+  GetComputationCache()->Clear();
+}
+
+void LazyGraphExecutor::RemoveFromComputationCache(const hash_t& hash) {
+  VLOG(4) << "Removing computation cache for hash " << hash;
+  if (!GetComputationCache()->Erase(hash)) {
+    LOG(ERROR) << "There is no cached computation for hash " << hash << '\n';
+  }
 }
 
 } // namespace torch::lazy

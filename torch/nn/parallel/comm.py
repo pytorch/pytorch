@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import List
 
 import torch
 from torch._utils import (
@@ -137,7 +136,7 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
     """
     # TODO: When `len(inputs) == 1` and all inputs are on `destination`, just
     #       return `inputs`.
-    dense_tensors: List[List] = [[] for _ in inputs]  # shape (num_gpus, num_tensors)
+    dense_tensors: list[list] = [[] for _ in inputs]  # shape (num_gpus, num_tensors)
     output = []
     ref_order = []
     # process sparse ones first since they may have different sizes on different gpus

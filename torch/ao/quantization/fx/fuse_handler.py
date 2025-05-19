@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Union
 
 import torch
 from torch.ao.quantization.backend_config import BackendConfig
@@ -36,13 +36,13 @@ class FuseHandler(ABC):
     def fuse(
         self,
         load_arg: Callable,
-        named_modules: Dict[str, torch.nn.Module],
+        named_modules: dict[str, torch.nn.Module],
         fused_graph: Graph,
         root_node: Node,
-        extra_inputs: List[Any],
+        extra_inputs: list[Any],
         matched_node_pattern: NodePattern,
         fuse_custom_config: FuseCustomConfig,
-        fuser_method_mapping: Dict[Pattern, Union[torch.nn.Sequential, Callable]],
+        fuser_method_mapping: dict[Pattern, Union[torch.nn.Sequential, Callable]],
         is_qat: bool,
     ) -> Node:
         pass
@@ -55,13 +55,13 @@ class DefaultFuseHandler(FuseHandler):
     def fuse(
         self,
         load_arg: Callable,
-        named_modules: Dict[str, torch.nn.Module],
+        named_modules: dict[str, torch.nn.Module],
         fused_graph: Graph,
         root_node: Node,
-        extra_inputs: List[Any],
+        extra_inputs: list[Any],
         matched_node_pattern: NodePattern,
         fuse_custom_config: FuseCustomConfig,
-        fuser_method_mapping: Dict[Pattern, Union[torch.nn.Sequential, Callable]],
+        fuser_method_mapping: dict[Pattern, Union[torch.nn.Sequential, Callable]],
         is_qat: bool,
     ) -> Node:
         assert (
@@ -76,7 +76,7 @@ class DefaultFuseHandler(FuseHandler):
             """
             if isinstance(pattern, (tuple, list)):
                 n, *args = pattern
-                modules: List[torch.nn.Module] = []
+                modules: list[torch.nn.Module] = []
                 modules.append(get_modules(n))
                 modules.extend(get_modules(a) for a in args)
                 return tuple(modules)
@@ -120,8 +120,8 @@ class DefaultFuseHandler(FuseHandler):
 
 def _get_fusion_pattern_to_fuse_handler_cls(
     backend_config: BackendConfig,
-) -> Dict[Pattern, Callable]:
-    fusion_pattern_to_fuse_handlers: Dict[Pattern, Callable] = {}
+) -> dict[Pattern, Callable]:
+    fusion_pattern_to_fuse_handlers: dict[Pattern, Callable] = {}
     for pattern, config in backend_config._pattern_complex_format_to_config.items():
         if config.fuser_method is not None:
             # TODO: is this logic right?

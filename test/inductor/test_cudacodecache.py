@@ -58,7 +58,7 @@ class TestCUDACodeCache(InductorTestCase):
             y = torch.rand(10).float().cuda()
             a = 5.0
             expected_y = a * x + y
-            res = dll_wrapper.saxpy(
+            dll_wrapper.saxpy(
                 ctypes.c_int(10),
                 ctypes.c_float(a),
                 ctypes.c_void_p(x.data_ptr()),
@@ -83,7 +83,7 @@ class TestCUDACodeCache(InductorTestCase):
             y = torch.rand(5).float().cuda()
             a = 2.0
             expected_y = a * x + y
-            res = compiled_res.result().saxpy(
+            compiled_res.result().saxpy(
                 ctypes.c_int(5),
                 ctypes.c_float(a),
                 ctypes.c_void_p(x.data_ptr()),

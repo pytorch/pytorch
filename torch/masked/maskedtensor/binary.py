@@ -139,9 +139,10 @@ def _binary_helper(fn, args, kwargs, inplace):
 
         crow = data_args[0].crow_indices()
         col = data_args[0].col_indices()
+        size = data_args[0].size()
         data_args[0] = data_args[0].values()
         v = fn(*data_args)
-        result_data = torch.sparse_csr_tensor(crow, col, v)
+        result_data = torch.sparse_csr_tensor(crow, col, v, size)
 
     else:
         result_data = fn(*data_args)

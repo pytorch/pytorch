@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, TypeVar, Union
+from typing import Optional, TypeVar, Union
 
 from torch import Tensor
 
@@ -9,13 +9,13 @@ from torch import Tensor
 # broadcast to a tuple.
 # Comes in several variants: A tuple of unknown size, and a fixed-size tuple for 1d, 2d, or 3d operations.
 T = TypeVar("T")
-_scalar_or_tuple_any_t = Union[T, Tuple[T, ...]]
-_scalar_or_tuple_1_t = Union[T, Tuple[T]]
-_scalar_or_tuple_2_t = Union[T, Tuple[T, T]]
-_scalar_or_tuple_3_t = Union[T, Tuple[T, T, T]]
-_scalar_or_tuple_4_t = Union[T, Tuple[T, T, T, T]]
-_scalar_or_tuple_5_t = Union[T, Tuple[T, T, T, T, T]]
-_scalar_or_tuple_6_t = Union[T, Tuple[T, T, T, T, T, T]]
+_scalar_or_tuple_any_t = Union[T, tuple[T, ...]]
+_scalar_or_tuple_1_t = Union[T, tuple[T]]
+_scalar_or_tuple_2_t = Union[T, tuple[T, T]]
+_scalar_or_tuple_3_t = Union[T, tuple[T, T, T]]
+_scalar_or_tuple_4_t = Union[T, tuple[T, T, T, T]]
+_scalar_or_tuple_5_t = Union[T, tuple[T, T, T, T, T]]
+_scalar_or_tuple_6_t = Union[T, tuple[T, T, T, T, T, T]]
 
 # For arguments which represent size parameters (eg, kernel size, padding)
 _size_any_t = _scalar_or_tuple_any_t[int]

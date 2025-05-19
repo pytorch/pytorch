@@ -33,17 +33,17 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 +----------------+-----+-----+-----+-----+-----+-----+
 | all_reduce     | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
-| reduce         | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
+| reduce         | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
-| all_gather     | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
+| all_gather     | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
-| gather         | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
+| gather         | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
-| scatter        | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
+| scatter        | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
-| reduce_scatter | ✘   | ✘   | ✘   | ✘   | ✘   | ✓   |
+| reduce_scatter | ✓   | ✓   | ✘   | ✘   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
-| all_to_all     | ✘   | ✘   | ✓   | ?   | ✘   | ✓   |
+| all_to_all     | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
 | barrier        | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
@@ -141,8 +141,11 @@ network bandwidth. These two environment variables have been pre-tuned by NCCL
 for some cloud providers, such as AWS or GCP.
 
 For a full list of NCCL environment variables, please refer to
-`NVIDIA NCCL's official documentation <https://docs.nvidia.com/deeplearning/sdk/nccl-developer-guide/docs/env.html>`_
+`NVIDIA NCCL's official documentation <https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html>`_
 
+You can tune NCCL communicators even further using `torch.distributed.ProcessGroupNCCL.NCCLConfig`
+and `torch.distributed.ProcessGroupNCCL.Options`. Learn more about them using `help`
+(e.g. `help(torch.distributed.ProcessGroupNCCL.NCCLConfig)`) in the interpreter.
 
 .. _distributed-basics:
 
@@ -197,6 +200,8 @@ Both block until all processes have joined.
 .. autofunction:: is_nccl_available
 
 .. autofunction:: is_gloo_available
+
+.. autofunction:: torch.distributed.distributed_c10d.is_xccl_available
 
 .. autofunction:: is_torchelastic_launched
 
@@ -281,6 +286,13 @@ The machine with rank 0 will be used to set up all connections.
 
 This is the default method, meaning that ``init_method`` does not have to be specified (or
 can be ``env://``).
+
+Improving initialization time
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* ``TORCH_GLOO_LAZY_INIT`` - establishes connections on demand rather than
+  using a full mesh which can greatly improve initialization time for non all2all
+  operations.
 
 Post-Initialization
 -------------------
@@ -412,8 +424,7 @@ is guaranteed to support two methods:
   returns ``True`` if the operation has been successfully enqueued onto a CUDA stream and the output can be utilized on the
   default stream without further synchronization.
 * ``wait()`` - in the case of CPU collectives, will block the process until the operation is completed. In the case
-  of CUDA collectives, will block until the operation has been successfully enqueued onto a CUDA stream and the
-  output can be utilized on the default stream without further synchronization.
+  of CUDA collectives, will block the currently active CUDA stream until the operation is completed (but will not block the CPU).
 * ``get_future()`` - returns ``torch._C.Future`` object. Supported for NCCL, also supported for most operations on GLOO
   and MPI, except for peer to peer operations.
   Note: as we continue adopting Futures and merging APIs, ``get_future()`` call might become redundant.
@@ -553,7 +564,46 @@ Multi-GPU collective functions
     please contact PyTorch Distributed's maintainers.
 
 
-.. _distributed-launch:
+.. _object_collectives:
+
+Object collectives
+------------------
+
+.. warning::
+    Object collectives have a number of serious limitations.  Read further to determine
+    if they are safe to use for your use case.
+
+Object collectives are a set of collective-like operations that work on arbitrary
+Python objects, as long as they can be pickled.  There are various collective patterns
+implemented (e.g. broadcast, all_gather, ...) but they each roughly follow this pattern:
+
+1. convert the input object into a pickle (raw bytes), then shove it into a byte tensor
+2. communicate the size of this byte tensor to peers (first collective operation)
+3. allocate appropriately sized tensor to perform the real collective
+4. communicate the object data (second collective operation)
+5. convert raw data back into Python (unpickle)
+
+Object collectives sometimes have surprising performance or memory characteristics that lead to
+long runtimes or OOMs, and thus they should be used with caution.  Here are some common issues.
+
+**Asymmetric pickle/unpickle time** - Pickling objects can be slow, depending on the number, type and size of the objects.
+When the collective has a fan-in (e.g. gather_object), the receiving rank(s) must unpickle N times more objects than
+the sending rank(s) had to pickle, which can cause other ranks to time out on their next collective.
+
+**Inefficient tensor communication** - Tensors should be sent via regular collective APIs, not object collective APIs.
+It is possible to send Tensors via object collective APIs, but they will be serialized and deserialized (including a
+CPU-sync and device-to-host copy in the case of non-CPU tensors), and in almost every case other than debugging or
+troubleshooting code, it would be worth the trouble to refactor the code to use non-object collectives instead.
+
+**Unexpected tensor devices** - If you still want to send tensors via object collectives, there is another aspect
+specific to cuda (and possibly other accelerators) tensors.  If you pickle a tensor that is currently on `cuda:3`, and
+then unpickle it, you will get another tensor on `cuda:3` *regardless of which process you are on, or which CUDA device
+is the 'default' device for that process*.  With regular tensor collective APIs, 'output tensors' will always be on the
+same, local device, which is generally what you'd expect.
+
+Unpickling a tensor will implicitly activate a CUDA context if it is the first
+time a GPU is used by the process, which can waste significant amounts of GPU memory. This issue can be avoided by
+moving tensors to CPU before passing them as inputs to an object collective.
 
 Third-party backends
 --------------------
@@ -576,6 +626,8 @@ the new backend.
 
 .. warning::
     The support of third-party backend is experimental and subject to change.
+
+.. _distributed-launch:
 
 Launch utility
 --------------

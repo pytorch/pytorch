@@ -22,10 +22,12 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 class PadMMTest(TestCase):
     def setUp(self):
         super().setUp()
-        if not is_big_gpu(0):
+        if not is_big_gpu():
             return self.skipTest("Need a big GPU to run max_autotune=True")
 
-    @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @inductor_config.patch(
+        max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
+    )
     def test_pad_mm_dyn_m(self):
         M = 40
         K1 = 581
@@ -56,7 +58,9 @@ class PadMMTest(TestCase):
             FileCheck().check(f"K = {aligned_k}").run(code)
         self.assertEqual(res1, res2)
 
-    @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @inductor_config.patch(
+        max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
+    )
     def test_cat_pad_mm_dyn_m(self):
         M1 = 128
         M2 = 40
@@ -91,7 +95,9 @@ class PadMMTest(TestCase):
             FileCheck().check(f"K = {aligned_k}").run(code)
         self.assertEqual(res1, res2)
 
-    @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @inductor_config.patch(
+        max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
+    )
     def test_pad_mm_dyn_n(self):
         M = 20
         K = 81
@@ -118,7 +124,9 @@ class PadMMTest(TestCase):
             FileCheck().check(f"K = {aligned_k}").run(code)
         self.assertEqual(res1, res2)
 
-    @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @inductor_config.patch(
+        max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
+    )
     def test_pad_mm_dyn_k(self):
         M = 21
         K = 80
@@ -172,7 +180,7 @@ class PadMMTest(TestCase):
         ):
             res1 = fn(a, b)
             compiled_fn = torch.compile(fn)
-            res2, (code,) = run_and_get_code(compiled_fn, a, b)
+            res2, (_,) = run_and_get_code(compiled_fn, a, b)
         self.assertEqual(res1, res2)
 
     @inductor_config.patch(force_shape_pad=True)
@@ -185,7 +193,9 @@ class PadMMTest(TestCase):
         b = torch.randn(10, 100).cuda()
         self.assertEqual(torch.compile(addmm)(x, a, b), addmm(x, a, b))
 
-    @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @inductor_config.patch(
+        max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
+    )
     def test_pad_bmm_dyn_b(self):
         B = 10
         M = 128
@@ -214,7 +224,9 @@ class PadMMTest(TestCase):
             FileCheck().check(f"K = {aligned_k}").run(code)
         self.assertEqual(res1, res2)
 
-    @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @inductor_config.patch(
+        max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
+    )
     def test_pad_bmm_dyn_k(self):
         B = 10
         M = 128
@@ -243,7 +255,9 @@ class PadMMTest(TestCase):
             FileCheck().check(f"N = {aligned_n}").run(code)
         self.assertEqual(res1, res2)
 
-    @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @inductor_config.patch(
+        max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
+    )
     def test_pad_bmm_dyn_bm(self):
         B = 10
         M = 128
@@ -273,7 +287,9 @@ class PadMMTest(TestCase):
             FileCheck().check(f"N = {aligned_n}").run(code)
         self.assertEqual(res1, res2)
 
-    @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @inductor_config.patch(
+        max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
+    )
     def test_pad_addmm_dyn_m(self):
         M = 128
         K = 33
@@ -302,7 +318,9 @@ class PadMMTest(TestCase):
             FileCheck().check(f"K = {aligned_k}").run(code)
         self.assertEqual(res1, res2)
 
-    @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @inductor_config.patch(
+        max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
+    )
     def test_pad_addmm_dyn_mn(self):
         M = 128
         K = 33
@@ -503,8 +521,8 @@ class PadMMTest(TestCase):
             return x @ y
 
         args = [
-            torch.randn(2**4, 2**14 - 1, device="cuda", dtype=torch.float16),
-            torch.randn(2**14 - 1, 2**4, device="cuda", dtype=torch.float16),
+            torch.randn(2**4, 2**8 - 1, device="cuda", dtype=torch.float16),
+            torch.randn(2**8 - 1, 2**4, device="cuda", dtype=torch.float16),
         ]
 
         counters.clear()
@@ -516,6 +534,7 @@ class PadMMTest(TestCase):
             ret, code = run_and_get_code(opt_fn, *args)
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
 
+        code = [c for c in code if "decompose_k" not in c]
         # The mm kernel should use a template (because we set max_autotune_gemm_backends = TRITON).
         # Its name should contain `mm` because `mm` was the original aten op where the mm came from.
         FileCheck().check("def triton_tem_fused_mm").run(code[0])

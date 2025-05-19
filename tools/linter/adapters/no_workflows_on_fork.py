@@ -22,7 +22,7 @@ import os
 import re
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, NamedTuple, Optional
+from typing import Any, Callable, NamedTuple, Optional
 
 from yaml import load
 
@@ -77,11 +77,11 @@ def gen_lint_message(
     )
 
 
-def check_file(filename: str) -> List[LintMessage]:
+def check_file(filename: str) -> list[LintMessage]:
     logging.debug("Checking file %s", filename)
 
     workflow = load_yaml(Path(filename))
-    bad_jobs: Dict[str, Optional[str]] = {}
+    bad_jobs: dict[str, Optional[str]] = {}
     if type(workflow) is not dict:
         return []
 
@@ -106,7 +106,7 @@ def check_file(filename: str) -> List[LintMessage]:
             pass
         else:
             if_statement = str(if_statement)
-            valid_checks: List[Callable[[str], bool]] = [
+            valid_checks: list[Callable[[str], bool]] = [
                 lambda x: "github.repository == 'pytorch/pytorch'" in x
                 and "github.event_name != 'schedule' || github.repository == 'pytorch/pytorch'"
                 not in x,

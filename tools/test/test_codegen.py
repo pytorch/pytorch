@@ -410,6 +410,17 @@ class TestNativeFunctionGeneratrion(unittest.TestCase):
         )
         BackendIndex.grow_index(self.backend_indices, two_returns_backend_index)
 
+        self.core_func, core_func_index = NativeFunction.from_yaml(
+            {
+                "func": "op_3.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor",
+                "autogen": "op_3.vec_out",
+                "tags": ["core"],
+            },
+            loc=Location(__file__, 1),
+            valid_tags={"core"},
+        )
+        BackendIndex.grow_index(self.backend_indices, core_func_index)
+
     def test_functional_variant_autogen_out_variant(self) -> None:
         native_functions = [self.one_return_func]
         add_generated_native_functions(native_functions, self.backend_indices)
@@ -437,6 +448,19 @@ class TestNativeFunctionGeneratrion(unittest.TestCase):
             op_name
         ]
         self.assertEqual(backend_metadata.kernel, "op_2_out")
+
+    def test_functional_variant_autogen_out_variant_core(self) -> None:
+        """
+        Tests autogen of out variants for core-tageed ops that are CompositeImplicitAutograd.
+        """
+        native_functions = [self.core_func]
+        add_generated_native_functions(native_functions, self.backend_indices)
+        print(native_functions)
+        self.assertEqual(len(native_functions), 2)
+        self.assertEqual(
+            str(native_functions[1].func),
+            "op_3.vec_out(Tensor input, SymInt[]? output_size, float[]? scale_factors, *, Tensor(a!) out) -> Tensor(a!)",
+        )
 
 
 # Test for static_dispatch

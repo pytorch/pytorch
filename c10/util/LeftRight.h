@@ -1,3 +1,5 @@
+#pragma once
+
 #include <c10/macros/Macros.h>
 #include <c10/util/Synchronized.h>
 #include <array>
@@ -57,8 +59,7 @@ class LeftRight final {
       : _counters{{{0}, {0}}},
         _foregroundCounterIndex(0),
         _foregroundDataIndex(0),
-        _data{{T{args...}, T{args...}}},
-        _writeMutex() {}
+        _data{{T{args...}, T{args...}}} {}
 
   // Copying and moving would not be threadsafe.
   // Needs more thought and careful design to make that work.

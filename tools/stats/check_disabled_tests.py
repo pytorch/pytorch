@@ -6,7 +6,7 @@ import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Generator
+from typing import Any, TYPE_CHECKING
 
 from tools.stats.upload_stats_lib import (
     download_s3_artifacts,
@@ -15,6 +15,10 @@ from tools.stats.upload_stats_lib import (
     upload_workflow_stats_to_s3,
 )
 from tools.stats.upload_test_stats import process_xml_element
+
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 
 TESTCASE_TAG = "testcase"
@@ -42,7 +46,8 @@ def process_report(
     all_tests: dict[str, dict[str, int]] = {}
 
     for test_case in root.iter(TESTCASE_TAG):
-        parsed_test_case = process_xml_element(test_case)
+        # Parse the test case as string values only.
+        parsed_test_case = process_xml_element(test_case, output_numbers=False)
 
         # Under --rerun-disabled-tests mode, a test is skipped when:
         # * it's skipped explicitly inside PyTorch code
@@ -240,7 +245,9 @@ def main(repo: str, workflow_run_id: int, workflow_run_attempt: int) -> None:
 
         # The scheduled workflow has both rerun disabled tests and memory leak check jobs.
         # We are only interested in the former here
-        if not is_rerun_disabled_tests(tests):
+        if not is_rerun_disabled_tests(
+            report, workflow_run_id, workflow_run_attempt, tests
+        ):
             continue
 
         for name, stats in tests.items():

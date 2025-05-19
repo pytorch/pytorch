@@ -34,6 +34,7 @@ static inline int PyCode_GetNFreevars(PyCodeObject* code) {
 
 // Provided by CPython but getting the header for them is very hard
 #if IS_PYTHON_3_11_PLUS
+// NOLINTNEXTLINE(readability-redundant-declaration)
 PyAPI_FUNC(void) _PyWeakref_ClearRef(PyWeakReference* self);
 #else
 extern void _PyWeakref_ClearRef(PyWeakReference* self);

@@ -11,7 +11,7 @@ import abc
 import time
 from collections import namedtuple
 from functools import wraps
-from typing import Dict, Optional
+from typing import Optional
 from typing_extensions import deprecated
 
 
@@ -37,7 +37,7 @@ MetricData = namedtuple("MetricData", ["timestamp", "group_name", "name", "value
 class MetricsConfig:
     __slots__ = ["params"]
 
-    def __init__(self, params: Optional[Dict[str, str]] = None):
+    def __init__(self, params: Optional[dict[str, str]] = None):
         self.params = params
         if self.params is None:
             self.params = {}
@@ -72,7 +72,7 @@ class MetricStream:
         )
 
 
-_metrics_map: Dict[str, MetricHandler] = {}
+_metrics_map: dict[str, MetricHandler] = {}
 _default_metrics_handler: MetricHandler = NullMetricHandler()
 
 
@@ -122,6 +122,7 @@ def prof(fn=None, group: str = "torchelastic"):
      @metrics.prof
      def x():
          pass
+
 
      @metrics.prof(group="agent")
      def y():

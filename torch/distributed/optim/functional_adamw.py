@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.optim._functional as F
@@ -9,7 +9,7 @@ from torch.distributed.optim._deprecation_warning import (
 )
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 
 # Define a TorchScript compatible Functional AdamW Optimizer
@@ -25,9 +25,9 @@ __all__: List[str] = []
 class _FunctionalAdamW:
     def __init__(
         self,
-        params: List[Tensor],
+        params: list[Tensor],
         lr: float = 1e-3,
-        betas: Tuple[float, float] = (0.9, 0.999),
+        betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 1e-2,
         amsgrad: bool = False,
@@ -59,7 +59,7 @@ class _FunctionalAdamW:
         self.maximize = maximize
         self.foreach = foreach
         self.fused = fused
-        self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
+        self.state = torch.jit.annotate(dict[torch.Tensor, dict[str, torch.Tensor]], {})
 
         if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")
@@ -74,7 +74,7 @@ class _FunctionalAdamW:
         exp_avgs = []
         exp_avg_sqs = []
         max_exp_avg_sqs = []
-        state_steps: List[Tensor] = []
+        state_steps: list[Tensor] = []
         has_complex = torch.is_complex(param)
         if grad is not None:
             params_with_grad.append(param)
@@ -129,14 +129,14 @@ class _FunctionalAdamW:
                 has_complex=has_complex,
             )
 
-    def step(self, gradients: List[Optional[Tensor]]):
+    def step(self, gradients: list[Optional[Tensor]]):
         params = self.param_group["params"]
         params_with_grad = []
         grads = []
         exp_avgs = []
         exp_avg_sqs = []
         max_exp_avg_sqs = []
-        state_steps: List[Tensor] = []
+        state_steps: list[Tensor] = []
 
         if len(params) != len(gradients):
             raise ValueError(

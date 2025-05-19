@@ -209,7 +209,7 @@ Diagnosing TorchInductor Errors
 
 If the error does not occur with the ``"eager"`` backend, then the
 backend compiler is the source of the error (`example
-error <https://gist.github.com/mlazos/2f13681e3cc6c43b3911f336327032de%5D>`__).
+error <https://gist.github.com/mlazos/2f13681e3cc6c43b3911f336327032de>`__).
 There are `different choices <./torch.compiler.rst>`__
 for backend compilers for TorchDynamo, with TorchInductor
 fitting the needs of most users. This section focuses on TorchInductor
@@ -668,7 +668,7 @@ assumptions about locals and globals in order to allow compiler
 optimizations, and expresses these assumptions as guards that check
 particular values at runtime. If any of these guards fail, Dynamo will
 recompile that function (or part) up to
-``torch._dynamo.config.cache_size_limit`` times. If your program is
+``torch._dynamo.config.recompile_limit`` times. If your program is
 hitting the cache limit, you will first need to determine which guard is
 failing and what part of your program is triggering it.
 
@@ -679,7 +679,7 @@ cost of recompilation outweighs any optimization benefits.
 
 ::
 
-   torch._dynamo.config.cache_size_limit = <your desired cache limit>
+   torch._dynamo.config.recompile_limit = <your desired cache limit>
 
 TorchDynamo plans to support many common cases of dynamic tensor shapes,
 such as varying batch size or sequence length. It does not plan to

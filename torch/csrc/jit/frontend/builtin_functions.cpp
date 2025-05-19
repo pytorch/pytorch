@@ -7,7 +7,7 @@
 
 namespace torch::jit {
 
-auto scalar_operators_source = at::jit::CodeTemplate(
+static auto scalar_operators_source = at::jit::CodeTemplate(
     R"SCRIPT(
 def mul(a : ${Scalar}, b : Tensor) -> Tensor:
   return b * a
@@ -23,7 +23,7 @@ def div(a : ${Scalar}, b : Tensor) -> Tensor:
   return torch.reciprocal(b) * a
 )SCRIPT");
 
-auto scalar_operators_no_complex_source = at::jit::CodeTemplate(
+static auto scalar_operators_no_complex_source = at::jit::CodeTemplate(
     R"SCRIPT(
 def lt(a : ${Scalar}, b : Tensor) -> Tensor:
   return b > a
@@ -35,19 +35,19 @@ def ge(a : ${Scalar}, b : Tensor) -> Tensor:
   return b <= a
 )SCRIPT");
 
-auto _ntuple_ops = at::jit::CodeTemplate(
+static auto _ntuple_ops = at::jit::CodeTemplate(
     R"SCRIPT(
 def _${name}(x: BroadcastingList${Length}[${Scalar}]) -> List[${Scalar}]:
   return x
 )SCRIPT");
 
-auto floordiv = at::jit::CodeTemplate(
+static auto floordiv = at::jit::CodeTemplate(
     R"SCRIPT(
 def floordiv(self : Tensor, other : ${Rhs_Type}) -> Tensor:
   return torch.floor_divide(self, other)
 )SCRIPT");
 
-auto tensor_properties =
+static auto tensor_properties =
     R"SCRIPT(
 def ndim(a : Tensor) -> int:
   return a.dim()
@@ -67,7 +67,7 @@ def shape(a : Tensor) -> List[int]:
 // aten::_assert_int_or_pair op which was removed once we were able to compile
 // torch.nn.functional.assert_int_or_pair
 // list_with_default also needs to be here for BC
-auto aten_ops =
+static auto aten_ops =
     R"SCRIPT(
 def _assert_int_or_pair(vals: List[int], name: str, message: str):
   pass

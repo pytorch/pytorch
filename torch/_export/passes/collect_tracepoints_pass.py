@@ -1,9 +1,17 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import operator
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.export.exported_program import ConstantArgument, TensorArgument
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
+
+
+if TYPE_CHECKING:
+    from torch.export.exported_program import ModuleCallSignature
+    from torch.export.graph_signature import ExportGraphSignature
 
 
 __all__ = ["CollectTracepointsPass"]
@@ -14,13 +22,15 @@ class CollectTracepointsPass(PassBase):
     Performs constant folding and constant propagation.
     """
 
-    def __init__(self, specs, sig) -> None:
+    def __init__(
+        self, specs: dict[str, ModuleCallSignature], sig: ExportGraphSignature
+    ) -> None:
         super().__init__()
         self.specs = specs
         self.sig = sig
 
-    def call(self, gm):
-        def get_arg_spec(arg):
+    def call(self, gm: torch.fx.GraphModule) -> Optional[PassResult]:
+        def get_arg_spec(arg) -> Union[TensorArgument, ConstantArgument]:
             if isinstance(arg, torch.fx.Node):
                 if isinstance(arg.meta.get("val"), torch.Tensor):
                     return TensorArgument(name=arg.name)
@@ -67,7 +77,7 @@ class CollectTracepointsPass(PassBase):
                 else:
                     nn_module_stack = None
 
-        def copy_sig(sig):
+        def copy_sig(sig) -> ModuleCallSignature:
             from torch.export.exported_program import ModuleCallSignature
 
             return ModuleCallSignature(
@@ -132,3 +142,5 @@ class CollectTracepointsPass(PassBase):
                         gm.graph.erase_node(user)
                     gm.graph.erase_node(node)
             return PassResult(gm, True)
+
+        return None

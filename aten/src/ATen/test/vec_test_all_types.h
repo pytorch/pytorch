@@ -64,6 +64,16 @@ CACHE_ALIGN #define
 #undef CHECK_WITH_FMA
 #endif
 
+template <typename scalar_t>
+struct OpMathType {
+  using type = scalar_t;
+};
+template <>
+struct OpMathType<c10::Half> {
+  using type = float;
+};
+
+
 template<typename T>
 using Complex = typename c10::complex<T>;
 
@@ -272,7 +282,7 @@ std::ostream& operator<<(std::ostream& stream, const CheckWithinDomains<T>& dmn)
 
 template <typename T>
 bool check_both_nan([[maybe_unused]] T x, [[maybe_unused]] T y) {
-    if constexpr (std::is_floating_point_v<T> || std::is_reduced_floating_point_v<T>) {
+    if constexpr (std::is_floating_point_v<T> || c10::is_reduced_floating_point_v<T>) {
         return std::isnan(x) && std::isnan(y);
     }
     return false;
@@ -422,7 +432,7 @@ std::enable_if_t<std::is_floating_point_v<T>, void> filter_fmod(T& a, T& b) {
 }
 
 template <typename T>
-std::enable_if_t<std::is_floating_point_v<T>, void> filter_fmadd(T& a, T& b, T& c) {
+std::enable_if_t<std::is_floating_point_v<T> || at::vec::is_reduced_floating_point_v<T>, void> filter_fmadd(T& a, T& b, T& c) {
     // This is to setup a limit to make sure fmadd (a * b + c) won't overflow
     T max = std::sqrt(std::numeric_limits<T>::max()) / T(2.0);
     T min = ((T)0 - max);
@@ -568,7 +578,7 @@ private:
     uint64_t seed;
 };
 
-template <typename T, bool is_floating_point = std::is_floating_point_v<T>, bool is_complex = is_complex<T>::value>
+template <typename T, bool is_floating_point = std::is_floating_point_v<T> || c10::is_reduced_floating_point_v<T>, bool is_complex = is_complex<T>::value>
 struct ValueGen
 {
     std::uniform_int_distribution<int64_t> dis;
@@ -591,10 +601,13 @@ struct ValueGen
 };
 
 template <typename T>
+using reduced_fp_to_float_t = std::conditional_t<c10::is_reduced_floating_point_v<T>, float, T>;
+
+template <typename T>
 struct ValueGen<T, true, false>
 {
     std::mt19937 gen;
-    std::normal_distribution<T> normal;
+    std::normal_distribution<reduced_fp_to_float_t<T>> normal;
     std::uniform_int_distribution<int> roundChance;
     T _start;
     T _stop;
@@ -613,7 +626,7 @@ struct ValueGen<T, true, false>
         //make it  normal +-3sigma
         T divRange = static_cast<T>(6.0);
         T stdev = std::abs(stop / divRange - start / divRange);
-        normal = std::normal_distribution<T>{ mean, stdev };
+        normal = std::normal_distribution<reduced_fp_to_float_t<T>>{ mean, stdev };
         // in real its hard to get rounded value
         // so we will force it by  uniform chance
         roundChance = std::uniform_int_distribution<int>(0, 5);
@@ -988,6 +1001,10 @@ void test_binary(
     CACHE_ALIGN VT vals0[el_count];
     CACHE_ALIGN VT vals1[el_count];
     CACHE_ALIGN VT expected[el_count];
+    [[maybe_unused]] CACHE_ALIGN VT expectedWithLeftScalar[el_count];
+    [[maybe_unused]] CACHE_ALIGN VT expectedWithRightScalar[el_count];
+    [[maybe_unused]] VT scalar0;
+    [[maybe_unused]] VT scalar1;
     bool bitwise = testCase.isBitwise();
     UVT default_start = std::is_floating_point_v<UVT> ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
     UVT default_end = std::numeric_limits<UVT>::max();
@@ -997,6 +1014,7 @@ void test_binary(
     int trialCount = getTrialCount<UVT>(test_trials, domains_size);
     TestSeed seed = testCase.getTestSeed();
     uint64_t changeSeedBy = 0;
+    constexpr bool kCanUseScalar = std::is_invocable_v<Op2, VT, T> && std::is_invocable_v<Op2, T, VT>;
     for (const CheckWithinDomains<UVT>& dmn : testCase.getDomains()) {
         size_t dmn_argc = dmn.ArgsDomain.size();
         UVT start0 = dmn_argc > 0 ? dmn.ArgsDomain[0].start : default_start;
@@ -1009,9 +1027,23 @@ void test_binary(
           for (const auto k : c10::irange(el_count)) {
             vals0[k] = generator0.get();
             vals1[k] = generator1.get();
+            if (k == 0) {
+              scalar0 = vals0[0];
+              scalar1 = vals1[0];
+            }
             call_filter(filter, vals0[k], vals1[k]);
+            if constexpr (kCanUseScalar) {
+              call_filter(filter, vals0[k], scalar1);
+              call_filter(filter, scalar0, vals1[k]);
+            }
+          }
+          for (const auto k : c10::irange(el_count)) {
             // map operator
             expected[k] = expectedFunction(vals0[k], vals1[k]);
+            if constexpr (kCanUseScalar) {
+              expectedWithLeftScalar[k] = expectedFunction(scalar0, vals1[k]);
+              expectedWithRightScalar[k] = expectedFunction(vals0[k], scalar1);
+            }
           }
           // test
           auto input0 = vec_type::loadu(vals0);
@@ -1021,8 +1053,27 @@ void test_binary(
           AssertVectorized<vec_type> vecAssert(
               testNameInfo, seed, vec_expected, actual, input0, input1);
           if (vecAssert.check(
-                  bitwise, dmn.CheckWithTolerance, dmn.ToleranceError))
+                  bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) {
             return;
+          }
+          if constexpr (kCanUseScalar) {
+            auto actualWithLeftScalar = actualFunction(scalar0, input1);
+            auto actualWithRightScalar = actualFunction(input0, scalar1);
+            auto vec_expectedWithLeftScalar = vec_type::loadu(expectedWithLeftScalar);
+            auto vec_expectedWithRightScalar = vec_type::loadu(expectedWithRightScalar);
+            AssertVectorized<vec_type> vecAssertWithLeftScalar(
+                testNameInfo, seed, vec_expectedWithLeftScalar, actualWithLeftScalar, scalar0, input1);
+            if (vecAssertWithLeftScalar.check(
+                    bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) {
+              return;
+            }
+            AssertVectorized<vec_type> vecAssertWithRightScalar(
+                testNameInfo, seed, vec_expectedWithRightScalar, actualWithRightScalar, input0, scalar1);
+            if (vecAssertWithRightScalar.check(
+                    bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) {
+              return;
+            }
+          }
         } // trial
         changeSeedBy += 1;
     }
@@ -1276,8 +1327,17 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Compl
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, T> local_fmadd(T a, T b, T c) {
     PreventFma noFma;
-    T ab = a * b;
-    return noFma.add(ab, c);
+    using op_math_t = typename OpMathType<T>::type;
+    auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
+    return static_cast<T>(noFma.add(ab, op_math_t(c)));
+}
+
+template <typename T>
+std::enable_if_t<!is_complex<T>::value, T> local_fmsub(T a, T b, T c) {
+    PreventFma noFma;
+    using op_math_t = typename OpMathType<T>::type;
+    auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
+    return static_cast<T>(noFma.sub(ab, op_math_t(c)));
 }
 
 template <typename T>

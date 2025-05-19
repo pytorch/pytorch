@@ -189,7 +189,7 @@ Tensor _pad_circular_symint(const Tensor &self, c10::SymIntArrayRef padding) {
   return out;
 }
 
-static c10::string_view padding_mode_string(padding_mode m) {
+static std::string_view padding_mode_string(padding_mode m) {
   switch (m) {
     case padding_mode::reflect:
       return "reflect";
@@ -244,7 +244,7 @@ Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mod
       "Only 2D, 3D, 4D, 5D padding with non-constant padding are supported for now");
 }
 
-Tensor pad_symint(const Tensor &self, c10::SymIntArrayRef pad, c10::string_view mode, std::optional<double> value) {
+Tensor pad_symint(const Tensor &self, c10::SymIntArrayRef pad, std::string_view mode, std::optional<double> value) {
   const auto mode_enum = [&] {
     if (mode == "reflect") {
       return at::padding_mode::reflect;

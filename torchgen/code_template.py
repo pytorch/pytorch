@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import itertools
 import re
-from typing import Mapping, Sequence
+import textwrap
+from typing import TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
 
 
 # match $identifier or ${identifier} and replace with value in env
@@ -41,9 +47,12 @@ class CodeTemplate:
             return kwargs[v] if v in kwargs else env[v]
 
         def indent_lines(indent: str, v: Sequence[object]) -> str:
-            return "".join(
-                [indent + l + "\n" for e in v for l in str(e).splitlines()]
-            ).rstrip()
+            content = "\n".join(
+                itertools.chain.from_iterable(str(e).splitlines() for e in v)
+            )
+            content = textwrap.indent(content, prefix=indent)
+            # Remove trailing whitespace on each line
+            return "\n".join(map(str.rstrip, content.splitlines())).rstrip()
 
         def replace(match: re.Match[str]) -> str:
             indent = match.group(1)

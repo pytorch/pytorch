@@ -3,6 +3,8 @@
 
 #include <c10/util/ThreadLocalDebugInfo.h>
 
+#include <cstring>
+
 namespace c10 {
 
 DataPtr Allocator::clone(const void* data, std::size_t n) {

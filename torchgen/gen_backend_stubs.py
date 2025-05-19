@@ -5,7 +5,7 @@ import os
 import re
 from collections import Counter, defaultdict, namedtuple
 from pathlib import Path
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 import yaml
 
@@ -26,6 +26,10 @@ from torchgen.model import (
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import concatMap, context, FileManager, NamespaceHelper, Target
 from torchgen.yaml_utils import YamlLoader
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # Parses the external backend's yaml, and adds a new BackendIndex for the backend's dispatch key.
@@ -76,34 +80,34 @@ def parse_backend_yaml(
 
     # Mostly just defaulting to false to stick with LazyTensor convention.
     use_out_as_primary = yaml_values.pop("use_out_as_primary", False)
-    assert isinstance(
-        use_out_as_primary, bool
-    ), f"You must provide either True or False for use_out_as_primary. Provided: {use_out_as_primary}"
+    assert isinstance(use_out_as_primary, bool), (
+        f"You must provide either True or False for use_out_as_primary. Provided: {use_out_as_primary}"
+    )
 
     use_device_guard = yaml_values.pop("device_guard", False)
-    assert isinstance(
-        use_device_guard, bool
-    ), f"You must provide either True or False for device_guard. Provided: {use_device_guard}"
+    assert isinstance(use_device_guard, bool), (
+        f"You must provide either True or False for device_guard. Provided: {use_device_guard}"
+    )
 
     supported = yaml_values.pop("supported", [])
     if supported is None:
         supported = []  # Allow an empty list of supported ops
-    assert isinstance(
-        supported, list
-    ), f'expected "supported" to be a list, but got: {supported} (of type {type(supported)})'
+    assert isinstance(supported, list), (
+        f'expected "supported" to be a list, but got: {supported} (of type {type(supported)})'
+    )
 
     symint = yaml_values.pop("symint", [])
     if symint is None:
         symint = []  # Allow an empty list of symint ops
-    assert isinstance(
-        symint, list
-    ), f'expected "symint" to be a list, but got: {supported} (of type {type(supported)})'
+    assert isinstance(symint, list), (
+        f'expected "symint" to be a list, but got: {supported} (of type {type(supported)})'
+    )
     symint_set = set(symint)
 
     supported_autograd = yaml_values.pop("autograd", [])
-    assert isinstance(
-        supported_autograd, list
-    ), f'expected "autograd" to be a list, but got: {supported_autograd}'
+    assert isinstance(supported_autograd, list), (
+        f'expected "autograd" to be a list, but got: {supported_autograd}'
+    )
 
     # full_codegen is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
     full_codegen = yaml_values.pop("full_codegen", [])
@@ -115,10 +119,10 @@ def parse_backend_yaml(
     # ir_gen is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
     yaml_values.pop("ir_gen", {})
 
-    assert (
-        len(yaml_values.keys()) == 0
-    ), f'{backend_yaml_path} contains unexpected keys: {", ".join(yaml_values.keys())}. \
-Only the following keys are supported: {", ".join(valid_keys)}'
+    assert len(yaml_values.keys()) == 0, (
+        f"{backend_yaml_path} contains unexpected keys: {', '.join(yaml_values.keys())}. "
+        f"Only the following keys are supported: {', '.join(valid_keys)}"
+    )
 
     def create_backend_index(
         backend_ops: list[str],
@@ -131,9 +135,9 @@ Only the following keys are supported: {", ".join(valid_keys)}'
         metadata: dict[OperatorName, BackendMetadata] = {}
         for op in backend_ops:
             op_name = OperatorName.parse(op)
-            assert (
-                op_name in native_functions_map
-            ), f"Found an invalid operator name: {op_name}"
+            assert op_name in native_functions_map, (
+                f"Found an invalid operator name: {op_name}"
+            )
             # See Note [External Backends Follow Dispatcher API]
             kernel_name = dispatcher.name(native_functions_map[op_name].func)
             if op in symint_ops:
@@ -234,11 +238,11 @@ the behavior of autograd for some operators on your backend. However "Autograd{b
 
         forward_kernels = [f for f in forward_kernels if f is not None]
         backward_kernels = [f for f in backward_kernels if f is not None]
-        assert (
-            len(forward_kernels) == 0 or len(backward_kernels) == 0
-        ), f'Currently, all variants of an op must either be registered to a backend key, or to a backend\'s \
+        assert len(forward_kernels) == 0 or len(backward_kernels) == 0, (
+            f'Currently, all variants of an op must either be registered to a backend key, or to a backend\'s \
 autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! \
 {forward_kernels[0].kernel} is listed under "supported", but {backward_kernels[0].kernel} is listed under "autograd".'
+        )
 
     return ParsedExternalYaml(
         backend_key, autograd_key, class_name, cpp_namespace, backend_indices
@@ -495,6 +499,7 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
             "dispatch_headers": dest.gen_registration_headers(
                 backend_index, per_operator_headers=per_operator_headers, rocm=False
             ),
+            "dispatch_helpers": dest.gen_registration_helpers(backend_index),
             "dispatch_definitions": fm.substitute_with_template(
                 "RegisterDispatchDefinitions.ini",
                 lambda: {
@@ -502,7 +507,6 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
                     "ns_epilogue": ns_helper.epilogue,
                     "static_init_dispatch_registrations": static_init_dispatch_registrations,
                     "deferred_dispatch_registrations": deferred_dispatch_registrations,
-                    "dispatch_helpers": dest.gen_registration_helpers(backend_index),
                     "dispatch_namespace": dispatch_key.lower(),
                     "dispatch_namespaced_definitions": "",
                     "dispatch_anonymous_definitions": list(
@@ -529,7 +533,7 @@ def run(
     source_yaml: str, output_dir: str, dry_run: bool, impl_path: str | None = None
 ) -> None:
     # Assumes that this file lives at PYTORCH_ROOT/torchgen/gen_backend_stubs.py
-    pytorch_root = Path(__file__).parent.parent.absolute()
+    pytorch_root = Path(__file__).absolute().parent.parent
     template_dir = os.path.join(pytorch_root, "aten/src/ATen/templates")
 
     def make_file_manager(install_dir: str) -> FileManager:

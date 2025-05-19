@@ -3,9 +3,10 @@ import torch
 import torch.distributed.checkpoint as dist_cp
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._state_dict_utils import _all_gather_sharded_tensor
-from torch.distributed._tensor import DTensor, init_device_mesh, Replicate
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
+from torch.distributed.tensor import DTensor, Replicate
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -86,7 +87,6 @@ class TestFsdpTpCheckpointConversion(DTensorTestBase):
         tp_model.load_state_dict(tp_state_dict)
 
         # Check parameters are equal after loading.
-        tp_state_dict_after_load = tp_model.state_dict()
         for fsdp_item, tp_item in zip(fsdp_state_dict.items(), tp_state_dict.items()):
             fsdp_k, fsdp_v = fsdp_item
             tp_k, tp_v = tp_item

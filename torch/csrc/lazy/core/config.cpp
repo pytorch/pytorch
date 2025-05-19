@@ -78,8 +78,8 @@ std::string& getLTCForceFallback() {
   static std::string config;
   static bool _ignore = [&]() {
     auto env = c10::utils::get_env("LTC_FORCE_FALLBACK");
-    if (env) {
-      config = std::move(env.value());
+    if (env.has_value()) {
+      config = std::string(env.value());
     }
     return true;
   }();
@@ -87,5 +87,4 @@ std::string& getLTCForceFallback() {
   return config;
 }
 
-// NOLINTEND(misc-use-internal-linkage)
 } // namespace torch::lazy

@@ -2,8 +2,8 @@
 
 namespace torch::jit {
 
-static thread_local std::string caughtOriginalMsg = "";
-static thread_local std::string caughtPythonClassName = "";
+static thread_local std::string caughtOriginalMsg;
+static thread_local std::string caughtPythonClassName;
 
 JITException::JITException(
     const std::string& msg,

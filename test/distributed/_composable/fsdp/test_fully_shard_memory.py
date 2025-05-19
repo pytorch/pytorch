@@ -4,11 +4,7 @@ import functools
 import gc
 
 import torch
-from torch.distributed._composable.fsdp import (
-    CPUOffloadPolicy,
-    fully_shard,
-    OffloadPolicy,
-)
+from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, OffloadPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests
@@ -121,6 +117,9 @@ class TestFullyShardMemory(FSDPTest):
         # number is kept much smaller than the actual memory usage, which is on
         # the order of 100-200+ MB)
         buffer_mb = 16
+        # The default workspace for hipblaslt is larger than for cublas/cublaslt
+        # which requires a slight increase to this buffer value.
+        buffer_mb = 16 if torch.version.cuda else 18
         if reshard_after_forward:
             # 3x max unsharded block parameters (current all-gather + copy-out
             # and next all-gather), non-block parameters, and other

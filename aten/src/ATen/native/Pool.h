@@ -191,6 +191,12 @@ max_pool2d_backward_shape_check(
   check_dim_size(indices, ndim, ndim-3, nOutputPlane);
   check_dim_size(indices, ndim, ndim-2, outputHeight);
   check_dim_size(indices, ndim, ndim-1, outputWidth);
+
+  if (ndim == 4) {
+    const int64_t batchSize = input.size(0);
+    check_dim_size(gradOutput, ndim, 0, batchSize);
+    check_dim_size(indices, ndim, 0, batchSize);
+  }
 }
 
 // AveragePool2d (backward)

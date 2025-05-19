@@ -531,7 +531,7 @@ Tensor to_functional_tensor(const Tensor& tensor) {
 }
 std::optional<Tensor> to_functional_tensor(const std::optional<Tensor>& tensor) {
   if (tensor.has_value()) {
-    return std::make_optional<Tensor>(to_functional_tensor(*tensor));
+    return to_functional_tensor(*tensor);
   }
   return std::nullopt;
 }
@@ -569,7 +569,7 @@ Tensor from_functional_tensor(const Tensor& tensor, bool assert_functional) {
 }
 std::optional<Tensor> from_functional_tensor(const std::optional<Tensor>& t, bool assert_functional) {
   if (t.has_value()) {
-    return std::make_optional<Tensor>(from_functional_tensor(*t, assert_functional));
+    return from_functional_tensor(*t, assert_functional);
   }
   return std::nullopt;
 }
@@ -737,7 +737,7 @@ bool isFunctionalTensor(const c10::List<::std::optional<Tensor>>& t_list) {
 }
 
 template <typename T>
-bool isFunctionalTensorIListRef(c10::IListRef<T> list) {
+static bool isFunctionalTensorIListRef(c10::IListRef<T> list) {
   if (list.size() == 0) return false;
   auto functional_count = 0;
   for (const auto& tensor : list) {
@@ -803,7 +803,7 @@ void set_sizes_strides_offset(const std::vector<Tensor>& outs, const std::vector
   }
 }
 
-thread_local bool _functionalizationReapplyViews;
+thread_local static bool _functionalizationReapplyViews;
 
 bool getFunctionalizationReapplyViewsTLS() {
   return _functionalizationReapplyViews;

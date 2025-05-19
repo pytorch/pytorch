@@ -154,7 +154,7 @@ static bool THPStorage_isPreservable(THPStorage* self) {
 
   if (storage.unsafeGetStorageImpl()->pyobj_slot()->check_pyobj(
           getPyInterpreter(), /*ignore_hermetic_tls=*/true) !=
-      std::make_optional((PyObject*)self)) {
+      (PyObject*)self) {
     return false;
   }
   if (storage.use_count() <= 1) {

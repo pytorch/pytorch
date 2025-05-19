@@ -1,10 +1,11 @@
 # mypy: allow-untyped-defs
 from dataclasses import dataclass
-from typing import Union
+from typing import Any, Union
 
 import torch
 from torch import SymBool, SymFloat, SymInt
 from torch.types import py_sym_types
+from torch.utils._ordered_set import OrderedSet
 
 
 @dataclass
@@ -62,7 +63,7 @@ def dedupe_symints(graph: torch.fx.Graph):
     """
 
     sym_dict = _SymHashingDict()
-    resolvable_from_input_symints = set()
+    resolvable_from_input_symints = OrderedSet[Any]()
 
     for node in graph.nodes:
         val = node.meta.get("val", None)

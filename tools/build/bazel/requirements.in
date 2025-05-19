@@ -4,3 +4,4 @@ requests==2.32.2
 setuptools==70.0.0
 sympy==1.12
 typing_extensions==4.11.0
+networkx==2.8.8

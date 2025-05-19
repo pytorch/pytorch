@@ -1341,7 +1341,7 @@ struct AttentionBackwardKernel {
 
     if (kApplyDropout) {
       // See Note [Seed and Offset Device]
-      auto seeds = at::cuda::philox::unpack(p.rng_engine_inputs);
+      auto const [seed, offset] = at::cuda::philox::unpack(p.rng_engine_inputs);
       // each element of the attention matrix P with shape
       // (batch_sz, n_heads, n_queries, n_keys) is associated with a single
       // offset in RNG sequence. we initialize the RNG state with offset that
@@ -1351,9 +1351,9 @@ struct AttentionBackwardKernel {
       // rather than once per iteration. each iteration takes a copy of the
       // initialized RNG state and offsets it as needed.
       curand_init(
-          std::get<0>(seeds),
+          seed,
           0,
-          std::get<1>(seeds) + p.dropout_batch_head_rng_offset,
+          offset + p.dropout_batch_head_rng_offset,
           &rng_state_init);
     }
 

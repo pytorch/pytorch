@@ -3,15 +3,15 @@
 import copy
 import functools
 import itertools
-from typing import List, Union
+from typing import Union
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._composable import checkpoint, replicate
-from torch.distributed._composable.fsdp import fully_shard
-from torch.distributed._composable.fsdp._fsdp_param_group import (
+from torch.distributed.fsdp import fully_shard
+from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
     RegisterPostBackwardFunction,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -116,7 +116,7 @@ class TestFullyShardFrozen(FSDPTest):
         ), patch_register_post_backward_hook_backward(backward_with_count):
             for iter_idx in range(10):
                 inp = torch.randn((8, lin_dim), device=device)
-                losses: List[torch.Tensor] = []
+                losses: list[torch.Tensor] = []
                 for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                     _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
                     losses.append(_model(inp).sum())
@@ -151,7 +151,7 @@ class TestFullyShardFrozen(FSDPTest):
     ):
         torch.manual_seed(42)
         num_linears, lin_dim = (6, 32)
-        modules: List[nn.Module] = []
+        modules: list[nn.Module] = []
         for _ in range(num_linears):
             modules += [nn.Linear(lin_dim, lin_dim), nn.ReLU()]
         model = nn.Sequential(*modules)
@@ -187,7 +187,7 @@ class TestFullyShardFrozen(FSDPTest):
         inp = torch.randn((8, lin_dim), device="cuda")
         with patch_register_post_backward_hook_backward(backward_with_count):
             for iter_idx in range(num_iters):
-                losses: List[torch.Tensor] = []
+                losses: list[torch.Tensor] = []
                 for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                     # Unfreeze the parameters on the last step to emulate some
                     # kinds of fine-tuning
@@ -251,7 +251,7 @@ class TestFullyShardFrozen(FSDPTest):
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         for iter_idx in range(10):
             inp = torch.randn((8, 5), device="cuda")
-            losses: List[torch.Tensor] = []
+            losses: list[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
                 losses.append(_model(inp).sum())

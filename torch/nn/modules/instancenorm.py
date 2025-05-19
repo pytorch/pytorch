@@ -139,7 +139,7 @@ class InstanceNorm1d(_InstanceNorm):
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size `C` (where `C` is the number of features or channels of the input) if :attr:`affine` is ``True``.
-    The standard-deviation is calculated via the biased estimator, equivalent to
+    The variance is calculated via the biased estimator, equivalent to
     `torch.var(input, unbiased=False)`.
 
     By default, this layer uses instance statistics computed from input data in

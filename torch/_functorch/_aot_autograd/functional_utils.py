@@ -9,7 +9,7 @@ This file contains utilities related to functionalization in AOTAutograd:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -17,11 +17,7 @@ from torch._logging import getArtifactLogger
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._subclasses.meta_utils import is_sparse_any
-from torch.fx.experimental.symbolic_shapes import (
-    definitely_true,
-    sym_eq,
-    SymIntEqByExpr,
-)
+from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq, SymIntEqByExpr
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
@@ -50,7 +46,7 @@ def to_fun(t):
 
 def sync_functional_tensor(t):
     if is_traceable_wrapper_subclass(t):
-        attrs, ctx = t.__tensor_flatten__()  # type: ignore[attr-defined]
+        attrs, _ctx = t.__tensor_flatten__()  # type: ignore[attr-defined]
         for attr in attrs:
             sync_functional_tensor(getattr(t, attr))
     else:
@@ -317,13 +313,13 @@ def gen_alias_from_base(
 
 def has_same_metadata(t1, t2):
     return (
-        definitely_true(sym_eq(t1.size(), t2.size()))
-        and definitely_true(t1.layout == t2.layout)
+        guard_or_false(sym_eq(t1.size(), t2.size()))
+        and guard_or_false(t1.layout == t2.layout)
         and (
             is_sparse_any(t1)
             or (
-                definitely_true(sym_eq(t1.stride(), t2.stride()))
-                and definitely_true(t1.storage_offset() == t2.storage_offset())
+                guard_or_false(sym_eq(t1.stride(), t2.stride()))
+                and guard_or_false(t1.storage_offset() == t2.storage_offset())
             )
         )
         and t1.is_conj() == t2.is_conj()
@@ -337,11 +333,11 @@ class MetadataKey:
     This should be equal whenever has_same_metadata would return True
     """
 
-    size: Tuple[SymIntEqByExpr, ...]
+    size: tuple[SymIntEqByExpr, ...]
     layout: torch.layout
     is_sparse: bool
     # these are empty when is_sparse
-    stride: Optional[Tuple[SymIntEqByExpr, ...]]
+    stride: Optional[tuple[SymIntEqByExpr, ...]]
     storage_offset: Optional[SymIntEqByExpr]
     is_conj: bool
     is_neg: bool
@@ -452,7 +448,6 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
             placeholders.add(n)
         if isinstance(n.target, torch._ops.OpOverload):
             if n.target in allowed_mutation_ops:
-                suffix = True
                 # Can only copy_/set_ into an input
                 # this is mostly a hack to avoid failing XLA tests.
                 # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113

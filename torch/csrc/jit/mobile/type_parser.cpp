@@ -2,9 +2,9 @@
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/type_factory.h>
-#include <c10/util/string_view.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
 #include <torch/custom_class.h>
+#include <string_view>
 
 using torch::jit::valid_single_char_tokens;
 
@@ -19,11 +19,7 @@ static constexpr const char* kTypeTorchbindCustomClass =
 static constexpr const char* kTypeNamedTuple = "NamedTuple";
 
 bool isSpecialChar(char a) {
-  for (const char* c = valid_single_char_tokens; *c; c++) {
-    if (a == *c)
-      return true;
-  }
-  return false;
+  return std::strchr(valid_single_char_tokens, a);
 }
 } // namespace
 
@@ -182,7 +178,7 @@ TypePtr TypeParser::parse() {
 //         ]
 //     ]"
 TypePtr TypeParser::parseNamedTuple(const std::string& qualified_name) {
-  std::vector<c10::string_view> field_names;
+  std::vector<std::string_view> field_names;
   std::vector<TypePtr> field_types;
   expect(",");
   expect("[");
@@ -282,7 +278,7 @@ void TypeParser::expect(const char* s) {
   advance();
 }
 
-// c10::string_view::operator== calls memcmp to compare against the target
+// std::string_view::operator== calls memcmp to compare against the target
 // string; we can do better if we specialize for a single character.
 void TypeParser::expectChar(char c) {
   std::string_view token = cur();

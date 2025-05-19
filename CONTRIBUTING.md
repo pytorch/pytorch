@@ -78,7 +78,9 @@ git clone git@github.com:<USERNAME>/pytorch.git
 cd pytorch
 git remote add upstream git@github.com:pytorch/pytorch.git
 
-make setup-env  # or make setup-env-cuda for pre-built CUDA binaries
+make setup-env
+# Or run `make setup-env-cuda` for pre-built CUDA binaries
+# Or run `make setup-env-rocm` for pre-built ROCm binaries
 source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 ```
 
@@ -128,8 +130,8 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
       git submodule deinit -f .
       git clean -xdf
       python setup.py clean
-      git submodule update --init --recursive # very important to sync the submodules
-      python setup.py develop                 # then try running the command again
+      git submodule update --init --recursive
+      python setup.py develop
       ```
   4. The main step within `python setup.py develop` is running `make` from the `build` directory. If you want to
     experiment with some environment variables, you can pass them into the command:
@@ -147,7 +149,7 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 
   - If you encounter an error such as
     ```
-    fatal: unable to access 'https://github.com/pybind11/pybind11.git': could not load PEM client certificate ...
+    fatal: unable to access 'https://github.com/pybind/pybind11.git': could not load PEM client certificate ...
     ```
     this is likely that you are using HTTP proxying and the certificate expired. To check if the certificate is valid, run
     `git config --global --list` and search for config like `http.proxysslcert=<cert_file>`. Then check certificate valid date by running
@@ -190,6 +192,13 @@ To install the nightly binaries built with CUDA, you can pass in the flag `--cud
 
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch --cuda
+source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+```
+
+To install the nightly binaries built with ROCm, you can pass in the flag `--rocm`:
+
+```bash
+./tools/nightly.py checkout -b my-nightly-branch --rocm
 source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 ```
 
@@ -272,8 +281,6 @@ dependencies as well as the nightly binaries into the repo directory.
 * [caffe2](caffe2) - The Caffe2 library.
   * [core](caffe2/core) - Core files of Caffe2, e.g., tensor, workspace,
     blobs, etc.
-  * [operators](caffe2/operators) - Operators of Caffe2.
-  * [python](caffe2/python) - Python bindings to Caffe2.
   * ...
 * [.circleci](.circleci) - CircleCI configuration management. [README](.circleci/README.md)
 
@@ -288,7 +295,7 @@ The following packages should be installed with either `conda` or `pip`:
 - `pytest` - recommended to run tests more selectively
 Running
 ```
-pip install -r requirements
+pip install -r requirements.txt
 ```
 will install these dependencies for you.
 
@@ -427,7 +434,7 @@ PyTorch has two main types of documentation:
 These are the docs that you see over at [our docs website](https://pytorch.org/docs).
 - **Developer facing documentation**:
 Developer facing documentation is spread around our READMEs in our codebase and in
-the [PyTorch Developer Wiki](https://pytorch.org/wiki).
+the [PyTorch Developer Wiki](https://github.com/pytorch/pytorch/wiki).
 If you're interested in adding new developer docs, please read this [page on the wiki](https://github.com/pytorch/pytorch/wiki/Where-or-how-should-I-add-documentation) on our best practices for where to put it.
 
 The rest of this section is about user-facing documentation.
@@ -660,7 +667,7 @@ details.
 One downside to using `python setup.py develop` is that your development
 version of PyTorch will be installed globally on your account (e.g., if
 you run `import torch` anywhere else, the development version will be
-used.
+used).
 
 If you want to manage multiple builds of PyTorch, you can make use of
 [conda environments](https://conda.io/docs/using/envs.html) to maintain
@@ -786,17 +793,15 @@ python setup.py develop
 
 #### Use a faster linker
 
-If you are editing a single file and rebuilding in a tight loop, the time spent
-linking will dominate. The system linker available in most Linux distributions
-(GNU `ld`) is quite slow. Use a faster linker, like [lld](https://lld.llvm.org/).
+If you are editing a single file and rebuilding in a tight loop, the time spent linking will dominate. The system linker available in most Linux distributions (GNU `ld`) is quite slow. To improve build times, consider using a faster linker such as [mold](https://github.com/rui314/mold) or [lld](https://lld.llvm.org/).
 
-People on Mac, follow [this guide](https://stackoverflow.com/questions/42730345/how-to-install-llvm-for-mac) instead.
+- **mold**: A modern, high-performance linker that significantly reduces linking time. It is typically available via package managers like `apt` or `yum`. Note that `mold` requires GCC version 12 or higher.
+- **lld**: A fast linker from the LLVM project. The easiest way to get `lld` is from a [LLVM release](https://releases.llvm.org/download.html).
 
-The easiest way to use `lld` this is download the
-[latest LLVM binaries](http://releases.llvm.org/download.html#8.0.0) and run:
+Starting with CMake 3.29, you can specify the linker type using the [`CMAKE_LINKER_TYPE`](https://cmake.org/cmake/help/latest/variable/CMAKE_LINKER_TYPE.html) variable. For example, with `mold` installed:
 
-```bash
-ln -s /path/to/downloaded/ld.lld /usr/local/bin/ld
+```sh
+CMAKE_LINKER_TYPE=MOLD python setup.py develop
 ```
 
 #### Use pre-compiled headers
@@ -983,7 +988,7 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
 3. CUDA supports a lot of C++11/14 features such as, `std::numeric_limits`, `std::nextafter`,
    `std::tuple` etc. in device code. Many of such features are possible because of the
    [--expt-relaxed-constexpr](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#constexpr-functions)
-   nvcc flag. There is a known [issue](https://github.com/ROCm-Developer-Tools/HIP/issues/374)
+   nvcc flag. There is a known [issue](https://github.com/ROCm/hip/issues/374)
    that ROCm errors out on device code, which uses such stl functions.
 4. A good performance metric for a CUDA kernel is the
    [Effective Memory Bandwidth](https://devblogs.nvidia.com/how-implement-performance-metrics-cuda-cc/).
@@ -1130,7 +1135,7 @@ CUDA, MSVC, and PyTorch versions are interdependent; please install matching ver
 | 10.2         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |  1.5.0 ~ 1.7.0  |
 | 11.0         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |      1.7.0      |
 
-Note: There's a [compilation issue](https://github.com/oneapi-src/oneDNN/issues/812) in several Visual Studio 2019 versions since 16.7.1, so please make sure your Visual Studio 2019 version is not in 16.7.1 ~ 16.7.5
+Note: There's a [compilation issue](https://github.com/uxlfoundation/oneDNN/issues/812) in several Visual Studio 2019 versions since 16.7.1, so please make sure your Visual Studio 2019 version is not in 16.7.1 ~ 16.7.5
 
 ## Pre-commit tidy/linting hook
 

@@ -169,7 +169,7 @@ struct RNNParams {
 };
 
 template<bool is_single_direction>
-std::vector<int64_t> _output_size(const RNNParams& rnn) {
+static std::vector<int64_t> _output_size(const RNNParams& rnn) {
   auto output_channels = is_single_direction ? rnn.hidden_size
                                              : rnn.hidden_size * rnn.num_directions;
   return {rnn.seq_length, rnn.mini_batch, output_channels};
@@ -487,13 +487,36 @@ static std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
       auto layer_cx = cx[index];
       auto reverse = (direction > 0);
       // bias won't be packed
-      auto outputs = at::mkldnn_rnn_layer(layer_input, layer_weights[0], layer_weights[1],
-                                        has_biases ? layer_weights[2] : at::zeros(layer_weights[0].sizes(), layer_weights[0].options().layout(at::Layout::Strided)),
-          has_biases ? layer_weights[3] : at::zeros(layer_weights[1].sizes(), layer_weights[1].options().layout(at::Layout::Strided)), layer_hx,
-          layer_cx, reverse, batch_sizes, mode, hidden_size, num_layers, has_biases, bidirectional, batch_first, train);
-      layer_output[direction] = std::get<0>(outputs);
-      layer_hy[index] = std::get<1>(outputs);
-      layer_cy[index] = std::get<2>(outputs);
+      std::tie(
+          layer_output[direction],
+          layer_hy[index],
+          layer_cy[index],
+          std::ignore) =
+          at::mkldnn_rnn_layer(
+              layer_input,
+              layer_weights[0],
+              layer_weights[1],
+              has_biases
+                  ? layer_weights[2]
+                  : at::zeros(
+                        layer_weights[0].sizes(),
+                        layer_weights[0].options().layout(at::Layout::Strided)),
+              has_biases
+                  ? layer_weights[3]
+                  : at::zeros(
+                        layer_weights[1].sizes(),
+                        layer_weights[1].options().layout(at::Layout::Strided)),
+              layer_hx,
+              layer_cx,
+              reverse,
+              batch_sizes,
+              mode,
+              hidden_size,
+              num_layers,
+              has_biases,
+              bidirectional,
+              batch_first,
+              train);
     }
     layer_input = num_directions == 1 ? layer_output[0]
                                       : at::cat(layer_output, /*output_channels*/-1);
@@ -553,9 +576,8 @@ void lstm_mkldnn(Tensor& output, Tensor& hy, Tensor& cy,
     int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
   auto result = mkldnn_impl(input, std::make_tuple(hx[0], hx[1]), params, has_biases,
       ideep::rnn_kind::LSTM, num_layers, dropout_p, train, bidirectional, batch_first);
-  output = result.first;
-  hy = std::get<0>(result.second);
-  cy = std::get<1>(result.second);
+  output = std::move(result.first);
+  std::tie(hy, cy) = std::move(result.second);
 }
 } // anonymous namespace
 

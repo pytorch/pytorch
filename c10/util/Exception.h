@@ -289,6 +289,12 @@ class C10_API OutOfMemoryError : public Error {
   using Error::Error;
 };
 
+// Used for handling syntacitc erros in input arguments.
+// They shuld turn into SytnaxError when the cross into Python
+class C10_API SyntaxError : public Error {
+  using Error::Error;
+};
+
 // Base error type for all distributed errors.
 // These turn into DistError when they cross into Python.
 class C10_API DistError : public Error {
@@ -311,6 +317,12 @@ class C10_API DistStoreError : public DistError {
 // libraries. These turn into DistNetworkError when they cross into Python.
 class C10_API DistNetworkError : public DistError {
   using DistError::DistError;
+};
+
+// Raised when a queue is empty and a non-blocking pop is called.
+// Translated to torch.distributed.QueueEmptyError in Python
+class C10_API DistQueueEmptyError : public DistStoreError {
+  using DistStoreError::DistStoreError;
 };
 
 // A utility function to return an exception std::string by prepending its

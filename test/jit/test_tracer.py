@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: jit"]
+# ruff: noqa: F841
 
 import copy
 import io
@@ -1701,7 +1702,7 @@ class TestTracer(JitTestCase):
     def test_trace_checker_dot_data(self):
         with self.assertRaisesRegex(
             torch.jit.TracingCheckError,
-            r"Tensor-valued Constant nodes differed in value " r"across invocations",
+            r"Tensor-valued Constant nodes differed in value across invocations",
         ):
 
             @_trace(torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])

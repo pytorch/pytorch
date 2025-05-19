@@ -124,20 +124,18 @@ static void fractional_max_pool3d_out_single_batch_frame(
           randomSamplesForPlane[2], inputW, outputW, poolSizeW);
 
       /* loop over output */
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int64_t t, h, w;
 
       const scalar_t* inputForPlane = input + plane * inputT * inputH * inputW;
       scalar_t* outputForPlane = output + plane * outputT * outputH * outputW;
       int64_t* indicesForPlane = indices + plane * outputT * outputH * outputW;
 
-      for (t = 0; t < outputT; ++t) {
+      for (int64_t t = 0; t < outputT; ++t) {
         int64_t inputTStart = sequenceT[t];
 
-        for (h = 0; h < outputH; ++h) {
+        for (int64_t h = 0; h < outputH; ++h) {
           int64_t inputHStart = sequenceH[h];
 
-          for (w = 0; w < outputW; ++w) {
+          for (int64_t w = 0; w < outputW; ++w) {
             int64_t inputWStart = sequenceW[w];
 
             int64_t t2 = inputTStart, h2 = inputHStart, w2 = inputWStart;
@@ -274,11 +272,9 @@ static void fractional_max_pool3d_backward_out_single_batch_frame(
                   plane * outputT * outputH * outputW;
       const int64_t* indicesForPlane = indices + plane * outputT * outputH * outputW;
 
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int64_t h, w, t;
-      for (t = 0; t < outputT; ++t) {
-        for (h = 0; h < outputH; ++h) {
-          for (w = 0; w < outputW; ++w) {
+      for (int64_t t = 0; t < outputT; ++t) {
+        for (int64_t h = 0; h < outputH; ++h) {
+          for (int64_t w = 0; w < outputW; ++w) {
             int64_t outputIndex = t * outputH * outputW + h * outputW + w;
             int64_t index = indicesForPlane[outputIndex];
             AT_ASSERT(index >= 0 && index < inputT * inputH * inputW);

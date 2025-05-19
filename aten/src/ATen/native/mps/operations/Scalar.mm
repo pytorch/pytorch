@@ -15,6 +15,7 @@ namespace at::native {
 
 Scalar _local_scalar_dense_mps(const Tensor& self) {
   Scalar r;
+  TORCH_CHECK(self.numel() > 0, "_local_scalar_dense: Empty tensor not supported");
 
   auto output = at::empty_like(self, TensorOptions(kCPU));
   mps::mps_copy_(output, self, false);

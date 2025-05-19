@@ -13,7 +13,7 @@ namespace torch::jit {
 // "Whether to emit compact debug_pkl when saving a model to .pt file."
 // "Compact file is smaller but cannot be loaded by old torch binaries."
 // TODO(qihan) remove when all binaries are using string table.
-thread_local bool should_use_format_with_string_table_ = true;
+static thread_local bool should_use_format_with_string_table_ = true;
 
 class SourceRangeSerializer {
  public:
@@ -76,7 +76,7 @@ std::shared_ptr<Source> SourceRangeDeserializer::deserialize_source(
         "Text table index is out of range")
     filename = *text_table_[fnameIndex];
 
-    std::vector<c10::string_view> pieces;
+    std::vector<std::string_view> pieces;
     std::vector<std::shared_ptr<std::string>> strs;
 
     for (int64_t i : textIndex) {

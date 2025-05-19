@@ -1,11 +1,11 @@
 # mypy: allow-untyped-defs
-from typing import List, Tuple, Union
+from typing import Union
 
 import torch
 from torch import Tensor
 
 from . import _functional as F
-from .optimizer import _maximize_doc, _params_doc, Optimizer, ParamsT
+from .optimizer import _maximize_doc, _params_doc, _to_scalar, Optimizer, ParamsT
 
 
 __all__ = ["SparseAdam"]
@@ -16,7 +16,7 @@ class SparseAdam(Optimizer):
         self,
         params: ParamsT,
         lr: Union[float, Tensor] = 1e-3,
-        betas: Tuple[float, float] = (0.9, 0.999),
+        betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         maximize: bool = False,
     ):
@@ -69,11 +69,11 @@ class SparseAdam(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad: List[Tensor] = []
-            grads: List[Tensor] = []
-            exp_avgs: List[Tensor] = []
-            exp_avg_sqs: List[Tensor] = []
-            state_steps: List[int] = []
+            params_with_grad: list[Tensor] = []
+            grads: list[Tensor] = []
+            exp_avgs: list[Tensor] = []
+            exp_avg_sqs: list[Tensor] = []
+            state_steps: list[int] = []
             beta1, beta2 = group["betas"]
             maximize = group.get("maximize", False)
 
@@ -117,7 +117,7 @@ class SparseAdam(Optimizer):
                 eps=group["eps"],
                 beta1=beta1,
                 beta2=beta2,
-                lr=group["lr"],
+                lr=_to_scalar(group["lr"]),
                 maximize=maximize,
             )
 

@@ -4,12 +4,12 @@ import copy
 import functools
 import unittest
 from contextlib import nullcontext
-from typing import Dict, Optional
+from typing import Optional
 
 import torch
 import torch.nn as nn
-from torch.distributed._composable.fsdp import CPUOffloadPolicy, fully_shard
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -39,10 +39,17 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
             {"mlp_dim": [2, 3, 4, 5], "mesh": [fsdp_mesh]},
             self._test_dp_state_dict_save_load,
         )
-        self.run_subtests(
-            {"mlp_dim": [16], "mesh": [fsdp_mesh], "use_shard_placement_fn": [True]},
-            self._test_dp_state_dict_save_load,
-        )
+        if 16 % self.world_size == 0:
+            # TODO: remove this evenness check when FSDP2 supports uneven sharding
+            # see: https://github.com/pytorch/pytorch/blob/cbb03e69717943ddf912f9a68b3a6f935bbf21f5/torch/distributed/fsdp/_fully_shard/_fsdp_param.py#L353-L361  # noqa: B950
+            self.run_subtests(
+                {
+                    "mlp_dim": [16],
+                    "mesh": [fsdp_mesh],
+                    "use_shard_placement_fn": [True],
+                },
+                self._test_dp_state_dict_save_load,
+            )
         if self.world_size % 2 != 0:
             return
         hsdp_mesh = init_device_mesh(
@@ -308,7 +315,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
 
         # Verify that we can load a new state dict that contains DTensors with
         # storages different from the current model parameters
-        new_state_dict: Dict[str, DTensor] = {}
+        new_state_dict: dict[str, DTensor] = {}
         for param_name, dtensor in state_dict.items():
             # Construct new DTensors to exercise load state dict writeback
             new_state_dict[param_name] = dtensor.detach().clone().fill_(new_fill_value)

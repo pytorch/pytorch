@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torchgen.api.ufunc as ufunc
 from torchgen.api.translate import translate
@@ -30,6 +30,8 @@ from torchgen.utils import OrderedSet
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torchgen.api.ufunc import UfunctorBindings
 
 
@@ -184,9 +186,9 @@ def compute_ufunc_cuda_functors(
                 ufunc_name = loops[lk].name
             else:
                 # See Note [ScalarOnly and Generic must match names for CUDA]
-                assert (
-                    ufunc_name == loops[lk].name
-                ), "ScalarOnly and Generic must have same ufunc name"
+                assert ufunc_name == loops[lk].name, (
+                    "ScalarOnly and Generic must have same ufunc name"
+                )
             supported_dtypes |= loops[lk].supported_dtypes
         assert ufunc_name is not None
 
@@ -475,15 +477,15 @@ def compute_ufunc_cpu_dtype_body(
         return f"""
 {body_str}
 cpu_kernel_vec(iter,
-  [=]({', '.join(b.decl() for b in scalar_bindings)}) {{ return {scalar_loop.call(with_ctx(scalar_bindings))}; }},
-  [=]({', '.join(b.decl() for b in vec_bindings)}) {{ return {vec_loop.call(with_ctx(vec_bindings))}; }}
+  [=]({", ".join(b.decl() for b in scalar_bindings)}) {{ return {scalar_loop.call(with_ctx(scalar_bindings))}; }},
+  [=]({", ".join(b.decl() for b in vec_bindings)}) {{ return {vec_loop.call(with_ctx(vec_bindings))}; }}
 );
 """
     else:
         return f"""
 {body_str}
 cpu_kernel(iter,
-  [=]({', '.join(b.decl() for b in scalar_bindings)}) {{ return {scalar_loop.call(with_ctx(scalar_bindings))}; }}
+  [=]({", ".join(b.decl() for b in scalar_bindings)}) {{ return {scalar_loop.call(with_ctx(scalar_bindings))}; }}
 );
 """
 

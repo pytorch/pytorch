@@ -61,7 +61,7 @@ MPSDevice::MPSDevice() : _mtl_device(nil) {
 bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
   auto is_os_version_at_least = [](int major, int minor) {
     @autoreleasepool {
-      NSProcessInfo* processInfo = [[NSProcessInfo alloc] init];
+      NSProcessInfo* processInfo = [[NSProcessInfo new] autorelease];
       return [processInfo
           isOperatingSystemAtLeastVersion:{.majorVersion = major, .minorVersion = minor, .patchVersion = 0}];
     }
@@ -73,6 +73,7 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
   static bool _macos_14_4_plus = is_os_version_at_least(14, 4);
   static bool _macos_15_0_plus = is_os_version_at_least(15, 0);
   static bool _macos_15_1_plus = is_os_version_at_least(15, 1);
+  static bool _macos_15_2_plus = is_os_version_at_least(15, 2);
 
   switch (version) {
     case MacOSVersion::MACOS_VER_13_1_PLUS:
@@ -89,6 +90,8 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
       return _macos_15_0_plus;
     case MacOSVersion::MACOS_VER_15_1_PLUS:
       return _macos_15_1_plus;
+    case MacOSVersion::MACOS_VER_15_2_PLUS:
+      return _macos_15_2_plus;
     default:
       return false;
   }

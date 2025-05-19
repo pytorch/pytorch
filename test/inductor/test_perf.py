@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 import functorch
 import torch
-import torch._dynamo.config as dynamo_config
 import torch._inductor.config as config
 import torch.autograd
 from torch._inductor import metrics
@@ -481,9 +480,6 @@ class FusionTests(TestCase):
         inp = (T(10, 10), T(10, 10), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """500""")
 
-    # With specialize_float = False, epsilon becomes an input and so
-    # the number of bytes accessed wobbles
-    @dynamo_config.patch(specialize_float=True)
     def test_reduction_pointwise_multi_level_reduction(self):
         hidden_size = 4096
         layer_norm = torch.nn.LayerNorm(hidden_size).cuda().float()
@@ -984,12 +980,10 @@ class InplacingTests(TestCase):
             tl.store(out_ptr + offsets, output, mask=mask)
             tl.store(out2_ptr + offsets, output, mask=mask)
 
-        from typing import List
-
         from torch._library import capture_triton, triton_op
 
         @triton_op("mylib::sin_kernel", mutates_args={})
-        def sin_kernel(x: torch.Tensor) -> List[torch.Tensor]:
+        def sin_kernel(x: torch.Tensor) -> list[torch.Tensor]:
             n_elements = x.numel()
             out = torch.empty_like(x)
             out2 = torch.empty_like(x)
@@ -1152,7 +1146,7 @@ class InplacingTests(TestCase):
                     x = x + torch.ops.mylib.foo(q, k_cache, v_cache)
                 return x
 
-            compiled_out, (code,) = run_and_get_code(
+            _, (code,) = run_and_get_code(
                 torch.compile(f, fullgraph=True),
             )
 

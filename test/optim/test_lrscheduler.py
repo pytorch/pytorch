@@ -1,4 +1,5 @@
 # Owner(s): ["module: optimizer", "module: LrScheduler" ]
+# ruff: noqa: F841
 import copy
 import math
 import pickle
@@ -1836,6 +1837,15 @@ class TestLRScheduler(TestCase):
         )
         self._test(scheduler, targets, epochs)
 
+    def test_multiplicative_lr_with_lr_lambda(self):
+        lr_lambda = 0.95
+        with self.assertRaisesRegex(TypeError, "lr_lambda should be a function"):
+            MultiplicativeLR(self.opt, lr_lambda)
+
+        lr_lambda2 = 0.95
+        with self.assertRaisesRegex(TypeError, "lr_lambda should be a function"):
+            MultiplicativeLR(self.opt, [lr_lambda, lr_lambda2])
+
     @parametrize("T_mult", [1, 2, 4])
     def test_CosineAnnealingWarmRestarts_lr1(self, T_mult):
         iters = 100
@@ -1922,6 +1932,14 @@ class TestLRScheduler(TestCase):
             self._test_interleaved_CosineAnnealingWarmRestarts(
                 scheduler, targets, epochs
             )
+
+    def test_CosineAnnealingWarmRestarts_T_cur_reset(self):
+        sch = CosineAnnealingWarmRestarts(self.opt, T_0=4)
+        for epoch in [7, 8, 9]:
+            sch.T_cur = epoch
+            sch.step()
+            expect_T_cur = (epoch + 1) % sch.T_0
+            self.assertEqual(sch.T_cur, expect_T_cur)
 
     def test_swalr_no_anneal(self):
         epochs, swa_start, swa_lr = 10, 5, 0.01
@@ -2347,47 +2365,6 @@ class TestLRScheduler(TestCase):
             last_lr = optimizer.param_groups[0]["lr"]
 
         self.assertLessEqual(last_lr, max_lr)
-
-    @parametrize(
-        "LRClass",
-        [
-            partial(LambdaLR, lr_lambda=lambda e: e // 10),
-            partial(MultiplicativeLR, lr_lambda=lambda: 0.95),
-            partial(StepLR, step_size=30),
-            partial(MultiStepLR, milestones=[30, 80]),
-            ConstantLR,
-            LinearLR,
-            partial(ExponentialLR, gamma=0.9),
-            lambda opt, **kwargs: SequentialLR(
-                opt,
-                schedulers=[ConstantLR(opt), ConstantLR(opt)],
-                milestones=[2],
-                **kwargs,
-            ),
-            PolynomialLR,
-            partial(CosineAnnealingLR, T_max=10),
-            ReduceLROnPlateau,
-            partial(CyclicLR, base_lr=0.01, max_lr=0.1),
-            partial(CosineAnnealingWarmRestarts, T_0=20),
-            partial(OneCycleLR, max_lr=0.01, total_steps=10),
-        ],
-    )
-    def test_lr_scheduler_verbose_deprecation_warning(self, LRClass):
-        """Check that a deprecating warning with verbose parameter."""
-        with self.assertWarnsOnceRegex(
-            UserWarning, "The verbose parameter is deprecated"
-        ):
-            LRClass(self.opt, verbose=True)
-
-        with self.assertWarnsOnceRegex(
-            UserWarning, "The verbose parameter is deprecated"
-        ):
-            LRClass(self.opt, verbose=False)
-
-        # No warning is raised when verbose is the default value.
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", UserWarning)
-            LRClass(self.opt)
 
     @parametrize(
         "LRClass",

@@ -264,8 +264,8 @@ class _map;
 template <class F, class A, class... Args>
 class _map<F, A, c10::guts::typelist::typelist<Args...>> {
  public:
-  static A function_one(F&& fn, const Args&... nested_node) {
-    return std::forward<F>(fn)(nested_node...);
+  static A function_one(const F& fn, const Args&... nested_node) {
+    return fn(nested_node...);
   }
   static NestedNode<A> function(
       const F& fn,
@@ -309,7 +309,7 @@ class _map<F, A, c10::guts::typelist::typelist<Args...>> {
             TORCH_CHECK(a.degree() > 0, "Internal assert.");
             return a.children(i);
           });
-      c10::guts::apply(
+      std::apply(
           [&result, &fn](Args... filtered) {
             result.emplace_back(function_one(fn, filtered...));
           },

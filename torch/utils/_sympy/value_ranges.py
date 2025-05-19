@@ -9,7 +9,6 @@ import math
 import operator
 from typing import (
     Callable,
-    Dict,
     Generic,
     Optional,
     overload,
@@ -50,7 +49,7 @@ from .numbers import int_oo, IntInfinity, NegativeIntInfinity
 
 log = logging.getLogger(__name__)
 
-__all__ = ["ValueRanges", "ValueRangeAnalysis", "bound_sympy"]
+__all__ = ["ValueRanges", "bound_sympy"]
 
 _T = TypeVar("_T", sympy.Expr, SympyBoolean)
 
@@ -302,17 +301,17 @@ class ValueRanges(Generic[_T]):
         return self.lower == self.upper
 
     @staticmethod
-    @functools.lru_cache(maxsize=None)
+    @functools.cache
     def unknown() -> ValueRanges[sympy.Expr]:
         return ValueRanges(-sympy.oo, sympy.oo)
 
     @staticmethod
-    @functools.lru_cache(maxsize=None)
+    @functools.cache
     def unknown_int() -> ValueRanges[sympy.Expr]:
         return ValueRanges(-int_oo, int_oo)
 
     @staticmethod
-    @functools.lru_cache(maxsize=None)
+    @functools.cache
     def unknown_bool() -> ValueRanges[SympyBoolean]:
         return ValueRanges(sympy.false, sympy.true)
 
@@ -517,11 +516,14 @@ class SymPyValueRangeAnalysis:
         if b.is_bool:
             b = cls._bool_to_int(b)
         lower = min(a.lower, b.lower)
-        if lower < 0 and lower != -int_oo:
+        if lower < 0 and lower != -sympy.oo and lower != -int_oo:
             # If both lower bounds are negative, then bits start like
             # 1...10..., so the smallest possible value is 1...101...1.
             # Thus, we need to find the next smallest power of 2 (inclusive).
-            lower = -(1 << int(-lower - 1).bit_length())
+            try:
+                lower = -(1 << int(-lower - 1).bit_length())
+            except Exception:
+                lower = -int_oo
         else:
             lower = 0
         return ValueRanges(lower, max(a.upper, b.upper))
@@ -538,11 +540,14 @@ class SymPyValueRangeAnalysis:
         upper = max(a.upper, b.upper)
         if upper == 0:
             upper = 0
-        elif upper > 0 and upper != int_oo:
+        elif upper > 0 and upper != sympy.oo and upper != int_oo:
             # If both upper bounds are positive, then the largest
             # possible value is 01...1, so we need to find
             # next largest power of 2 (exclusive), minus 1
-            upper = (1 << int(upper).bit_length()) - 1
+            try:
+                upper = (1 << int(upper).bit_length()) - 1
+            except Exception:
+                upper = int_oo
         elif upper < 0:
             upper = -1
         return ValueRanges(min(a.lower, b.lower), upper)
@@ -999,110 +1004,8 @@ class SymPyValueRangeAnalysis:
         return ValueRanges.increasing_map(x, TruncToFloat)
 
 
-class ValueRangeAnalysis(SymPyValueRangeAnalysis):
-    def __init__(self) -> None:
-        self.name = "ValueRangeAnalysis"
-        boolean_operators = (
-            "xor",
-            "logical_and",
-            "logical_or",
-            "logical_not",
-        )
-        for op in boolean_operators:
-            setattr(self, op, self.bool_handler)
-
-    @staticmethod
-    def bool_handler(*args, **kwargs):
-        # just assuming bools can have both values
-        return ValueRanges(sympy.false, sympy.true)  # type: ignore[arg-type]
-
-    @staticmethod
-    def default_handler(*args, **kwargs):
-        # many ops are unlikely to show up in optimizable indexing compute,
-        # so we dont have full coverage
-        return ValueRanges.unknown()
-
-    def load(self, name: str, index: sympy.Expr):
-        return ValueRanges.unknown()
-
-    def store(self, name, index, value, mode=None):
-        return
-
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
-        return ValueRanges.unknown()
-
-    @classmethod
-    def index_expr(cls, index, dtype):
-        assert isinstance(index, ValueRanges)
-        return cls.to_dtype(index, dtype)
-
-    @staticmethod
-    def to_dtype(x, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None):
-        x = ValueRanges.wrap(x)
-
-        if dtype == torch.bool:
-            if x.is_singleton():
-                return ValueRanges.wrap(x.lower != 0)
-            elif x.is_bool:
-                return x
-            elif 0 not in x:
-                return ValueRanges.wrap(sympy.true)
-            else:
-                return ValueRanges(sympy.false, sympy.true)
-
-        def cast(x, dtype):
-            # dtype is int or float
-            if dtype.is_floating_point:
-                return sympy.Float(x)
-            else:
-                if x in (int_oo, -int_oo):
-                    return x
-                try:
-                    return sympy.Integer(x)
-                except TypeError:
-                    # inf cannot be cast to Integer
-                    return x
-
-        if x.is_bool:
-            if x.is_singleton():
-                val = 1 if x.lower else 0
-                return ValueRanges.wrap(cast(val, dtype))
-            else:
-                return ValueRanges(cast(0, dtype), cast(1, dtype))
-        else:
-            # int to float or float to int
-            return ValueRanges(cast(x.lower, dtype), cast(x.upper, dtype))
-
-    @staticmethod
-    def square(x):
-        return ValueRanges.convex_min_zero_map(x, lambda y: PowByNatural(y, 2))
-
-    @staticmethod
-    def neg(x):
-        return ValueRanges.decreasing_map(x, operator.neg)
-
-    # TODO: this is slightly inaccurate because truncdiv operates at integer
-    # precision, but we're going through float truediv which means we can
-    # potentially lose precision on the bounds
-    @classmethod
-    def truncdiv(cls, a, b):
-        x = cls.truediv(a, b)
-        if x == ValueRanges.unknown():
-            return x
-
-        return cls.trunc(x)
-
-    @classmethod
-    def sub(cls, a, b):
-        return cls.add(a, cls.neg(b))
-
-    def __getattr__(self, name):
-        log.debug("unhandled ValueRange op %s", name)
-        return self.default_handler
-
-
 def bound_sympy(
-    expr: sympy.Expr, ranges: Optional[Dict[sympy.Symbol, ValueRanges]] = None
+    expr: sympy.Expr, ranges: Optional[dict[sympy.Symbol, ValueRanges]] = None
 ) -> ValueRanges:
     log.debug(
         "bound_sympy(%s)%s",

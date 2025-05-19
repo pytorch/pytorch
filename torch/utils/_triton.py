@@ -39,6 +39,29 @@ def has_triton_tma():
 
 
 @functools.lru_cache(None)
+def has_triton_tma_device():
+    if has_triton_package():
+        import torch
+
+        if (
+            torch.cuda.is_available()
+            and torch.cuda.get_device_capability() >= (9, 0)
+            and not torch.version.hip
+        ):
+            try:
+                from triton.language.extra.cuda import (  # noqa: F401
+                    experimental_device_tensormap_create1d,
+                    experimental_device_tensormap_create2d,
+                )
+
+                return True
+            except ImportError:
+                pass
+
+    return False
+
+
+@functools.lru_cache(None)
 def has_triton() -> bool:
     if not has_triton_package():
         return False
@@ -90,23 +113,3 @@ def triton_hash_with_backend():
 
     # Hash is upper case so that it can't contain any Python keywords.
     return hashlib.sha256(key.encode("utf-8")).hexdigest().upper()
-
-
-def dtype_to_string(dtype):
-    if dtype.name.startswith("fp"):
-        suffix = "float" + dtype.name[2:]
-    elif dtype.name.startswith("bf"):
-        suffix = "bfloat" + dtype.name[2:]
-    else:
-        suffix = dtype.name
-    return "triton.language." + suffix
-
-
-def patch_triton_dtype_repr():
-    import triton
-
-    # Hack to get triton dtype repr to produce an evaluatable expression
-    # triton.language.float32 emits triton.language.fp32 which does not
-    # exist
-    # REMOVE when https://github.com/openai/triton/pull/3342 lands
-    triton.language.dtype.__repr__ = lambda self: dtype_to_string(self)

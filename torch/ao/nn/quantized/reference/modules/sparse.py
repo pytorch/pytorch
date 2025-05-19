@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import torch.nn as nn
 import torch.nn.functional as F
@@ -31,7 +31,7 @@ class Embedding(nn.Embedding, ReferenceQuantizedModule):
         _weight: Optional[Tensor] = None,
         device=None,
         dtype=None,
-        weight_qparams: Optional[Dict[str, Any]] = None,
+        weight_qparams: Optional[dict[str, Any]] = None,
     ) -> None:
         super().__init__(
             num_embeddings,
@@ -101,7 +101,7 @@ class EmbeddingBag(nn.EmbeddingBag, ReferenceQuantizedModule):
         padding_idx: Optional[int] = None,
         device=None,
         dtype=None,
-        weight_qparams: Optional[Dict[str, Any]] = None,
+        weight_qparams: Optional[dict[str, Any]] = None,
     ) -> None:
         super().__init__(
             num_embeddings,

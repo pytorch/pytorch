@@ -24,7 +24,7 @@ std::unique_ptr<ChannelRegistration> makeCudaIpcChannel() {
 }
 
 // The cuda_ipc channels use cudaMemcpy to transmit CUDA tensor across processes
-C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_ipc, makeCudaIpcChannel);
+C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_ipc, makeCudaIpcChannel)
 
 #endif
 
@@ -44,7 +44,7 @@ std::unique_ptr<ChannelRegistration> makeCudaGdrChannel() {
 // in order to ensure readiness and to agree on the device indices and thus the
 // queue pair to use. It automatically pairs each GPU to the "closest" NIC if
 // there are multiple of them (closest = longest prefix match in PCI tree).
-C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_gdr, makeCudaGdrChannel);
+C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_gdr, makeCudaGdrChannel)
 
 #endif
 
@@ -55,7 +55,7 @@ std::unique_ptr<ChannelRegistration> makeCudaXthChannel() {
 }
 
 // The cuda_xth channel supports same-process GPU-to-GPU comm
-C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_xth, makeCudaXthChannel);
+C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_xth, makeCudaXthChannel)
 
 std::unique_ptr<ChannelRegistration> makeCudaBasicChannel() {
   auto context = tensorpipe::channel::cuda_basic::create(
@@ -68,7 +68,7 @@ std::unique_ptr<ChannelRegistration> makeCudaBasicChannel() {
 C10_REGISTER_CREATOR(
     TensorPipeChannelRegistry,
     cuda_basic,
-    makeCudaBasicChannel);
+    makeCudaBasicChannel)
 
 class TensorpipeCudaConverter : public TensorpipeDeviceTypeConverter {
  public:

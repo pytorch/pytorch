@@ -6,8 +6,6 @@ the values observed during calibration (PTQ) or training (QAT).
 
 import itertools
 
-import matplotlib.pyplot as plt
-
 import torch
 from torch.ao.quantization.experimental.apot_utils import apot_to_float, float_to_apot
 from torch.ao.quantization.observer import ObserverBase
@@ -83,7 +81,7 @@ class APoTObserver(ObserverBase):
 
             if signed:
                 # sort tensor in reverse order before adding to list if signed
-                sorted, indices = torch.sort(p_curr, descending=True)
+                sorted, _indices = torch.sort(p_curr, descending=True)
                 p_all.append(sorted)
             else:
                 p_all.append(p_curr)
@@ -148,7 +146,10 @@ class APoTObserver(ObserverBase):
     """
 
     def quant_levels_visualization(self, signed=False):
-        alpha, gamma, quantization_levels, level_indices = self.calculate_qparams(
+        # matplotlib is optional dep
+        import matplotlib.pyplot as plt
+
+        alpha, _gamma, quantization_levels, level_indices = self.calculate_qparams(
             signed
         )
 
@@ -162,7 +163,7 @@ class APoTObserver(ObserverBase):
             for x in xs
         ]
 
-        f = plt.figure(figsize=(15, 10))
+        plt.figure(figsize=(15, 10))
 
         plt.plot(xs, ys)
         plt.title("APoT Quantization Plot")

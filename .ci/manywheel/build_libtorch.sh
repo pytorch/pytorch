@@ -95,12 +95,6 @@ python setup.py clean
 retry pip install -qr requirements.txt
 retry pip install -q numpy==2.0.1
 
-if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-    export _GLIBCXX_USE_CXX11_ABI=1
-else
-    export _GLIBCXX_USE_CXX11_ABI=0
-fi
-
 if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
     echo "Calling build_amd.py at $(date)"
     python tools/amd_build/build_amd.py
@@ -169,12 +163,6 @@ fi
 
 )
 
-if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-    LIBTORCH_ABI="cxx11-abi-"
-else
-    LIBTORCH_ABI=
-fi
-
 (
     set -x
 
@@ -225,11 +213,11 @@ make_wheel_record() {
     FPATH=$1
     if echo $FPATH | grep RECORD >/dev/null 2>&1; then
         # if the RECORD file, then
-        echo "$FPATH,,"
+        echo "\"$FPATH\",,"
     else
         HASH=$(openssl dgst -sha256 -binary $FPATH | openssl base64 | sed -e 's/+/-/g' | sed -e 's/\//_/g' | sed -e 's/=//g')
         FSIZE=$(ls -nl $FPATH | awk '{print $5}')
-        echo "$FPATH,sha256=$HASH,$FSIZE"
+        echo "\"$FPATH\",sha256=$HASH,$FSIZE"
     fi
 }
 

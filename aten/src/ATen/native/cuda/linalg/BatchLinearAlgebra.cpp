@@ -1865,8 +1865,6 @@ void geqrf_kernel(const Tensor& input, const Tensor& tau) {
   // We require to perform ?geqrf_gpu again due to this bug in MAGMA:
   // - ?geqrf_gpu allows fast computation of Q via ?orgqr_gpu, but doesn't give R properly.
   // - ?geqrf2_gpu gives correct R, but doesn't allow computation of Q via ?orgqr_gpu
-  // Refer to the below link for more details:
-  // http://icl.cs.utk.edu/magma/forum/viewtopic.php?f=2&t=1015&p=2800&hilit=geqrf_gpu#p2800
     case at::LinalgBackend::Magma:
       return geqrf_magma(input, tau);
     case at::LinalgBackend::Cusolver:
@@ -2210,7 +2208,7 @@ void svd_magma(const Tensor& A,
 void svd_kernel(const Tensor& A,
                 const bool full_matrices,
                 const bool compute_uv,
-                const std::optional<c10::string_view>& driver,
+                const std::optional<std::string_view>& driver,
                 const Tensor& U,
                 const Tensor& S,
                 const Tensor& Vh,

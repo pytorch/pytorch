@@ -56,7 +56,6 @@ cusparseIndexType_t getCuSparseIndexType(const c10::ScalarType& scalar_type) {
   }
 }
 
-#if AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 cusparseDnMatDescr_t createRawDnMatDescriptor(const Tensor& input, int64_t batch_offset, bool is_const=false) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.layout() == kStrided);
   IntArrayRef input_strides = input.strides();
@@ -121,7 +120,6 @@ CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input, int64_t ba
 CuSparseConstDnMatDescriptor::CuSparseConstDnMatDescriptor(const Tensor& input, int64_t batch_offset) {
   descriptor_.reset(createRawDnMatDescriptor(input, batch_offset, /*is_const*/true));
 }
-#endif // AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
 CuSparseDnVecDescriptor::CuSparseDnVecDescriptor(const Tensor& input) {
   // cuSPARSE doesn't support batched vectors

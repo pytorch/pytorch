@@ -1,16 +1,6 @@
 import warnings
 from collections.abc import Iterable
-from typing import (
-    Any,
-    Callable,
-    List,
-    NamedTuple,
-    Optional,
-    overload,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, NamedTuple, Optional, overload, TypeVar, Union
 from typing_extensions import Self
 
 import torch
@@ -228,7 +218,7 @@ def _packed_sequence_init_args(
     batch_sizes: Optional[Tensor] = None,
     sorted_indices: Optional[Tensor] = None,
     unsorted_indices: Optional[Tensor] = None,
-) -> Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]]:
+) -> tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]]:
     # NB: if unsorted_indices is provided, it should be the inverse permutation
     # to sorted_indices. Don't assert it here because the PackedSequence ctor
     # should only be used internally.
@@ -279,7 +269,7 @@ def invert_permutation(permutation: Optional[Tensor]) -> Optional[Tensor]:
 
 def pack_padded_sequence(
     input: Tensor,
-    lengths: Union[Tensor, List[int]],
+    lengths: Union[Tensor, list[int]],
     batch_first: bool = False,
     enforce_sorted: bool = True,
 ) -> PackedSequence:
@@ -309,10 +299,14 @@ def pack_padded_sequence(
         lengths (Tensor or list(int)): list of sequence lengths of each batch
             element (must be on the CPU if provided as a tensor).
         batch_first (bool, optional): if ``True``, the input is expected in ``B x T x *``
-            format, ``T x B x *`` otherwise.
+            format, ``T x B x *`` otherwise. Default: ``False``.
         enforce_sorted (bool, optional): if ``True``, the input is expected to
             contain sequences sorted by length in a decreasing order. If
             ``False``, the input will get sorted unconditionally. Default: ``True``.
+
+    .. warning::
+        The dim of ``input`` tensor will be truncated if its length larger than
+        correspond value in ``length``.
 
     Returns:
         a :class:`PackedSequence` object
@@ -347,7 +341,7 @@ def pad_packed_sequence(
     batch_first: bool = False,
     padding_value: float = 0.0,
     total_length: Optional[int] = None,
-) -> Tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:
     r"""Pad a packed batch of variable length sequences.
 
     It is an inverse operation to :func:`pack_padded_sequence`.
@@ -419,7 +413,7 @@ def pad_packed_sequence(
 
 # NOTE: for JIT-compatibility, we need to be more restrictive here and use specific types instead of Iterable.
 def pad_sequence(
-    sequences: Union[Tensor, List[Tensor]],
+    sequences: Union[Tensor, list[Tensor]],
     batch_first: bool = False,
     padding_value: float = 0.0,
     padding_side: str = "right",
@@ -429,7 +423,7 @@ def pad_sequence(
     ``pad_sequence`` stacks a list of Tensors along a new dimension, and pads them
     to equal length. :attr:`sequences` can be list of sequences with size ``L x *``,
     where `L` is length of the sequence and ``*`` is any number of dimensions
-    (including 0). If :attr:`batch_first` is ``False``, the output is of size
+    (including ``0``). If :attr:`batch_first` is ``False``, the output is of size
     ``T x B x *``, and ``B x T x *`` otherwise, where ``B`` is the batch size
     (the number of elements in :attr:`sequences`), ``T`` is the length of the longest
     sequence.
@@ -451,9 +445,9 @@ def pad_sequence(
         sequences (list[Tensor]): list of variable length sequences.
         batch_first (bool, optional): if ``True``, the output will be in ``B x T x *``
             format, ``T x B x *`` otherwise.
-        padding_value (float, optional): value for padded elements. Default: 0.
+        padding_value (float, optional): value for padded elements. Default: ``0``.
         padding_side (str, optional): the side to pad the sequences on.
-            Default: "right".
+            Default: ``'right'``.
 
     Returns:
         Tensor of size ``T x B x *`` if :attr:`batch_first` is ``False``.
@@ -487,7 +481,7 @@ def unpad_sequence(
     padded_sequences: Tensor,
     lengths: Tensor,
     batch_first: bool = False,
-) -> List[Tensor]:
+) -> list[Tensor]:
     r"""Unpad padded Tensor into a list of variable length Tensors.
 
     ``unpad_sequence`` unstacks padded Tensor into a list of variable length Tensors.
@@ -511,7 +505,7 @@ def unpad_sequence(
     Args:
         padded_sequences (Tensor): padded sequences.
         lengths (Tensor): length of original (unpadded) sequences.
-        batch_first (bool, optional): whether batch dimension first or not. Default: False.
+        batch_first (bool, optional): whether batch dimension first or not. Default: ``False``.
 
     Returns:
         a list of :class:`Tensor` objects
@@ -533,7 +527,7 @@ def unpad_sequence(
 
 
 def pack_sequence(
-    sequences: List[Tensor],
+    sequences: list[Tensor],
     enforce_sorted: bool = True,
 ) -> PackedSequence:
     r"""Packs a list of variable length Tensors.
@@ -542,7 +536,7 @@ def pack_sequence(
 
     ``sequences`` should be a list of Tensors of size ``L x *``, where `L` is
     the length of a sequence and `*` is any number of trailing dimensions,
-    including zero.
+    including ``0``.
 
     For unsorted sequences, use `enforce_sorted = False`. If ``enforce_sorted``
     is ``True``, the sequences should be sorted in the order of decreasing length.
@@ -571,7 +565,7 @@ def pack_sequence(
     )
 
 
-def unpack_sequence(packed_sequences: PackedSequence) -> List[Tensor]:
+def unpack_sequence(packed_sequences: PackedSequence) -> list[Tensor]:
     r"""Unpack PackedSequence into a list of variable length Tensors.
 
     ``packed_sequences`` should be a PackedSequence object.

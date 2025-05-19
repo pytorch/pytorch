@@ -137,7 +137,13 @@ void test_random_from_to(const at::Device& device) {
               range = static_cast<uint64_t>(max_to) - static_cast<uint64_t>(from) + 1;
               from_case_covered = true;
             }
+#ifdef FBCODE_CAFFE2
             if (range < (1ULL << 32)) {
+#else
+            // this is leaking details of implementation into test
+            // we are starting to use random64() at 2^28 to minimize skew due to %
+            if (range < (1ULL << 28)) {
+#endif
               exp = static_cast<T>(static_cast<int64_t>((static_cast<uint32_t>(val) % range + from)));
             } else {
               exp = static_cast<T>(static_cast<int64_t>((val % range + from)));

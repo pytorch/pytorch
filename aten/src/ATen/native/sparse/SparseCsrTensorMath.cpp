@@ -219,7 +219,7 @@ Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
 }
 
 template <typename op_t>
-Tensor intersection_binary_op_with_wrapped_scalar(const Tensor& sparse, const Tensor& scalar, const op_t& op) {
+static Tensor intersection_binary_op_with_wrapped_scalar(const Tensor& sparse, const Tensor& scalar, const op_t& op) {
   // NOTE: intersection_binary_op_with_wrapped_scalar assumes scalar.numel() == 1.
   const auto result_values = op(sparse.values(), scalar.squeeze()).to(at::result_type(sparse, scalar));
   const auto result_sizes = infer_size(sparse.sizes(), scalar.sizes());
@@ -233,7 +233,7 @@ Tensor intersection_binary_op_with_wrapped_scalar(const Tensor& sparse, const Te
 }
 
 template <typename op_t>
-Tensor& intersection_binary_op_with_wrapped_scalar_(Tensor& sparse, const Tensor& scalar, const string& op_name, const op_t& op) {
+static Tensor& intersection_binary_op_with_wrapped_scalar_(Tensor& sparse, const Tensor& scalar, const std::string& op_name, const op_t& op) {
   // NOTE: intersection_binary_op_with_wrapped_scalar_ assumes scalar.numel() == 1.
   const auto broadcasted_shape = infer_size(sparse.sizes(), scalar.sizes());
   if (sparse.sizes() != broadcasted_shape) {
@@ -344,7 +344,7 @@ Tensor sparse_mask_sparse_compressed(
   }
 
   if (!mask.numel() || !mask._nnz()) {
-    return mask.clone().to(self.device(), self.scalar_type());
+    return mask.to(self.device(), self.scalar_type(), /*non_blocking=*/false, /*copy=*/true);
   }
 
   if (self.layout() == kStrided) {
@@ -522,7 +522,7 @@ CREATE_UNARY_UFUNC_FUNCTIONAL(isnan)
 CREATE_UNARY_UFUNC_FUNCTIONAL(isinf)
 
 template <typename scalar_t>
-void addmm_out_sparse_csr_native_cpu(
+static void addmm_out_sparse_csr_native_cpu(
     const Tensor& sparse,
     const Tensor& dense,
     const Tensor& r,
@@ -1359,7 +1359,7 @@ Tensor _sparse_csr_prod_cpu(const Tensor& input, IntArrayRef dims_to_reduce, boo
 std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_sparse_csr_cpu(
     const Tensor& self,
     const Tensor& other,
-    const c10::string_view reduce) {
+    const std::string_view reduce) {
 
   auto layout = self.layout();
   TORCH_CHECK(layout == kSparseCsr,
@@ -1411,7 +1411,7 @@ std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_backward_sparse_csr_cpu(
     const Tensor& self,
     const Tensor& grad_out,
     const Tensor& other,
-    const c10::string_view reduce,
+    const std::string_view reduce,
     const Tensor& arg_out,
     std::array<bool, 2> output_mask) {
 

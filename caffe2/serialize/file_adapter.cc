@@ -21,7 +21,8 @@ FileAdapter::RAIIFile::RAIIFile(const std::string& file_name) {
     auto error_msg =
         std::system_category().default_error_condition(old_errno).message();
 #endif
-    TORCH_CHECK(false,
+    TORCH_CHECK(
+        false,
         "open file failed because of errno ",
         old_errno,
         " on fopen: ",
