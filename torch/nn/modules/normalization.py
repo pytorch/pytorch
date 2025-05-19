@@ -227,8 +227,9 @@ class LayerNorm(Module):
             "{normalized_shape}, eps={eps}, "
             "elementwise_affine={elementwise_affine}".format(**self.__dict__)
         )
-add_docstr(LayerNorm, LayerNorm.__doc__.format(**common_args))
 
+docstr = LayerNorm.__doc__.format(**common_args)
+add_docstr(LayerNorm, docstr)
 
 class GroupNorm(Module):
     r"""Applies Group Normalization over a mini-batch of inputs.
