@@ -674,12 +674,16 @@ def tuned_mm(mat1, mat2, *, layout=None):
                     **mm_options(config, m, n, k, layout),
                     **persistent_mm_options(mat1, mat2),
                 )
+
+        from torch._inductor.ir import get_free_symbols
+
         # Only do split-k optimization if K is much larger than m, n and m, n are small
-        if (
-            use_decompose_k_choice(m, n, k)
-            and len(mat1.get_free_symbol_uses(True) | mat2.get_free_symbol_uses(True))
-            == 0
-        ):
+        unbacked_lengths = [
+            len(get_free_symbols(itr, unbacked_only=True))
+            for itr in (m.get_size(), m.get_stride())
+            for m in (mat1, mat2)
+        ]
+        if use_decompose_k_choice(m, n, k) and sum(unbacked_lengths) == 0:
             from torch._dispatch.python import enable_python_dispatcher
 
             from ..decomposition import select_decomp_table

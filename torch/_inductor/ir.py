@@ -495,7 +495,8 @@ def add_symbolic_shapes_for_inputs_to_subgraph(
 ) -> list[Expr]:
     sym_vars: OrderedSet[Expr] = OrderedSet()
     for inp in inputs:
-        sym_vars |= inp.get_free_symbol_uses(unbacked_only=False)
+        sym_vars |= get_free_symbols(inp.get_size(), unbacked_only=False)
+        sym_vars |= get_free_symbols(inp.get_stride(), unbacked_only=False)
 
     sym_inputs = []
     for sym_var in sym_vars:
