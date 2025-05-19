@@ -26,7 +26,7 @@ function install_ubuntu() {
     wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
         | gpg --dearmor > /usr/share/keyrings/oneapi-archive-keyring.gpg.gpg
     echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg.gpg] \
-        https://apt.repos.intel.com/oneapi all main" \  # @lint-ignore
+        https://apt.repos.intel.com/oneapi all main"  # @lint-ignore \
         | tee /etc/apt/sources.list.d/oneAPI.list
 
     # Update the packages list and repository index
