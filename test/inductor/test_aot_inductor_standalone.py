@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.triton_utils import HAS_GPU
 
 
 if IS_WINDOWS and IS_CI:
@@ -81,7 +82,7 @@ test_list_cpu = {
 }
 
 
-class AOTInductorTestLibtorchFreeCpu(TestCase):
+class AOTInductorTestStandaloneCpu(TestCase):
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
@@ -93,7 +94,7 @@ class AOTInductorTestLibtorchFreeCpu(TestCase):
 
 copy_tests(
     AOTInductorTestsTemplate,
-    AOTInductorTestLibtorchFreeCpu,
+    AOTInductorTestStandaloneCpu,
     "cpu_standalone",
     test_list_cpu,
 )
@@ -104,7 +105,7 @@ test_list_gpu = {
 
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
-class AOTInductorTestLibtorchFreeGpu(TestCase):
+class AOTInductorTestStandaloneGpu(TestCase):
     device = GPU_TYPE
     device_type = GPU_TYPE
     check_model = check_model
@@ -116,7 +117,7 @@ class AOTInductorTestLibtorchFreeGpu(TestCase):
 
 copy_tests(
     AOTInductorTestsTemplate,
-    AOTInductorTestLibtorchFreeGpu,
+    AOTInductorTestStandaloneGpu,
     f"{GPU_TYPE}_standalone",
     test_list_gpu,
 )
@@ -125,4 +126,5 @@ copy_tests(
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    run_tests(needs="filelock")
+    if HAS_GPU:
+        run_tests(needs="filelock")

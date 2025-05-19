@@ -5,6 +5,7 @@
 #include <torch/csrc/inductor/aoti_standalone/c/shim_device.h>
 #include <torch/csrc/inductor/aoti_standalone/c/shim_dtype.h>
 #include <torch/csrc/inductor/aoti_standalone/c/shim_layout.h>
+#include <torch/csrc/inductor/aoti_standalone/utils.h>
 #include <torch/standalone/slim_tensor/slim_tensor.h>
 
 using AtenTensorOpaque = torch::standalone::SlimTensor;
