@@ -1333,24 +1333,24 @@ class AOTInductorTestsTemplate:
                 index = torch.repeat_interleave(values, repeats)
                 index_select = torch.index_select(embeddings, 0, index)
 
-                u0, u1, random_unbacked = lst.tolist()
+                u0, u1 = lst.tolist()
                 torch._check_is_size(u0)
                 torch._check_is_size(u1)
-                backed = z.size(0)
-                backed1 = z.size(1)
+                backed0, backed1 = z.size(0), z.size(1)
 
-                repeated = y.repeat(backed + u0, 1)
+                repeated0 = y.repeat(backed0 + u0, 1)
                 repeated1 = x.repeat(backed1 + u1, 1)
                 out1 = torch.empty_like(repeated1)
                 add_kernel[(out1.numel(),)](
-                    repeated, repeated, out1, out1.numel(), BLOCK_SIZE=2
+                    repeated1, repeated1, out1, out1.numel(), BLOCK_SIZE=2
                 )
 
-                # torch._check(repeated.size(0) == random_unbacked)
-
+                # Implicitly add torch._check(expr2, unbacked)
                 cat = torch.cat([out1, index_select], dim=1)
-                add = repeated + repeated1
-                torch._check(repeated.size(0) == out1.size(0))
+                add = repeated0 + repeated1
+
+                # Explicitly add torch._check(expr1, expr2)
+                torch._check(repeated0.size(0) == out1.size(0))
                 return cat, add
 
         example_inputs = (
@@ -1361,9 +1361,7 @@ class AOTInductorTestsTemplate:
             torch.randn((2, 256), dtype=torch.bfloat16, device=self.device),
             torch.randn((2, 256), dtype=torch.bfloat16, device=self.device),
             torch.ones(758, 758, dtype=torch.int64, device=self.device),
-            torch.tensor(
-                [10, 10, 2 * (758 + 10)], dtype=torch.int32, device=self.device
-            ),
+            torch.tensor([10, 10], dtype=torch.int32, device=self.device),
         )
         spec = {
             "values": (Dim.DYNAMIC,),
