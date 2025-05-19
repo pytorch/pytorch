@@ -104,7 +104,7 @@ from .virtualized import V
 
 
 if config.is_fbcode():
-    from triton.fb import build_paths
+    from triton.fb.build import build_paths
 
     from torch._inductor.fb.utils import (
         log_global_cache_errors,
