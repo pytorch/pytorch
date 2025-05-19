@@ -1,7 +1,6 @@
 import argparse
 import os
 import subprocess
-import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast, Optional
@@ -56,7 +55,9 @@ def check_labels_for_pr() -> bool:
     url = f"https://api.github.com/repos/pytorch/pytorch/commits/{head_sha}/pulls"
     response = query_github_api(url)
 
-    print(f"Found {len(response)} PRs for commit {head_sha}: {[pr['number'] for pr in response]}")
+    print(
+        f"Found {len(response)} PRs for commit {head_sha}: {[pr['number'] for pr in response]}"
+    )
     for pr in response:
         labels = pr.get("labels", [])
         for label in labels:
@@ -185,12 +186,7 @@ def unzip_artifact_and_replace_files() -> None:
 
         # Zip the wheel back
         subprocess.check_output(
-            [
-                "zip",
-                "-r",
-                f"{new_path.stem}.zip",
-                "."
-            ],
+            ["zip", "-r", f"{new_path.stem}.zip", "."],
             cwd=f"artifacts/dist/{new_path.stem}",
         )
         subprocess.check_output(
@@ -253,7 +249,7 @@ def can_reuse_whl(args: argparse.Namespace) -> bool:
         return False
 
     if not check_changed_files(get_merge_base()):
-        print(f"Cannot use old whl due to the changed files, rebuild whl")
+        print("Cannot use old whl due to the changed files, rebuild whl")
         return False
 
     workflow_id = get_workflow_id(args.run_id)
@@ -267,6 +263,7 @@ def can_reuse_whl(args: argparse.Namespace) -> bool:
         return False
 
     return True
+
 
 if __name__ == "__main__":
     args = parse_args()
