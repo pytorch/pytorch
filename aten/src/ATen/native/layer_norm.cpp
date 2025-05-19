@@ -317,8 +317,10 @@ std::tuple<Tensor, Tensor> rms_norm_cpu(
       upcasted_result = upcasted_result.mul(weight_opt.value());
     }
 
-    return std::make_tuple(upcasted_result, rqrst_input);
+    return std::make_tuple(upcasted_result.contiguous(), rqrst_input.contiguous());
   });
+
+
 
   return std::make_tuple(
     std::get<0>(result).type_as(input), // Cast normalized result to original input type
@@ -337,7 +339,7 @@ Tensor rms_norm_symint(
   const Tensor& weight = *weight_maybe_owned;
   _check_rms_norm_inputs_symint(input, normalized_shape, weight);
 
-    // maybe dispatch to cpu if type isnt supported by the cuda impl
+  // maybe dispatch to cpu if type isnt supported by the cuda impl
   return std::get<0>(at::native_rms_norm_symint(input, normalized_shape, weight_opt, eps));
 }
 
