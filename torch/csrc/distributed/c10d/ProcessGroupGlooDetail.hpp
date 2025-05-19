@@ -26,7 +26,7 @@
       func<double>(__VA_ARGS__);                 \
       break;                                     \
     case ::at::ScalarType::Half:                 \
-      func<gloo::float16>(__VA_ARGS__);          \
+      func<c10::Half>(__VA_ARGS__);              \
       break;                                     \
     case ::at::ScalarType::BFloat16:             \
       func<c10::BFloat16>(__VA_ARGS__);          \
@@ -59,7 +59,7 @@
       func<double>(args);                        \
       break;                                     \
     case ::at::ScalarType::Half:                 \
-      func<gloo::float16>(args);                 \
+      func<c10::Half>(args);                     \
       break;                                     \
     case ::at::ScalarType::BFloat16:             \
       func<c10::BFloat16>(args);                 \

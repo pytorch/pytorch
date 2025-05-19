@@ -465,6 +465,20 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             result[0],
         )
 
+        # Single input tests
+        tensor = (torch.rand(20000, 1, dtype=torch.float32) * 2 - 1) * 65504 / self.world_size
+        opts = c10d.AllreduceOptions()
+        tensor_half = tensor.clone().to(torch.float16)
+        # results from fp32
+        fut = pg.allreduce([tensor], opts).get_future()
+        fut.wait()
+        result_fp32 = fut.value()
+        # result from fp16
+        fut = pg.allreduce([tensor_half], opts).get_future()
+        fut.wait()
+        result_fp16 = fut.value()
+        self.assertEqual(result_fp32[0].to(torch.float16), result_fp16[0])
+
     @requires_gloo()
     def test_allreduce_basics(self):
         self._test_allreduce_basics(lambda t: t.clone())
