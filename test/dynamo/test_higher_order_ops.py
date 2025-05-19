@@ -6,6 +6,7 @@ import re
 import unittest
 import warnings
 from copy import deepcopy
+from unittest.mock import patch
 
 import functorch.experimental.control_flow as control_flow
 import torch
@@ -6701,6 +6702,609 @@ class GraphModule(torch.nn.Module):
         expected = wrapper_fn(x)
         actual = opt(x)
         self.assertEqual(expected, actual)
+
+
+class AutoRewriteDataDependentControlFlowTests(torch._dynamo.test_case.TestCase):
+    def _check_successful_rewrite(self, f, args) -> torch.fx.GraphModule:
+        eager_out = f(*args)
+        compile_out = torch.compile(f, backend="eager", fullgraph=False)(*args)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Hint: Set torch._dynamo.config.enable_auto_rewrite_data_dependent_control_flow=True",
+        ):
+            torch._dynamo.reset()
+            torch.compile(f, backend="eager", fullgraph=True)(*args)
+
+        backend = EagerAndRecordGraphs()
+        with torch._dynamo.config.patch(
+            enable_auto_rewrite_data_dependent_control_flow=True
+        ):
+            torch._dynamo.reset()
+            auto_rewrite_out = torch.compile(f, backend=backend, fullgraph=True)(*args)
+
+        self.assertEqual(eager_out, compile_out)
+        self.assertEqual(eager_out, auto_rewrite_out)
+        self.assertEqual(len(backend.graphs), 1)
+        return backend.graphs[0]
+
+    def _check_raise_uncaptured_exception(self, f, args):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "IF doesn't work unless it is captured completely with torch.compile",
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(*args)
+
+    def test_auto_rewrite_if_early_return(self):
+        def f(x):
+            if x.sum() > 0:
+                return x.sin()
+            return x.cos()
+
+        gm = self._check_successful_rewrite(f, (torch.randn(3, 4),))
+        self.assertExpectedInline(
+            normalize_gm(gm.print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3, 4]"):
+        l_x_ = L_x_
+
+        sum_1: "f32[]" = l_x_.sum()
+        pred_tmp_0: "b8[]" = sum_1 > 0;  sum_1 = None
+        not_pred_tmp_1: "b8[]" = pred_tmp_0.__eq__(True)
+
+        then_graph_0 = self.then_graph_0
+        if_op = torch.ops.higher_order.if_op(pred_tmp_0, then_graph_0, l_x_);  then_graph_0 = None
+        then_out_tmp_2: "f32[3, 4]" = if_op[0];  if_op = None
+        then_graph_1 = self.then_graph_1
+        if_op_1 = torch.ops.higher_order.if_op(not_pred_tmp_1, then_graph_1, l_x_);  not_pred_tmp_1 = then_graph_1 = l_x_ = None
+        else_out_tmp_3: "f32[3, 4]" = if_op_1[0];  if_op_1 = None
+
+        merge_op = torch.ops.higher_order.merge_op(pred_tmp_0, (then_out_tmp_2,), (else_out_tmp_3,));  pred_tmp_0 = then_out_tmp_2 = else_out_tmp_3 = None
+        getitem_2: "f32[3, 4]" = merge_op[0];  merge_op = None
+        return (getitem_2,)
+
+    class then_graph_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]"):
+            sin: "f32[3, 4]" = l_x_.sin();  l_x_ = None
+            return (sin,)
+
+    class then_graph_1(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]"):
+            cos: "f32[3, 4]" = l_x_.cos();  l_x_ = None
+            return (cos,)
+""",
+        )
+
+    def test_rewrite_if_early_return2(self):
+        def f(x, y):
+            if x.sum() > 0:
+                return torch.abs(x) + 1 + y, torch.abs(y)
+            return x + y, x - y
+
+        gm = self._check_successful_rewrite(f, (torch.randn(3, 4), torch.randn(3, 4)))
+        self.assertExpectedInline(
+            normalize_gm(gm.print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3, 4]", L_y_: "f32[3, 4]"):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        sum_1: "f32[]" = l_x_.sum()
+        pred_tmp_0: "b8[]" = sum_1 > 0;  sum_1 = None
+        not_pred_tmp_1: "b8[]" = pred_tmp_0.__eq__(True)
+
+        then_graph_0 = self.then_graph_0
+        if_op = torch.ops.higher_order.if_op(pred_tmp_0, then_graph_0, l_x_, l_y_);  then_graph_0 = None
+        child: "f32[3, 4]" = if_op[0]
+        child_1: "f32[3, 4]" = if_op[1];  if_op = None
+        then_graph_1 = self.then_graph_1
+        if_op_1 = torch.ops.higher_order.if_op(not_pred_tmp_1, then_graph_1, l_x_, l_y_);  not_pred_tmp_1 = then_graph_1 = l_x_ = l_y_ = None
+        child_2: "f32[3, 4]" = if_op_1[0]
+        child_3: "f32[3, 4]" = if_op_1[1];  if_op_1 = None
+
+        merge_op = torch.ops.higher_order.merge_op(pred_tmp_0, (child, child_1), (child_2, child_3));  pred_tmp_0 = child = child_1 = child_2 = child_3 = None
+        getitem_4: "f32[3, 4]" = merge_op[0]
+        getitem_5: "f32[3, 4]" = merge_op[1];  merge_op = None
+        return (getitem_4, getitem_5)
+
+    class then_graph_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]", l_y_: "f32[3, 4]"):
+            abs_1: "f32[3, 4]" = torch.abs(l_x_);  l_x_ = None
+            add: "f32[3, 4]" = abs_1 + 1;  abs_1 = None
+            child: "f32[3, 4]" = add + l_y_;  add = None
+            child_1: "f32[3, 4]" = torch.abs(l_y_);  l_y_ = None
+            return (child, child_1)
+
+    class then_graph_1(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]", l_y_: "f32[3, 4]"):
+            child: "f32[3, 4]" = l_x_ + l_y_
+            child_1: "f32[3, 4]" = l_x_ - l_y_;  l_x_ = l_y_ = None
+            return (child, child_1)
+""",
+        )
+
+    def test_auto_rewrite_if_shape_mismatch(self):
+        # true branch's y has shape (3, 4)
+        # false branch's y has shape (3, 3))
+        # we're able to merge the output to be (3, u0), where the unmatched
+        # dimension is replaced by an unbacked symint
+        def f(x):
+            y = torch.randn(3, 3)
+            if x.sum() > 0:
+                y = x + 1
+            return x, y
+
+        with patch.object(
+            torch._dynamo.variables.higher_order_ops.IfHigherOrderVariable,
+            "supports_aliasing",
+            True,
+        ):
+            gm = self._check_successful_rewrite(f, (torch.randn(3, 4),))
+            self.assertExpectedInline(
+                normalize_gm(gm.print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3, 4]"):
+        l_x_ = L_x_
+
+        y: "f32[3, 3]" = torch.randn(3, 3)
+
+        sum_1: "f32[]" = l_x_.sum()
+        pred_tmp_0: "b8[]" = sum_1 > 0;  sum_1 = None
+        not_pred_tmp_1: "b8[]" = pred_tmp_0.__eq__(True)
+
+        then_graph_0 = self.then_graph_0
+        if_op = torch.ops.higher_order.if_op(pred_tmp_0, then_graph_0, l_x_);  then_graph_0 = None
+        child: "f32[3, 4]" = if_op[0]
+        child_1: "f32[3, 4]" = if_op[1];  if_op = None
+        then_graph_1 = self.then_graph_1
+        if_op_1 = torch.ops.higher_order.if_op(not_pred_tmp_1, then_graph_1, l_x_, y);  not_pred_tmp_1 = then_graph_1 = l_x_ = y = None
+        child_2: "f32[3, 4]" = if_op_1[0]
+        child_3: "f32[3, 3]" = if_op_1[1];  if_op_1 = None
+
+        merge_op = torch.ops.higher_order.merge_op(pred_tmp_0, (child, child_1), (child_2, child_3));  pred_tmp_0 = child = child_1 = child_2 = child_3 = None
+
+        getitem_6: "f32[3, u0]" = merge_op[1]
+        sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(getitem_6, 1);  getitem_6 = None
+        _check_is_size = torch._check_is_size(sym_size_int);  _check_is_size = None
+
+        ge: "Sym(u0 >= 3)" = sym_size_int >= 3
+        _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 3 on node 'ge'");  ge = _assert_scalar_default = None
+        le: "Sym(u0 <= 4)" = sym_size_int <= 4;  sym_size_int = None
+        _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u0 <= 4 on node 'le'");  le = _assert_scalar_default_1 = None
+        getitem_4: "f32[3, 4]" = merge_op[0]
+        getitem_5: "f32[3, u0]" = merge_op[1];  merge_op = None
+        return (getitem_4, getitem_5)
+
+    class then_graph_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]"):
+            y: "f32[3, 4]" = l_x_ + 1
+            return (l_x_, y)
+
+    class then_graph_1(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]", y: "f32[3, 3]"):
+            return (l_x_, y)
+""",
+            )
+
+    def test_auto_rewrite_if_diff_graph(self):
+        def f(x):
+            y = torch.randn(3, 4)
+            if x.sum() > 0:
+                y = x + 1
+            return x, y
+
+        with patch.object(
+            torch._dynamo.variables.higher_order_ops.IfHigherOrderVariable,
+            "supports_aliasing",
+            True,
+        ):
+            gm = self._check_successful_rewrite(f, (torch.randn(3, 4),))
+            self.assertExpectedInline(
+                normalize_gm(gm.print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3, 4]"):
+        l_x_ = L_x_
+
+        y: "f32[3, 4]" = torch.randn(3, 4)
+
+        sum_1: "f32[]" = l_x_.sum()
+        pred_tmp_0: "b8[]" = sum_1 > 0;  sum_1 = None
+        not_pred_tmp_1: "b8[]" = pred_tmp_0.__eq__(True)
+
+        then_graph_0 = self.then_graph_0
+        if_op = torch.ops.higher_order.if_op(pred_tmp_0, then_graph_0, l_x_);  then_graph_0 = None
+        child: "f32[3, 4]" = if_op[0]
+        child_1: "f32[3, 4]" = if_op[1];  if_op = None
+        then_graph_1 = self.then_graph_1
+        if_op_1 = torch.ops.higher_order.if_op(not_pred_tmp_1, then_graph_1, l_x_, y);  not_pred_tmp_1 = then_graph_1 = l_x_ = y = None
+        child_2: "f32[3, 4]" = if_op_1[0]
+        child_3: "f32[3, 4]" = if_op_1[1];  if_op_1 = None
+
+        merge_op = torch.ops.higher_order.merge_op(pred_tmp_0, (child, child_1), (child_2, child_3));  pred_tmp_0 = child = child_1 = child_2 = child_3 = None
+        getitem_4: "f32[3, 4]" = merge_op[0]
+        getitem_5: "f32[3, 4]" = merge_op[1];  merge_op = None
+        return (getitem_4, getitem_5)
+
+    class then_graph_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]"):
+            y: "f32[3, 4]" = l_x_ + 1
+            return (l_x_, y)
+
+    class then_graph_1(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]", y: "f32[3, 4]"):
+            return (l_x_, y)
+""",
+            )
+
+    def test_auto_rewrite_nested_if(self):
+        def g(x):
+            if (x * 0.1).sum() <= 0:
+                return x.sin()
+            return torch.clamp(x, 0, 1)
+
+        def f(x):
+            y = torch.randn(3, 4)
+            if x.sum() > 0:
+                y = g(x)
+            return x, y
+
+        with patch.object(
+            torch._dynamo.variables.higher_order_ops.IfHigherOrderVariable,
+            "supports_aliasing",
+            True,
+        ):
+            gm = self._check_successful_rewrite(f, (torch.randn(3, 4),))
+        self.assertExpectedInline(
+            normalize_gm(gm.print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3, 4]"):
+        l_x_ = L_x_
+
+        y: "f32[3, 4]" = torch.randn(3, 4)
+
+        sum_1: "f32[]" = l_x_.sum()
+        pred_tmp_0: "b8[]" = sum_1 > 0;  sum_1 = None
+        not_pred_tmp_1: "b8[]" = pred_tmp_0.__eq__(True)
+
+        then_graph_2 = self.then_graph_2
+        if_op = torch.ops.higher_order.if_op(pred_tmp_0, then_graph_2, l_x_);  then_graph_2 = None
+        child: "f32[3, 4]" = if_op[0]
+        child_1: "f32[3, 4]" = if_op[1];  if_op = None
+        then_graph_3 = self.then_graph_3
+        if_op_1 = torch.ops.higher_order.if_op(not_pred_tmp_1, then_graph_3, l_x_, y);  not_pred_tmp_1 = then_graph_3 = l_x_ = y = None
+        child_2: "f32[3, 4]" = if_op_1[0]
+        child_3: "f32[3, 4]" = if_op_1[1];  if_op_1 = None
+
+        merge_op = torch.ops.higher_order.merge_op(pred_tmp_0, (child, child_1), (child_2, child_3));  pred_tmp_0 = child = child_1 = child_2 = child_3 = None
+        getitem_4: "f32[3, 4]" = merge_op[0]
+        getitem_5: "f32[3, 4]" = merge_op[1];  merge_op = None
+        return (getitem_4, getitem_5)
+
+    class then_graph_2(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]"):
+            mul: "f32[3, 4]" = l_x_ * 0.1
+            sum_1: "f32[]" = mul.sum();  mul = None
+            pred_tmp_7: "b8[]" = sum_1 <= 0;  sum_1 = None
+            not_pred_tmp_8: "b8[]" = pred_tmp_7.__eq__(True)
+
+            then_graph_0 = self.then_graph_0
+            if_op = torch.ops.higher_order.if_op(pred_tmp_7, then_graph_0, l_x_);  then_graph_0 = None
+            then_out_tmp_9: "f32[3, 4]" = if_op[0];  if_op = None
+            then_graph_1 = self.then_graph_1
+            if_op_1 = torch.ops.higher_order.if_op(not_pred_tmp_8, then_graph_1, l_x_);  not_pred_tmp_8 = then_graph_1 = None
+            else_out_tmp_10: "f32[3, 4]" = if_op_1[0];  if_op_1 = None
+
+            merge_op = torch.ops.higher_order.merge_op(pred_tmp_7, (then_out_tmp_9,), (else_out_tmp_10,));  pred_tmp_7 = then_out_tmp_9 = else_out_tmp_10 = None
+            y: "f32[3, 4]" = merge_op[0];  merge_op = None
+            return (l_x_, y)
+
+        class then_graph_0(torch.nn.Module):
+            def forward(self, l_x_: "f32[3, 4]"):
+                sin: "f32[3, 4]" = l_x_.sin();  l_x_ = None
+                return (sin,)
+
+        class then_graph_1(torch.nn.Module):
+            def forward(self, l_x_: "f32[3, 4]"):
+                clamp: "f32[3, 4]" = torch.clamp(l_x_, 0, 1);  l_x_ = None
+                return (clamp,)
+
+    class then_graph_3(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]", y: "f32[3, 4]"):
+            return (l_x_, y)
+""",
+        )
+
+    def test_auto_rewrite_consecutive_rewrite_in_function(self):
+        def g(x):
+            if x.sum() <= 0:
+                return x.sin()
+            return torch.clamp(x, 0, 1)
+
+        def f(x):
+            x = g(x)
+            y = g(x)
+            return x, y
+
+        gm = self._check_successful_rewrite(f, (torch.randn(3, 4),))
+        self.assertExpectedInline(
+            normalize_gm(gm.print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3, 4]"):
+        l_x_ = L_x_
+
+        sum_1: "f32[]" = l_x_.sum()
+        pred_tmp_0: "b8[]" = sum_1 <= 0;  sum_1 = None
+        not_pred_tmp_1: "b8[]" = pred_tmp_0.__eq__(True)
+
+        then_graph_0 = self.then_graph_0
+        if_op = torch.ops.higher_order.if_op(pred_tmp_0, then_graph_0, l_x_);  then_graph_0 = None
+        then_out_tmp_2: "f32[3, 4]" = if_op[0];  if_op = None
+        then_graph_1 = self.then_graph_1
+        if_op_1 = torch.ops.higher_order.if_op(not_pred_tmp_1, then_graph_1, l_x_);  not_pred_tmp_1 = then_graph_1 = l_x_ = None
+        else_out_tmp_3: "f32[3, 4]" = if_op_1[0];  if_op_1 = None
+
+        merge_op = torch.ops.higher_order.merge_op(pred_tmp_0, (then_out_tmp_2,), (else_out_tmp_3,));  pred_tmp_0 = then_out_tmp_2 = else_out_tmp_3 = None
+        x: "f32[3, 4]" = merge_op[0];  merge_op = None
+
+        sum_2: "f32[]" = x.sum()
+        pred_tmp_7: "b8[]" = sum_2 <= 0;  sum_2 = None
+        not_pred_tmp_8: "b8[]" = pred_tmp_7.__eq__(True)
+
+        then_graph_2 = self.then_graph_2
+        if_op_2 = torch.ops.higher_order.if_op(pred_tmp_7, then_graph_2, x);  then_graph_2 = None
+        then_out_tmp_9: "f32[3, 4]" = if_op_2[0];  if_op_2 = None
+        then_graph_3 = self.then_graph_3
+        if_op_3 = torch.ops.higher_order.if_op(not_pred_tmp_8, then_graph_3, x);  not_pred_tmp_8 = then_graph_3 = None
+        else_out_tmp_10: "f32[3, 4]" = if_op_3[0];  if_op_3 = None
+
+        merge_op_1 = torch.ops.higher_order.merge_op(pred_tmp_7, (then_out_tmp_9,), (else_out_tmp_10,));  pred_tmp_7 = then_out_tmp_9 = else_out_tmp_10 = None
+        y: "f32[3, 4]" = merge_op_1[0];  merge_op_1 = None
+        return (x, y)
+
+    class then_graph_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]"):
+            sin: "f32[3, 4]" = l_x_.sin();  l_x_ = None
+            return (sin,)
+
+    class then_graph_1(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]"):
+            clamp: "f32[3, 4]" = torch.clamp(l_x_, 0, 1);  l_x_ = None
+            return (clamp,)
+
+    class then_graph_2(torch.nn.Module):
+        def forward(self, x: "f32[3, 4]"):
+            sin: "f32[3, 4]" = x.sin();  x = None
+            return (sin,)
+
+    class then_graph_3(torch.nn.Module):
+        def forward(self, x: "f32[3, 4]"):
+            clamp: "f32[3, 4]" = torch.clamp(x, 0, 1);  x = None
+            return (clamp,)
+""",
+        )
+
+    def test_auto_rewrite_if_return_tuple(self):
+        def f(x, y):
+            if x.sum() > 0:
+                return x + y, x - y
+            else:
+                return torch.abs(x) + y, torch.abs(x) - y
+
+        gm = self._check_successful_rewrite(f, (torch.randn(3, 4), torch.randn(3, 4)))
+        self.assertExpectedInline(
+            normalize_gm(gm.print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3, 4]", L_y_: "f32[3, 4]"):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        sum_1: "f32[]" = l_x_.sum()
+        pred_tmp_0: "b8[]" = sum_1 > 0;  sum_1 = None
+        not_pred_tmp_1: "b8[]" = pred_tmp_0.__eq__(True)
+
+        then_graph_0 = self.then_graph_0
+        if_op = torch.ops.higher_order.if_op(pred_tmp_0, then_graph_0, l_x_, l_y_);  then_graph_0 = None
+        child: "f32[3, 4]" = if_op[0]
+        child_1: "f32[3, 4]" = if_op[1];  if_op = None
+        then_graph_1 = self.then_graph_1
+        if_op_1 = torch.ops.higher_order.if_op(not_pred_tmp_1, then_graph_1, l_x_, l_y_);  not_pred_tmp_1 = then_graph_1 = l_x_ = l_y_ = None
+        child_2: "f32[3, 4]" = if_op_1[0]
+        child_3: "f32[3, 4]" = if_op_1[1];  if_op_1 = None
+
+        merge_op = torch.ops.higher_order.merge_op(pred_tmp_0, (child, child_1), (child_2, child_3));  pred_tmp_0 = child = child_1 = child_2 = child_3 = None
+        getitem_4: "f32[3, 4]" = merge_op[0]
+        getitem_5: "f32[3, 4]" = merge_op[1];  merge_op = None
+        return (getitem_4, getitem_5)
+
+    class then_graph_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]", l_y_: "f32[3, 4]"):
+            child: "f32[3, 4]" = l_x_ + l_y_
+            child_1: "f32[3, 4]" = l_x_ - l_y_;  l_x_ = l_y_ = None
+            return (child, child_1)
+
+    class then_graph_1(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]", l_y_: "f32[3, 4]"):
+            abs_1: "f32[3, 4]" = torch.abs(l_x_)
+            child: "f32[3, 4]" = abs_1 + l_y_;  abs_1 = None
+            abs_2: "f32[3, 4]" = torch.abs(l_x_);  l_x_ = None
+            child_1: "f32[3, 4]" = abs_2 - l_y_;  abs_2 = l_y_ = None
+            return (child, child_1)
+""",
+        )
+
+    def test_rewrite_if_local_var(self):
+        def f(x, y):
+            if x.sum() > 0:
+                w, z = x + y, x - y
+            else:
+                w, z = torch.abs(x) + y + 1, torch.abs(x) - y + 1
+            return z, w
+
+        gm = self._check_successful_rewrite(f, (torch.randn(3, 4), torch.randn(3, 4)))
+        self.assertExpectedInline(
+            normalize_gm(gm.print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3, 4]", L_y_: "f32[3, 4]"):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        sum_1: "f32[]" = l_x_.sum()
+        pred_tmp_0: "b8[]" = sum_1 > 0;  sum_1 = None
+        not_pred_tmp_1: "b8[]" = pred_tmp_0.__eq__(True)
+
+        then_graph_0 = self.then_graph_0
+        if_op = torch.ops.higher_order.if_op(pred_tmp_0, then_graph_0, l_x_, l_y_);  then_graph_0 = None
+        child: "f32[3, 4]" = if_op[0]
+        child_1: "f32[3, 4]" = if_op[1];  if_op = None
+        then_graph_1 = self.then_graph_1
+        if_op_1 = torch.ops.higher_order.if_op(not_pred_tmp_1, then_graph_1, l_x_, l_y_);  not_pred_tmp_1 = then_graph_1 = l_x_ = l_y_ = None
+        child_2: "f32[3, 4]" = if_op_1[0]
+        child_3: "f32[3, 4]" = if_op_1[1];  if_op_1 = None
+
+        merge_op = torch.ops.higher_order.merge_op(pred_tmp_0, (child, child_1), (child_2, child_3));  pred_tmp_0 = child = child_1 = child_2 = child_3 = None
+        getitem_4: "f32[3, 4]" = merge_op[0]
+        getitem_5: "f32[3, 4]" = merge_op[1];  merge_op = None
+        return (getitem_4, getitem_5)
+
+    class then_graph_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]", l_y_: "f32[3, 4]"):
+            w: "f32[3, 4]" = l_x_ + l_y_
+            z: "f32[3, 4]" = l_x_ - l_y_;  l_x_ = l_y_ = None
+            return (z, w)
+
+    class then_graph_1(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]", l_y_: "f32[3, 4]"):
+            abs_1: "f32[3, 4]" = torch.abs(l_x_)
+            add: "f32[3, 4]" = abs_1 + l_y_;  abs_1 = None
+            w: "f32[3, 4]" = add + 1;  add = None
+            abs_2: "f32[3, 4]" = torch.abs(l_x_);  l_x_ = None
+            sub: "f32[3, 4]" = abs_2 - l_y_;  abs_2 = l_y_ = None
+            z: "f32[3, 4]" = sub + 1;  sub = None
+            return (z, w)
+""",
+        )
+
+    def test_rewrite_if_differnt_local(self):
+        def f(x, y):
+            if x.sum() > 0:
+                w = x + y
+                z = x - y
+            else:
+                u = y + 1
+                w = torch.abs(x) + u
+                z = torch.abs(x) - u
+            return w, z
+
+        gm = self._check_successful_rewrite(f, (torch.randn(3, 4), torch.randn(3, 4)))
+        self.assertExpectedInline(
+            normalize_gm(gm.print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3, 4]", L_y_: "f32[3, 4]"):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        sum_1: "f32[]" = l_x_.sum()
+        pred_tmp_0: "b8[]" = sum_1 > 0;  sum_1 = None
+        not_pred_tmp_1: "b8[]" = pred_tmp_0.__eq__(True)
+
+        then_graph_0 = self.then_graph_0
+        if_op = torch.ops.higher_order.if_op(pred_tmp_0, then_graph_0, l_x_, l_y_);  then_graph_0 = None
+        child: "f32[3, 4]" = if_op[0]
+        child_1: "f32[3, 4]" = if_op[1];  if_op = None
+        then_graph_1 = self.then_graph_1
+        if_op_1 = torch.ops.higher_order.if_op(not_pred_tmp_1, then_graph_1, l_y_, l_x_);  not_pred_tmp_1 = then_graph_1 = l_y_ = l_x_ = None
+        child_2: "f32[3, 4]" = if_op_1[0]
+        child_3: "f32[3, 4]" = if_op_1[1];  if_op_1 = None
+
+        merge_op = torch.ops.higher_order.merge_op(pred_tmp_0, (child, child_1), (child_2, child_3));  pred_tmp_0 = child = child_1 = child_2 = child_3 = None
+        getitem_4: "f32[3, 4]" = merge_op[0]
+        getitem_5: "f32[3, 4]" = merge_op[1];  merge_op = None
+        return (getitem_4, getitem_5)
+
+    class then_graph_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]", l_y_: "f32[3, 4]"):
+            w: "f32[3, 4]" = l_x_ + l_y_
+
+            z: "f32[3, 4]" = l_x_ - l_y_;  l_x_ = l_y_ = None
+            return (w, z)
+
+    class then_graph_1(torch.nn.Module):
+        def forward(self, l_y_: "f32[3, 4]", l_x_: "f32[3, 4]"):
+            u: "f32[3, 4]" = l_y_ + 1;  l_y_ = None
+
+            abs_1: "f32[3, 4]" = torch.abs(l_x_)
+            w: "f32[3, 4]" = abs_1 + u;  abs_1 = None
+
+            abs_2: "f32[3, 4]" = torch.abs(l_x_);  l_x_ = None
+            z: "f32[3, 4]" = abs_2 - u;  abs_2 = u = None
+            return (w, z)
+""",
+        )
+
+    @torch._dynamo.config.patch(enable_auto_rewrite_data_dependent_control_flow=True)
+    def test_auto_rewrite_side_effects_exception(self):
+        class TestMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const_attr = "foo"
+                self.tensor_attr = torch.randn(3, 4)
+                self.list_attr = [torch.randn(1, 2), torch.randn(3, 4)]
+
+        mod = TestMod()
+        x = torch.randn(3, 4)
+        closure = 5
+
+        def mutate_local_list(x):
+            li = []
+            if x.sum() > 0:
+                y = x.sin()
+                li.append(y)
+                return y
+            return x.cos()
+
+        def mutate_non_local_closure(x):
+            if x.sum() > 0:
+                nonlocal closure
+                y = x.sin()
+                closure = closure + 1
+                return y
+            return x.cos()
+
+        def mutate_global(x):
+            if x.sum() > 0:
+                global global_var
+                global_var += 1
+            return x.cos()
+
+        def set_module_constant_attr(x):
+            if x.sum() > 0:
+                mod.const_attr = "bar"
+            return x.sin()
+
+        def set_mutate_tensor_attr(x):
+            if x.sum() > 0:
+                mod.tensor_attr = torch.randn(3, 4)
+            return x.sin()
+
+        def mutate_mod_container_attr(x):
+            if x.sum() > 0:
+                mod.list_attr.append(torch.randn(3, 4))
+            return x.sin()
+
+        self._check_raise_uncaptured_exception(mutate_local_list, (x,))
+        self._check_raise_uncaptured_exception(mutate_non_local_closure, (x,))
+        self._check_raise_uncaptured_exception(mutate_global, (x,))
+        self._check_raise_uncaptured_exception(set_module_constant_attr, (x,))
+        self._check_raise_uncaptured_exception(set_mutate_tensor_attr, (x,))
+        self._check_raise_uncaptured_exception(mutate_mod_container_attr, (x,))
 
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):

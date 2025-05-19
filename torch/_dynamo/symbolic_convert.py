@@ -581,6 +581,74 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         "Use `torch.cond` to express dynamic control flow.",
     ]
 
+    def rewrite_control_flow(self, inst, value, extra_msg=""):
+        cg = PyCodegen(self)
+        # store the predicate on the stack
+        self.push(value)
+        pred_var = self.output.new_var("pred_tmp")
+        not_pred_var = self.output.new_var("not_pred_tmp")
+        cg.extend_output([cg.create_store(pred_var)])
+        cg.extend_output([cg.create_load(pred_var)])
+        cg.extend_output([cg.create_load_const(True)])
+        cg.extend_output([create_instruction("COMPARE_OP", argval="==")])
+        cg.extend_output([cg.create_store(not_pred_var)])
+        self.pop()
+
+        then_out_var = self.output.new_var("then_out_tmp")
+        else_out_var = self.output.new_var("else_out_tmp")
+
+        def create_if(pred_var, out_var, inst):
+            cg.add_push_null(
+                lambda: cg.load_import_from(
+                    "torch._higher_order_ops.auto_rewrite", "IF"
+                )
+            )
+            cg.extend_output([cg.create_load(pred_var)])
+            nargs, argnames, instructions = self.create_resume_fn(inst)
+            cg.extend_output(instructions)
+            cg.extend_output([cg.create_load(arg) for arg in argnames])
+            cg.extend_output(create_call_function(len(argnames) + 2, False))
+            cg.extend_output([cg.create_store(out_var)])
+
+        def create_merge(pred_var, then_var, else_var):
+            cg.add_push_null(
+                lambda: cg.load_import_from(
+                    "torch._higher_order_ops.auto_rewrite", "MERGE"
+                )
+            )
+            cg.extend_output([cg.create_load(pred_var)])
+            cg.extend_output([cg.create_load(then_var)])
+            cg.extend_output([cg.create_load(else_var)])
+            cg.extend_output(create_call_function(3, False))
+
+        create_if(pred_var, then_out_var, self.next_instruction)
+        create_if(not_pred_var, else_out_var, inst.target)
+        create_merge(pred_var, then_out_var, else_out_var)
+        cg.extend_output([create_instruction("RETURN_VALUE")])
+        new_instructions = cg.get_instructions()
+        self.instruction_pointer -= 1
+        self.instructions = (
+            self.instructions[: self.instruction_pointer] + new_instructions
+        )
+        self.push(value)
+        return
+
+    def data_dependent_jump(self, inst, value, extra_msg=""):
+        if torch._dynamo.config.enable_auto_rewrite_data_dependent_control_flow:
+            return rewrite_control_flow(self, inst, value, extra_msg)
+        if self.should_compile_partial_graph():
+            return jump_graph_break(self, inst, value, extra_msg)
+        else:
+            unimplemented_v2(
+                gb_type=_gb_type,
+                context=f"attempted to jump with {value}",
+                explanation=_explanation,
+                hints=_hints
+                + [
+                    "Set torch._dynamo.config.enable_auto_rewrite_data_dependent_control_flow=True"
+                ],
+            )
+
     def jump_graph_break(self, inst, value, extra_msg=""):
         log_graph_break(
             self.code_options,
@@ -714,10 +782,16 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 if push:
                     self.push(value)
                 self.jump(inst)
-        elif (
-            isinstance(value, (TensorVariable)) and self.should_compile_partial_graph()
-        ):
-            jump_graph_break(self, inst, value)
+        elif isinstance(value, (TensorVariable)):
+            from .source import is_constant_source
+
+            if value.source is not None and is_constant_source(value.source):
+                if truth_fn(value.get_real_value()):  # type: ignore[attr-defined]
+                    if push:
+                        self.push(value)
+                    self.jump(inst)
+            else:
+                data_dependent_jump(self, inst, value)
         elif isinstance(value, NNModuleVariable):
             # Equivalent of "self.nn_module is not None"
             mod = self.output.get_submodule(value.module_key)
@@ -798,20 +872,12 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                     self.push(value)
                 self.jump(inst)
         else:
-            from .source import is_constant_source
-
-            if value.source is not None and is_constant_source(value.source):
-                if truth_fn(value.get_real_value()):  # type: ignore[attr-defined]
-                    if push:
-                        self.push(value)
-                    self.jump(inst)
-            else:
-                unimplemented_v2(
-                    gb_type=_gb_type,
-                    context=f"attempted to jump with {value}",
-                    explanation=_explanation,
-                    hints=_hints,
-                )
+            unimplemented_v2(
+                gb_type=_gb_type,
+                context=f"attempted to jump with {value}",
+                explanation=_explanation,
+                hints=_hints,
+            )
 
     return inner
 
@@ -2151,7 +2217,11 @@ class InstructionTranslatorBase(
 
     @break_graph_if_unsupported(push=1)
     def CALL_FUNCTION(self, inst):
-        args = self.popn(inst.argval)
+        n = inst.argval
+        if not isinstance(n, int):
+            n = inst.arg
+        assert isinstance(n, int)
+        args = self.popn(n)
         fn = self.pop()
         self.call_function(fn, args, {})
 
@@ -2366,6 +2436,123 @@ class InstructionTranslatorBase(
             self.create_call_resume_at(self.next_instruction)
         )
 
+    def create_resume_fn(self, inst) -> tuple[int, tuple[str, ...], list[Instruction]]:
+        cg = PyCodegen(self)
+
+        reads = livevars_analysis(self.instructions, inst)
+        all_argnames = tuple(
+            k
+            for k in self.symbolic_locals.keys()
+            if k in reads and k not in self.cell_and_freevars()
+        )
+        # NOTE: do not use isinstance, since it realizes lazy VT's
+        argnames = tuple(
+            k
+            for k in all_argnames
+            if not type.__instancecheck__(NullVariable, self.symbolic_locals[k])
+        )
+        argnames_null = tuple(
+            k
+            for k in all_argnames
+            if type.__instancecheck__(NullVariable, self.symbolic_locals[k])
+        )
+        if sys.version_info < (3, 12):
+            assert len(argnames_null) == 0, "variables should not be NULL in < 3.12"
+
+        # Handle inactive context variables.
+        # The resume function assumes that context variables are the class, NOT the object.
+        # e.g. torch.set_grad_enabled(True) will be reconstructed as torch.set_grad_enabled
+        stack_ctx_vars = []
+        for i, var in enumerate(self.stack):
+            if type.__instancecheck__(ContextWrappingVariable, var):
+                ctx = cast(ContextWrappingVariable, var)
+                target_values = (
+                    () if ctx.target_values is None else tuple(ctx.target_values)
+                )
+                stack_ctx_vars.append((i, target_values))
+                # Replace the current stack var with the context class
+                ctx.reconstruct_type(cg)
+                cg.extend_output(create_swap(len(self.stack) - i + 1))
+                cg.append_output(create_instruction("POP_TOP"))
+
+        argnames_ctx_vars = []
+        for name in argnames:
+            if type.__instancecheck__(
+                ContextWrappingVariable, var := self.symbolic_locals[name]
+            ):
+                ctx = cast(ContextWrappingVariable, var)
+                target_values = (
+                    () if ctx.target_values is None else tuple(ctx.target_values)
+                )
+                argnames_ctx_vars.append((name, target_values))
+                # Replace the local with the context class
+                ctx.reconstruct_type(cg)
+                cg.append_output(create_instruction("STORE_FAST", argval=name))
+
+        # Python does not allow null to be an arg to a function, so
+        # we remove nulls from the stack and restore them in the
+        # prologue of the resume function
+
+        # sorted list of indices of nulls on the stack
+        null_idxes: list[int] = []
+        if sys.version_info >= (3, 11):
+            # find indices of NullVariables
+            for i, var in enumerate(self.stack):
+                if type.__instancecheck__(NullVariable, var):
+                    null_idxes.append(i)
+            # generate bytecode to pop the nulls
+            null_cnt = 0
+            for i, var in enumerate(reversed(self.stack)):
+                if type.__instancecheck__(NullVariable, var):
+                    for j in range(2, i + 2 - null_cnt):
+                        cg.append_output(create_instruction("SWAP", arg=j))
+                    cg.extend_output(cg.pop_null())
+                    null_cnt += 1
+
+        # we popped all nulls from the stack at runtime,
+        # so we should not count NullVariables
+        stack_len = len(self.stack) - len(null_idxes)
+        nargs = stack_len + len(argnames)
+
+        name = unique_id(f"__resume_at_{inst.offset}")
+
+        new_code: types.CodeType = ContinueExecutionCache.lookup(
+            self.f_code,
+            self.lineno,
+            inst.offset,
+            tuple(b.target.offset for b in self.block_stack),
+            stack_len,
+            argnames,
+            argnames_null,
+            tuple(b.resume_fn() for b in self.block_stack),
+            tuple(stack_ctx_vars),
+            tuple(argnames_ctx_vars),
+            tuple(null_idxes),
+        )
+
+        # Add original GraphModule context to the resume function to handle
+        # the case of a graph break while tracing a GraphModule
+        orig_graphmodule_maybe = code_context.get_context(self.f_code).get(
+            "orig_graphmodule", lambda: None
+        )()
+        if orig_graphmodule_maybe is not None:
+            code_context.get_context(new_code)["orig_graphmodule"] = weakref.ref(
+                orig_graphmodule_maybe
+            )
+
+        if new_code.co_freevars:
+            # expose code object for debugging purposes
+            self.output.install_global_unsafe(name, new_code)
+            cg.make_function_with_closure(name, new_code, True, stack_len)
+        else:
+            # This is safe: we pre-generate a unique name
+            self.output.install_global_unsafe(
+                name, types.FunctionType(new_code, self.f_globals, name)
+            )
+            cg.extend_output(cg.load_function_name(name, True, stack_len))
+
+        return nargs, argnames, cg.get_instructions()
+
     def DELETE_ATTR(self, inst):
         obj = self.pop()
         BuiltinVariable(delattr).call_function(
@@ -2394,7 +2581,9 @@ class InstructionTranslatorBase(
         obj.call_method(self, "__delitem__", [key], {})
 
     def BUILD_TUPLE(self, inst):
-        items = self.popn(inst.argval)
+        n = inst.argval if isinstance(inst.argval, int) else inst.arg
+        assert isinstance(n, int)
+        items = self.popn(n)
         self.push(TupleVariable(items))
 
     def BUILD_SLICE(self, inst):
@@ -3521,130 +3710,13 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.active_generic_context_managers
         )
 
-    def create_resume_fn(self, inst) -> tuple[int, tuple[str, ...], list[Instruction]]:
-        self.instruction_pointer = None
-
-        cg = PyCodegen(self)
-
-        reads = livevars_analysis(self.instructions, inst)
-        all_argnames = tuple(
-            k
-            for k in self.symbolic_locals.keys()
-            if k in reads and k not in self.cell_and_freevars()
-        )
-        # NOTE: do not use isinstance, since it realizes lazy VT's
-        argnames = tuple(
-            k
-            for k in all_argnames
-            if not type.__instancecheck__(NullVariable, self.symbolic_locals[k])
-        )
-        argnames_null = tuple(
-            k
-            for k in all_argnames
-            if type.__instancecheck__(NullVariable, self.symbolic_locals[k])
-        )
-        if sys.version_info < (3, 12):
-            assert len(argnames_null) == 0, "variables should not be NULL in < 3.12"
-
-        # Handle inactive context variables.
-        # The resume function assumes that context variables are the class, NOT the object.
-        # e.g. torch.set_grad_enabled(True) will be reconstructed as torch.set_grad_enabled
-        stack_ctx_vars = []
-        for i, var in enumerate(self.stack):
-            if type.__instancecheck__(ContextWrappingVariable, var):
-                ctx = cast(ContextWrappingVariable, var)
-                target_values = (
-                    () if ctx.target_values is None else tuple(ctx.target_values)
-                )
-                stack_ctx_vars.append((i, target_values))
-                # Replace the current stack var with the context class
-                ctx.reconstruct_type(cg)
-                cg.extend_output(create_swap(len(self.stack) - i + 1))
-                cg.append_output(create_instruction("POP_TOP"))
-
-        argnames_ctx_vars = []
-        for name in argnames:
-            if type.__instancecheck__(
-                ContextWrappingVariable, var := self.symbolic_locals[name]
-            ):
-                ctx = cast(ContextWrappingVariable, var)
-                target_values = (
-                    () if ctx.target_values is None else tuple(ctx.target_values)
-                )
-                argnames_ctx_vars.append((name, target_values))
-                # Replace the local with the context class
-                ctx.reconstruct_type(cg)
-                cg.append_output(create_instruction("STORE_FAST", argval=name))
-
-        # Python does not allow null to be an arg to a function, so
-        # we remove nulls from the stack and restore them in the
-        # prologue of the resume function
-
-        # sorted list of indices of nulls on the stack
-        null_idxes: list[int] = []
-        if sys.version_info >= (3, 11):
-            # find indices of NullVariables
-            for i, var in enumerate(self.stack):
-                if type.__instancecheck__(NullVariable, var):
-                    null_idxes.append(i)
-            # generate bytecode to pop the nulls
-            null_cnt = 0
-            for i, var in enumerate(reversed(self.stack)):
-                if type.__instancecheck__(NullVariable, var):
-                    for j in range(2, i + 2 - null_cnt):
-                        cg.append_output(create_instruction("SWAP", arg=j))
-                    cg.extend_output(cg.pop_null())
-                    null_cnt += 1
-
-        # we popped all nulls from the stack at runtime,
-        # so we should not count NullVariables
-        stack_len = len(self.stack) - len(null_idxes)
-        nargs = stack_len + len(argnames)
-
-        name = unique_id(f"__resume_at_{inst.offset}")
-
-        new_code: types.CodeType = ContinueExecutionCache.lookup(
-            self.f_code,
-            self.lineno,
-            inst.offset,
-            tuple(b.target.offset for b in self.block_stack),
-            stack_len,
-            argnames,
-            argnames_null,
-            tuple(b.resume_fn() for b in self.block_stack),
-            tuple(stack_ctx_vars),
-            tuple(argnames_ctx_vars),
-            tuple(null_idxes),
-        )
-
-        # Add original GraphModule context to the resume function to handle
-        # the case of a graph break while tracing a GraphModule
-        orig_graphmodule_maybe = code_context.get_context(self.f_code).get(
-            "orig_graphmodule", lambda: None
-        )()
-        if orig_graphmodule_maybe is not None:
-            code_context.get_context(new_code)["orig_graphmodule"] = weakref.ref(
-                orig_graphmodule_maybe
-            )
-
-        if new_code.co_freevars:
-            # expose code object for debugging purposes
-            self.output.install_global_unsafe(name, new_code)
-            cg.make_function_with_closure(name, new_code, True, stack_len)
-        else:
-            # This is safe: we pre-generate a unique name
-            self.output.install_global_unsafe(
-                name, types.FunctionType(new_code, self.f_globals, name)
-            )
-            cg.extend_output(cg.load_function_name(name, True, stack_len))
-
-        return nargs, argnames, cg.get_instructions()
-
     def create_call_resume_at(self, inst) -> list[Instruction]:
         if inst.opname == "RETURN_VALUE":
             return [create_instruction("RETURN_VALUE")]
         elif inst.opname == "RETURN_CONST":
             return [create_instruction("RETURN_CONST", argval=inst.argval)]
+
+        self.instruction_pointer = None
 
         nargs, argnames, instructions = self.create_resume_fn(inst)
         instructions.extend(
