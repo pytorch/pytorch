@@ -2751,6 +2751,18 @@ class Scheduler:
                 self.name_to_node[node.get_name()] = new_scheduler_node
                 self.name_to_fused_node[node.get_name()] = new_scheduler_node
 
+                # We need to reflect the mutation renames that were recorded in the original node
+                mutation_renames = {}
+                for dep in itertools.chain(node.read_writes.reads, node.unmet_dependencies):
+                    if real_name := self.mutation_real_name.get(dep.name, None):
+                        mutation_renames[real_name] = dep.name
+
+                def rename_deps(deps: OrderedSet[Dep]) -> OrderedSet[Dep]:
+                    return OrderedSet(dep.rename(mutation_renames) for dep in deps)
+
+                new_scheduler_node.unmet_dependencies = rename_deps(new_scheduler_node.unmet_dependencies)
+                new_scheduler_node.read_writes.reads = rename_deps(new_scheduler_node.read_writes.reads)
+
                 for new_out, old_out in zip(
                     new_scheduler_node.get_outputs(), node.get_outputs()
                 ):
