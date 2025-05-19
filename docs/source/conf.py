@@ -3460,7 +3460,6 @@ source_suffix = ".rst"
 # The master toctree document.
 master_doc = "index"
 
-
 # Use the linkcode extension to override [SOURCE] links to point
 # to the repo. Use the torch_version variable defined above to
 # determine link
@@ -3486,13 +3485,17 @@ def linkcode_resolve(domain, info):
     if RELEASE:
         version_parts = torch_version.split(
             "."
-        )  # For release versions, format as "vX.Y.Z" for correct path in repo
-        patch_version = (
-            version_parts[2].split("+")[0].split("a")[0]
-        )  # assuming a0 always comes after release version in versions.txt
-        version_path = f"v{version_parts[0]}.{version_parts[1]}.{patch_version}"
+        ) 
+        if "-rc" in torch_version:
+            # Use the actual git version for RC builds
+            version_path = torch_version
+        else:
+            # For stable releases, use vX.Y.Z format
+            patch_version = version_parts[2].split("+")[0].split("a")[0]
+            version_path = f"v{version_parts[0]}.{version_parts[1]}.{patch_version}"
     else:
         version_path = torch.version.git_version
+    print(f"Version path: {version_path}")
     fn = os.path.relpath(fn, start=os.path.dirname(torch.__file__))
     return (
         f"https://github.com/pytorch/pytorch/blob/{version_path}/torch/{fn}#L{lineno}"
