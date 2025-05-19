@@ -12,6 +12,7 @@ import torch._guards
 import torch.utils._pytree as pytree
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
+from torch._inductor.utils import get_gpu_type
 from torch.fx.experimental.symbolic_shapes import (
     _guard_sizes_oblivious,
     statically_known_true,
@@ -727,7 +728,7 @@ def bmm_to_mm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
         return torch.mm(a.squeeze(0), b.squeeze(0)).unsqueeze(0)
 
     if (
-        check_device(mat1.meta["val"], mat2.meta["val"], "cuda")
+        check_device(mat1.meta["val"], mat2.meta["val"], get_gpu_type())
         and statically_known_true(mat1.meta["val"].shape[0] == 1)
         and statically_known_true(mat2.meta["val"].shape[0] == 1)
     ):
