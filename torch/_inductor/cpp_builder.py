@@ -157,6 +157,51 @@ def get_cpp_compiler() -> str:
     return compiler
 
 
+def get_ld_and_objcopy(use_relative_path: bool) -> tuple[str, str]:
+    if _IS_WINDOWS:
+        raise RuntimeError("Windows is not supported yet.")
+    else:
+        if config.is_fbcode():
+            ld = build_paths.ld
+            objcopy = (
+                build_paths.objcopy_fallback
+                if use_relative_path
+                else build_paths.objcopy
+            )
+        else:
+            ld = "ld"
+            objcopy = "objcopy"
+    return ld, objcopy
+
+
+def convert_cubin_to_obj(
+    cubin_file: str,
+    kernel_name: str,
+    ld: str,
+    objcopy: str,
+) -> str:
+    obj_file = cubin_file + ".o"
+    # Convert .cubin to .o
+    cmd = f"{ld} -r -b binary -z noexecstack -o {obj_file} {cubin_file}"
+    subprocess.run(cmd.split(), capture_output=True, text=True)
+    os.remove(cubin_file)
+    # Rename .data to .rodata
+    cmd = f"{objcopy} --rename-section .data=.rodata,alloc,load,readonly,data,contents {obj_file}"
+    subprocess.run(cmd.split(), capture_output=True, text=True)
+    # By default objcopy will create *_start, *_size, *_end symbols using the full path
+    # Rename to use the unique kernel name
+    file_name = re.sub(r"[\W]", "_", cubin_file)
+    cmd = (
+        objcopy
+        + f" --redefine-sym _binary_{file_name}_start=__{kernel_name}_start "
+        + f"--redefine-sym _binary_{file_name}_size=__{kernel_name}_size "
+        + f"--redefine-sym _binary_{file_name}_end=__{kernel_name}_end "
+        + obj_file
+    )
+    subprocess.run(cmd.split(), capture_output=True, text=True)
+    return obj_file
+
+
 @functools.lru_cache(None)
 def _is_apple_clang(cpp_compiler: str) -> bool:
     version_string = subprocess.check_output([cpp_compiler, "--version"]).decode("utf8")
@@ -586,28 +631,24 @@ def _get_optimization_cflags(
         return cflags
 
 
-def _get_shared_cflag(compile_only: bool) -> list[str]:
+def _get_shared_cflag(do_link: bool) -> list[str]:
     if _IS_WINDOWS:
         """
         MSVC `/MD` using python `ucrtbase.dll` lib as runtime.
         https://learn.microsoft.com/en-us/cpp/c-runtime-library/crt-library-features?view=msvc-170
         """
-        SHARED_FLAG = ["DLL", "MD"]
-    else:
-        if compile_only:
-            return ["fPIC"]
-        if platform.system() == "Darwin" and "clang" in get_cpp_compiler():
-            # This causes undefined symbols to behave the same as linux
-            return ["shared", "fPIC", "undefined dynamic_lookup"]
-        else:
-            return ["shared", "fPIC"]
-
-    return SHARED_FLAG
+        return ["DLL", "MD"]
+    if not do_link:
+        return ["fPIC"]
+    if platform.system() == "Darwin" and "clang" in get_cpp_compiler():
+        # This causes undefined symbols to behave the same as linux
+        return ["shared", "fPIC", "undefined dynamic_lookup"]
+    return ["shared", "fPIC"]
 
 
 def get_cpp_options(
     cpp_compiler: str,
-    compile_only: bool,
+    do_link: bool,
     warning_all: bool = True,
     extra_flags: Sequence[str] = (),
     min_optimize: bool = False,
@@ -621,7 +662,7 @@ def get_cpp_options(
     passthrough_args: list[str] = []
 
     cflags = (
-        _get_shared_cflag(compile_only)
+        _get_shared_cflag(do_link)
         + _get_optimization_cflags(cpp_compiler, min_optimize)
         + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
@@ -681,7 +722,7 @@ class CppOptions(BuildOptionsBase):
             passthrough_args,
         ) = get_cpp_options(
             cpp_compiler=self._compiler,
-            compile_only=compile_only,
+            do_link=not (compile_only or precompiling or preprocessing),
             extra_flags=extra_flags,
             warning_all=warning_all,
             min_optimize=min_optimize,
@@ -1041,7 +1082,6 @@ def get_cpp_torch_options(
     vec_isa: VecISA,
     include_pytorch: bool,
     aot_mode: bool,
-    compile_only: bool,
     use_relative_path: bool,
     use_mmap_weights: bool,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
@@ -1175,7 +1215,6 @@ class CppTorchOptions(CppOptions):
             vec_isa=vec_isa,
             include_pytorch=include_pytorch,
             aot_mode=aot_mode,
-            compile_only=compile_only,
             use_relative_path=use_relative_path,
             use_mmap_weights=use_mmap_weights,
         )
@@ -1275,13 +1314,6 @@ def get_cpp_torch_device_options(
                 "Intel GPU driver is not properly installed, please follow the instruction "
                 "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
             )
-
-    if aot_mode:
-        if config.is_fbcode():
-            from torch._inductor.codecache import cpp_prefix_path
-
-            cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
-            include_dirs += cpp_prefix_include_dir
 
     if config.is_fbcode():
         include_dirs.append(build_paths.sdk_include)
@@ -1633,14 +1665,9 @@ class CppBuilder:
     def build_fbcode_re(
         self,
     ) -> None:
-        from torch._inductor.codecache import cpp_prefix_path
-
         with dynamo_timed("compile_file"):
             command = self.get_command_line().split()
             try:
-                # Need to copy our header into the same folder as the sourcecode.
-                header_path = cpp_prefix_path()
-                header_name = os.path.basename(header_path)
                 output_path = self._target_file
                 # When we build remotely, we need to make sure to carefully copy any files
                 # that are required during the compilation process into our build directly.
@@ -1648,7 +1675,6 @@ class CppBuilder:
                 torch_includes_path = os.path.join(_TORCH_PATH, "include")
                 with tempfile.TemporaryDirectory() as tmp_dir:
                     # Copy everything to tmp compilation folder
-                    shutil.copy(header_path, os.path.join(tmp_dir, header_name))
                     shutil.copy(_LINKER_SCRIPT, os.path.join(tmp_dir, "script.ld"))
                     for src in self._orig_source_paths:
                         shutil.copy(src, os.path.join(tmp_dir, os.path.basename(src)))

@@ -3359,6 +3359,24 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         res = compiled_module(input_tensor)
         self.assertEqual(ref, res)
 
+    def test_unhashable_nn_submodule(self):
+        class UnhashableModule(torch.nn.Module):
+            def __hash__(self):
+                raise TypeError("Unhashable module")
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.unhashable_attr = UnhashableModule()
+
+            def forward(self, x):
+                return x
+
+        mod = MyModule()
+        x = torch.randn(1)
+        compiled_mod = torch.compile(mod, backend="eager")
+        compiled_mod(x)
+
 
 devices = ["cuda", "hpu"]
 instantiate_device_type_tests(NNModuleTestsDevice, globals(), only_for=devices)

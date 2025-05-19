@@ -3,10 +3,12 @@ import itertools
 import logging
 import operator
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, Union
+from typing import Any, Callable, cast, Union
 
 import torch
+import torch.fx.node
 from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
@@ -176,7 +178,13 @@ _ALWAYS_MUTATING_SCATTER_OPS = OrderedSet(
 
 def scatter_always_uses_mutation(node: torch.fx.Node) -> bool:
     _, _, view_ops = node.args
-    return any(view.target in _ALWAYS_MUTATING_SCATTER_OPS for view in view_ops)  # type: ignore[union-attr]
+    view_ops = cast(Sequence[torch.fx.node.Argument], view_ops)
+    return any(
+        view.target in _ALWAYS_MUTATING_SCATTER_OPS
+        for view in view_ops
+        if isinstance(view, torch.fx.Node)
+        and isinstance(view.target, torch._ops.OpOverload)
+    )
 
 
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
@@ -267,6 +275,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
         assert len(node.args) >= 2
         inp, src = node.args[:2]
 
+        assert isinstance(node.target, torch._ops.OpOverload)
         scatter_view_op = ViewOp(
             _SCATTER_OP_TO_VIEW[node.target],
             args=node.args[2:],
@@ -331,7 +340,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
             handle_view_scatter(node)
 
 
-inplaceable_ops = {
+inplaceable_ops: dict[Callable[..., Any], InplaceableOp] = {
     aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
     aten._unsafe_index_put.default: InplaceableOp(inductor_prims._unsafe_index_put_, 0),
     _generalized_scatter: InplaceableOp(
@@ -343,7 +352,7 @@ inplaceable_ops = {
 
 try:
     c10d_functional = torch.ops._c10d_functional
-    inplaceable_collective_ops = {
+    inplaceable_collective_ops: dict[Callable[..., Any], InplaceableOp] = {
         c10d_functional.all_reduce.default: InplaceableOp(
             c10d_functional.all_reduce_.default, 0
         ),
