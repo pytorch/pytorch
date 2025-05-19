@@ -1799,12 +1799,12 @@ def native_rms_norm_backward(
     if output_mask[1] and weight_cast is not None:
         x_norm_cast = input_cast * rstd
         d_weight_full_shape = grad_out_cast * x_norm_cast
-        
+
         if len(outer_dim_indices) > 0:
             d_weight_val = torch.sum(d_weight_full_shape, dim=outer_dim_indices, keepdim=False)
         else:
             d_weight_val = d_weight_full_shape
-        
+
         d_weight = d_weight_val
 
     return (
