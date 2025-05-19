@@ -3320,6 +3320,7 @@ class TestCase(expecttest.TestCase):
     def setUp(self):
         check_if_enable(self)
         set_rng_seed(SEED)
+        assert 1 == 2
 
         # Save global check sparse tensor invariants state that can be
         # restored from tearDown:
