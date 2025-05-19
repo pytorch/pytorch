@@ -1112,6 +1112,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("MAJOR_VERSION", "hipLibraryMajorVersion"),
     ("MINOR_VERSION", "hipLibraryMinorVersion"),
     ("PATCH_LEVEL", "hipLibraryPatchVersion"),
+    ("cudaLaunchKernel", "hipLaunchKernel"),
     ("cudaMemAllocationHandleType", "hipMemAllocationHandleType"),
     ("cudaMemAllocationType", "hipMemAllocationType"),
     ("cudaMemLocationType", "hipMemLocationType"),
