@@ -1426,14 +1426,22 @@ class FakeTensorMode(TorchDispatchMode):
         Lookup a cache entry for the given arguments. If none exists, dispatch
         and cache the result (if the result is eligible for caching).
         """
+        state = None
+        key = None
         try:
             state = _CacheKeyState(self.shape_env)
             key = self._cache_key(state, func, args, kwargs)
         except _BypassDispatchCache as e:
             # We couldn't create the cache key at all
             FakeTensorMode.cache_bypasses[e.reason] += 1
+
+        if key is None:
+            # Do this dispatch outside the above except handler so if it
+            # generates its own exception there won't be a __context__ caused by
+            # the caching mechanism.
             return self._dispatch_impl(func, types, args, kwargs)
 
+        assert state is not None
         if state.cache_on_shape_env():
             assert state.shape_env is not None
             cache = state.shape_env.fake_tensor_cache
@@ -1512,6 +1520,9 @@ class FakeTensorMode(TorchDispatchMode):
             # Disallowing dynamic shapes can introduce a DynamicOutputShapeException
             # where it wasn't seen on a previous instance of the same op.
             self.shape_env.settings if self.shape_env else None,
+            # And include the epoch - this is really more of a Shape env which
+            # lives on the FakeTensorMode.
+            self.epoch,
         ]
         # Collect the id_hashed objects to attach a weakref finalize later
         id_hashed_objects: list[object] = []
