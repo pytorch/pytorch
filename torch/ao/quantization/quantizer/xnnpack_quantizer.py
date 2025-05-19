@@ -278,7 +278,7 @@ class XNNPACKQuantizer(Quantizer):
 
     def __init__(self) -> None:
         super().__init__()
-        warnings.warn(f"{self.__class__.__name__} is deprecated!")
+        warnings.warn(f"{self.__class__.__name__} is deprecated! Please use xnnpack quantizer in ExecuTorch (https://github.com/pytorch/executorch/tree/main/backends/xnnpack/quantizer) instead", DeprecationWarning)
         self.global_config: Optional[QuantizationConfig] = None
         self.operator_type_config: dict[
             torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
