@@ -2147,8 +2147,8 @@ class AlgorithmSelectorCache(PersistentCache):
                     counters["inductor"]["select_algorithm_num_precompiles"] += 1
                     log.info(
                         "Precompiling benchmark choice %s took %.02fs",
-                        futures[future],
-                        elapsed_times[future],
+                        futures.get(future),
+                        elapsed_times.get(future),
                     )
 
             executor.shutdown(wait=True)
@@ -2258,11 +2258,6 @@ class AlgorithmSelectorCache(PersistentCache):
                 log.warning("Not yet implemented: %s", e)
                 timing = float("inf")
             except RuntimeError as e:
-                if not isinstance(choice, CUDATemplateCaller):
-                    log.error(
-                        "CUDA runtime error during autotuning: \n%s. \nIgnoring this choice.",
-                        e,
-                    )
                 msg = str(e)
                 if "invalid argument" in msg:
                     msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
