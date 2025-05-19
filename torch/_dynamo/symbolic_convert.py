@@ -783,7 +783,15 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                     self.push(value)
                 self.jump(inst)
         elif isinstance(value, (TensorVariable)):
-            data_dependent_jump(self, inst, value)
+            from .source import is_constant_source
+
+            if value.source is not None and is_constant_source(value.source):
+                if truth_fn(value.get_real_value()):  # type: ignore[attr-defined]
+                    if push:
+                        self.push(value)
+                    self.jump(inst)
+            else:
+                data_dependent_jump(self, inst, value)
         elif isinstance(value, NNModuleVariable):
             # Equivalent of "self.nn_module is not None"
             mod = self.output.get_submodule(value.module_key)
@@ -864,20 +872,12 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                     self.push(value)
                 self.jump(inst)
         else:
-            from .source import is_constant_source
-
-            if value.source is not None and is_constant_source(value.source):
-                if truth_fn(value.get_real_value()):  # type: ignore[attr-defined]
-                    if push:
-                        self.push(value)
-                    self.jump(inst)
-            else:
-                unimplemented_v2(
-                    gb_type=_gb_type,
-                    context=f"attempted to jump with {value}",
-                    explanation=_explanation,
-                    hints=_hints,
-                )
+            unimplemented_v2(
+                gb_type=_gb_type,
+                context=f"attempted to jump with {value}",
+                explanation=_explanation,
+                hints=_hints,
+            )
 
     return inner
 

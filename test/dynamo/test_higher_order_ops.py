@@ -7131,11 +7131,9 @@ class GraphModule(torch.nn.Module):
     class then_graph_1(torch.nn.Module):
         def forward(self, l_x_: "f32[3, 4]", l_y_: "f32[3, 4]"):
             abs_1: "f32[3, 4]" = torch.abs(l_x_)
-            add: "f32[3, 4]" = abs_1 + l_y_;  abs_1 = None
-            child: "f32[3, 4]" = add + 1;  add = None
+            child: "f32[3, 4]" = abs_1 + l_y_;  abs_1 = None
             abs_2: "f32[3, 4]" = torch.abs(l_x_);  l_x_ = None
-            sub: "f32[3, 4]" = abs_2 - l_y_;  abs_2 = l_y_ = None
-            child_1: "f32[3, 4]" = sub + 1;  sub = None
+            child_1: "f32[3, 4]" = abs_2 - l_y_;  abs_2 = l_y_ = None
             return (child, child_1)
 """,
         )
