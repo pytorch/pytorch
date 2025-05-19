@@ -6506,9 +6506,7 @@ class ShapeEnv:
                 # dependencies for substitutions, so ban it entirely.
                 def trivial_solve(lhs: sympy.Expr, rhs: sympy.Expr) -> bool:
                     if isinstance(lhs, sympy.Symbol):
-                        if free_unbacked_symbols(lhs) or free_unbacked_symbols(
-                            rhs
-                        ):
+                        if free_unbacked_symbols(lhs) or free_unbacked_symbols(rhs):
                             return False
                         if symbol_is_type(lhs, SymT.FLOAT):
                             return True
@@ -6528,7 +6526,7 @@ class ShapeEnv:
                     ):
                         new_var = self._find(r[1])
                         ok = len(free_unbacked_symbols(new_var)) == 0
-                        if ok and not free_unbacked_symbols(free[0]) :
+                        if ok and not free_unbacked_symbols(free[0]):
                             self._set_replacement(free[0], new_var, "solve")
             except NotImplementedError:
                 pass
