@@ -276,7 +276,9 @@ def stage_backward(
     stage_output,
     output_grads,
     input_values,
-    outputs_with_grads_idxs: Optional[list[int]] = None,  # deprecated, not used
+    weights: Iterator[Parameter],
+    last_backward: Optional[bool] = None,
+    outputs_with_grads_idxs: Optional[list[int]] = None,  # deprecated, not used,
 ) -> tuple[Optional[torch.Tensor], ...]:
     """
     This is a helper function to:
@@ -351,10 +353,38 @@ def stage_backward(
             stage_output, output_grads, extract_tensors_with_grads
         )
 
-        torch.autograd.backward(
-            stage_output_tensors,
-            grad_tensors=output_grad_tensors,  # type: ignore[arg-type]
-        )
+        # We call `torch.autograd.backward` for the last microbatch which will trigger the backward hooks for any
+        # subwrapped modules (e.g. DDP, FSDP) and also trigger .backward() for the rest of the graph.
+        # Otherwise we just call `torch.autograd.grad` for the rest of the microbatches which will accumulate the
+        # gradients.
+        if last_backward:
+            torch.autograd.backward(
+                stage_output_tensors,
+                grad_tensors=output_grad_tensors,  # type: ignore[arg-type]
+            )
+        else:
+            # Combine inputs and weights
+            inputs_and_weights_with_grad = [
+                val
+                for val in input_values
+                if isinstance(val, torch.Tensor) and val.requires_grad
+            ] + [w for w in weights if w.requires_grad]
+
+            # Compute gradients for both inputs and weights
+            grad_inputs_and_weights = torch.autograd.grad(
+                stage_output_tensors,
+                inputs_and_weights_with_grad,
+                grad_outputs=output_grad_tensors,  # type: ignore[arg-type]
+            )
+
+            # Update the gradients for inputs and weights
+            for item, grad in zip(
+                inputs_and_weights_with_grad, grad_inputs_and_weights
+            ):
+                if item.grad is None:
+                    item.grad = grad
+                else:
+                    item.grad += grad
 
         # Extract gradients wrt the input values
         grad_inputs: list[Optional[torch.Tensor]] = []
@@ -363,20 +393,6 @@ def stage_backward(
                 grad_inputs.append(val.grad)
             else:
                 grad_inputs.append(None)
-
-        # Alternative impl: `torch.autograd.grad`.
-        # Note that `torch.autograd.grad` will not accumulate gradients into the
-        # model's parameters.
-        """
-        inputs_with_grad = []
-        for val in input_values:
-            if isinstance(val, torch.Tensor) and val.requires_grad:
-                inputs_with_grad.append(val)
-
-        grad_inputs = torch.autograd.grad(
-            stage_output_tensors, inputs_with_grad, output_grad_tensors,  # type: ignore[arg-type]
-        )
-        """
 
     except Exception as e:
         exc_msg = f"""
