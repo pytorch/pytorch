@@ -99,17 +99,11 @@ install_centos() {
   # Need EPEL for many packages we depend on.
   # See http://fedoraproject.org/wiki/EPEL
   # extras repo is not there for CentOS 9 and epel-release is already part of repo list
-  if [[ $OS_VERSION == 9 ]]; then
-      yum install -y epel-release
-      ALLOW_ERASE="--allowerasing"
-  else
-      yum --enablerepo=extras install -y epel-release
-      ALLOW_ERASE=""
-  fi
+  yum install -y epel-release
 
   ccache_deps="asciidoc docbook-dtds docbook-style-xsl libxslt"
   numpy_deps="gcc-gfortran"
-  yum install -y $ALLOW_ERASE \
+  yum install -y --allowerasing \
     $ccache_deps \
     $numpy_deps \
     autoconf \
@@ -131,16 +125,9 @@ install_centos() {
     wget \
     vim \
     unzip \
-    gdb
-  if [[ $OS_VERSION == 9 ]]
-  then
-	  dnf --enablerepo=crb -y install libsndfile-devel
-	  yum install -y procps
-  else
-	  yum install -y \
-            opencv-devel \
-	    libsndfile-devel
-  fi
+    gdb  
+  dnf --enablerepo=crb -y install libsndfile-devel
+  yum install -y procps
   # Cleanup
   yum clean all
   rm -rf /var/cache/yum
