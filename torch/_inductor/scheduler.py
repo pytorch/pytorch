@@ -502,76 +502,76 @@ class BaseSchedulerNode:
 
             return True
 
-        # for buf in self.get_outputs():
-        #     buf_node = buf.node
-        #     assert buf_node is not None
-        #     if (
-        #         not buf_node.should_allocate()
-        #         or buf_node.get_inputs_that_alias_output()
-        #         or buf_node.get_mutation_names()
-        #         or buf.get_name() in V.graph.removed_buffers
-        #     ):
-        #         continue
+        for buf in self.get_outputs():
+            buf_node = buf.node
+            assert buf_node is not None
+            if (
+                not buf_node.should_allocate()
+                or buf_node.get_inputs_that_alias_output()
+                or buf_node.get_mutation_names()
+                or buf.get_name() in V.graph.removed_buffers
+            ):
+                continue
 
-        #     for read in self.read_writes.reads:
-        #         input_buf: Optional[Union[SchedulerBuffer, SchedulerDonatedBuffer]]
-        #         if read.name in self.scheduler.name_to_donated_buffer:
-        #             input_buf = self.scheduler.name_to_donated_buffer[read.name]
-        #         else:
-        #             input_buf = self.scheduler.name_to_buf.get(read.name)
+            for read in self.read_writes.reads:
+                input_buf: Optional[Union[SchedulerBuffer, SchedulerDonatedBuffer]]
+                if read.name in self.scheduler.name_to_donated_buffer:
+                    input_buf = self.scheduler.name_to_donated_buffer[read.name]
+                else:
+                    input_buf = self.scheduler.name_to_buf.get(read.name)
 
-        #         if (
-        #             input_buf
-        #             and V.graph.wrapper_code.can_reuse(input_buf, self)
-        #             and not isinstance(input_buf.defining_op, NopKernelSchedulerNode)
-        #         ):
-        #             assert input_buf.users is not None
-        #             remaining_uses = [
-        #                 x
-        #                 for x in input_buf.users
-        #                 if x.node.get_name() not in inconsequential_nodes
-        #             ]
-        #             if (
-        #                 len(remaining_uses) == 1
-        #                 and remaining_uses[0].can_inplace
-        #                 and remaining_uses[0].node is self
-        #                 and input_buf.node is not None
-        #                 and not isinstance(
-        #                     input_buf.node.get_output_spec(),
-        #                     (
-        #                         ir.NoneLayout,
-        #                         ir.MultiOutputLayout,
-        #                         ir.MutationLayoutSHOULDREMOVE,
-        #                     ),
-        #                 )
-        #                 and not (
-        #                     input_buf.defining_op
-        #                     and isinstance(
-        #                         input_buf.defining_op.node,
-        #                         (ir.FallbackKernel, ir.MultiOutput),
-        #                     )
-        #                     and len(input_buf.node.get_inputs_that_alias_output()) > 0
-        #                 )
-        #                 and can_match_buffer_size(input_buf.node, buf.node)
-        #                 and single_index_in_fused_node(input_buf)
-        #             ):
-        #                 input_buf_name = input_buf.get_name()
-        #                 input_buf_name = self.scheduler.mutation_real_name.get(input_buf_name, input_buf_name)
-        #                 # if there isn't a triton kernel, then we don't need to call triton-specific things.
-        #                 # but TODO this might be a convenient place to signal to the Collective kernels to inplace
-        #                 # (and, can we make "kernel" less generic of a name?)
-        #                 V.kernel.args.make_inplace(input_buf_name, buf.get_name())
-        #                 # mutations not tracked in cpp kernels
-        #                 if isinstance(
-        #                     V.kernel, torch._inductor.codegen.simd.SIMDKernel
-        #                 ):
-        #                     V.kernel.mutations.add(input_buf_name)
-        #                     V.kernel.mutations.add(buf.get_name())
+                if (
+                    input_buf
+                    and V.graph.wrapper_code.can_reuse(input_buf, self)
+                    and not isinstance(input_buf.defining_op, NopKernelSchedulerNode)
+                ):
+                    assert input_buf.users is not None
+                    remaining_uses = [
+                        x
+                        for x in input_buf.users
+                        if x.node.get_name() not in inconsequential_nodes
+                    ]
+                    if (
+                        len(remaining_uses) == 1
+                        and remaining_uses[0].can_inplace
+                        and remaining_uses[0].node is self
+                        and input_buf.node is not None
+                        and not isinstance(
+                            input_buf.node.get_output_spec(),
+                            (
+                                ir.NoneLayout,
+                                ir.MultiOutputLayout,
+                                ir.MutationLayoutSHOULDREMOVE,
+                            ),
+                        )
+                        and not (
+                            input_buf.defining_op
+                            and isinstance(
+                                input_buf.defining_op.node,
+                                (ir.FallbackKernel, ir.MultiOutput),
+                            )
+                            and len(input_buf.node.get_inputs_that_alias_output()) > 0
+                        )
+                        and can_match_buffer_size(input_buf.node, buf.node)
+                        and single_index_in_fused_node(input_buf)
+                    ):
+                        input_buf_name = input_buf.get_name()
+                        input_buf_name = self.scheduler.mutation_real_name.get(input_buf_name, input_buf_name)
+                        # if there isn't a triton kernel, then we don't need to call triton-specific things.
+                        # but TODO this might be a convenient place to signal to the Collective kernels to inplace
+                        # (and, can we make "kernel" less generic of a name?)
+                        V.kernel.args.make_inplace(input_buf_name, buf.get_name())
+                        # mutations not tracked in cpp kernels
+                        if isinstance(
+                            V.kernel, torch._inductor.codegen.simd.SIMDKernel
+                        ):
+                            V.kernel.mutations.add(input_buf_name)
+                            V.kernel.mutations.add(buf.get_name())
 
-        #                 V.kernel.inplace_update_buffers[buf.get_name()] = (
-        #                     input_buf_name
-        #                 )
-        #                 break
+                        V.kernel.inplace_update_buffers[buf.get_name()] = (
+                            input_buf_name
+                        )
+                        break
 
     def codegen_originating_info(
         self, buffer: IndentedBuffer, only_once: bool = True
