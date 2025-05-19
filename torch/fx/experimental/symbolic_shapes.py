@@ -157,6 +157,7 @@ __all__ = [
     "StatefulSymbolicContext",
     "SubclassSymbolicContext",
     "SymIntSymbolicContext",
+    "TrackedFake",
     "statically_known_true",
     "guard_size_oblivious",
     "check_consistent",
@@ -2004,6 +2005,23 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
         super().__post_init__()
         if self.inner_contexts is None:
             self.inner_contexts = {}
+
+
+# Tracks the sources of all fake tensors we wrap in Dynamo.
+# Used by shape guard computation.
+@dataclass
+class TrackedFake:
+    fake: Union[FakeTensor, SymInt]
+    source: Source
+    symbolic_context: Optional[SymbolicContext]
+
+    def __hash__(self) -> int:
+        return hash((self.fake, self.source.name()))
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, TrackedFake):
+            return self.fake is other.fake and self.source.name() == other.source.name()
+        return False
 
 
 def is_symbolic(
@@ -6746,9 +6764,10 @@ class ShapeEnv:
             if (lineno := instr.starts_line) is not None:
                 last_lineno = max(last_lineno, lineno)
             if isinstance(instr.argval, str) and instr.argval in frame.f_locals:
-                frame_locals[instr.argval] = pytree.tree_map(
-                    go, frame.f_locals[instr.argval]  # type: ignore[index]
-                )
+                flat_locals = pytree.tree_flatten(frame.f_locals[instr.argval])[0]
+                frame_locals[instr.argval] = [
+                    go(flat_local) for flat_local in flat_locals
+                ]
 
         # store LOC
         locs = co_lines[frame.f_lineno - offset : last_lineno + 1 - offset]
