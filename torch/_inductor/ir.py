@@ -4772,11 +4772,13 @@ class CUDATemplateBuffer(TemplateBuffer):
         make_kernel_render,
         workspace_size: int,
         template: CUDATemplate,
+        supports_epilogue_fusion: bool,
     ) -> None:
         super().__init__(layout, inputs, make_kernel_render)
         # Global memory (in bytes) needed for this template.
         self.workspace_size = workspace_size
         self.template = template
+        self.supports_epilogue_fusion = supports_epilogue_fusion
 
     def get_workspace_size(self):  # type: ignore[no-untyped-def]
         return self.workspace_size if self.workspace_size is not None else 0
@@ -5772,17 +5774,6 @@ class ExternKernel(InputsKernel):
             ]
         return kwargs
 
-    def get_op_name(self) -> str:
-        if self.fx_node is not None:
-            target = self.fx_node.target
-            op_namespace = getattr(target, "__module__", "unknown_namespace")
-            op_namespace = op_namespace.replace("._ops.", ".ops.")
-            op_namespace = op_namespace.rsplit(".", 1)[0]
-            op_name = f"{op_namespace}.{target}"
-        else:
-            op_name = "unknown_op"
-        return op_name
-
     def codegen_size_asserts(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         if config.size_asserts and not V.graph.cpp_wrapper:
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
@@ -5790,24 +5781,19 @@ class ExternKernel(InputsKernel):
                 return
             size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
             stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
-            op_name = self.get_op_name()
+
             wrapper.writeline(
-                f"assert_size_stride({self.get_name()}, {size}, {stride}, {op_name!r})"
+                f"assert_size_stride({self.get_name()}, {size}, {stride})"
             )
 
     def codegen_alignment_asserts(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         if config.alignment_asserts and not V.graph.cpp_wrapper:
             name = self.get_name()
             aligned = name not in V.graph.unaligned_buffers
-            op_name = self.get_op_name()
             if aligned:
-                wrapper.writeline(
-                    f"assert_alignment({name}, {GPU_ALIGN_BYTES}, {op_name!r})"
-                )
+                wrapper.writeline(f"assert_alignment({name}, {GPU_ALIGN_BYTES})")
             else:
-                wrapper.writeline(
-                    f"# buffer {name} (op: {op_name}) is assumed to be not aligned"
-                )
+                wrapper.writeline(f"# buffer {name} is assumed to be not aligned")
 
     def get_group_stride(self):  # type: ignore[no-untyped-def]
         """
@@ -7912,7 +7898,7 @@ class WhileLoop(ExternKernel):
         # Handling input mutations
         mutated_idxs = check_input_alias_and_mutation(
             body_fn.graph.module, fake_all_inputs
-        )[0]
+        )[3]
         mutated_idx_set = OrderedSet(mutated_idxs)
         mutated_inputs = [all_inputs[idx] for idx in mutated_idx_set]
         real_outputs = {
