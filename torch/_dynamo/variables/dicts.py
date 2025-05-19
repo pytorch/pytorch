@@ -565,8 +565,9 @@ class ConstDictVariable(VariableTracker):
             return ConstantVariable.create(None)
         elif name == "__or__":
             assert len(args) == 1
-            # TODO(guilherme): self and args[0] should have the same type(?)
-            if not isinstance(args[0], ConstDictVariable):
+            if not isinstance(
+                args[0], (ConstDictVariable, variables.UserDefinedObjectVariable)
+            ):
                 msg = (
                     f"unsupported operand type(s) for |: '{self.python_type().__name__}'"
                     f"and '{args[0].python_type().__name__}'"
@@ -861,14 +862,14 @@ class SetVariable(ConstDictVariable):
             return variables.BuiltinVariable(op.get(name)).call_function(
                 tx, [self, other], {}
             )
-        # elif name == "__iand__":
-        #     return self.call_method(tx, "intersection_update", args, kwargs)
-        # elif name == "__ior__":
-        #     return self.call_method(tx, "update", args, kwargs)
-        # elif name == "__ixor__":
-        #     return self.call_method(tx, "symmetric_difference_update", args, kwargs)
-        # elif name == "__isub__":
-        #     return self.call_method(tx, "difference_udpate", args, kwargs)
+        elif name == "__iand__":
+            return self.call_method(tx, "intersection_update", args, kwargs)
+        elif name == "__ior__":
+            return self.call_method(tx, "update", args, kwargs)
+        elif name == "__ixor__":
+            return self.call_method(tx, "symmetric_difference_update", args, kwargs)
+        elif name == "__isub__":
+            return self.call_method(tx, "difference_update", args, kwargs)
         elif name == "__eq__":
             r = self.call_method(tx, "symmetric_difference", args, kwargs)
             return ConstantVariable.create(len(r.set_items) == 0)
@@ -959,7 +960,7 @@ class FrozensetVariable(SetVariable):
             "symmetric_difference",
         ):
             r = super().call_method(tx, name, args, kwargs)
-            return FrozensetVariable(r.items, source=self.source)
+            return FrozensetVariable(r.items)
         return super().call_method(tx, name, args, kwargs)
 
 

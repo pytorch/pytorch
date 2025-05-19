@@ -1629,13 +1629,22 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
             return self._set_vt.unpack_var_sequence(tx)
         raise NotImplementedError
 
-    def __getattribute__(self, name):
-        if name == "set_items":
-            return self._set_vt.set_items
-        return super().__getattribute__(name)
+    @property
+    def set_items(self):
+        return self._set_vt.set_items
+
+    @property
+    def items(self):
+        return self._set_vt.items
 
     def is_underlying_vt_modified(self, side_effects):
         return side_effects.is_modified(self._set_vt)
+
+    def install_dict_keys_match_guard(self):
+        return self._set_vt.install_dict_keys_match_guard()
+
+    def install_dict_contains_guard(self):
+        return self._set_vt.install_dict_contains_guard()
 
 
 class UserDefinedListVariable(UserDefinedObjectVariable):
