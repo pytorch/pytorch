@@ -1324,6 +1324,8 @@ def get_cpp_torch_device_options(
                     # Only add link args, when compile_only is false.
                     passthrough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
 
+    libraries += config.aot_inductor.custom_op_libs
+
     return (
         definitions,
         include_dirs,
