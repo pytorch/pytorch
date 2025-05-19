@@ -675,7 +675,11 @@ def tuned_mm(mat1, mat2, *, layout=None):
                     **persistent_mm_options(mat1, mat2),
                 )
         # Only do split-k optimization if K is much larger than m, n and m, n are small
-        if use_decompose_k_choice(m, n, k):
+        if (
+            use_decompose_k_choice(m, n, k)
+            and len(mat1.get_free_symbol_uses(True) | mat2.get_free_symbol_uses(True))
+            == 0
+        ):
             from torch._dispatch.python import enable_python_dispatcher
 
             from ..decomposition import select_decomp_table

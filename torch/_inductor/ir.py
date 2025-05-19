@@ -491,26 +491,20 @@ def try_match_insignificant_strides(
 
 
 def add_symbolic_shapes_for_inputs_to_subgraph(
-    inputs: list[Any], subgraph: GraphLowering
+    inputs: list[Buffer], subgraph: GraphLowering
 ) -> list[Expr]:
     sym_vars: OrderedSet[Expr] = OrderedSet()
     for inp in inputs:
-        if isinstance(inp, torch.Tensor):
-            for size in inp.size():
-                if isinstance(size, SymTypes):
-                    sym_vars |= size.node.expr.free_symbols
-            for stride in inp.stride():
-                if isinstance(stride, SymTypes):
-                    sym_vars |= stride.node.expr.free_symbols
+        sym_vars |= inp.get_free_symbol_uses(unbacked_only=False)
 
     sym_inputs = []
     for sym_var in sym_vars:
         assert sym_var in V.graph.graph_inputs.values()
 
-        for inp in V.graph.graph_inputs:
-            if V.graph.graph_inputs[inp] == sym_var:
-                subgraph.graph_inputs[inp] = sym_var
-                subgraph.graph_input_names.append(inp)
+        for graph_inp in V.graph.graph_inputs:
+            if V.graph.graph_inputs[graph_inp] == sym_var:
+                subgraph.graph_inputs[graph_inp] = sym_var
+                subgraph.graph_input_names.append(graph_inp)
                 sym_inputs.append(sym_var)
 
     return sym_inputs
@@ -6119,7 +6113,7 @@ class SubgraphBuffer(ExternKernel):
         )
 
         sym_inputs = add_symbolic_shapes_for_inputs_to_subgraph(
-            self.example_inputs, self.subgraph
+            self.inputs, self.subgraph
         )
         self.sym_inputs = [sym_var.name for sym_var in sym_inputs]
 
