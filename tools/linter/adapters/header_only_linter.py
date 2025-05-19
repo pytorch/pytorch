@@ -8,7 +8,6 @@ without linking libtorch.
 import argparse
 import json
 import re
-from collections.abc import Iterable
 from enum import Enum
 from pathlib import Path
 from typing import NamedTuple, Union
@@ -43,7 +42,9 @@ CPP_TEST_GLOBS = [
 REPO_ROOT = Path(__file__).parents[3]
 
 
-def find_matched_symbols(symbols_regex: str, test_globs: list[str]) -> set[str]:
+def find_matched_symbols(
+    symbols_regex: re.Pattern[str], test_globs: list[str] = CPP_TEST_GLOBS
+) -> set[str]:
     """
     Goes through all lines not starting with // in the cpp files and
     accumulates a list of matches with the symbols_regex. Note that
@@ -66,22 +67,9 @@ def find_matched_symbols(symbols_regex: str, test_globs: list[str]) -> set[str]:
     return matched_symbols
 
 
-def build_symbols_regex(symbols: Iterable[str]) -> str:
-    """
-    Given a list of string symbols containing [A-Za-z], [0-9] and _,
-    build a regex that will look like:
-        stringC|string_B|StringA
-    if the symbols were [stringC, string_B, StringA].
-    """
-    regex = r""
-    for s in symbols:
-        regex += rf"{s}|"
-
-    # drop the last |
-    return regex[0 : len(regex) - 1]
-
-
-def check_file(filename: str, test_globs: list[str]) -> list[LintMessage]:
+def check_file(
+    filename: str, test_globs: list[str] = CPP_TEST_GLOBS
+) -> list[LintMessage]:
     """
     Goes through the header_only_apis.txt file and verifies that all symbols
     within the file can be found tested in an appropriately independent .cpp
@@ -97,7 +85,7 @@ def check_file(filename: str, test_globs: list[str]) -> list[LintMessage]:
         for idx, line in enumerate(f):
             # commented out lines should be skipped
             symbol = line.strip()
-            if symbol.startswith("#") or symbol == "":
+            if not symbol or symbol[0] == "#":
                 continue
 
             # symbols can in fact be duplicated and come from different headers.
@@ -108,15 +96,15 @@ def check_file(filename: str, test_globs: list[str]) -> list[LintMessage]:
     # find_matched_symbols. For example, we want Float8_e5m2fnuz to match
     # before Float8_e5m2. Otherwise, both Float8_e5m2fnuz and Float8_e5m2 will
     # match Float8_e5m2
-    symbols_regex = build_symbols_regex(sorted(symbols.keys(), reverse=True))
+    symbols_regex = re.compile("|".join(sorted(symbols.keys(), reverse=True)))
     matched_symbols = find_matched_symbols(symbols_regex, test_globs)
 
-    for s in symbols.keys():
+    for s, lineno in symbols.items():
         if s not in matched_symbols:
             lint_messages.append(
                 LintMessage(
                     path=filename,
-                    line=symbols[s],
+                    line=lineno,
                     char=None,
                     code=LINTER_CODE,
                     severity=LintSeverity.ERROR,

@@ -1,7 +1,7 @@
+import re
 import unittest
 
 from tools.linter.adapters.header_only_linter import (
-    build_symbols_regex,
     check_file,
     CPP_TEST_GLOBS,
     find_matched_symbols,
@@ -18,7 +18,7 @@ class TestHeaderOnlyLinter(unittest.TestCase):
     """
 
     def test_find_matched_symbols(self) -> None:
-        sample_regex = r"symDef|symD|symC|bbb|a"
+        sample_regex = re.compile("symDef|symD|symC|bbb|a")
         test_globs = ["tools/test/header_only_linter_testdata/*.cpp"]
 
         expected_matches = {"symDef", "symC", "a"}
@@ -27,21 +27,13 @@ class TestHeaderOnlyLinter(unittest.TestCase):
         )
 
     def test_find_matched_symbols_empty_regex(self) -> None:
-        sample_regex = r""
+        sample_regex = re.compile("")
         test_globs = ["tools/test/header_only_linter_testdata/*.cpp"]
 
         expected_matches: set[str] = set()
         self.assertEqual(
             find_matched_symbols(sample_regex, test_globs), expected_matches
         )
-
-    def test_build_symbols_regex_no_symbols(self) -> None:
-        self.assertEqual(build_symbols_regex([]), r"")
-
-    def test_build_symbols_regex(self) -> None:
-        sample_symbols = ["symDef", "symC", "a"]
-        expected_regex = r"symDef|symC|a"
-        self.assertEqual(build_symbols_regex(sample_symbols), expected_regex)
 
     def test_check_file_no_issues(self) -> None:
         sample_txt = str(REPO_ROOT / "tools/test/header_only_linter_testdata/good.txt")
