@@ -227,8 +227,7 @@ struct TensorDescriptorListParams {
     }
 
     std::vector<TensorDescriptor> descriptors(Tensor x) const {
-        auto is_input_packed = !batch_sizes.empty();
-        if (is_input_packed) {
+        if (is_input_packed()) {
             return rnn_descriptor_sequence(x, batch_sizes);
         } else {
             return rnn_descriptor(x[0], seq_length);
