@@ -125,7 +125,8 @@ install_centos() {
     wget \
     vim \
     unzip \
-    gdb  
+    gdb
+
   dnf --enablerepo=crb -y install libsndfile-devel
   yum install -y procps
   # Cleanup
