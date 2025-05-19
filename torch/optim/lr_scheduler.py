@@ -464,7 +464,7 @@ class MultiplicativeLR(LRScheduler):
         """Compute the learning rate of each parameter group."""
         _warn_get_lr_called_within_step(self)
 
-        if self.last_epoch > 0:
+        if not self._is_initial:
             return [
                 group["lr"] * lmbda(self.last_epoch)
                 for lmbda, group in zip(self.lr_lambdas, self.optimizer.param_groups)
@@ -729,7 +729,7 @@ class LinearLR(LRScheduler):
                 group["lr"] * self.start_factor for group in self.optimizer.param_groups
             ]
 
-        if self.last_epoch > self.total_iters:
+        if self._is_initial or self.last_epoch > self.total_iters:
             return [group["lr"] for group in self.optimizer.param_groups]
 
         return [
@@ -995,7 +995,7 @@ class PolynomialLR(LRScheduler):
         """Compute the learning rate."""
         _warn_get_lr_called_within_step(self)
 
-        if self.last_epoch == 0 or self.last_epoch > self.total_iters:
+        if self._is_initial or self.last_epoch > self.total_iters:
             return [group["lr"] for group in self.optimizer.param_groups]
 
         decay_factor = (
@@ -1081,7 +1081,7 @@ class CosineAnnealingLR(LRScheduler):
         """Retrieve the learning rate of each parameter group."""
         _warn_get_lr_called_within_step(self)
 
-        if self.last_epoch == 0:
+        if self._is_initial:
             return [group["lr"] for group in self.optimizer.param_groups]
         elif self._step_count == 1 and self.last_epoch > 0:
             return [
