@@ -235,7 +235,11 @@ def parse_args() -> argparse.Namespace:
 
 def can_reuse_whl(args: argparse.Namespace) -> bool:
     if is_main_branch() or (
-        args.github_ref and args.github_ref.startswith("refs/heads/release")
+        args.github_ref
+        and any(
+            args.github_ref.startswith(x)
+            for x in ["refs/heads/release", "refs/tags/v", "refs/heads/main"]
+        )
     ):
         print("On main branch or release branch, rebuild whl")
         return False
