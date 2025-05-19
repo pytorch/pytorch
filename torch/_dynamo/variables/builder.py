@@ -49,6 +49,7 @@ from torch._dynamo.utils import (
     get_metrics_context,
     is_int_specialization_case,
     is_torch_sym,
+    set_feature_use,
 )
 from torch._guards import TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
@@ -2174,6 +2175,7 @@ class VariableBuilder:
                 config.automatic_dynamic_shapes
                 and frame_state_entry.scalar is auto_dynamic
             ):
+                set_feature_use("dynamo.automatic_dynamic_shapes", True)
                 dynamic_dim = get_automatic_dynamic_shapes_mark_as()
             elif (
                 isinstance(base_source, LocalSource)
@@ -2186,6 +2188,8 @@ class VariableBuilder:
             else:  # assume_static_by_default
                 # TODO: dynamic_dim = DimDynamic.STATIC should work but
                 # for some reason it doesn't
+                if frame_state_entry.scalar is auto_dynamic:
+                    set_feature_use("dynamo.automatic_dynamic_shapes", False)
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value)
 
@@ -3157,11 +3161,14 @@ def _automatic_dynamic(
             elif marked_strict_unbacked:
                 constraint_size = RelaxedUnspecConstraint(warn_only=False)
             elif not marked_static and automatic_dynamic:
+                set_feature_use("dynamo.automatic_dynamic_shapes", True)
                 if automatic_dynamic_size:
                     constraint_size = RelaxedUnspecConstraint(warn_only=True)
                 if automatic_dynamic_stride:
                     constraint_stride = RelaxedUnspecConstraint(warn_only=True)
             else:
+                if not marked_static and not config.automatic_dynamic_shapes:
+                    set_feature_use("dynamo.automatic_dynamic_shapes", False)
                 constraint_size = None
                 constraint_stride = None
         else:

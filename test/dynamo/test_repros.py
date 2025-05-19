@@ -5853,6 +5853,40 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         mod.eval()
         self.assertFalse(opt_mod.training)
 
+    def test_optimized_module_patched_init(self):
+        # A regression test for #138157, and the pattern acame from deepspeed.
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x.mul(5.0)
+
+        def patch_init(init):
+            @functools.wraps(init)
+            def wrapper(module, *args, **kwargs):
+                if not hasattr(module, "_ds_child_entered"):
+                    # child's __init__ was called, since parents all see the same object they can now skip post_init
+                    module._ds_child_entered = True
+                init(module, *args, **kwargs)
+
+            return wrapper
+
+        def patch_init_for_class(cls):
+            if "__init__" in cls.__dict__:
+                cls._old_init = cls.__init__
+                cls.__init__ = patch_init(cls.__init__)
+
+        patch_init_for_class(MyModule)
+        mod = MyModule()
+        opt_mod = torch.compile(mod)
+
+        x = torch.rand(10)
+        ref = mod(x)
+        res = opt_mod(x)
+
+        self.assertEqual(ref, res)
+
     def test_os_fspath(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
