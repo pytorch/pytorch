@@ -141,6 +141,35 @@ CUfunction loadKernel(
   return func;
 }
 
+inline void launchKernelEx(
+    CUfunction func,
+    uint32_t gridX,
+    uint32_t gridY,
+    uint32_t gridZ,
+    uint32_t numWarps,
+    uint32_t sharedMemBytes,
+    void** args,
+    cudaStream_t stream
+) {
+  const CUlaunchConfig config;
+  config.gridDimX = gridX;
+  config.gridDimY = gridY;
+  config.gridDimZ = gridZ;
+  config.blockDimX = 32 * numWarps;
+  config.blockDimY = 1;
+  config.blockDimZ = 1;
+  config.sharedMemBytes = sharedMemBytes;
+  config.hStream = stream;
+  config.attrs = nullptr;
+  config.numAttrs = 0; 
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernelEx(
+    &config, 
+    func, 
+    args, 
+    nullptr /* void** extra */
+  ));
+}
+
 inline void launchKernel(
     CUfunction func,
     uint32_t gridX,

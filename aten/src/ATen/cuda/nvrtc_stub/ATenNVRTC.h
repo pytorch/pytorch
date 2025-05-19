@@ -50,6 +50,7 @@ namespace at::cuda {
   _(cuOccupancyMaxActiveBlocksPerMultiprocessor) \
   _(cuGetErrorString)                            \
   _(cuLaunchKernel)                              \
+  _(cuLaunchKernelEx)                              \
   _(cuLaunchCooperativeKernel)                   \
   _(cuCtxGetCurrent)                             \
   _(cuCtxSetCurrent)                             \
