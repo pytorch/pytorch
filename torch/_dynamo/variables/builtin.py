@@ -57,7 +57,7 @@ from ..utils import (
     str_methods,
     tensortype_to_dtype,
 )
-from .base import ValueMutationNew, VariableTracker
+from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import EventVariable, StreamVariable
 from .dicts import (
@@ -901,6 +901,12 @@ class BuiltinVariable(VariableTracker):
                             *[x.as_python_constant() for x in args],
                         )
                     except Exception as exc:
+                        raise_observed_exception(
+                            type(exc),
+                            tx,
+                            args=list(map(ConstantVariable.create, exc.args)),
+                        )
+                    except AsPythonConstantNotImplementedError as exc:
                         unimplemented_v2(
                             gb_type="constant fold exception",
                             context=f"attempted to run function {fn} with arguments {args}",
@@ -922,13 +928,19 @@ class BuiltinVariable(VariableTracker):
                                     k: v.as_python_constant() for k, v in kwargs.items()
                                 },
                             )
-                        except Exception as exc:
+                        except AsPythonConstantNotImplementedError as exc:
                             unimplemented_v2(
                                 gb_type="constant fold exception",
-                                context=f"attempted to run function {fn} with arguments {args} {kwargs}",
+                                context=f"attempted to run function {fn} with arguments {args}",
                                 explanation="Encountered exception when attempting to constant fold.",
                                 hints=[*graph_break_hints.DYNAMO_BUG],
                                 from_exc=exc,
+                            )
+                        except Exception as exc:
+                            raise_observed_exception(
+                                type(exc),
+                                tx,
+                                args=list(map(ConstantVariable.create, exc.args)),
                             )
                         return VariableTracker.build(tx, res)
 
@@ -1675,7 +1687,16 @@ class BuiltinVariable(VariableTracker):
         assert not kwargs
         if not args:
             return SetVariable([], mutation_type=ValueMutationNew())
-        assert len(args) == 1
+        if len(args) != 1:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    ConstantVariable.create(
+                        f"set() takes 1 positional argument but {len(args)} were given"
+                    )
+                ],
+            )
         arg = args[0]
         if isinstance(arg, variables.SetVariable):
             return arg.clone(mutation_type=ValueMutationNew())
@@ -1691,35 +1712,36 @@ class BuiltinVariable(VariableTracker):
                 if isinstance(out, SetVariable):
                     return out
                 return BuiltinVariable(set).call_set(tx, out)
-        unimplemented_v2(
-            gb_type="failed to construct builtin set()",
-            context=f"set(): {args} {kwargs}",
-            explanation="Unable to call builtin set() with provided arguments.",
-            hints=[
-                *graph_break_hints.USER_ERROR,
-                *graph_break_hints.SUPPORTABLE,
-            ],
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[ConstantVariable.create("failed to construct builtin set()")],
         )
 
     def call_frozenset(self, tx: "InstructionTranslator", *args, **kwargs):
         assert not kwargs
         if not args:
             return FrozensetVariable([])
-        assert len(args) == 1
+        if len(args) != 1:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    ConstantVariable.create(
+                        f"frozenset() takes 1 positional argument but {len(args)} were given"
+                    )
+                ],
+            )
         arg = args[0]
         if isinstance(arg, variables.FrozensetVariable):
             return FrozensetVariable([x.vt for x in arg.set_items])
         elif arg.has_unpack_var_sequence(tx):
             items = arg.unpack_var_sequence(tx)
             return FrozensetVariable(items)
-        unimplemented_v2(
-            gb_type="failed to construct builtin frozenset()",
-            context=f"frozenset(): {args} {kwargs}",
-            explanation="Unable to call builtin frozenset() with provided arguments.",
-            hints=[
-                *graph_break_hints.USER_ERROR,
-                *graph_break_hints.SUPPORTABLE,
-            ],
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[ConstantVariable.create("failed to construct builtin frozenset()")],
         )
 
     def call_zip(self, tx: "InstructionTranslator", *args, **kwargs):

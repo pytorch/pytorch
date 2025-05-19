@@ -235,7 +235,9 @@ class _AsyncCheckpointProcess:
                     f"Submitted checkpoint save request for checkpoint_id={obj.checkpoint_request_id}"  # noqa: G004
                 )
         except BaseException as e:
-            logger.exception("Checkpoint background process encountered an exception")
+            logger.error(
+                f"Checkpoint background process encountered an exception: {e}"  # noqa: G004
+            )
             parent_conn.send(e)
             raise
         finally:
