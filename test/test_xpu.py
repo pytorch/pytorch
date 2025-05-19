@@ -737,12 +737,19 @@ class TestXPUAPISanity(TestCase):
         config = torch.__config__.show()
         value = re.search(r"USE_XPU=([^,]+)", config)
         self.assertIsNotNone(value)
-        self.assertEqual(value.group(1) in ["ON", "1"], torch.xpu._is_compiled())
-        value = re.search(r"USE_XCCL=([^,]+)", config)
-        self.assertIsNotNone(value)
-        self.assertEqual(
-            value.group(1) in ["ON", "1"], torch.distributed.is_xccl_available()
-        )
+        if torch.xpu._is_compiled():
+            self.assertTrue(value.group(1) in ["ON", "1"])
+            value = re.search(r"USE_XCCL=([^,]+)", config)
+            if torch.distributed.is_xccl_available():
+                self.assertTrue(value.group(1) in ["ON", "1"])
+            else:
+                self.assertTrue(value.group(1) in ["OFF", "0"])
+        else:
+            self.assertTrue(value.group(1) in ["OFF", "0"])
+            self.assertFalse(torch.distributed.is_xccl_available())
+            value = re.search(r"USE_XCCL=([^,]+)", config)
+            self.assertIsNotNone(value)
+            self.assertTrue(value.group(1) in ["OFF", "0"])
 
 
 if __name__ == "__main__":
