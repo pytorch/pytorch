@@ -2185,7 +2185,9 @@ class TestAutotuneCache(TestCase):
 
     @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
-    @unittest.skipIf(TEST_WITH_ROCM, "Requires static cuda launcher, which does not support ROCM")
+    @unittest.skipIf(
+        TEST_WITH_ROCM, "Requires static cuda launcher, which does not support ROCM"
+    )
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"autotune_local_cache": False})
