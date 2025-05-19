@@ -77,11 +77,11 @@ class FailChoiceCaller(ChoiceCaller):
         raise RuntimeError("This choice caller will always throw")
 
 
-@instantiate_parametrized_tests
 @unittest.mock.patch(
     "torch._inductor.select_algorithm.TritonTemplate.test_cache", new=True
 )
 @config.patch(enable_caching_generated_triton_templates=True)
+@instantiate_parametrized_tests
 class TestMaxAutotune(TestCase):
     @parametrize("dynamic", (False, True))
     def test_max_autotune_mm_plus_mm_zero_size_input(self, dynamic):
