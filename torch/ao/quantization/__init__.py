@@ -32,7 +32,6 @@ from .stubs import *  # noqa: F403
 
 import warnings
 
-print("printing warning")
 warnings.warn(
     "torch.ao.quantization is deprecated. Plan is to: \n"
     "1. Remove eager mode quantization (torch.ao.quantization.quantize, torch.ao.quantization.quantize_dynamic), please migrate to use torchao eager mode quantize_ API instead \n"
