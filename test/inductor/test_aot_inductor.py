@@ -156,6 +156,18 @@ class AOTInductorTestsTemplate:
                 model, example_inputs, "AOTInductorModelRunMinimalArrayrefInterface(", 1
             )
 
+    def test_cos(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                y = torch.cos(x)
+                return y
+
+        example_inputs = (torch.randn(16, 10, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
     def test_small_constant(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:

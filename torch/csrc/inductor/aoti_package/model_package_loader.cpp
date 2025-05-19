@@ -10,7 +10,6 @@
 #include <miniz.h>
 #include <nlohmann/json.hpp>
 #include <fstream>
-#include <iostream>
 
 #ifndef _WIN32
 #include <dirent.h>
@@ -66,7 +65,6 @@ const std::string k_separator = "/";
 } // namespace
 
 namespace torch::inductor {
-
 namespace {
 const nlohmann::json& load_json_file(const std::string& json_path) {
   if (!file_exists(json_path)) {
@@ -263,26 +261,26 @@ bool recursive_rmdir(const std::string& path) {
 }
 
 std::string compile_so(
-    const std::string& cpp_filename,
-    std::vector<std::string>& obj_filenames) {
+    const std::string& cpp_path,
+    std::vector<std::string>& obj_paths) {
   // Compile the cpp file into a .so
 
-  size_t lastindex = cpp_filename.find_last_of('.');
-  std::string filename = cpp_filename.substr(0, lastindex);
+  size_t lastindex = cpp_path.find_last_of('.');
+  std::string filename = cpp_path.substr(0, lastindex);
 
   std::string compile_flags_path = filename + "_compile_flags.json";
   const nlohmann::json compile_flags = load_json_file(compile_flags_path);
 
   auto [compile_cmd, output_o] =
-      get_cpp_compile_command(filename, {cpp_filename}, compile_flags);
+      get_cpp_compile_command(filename, {cpp_path}, compile_flags);
 
   std::string linker_flags_path =
-      cpp_filename.substr(0, lastindex) + "_linker_flags.json";
+      cpp_path.substr(0, lastindex) + "_linker_flags.json";
   const nlohmann::json linker_flags = load_json_file(linker_flags_path);
 
-  obj_filenames.push_back(output_o);
+  obj_paths.push_back(output_o);
   auto [link_cmd, output_so] =
-      get_cpp_compile_command(filename, obj_filenames, linker_flags);
+      get_cpp_compile_command(filename, obj_paths, linker_flags);
 
   // Run the commands to generate a .so file
   int status = system(compile_cmd.c_str());
@@ -326,11 +324,11 @@ std::string compile_so(
 }
 } // namespace
 
-void AOTIModelPackageLoader::load_metadata(const std::string& cpp_filename) {
+void AOTIModelPackageLoader::load_metadata(const std::string& cpp_path) {
   // Parse metadata json file (if it exists) into the metadata_ map
-  size_t lastindex = cpp_filename.find_last_of('.');
+  size_t lastindex = cpp_path.find_last_of('.');
   std::string metadata_json_path =
-      cpp_filename.substr(0, lastindex) + "_metadata.json";
+      cpp_path.substr(0, lastindex) + "_metadata.json";
 
   const nlohmann::json metadata_json_obj = load_json_file(metadata_json_path);
 
@@ -368,9 +366,9 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   }
 
   temp_dir_ = create_temp_dir();
-  std::string so_filename;
-  std::string cpp_filename;
-  std::vector<std::string> obj_filenames;
+  std::string so_path;
+  std::string cpp_path;
+  std::vector<std::string> obj_paths;
   std::string found_filenames; // Saving for bookkeeping
   std::string model_directory =
       "data" + k_separator + "aotinductor" + k_separator + model_name;
@@ -441,11 +439,11 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
       if (extension_idx != std::string::npos) {
         std::string filename_extension = output_path_str.substr(extension_idx);
         if (filename_extension == ".cpp") {
-          cpp_filename = output_path_str;
+          cpp_path = output_path_str;
         } else if (filename_extension == ".o") {
-          obj_filenames.push_back(output_path_str);
+          obj_paths.push_back(output_path_str);
         } else if (filename_extension == ".so") {
-          so_filename = output_path_str;
+          so_path = output_path_str;
         }
       }
     }
@@ -459,19 +457,19 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         mz_zip_get_error_string(mz_zip_get_last_error(&zip_archive)));
   }
 
-  if (cpp_filename.empty() && so_filename.empty()) {
+  if (cpp_path.empty() && so_path.empty()) {
     throw std::runtime_error(
         "No AOTInductor generate cpp file or so file found in zip archive. Loaded the following:\n" +
         found_filenames);
   }
 
   // Compile the .so
-  std::string so_path = !so_filename.empty()
-      ? so_filename
-      : compile_so(cpp_filename, obj_filenames);
+  if (so_path.empty()) {
+    so_path = compile_so(cpp_path, obj_paths);
+  }
 
   // Load metadata which can be queried by user
-  load_metadata(cpp_filename);
+  load_metadata(cpp_path);
 
   // Construct the runner depending on the device information
   std::string device_key = metadata_["AOTI_DEVICE_KEY"];
@@ -515,7 +513,11 @@ std::vector<at::Tensor> AOTIModelPackageLoader::run(
 std::vector<at::Tensor> AOTIModelPackageLoader::boxed_run(
     std::vector<at::Tensor>&& inputs,
     void* stream_handle) {
-  return runner_->boxed_run(std::move(inputs), stream_handle);
+  if (metadata_["STANDALONE"] == "1") {
+    return runner_->slim_tensor_run(std::move(inputs), stream_handle);
+  } else {
+    return runner_->boxed_run(std::move(inputs), stream_handle);
+  }
 }
 
 std::unordered_map<std::string, std::string> AOTIModelPackageLoader::

@@ -33,6 +33,12 @@ class TORCH_API AOTIModelContainerRunner {
       std::vector<at::Tensor>&& inputs,
       void* stream_handle = nullptr);
 
+  // inputs and outputs are flattened, used for calling from
+  // AtenTensor to SlimTensor
+  virtual std::vector<at::Tensor> slim_tensor_run(
+      std::vector<at::Tensor>&& inputs,
+      void* stream_handle = nullptr);
+
   std::unordered_map<std::string, std::string> getConstantNamesToOriginalFQNs()
       const;
   std::unordered_map<std::string, int32_t> getConstantNamesToDtypes() const;
@@ -70,6 +76,11 @@ class TORCH_API AOTIModelContainerRunner {
       std::vector<AtenTensorHandle>& input_handles,
       void* stream_handle);
 
+  std::vector<at::Tensor> slim_tensor_run_impl(
+      std::vector<at::Tensor>&& inputs,
+      void* stream_handle,
+      const std::function<void(void*)>& deleter);
+
   std::unique_ptr<at::DynamicLibrary> model_so_;
   decltype(&AOTInductorModelContainerCreateWithDevice) create_func_{nullptr};
   decltype(&AOTInductorModelContainerDelete) delete_func_{nullptr};
@@ -100,9 +111,9 @@ class TORCH_API AOTIModelContainerRunner {
       free_inactive_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerGetCallSpec) get_call_spec_func_{nullptr};
 
-  AOTInductorModelContainerHandle container_handle_ = nullptr;
+  AOTInductorModelContainerHandle container_handle_{nullptr};
 
-  AOTIProxyExecutorHandle proxy_executor_handle_;
+  AOTIProxyExecutorHandle proxy_executor_handle_{nullptr};
 
  private:
   std::unique_ptr<torch::aot_inductor::ProxyExecutor> proxy_executor_;

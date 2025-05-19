@@ -795,5 +795,5 @@ DEFINE_DTYPE_SPECIALIZATION(int32_t, int32)
 DEFINE_DTYPE_SPECIALIZATION(int64_t, int64)
 DEFINE_DTYPE_SPECIALIZATION(bool, bool)
 
-#endif
+#endif // __cplusplus
 #endif // AOTI_TORCH_SHIM

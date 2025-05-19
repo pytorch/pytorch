@@ -124,8 +124,13 @@ class CppTemplate(KernelTemplate):
         res = IndentedBuffer()
         res.writeline("#include <torch/csrc/inductor/cpp_prefix.h>")
         # TODO: add c10::ForcedUnroll test to test_aoti_abi_check
-        res.splice("""#include <c10/util/Unroll.h>""")
-        res.splice("""#include <torch/csrc/inductor/aoti_torch/c/shim.h>""")
+        res.splice("""
+            #include <c10/util/Unroll.h>
+            #ifdef AOTI_STANDALONE
+            #include <torch/csrc/inductor/aoti_standalone/c/shim.h>
+            #else
+            #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+            #endif // AOTI_STANDALONE""")
         enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
             "linux",
             "win32",
