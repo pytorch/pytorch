@@ -30,16 +30,6 @@ from torch.testing._internal.common_utils import (
 from torch.utils.checkpoint import checkpoint_sequential
 
 
-class TestXpuConfig(TestCase):
-    def test_xpu_record(self):
-        config = torch.__config__.show()
-        assert f"USE_XPU={int(torch.xpu._is_compiled())}" in config
-
-    def test_xccl_record(self):
-        config = torch.__config__.show()
-        assert f"USE_XCCL={int(torch.distributed.is_xccl_available())}" in config
-
-
 TEST_MULTIXPU = torch.xpu.device_count() > 1
 
 cpu_device = torch.device("cpu")
@@ -741,6 +731,11 @@ class TestXPUAPISanity(TestCase):
     def test_get_arch_list(self):
         if not torch.xpu._is_compiled():
             self.assertEqual(len(torch.xpu.get_arch_list()), 0)
+
+    def test_torch_config(self):
+        config = torch.__config__.show()
+        self.assertIn(f"USE_XPU={int(torch.xpu._is_compiled())}", config)
+        self.assertIn(f"USE_XCCL={int(torch.distributed.is_xccl_available())}", config)
 
 
 if __name__ == "__main__":
