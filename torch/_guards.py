@@ -37,6 +37,8 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
+    from types import CodeType
+
     import sympy
 
 
@@ -865,6 +867,8 @@ class TracingContext:
         # see note: [Returning Fake Tensors on First AOT Autograd Call]
         self.fakify_first_call = False
         self.hop_dispatch_set_cache = HopDispatchSetCache()
+        # list of code objects for inlined functions
+        self.traced_code: list[CodeType] = []
 
     def clear(self):
         # Look at the note in output_graph.py in function `save_global_state`
