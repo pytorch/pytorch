@@ -232,8 +232,6 @@ void setInput(O& opts, at::Tensor& tensor, std::vector<int64_t>& counts) {
 
 template <typename T, typename O>
 void setOutputs(O& opts, std::vector<at::Tensor>& tensors) {
-  at::Tensor t = tensors[0][7205];
-  float val = t[0].item<float>();
   opts.setOutputs(getDataPointers<T>(tensors), tensors[0].numel());
 }
 
