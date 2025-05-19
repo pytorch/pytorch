@@ -1160,7 +1160,7 @@ void MetalKernelFunction::dispatch(uint64_t length, std::optional<uint64_t> grou
 }
 
 void MetalKernelFunction::dispatch(c10::ArrayRef<uint64_t> length, c10::OptionalArrayRef<uint64_t> group_size) {
-  TORCH_CHECK(length.size() > 0 && length.size() < 4, "Dispatch dimentions must be less than 3 and non-empty");
+  TORCH_CHECK(!length.empty() && length.size() < 4, "Dispatch dimentions must be less than 3 and non-empty");
   TORCH_CHECK(!group_size.has_value() || group_size->size() == length.size(),
               "size and group_size must have same number of dimentions");
   const auto max_tg_size = getMaxThreadsPerThreadgroup();
