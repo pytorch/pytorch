@@ -615,6 +615,8 @@ class _PipelineStageBase(ABC):
                         bwd_kwargs["stage_output"],
                         bwd_kwargs["output_grads"],
                         bwd_kwargs["input_values"],
+                        self.submod.parameters(),
+                        last_backward,
                     ),
                     None,
                 )

@@ -40,9 +40,53 @@ class StageBackwardTests(TestCase):
             stage_output=loss,
             output_grads=None,
             input_values=(x,),
+            weights=mod.parameters(),
+            last_backward=True,
         )
 
         # Run reference
+        ref_out = ref_mod(ref_x)
+        ref_loss = loss_fn(ref_out, ref_target)
+        ref_loss.backward()
+
+        print(f"{grad_inputs[0]=}, {ref_x.grad=}")
+        torch.testing.assert_close(grad_inputs[0], ref_x.grad)
+
+        # Every rank checks gradients
+        for name, p in mod.named_parameters():
+            ref_p = ref_mod.get_parameter(name)
+            try:
+                torch.testing.assert_close(p.grad, ref_p.grad)
+            except AssertionError:
+                print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
+                raise
+
+    def test_stage_non_last_backward(self, device):
+        # MLP as a stage module
+        mod = MLPModule(d_hid).to(device)
+        x = torch.randn(batch_size, d_hid, device=device)
+        # As in a pipeline stage, the inputs to this stage requires gradients
+        x.requires_grad_(True)
+        target = torch.randn(batch_size, d_hid, device=device)
+        loss_fn = torch.nn.MSELoss(reduction="sum")
+
+        # Make a copy
+        ref_mod = copy.deepcopy(mod).to(device)
+        ref_x = x.detach().requires_grad_(x.requires_grad).to(device)
+        ref_target = target.detach().to(device)
+
+        # Forward and backward in stage manner
+        out = mod(x)
+        loss = loss_fn(out, target)
+        grad_inputs = stage_backward(
+            stage_output=loss,
+            output_grads=None,
+            input_values=(x,),
+            weights=mod.parameters(),
+            last_backward=False,
+        )
+
+        # Run reference backward twice
         ref_out = ref_mod(ref_x)
         ref_loss = loss_fn(ref_out, ref_target)
         ref_loss.backward()
