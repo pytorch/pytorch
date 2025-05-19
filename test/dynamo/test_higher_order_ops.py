@@ -3166,10 +3166,13 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
                 if isinstance(out, tuple):
                     return (out[0] + k,)
                 return out + k
+
             return wrapper
 
         def my_hop_fn(fn, *args, k=1, **kwargs):
-            return wrap_generic(fn, *args, wrapper_fn=functools.partial(my_hop_fn_impl, k=k), **kwargs)
+            return wrap_generic(
+                fn, *args, wrapper_fn=functools.partial(my_hop_fn_impl, k=k), **kwargs
+            )
 
         def my_hop_fn_2_impl(fn, *args, g=None):
             def wrapper(*args, **kwargs):
@@ -3178,10 +3181,13 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
                 if isinstance(out, tuple):
                     return (g(out[0]),)
                 return g(out)
+
             return wrapper
 
         def my_hop_fn_2(fn, *args, g=None, **kwargs):
-            return wrap_generic(fn, *args, wrapper_fn=functools.partial(my_hop_fn_2_impl, g=g), **kwargs)
+            return wrap_generic(
+                fn, *args, wrapper_fn=functools.partial(my_hop_fn_2_impl, g=g), **kwargs
+            )
 
         def gn(x, h=1):
             return x.sin() + h
