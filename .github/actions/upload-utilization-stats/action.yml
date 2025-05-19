@@ -66,5 +66,5 @@ runs:
           --workflow-run-attempt "${{inputs.workflow_attempt}}" \
           --job-id "${{inputs.job_id}}" \
           --job-name "${{inputs.job_name}}" \
-          --local-path "${{inputs.local_path}}"
+          --local-path "${{inputs.local_path}}" \
           --artifact-prefix "${{inputs.artifact_prefix}}"
