@@ -897,6 +897,7 @@ class MLP(nn.Module):
             self.buffer = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # torch.distributed.breakpoint()
         z = self.in_proj(x)
         z = F.relu(z)
         z = self.out_proj(z)
@@ -938,9 +939,11 @@ class MLPStack(nn.Sequential):
             "1.in_proj": ColwiseParallel(use_local_output=False),
             "1.out_proj": RowwiseParallel(use_local_output=False),
             "2.in_proj": ColwiseParallel(use_local_output=False),
-            "2.out_proj": RowwiseParallel(output_layouts=Shard(1))
-            if self.with_seq_parallel
-            else RowwiseParallel(),
+            "2.out_proj": (
+                RowwiseParallel(output_layouts=Shard(1))
+                if self.with_seq_parallel
+                else RowwiseParallel()
+            ),
         }
         if self.with_seq_parallel:
             parallelize_plan["3"] = SequenceParallel(sequence_dim=1)
@@ -973,7 +976,7 @@ class DoubleLinear(nn.Module):
     ) -> Union[tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
         if self.use_second_linear:
             return self.relu(self.lin1(x)), self.relu(self.lin2(x))
-        return self.relu(self.lin1(x))
+        return self.lin2(self.lin1(x))
 
 
 # NOTE: For these patch methods, if we want safety under multi-threading (e.g.

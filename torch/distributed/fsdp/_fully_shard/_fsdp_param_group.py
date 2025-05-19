@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Any, Callable, cast, NamedTuple, Optional
+from typing import Any, Callable, cast, NamedTuple, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -18,6 +18,7 @@ from ._fsdp_collectives import (
     AllGatherResult,
     foreach_all_gather,
     foreach_all_gather_copy_out,
+    foreach_all_gather_twice,
     foreach_reduce,
 )
 from ._fsdp_common import (
@@ -249,7 +250,7 @@ class FSDPParamGroup:
         self._register_state_dict_hooks()
 
     # Runtime #
-    def unshard(self, async_op: bool = False):
+    def unshard(self, async_op: bool = False, dim: Union[bool, int] = False):
         if self._all_gather_result is not None:  # already called, pending wait
             return
         if self.is_unsharded:
@@ -264,14 +265,52 @@ class FSDPParamGroup:
             # used in the all-gather streams
             self._wait_all_gather_streams_on_event(self._reshard_after_forward_event)
             self._reshard_after_forward_event = None
-        with record_function(self._with_fqn("FSDP::all_gather")):
-            self._all_gather_result = foreach_all_gather(
-                self.fsdp_params,
-                self._all_gather_process_group,
-                async_op,
-                *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
-                self.device,
-            )
+        if dim is not False:
+            self.dim = dim
+            if dim < 3:
+                if dim == 0:
+                    group = self._reduce_scatter_process_group
+                elif dim == 1:
+                    group = self._all_reduce_process_group
+                with record_function(self._with_fqn("FSDP::all_gather")):
+                    self._all_gather_result = foreach_all_gather(
+                        self.fsdp_params,
+                        group,
+                        async_op,
+                        *self.comm_ctx.get_all_gather_streams(
+                            async_op, self._training_state
+                        ),
+                        self.device,
+                    )
+            else:
+                stream = self.comm_ctx.get_all_gather_streams(
+                    async_op, self._training_state
+                )
+                groups = [
+                    self.mesh_info.shard_process_group,
+                    self.mesh_info.replicate_process_group,
+                ]
+                with record_function(self._with_fqn("FSDP::all_gather")):
+                    self._all_gather_result = foreach_all_gather_twice(
+                        self.fsdp_params,
+                        groups,
+                        async_op,
+                        *self.comm_ctx.get_all_gather_streams(
+                            async_op, self._training_state
+                        ),
+                        self.device,
+                    )
+        else:
+            with record_function(self._with_fqn("FSDP::all_gather")):
+                self._all_gather_result = foreach_all_gather(
+                    self.fsdp_params,
+                    self._all_gather_process_group,
+                    async_op,
+                    *self.comm_ctx.get_all_gather_streams(
+                        async_op, self._training_state
+                    ),
+                    self.device,
+                )
 
     def wait_for_unshard(self):
         """
@@ -427,9 +466,9 @@ class FSDPParamGroup:
             if all_reduce_pg is None and self._all_reduce_hook_stream is not None:
                 # this means the native HSDP is not enabled,
                 # but user may want to have a custom HSDP setup
-                assert self._all_reduce_hook is not None, (
-                    "all reduce hook stream is specified but hook itself is missing."
-                )
+                assert (
+                    self._all_reduce_hook is not None
+                ), "all reduce hook stream is specified but hook itself is missing."
                 all_reduce_stream = self._all_reduce_hook_stream
             else:
                 all_reduce_stream = self.comm_ctx.all_reduce_stream
@@ -600,9 +639,9 @@ class FSDPParamGroup:
     def _register_state_dict_hooks(self) -> None:
         num_pre_save_hooks = len(self._module_to_pre_save_state_dict_hook_handle)
         num_pre_load_hooks = len(self._module_to_pre_load_state_dict_hook_handle)
-        assert num_pre_save_hooks == num_pre_load_hooks, (
-            f"Pre-save: {num_pre_save_hooks} pre-load: {num_pre_load_hooks}"
-        )
+        assert (
+            num_pre_save_hooks == num_pre_load_hooks
+        ), f"Pre-save: {num_pre_save_hooks} pre-load: {num_pre_load_hooks}"
         if num_pre_save_hooks > 0:
             return  # already registered
         modules_with_fsdp_params: set[nn.Module] = {

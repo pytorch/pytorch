@@ -1,6 +1,6 @@
 import copy
 from itertools import chain
-from typing import Callable, cast, NamedTuple, Optional, Union
+from typing import Callable, cast, List, NamedTuple, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -152,7 +152,103 @@ def foreach_all_gather(
         param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
         (
             param_all_gather_input_dtypes,
+            param_all_gather_input_numels,  # does not take the replicated dim
+            dtype,
+        ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
+        if dtype == torch.uint8:
+            all_gather_inputs = [
+                t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
+            ]
+        else:
+            all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
+        inp_split_sizes = [t.numel() for t in all_gather_inputs]
+        all_gather_input_numel = sum(inp_split_sizes)
+        all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
+            all_gather_inputs,
+            inp_split_sizes,
+            all_gather_input_numel,
+            world_size,
+            rank,
+            dtype,
+            device,
+        )
+        del param_all_gather_inputs
+    all_gather_stream.wait_stream(all_gather_copy_in_stream)
+    with device_handle.stream(all_gather_stream):
+        all_gather_work = dist.all_gather_into_tensor(
+            output_tensor=all_gather_output,
+            input_tensor=all_gather_input,
+            group=group,
+            async_op=async_op,
+        )
+        all_gather_event = all_gather_stream.record_event()
+        return AllGatherResult(
+            all_gather_output,
+            all_gather_event,
+            all_gather_work,
+            param_all_gather_input_dtypes,
             param_all_gather_input_numels,
+            inp_split_sizes,
+        )
+
+
+@torch.no_grad()
+def foreach_all_gather_twice(
+    fsdp_params: list[FSDPParam],
+    groups: List[dist.ProcessGroup],
+    async_op: bool,
+    all_gather_copy_in_stream: torch.Stream,
+    all_gather_stream: torch.Stream,
+    device: torch.device,
+) -> Optional[AllGatherResult]:
+    group = groups[0]
+    world_size, rank = group.size(), group.rank()
+    device_handle = _get_device_handle(device.type)
+    with device_handle.stream(all_gather_copy_in_stream):
+        param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
+        (
+            param_all_gather_input_dtypes,
+            param_all_gather_input_numels,  # does not take the replicated dim
+            dtype,
+        ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
+        if dtype == torch.uint8:
+            all_gather_inputs = [
+                t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
+            ]
+        else:
+            all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
+        inp_split_sizes = [t.numel() for t in all_gather_inputs]
+        all_gather_input_numel = sum(inp_split_sizes)
+        all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
+            all_gather_inputs,
+            inp_split_sizes,
+            all_gather_input_numel,
+            world_size,
+            rank,
+            dtype,
+            device,
+        )
+        del param_all_gather_inputs
+    all_gather_stream.wait_stream(all_gather_copy_in_stream)
+    with device_handle.stream(all_gather_stream):
+        all_gather_work = dist.all_gather_into_tensor(
+            output_tensor=all_gather_output,
+            input_tensor=all_gather_input,
+            group=group,
+            async_op=async_op,
+        )
+        all_gather_event = all_gather_stream.record_event()
+
+    group = groups[1]
+    world_size, rank = group.size(), group.rank()
+    device_handle = _get_device_handle(device.type)
+    all_gather_copy_in_stream.wait_stream(all_gather_stream)
+    with device_handle.stream(all_gather_copy_in_stream):
+        # param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
+        param_all_gather_inputs = [all_gather_output.flatten()]
+        (
+            param_all_gather_input_dtypes,
+            param_all_gather_input_numels,  # does not take the replicated dim
             dtype,
         ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
         if dtype == torch.uint8:
@@ -281,6 +377,7 @@ def foreach_all_gather_copy_out(
             device,
             force_recreate=force_recreate,
         )
+        # torch.distributed.breakpoint()  # fsdp_param.all_gather_outputs
         if not force_recreate:
             fsdp_param.alloc_all_gather_outputs()
         param_all_gather_outputs = fsdp_param.all_gather_outputs
@@ -298,7 +395,6 @@ def foreach_all_gather_copy_out(
         out = [t.view(world_size, -1).view(torch.uint8) for t in split_with_sizes_out]
     else:
         out = [t.view(world_size, -1) for t in split_with_sizes_out]
-
     # only avoid VC bump if we are not in inference mode
     if torch._dynamo.is_compiling():
         # For torch.compile, we turn off inference_mode for fake tensor
@@ -492,7 +588,6 @@ def foreach_reduce(
         with device_handle.stream(all_reduce_stream):
             all_reduce_hook(reduce_output)
     # -- END: ops post reduce_scatter
-
     with device_handle.stream(post_reduce_stream):
         _div_if_needed(reduce_output, postdivide_factor)
         reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
@@ -503,9 +598,17 @@ def foreach_reduce(
         ):
             # Assume even sharding for Shard(i), i > 0; otherwise would require
             # copy-out for contiguous strides
+            if all_reduce_group is not None:
+                size_dim = len(fsdp_param.sharded_size)
+                size = [fsdp_param.sharded_size[0] // all_reduce_group.size()]
+                for i in range(1, size_dim):
+                    size.append(fsdp_param.sharded_size[i])
+                size = torch.Size(size)
+            else:
+                size = fsdp_param.sharded_size
             new_sharded_grad = torch.as_strided(
                 reduce_output,
-                size=fsdp_param.sharded_size,
+                size=size,
                 stride=fsdp_param.contiguous_sharded_stride,
                 storage_offset=flat_grad_offset,
             )
@@ -529,22 +632,28 @@ def foreach_reduce(
                 assert isinstance(fsdp_param.sharded_param.grad, DTensor)
                 fsdp_param.sharded_param.grad._local_tensor += new_sharded_grad
             else:
-                new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(
-                    new_sharded_grad
+                from ._fsdp_common import _from_local_no_grad
+
+                new_sharded_dtensor_grad = _from_local_no_grad(
+                    new_sharded_grad, fsdp_param._sharding_spec
                 )
-                torch.distributed.breakpoint()
-                fsdp_param.sharded_param_fully_shard = copy.deepcopy(
+                fsdp_param.sharded_param_fully_shard = torch.empty_like(
                     new_sharded_dtensor_grad
                 )
+                # fsdp_param.sharded_param_fully_shard = fsdp_param.sharded_param.view(
+                #    fsdp_param.sharded_param.dtype
+                # )
                 fsdp_param.sharded_param_fully_shard.grad = new_sharded_dtensor_grad
-                fsdp_param.sharded_param = fsdp_param.sharded_param_fully_shard.view()
+                fsdp_param._setattr_on_modules(fsdp_param.sharded_param_fully_shard)
             if not compiled_autograd_enabled():
                 for hook in (
                     getattr(fsdp_param.sharded_param, "_post_accumulate_grad_hooks", {})
                     or {}
                 ).values():
                     hook(fsdp_param.sharded_param)
-            padded_sharded_numel = padded_unsharded_size.numel() // world_size
+            padded_sharded_numel = (
+                padded_unsharded_size.numel() // world_size // all_reduce_group.size()
+            )
             flat_grad_offset += padded_sharded_numel
         post_reduce_event = post_reduce_stream.record_event()
     # The RS output is allocated in the RS stream and used in the default
