@@ -1762,19 +1762,6 @@ TEST_WITH_TV = os.getenv('PYTORCH_TEST_WITH_TV') == '1'
 if TEST_WITH_TV:
     torch.fx.experimental._config.translation_validation = True
 
-# Some tests take too long when dynamic_shapes is combined with
-# translation_validation. Whenever that happens, we solve that by
-# disabling translation_validation.
-def disable_translation_validation_if_dynamic_shapes(fn):
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        if torch._dynamo.config.dynamic_shapes:
-            # Turning TV off due to high latency on dynamic shapes.
-            torch.fx.experimental._config.translation_validation = False
-        return fn(*args, **kwargs)
-    return wrapper
-
-
 # Determine whether to enable cuda memory leak check.
 # CUDA mem leak check is expensive and thus we don't want to execute it on every
 # test case / configuration.
