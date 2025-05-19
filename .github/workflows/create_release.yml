@@ -54,9 +54,11 @@ jobs:
           tag_or_branch="${tag_or_branch#refs/heads/}"
           # replace directory separators with _ in branch name
           tag_or_branch="${tag_or_branch//\//_}"
-          echo "PT_RELEASE_NAME=pytorch-$tag_or_branch" >> "$GITHUB_ENV"
-          echo "PT_RELEASE_FILE=pytorch-$tag_or_branch.tar.gz" >> "$GITHUB_ENV"
-          echo "PT_PEP517_RELEASE_FILE=torch-$tag_or_branch.tar.gz" >> "$GITHUB_ENV"
+          {
+            echo "PT_RELEASE_NAME=pytorch-$tag_or_branch";
+            echo "PT_RELEASE_FILE=pytorch-$tag_or_branch.tar.gz";
+            echo "PT_PEP517_RELEASE_FILE=torch-$tag_or_branch.tar.gz";
+          } >> "$GITHUB_ENV"
       - name: Create source distribution
         run: |
           # Create new folder with specified name so extracting the archive yields that
@@ -96,8 +98,10 @@ jobs:
       - name: Set output
         id: release_name
         run: |
-          echo "name=pt_release_name::${{ env.PT_RELEASE_FILE }}" >> "${GITHUB_OUTPUT}"
-          echo "name=pt_pep517_release_name::${{ env.PT_PEP517_RELEASE_FILE }}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "name=pt_release_name::${{ env.PT_RELEASE_FILE }}";
+            echo "name=pt_pep517_release_name::${{ env.PT_PEP517_RELEASE_FILE }}";
+          } >> "${GITHUB_OUTPUT}"
 
   upload_source_code_to_s3:
     if: ${{ github.repository == 'pytorch/pytorch' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'rc') }}
