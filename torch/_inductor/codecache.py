@@ -3597,6 +3597,9 @@ class StaticAutotunerFuture(CodeCacheFuture):
     def result(self) -> CachingAutotuner:
         assert self.reload_kernel_from_src is not None
         with dynamo_timed("StaticAutotunerFuture.warm_precompile"):
+            self.static_autotuner.recheck_autotune_cache(
+                reload_kernel_from_src=self.reload_kernel_from_src
+            )
             self.static_autotuner.precompile(  # type: ignore[union-attr]
                 warm_cache_only=False,
                 reload_kernel=self.reload_kernel_from_src,
