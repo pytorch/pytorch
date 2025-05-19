@@ -328,6 +328,23 @@ static __global__ void multimem_all_gather_kernel(
   sync_remote_blocks<std::memory_order_acq_rel>(signal_pads, rank, world_size);
 }
 
+at::Tensor get_multicast_buffer(
+    const at::Tensor& input,
+    std::string group_name) {
+  auto symm_mem = c10d::symmetric_memory::rendezvous(input, group_name);
+  TORCH_CHECK(
+      symm_mem != nullptr,
+      "multimem_all_gather_out: output must be allocated with empty_strided_p2p().");
+  TORCH_CHECK(
+      symm_mem->has_multicast_support(),
+      "multimem_all_gather_out: output must have multicast support.");
+  auto data_ptr = symm_mem->get_multicast_ptr();
+  return at::for_blob(data_ptr, input.sizes())
+      .options(input.options())
+      .target_device(input.device())
+      .make_tensor();
+}
+
 at::Tensor multimem_all_gather_out(
     const at::Tensor& input,
     std::string group_name,
@@ -1196,6 +1213,7 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl(
       "multimem_one_shot_all_reduce_out", ::multimem_one_shot_all_reduce_out);
   m.impl("multimem_all_gather_out", ::multimem_all_gather_out);
+  m.impl("get_multicast_buffer", ::get_multicast_buffer);
 #endif
   m.impl("stream_write_value32_", ::stream_write_value32_);
   m.impl("memset32_", ::memset32_);

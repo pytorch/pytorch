@@ -14,8 +14,9 @@ from torch.distributed.tensor._dtensor_spec import DTensorSpec
 
 
 _compiled_autograd_enabled: bool = False
-_USE_SM_ALL_GATHER_DIRECT = True
-_USE_SM_ALL_GATHER = False
+_USE_SM_ALL_GATHER_DIRECT = False
+_USE_SM_MULTIMEM_ALL_GATHER_OUT = True
+_USE_SM_LOW_CONTENTION_ALL_GATHER = False
 
 if torch._running_with_deploy():
 
