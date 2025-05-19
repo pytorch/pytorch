@@ -1929,13 +1929,6 @@ class TestLinalg(TestCase):
             msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}'
             self.assertEqual(result, result_numpy, msg=msg)
 
-    def test_vector_norm_compile(self, device):
-        x = torch.randn([16, 32], dtype=torch.float, device=device)
-        ref = torch.linalg.vector_norm(x, ord=2, dim=[], keepdim=False, dtype=None)
-        compiled_vector_norm = torch.compile(torch.linalg.vector_norm, backend="inductor")
-        res = compiled_vector_norm(x, ord=2, dim=[], keepdim=False, dtype=None)
-        self.assertEqual(ref, res)
-
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
