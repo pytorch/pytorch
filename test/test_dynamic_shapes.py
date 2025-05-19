@@ -3090,7 +3090,7 @@ class TestGuardsExpressions(TestCase):
             dynamic=True,
         )(func)
 
-        # create a non-contigious with data being even numbers in [0:cnt-1]
+        # create a non-contiguous with data being even numbers in [0:cnt-1]
         # and reshape it into sqrt(cnt)*sqrt(cnt)
         def make_non_contiguous_tensor_and_test(cnt):
             # create a non-contiguous tensor x that is skipping odd indices.
@@ -3134,7 +3134,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         self.assertEqual(cnt.frame_count, 1)
 
         # Pass in a contiguous tensor, it will recompile due to stride being 1 (0/1 specialization).
-        # marking strides unabcked would have avoided the recompilatipn here.
+        # marking strides unbacked would have avoided the recompilation here.
         x = torch.arange(100)
         torch._dynamo.decorators.mark_unbacked(x, 0)
 
@@ -3261,10 +3261,10 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
             t2 = x.reshape((f, f))
             return t1, t2
 
-        # create a non-contigious with data being even numbers in [0:cnt-1]
+        # create a non-contiguous with data being even numbers in [0:cnt-1]
         def make_non_contiguous_tensor(cnt):
             # create a non-contiguous tensor x that is skipping odd indices.
-            x = torch.arange(cnt * 2, device="cuda")
+            x = torch.arange(cnt * 2)
             x = x.as_strided((x.size()[0] // 2,), (2,))
             return x
 

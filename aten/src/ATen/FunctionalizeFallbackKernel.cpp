@@ -317,7 +317,7 @@ static at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymInt
   auto inferred_size = at::infer_size_dv(size, self.sym_numel());
 
   auto stride = at::detail::computeStride(self.sym_sizes(), self.sym_strides(), inferred_size);
-  if (! stride.has_value()){
+  if (!stride.has_value()){
     // See if the view is valid. If it's not, then we copy.
     // It's OK to copy, because _unsafe_view(x) guarantees that x isn't used
     // anymore.

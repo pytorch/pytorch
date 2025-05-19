@@ -31,7 +31,7 @@ inline void infer_size_impl(
       }
       infer_dim = dim;
     } else {
-      // in case of unbacked shape[dim] we assume its not -1 and add runtime
+      // in case of unbacked shape[dim] we assume it's not -1 and add a runtime
       // assertion.
       TORCH_MAYBE_SYM_CHECK(
           sym_gt(shape[dim], -1),
