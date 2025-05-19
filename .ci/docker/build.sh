@@ -239,22 +239,9 @@ case "$tag" in
     UCC_COMMIT=${_UCC_COMMIT}
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-rocm-n-py3)
+  pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-centos9-rocm-n-py3)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    VISION=yes
-    ROCM_VERSION=6.4
-    NINJA_VERSION=1.9.0
-    TRITON=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    INDUCTOR_BENCHMARKS=yes
-    ;;
-  pytorch-linux-centos9-rocm-n-py3)
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
-    PROTOBUF=yes
     VISION=yes
     ROCM_VERSION=6.4
     NINJA_VERSION=1.9.0
