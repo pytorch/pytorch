@@ -168,6 +168,18 @@ class MPSBasicTests(TestCase):
 
         self.common(fn, (torch.rand(10), np.exp(0.3)))
 
+    def test_conv_transpose_channels_last(self):
+        def fn(x, y):
+            return torch.nn.functional.conv_transpose2d(x, y, stride=1, padding=1)
+
+        self.common(
+            fn,
+            (
+                torch.rand(1, 1, 16, 16).to(memory_format=torch.channels_last),
+                torch.rand(1, 4, 8, 8),
+            ),
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

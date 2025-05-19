@@ -297,16 +297,6 @@ def pre_grad_passes(
             if example_inputs is not None:
                 gm = fuse_fx(gm, example_inputs)
             numpy_compat_normalization(gm.graph)
-            trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": "before_recompile_pre_grad",
-                    "encoding": "string",
-                },
-                payload_fn=lambda: gm.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                ),
-            )
             # We should always do the normalization_pass first
             if "normalization_pass" in config.pre_grad_fusion_options:
                 pattern_matcher_pass = PRE_GRAD_PATTERNS["normalization_pass"]
@@ -349,16 +339,6 @@ def pre_grad_passes(
 
     gm.graph.lint()
     gm.recompile()
-    trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "after_recompile_pre_grad",
-            "encoding": "string",
-        },
-        payload_fn=lambda: gm.print_readable(
-            print_output=False, include_stride=True, include_device=True
-        ),
-    )
 
     if (
         config.pattern_matcher
