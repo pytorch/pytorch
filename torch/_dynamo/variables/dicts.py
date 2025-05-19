@@ -862,15 +862,23 @@ class SetVariable(ConstDictVariable):
             return variables.BuiltinVariable(op.get(name)).call_function(
                 tx, [self, other], {}
             )
-        elif name == "__iand__":
-            return self.call_method(tx, "intersection_update", args, kwargs)
-        elif name == "__ior__":
-            return self.call_method(tx, "update", args, kwargs)
-        elif name == "__ixor__":
-            return self.call_method(tx, "symmetric_difference_update", args, kwargs)
-        elif name == "__isub__":
-            return self.call_method(tx, "difference_update", args, kwargs)
+        elif name in ("__iand__", "__ior__", "__ixor__", "__isub__"):
+            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
+                msg = ConstantVariable.create(
+                    f"unsupported operand type(s) for {name}: '{self.python_type_name()}' and '{args[0].python_type_name()}'"
+                )
+                raise_observed_exception(TypeError, tx, args=[msg])
+            m = {
+                "__iand__": "intersection_update",
+                "__ior__": "update",
+                "__ixor__": "symmetric_difference_update",
+                "__isub__": "difference_update",
+            }.get(name)
+            self.call_method(tx, m, args, kwargs)
+            return self
         elif name == "__eq__":
+            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
+                return ConstantVariable.create(False)
             r = self.call_method(tx, "symmetric_difference", args, kwargs)
             return ConstantVariable.create(len(r.set_items) == 0)
         elif name == "__sub__":
