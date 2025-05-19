@@ -31,7 +31,7 @@ def _group_membership_management(store, name, is_join):
             try:
                 store.wait([returned])
             except RuntimeError:
-                logger.error(  # noqa: TRY400
+                logger.error(
                     "Group membership token %s timed out waiting for %s to be released.",
                     my_token,
                     returned,
