@@ -1171,6 +1171,9 @@ def tuned_scaled_mm(
                 epilogue_fn=scale_mm_epilogue(),
             )
 
+    if is_nonzero and use_cutlass_template(layout, m, n, k):
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, input_nodes)
+
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, input_nodes)
 
