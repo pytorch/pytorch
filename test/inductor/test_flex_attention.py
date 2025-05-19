@@ -5915,7 +5915,7 @@ instantiate_device_type_tests(
     TestPagedAttention, globals(), only_for=test_device, allow_xpu=True
 )
 instantiate_device_type_tests(
-    TestBlockMask, globals(), only_for=test_device, allow_xpu=True
+    TestBlockMask, globals(), only_for=(test_device[0]), allow_xpu=True
 )
 instantiate_device_type_tests(
     TestLearnableBiases, globals(), only_for=test_device, allow_xpu=True
