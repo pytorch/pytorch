@@ -474,8 +474,7 @@ struct TensorDescriptorListParams {
   }
 #else
   auto descriptors(Tensor x) const {
-    auto is_input_packed = !batch_sizes.empty();
-    if (is_input_packed) {
+    if (is_input_packed()) {
       return rnn_descriptor_sequence(
           x, mini_batch, batch_sizes, seq_length, x.size(-1));
     } else {
