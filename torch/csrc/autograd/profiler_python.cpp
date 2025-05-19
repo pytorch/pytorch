@@ -886,8 +886,8 @@ void PythonTracer::recordPyCall(
 #if PY_MAJOR_VERSION < 3 || (PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION < 13)
       auto self = THPObjectPtr(PyDict_GetItemString(locals, "self"));
 #else
-      // In Python-3.13+ `PyFrame_GetLocals()` returns instance of PyFrameLocalsProxy_Type
-      // See PEP 667 for more info
+      // In Python-3.13+ `PyFrame_GetLocals()` returns instance of
+      // PyFrameLocalsProxy_Type See PEP 667 for more info
       auto self = THPObjectPtr(PyMapping_GetItemString(locals, "self"));
 #endif
       Py_INCREF(self.get());
