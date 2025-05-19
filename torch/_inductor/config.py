@@ -145,8 +145,19 @@ force_disable_caches: bool = Config(
 # Unsafe way to skip dynamic shape guards to get faster cache load
 unsafe_skip_cache_dynamic_shape_guards: bool = False
 
-# Unsafe way to mark function as cacheable
-unsafe_marked_cacheable_functions: list[str] = []
+# Unsafe way to mark non torch functions as safe to cache
+# dictionary is from function name -> cache key
+# Any function name in the dictionary will be allowed to be cacheable
+# by AOTAutogradCache and FxGraphCache.
+# changing the cache key value will change the resulting
+# FXGraphCache key.
+# Example usage:
+# torch._inductor.config.unsafe_marked_cacheable_functions = {
+# 'torch.ops.my_function' : torch.__version__
+# }
+# The above example causes the custom op torch.ops.my_function to be cacheable,
+# and for cache keys to be keyed by the current torch version
+unsafe_marked_cacheable_functions: dict[str, str] = {}
 
 # sleep in inductor for testing
 sleep_sec_TESTING_ONLY: Optional[int] = None
@@ -164,7 +175,7 @@ cpp_wrapper: bool = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 # Controls automatic precompiling of common include files for codecache.CppCodeCache
 # (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
 # controlled by a separate flag.
-cpp_cache_precompile_headers: bool = True
+cpp_cache_precompile_headers: bool = not is_fbcode()
 
 online_softmax = os.environ.get("TORCHINDUCTOR_ONLINE_SOFTMAX", "1") == "1"
 
@@ -903,6 +914,9 @@ enable_linear_binary_folding = (
 # Adds NVTX annotations aroung training phases
 annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0") == "1"
 
+# Enable caching codegen of triton templates.
+enable_caching_generated_triton_templates: bool = False
+
 
 # config specific to codegen/cpp.py
 class cpp:
@@ -1293,10 +1307,15 @@ class aot_inductor:
     package_constants_in_so: bool = True
 
     # Experimental.  Controls automatic precompiling of common AOTI include files.
-    precompile_headers: bool = False
+    precompile_headers: bool = not is_fbcode()
+
+    # Embed generated .cubin files into the .so
+    embed_cubin: bool = False
 
 
 class cuda:
+    """Settings for cuda backend, today this consists of cutlass"""
+
     # CUDA arch to use for CUDA template kernel compilation.
     # e.g. "70", "75", "80", "90", etc.
     # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
@@ -1341,6 +1360,9 @@ class cuda:
 
     # Whether to use CUTLASS EVT for epilogue fusion
     cutlass_epilogue_fusion_enabled = False
+
+    # Whether to only use TMA-compatible kernels in CUTLASS
+    cutlass_tma_only = False
 
     # Path to CUDA NVCC.
     # NVCC search order:
