@@ -104,17 +104,15 @@ class WrapGeneric(HigherOrderOperator):
         import torch._dynamo  # noqa: F401
         from torch._dynamo import disable
 
-        # Find the obj from the fqn (it cannot be defined in some local scope)
-        fqn = gmod.meta["_wrap_generic_fqn"]
-        module_path, attribute = fqn.rsplit(".", 1)
-        module = importlib.import_module(module_path)
-        obj = getattr(module, attribute)
-
-        kwarg_values = gmod.meta["_wrap_generic_kwarg_values"]
+        if kwargs.get("wrapper_fn") is not None:
+            # This means we're in eager mode
+            wrapper_fn = kwargs.pop("wrapper_fn")
+        else:
+            wrapper_fn = gmod.meta["_wrap_generic_wrapper_fn"]
 
         @disable
         def wrapper():
-            return obj(gmod, *args, **kwargs, **kwarg_values)
+            return wrapper_fn(gmod)(*args, **kwargs)
 
         return wrapper()
 

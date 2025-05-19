@@ -86,21 +86,6 @@ def op_count(gm):
     return result
 
 
-def my_hop_fn(fn, *args, k=1, **kwargs):
-    out = fn(*args, **kwargs)
-    if isinstance(out, tuple):
-        return (out[0] + k,)
-    return out + k
-
-
-def my_hop_fn_2(fn, *args, g=None):
-    assert g is not None
-    out = fn(*args)
-    if isinstance(out, tuple):
-        return (g(out[0]),)
-    return g(out)
-
-
 # Checks that a dict matches a dict with "regex keys". That is,
 # the keys are regex expressions.
 def assert_dict_matches_regex(self, dct, dct_with_regex_keys):
@@ -3172,10 +3157,32 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
         self.assertEqual(fn(zeros, ones, ones), torch.tensor([2.0]))
         self.assertEqual(fn(ones, ones, ones), torch.tensor([3.0]))
 
-    @torch._dynamo.config.patch(
-        "_hopify_generic_wrap_fn_kwarg_keys", {my_hop_fn: ("k",), my_hop_fn_2: ("g",)}
-    )
     def test_hopify_generic_wrap(self):
+        from torch._higher_order_ops.wrap import wrap_generic
+
+        def my_hop_fn_impl(fn, *args, k=1, **kwargs):
+            def wrapper(*args, **kwargs):
+                out = fn(*args, **kwargs)
+                if isinstance(out, tuple):
+                    return (out[0] + k,)
+                return out + k
+            return wrapper
+
+        def my_hop_fn(fn, *args, k=1, **kwargs):
+            return wrap_generic(fn, *args, wrapper_fn=functools.partial(my_hop_fn_impl, k=k), **kwargs)
+
+        def my_hop_fn_2_impl(fn, *args, g=None):
+            def wrapper(*args, **kwargs):
+                assert g is not None
+                out = fn(*args)
+                if isinstance(out, tuple):
+                    return (g(out[0]),)
+                return g(out)
+            return wrapper
+
+        def my_hop_fn_2(fn, *args, g=None, **kwargs):
+            return wrap_generic(fn, *args, wrapper_fn=functools.partial(my_hop_fn_2_impl, g=g), **kwargs)
+
         def gn(x, h=1):
             return x.sin() + h
 
