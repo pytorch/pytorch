@@ -217,6 +217,7 @@ def set_logs(
     ddp_graphs: bool = False,
     graph: bool = False,
     graph_code: bool = False,
+    graph_code_verbose: bool = False,
     graph_breaks: bool = False,
     graph_sizes: bool = False,
     guards: bool = False,
@@ -344,6 +345,9 @@ def set_logs(
         graph_code (:class:`bool`):
             Whether to emit the python source of the graph captured by TorchDynamo.
             Default: ``False``
+
+        graph_code_verbose (:class:`bool`):
+            Whether to emit verbose/intermediate FX pass logs for graph code. Default: ``False``
 
         graph_breaks (:class:`bool`):
             Whether to emit the graph breaks encountered by TorchDynamo.
@@ -519,6 +523,7 @@ def set_logs(
         dtensor=dtensor,
         graph=graph,
         graph_code=graph_code,
+        graph_code_verbose=graph_code_verbose,
         graph_breaks=graph_breaks,
         graph_sizes=graph_sizes,
         guards=guards,
@@ -640,6 +645,12 @@ def help_message(verbose=False):
     else:
         printed_artifacts = log_registry.visible_artifacts
 
+    # Ensure graph_code_verbose is always listed with a description
+    if verbose and "graph_code_verbose" not in printed_artifacts:
+        printed_artifacts = set(printed_artifacts)
+        printed_artifacts.add("graph_code_verbose")
+        log_registry.artifact_descriptions["graph_code_verbose"] = "Verbose FX pass logs for graph code."
+
     if verbose:
         heading = "All registered names"
     else:
@@ -670,6 +681,8 @@ Examples:
 
   TORCH_LOGS="+some.random.module,schedule" will set the log level of
   some.random.module to logging.DEBUG and enable the schedule artifact
+
+  TORCH_LOGS="graph_code_verbose" will enable verbose FX pass logs for graph code
 
   TORCH_LOGS_FORMAT="%(levelname)s: %(message)s" or any provided format
   string will set the output format
