@@ -882,7 +882,14 @@ void PythonTracer::recordPyCall(
       // `PyFrame_FastToLocals` which forces the interpreter to materialize
       // the full dict of locals.
       auto locals = THPObjectPtr(PyFrame_GetLocals(frame));
+
+#if PY_MAJOR_VERSION < 3 || (PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION < 13)
       auto self = THPObjectPtr(PyDict_GetItemString(locals, "self"));
+#else
+      // In Python-3.13+ `PyFrame_GetLocals()` returns instance of
+      // PyFrameLocalsProxy_Type See PEP 667 for more info
+      auto self = THPObjectPtr(PyMapping_GetItemString(locals, "self"));
+#endif
       Py_INCREF(self.get());
       auto back = THPFrameObjectPtr(PyFrame_GetBack(frame));
       TORCH_INTERNAL_ASSERT(back != nullptr);
@@ -890,7 +897,11 @@ void PythonTracer::recordPyCall(
           frame, self.get(), back.get());
     } else if (code.get() == optimizer_hook_) {
       auto locals = THPObjectPtr(PyFrame_GetLocals(frame));
+#if PY_MAJOR_VERSION < 3 || (PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION < 13)
       auto self = THPObjectPtr(PyDict_GetItemString(locals, "self"));
+#else
+      auto self = THPObjectPtr(PyMapping_GetItemString(locals, "self"));
+#endif
       Py_INCREF(self.get());
       auto back = THPFrameObjectPtr(PyFrame_GetBack(frame));
       TORCH_INTERNAL_ASSERT(back != nullptr);
