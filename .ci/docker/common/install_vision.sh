@@ -23,9 +23,8 @@ install_centos() {
   
   # Cleanup
   dnf clean all
-  rm -rf /var/cache/yum
-  rm -rf /var/lib/yum/yumdb
-  rm -rf /var/lib/yum/history
+  rm -rf /var/cache/dnf
+  rm -rf /var/lib/dnf/history.db
 }
 
 
