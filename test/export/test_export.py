@@ -7604,20 +7604,25 @@ def forward(self, b_a_buffer, x):
         self.assertTrue(torch.allclose(ep.module()(xs), module_out))
 
     @requires_cuda
-    @testing.expectedFailureCppRuntime
     def test_export_associative_scan_lifted_buffers(self):
         device = torch.device("cuda")
         combine_mode = "pointwise"
 
+        class A(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.buffer = torch.nn.Buffer(torch.ones(3, 2, device=device))
+
+            def forward(self):
+                return self.buffer.cos()
+
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer(
-                    "buf", torch.ones(3, 2, device=device), persistent=False
-                )
+                self.a = A()
 
             def combine_fn(self, x, y):
-                return x + y * self.buf
+                return (x + y) * self.a()
 
             def forward(self, x):
                 return associative_scan(
