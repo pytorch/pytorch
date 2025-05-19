@@ -43,7 +43,7 @@ CPP_TEST_GLOBS = [
 REPO_ROOT = Path(__file__).parents[3]
 
 
-def find_matched_symbols(symbols_regex: str) -> set[str]:
+def find_matched_symbols(symbols_regex: str, test_globs: list[str]) -> set[str]:
     """
     Goes through all lines not starting with // in the cpp files and
     accumulates a list of matches with the symbols_regex. Note that
@@ -52,16 +52,17 @@ def find_matched_symbols(symbols_regex: str) -> set[str]:
     """
     matched_symbols = set()
     # check noncommented out lines of the test files
-    for cpp_test_glob in CPP_TEST_GLOBS:
+    for cpp_test_glob in test_globs:
         for test_file in REPO_ROOT.glob(cpp_test_glob):
             with open(test_file) as tf:
                 for test_file_line in tf:
                     test_file_line = test_file_line.strip()
-                    if test_file_line.startswith("//") or test_file_line == "":
+                    if test_file_line.startswith(("//", "#")) or test_file_line == "":
                         continue
                     matches = re.findall(symbols_regex, test_file_line)
                     for m in matches:
-                        matched_symbols.add(m)
+                        if m != "":
+                            matched_symbols.add(m)
     return matched_symbols
 
 
@@ -80,11 +81,14 @@ def build_symbols_regex(symbols: Iterable[str]) -> str:
     return regex[0 : len(regex) - 1]
 
 
-def check_file(filename: str) -> list[LintMessage]:
+def check_file(filename: str, test_globs: list[str]) -> list[LintMessage]:
     """
     Goes through the header_only_apis.txt file and verifies that all symbols
     within the file can be found tested in an appropriately independent .cpp
     file.
+
+    Note that we expect CPP_TEST_GLOBS to be passed in as test_globs--the
+    only reason this is an argument at all is for ease of testing.
     """
     lint_messages: list[LintMessage] = []
 
@@ -105,7 +109,7 @@ def check_file(filename: str) -> list[LintMessage]:
     # before Float8_e5m2. Otherwise, both Float8_e5m2fnuz and Float8_e5m2 will
     # match Float8_e5m2
     symbols_regex = build_symbols_regex(sorted(symbols.keys(), reverse=True))
-    matched_symbols = find_matched_symbols(symbols_regex)
+    matched_symbols = find_matched_symbols(symbols_regex, test_globs)
 
     for s in symbols.keys():
         if s not in matched_symbols:
@@ -142,5 +146,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    for lint_message in check_file(str(REPO_ROOT) + "/torch/header_only_apis.txt"):
+    for lint_message in check_file(
+        str(REPO_ROOT) + "/torch/header_only_apis.txt", CPP_TEST_GLOBS
+    ):
         print(json.dumps(lint_message._asdict()), flush=True)

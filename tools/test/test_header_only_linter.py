@@ -1,0 +1,127 @@
+import unittest
+
+from tools.linter.adapters.header_only_linter import (
+    find_matched_symbols,
+    build_symbols_regex,
+    check_file,
+    CPP_TEST_GLOBS,
+    LINTER_CODE,
+    REPO_ROOT,
+    LintMessage,
+    LintSeverity,
+)
+
+class TestHeaderOnlyLinter(unittest.TestCase):
+    """
+    Test the header only linter functionality
+    """
+
+    def test_find_matched_symbols(self):
+        sample_regex = r"symDef|symD|symC|bbb|a"
+        test_globs = [
+            "tools/test/header_only_linter_testdata/*.cpp"
+        ]
+
+        expected_matches = set(["symDef", "symC", "a"])
+        self.assertEqual(
+            find_matched_symbols(sample_regex, test_globs),
+            expected_matches
+        )
+
+    def test_find_matched_symbols_empty_regex(self):
+        sample_regex = r""
+        test_globs = [
+            "tools/test/header_only_linter_testdata/*.cpp"
+        ]
+
+        expected_matches = set()
+        self.assertEqual(
+            find_matched_symbols(sample_regex, test_globs),
+            expected_matches
+        )
+
+    def test_build_symbols_regex_no_symbols(self):
+        sample_symbols = []
+        expected_regex = r""
+        self.assertEqual(
+            build_symbols_regex(sample_symbols),
+            expected_regex
+        )
+
+    def test_build_symbols_regex(self):
+        sample_symbols = ["symDef", "symC", "a"]
+        expected_regex = r"symDef|symC|a"
+        self.assertEqual(
+            build_symbols_regex(sample_symbols),
+            expected_regex
+        )
+
+    def test_check_file_no_issues(self):
+        sample_txt = str(REPO_ROOT / 
+            "tools/test/header_only_linter_testdata/good.txt")
+        test_globs = [
+            "tools/test/header_only_linter_testdata/*.cpp"
+        ]
+        self.assertEqual(len(check_file(sample_txt, test_globs)), 0)
+    
+    def test_check_empty_file(self):
+        sample_txt = str(REPO_ROOT / 
+            "tools/test/header_only_linter_testdata/empty.txt")
+        test_globs = [
+            "tools/test/header_only_linter_testdata/*.cpp"
+        ]
+        self.assertEqual(len(check_file(sample_txt, test_globs)), 0)
+    
+    def test_check_file_with_untested_symbols(self):
+        sample_txt = str(REPO_ROOT / 
+            "tools/test/header_only_linter_testdata/bad.txt")
+        test_globs = [
+            "tools/test/header_only_linter_testdata/*.cpp"
+        ]
+
+        expected_msgs = [
+            LintMessage(
+                path=sample_txt,
+                line=7,
+                char=None,
+                code=LINTER_CODE,
+                severity=LintSeverity.ERROR,
+                name="[untested-symbol]",
+                original=None,
+                replacement=None,
+                description=(
+                    f"bbb has been included as a header-only API "
+                    "but is not tested in any of CPP_TEST_GLOBS, which "
+                    f"contains {CPP_TEST_GLOBS}.\n"
+                    "Please add a .cpp test using the symbol without "
+                    "linking anything to verify that the symbol is in "
+                    "fact header-only. If not already there, please "
+                    "add the .cpp file to CPP_TEST_GLOBS in "
+                    "tools/linters/adapters/header_only_linter.py."
+                ),
+            ),
+            LintMessage(
+                path=sample_txt,
+                line=8,
+                char=None,
+                code=LINTER_CODE,
+                severity=LintSeverity.ERROR,
+                name="[untested-symbol]",
+                original=None,
+                replacement=None,
+                description=(
+                    f"symD has been included as a header-only API "
+                    "but is not tested in any of CPP_TEST_GLOBS, which "
+                    f"contains {CPP_TEST_GLOBS}.\n"
+                    "Please add a .cpp test using the symbol without "
+                    "linking anything to verify that the symbol is in "
+                    "fact header-only. If not already there, please "
+                    "add the .cpp file to CPP_TEST_GLOBS in "
+                    "tools/linters/adapters/header_only_linter.py."
+                ),
+            )
+        ]
+        self.assertEqual(set(check_file(sample_txt, test_globs)), set(expected_msgs))
+
+if __name__ == "__main__":
+    unittest.main()
