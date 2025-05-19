@@ -8,6 +8,7 @@ from torch._inductor.codegen.common import KernelTemplate
 from torch._inductor.ir import (
     add_symbolic_shapes_for_inputs_to_subgraph,
     Buffer,
+    get_free_symbols,
     gm_original_output_strides,
     ir_node_to_tensor,
     Layout,
@@ -39,7 +40,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         with V.fake_mode:
             for inp in self.input_nodes:
                 # Here there will be no unbacked symbols, as SubgraphBuffer does not support them
-                assert len(inp.get_free_symbol_uses()) == 0
+                assert len(get_free_symbols(inp.get_size(), unbacked_only=True)) == 0
+                assert len(get_free_symbols(inp.get_stride(), unbacked_only=True)) == 0
 
                 inp.data.freeze_layout()  # type: ignore[attr-defined]
                 self.example_inputs.append(ir_node_to_tensor(inp))

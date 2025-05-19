@@ -17,7 +17,7 @@ add_executable(test_nativert
 # TODO temporary until we can delete the old gtest polyfills.
 target_compile_definitions(test_nativert PRIVATE USE_GTEST)
 
-set(NATIVERT_TEST_DEPENDENCIES torch gtest)
+set(NATIVERT_TEST_DEPENDENCIES torch gtest_main)
 
 target_link_libraries(test_nativert PRIVATE ${NATIVERT_TEST_DEPENDENCIES})
 target_link_libraries(test_nativert PRIVATE fmt::fmt-header-only)

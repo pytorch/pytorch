@@ -42,7 +42,6 @@ from torch.testing._internal.common_device_type import (
 )
 
 from torch.testing._internal.common_utils import (
-    IS_ARM64,
     IS_JETSON,
     IS_WINDOWS,
     parametrize,
@@ -63,7 +62,6 @@ if TEST_CUDA:
 assert torch.get_default_dtype() is torch.float32
 
 
-@unittest.skipIf(IS_ARM64, "Issue with numpy version on arm")
 class TestMatmulCuda(TestCase):
     def setUp(self):
         super().setUp()
@@ -155,6 +153,29 @@ class TestMatmulCuda(TestCase):
     @parametrize("size", [100, 1000, 10000])
     def test_cublas_addmm_reduced_precision(self, size: int, dtype: torch.dtype):
         self.cublas_addmm(size, dtype, True)
+
+    @onlyCUDA
+    @skipIfRocmVersionLessThan((5, 2))
+    @dtypes(torch.float16)
+    # m == 4 chooses OUTPUT_TYPE reduction on H200
+    # m == 8 chooses OUTOUT_TYPE reduction on A100
+    @parametrize("small_size", [4, 8])
+    @parametrize("size", [32768])
+    @parametrize("backend", ["cublaslt", "cublas"])
+    def test_cublas_addmm_no_reduced_precision(self, small_size: int, size: int, dtype: torch.dtype, backend):
+        # TODO(eqy): replace with contextlib once that is merged
+        orig = torch.backends.cuda.preferred_blas_library()
+        torch.backends.cuda.preferred_blas_library(backend)
+        orig_precision = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+        m1 = torch.full((small_size, size), 65504.0, dtype=dtype, device='cuda')
+        m2 = torch.ones((size, small_size), dtype=dtype, device='cuda')
+        m2[size // 2:, :] = -1.0
+        b = torch.zeros((small_size,), dtype=dtype, device='cuda')
+        out = torch.addmm(b, m1, m2, beta=1.0)
+        self.assertEqual(out.sum().item(), 0.0)
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_precision
+        torch.backends.cuda.preferred_blas_library(orig)
 
     @onlyCUDA
     @skipIfRocmVersionLessThan((5, 2))
