@@ -489,16 +489,9 @@ Attempted to call function marked as skipped
 
         first_graph_break = re.sub(r"mylib(_v\d+)?", "mylib", first_graph_break)
 
-        self.assertExpectedInline(
+        self.assertEqual(
             first_graph_break,
-            """\
-Attempted to call function marked as skipped
-  Explanation: Dynamo does not know how to trace the builtin `mylib.PyCapsule.foobar.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
-  Hint: If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
-  Hint: If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
-
-  Developer debug context: module: mylib, qualname: PyCapsule.foobar, skip reason: <missing reason>
-""",
+            "Attempted to call function marked as skipped",
         )
 
         cpp_source = """
