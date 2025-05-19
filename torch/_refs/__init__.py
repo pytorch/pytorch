@@ -3800,7 +3800,7 @@ def _compute_stride(old_shape, old_stride, new_shape):
 # returned by _compute_stride.
 # (2) if a contiguous, we know the requested shape is valid, the output strides can be computed using
 # make_contiguous_strides_for.
-def _view_simple(a: TensorLikeType, shape) -> TensorLikeType:
+def _view_simple(a: TensorLikeType, shape, data_dependent_error) -> TensorLikeType:
     from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 
     # Creates a valid shape
