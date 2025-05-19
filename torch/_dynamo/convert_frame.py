@@ -945,8 +945,8 @@ def _compile(
                 # they are benign and do not generate any new graphs.
                 hooks.guard_export_fn(output.guards)
             if hooks.frame_traced_fn is not None:
-                output.tracing_context.traced_files.add(output.co_fields["co_filename"])
-                hooks.frame_traced_fn(output.tracing_context.traced_files)
+                output.tracing_context.traced_code.append(output.f_code)
+                hooks.frame_traced_fn(output.tracing_context.traced_code)
 
         return wrap_guarded_code(guarded_code)
 

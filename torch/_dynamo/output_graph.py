@@ -370,8 +370,8 @@ class OutputGraph(OutputGraphGuardsState):
         # Set of globals installed via install_global* APIs
         self.installed_globals: set[str] = set()
 
-        # TODO: maybe should just pass the entire f_code in here?  Not
-        # sure...
+        self.f_code = f_code
+        # TODO: maybe should only store the entire f_code
         self.co_fields = {
             "co_name": f_code.co_name,
             "co_filename": f_code.co_filename,

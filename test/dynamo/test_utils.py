@@ -145,59 +145,65 @@ class TestUtils(TestCase):
     def test_frame_traced_hook(self):
         from utils import add, break_it
 
-        traced_file_sets = []
+        traced_code_lists = []
 
-        def get_traced_files(s):
-            nonlocal traced_file_sets
-            traced_file_sets.append(s)
+        def get_traced_code(s):
+            nonlocal traced_code_lists
+            traced_code_lists.append(s)
+
+        def get_filenames(traced_code_lists):
+            return [
+                [code.co_filename for code in code_list]
+                for code_list in traced_code_lists
+            ]
 
         utils_path = os.path.join(os.path.dirname(__file__), "utils.py")
 
         # === no inlining ===
-        @torch.compile(options={"frame_traced_fn": get_traced_files})
+        @torch.compile(options={"frame_traced_fn": get_traced_code})
         def fn(x):
             return x * 2
 
         x = torch.randn(3)
-        traced_file_sets = []
+        traced_code_lists = []
         fn(x)
         # expect hook to be called once with this file
-        self.assertEqual(traced_file_sets, [{__file__}])
+        self.assertEqual(get_filenames(traced_code_lists), [[__file__]])
 
         # === successful inlining ===
-        @torch.compile(options={"frame_traced_fn": get_traced_files})
+        @torch.compile(options={"frame_traced_fn": get_traced_code})
         def fn(x):
             return add(x) * 2
 
         x = torch.randn(3)
-        traced_file_sets = []
+        traced_code_lists = []
         fn(x)
         utils_path = os.path.join(os.path.dirname(__file__), "utils.py")
         # expect hook to be called once with both this file and file of inlined func
-        self.assertEqual(traced_file_sets, [{__file__, utils_path}])
+        self.assertEqual(get_filenames(traced_code_lists), [[utils_path, __file__]])
 
         # === graph break occurs during inlining ===
-        @torch.compile(options={"frame_traced_fn": get_traced_files})
+        @torch.compile(options={"frame_traced_fn": get_traced_code})
         def fn(x):
             y = break_it(x)
             return y * 2
 
         x = torch.randn(3)
-        traced_file_sets = []
+        traced_code_lists = []
         fn(x)
         # expect hook to be called twice; once for this file one for file of inlined func
-        self.assertEqual(traced_file_sets, [{__file__}, {utils_path}])
+        self.assertEqual(get_filenames(traced_code_lists), [[__file__], [utils_path]])
 
         # === empty graph ===
-        @torch.compile(options={"frame_traced_fn": get_traced_files})
+        @torch.compile(options={"frame_traced_fn": get_traced_code})
         def fn(x):
             return x
 
         x = torch.randn(3)
-        traced_file_sets = []
+        traced_code_lists = []
         fn(x)
         # hook is not expected to be called at all for an empty graph
-        self.assertEqual(traced_file_sets, [])
+        self.assertEqual(traced_code_lists, [])
 
 
 class TestModel(torch.nn.Module):
