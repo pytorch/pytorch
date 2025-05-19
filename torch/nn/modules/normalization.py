@@ -6,6 +6,7 @@ import torch
 from torch import Size, Tensor
 from torch.nn import functional as F, init
 from torch.nn.modules._nn_docs import common_args
+from torch._C import _add_docstr as add_docstr
 from torch.nn.parameter import Parameter
 
 from ._functions import CrossMapLRN2d as _cross_map_lrn2d
@@ -226,6 +227,7 @@ class LayerNorm(Module):
             "{normalized_shape}, eps={eps}, "
             "elementwise_affine={elementwise_affine}".format(**self.__dict__)
         )
+add_docstr(LayerNorm, LayerNorm.__doc__.format(**common_args))
 
 
 class GroupNorm(Module):
