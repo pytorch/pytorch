@@ -40,7 +40,7 @@ static void initHipSparseLtSupport() {
     }
 }
 
-static bool isHipSparseLtSupported(int idx) {
+static bool isHipSparseLtSupported() {
     // Initialize support check only once
     c10::call_once(g_hipSparseLtSupportInitFlag, initHipSparseLtSupport);
 
@@ -61,9 +61,9 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
 
   #ifdef USE_ROCM
   TORCH_CHECK(
-      isHipSparseLtSupported(sparse_input.device().index()),
+      isHipSparseLtSupported(),
       "hipSparseLt not supported on this device, supported architectures: "
-      "gfx950, gfx940, gfx941, gfx942, gfx1200, gfx1201. "
+      "gfx950, gfx942."
       "required ROCM version: 6.4.0 or later.");
   #endif
 
@@ -165,7 +165,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
   auto compression_factor = 9;
 
   TORCH_CHECK(
-      isHipSparseLtSupported(sparse_input.device().index()),
+      isHipSparseLtSupported(),
       "hipSparseLt not supported on this device, supported architectures: "
       "gfx950, gfx942."
       "required ROCM version: 6.4.0 or later.");
