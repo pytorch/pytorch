@@ -69,7 +69,7 @@ try:
     not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 except ValueError as e:
     if "'not_implemented' not registered" in str(e):
-        import logging as not_implemented_log
+        not_implemented_log = logging.getLogger(__name__ + ".not_implemented")
     else:
         raise e
 
@@ -1022,7 +1022,7 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
     """
     Extract the TensorMetadata of a tensor.
     """
-    memory_format: Optional[torch.memory_format] = suggest_memory_format(t)
+    memory_format = suggest_memory_format(t)
     # Don't call is_contiguous() on a Tensor which has symbolic sizes or things
     # will go badly (guards will be messed up?)
     if (
@@ -1030,7 +1030,7 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
         or is_sparse_any(t)
         or not t.is_contiguous(memory_format=memory_format)
     ):
-        memory_format = None
+        memory_format = None  # type: ignore[assignment]
 
     storage_offset = t.storage_offset()
 
@@ -1426,14 +1426,22 @@ class FakeTensorMode(TorchDispatchMode):
         Lookup a cache entry for the given arguments. If none exists, dispatch
         and cache the result (if the result is eligible for caching).
         """
+        state = None
+        key = None
         try:
             state = _CacheKeyState(self.shape_env)
             key = self._cache_key(state, func, args, kwargs)
         except _BypassDispatchCache as e:
             # We couldn't create the cache key at all
             FakeTensorMode.cache_bypasses[e.reason] += 1
+
+        if key is None:
+            # Do this dispatch outside the above except handler so if it
+            # generates its own exception there won't be a __context__ caused by
+            # the caching mechanism.
             return self._dispatch_impl(func, types, args, kwargs)
 
+        assert state is not None
         if state.cache_on_shape_env():
             assert state.shape_env is not None
             cache = state.shape_env.fake_tensor_cache
