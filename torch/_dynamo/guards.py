@@ -120,7 +120,7 @@ from .source import (
     NumpyTensorSource,
     OptimizerSource,
     ScriptObjectQualifiedNameSource,
-    SetItemKeySource,
+    SetGetItemSource,
     ShapeEnvSource,
     SubclassAttrListSource,
     TorchFunctionModeStackSource,
@@ -1289,7 +1289,7 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
-        elif istype(source, SetItemKeySource):
+        elif istype(source, SetGetItemSource):
             assert base_guard_manager
             out = base_guard_manager.set_getitem_manager(
                 index=source.index,

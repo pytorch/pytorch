@@ -2831,11 +2831,13 @@ class SubgraphTracer(fx.Tracer):
         return MutationInfo(False, "")
 
     def has_aliasing(self):
+        from torch._higher_order_ops.utils import _collect_fake_inputs
+
         input_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
 
         for node in self.graph.nodes:
             if node.op == "placeholder":
-                example_value = node.meta["example_value"]
+                example_value = _collect_fake_inputs([node])[0]
                 if isinstance(example_value, torch.Tensor):
                     storage = StorageWeakRef(example_value._typed_storage())
                     if storage in input_storages:
@@ -2848,9 +2850,9 @@ class SubgraphTracer(fx.Tracer):
 
         output_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
         out_nodes = self.graph.find_nodes(op="output")[0]
-        for out_node in out_nodes.args[0]:
+        for out_node in pytree.tree_leaves(out_nodes.args[0]):
             if out_node:
-                example_value = out_node.meta["example_value"]
+                example_value = _collect_fake_inputs([out_node])[0]
                 assert not isinstance(example_value, list)
                 if isinstance(example_value, torch.Tensor):
                     storage = StorageWeakRef(example_value._typed_storage())
