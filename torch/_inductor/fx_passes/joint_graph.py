@@ -21,6 +21,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..pattern_matcher import (
+    Arg,
     CallFunction,
     init_once_fakemode,
     KeywordArg,
@@ -30,6 +31,7 @@ from ..pattern_matcher import (
     register_graph_pattern,
     stable_topological_sort,
 )
+from .decompose_mem_bound_mm import check_device
 from .replace_random import replace_random_passes
 
 
@@ -708,6 +710,28 @@ def pointless_permute_pair(match: Match, arg, perm1, perm2):
     node = match.output_node()
     node.replace_all_uses_with(arg)
     match.erase_nodes()
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.bmm,
+        Arg(),
+        Arg(),
+    ),
+    pass_dict=patterns,
+)
+def bmm_to_mm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
+    """Convert bmm to mm when batch size is 1"""
+
+    def repl(a, b):
+        return torch.mm(a.squeeze(0), b.squeeze(0)).unsqueeze(0)
+
+    if (
+        check_device(mat1.meta["val"], mat2.meta["val"], "cuda")
+        and statically_known_true(mat1.meta["val"].shape[0] == 1)
+        and statically_known_true(mat2.meta["val"].shape[0] == 1)
+    ):
+        match.replace_by_example(repl, [mat1, mat2])
 
 
 # When softmax is used with temperature or other scaling, we get the pattern

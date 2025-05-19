@@ -50,8 +50,6 @@ std::unique_ptr<AOTIModelContainerRunner> create_aoti_runner_xpu(
 }
 } // namespace
 
-static RegisterAOTIModelRunner register_xpu_runner(
-    "xpu",
-    &create_aoti_runner_xpu);
+RegisterAOTIModelRunner register_xpu_runner("xpu", &create_aoti_runner_xpu);
 } // namespace torch::inductor
 #endif

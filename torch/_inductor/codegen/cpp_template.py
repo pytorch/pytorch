@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import sympy
 
-from .. import codecache, config, ir
+from .. import config, ir
 from ..autotune_process import CppBenchmarkRequest, TensorMeta
 from ..utils import IndentedBuffer, Placeholder, unique
 from ..virtualized import V
@@ -122,15 +122,10 @@ class CppTemplate(KernelTemplate):
 
     def header(self) -> IndentedBuffer:
         res = IndentedBuffer()
-        res.writeline(codecache.cpp_prefix())
+        res.writeline("#include <torch/csrc/inductor/cpp_prefix.h>")
         # TODO: add c10::ForcedUnroll test to test_aoti_abi_check
-        res.splice("""
-            #include <c10/util/Unroll.h>
-            #ifdef AOTI_STANDALONE
-            #include <torch/csrc/inductor/aoti_standalone/c/shim.h>
-            #else
-            #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-            #endif // AOTI_STANDALONE""")
+        res.splice("""#include <c10/util/Unroll.h>""")
+        res.splice("""#include <torch/csrc/inductor/aoti_torch/c/shim.h>""")
         enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
             "linux",
             "win32",

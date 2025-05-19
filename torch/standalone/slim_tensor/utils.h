@@ -2,37 +2,14 @@
 #include <cstdint>
 #include <stdexcept>
 
-// TODO: move c10 headers to a header-only directory
+// OK to use c10 headers here because their corresponding cpp files will be
+// included in the final binary.
 #include <c10/core/Device.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 
 #include <torch/standalone/slim_tensor/array_ref.h>
-
-using AOTITorchError = int32_t;
-#define AOTI_TORCH_SUCCESS 0
-#define AOTI_TORCH_FAILURE 1
-
-// TODO: implement a proper logging mechanism or simply reuse the c10 logging
-#ifndef AOTI_TORCH_CHECK
-#define AOTI_TORCH_CHECK(...) ((void)0);
-#endif
-#ifndef AOTI_TORCH_WARN
-#define AOTI_TORCH_WARN(...) ((void)0);
-#endif
-
-#define AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(...)   \
-  try {                                                   \
-    __VA_ARGS__                                           \
-  } catch (const std::exception& e) {                     \
-    std::cerr << "Exception in aoti_torch: " << e.what(); \
-    return AOTI_TORCH_FAILURE;                            \
-  } catch (...) {                                         \
-    std::cerr << "Exception in aoti_torch: UNKNOWN";      \
-    return AOTI_TORCH_FAILURE;                            \
-  }                                                       \
-  return AOTI_TORCH_SUCCESS;
 
 namespace torch::standalone {
 inline size_t compute_numel(const ArrayRef& sizes) {
