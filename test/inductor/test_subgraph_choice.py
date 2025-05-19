@@ -183,7 +183,7 @@ class TestSubgraphChoice(TestCase):
 
             compiled_func = torch.compile(func, mode="max-autotune", dynamic=False)
 
-            res = compiled_func(a_in, b_in)
+            compiled_func(a_in, b_in)
 
 
 if __name__ == "__main__":
