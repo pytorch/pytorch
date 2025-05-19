@@ -8,12 +8,9 @@ ver() {
 
 install_ubuntu() {
     apt-get update
-    if [[ $UBUNTU_VERSION == 20.04 ]]; then
-      # gpg-agent is not available by default on 20.04
-      apt-get install -y --no-install-recommends gpg-agent
-    fi
-    apt-get install -y kmod
-    apt-get install -y wget
+    # gpg-agent is not available by default on 20.04
+    apt-get install -y --no-install-recommends gpg-agent
+    apt-get install -y kmod wget
 
     # Need the libc++1 and libc++abi1 libraries to allow torch._C to load at runtime
     apt-get install -y libc++1
