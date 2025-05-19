@@ -229,9 +229,9 @@ case "$tag" in
     VISION=yes
     TRITON=yes
     ;;
-  pytorch-linux-jammy-py3-clang18-asan)
+  pytorch-linux-jammy-py3-clang20-asan)
     ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=18
+    CLANG_VERSION=20
     VISION=yes
     ;;
   pytorch-linux-jammy-py3.10-gcc11)
