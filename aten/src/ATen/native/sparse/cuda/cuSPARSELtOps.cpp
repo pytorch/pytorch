@@ -24,28 +24,15 @@ thread_local bool handle_initialized = false;
 c10::once_flag g_hipSparseLtSupportInitFlag;
 static bool g_hipSparseLtSupported = false;
 
-// Set of supported architectures
-const static std::unordered_set<std::string> supported_archs = {"gfx950", "gfx942"};
-
 // Initialize the hipSparseLt support status once for the platform
 static void initHipSparseLtSupport() {
     // Default to not supported
     g_hipSparseLtSupported = false;
 
-    // Check the first available device
+    // Check only the first available device
     try {
-        int device_count = at::cuda::device_count();
-        for (int idx = 0; idx < device_count; idx++) {
-            auto prop = at::cuda::getDeviceProperties(idx);
-            std::string_view gcnArchName(prop->gcnArchName);
-            size_t colonPos = gcnArchName.find(':');
-            std::string_view baseArch = (colonPos != std::string_view::npos) ?
-                                        gcnArchName.substr(0, colonPos) : gcnArchName;
-
-            if (supported_archs.count(std::string(baseArch)) > 0) {
-                g_hipSparseLtSupported = true;
-                break;
-            }
+        if (at::cuda::device_count() > 0) {
+            g_hipSparseLtSupported = at::detail::getCUDAHooks().isGPUArch({"gfx950", "gfx942"}, 0);
         }
     } catch (const std::exception&) {
         // If an exception occurs during device property check, we assume hipSparseLt is not supported
