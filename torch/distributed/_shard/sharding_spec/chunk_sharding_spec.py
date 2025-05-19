@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 from dataclasses import dataclass
 from typing import cast, Optional, TYPE_CHECKING, Union
-from typing_extensions import TypeAlias
 
 import torch
 import torch.distributed as dist
@@ -22,8 +21,6 @@ if TYPE_CHECKING:
     # Only include ShardedTensor when do type checking, exclude it
     # from run-time to resolve circular dependency.
     from torch.distributed._shard.sharded_tensor import ShardedTensor
-
-_ShardingDim: TypeAlias = Union[int, str]
 
 
 @dataclass
@@ -53,7 +50,9 @@ class ChunkShardingSpec(ShardingSpec):
             :class:`torch.distributed._remote_device`
     """
 
-    dim: _ShardingDim
+    ShardingDim = Union[int, str]
+
+    dim: ShardingDim
     placements: list[Union[torch.distributed._remote_device, str]]
 
     def __post_init__(self):

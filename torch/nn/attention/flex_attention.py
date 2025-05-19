@@ -1177,8 +1177,9 @@ def _enforce_mem_layouts(
     def is_col_major(tensor: Tensor) -> bool:
         return tensor.stride()[-2] == 1
 
-    # These memory layout constraint are only for FP8 GEMMs on architectures prior to SM100.
-    # SM100 has support for TN, NT, TT, NN layouts for FP8 GEMM
+    # These memory layout constraint are only for FP8 GEMMs on NVIDIA GPU architectures >= SM89 and < SM100.
+    # This is because GPU arch < SM89 does not not support FP8 GEMMs, and
+    # SM100 has support for TN, NT, TT, NN layouts for FP8 GEMMs
     # (i.e., left and right operands can be in row or column major layouts)
     # so this check is only needed for older architectures.
     # See: https://github.com/NVIDIA/cutlass/blob/main/media/docs/cpp/blackwell_functionality.md
@@ -1187,12 +1188,14 @@ def _enforce_mem_layouts(
         torch.float8_e5m2,
     )
     gemm_precision = query.dtype
-    is_sm100_or_greater = (
-        torch.cuda.is_available()
+
+    should_enforce_mem_layout = (
+        gemm_precision in fp8_dtypes
         and torch.version.cuda is not None
-        and torch.cuda.get_device_capability("cuda") >= (10, 0)
+        and torch.cuda.get_device_capability("cuda") >= (8, 9)
+        and torch.cuda.get_device_capability("cuda") < (10, 0)
     )
-    if gemm_precision not in fp8_dtypes or not is_sm100_or_greater:
+    if not should_enforce_mem_layout:
         return query, key, value
 
     # Query must be in row-major memory layout as the left-operand in the FP8 GEMM `q @ k.T`

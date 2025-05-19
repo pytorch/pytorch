@@ -39,6 +39,9 @@ struct Vectorizedi {}; // dummy definition to make Vectorizedi always defined
 #ifdef CPU_CAPABILITY_AVX2
 
 template <>
+struct is_vec_specialized_for<int64_t> : std::bool_constant<true> {};
+
+template <>
 class Vectorized<int64_t> : public Vectorizedi {
  private:
   static const Vectorized<int64_t> ones;
@@ -172,6 +175,9 @@ class Vectorized<int64_t> : public Vectorizedi {
   Vectorized<int64_t> lt(const Vectorized<int64_t>& other) const;
   Vectorized<int64_t> le(const Vectorized<int64_t>& other) const;
 };
+
+template <>
+struct is_vec_specialized_for<int32_t> : std::bool_constant<true> {};
 
 template <>
 class Vectorized<int32_t> : public Vectorizedi {
@@ -387,6 +393,9 @@ inline void convert(const int32_t* src, double* dst, int64_t n) {
     dst[i] = static_cast<double>(src[i]);
   }
 }
+
+template <>
+struct is_vec_specialized_for<int16_t> : std::bool_constant<true> {};
 
 template <>
 class Vectorized<int16_t> : public Vectorizedi {
@@ -940,6 +949,9 @@ class Vectorized8 : public Vectorizedi {
 };
 
 template <>
+struct is_vec_specialized_for<int8_t> : std::bool_constant<true> {};
+
+template <>
 class Vectorized<int8_t> : public Vectorized8<int8_t> {
  public:
   using Vectorized8::Vectorized8;
@@ -976,6 +988,9 @@ class Vectorized<int8_t> : public Vectorized8<int8_t> {
   Vectorized<int8_t> lt(const Vectorized<int8_t>& other) const;
   Vectorized<int8_t> le(const Vectorized<int8_t>& other) const;
 };
+
+template <>
+struct is_vec_specialized_for<uint8_t> : std::bool_constant<true> {};
 
 template <>
 class Vectorized<uint8_t> : public Vectorized8<uint8_t> {
