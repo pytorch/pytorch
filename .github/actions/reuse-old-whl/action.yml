@@ -27,7 +27,7 @@ runs:
     - name: Check file changes
       id: check-file-changes
       shell: bash
-      ignore-errors: true
+      continue-on-error: true
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
       run: |
