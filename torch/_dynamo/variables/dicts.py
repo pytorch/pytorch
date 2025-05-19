@@ -931,7 +931,7 @@ class FrozensetVariable(SetVariable):
             "symmetric_difference",
         ):
             r = super().call_method(tx, name, args, kwargs)
-            return FrozensetVariable(r.items, source=self.source)
+            return FrozensetVariable(r.items)
         return super().call_method(tx, name, args, kwargs)
 
 
