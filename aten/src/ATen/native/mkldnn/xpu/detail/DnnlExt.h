@@ -303,10 +303,23 @@ class primitive_ext : public primitive {
   dnnl_exec_arg_t c_args[max_args];
 };
 
+// Specifies the combined data types of input and weight tensors.
+// For example, f32 means both input and weight are FP32, 
+// bf16_int4 means input is BF16 and weight is INT4.
 enum class joint_dtypes_t { f32 = 0, f16, bf16, int8, f16_int4, bf16_int4 };
 
+// Specifies the transposition state of input and weight tensors.
+// Convention: first letter = input, second letter = weight.
+// 'n' = not transposed, 't' = transposed.
+// For example, 'nt' means input is not transposed, weight is transposed.
 enum class trans_type_t { nn = 0, nt, tn, tt };
 
+// Specifies the type and placement of bias in the computation.
+// 'none' = no bias,
+// 'scalar' = a single scalar bias applied to all elements,
+// 'm' = per-row bias (typically matched to input rows),
+// 'n' = per-column bias (typically matched to output channels),
+// 'mn' = full bias matrix matching the output dimensions.
 enum class bias_type_t { none = 0, scalar, m, n, mn };
 
 template <typename T>
