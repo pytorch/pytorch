@@ -28,7 +28,7 @@ from .utils import (
 )
 
 
-QOP_TO_ARG_NAMES_TO_SKIP = {
+QOP_TO_ARG_NAMES_TO_SKIP: dict[Callable[..., Any], list[str]] = {
     torch._ops.ops.quantized.hardswish: ["inplace"],
     torch._ops.ops.quantized.elu: ["inplace"],
     torch._ops.ops.quantized.dropout: ["inplace"],

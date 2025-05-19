@@ -587,7 +587,7 @@ class ConstDictKeySource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
-class SetItemKeySource(ChainedSource):
+class SetGetItemSource(ChainedSource):
     index: Any
 
     def __post_init__(self):
