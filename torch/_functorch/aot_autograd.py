@@ -683,16 +683,21 @@ def _create_aot_dispatcher_function(
                         "aot_collect_metadata", log_pt2_compile_event=True
                     )
 
-                with dynamo_timed_ctx, ctx:
-                    fw_metadata = run_functionalized_fw_and_collect_metadata(
-                        flat_fn,
-                        static_input_indices=aot_config.static_input_indices,
-                        keep_input_mutations=aot_config.keep_inference_input_mutations,
-                        is_train=needs_autograd,
-                        pre_dispatch=aot_config.pre_dispatch,
-                        is_export=aot_config.is_export,
-                    )(*_dup_fake_script_obj(fake_flat_args))
-
+                if aot_config.fw_metadata:
+                    fw_metadata = aot_config.fw_metadata
+                else:
+                    with dynamo_timed_ctx, ctx:
+                        fw_metadata = run_functionalized_fw_and_collect_metadata(
+                            flat_fn,
+                            static_input_indices=aot_config.static_input_indices,
+                            keep_input_mutations=aot_config.keep_inference_input_mutations,
+                            is_train=needs_autograd,
+                            pre_dispatch=aot_config.pre_dispatch,
+                            is_export=aot_config.is_export,
+                            gm=aot_config.gm,
+                        )(*_dup_fake_script_obj(fake_flat_args))
+                # TODO: Change this to run both and assert equal
+                # assert fw_metadata == fw_metadata2
                 req_subclass_dispatch = requires_subclass_dispatch(
                     fake_flat_args, fw_metadata
                 )
@@ -1012,7 +1017,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
 def _try_get_metadata_from_dynamo(
     mod: torch.nn.Module, param_keys: KeysView[str], full_args_num: int
-) -> tuple[Optional[list[torch._guards.Source]], list[int]]:
+) -> tuple[Optional[list[torch._guards.Source]], list[int], Optional[ViewAndMutationMeta]]:
     """
     Metadata is forwarded from Dynamo to AOTDispatch via special fields on GraphModule.
     We first verify that `mod` does come from Dynamo, then we handle cases where
@@ -1024,11 +1029,11 @@ def _try_get_metadata_from_dynamo(
     """
     if not (isinstance(mod, torch.fx.GraphModule) and "dynamo_compile_id" in mod.meta):
         # graph was not captured by dynamo
-        return None, []
+        return None, [], None
 
     if not hasattr(mod, "_param_name_to_source"):
         # is from export
-        return None, []
+        return None, [], None
 
     # We now know this came from dynamo, and (1) we care about guards,
     # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
@@ -1049,6 +1054,7 @@ def _try_get_metadata_from_dynamo(
 
         static_input_indices.append(i)
 
+    view_and_mutation_meta = mod.meta.get("view_and_mutation_meta", None)
     # Collect the dynamo graph inputs
     # TODO(mlazos): Revisit if this is still needed. With Dynamo install ID
     # matched tensors back into the Fx graph, this might not be necessary.
@@ -1079,7 +1085,7 @@ def _try_get_metadata_from_dynamo(
             )
 
     assert full_args_num == len(aot_autograd_arg_pos_to_source)
-    return aot_autograd_arg_pos_to_source, static_input_indices
+    return aot_autograd_arg_pos_to_source, static_input_indices, view_and_mutation_meta
 
 
 def aot_module_simplified(
@@ -1138,6 +1144,7 @@ def aot_module_simplified(
     (
         aot_autograd_arg_pos_to_source,
         static_input_indices,
+        fw_metadata,
     ) = _try_get_metadata_from_dynamo(mod, params.keys(), len(full_args))
 
     dynamic_shapes = False
@@ -1145,7 +1152,6 @@ def aot_module_simplified(
         if isinstance(x, FakeTensor):
             dynamic_shapes = x.fake_mode.shape_env is not None
             break
-
     aot_config = AOTConfig(
         fw_compiler=fw_compiler,
         bw_compiler=bw_compiler,
@@ -1162,6 +1168,8 @@ def aot_module_simplified(
         no_tangents=False,
         cache_info=None,
         ignore_shape_env=ignore_shape_env,
+        fw_metadata=fw_metadata,
+        gm=mod if isinstance(mod, torch.fx.GraphModule) else None,
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     fake_flat_args = process_inputs(

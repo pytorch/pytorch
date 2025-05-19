@@ -12,7 +12,7 @@ import collections
 import contextlib
 import logging
 from functools import wraps
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -125,6 +125,45 @@ def coerce_tangent_and_suggest_memory_format(x: Tensor):
     return out, out_memory_format, updated
 
 
+# To work around vmap, might need to disable if not suitable
+# since vmap not common enough
+def extract_view_graph_module(
+    gm: torch.fx.GraphModule,
+    output_node: torch.fx.Node,
+    tgt_base_tensor: torch.Tensor
+) -> torch.fx.GraphModule:
+    """
+    Given a graph module, gm, and the output_node, output, where
+    output_node is a alias (some combination of views on the tgt_node),
+    we want to extract a graph module that performs the view operations on
+    tgt_node to reach output_node.
+    """
+    # Create a new graph to hold the extracted operations
+    new_graph = torch.fx.Graph()
+
+    # Traverse the graph from tgt_node to output_node
+    current_node = output_node
+    current_fake_tensor = current_node.meta['example_value'] if 'example_value' in current_node.meta else None
+    nodes_for_view = []
+    # TODO instead: just check the curr storage 
+    while id(current_fake_tensor) != id(tgt_base_tensor):
+        # Copy the current node to the new graph
+        nodes_for_view.append(current_node)
+
+        # Move to the next node in the path
+        current_node = current_node.args[0]  # Assuming a single input for simplicity
+        current_fake_tensor = current_node.meta['example_value'] if 'example_value' in current_node.meta else None
+
+    # Create a new GraphModule with the extracted graph
+    for node in reversed(nodes_for_view):
+        _ = new_graph.node_copy(node)
+    new_gm = torch.fx.GraphModule(gm, new_graph)
+
+    return new_gm
+
+# TODO: Test integration of this 
+
+
 # This is a version of functionalization that is specifically designed
 # for the AOTAutograd use case.
 #
@@ -156,9 +195,11 @@ def run_functionalized_fw_and_collect_metadata(
     # is_export is technically only needed to avoid using functionalization V2
     # during analysis
     is_export: bool = False,
+    gm: Optional[torch.fx.GraphModule] = None,
 ) -> Callable[..., ViewAndMutationMeta]:
     memo: dict[Tensor, Tensor] = {}
-
+    # For testing purpose for now, we want a graph module to be passed in
+    assert gm is not None 
     def _to_fun(t):
         if isinstance(t, Tensor):
             if t in memo:
@@ -175,7 +216,10 @@ def run_functionalized_fw_and_collect_metadata(
         assert all(isinstance(a, tuple(KNOWN_TYPES)) for a in flat_args)
 
         input_info: list[InputAliasInfo] = []
+        # Make the arg id to what info we could collect for now
+        input_info_from_fake_tensor: dict[int, dict[str, Any]] = {}
         output_info: list[OutputAliasInfo] = []
+        output_info_from_fake_tensor: list[dict[str, Any]] = []
 
         prior_grad_enabled = torch.is_grad_enabled()
         prior_autocast_states = _get_autocast_states()
@@ -211,8 +255,15 @@ def run_functionalized_fw_and_collect_metadata(
                 "If you encounter this error while using torch.compile, please file a bug."
             )
 
+        for arg in flat_args:
+            # These are the fake_tensor inputs
+            # TODO: Figure out how to set bits to track mutations properly
+            requires_grad = isinstance(arg, Tensor) and arg.requires_grad
+            input_info_from_fake_tensor[id(arg)] = {'requires_grad': requires_grad}
+
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
+        # TODO: Replace as much of this as possible with the fake tensors right now
         for i, (arg, f_arg) in enumerate(zip(flat_args, flat_f_args)):
             # NB: Mutation of non-contiguous tensor subclass input can result in a mismatch in
             # strides between the functionalized arg inner tensors and non-functionalized arg inner
@@ -242,7 +293,7 @@ def run_functionalized_fw_and_collect_metadata(
                 mutates_data = False
 
             requires_grad = isinstance(f_arg, torch.Tensor) and f_arg.requires_grad
-
+            assert input_info_from_fake_tensor[id(arg)]['requires_grad'] == requires_grad
             input_info.append(
                 InputAliasInfo(
                     is_leaf=isinstance(arg, Tensor) and safe_is_leaf(arg),
@@ -268,15 +319,32 @@ def run_functionalized_fw_and_collect_metadata(
             if isinstance(inpt, Tensor)
         }
 
+        # Can't use f_args - not actually the inputs!
+        inp_fake_nodes = gm.graph.find_nodes(op="placeholder")
+        inp_storage_fake_refs = {
+            StorageWeakRef(inpt.meta['example_value'].untyped_storage()): idx
+            for idx, inpt in enumerate(inp_fake_nodes)
+            if 'example_value' in inpt.meta and isinstance(inpt.meta['example_value'], Tensor)
+        }
         # We need inp tensor id's to be able to tell if an outputs **are** inputs.
         inp_tensor_ids = {id(inpt) for inpt in flat_f_args if isinstance(inpt, Tensor)}
+        inp_tensor_fake_ids = {id(inpt) for inpt in inp_fake_nodes if 'example_value' in inpt.meta and isinstance(inpt.meta['example_value'], Tensor)}
         # We need output tensor id's to tell if any output._base` attributes **are** other outputs.
         # (This is also a dict because we need to know that output's index, so we can regenerate
         # the alias from it).
         out_tensor_ids = {id(o): i for i, o in enumerate(flat_f_outs)}
+        # Should only be one
+        output_node = gm.graph.find_nodes(op="output")[0]
+        output_nodes = output_node.args
+        # Filter non-empty
+        # Want to get the fakeTensor (example_value) in meta 
+        # So check first element of tuple for the fx.Node
+        import pdb; pdb.set_trace
+        out_tensor_fake_ids = {id(o[0].meta['example_value']): i for i, o in enumerate(output_nodes) if len(o) > 0 and hasattr(o[0], 'meta') and 'example_value' in o[0].meta and isinstance(o[0].meta['example_value'], torch.Tensor)}
 
         # Keep track of which outputs alias other outputs
         out_tensor_alias_counts: collections.defaultdict = collections.defaultdict(int)
+        out_fake_tensor_alias_counts: collections.defaultdict = collections.defaultdict(int)
         # This tells us, for a given group of outputs that alias each other,
         # whether they e.g. all came from an unbind call
         num_aliased_tensors_that_are_multi_output_views: collections.defaultdict = (
@@ -287,6 +355,280 @@ def run_functionalized_fw_and_collect_metadata(
             Optional[StorageWeakRef],
             collections.defaultdict[MetadataKey, set[torch.Tensor]],
         ] = collections.defaultdict(lambda: collections.defaultdict(set))
+        out_fake_storage_to_metadata_key_to_tensors: collections.defaultdict[
+            Optional[StorageWeakRef],
+            collections.defaultdict[MetadataKey, set[torch.Tensor]],
+        ] = collections.defaultdict(lambda: collections.defaultdict(set))
+
+        intermediate_base_fake_tensor_id_to_output_idx: dict[int, int] = {}
+        intermediate_fake_bases: list[torch.Tensor] = []
+
+        for output_node in output_nodes:
+            o = output_node[0].meta['example_value'] if 'example_value' in output_node[0].meta and isinstance(output_node[0].meta['example_value'], torch.Tensor) else None
+            if o is not None and isinstance(o, Tensor):
+                curr_storage = StorageWeakRef(o.untyped_storage())
+                out_fake_tensor_alias_counts[curr_storage] += 1
+                if o.requires_grad:
+                    out_fake_storage_to_metadata_key_to_tensors[curr_storage][
+                        MetadataKey.make(o)
+                    ].add(o)
+
+
+        for output_node in output_nodes:
+            # NOTE: No longer using functional tensors... figure what to do
+            o = output_node[0].meta['example_value'] if 'example_value' in output_node[0].meta and isinstance(output_node[0].meta['example_value'], torch.Tensor) else None
+            functional_tensor_storage_changed = False 
+            # isinstance(
+            #     o, FunctionalTensor
+            # ) and torch._functionalize_was_storage_changed(  # type: ignore[attr-defined]
+            #     o.elem
+            # )
+            # QUESTION TO VALIDATE: does this untyped storage actually work
+            # for FakeTensor as expected? 
+            curr_storage = (
+                None
+                if not isinstance(o, torch.Tensor)
+                else StorageWeakRef(o.untyped_storage())
+            )
+            outs_with_identical_metadata_that_require_grad = (
+                []
+                if not isinstance(o, Tensor)
+                else [
+                    curr
+                    for curr in out_fake_storage_to_metadata_key_to_tensors[curr_storage][
+                        MetadataKey.make(o)
+                    ]
+                    if o is not curr
+                ]
+            )
+
+            # See Note [Accessing .grad_fn on FunctionalTensor]
+            # In-place operations on views will trigger a lazy rebase of the autograd graph;
+            # this runs during access to the .grad_fn. The rebase logic will invoke view ops
+            # on FunctionalTensors, so we must enable a FunctionalTensorMode here to ensure
+            # these op calls succeed.
+            grad_fn = None
+            if isinstance(o, Tensor):
+                grad_fn = o.grad_fn
+
+            is_result_of_custom_autograd_fn = False
+            # Need to check for both custom cpp (CppFunction) and python (BackwardCFunction)
+            # autograd fns
+            if type(grad_fn).__name__ == "CppFunction":
+                is_result_of_custom_autograd_fn = True
+            if isinstance(grad_fn, torch.autograd.function.BackwardCFunction):
+                is_result_of_custom_autograd_fn = True
+
+            if not isinstance(o, Tensor):
+                output_type = OutputType.non_alias
+                base_idx = None
+            elif (
+                curr_storage in inp_storage_fake_refs
+                and grad_fn is not None
+                and is_result_of_custom_autograd_fn
+            ):
+                output_type = OutputType.custom_function_view
+                base_idx = None
+            elif (
+                curr_storage in inp_storage_fake_refs
+                and not functional_tensor_storage_changed
+            ):
+                base_idx = inp_storage_fake_refs[curr_storage]
+                is_input_tensor = id(o) in inp_tensor_fake_ids
+                num_aliased_outs = out_fake_tensor_alias_counts[curr_storage]
+                num_multi_output_view_outs = (
+                    num_aliased_tensors_that_are_multi_output_views[curr_storage]
+                )
+                num_aliased_outs_that_are_not_multi_output_views = (
+                    num_aliased_outs - num_multi_output_view_outs
+                )
+                if (
+                    grad_fn is not None
+                    and num_aliased_outs_that_are_not_multi_output_views == 0
+                ):
+                    # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
+                    # In particular, given:
+                    # def f(x):
+                    #     return list(x.unbind(0))
+                    # The main reason we ordinarily try to regenerate these output aliases outside of the
+                    # compiled autograd.Function is because if any of the outputs are later mutated,
+                    # autograd needs to perform view-replay to regenerate them.
+                    # However, autograd does not allow users to mutate multi-output views
+                    # in any way that can change the autograd metadata of other aliases.
+                    # So we hide this aliasing from autograd here.
+                    log.debug(
+                        "Encountered AOTAutograd case: differentiable outputs that \
+alias each other from a multi-output view call"
+                    )
+                    output_type = OutputType.non_alias
+                elif is_input_tensor:
+                    output_type = OutputType.is_input
+                else:
+                    output_type = OutputType.alias_of_input
+            elif functional_tensor_storage_changed and id(o) in inp_tensor_fake_ids:
+                # When there is a set_() on an input, we cannot rely on checking storages
+                # to detect if we are returning an input (since the inputs storage is different)
+                assert curr_storage is not None
+                base_idx = inp_storage_refs[curr_storage]
+                output_type = OutputType.is_input
+
+            # We only need to handle the intermediate base case when both
+            # the intermediate base and the output require gradients.
+            # See Note [AOT Autograd: outputs aliasing inputs or intermediates!]
+            elif o._base is not None and o.requires_grad and o._base.requires_grad:
+                num_aliased_outs = out_fake_tensor_alias_counts[curr_storage]
+                num_multi_output_view_outs = (
+                    num_aliased_tensors_that_are_multi_output_views[curr_storage]
+                )
+                num_aliased_outs_that_are_not_multi_output_views = (
+                    num_aliased_outs - num_multi_output_view_outs
+                )
+                # Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
+                if (
+                    out_fake_tensor_alias_counts[curr_storage] == 1
+                    or num_aliased_outs_that_are_not_multi_output_views <= 1
+                ):
+                    # Note [Intermediate Bases Optimization]
+                    # Normally if we have an output that aliases an intermediate,
+                    # we need to add the extra "intermediate base" logic further down
+                    # to prevent autograd from yelling at us if the user later tries to
+                    # mutate that output.
+                    # However, the common case here is if we have an output that aliases an intermediate,
+                    # but doesn't alias any other outputs.
+                    # In that case, autograd shouldn't have to worry about the aliasing at all
+                    # (if that output is mutated, there are no other live aliases for autograd to worry about).
+                    # The "intermediate bases" can hurt inductor perf by forcing more variables to become outputs.
+                    # So as an optimization, we won't do intermediate base handling in this case.
+                    # Instead, we'll hide the aliasing from autograd using aten._unsafe_view().
+                    if (
+                        out_fake_tensor_alias_counts[curr_storage] != 1
+                        and num_aliased_outs_that_are_not_multi_output_views <= 1
+                    ):
+                        log.debug(
+                            "Encountered AOTAutograd case: differentiable outputs that alias each other \
+from a multi-output view call"
+                        )
+                    output_type = OutputType.unsafe_view_alias
+                    base_idx = None
+                else:
+                    # First, check if o's ._base is an existing output
+                    maybe_existing_out_idx = out_tensor_fake_ids.get(id(o._base), None)
+                    if maybe_existing_out_idx is not None:
+                        # Special case where the output is an alias of a graph intermediate, but that intermediate
+                        # is itself also a user output.
+                        output_type = (
+                            OutputType.alias_of_intermediate_base_is_user_output
+                        )
+                        base_idx = maybe_existing_out_idx
+                    else:
+                        # Next, check if o's ._base is an intermediate base that we already returned
+                        maybe_existing_base_output_idx = (
+                            intermediate_base_fake_tensor_id_to_output_idx.get(
+                                id(o._base), None
+                            )
+                        )
+                        if maybe_existing_base_output_idx is not None:
+                            output_type = OutputType.alias_of_intermediate
+                            base_idx = maybe_existing_base_output_idx
+                        else:
+                            # Otherwise, take o._base and explicitly return it as an output in the compiled graph
+                            new_out_idx = len(intermediate_fake_bases)
+                            base_idx = new_out_idx
+                            # Indicate to the logic later on (when we trace the joint)
+                            # that this particular output should get it's ._base appended to the forward graph outputs
+                            output_type = (
+                                OutputType.alias_of_intermediate_save_as_output
+                            )
+                            intermediate_base_fake_tensor_id_to_output_idx[
+                                id(o._base)
+                            ] = new_out_idx
+                            intermediate_fake_bases.append(o._base)
+            elif (
+                # See https://github.com/pytorch/pytorch/issues/100348 for this case.
+                # This protects against the specific case where a user fn returns (output, output.detach())
+                out_fake_tensor_alias_counts[curr_storage] > 1
+                and len(outs_with_identical_metadata_that_require_grad) > 0
+                and not o.requires_grad
+            ):
+                # In theory we could use any of these tensors to regenerate the aliased outputs from,
+                # since they all alias each other and have identical metatadata
+                out_alias = outs_with_identical_metadata_that_require_grad[0]
+                existing_out_idx = out_tensor_fake_ids[id(out_alias)]
+                output_type = OutputType.alias_of_intermediate_base_is_user_output
+                base_idx = existing_out_idx
+            else:
+                output_type = OutputType.non_alias
+                base_idx = None
+
+            if isinstance(o, torch.Tensor):
+                dynamic_dims = {
+                    i for i, s in enumerate(o.shape) if not is_concrete_int(s)
+                }
+            else:
+                dynamic_dims = None
+
+            # Save the current FunctionalTensor output.
+            #
+            # This will be used at runtime for reconstructing output views from
+            # their respective base tensors.
+            #
+            # The FunctionalTensor will be saved if one of the 2 conditions below
+            # is true:
+            functional_tensor = None
+            if (
+                # 1. If the output_type is either of:
+                #    (i) alias_of_intermediate;
+                #    (ii) alias_of_intermediate_save_as_output; or
+                #    (iii) alias_of_intermediate_base_is_user_output.
+                #
+                # No need to worry about in-place view operations here, since
+                # this functionalization step elimitates mutations.
+                #
+                # i.e. we have access to the actual base tensor, before the
+                # in-place operation was applied.
+                output_type
+                in (
+                    OutputType.alias_of_intermediate,
+                    OutputType.alias_of_intermediate_save_as_output,
+                    OutputType.alias_of_intermediate_base_is_user_output,
+                )
+            ) or (
+                # 2. If the output_type is alias_of_input, and no in-place view
+                #    operationthe was run on the input (base tensor).
+                #
+                # In this case, we need to check for metadata mutation because
+                # the runtime explicitly reconstructs the inputs, before actually
+                # reconstructing the outputs. Due to in-place view operations, the
+                # fully reconstructed input may not be this output base tensor
+                # anymore.
+                output_type == OutputType.alias_of_input
+                and base_idx is not None
+                # TODO: Get this properly from the input metadata
+                # and not input_info[base_idx].mutates_metadata
+            ):
+                # Try getting the subgraph
+                base_tensor = None                    
+                if base_idx is not None and base_idx < len(inp_storage_refs):
+                    base_tensor = inp_fake_nodes[base_idx].meta['example_value']
+                elif base_idx is not None and base_idx < len(inp_storage_refs) + len(
+                    intermediate_fake_bases
+                ):
+                    # Get from intermediate bases
+                    base_tensor = o._base
+                else:
+                    assert False, "Shouldn't be here"
+                # Get the subgraph
+                import pdb; pdb.set_trace()
+                functional_tensor = extract_view_graph_module(gm, output_node[0], base_tensor)
+            
+            output_info_from_fake_tensor.append({
+                "output_type": output_type,
+                "raw_type": type(o),
+                "base_idx": base_idx,
+                "dynamic_dims": dynamic_dims,
+                "requires_grad": isinstance(o, torch.Tensor) and o.requires_grad,
+                "functional_tensor": functional_tensor,
+            })
 
         curr_storage = None
         for o in flat_f_outs:
@@ -410,6 +752,7 @@ def run_functionalized_fw_and_collect_metadata(
         # the autograd engine mistakenly assumes that 'x' and 'out' are aliased, treating 'x' as 'out._base'.
         # This misinterpretation leads to an 'alias_of_input' flag, causing an unnecessary as_strided() call to be generated,
         # which could lead to issues later in the code.
+        idx = 0
         for o in flat_f_outs:
             functional_tensor_storage_changed = isinstance(
                 o, FunctionalTensor
@@ -451,6 +794,7 @@ def run_functionalized_fw_and_collect_metadata(
             if isinstance(grad_fn, torch.autograd.function.BackwardCFunction):
                 is_result_of_custom_autograd_fn = True
 
+
             if not isinstance(o, Tensor):
                 output_type = OutputType.non_alias
                 base_idx = None
@@ -465,6 +809,7 @@ def run_functionalized_fw_and_collect_metadata(
                 curr_storage in inp_storage_refs
                 and not functional_tensor_storage_changed
             ):
+                # Test takes this path, so why not other?
                 base_idx = inp_storage_refs[curr_storage]
                 is_input_tensor = id(o) in inp_tensor_ids
                 num_aliased_outs = out_tensor_alias_counts[curr_storage]
@@ -639,10 +984,23 @@ from a multi-output view call"
             ):
                 if isinstance(o, FunctionalTensor):
                     functional_tensor = FunctionalTensorMetadataEq(o.elem)
-
+            import pdb; pdb.set_trace()
+            fake_tensor_info = output_info_from_fake_tensor[idx]
+            idx += 1
+            # Check parity
+            assert fake_tensor_info["output_type"] == (
+                output_type
+            ), "output types must match"
+            assert fake_tensor_info["base_idx"] == base_idx, "base indices must match"
+            assert fake_tensor_info["dynamic_dims"] == (
+                dynamic_dims
+            ), "dynamic dims must match"
+            assert fake_tensor_info["requires_grad"] == (
+                isinstance(o, torch.Tensor) and o.requires_grad
+            ), "require grad must match"
             out_info = OutputAliasInfo(
                 output_type=output_type,
-                raw_type=type(o),
+                raw_type=type(o), # NOTE: raw_type won't match because of functionalization
                 base_idx=base_idx,
                 dynamic_dims=dynamic_dims,
                 requires_grad=isinstance(o, torch.Tensor) and o.requires_grad,

@@ -35,6 +35,9 @@ from torch._dynamo import (
 )
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.repro.after_aot import wrap_compiler_debug
+from torch._dynamo.output_graph import get_aliased_nodes, get_mutated_inputs
+from torch.fx.experimental.symbolic_shapes import is_concrete_int
+from torch._subclasses.meta_utils import safe_is_leaf
 from torch._dynamo.utils import (
     chromium_event_timed,
     CompileEventLogger,
@@ -81,6 +84,12 @@ from torch._inductor.utils import (
     should_assume_input_aligned,
     should_use_remote_fx_graph_cache,
     tensor_is_aligned,
+)
+from torch._functorch._aot_autograd.schemas import (
+    InputAliasInfo,
+    OutputAliasInfo,
+    OutputType,
+    ViewAndMutationMeta
 )
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import trace_structured
@@ -2100,7 +2109,67 @@ def compile_fx(
                 )
                 + f"\n\n # graph id: {id(model_.graph)}",
             )
-
+            input_info = []
+            output_info = []
+            keep_input_mutations = True
+            # TODO: Need to find where the subgraph tracer is called to move this logic to there!
+            aliased_input_to_input, aliased_output_to_output, aliased_input_to_output = get_aliased_nodes(model_.graph)
+            mutated_inputs = get_mutated_inputs(model_.graph, [])
+            mutated_inputs = []
+            for node in model_.graph.nodes:
+                if node.op == "placeholder":
+                    mutates_data = node in mutated_inputs
+                    # NOTE: Not sure if this is actually correct :/
+                    mutates_metadata = node in aliased_input_to_output
+                    mutates_storage_metadata = node in aliased_input_to_input
+                    requires_grad = isinstance(node.type, torch.Tensor) and node.meta['example_value'].requires_grad 
+                    input_info.append(
+                        InputAliasInfo(
+                            is_leaf=isinstance(node.type, torch.Tensor) and safe_is_leaf(node.meta['example_value']),
+                            mutates_data=mutates_data,
+                            mutates_metadata=mutates_metadata,
+                            mutations_hidden_from_autograd=False, # TODO: Fill in,
+                            mutates_storage_metadata=mutates_storage_metadata,
+                            mutations_under_no_grad_or_inference_mode=False, # TODO: Fill in,
+                            mutation_inductor_storage_resize=False, # TODO: Fill in,
+                            requires_grad=requires_grad,
+                            keep_input_mutations=keep_input_mutations,
+                        )
+                    )
+                # TODO: Split this in two since that is what is done when iterating - makes faster
+                elif node.op == "output":
+                    # TODO: Add the logic to determine this; itis very complex though so we skip for now
+                    # TODO: inspect Node here, as well as the fields above
+                    # import pdb; pdb.set_trace()
+                    base_idx = None
+                    output_type = OutputType.unsafe_view_alias 
+                    o = type(node)
+                    # o_ex = node.meta['example_value']
+                    o_ex = None
+                    if isinstance(o, torch.Tensor):
+                        # TODO: Should we just get this from dynamism?
+                        dynamic_dims = {
+                            i for i, s in enumerate(o_ex.size) if not is_concrete_int(s)
+                        }
+                    else:
+                        dynamic_dims = None
+                    output_info.append(
+                        OutputAliasInfo(
+                            output_type=output_type,
+                            raw_type=type(o),
+                            base_idx=base_idx,
+                            dynamic_dims=dynamic_dims,
+                            requires_grad=isinstance(o, torch.Tensor) and o_ex.requires_grad,
+                            functional_tensor=None, # TODO: Fill this in after evaluating feasability
+                        )
+                    )
+            # Setup what metadata we can here 
+            model_.meta["view_and_mutation_data"] = (
+                None
+                # ViewAndMutationMeta(
+                #     input_info=input_info, output_info=output_info, num_intermediate_bases=0, keep_input_mutations=False, traced_tangents=[], subclass_inp_meta=[], subclass_fw_graph_out_meta=[], subclass_tangent_meta=[]
+                # )
+            )
         # TODO: Move this before recursive pre-grad passes
         # NB: This short circuit never occurs for Dynamo produced graphs
         # (which are pre-flattened)

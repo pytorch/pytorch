@@ -46,6 +46,9 @@ class StorageWeakRef:
     def expired(self):
         return torch.Storage._expired(self.cdata)  # type: ignore[attr-defined]
 
+    def __repr__(self):
+        return f"StorageWeakRef({self.cdata})"
+        
     def __del__(self):
         self._free_weak_ref(self.cdata)
 
