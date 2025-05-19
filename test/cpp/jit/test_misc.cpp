@@ -3050,6 +3050,25 @@ TEST(TestShapeGraphLinting, Basic) {
   }
 }
 
+TEST(DeadCodeEliminatorTest, TestConstructor) {
+  // Test case 1: markUpdated = true, fullyMarked = true
+  MarkResult result1(true, true);
+  EXPECT_TRUE(result1.markUpdated_);
+  EXPECT_TRUE(result1.fullyMarked_);
+  // Test case 2: markUpdated = true, fullyMarked = false
+  MarkResult result2(true, false);
+  EXPECT_TRUE(result2.markUpdated_);
+  EXPECT_FALSE(result2.fullyMarked_);
+  // Test case 3: markUpdated = false, fullyMarked = true
+  MarkResult result3(false, true);
+  EXPECT_FALSE(result3.markUpdated_);
+  EXPECT_TRUE(result3.fullyMarked_);
+  // Test case 4: markUpdated = false, fullyMarked = false
+  MarkResult result4(false, false);
+  EXPECT_FALSE(result4.markUpdated_);
+  EXPECT_FALSE(result4.fullyMarked_);
+}
+
 // TODO: move to test_kernel when global settings are explicit
 // fusion parameters
 class Composed : public ::testing::Test {
