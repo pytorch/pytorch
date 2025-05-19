@@ -432,7 +432,7 @@ struct TensorDescriptorListParams {
   // Only valid when !is_input_packed
   int64_t batch_sizes_sum; // == sum(batch_sizes)
 
-  bool is_input_packed() const {
+  [[nodiscard]] bool is_input_packed() const {
     return !batch_sizes.empty();
   }
 
