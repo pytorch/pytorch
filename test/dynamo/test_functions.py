@@ -15,7 +15,6 @@ import typing
 import unittest
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar
-from typing_extensions import NamedTuple
 from unittest.mock import patch
 
 import numpy as np
@@ -39,6 +38,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from typing_extensions import NamedTuple
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
@@ -150,6 +150,28 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_inline_lru_cache_fn_with_default_args(a, b):
         return inline_lru_cache_fn_with_default_args(a, 2, b)
+
+    def test_lru_cache_warning_issued_during_tracing(self):
+        import warnings
+        from functools import lru_cache
+
+        @lru_cache
+        def foo(x):
+            return x + 1
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            torch.compile(foo, backend="eager")(torch.randn(4))
+
+        for warning in w:
+            warning_message = str(warning.message)
+            if (
+                "Dynamo detected a call to a `functools.lru_cache` wrapped function"
+                in warning_message
+            ):
+                break
+        else:
+            self.assertTrue(False, "Expected warning about lru_cache not found")
 
     @make_test
     def test_add(a, b):
