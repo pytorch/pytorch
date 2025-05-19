@@ -467,9 +467,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               alpha,
               (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
               activation_to_gemm_and_blas_arg(activation));
-        }
-
-        okay = at::cuda::blas::gemm_and_bias<scalar_t>(
+        } else {
+          okay = at::cuda::blas::gemm_and_bias<scalar_t>(
             args.transa == 't',
             args.transb == 't',
             args.m,
@@ -486,7 +485,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
             args.result->data_ptr<scalar_t>(),
             args.result_ld,
             activation_to_gemm_and_blas_arg(activation)
-        );
+          );
+        }
       });
     }
     if (!okay) {

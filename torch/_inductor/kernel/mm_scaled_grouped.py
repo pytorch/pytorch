@@ -75,7 +75,7 @@ _AMD_CONFIGS = [
 ]
 
 
-def scaled_grouped_mm_configs():
+def grouped_mm_configs():
     return _AMD_CONFIGS if torch.version.hip else _NV_CONFIGS
 
 
@@ -122,7 +122,7 @@ def early_config_prune(configs, named_args):
 
 
 # Copied from fbgemm grouped_gemm.py
-triton_scaled_grouped_mm_source = r"""
+triton_grouped_mm_source = r"""
 {% if A_IS_2D or B_IS_2D %}
 {{def_kernel("a_ptr", "b_ptr", "scale_a_ptr", "scale_b_ptr", "offsets_ptr")}}
 {% else %}
@@ -370,7 +370,7 @@ triton_scaled_grouped_mm_source = r"""
 triton_scaled_grouped_mm_template = TritonTemplate(
     name="scaled_grouped_mm",
     grid=persistent_grouped_mm_grid,
-    source=triton_scaled_grouped_mm_source,
+    source=triton_grouped_mm_source,
 )
 
 
@@ -439,8 +439,8 @@ def can_use_triton_kernel(
     if not has_triton_tma_device():
         return False
 
-    # The _scaled_grouped_mm() operator doesn't support bias nor
-    # scale_result yet.
+    # The _grouped_mm()/_scaled_grouped_mm() operator do not support
+    # bias nor scale_result yet.
     if bias is not None:
         return False
     if scale_result is not None:
@@ -483,27 +483,32 @@ def create_offsets(x, m1_size, m2_size, offs_size):
             return None
 
 
-@register_lowering(aten._scaled_grouped_mm.default, type_promotion_kind=None)
-def tuned_scaled_grouped_mm(
+def _tuned_grouped_mm_common(
+    operator_name: str,
+    algorithm_name: str,
+    extern_kernel_choice: ExternKernelChoice,
+    kernel_template: TritonTemplate,
     mat_a: TensorBox,
     mat_b: TensorBox,
-    scale_a: TensorBox,
-    scale_b: TensorBox,
+    scale_a: Optional[TensorBox] = None,
+    scale_b: Optional[TensorBox] = None,
     offs: Optional[TensorBox] = None,
     bias: Optional[TensorBox] = None,
     scale_result: Optional[TensorBox] = None,
     out_dtype: Optional[torch.dtype] = None,
-    use_fast_accum: bool = False,
+    use_fast_accum: Optional[bool] = False,
     layout: Optional[Layout] = None,
 ) -> TensorBox:
-    """Auto-tuning for _scaled_grouped_mm() operator."""
+    assert (scale_a is None) == (scale_b is None)
+    assert scale_result is None or scale_a is not None
 
     m1_size, m2_size, layout, mat_a, mat_b, offs = grouped_mm_args(
         mat_a, mat_b, offs, layout=layout, out_dtype=out_dtype
     )
-    counters["aten_mm_info"]["aten._scaled_grouped_mm.default"] += 1
+    counters["aten_mm_info"][operator_name] += 1
+    log_message = f"Tuned {operator_name}: mat1_shape=%s, mat2_shape=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s"
     log.info(
-        "Tuned aten._scaled_grouped_mm.default: mat1_shape=%s, mat2_shape=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        log_message,
         m1_size,
         m2_size,
         mat_a.get_dtype(),
@@ -512,14 +517,16 @@ def tuned_scaled_grouped_mm(
     )
     check_supported_striding(mat_a, mat_b)
 
-    scale_a, scale_b = realize_inputs(scale_a, scale_b)
-
     # workaround for Inductor not supporting optional tensor input arguments
-    input_nodes: list[Any] = [mat_a, mat_b, scale_a, scale_b]
+    input_nodes: list[Any] = [mat_a, mat_b]
+    if scale_a is not None:
+        input_nodes.append(realize_inputs(scale_a))
+    if scale_b is not None:
+        input_nodes.append(realize_inputs(scale_b))
     if offs is not None:
         input_nodes.append(realize_inputs(offs))
 
-    aten_choice = aten__scaled_grouped_mm.bind(
+    aten_choice = extern_kernel_choice.bind(
         input_nodes,
         layout,
         out_dtype=out_dtype,
@@ -572,8 +579,8 @@ def tuned_scaled_grouped_mm(
             "USE_TMA_LOAD": True,
         }
 
-        for config in early_config_prune(scaled_grouped_mm_configs(), kwargs):
-            triton_scaled_grouped_mm_template.maybe_append_choice(
+        for config in early_config_prune(grouped_mm_configs(), kwargs):
+            kernel_template.maybe_append_choice(
                 choices,
                 input_nodes=input_nodes,
                 layout=layout,
@@ -589,5 +596,38 @@ def tuned_scaled_grouped_mm(
         ),
     }
     return autotune_select_algorithm(
-        "scaled_grouped_mm", choices, input_nodes, layout, input_gen_fns=input_gen_fns
+        algorithm_name, choices, input_nodes, layout, input_gen_fns=input_gen_fns
+    )
+
+
+@register_lowering(aten._scaled_grouped_mm.default, type_promotion_kind=None)
+def tuned_scaled_grouped_mm(
+    mat_a: TensorBox,
+    mat_b: TensorBox,
+    scale_a: TensorBox,
+    scale_b: TensorBox,
+    offs: Optional[TensorBox] = None,
+    bias: Optional[TensorBox] = None,
+    scale_result: Optional[TensorBox] = None,
+    out_dtype: Optional[torch.dtype] = None,
+    use_fast_accum: bool = False,
+    layout: Optional[Layout] = None,
+) -> TensorBox:
+    """Auto-tuning for _scaled_grouped_mm() operator."""
+
+    return _tuned_grouped_mm_common(
+        "aten._scaled_grouped_mm.default",
+        "scaled_grouped_mm",
+        aten__scaled_grouped_mm,
+        triton_scaled_grouped_mm_template,
+        mat_a,
+        mat_b,
+        scale_a,
+        scale_b,
+        offs,
+        bias,
+        scale_result,
+        out_dtype,
+        use_fast_accum,
+        layout,
     )
