@@ -1509,8 +1509,10 @@ class GuardBuilder(GuardBuilderBase):
             not invert, key, get_verbose_code_parts(code, guard)
         )
 
-    def SET_CONTAINS(self, guard: Guard, item: Any, contains: bool):
+    def SET_CONTAINS(self, guard: Guard, key: Any, invert: bool):
         set_ref = self.arg_ref(guard)
+        item = key
+        contains = not invert  # install_dict_contains_guard inverts "contains"
 
         code = f"set.__contains__({set_ref}, {item!r})"
 
