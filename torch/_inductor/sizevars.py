@@ -666,6 +666,13 @@ class SizeVarAllocator:
                 l2r = lhs.compare(rhs) == 1  # see sympy.Basic.compare
                 src = lhs if l2r else rhs
                 dst = rhs if l2r else lhs
+
+                existing_replacement = self.unbacked_replacements.get(src, None)
+                if existing_replacement and isinstance(
+                    existing_replacement, sympy.Symbol
+                ):
+                    # Prefer to keep replacements with symbols.
+                    continue
                 self.unbacked_replacements[src] = dst
         return self.unbacked_replacements
 

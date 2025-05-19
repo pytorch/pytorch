@@ -1330,27 +1330,27 @@ class AOTInductorTestsTemplate:
 
         class Repro(torch.nn.Module):
             def forward(self, values, repeats, mask, embeddings, x, y, z, lst):
+                index = torch.repeat_interleave(values, repeats)
+                index_select = torch.index_select(embeddings, 0, index)
+
                 u0, u1, random_unbacked = lst.tolist()
                 torch._check_is_size(u0)
                 torch._check_is_size(u1)
                 backed = z.size(0)
                 backed1 = z.size(1)
 
-                repeated = x.repeat(backed + u0, 1)
-                repeated1 = y.repeat(backed1 + u1, 1)
-                out = torch.empty_like(repeated)
-                add_kernel[(out.numel(),)](
-                    repeated, repeated, out, out.numel(), BLOCK_SIZE=2
+                repeated = y.repeat(backed + u0, 1)
+                repeated1 = x.repeat(backed1 + u1, 1)
+                out1 = torch.empty_like(repeated1)
+                add_kernel[(out1.numel(),)](
+                    repeated, repeated, out1, out1.numel(), BLOCK_SIZE=2
                 )
 
-                torch._check(repeated1.size(0) == out.size(0))
-                torch._check(out.size(0) == random_unbacked)
+                # torch._check(repeated.size(0) == random_unbacked)
 
-                index = torch.repeat_interleave(values, repeats)
-                index_select = torch.index_select(embeddings, 0, index)
-
-                cat = torch.cat([out, index_select], dim=1)
+                cat = torch.cat([out1, index_select], dim=1)
                 add = repeated + repeated1
+                torch._check(repeated.size(0) == out1.size(0))
                 return cat, add
 
         example_inputs = (
