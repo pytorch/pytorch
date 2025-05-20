@@ -801,12 +801,7 @@ def forward(self, primals_1):
         out_dt = torch.matmul(tmp_dt, y_dt)
         out_dt.sum().backward()
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(1)
-    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
-    @patch.object(torch._inductor.config, "compile_threads", 1)
-    @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
-    def test_tp_compile_comm_reordering(self):
+    def _test_tp_compile_comm_reordering(self):
         class FakeAttention(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -875,6 +870,23 @@ def forward(self, primals_1):
         ).run(
             code
         )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(1)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
+    def test_tp_compile_comm_reordering(self):
+        self._test_tp_compile_comm_reordering()
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(1)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_tp_compile_comm_reordering_graph_partition(self):
+        self._test_tp_compile_comm_reordering()
 
 
 @instantiate_parametrized_tests

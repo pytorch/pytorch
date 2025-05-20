@@ -3260,7 +3260,9 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self,
     ) -> dict[str, Union[ir.TensorBox, ir.TorchBindObject, sympy.Expr]]:
         if signature := self.partition_signatures:
-            inputs = signature.input_nodes
+            inputs = signature.input_nodes | {
+                str(s): s for s in signature.symbol_inputs
+            }
         else:
             inputs = V.graph.graph_inputs
         return inputs
