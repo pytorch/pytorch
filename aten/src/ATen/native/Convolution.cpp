@@ -1456,7 +1456,6 @@ static inline at::MemoryFormat determine_backend_memory_format(
       }
       break;
     case ConvBackend::Mps:
-    case ConvBackend::MpsTranspose:
       if (mps_conv_use_channels_last(input, weight)) {
 #ifdef USE_MPS
         if (!mps::is_macos_13_or_newer(mps::MacOSVersion::MACOS_VER_15_0_PLUS)) {
