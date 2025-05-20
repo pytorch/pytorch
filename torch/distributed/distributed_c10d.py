@@ -5455,7 +5455,7 @@ def new_subgroups(
         )
         subgroups.append(subgroup)
 
-        if rank := get_rank(group=group) in ranks_in_subgroup:
+        if rank := get_rank() in ranks_in_subgroup:
             cur_subgroup = subgroup
             logger.info("Rank %s is assigned to subgroup %s", rank, ranks_in_subgroup)
 
