@@ -1,6 +1,6 @@
-#include <torch/csrc/distributed/c10d/SymmetricMemory.hpp>
-#include <torch/csrc/distributed/c10d/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory-inl.h>
+#include <torch/csrc/distributed/c10d/CUDASymmetricMemoryUtils.hpp>
+#include <torch/csrc/distributed/c10d/SymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/nvshmem_extension.cuh>
 
@@ -167,7 +167,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     // If the shape is unspecified, treat the signal pad as a 1d tensor.
     const auto element_size = c10::elementSize(*dtype);
     std::vector<int64_t> shape;
-    if (sizes.size() != 0) {
+    if (!sizes.empty()) {
       shape = sizes.vec();
     } else {
       shape.push_back(signal_pad_size / element_size);
