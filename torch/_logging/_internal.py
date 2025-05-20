@@ -644,7 +644,6 @@ def help_message(verbose=False):
         printed_artifacts = log_registry.artifact_names
     else:
         printed_artifacts = log_registry.visible_artifacts
-        
     if verbose:
         heading = "All registered names"
     else:
