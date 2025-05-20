@@ -4312,6 +4312,11 @@ class Scheduler:
 
             returned_output_names.update(extra_output_names)
 
+            returned_output_names = OrderedSet(
+                self.mutation_real_name.get(name, name)
+                for name in returned_output_names
+            )
+
             output_nodes = [
                 name_to_node[name]
                 for name in returned_output_names
