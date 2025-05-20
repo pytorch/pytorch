@@ -657,6 +657,9 @@ class DistributedDataParallel(Module, Joinable):
     ):
         super().__init__()
         Joinable.__init__(self)
+        self._use_python_reducer = (
+            torch._dynamo.utils.get_optimize_ddp_mode() == "python_reducer"
+        )
         self.logger: Optional[dist.Logger] = None
         if bool(delay_all_reduce_named_params is not None) != bool(
             param_to_hook_all_reduce is not None
@@ -915,8 +918,6 @@ class DistributedDataParallel(Module, Joinable):
         # True. The hooks will be deregistered if compiled_autograd is not
         # enabled.
         self._accum_grad_hooks: list[RemovableHandle] = []
-        optimize_ddp = torch._dynamo.utils.get_optimize_ddp_mode()
-        self._use_python_reducer = optimize_ddp == "python_reducer"
         if self._use_python_reducer:
             torch._inductor.config._fuse_ddp_communication = True
             torch._inductor.config._fuse_ddp_bucket_size = bucket_cap_mb
@@ -1228,6 +1229,7 @@ class DistributedDataParallel(Module, Joinable):
                 else self.bucket_bytes_cap
             ),
             self.skip_all_reduce_unused_params,
+            self._use_python_reducer,
         )
 
         self.logger = dist.Logger(self.reducer)
