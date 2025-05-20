@@ -391,6 +391,14 @@ class FSDPParam:
         # the `fully_shard` call returns to allow provided parameters to alias
         self._setattr_on_modules(self.sharded_param)
         self.sharded_state = ShardedState.SHARDED
+        self.sharded_param_fully_shard = _from_local_no_grad(
+            torch.split(
+                self.sharded_param._local_tensor,
+                1024,
+                dim=0,
+            )[0],
+            self._sharding_spec,
+        )
 
     def _init_sharded_post_forward_param_metadata(self, param: torch.Tensor) -> None:
         mesh_info = self.post_forward_mesh_info

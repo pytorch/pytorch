@@ -6,7 +6,7 @@ import torch
 import torch.distributed as dist
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.distributed_c10d import ReduceOp
-from torch.distributed.tensor import DTensor
+from torch.distributed.tensor import DeviceMesh, DTensor
 
 from ._fsdp_common import (
     _get_dim0_padded_size,
@@ -637,32 +637,15 @@ def foreach_reduce(
                 new_sharded_dtensor_grad = _from_local_no_grad(
                     new_sharded_grad, fsdp_param._sharding_spec
                 )
-                # torch.distributed.breakpoint()
+                # new_tensor = DTtensor.from_local()
                 fsdp_param.sharded_param_fully_shard = _from_local_no_grad(
                     torch.split(
                         fsdp_param.sharded_param._local_tensor,
-                        all_reduce_group.size(),
+                        1024,
                         dim=0,
                     )[0],
                     fsdp_param._sharding_spec,
                 )
-                # fsdp_param.sharded_param_fully_shard = torch.empty_like(
-                #    new_sharded_dtensor_grad
-                # )
-                # fsdp_param.sharded_param_fully_shard = torch.split(
-                #    fsdp_param.sharded_param._local_tensor,
-                #    all_reduce_group.size(),
-                #    dim=0,
-                # )[0]
-                # spec = fsdp_param.sharded_param.to_spec()
-                # torch.distributed.breakpoint()
-
-                # fsdp_param.sharded_param_fully_shard = DTensor(
-                #    _local_tensor=fsdp_param.sharded_param_fully_shard,
-                # )
-                # fsdp_param.sharded_param_fully_shard = fsdp_param.sharded_param.view(
-                #    fsdp_param.sharded_param.dtype
-                # )
                 fsdp_param.sharded_param_fully_shard.grad = new_sharded_dtensor_grad
                 fsdp_param._setattr_on_modules(fsdp_param.sharded_param_fully_shard)
             if not compiled_autograd_enabled():
