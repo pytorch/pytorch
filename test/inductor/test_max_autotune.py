@@ -7,6 +7,7 @@ import random
 import tempfile
 import unittest
 from typing import Callable, Optional
+from unittest import mock
 
 import torch
 from torch import multiprocessing as mp, nn
@@ -992,6 +993,54 @@ class TestMaxAutotune(TestCase):
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
             bf16_red_setting
         )
+
+    @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        autotune_fallback_to_aten=False,
+    )
+    def test_max_autotune_decompose_k_dynamic_input(self):
+        def f(a, b):
+            a_in = torch.stack((a, a), dim=0)
+            return (a_in @ b).relu()
+
+        a = torch.randn(
+            32, 32768, dtype=torch.bfloat16, device="cuda", requires_grad=True
+        )
+        b = torch.randn(
+            32768, 64, dtype=torch.bfloat16, device="cuda", requires_grad=True
+        )
+
+        torch._dynamo.reset()
+        torch._dynamo.maybe_mark_dynamic(a, 0)
+        compiled_func = torch.compile(f)
+
+        with mock.patch(
+            "torch._inductor.kernel.mm.use_decompose_k_choice"
+        ) as decomp_mock:
+            decomp_mock.return_value = True
+
+            out, code = run_and_get_code(compiled_func, a, b)
+            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                "triton_.*_fused_0.run"
+            ).check("decompose_k").check_regex("s[0-9]+ = primals_1").check_regex(
+                "2*s[0-9]+"
+            ).check(
+                "primals_1 = 32"
+            ).run(
+                code[0]
+            )
+            torch.testing.assert_close(
+                out,
+                f(a, b),
+                atol=1e-2,
+                rtol=1e-2,
+            )
 
 
 class TestMaxAutotunePrecompile(TestCase):
