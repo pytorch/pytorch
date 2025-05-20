@@ -28,7 +28,6 @@ RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 
 # Install conda and other packages (e.g., numpy, pytest)
 ARG ANACONDA_PYTHON_VERSION
-ARG CONDA_CMAKE
 ARG DOCS
 ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
@@ -54,7 +53,8 @@ ARG CUDA_VERSION
 COPY ./common/install_cuda.sh install_cuda.sh
 COPY ./common/install_nccl.sh install_nccl.sh
 COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
-RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh install_nccl.sh /ci_commit_pins/nccl-cu*
+COPY ./common/install_cusparselt.sh install_cusparselt.sh
+RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh install_nccl.sh /ci_commit_pins/nccl-cu* install_cusparselt.sh
 ENV DESIRED_CUDA ${CUDA_VERSION}
 ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
 # No effect if cuda not installed
@@ -74,25 +74,12 @@ ADD ./common/install_ucc.sh install_ucc.sh
 RUN if [ -n "${UCX_COMMIT}" ] && [ -n "${UCC_COMMIT}" ]; then bash ./install_ucc.sh; fi
 RUN rm install_ucc.sh
 
-# (optional) Install protobuf for ONNX
-ARG PROTOBUF
-COPY ./common/install_protobuf.sh install_protobuf.sh
-RUN if [ -n "${PROTOBUF}" ]; then bash ./install_protobuf.sh; fi
-RUN rm install_protobuf.sh
-ENV INSTALLED_PROTOBUF ${PROTOBUF}
-
 # (optional) Install vision packages like OpenCV
 ARG VISION
 COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
 RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
 RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
 ENV INSTALLED_VISION ${VISION}
-
-# (optional) Install non-default CMake version
-ARG CMAKE_VERSION
-COPY ./common/install_cmake.sh install_cmake.sh
-RUN if [ -n "${CMAKE_VERSION}" ]; then bash ./install_cmake.sh; fi
-RUN rm install_cmake.sh
 
 # (optional) Install non-default Ninja version
 ARG NINJA_VERSION

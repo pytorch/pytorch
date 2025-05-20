@@ -1,4 +1,4 @@
-import os  # noqa: C101
+import os
 import sys
 from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 
@@ -37,6 +37,21 @@ def bundle_triton_into_fx_graph_cache_default() -> Optional[bool]:
         "TORCHINDUCTOR_BUNDLE_TRITON_INTO_FX_GRAPH_CACHE",
         True if not is_fbcode() else None,
     )
+
+
+def static_cuda_launcher_default() -> bool:
+    STATIC_CUDA_LAUNCHER_VERSION = 0
+
+    if "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER" in os.environ:
+        return os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER") == "1"
+    elif is_fbcode():
+        version = torch._utils_internal.justknobs_getval_int(
+            "pytorch/inductor:static_cuda_launcher_version"
+        )
+        return version <= STATIC_CUDA_LAUNCHER_VERSION
+    else:
+        # Default true in OSS
+        return True
 
 
 def prologue_fusion_enabled() -> bool:
@@ -84,6 +99,12 @@ bundle_triton_into_fx_graph_cache: Optional[bool] = (
     bundle_triton_into_fx_graph_cache_default()
 )
 
+non_blocking_remote_cache_write: bool = Config(
+    justknob="pytorch/remote_cache:enable_non_blocking_remote_cache_write",
+    env_name_force="TORCHINDUCTOR_NON_BLOCKING_REMOTE_CACHE_WRITE",
+    default=True,
+)
+
 # Enable autotune local cache.
 #
 # See bundled_autotune_remote_cache for the effect this flag has on the bundled
@@ -124,20 +145,22 @@ force_disable_caches: bool = Config(
 # Unsafe way to skip dynamic shape guards to get faster cache load
 unsafe_skip_cache_dynamic_shape_guards: bool = False
 
-# Unsafe way to mark function as cacheable
-unsafe_marked_cacheable_functions: list[str] = []
+# Unsafe way to mark non torch functions as safe to cache
+# dictionary is from function name -> cache key
+# Any function name in the dictionary will be allowed to be cacheable
+# by AOTAutogradCache and FxGraphCache.
+# changing the cache key value will change the resulting
+# FXGraphCache key.
+# Example usage:
+# torch._inductor.config.unsafe_marked_cacheable_functions = {
+# 'torch.ops.my_function' : torch.__version__
+# }
+# The above example causes the custom op torch.ops.my_function to be cacheable,
+# and for cache keys to be keyed by the current torch version
+unsafe_marked_cacheable_functions: dict[str, str] = {}
 
 # sleep in inductor for testing
 sleep_sec_TESTING_ONLY: Optional[int] = None
-
-# The default layout constraint for custom operators.
-# This must be the name of one of the layout constraint tags
-# (that is, one of {"needs_fixed_stride_order", "flexible_layout"}),
-# If the custom op does not have a layout constraint tag already
-# then we assume the following applies.
-custom_op_default_layout_constraint: Literal[
-    "needs_fixed_stride_order", "flexible_layout"
-] = "needs_fixed_stride_order"
 
 # The default layout constraint for user-defined triton kernels.
 # See "The default layout constraint for custom operators" for options.
@@ -152,7 +175,7 @@ cpp_wrapper: bool = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 # Controls automatic precompiling of common include files for codecache.CppCodeCache
 # (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
 # controlled by a separate flag.
-cpp_cache_precompile_headers: bool = True
+cpp_cache_precompile_headers: bool = not is_fbcode()
 
 online_softmax = os.environ.get("TORCHINDUCTOR_ONLINE_SOFTMAX", "1") == "1"
 
@@ -304,9 +327,7 @@ dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1")
 # but the mul gets fused with other pointwise ops instead.
 force_fuse_int_mm_with_mul = False
 
-# for pattern torch.mm(a, b.to(dtype)) with cuda tensors,
-# enable torch._inductor.kernel.mm.tuned_mixed_mm fused kernel.
-# Autotune will compare perf with normal cast->then->mm option
+# DEPRECATED. This setting is ignored.
 use_mixed_mm = True
 
 # enable runtime numeric check for pre/post grad fx passes
@@ -321,19 +342,7 @@ fx_passes_numeric_check: dict[str, Any] = {
     "requires_optimizer": True,
 }
 
-# mixed_mm_choice can be used to control the behaviour for pattern torch.mm(a, b.to(dtype)) with cuda tensors.
-# The fallback aten implementation is normal cast->then->mm option.
-# If mixed_mm_choice is "default": this flag will be ignored.
-# If mixed_mm_choice is "triton":
-# - Always use torch._inductor.kernel.mm.tuned_mixed_mm's fused kernel.
-# - Autotune will not compare with fallback.
-# If mixed_mm_choice is "aten": always use the fallback aten implementation.
-# If mixed_mm_choice is "heuristic":
-# - Enables the heuristic.
-# - If the heuristic decides to add a config, it will add the config as the first choice.
-# - If autotune is disabled, this config will always be chosen.
-# - If autotune is enabled, it will also compare with fallback aten implementation and fused kernel.
-# The use_mixed_mm flag will be ignored if mixed_mm_choice != "default".
+# DEPRECATED. This setting is ignored.
 mixed_mm_choice: Literal["default", "triton", "aten", "heuristic"] = "heuristic"
 
 # enable reordering pass for increasing overlap between compute and communication
@@ -356,6 +365,9 @@ reorder_for_compute_comm_overlap_passes: list[
     "sink_waits",
     "raise_comms",
 ]
+
+# Maximum number of positions to advance a given collective, unlimited by default
+reorder_prefetch_limit: Optional[int] = None
 
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
@@ -758,9 +770,7 @@ compile_threads: Optional[int] = None if is_fbcode() else decide_compile_threads
 
 # Whether or not to enable statically launching CUDA kernels
 # compiled by triton (instead of using triton's own launcher)
-use_static_cuda_launcher: bool = (
-    os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER", "0") == "1"
-)
+use_static_cuda_launcher: bool = static_cuda_launcher_default()
 
 # Raise error if we bypass the launcher
 strict_static_cuda_launcher: bool = (
@@ -1023,6 +1033,12 @@ class cpp:
     # enable this feature by their need.
     enable_concat_linear = False
 
+    # Whether to use decomposed tanh for cpu device
+    # Disable by default due to https://github.com/pytorch/pytorch/issues/148241
+    use_decompose_tanh = (
+        os.environ.get("TORCHINDUCTOR_CPP_USE_DECOMPOSE_TANH", "0") == "1"
+    )
+
 
 # config specific to codegen/triton.py
 class triton:
@@ -1176,7 +1192,7 @@ class triton:
     # of registers being benchmarked.
     #
     # NOTE: triton will always report >0 register spills for kernels using sin/cos.
-    # (check this issue https://github.com/openai/triton/issues/1756 )
+    # (check this issue https://github.com/triton-lang/triton/issues/1756 )
     # So far we see a fixed 8 spilled registers for kernels using sin/cos.
     # Raise the threshold to 16 to be safe.
     # We should revisit this once we understand more of the source of register spills.
@@ -1298,10 +1314,15 @@ class aot_inductor:
     package_constants_in_so: bool = True
 
     # Experimental.  Controls automatic precompiling of common AOTI include files.
-    precompile_headers: bool = False
+    precompile_headers: bool = not is_fbcode()
+
+    # Embed generated .cubin files into the .so
+    embed_cubin: bool = False
 
 
 class cuda:
+    """Settings for cuda backend, today this consists of cutlass"""
+
     # CUDA arch to use for CUDA template kernel compilation.
     # e.g. "70", "75", "80", "90", etc.
     # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
@@ -1343,6 +1364,12 @@ class cuda:
 
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4]
+
+    # Whether to use CUTLASS EVT for epilogue fusion
+    cutlass_epilogue_fusion_enabled = False
+
+    # Whether to only use TMA-compatible kernels in CUTLASS
+    cutlass_tma_only = False
 
     # Path to CUDA NVCC.
     # NVCC search order:
@@ -1394,6 +1421,11 @@ class cuda:
     # Format looks like: "0,1,3" for using presets 0, 1, and 3. Presets can be
     # controlled by some cutlass instantiation level flags (e.g. 0, 1111, 2222, ...)
     cutlass_presets: Optional[str] = os.environ.get("TORCHINDUCTOR_CUTLASS_PRESETS")
+
+    # use compile command to create kernel .cu and .so name
+    cutlass_hash_with_compile_cmd: bool = (
+        os.environ.get("TORCHINDUCTOR_CUTLASS_HASH_WITH_COMPILE_CMD", "0") == "1"
+    )
 
 
 class rocm:
@@ -1564,6 +1596,8 @@ _save_config_ignore: list[str] = [
     "pre_grad_custom_pass",
     "aot_inductor.repro_level",
     "aot_inductor.dump_aoti_minifier",
+    "post_grad_custom_pre_pass",
+    "post_grad_custom_post_pass",
 ]
 
 _cache_config_ignore_prefix: list[str] = [

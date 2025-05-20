@@ -1759,7 +1759,6 @@ class TestReductions(TestCase):
         # On Windows CI, the current version of `numpy` promotes all lower integers
         # dtypes to int32 while `torch` promotes them to int64. Hence we skip on checking
         # the exact dtype.
-        # Reference : https://dr.pytorch.org/api/view-log-full?build_id=122051580
         # PR : https://github.com/pytorch/pytorch/pull/38628#issuecomment-655905370
         if IS_WINDOWS and is_integral(dtype):
             exact_dtype = False
