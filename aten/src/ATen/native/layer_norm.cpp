@@ -322,7 +322,7 @@ std::tuple<Tensor, Tensor> rms_norm_cpu(
     if(input.is_nested() || (weight_opt.has_value() && weight_opt.value().is_nested())){
       return std::make_tuple(upcasted_result, rqrst_input);
     }
-    
+
     // return std::make_tuple(upcasted_result, rqrst_input);
     return std::make_tuple(upcasted_result.contiguous(), rqrst_input.contiguous());
   });
