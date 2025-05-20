@@ -546,6 +546,14 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
       set(XNNPACK_BUILD_WITH_LIBM OFF CACHE BOOL "")
     endif()
 
+    # Change XNNPCK memory target name because it conflicts with ABSL.
+    if(NOT EXISTS "${XNNPACK_SOURCE_DIR}/CMakeLists.txt.tag")
+      file(READ "${XNNPACK_SOURCE_DIR}/CMakeLists.txt" FILE_CONTENTS)
+      string(REPLACE "memory " "xnnpack_memory " FILE_CONTENTS "${FILE_CONTENTS}")
+      file(WRITE "${XNNPACK_SOURCE_DIR}/CMakeLists.txt" "${FILE_CONTENTS}")
+      file(WRITE "${XNNPACK_SOURCE_DIR}/CMakeLists.txt.tag" "xnnpack_memory")
+    endif()
+
     add_subdirectory(
       "${XNNPACK_SOURCE_DIR}"
       "${CONFU_DEPENDENCIES_BINARY_DIR}/XNNPACK")
@@ -1280,6 +1288,12 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   set(Python3_EXECUTABLE "${Python_EXECUTABLE}")
   if(NOT USE_SYSTEM_ONNX)
     set(ONNX_BUILD_CUSTOM_PROTOBUF ON)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      string(APPEND CMAKE_CXX_FLAGS " -Wno-error=deprecated ")
+    endif()
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+      string(APPEND CMAKE_CXX_FLAGS " -Wno-error=deprecated-copy-with-dtor")
+    endif()
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
     add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
     # In mobile build we care about code size, and so we need drop
