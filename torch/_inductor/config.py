@@ -1317,6 +1317,11 @@ class aot_inductor:
     # Embed generated .cubin files into the .so
     embed_cubin: bool = False
 
+    # Custom ops that have implemented C shim wrappers, defined as an op to C shim declaration dict
+    custom_ops_to_c_shims: dict[torch._ops.OpOverload, list[str]] = {}
+    # custom op libs that have implemented C shim wrappers
+    custom_op_libs: Optional[list[str]] = None
+
 
 class cuda:
     """Settings for cuda backend, today this consists of cutlass"""
