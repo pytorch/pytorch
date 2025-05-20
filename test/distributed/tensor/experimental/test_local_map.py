@@ -4,15 +4,10 @@ from functools import partial
 
 import torch
 import torch.distributed._functional_collectives as funcol
-from torch.distributed._tensor import (
-    distribute_tensor,
-    DTensor,
-    init_device_mesh,
-    Replicate,
-    Shard,
-)
-from torch.distributed._tensor.experimental import local_map
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.experimental import local_map
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,

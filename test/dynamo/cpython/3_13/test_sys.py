@@ -54,6 +54,7 @@ import builtins
 import codecs
 import _datetime
 import gc
+import io
 import locale
 import operator
 import os
@@ -68,6 +69,7 @@ from test.support import os_helper
 from test.support.script_helper import assert_python_ok, assert_python_failure
 from test.support import threading_helper
 from test.support import import_helper
+from test.support import force_not_colorized
 try:
     from test.support import interpreters
 except ImportError:
@@ -130,6 +132,7 @@ class DisplayHookTest(__TestCase):
         with support.swap_attr(sys, 'displayhook', baddisplayhook):
             code = compile("42", "<string>", "single")
             self.assertRaises(ValueError, eval, code)
+
 
 class ActiveExceptionTests(__TestCase):
     def test_exc_info_no_exception(self):
@@ -197,6 +200,7 @@ class ActiveExceptionTests(__TestCase):
 
 class ExceptHookTest(__TestCase):
 
+    @force_not_colorized
     def test_original_excepthook(self):
         try:
             raise ValueError(42)
@@ -208,6 +212,7 @@ class ExceptHookTest(__TestCase):
 
         self.assertRaises(TypeError, sys.__excepthook__)
 
+    @force_not_colorized
     def test_excepthook_bytes_filename(self):
         # bpo-37467: sys.excepthook() must not crash if a filename
         # is a bytes string
@@ -252,6 +257,20 @@ class SysModuleTest(__TestCase):
 
         rc, out, err = assert_python_ok('-c', 'import sys; sys.exit()')
         self.assertEqual(rc, 0)
+        self.assertEqual(out, b'')
+        self.assertEqual(err, b'')
+
+        # gh-125842: Windows uses 32-bit unsigned integers for exit codes
+        # so a -1 exit code is sometimes interpreted as 0xffff_ffff.
+        rc, out, err = assert_python_failure('-c', 'import sys; sys.exit(0xffff_ffff)')
+        self.assertIn(rc, (-1, 0xff, 0xffff_ffff))
+        self.assertEqual(out, b'')
+        self.assertEqual(err, b'')
+
+        # Overflow results in a -1 exit code, which may be converted to 0xff
+        # or 0xffff_ffff.
+        rc, out, err = assert_python_failure('-c', 'import sys; sys.exit(2**128)')
+        self.assertIn(rc, (-1, 0xff, 0xffff_ffff))
         self.assertEqual(out, b'')
         self.assertEqual(err, b'')
 
@@ -306,6 +325,27 @@ class SysModuleTest(__TestCase):
         check_exit_message(
             r'import sys; sys.exit("h\xe9")',
             b"h\xe9", PYTHONIOENCODING='latin-1')
+
+    @support.requires_subprocess()
+    def test_exit_codes_under_repl(self):
+        # GH-129900: SystemExit, or things that raised it, didn't
+        # get their return code propagated by the REPL
+        import tempfile
+
+        exit_ways = [
+            "exit",
+            "__import__('sys').exit",
+            "raise SystemExit"
+        ]
+
+        for exitfunc in exit_ways:
+            for return_code in (0, 123):
+                with self.subTest(exitfunc=exitfunc, return_code=return_code):
+                    with tempfile.TemporaryFile("w+") as stdin:
+                        stdin.write(f"{exitfunc}({return_code})\n")
+                        stdin.seek(0)
+                        proc = subprocess.run([sys.executable], stdin=stdin)
+                        self.assertEqual(proc.returncode, return_code)
 
     def test_getdefaultencoding(self):
         self.assertRaises(TypeError, sys.getdefaultencoding, 42)
@@ -397,6 +437,36 @@ class SysModuleTest(__TestCase):
         finally:
             sys.setrecursionlimit(old_limit)
 
+    @unittest.skipUnless(support.Py_GIL_DISABLED, "only meaningful if the GIL is disabled")
+    @threading_helper.requires_working_threading()
+    def test_racing_recursion_limit(self):
+        from threading import Thread
+        def something_recursive():
+            def count(n):
+                if n > 0:
+                    return count(n - 1) + 1
+                return 0
+
+            count(50)
+
+        def set_recursion_limit():
+            for limit in range(100, 200):
+                sys.setrecursionlimit(limit)
+
+        threads = []
+        for _ in range(5):
+            threads.append(Thread(target=set_recursion_limit))
+
+        for _ in range(5):
+            threads.append(Thread(target=something_recursive))
+
+        with threading_helper.catch_threading_exception() as cm:
+            with threading_helper.start_threads(threads):
+                pass
+
+            if cm.exc_value:
+                raise cm.exc_value
+
     def test_getwindowsversion(self):
         # Raise SkipTest if sys doesn't have getwindowsversion attribute
         test.support.get_attribute(sys, "getwindowsversion")
@@ -443,10 +513,15 @@ class SysModuleTest(__TestCase):
 
     @test.support.refcount_test
     def test_refcount(self):
-        # n here must be a global in order for this test to pass while
-        # tracing with a python function.  Tracing calls PyFrame_FastToLocals
-        # which will add a copy of any locals to the frame object, causing
-        # the reference count to increase by 2 instead of 1.
+        # n here originally had to be a global in order for this test to pass
+        # while tracing with a python function. Tracing used to call
+        # PyFrame_FastToLocals, which would add a copy of any locals to the
+        # frame object, causing the ref count to increase by 2 instead of 1.
+        # While that no longer happens (due to PEP 667), this test case retains
+        # its original global-based implementation
+        # PEP 683's immortal objects also made this point moot, since the
+        # refcount for None doesn't change anyway. Maybe this test should be
+        # using a different constant value? (e.g. an integer)
         global n
         self.assertRaises(TypeError, sys.getrefcount)
         c = sys.getrefcount(None)
@@ -616,7 +691,7 @@ class SysModuleTest(__TestCase):
             filename, lineno, funcname, sourceline = stack[i+1]
             self.assertEqual(funcname, "g456")
             self.assertTrue((sourceline.startswith("if leave_g.wait(") or
-                            sourceline.startswith("g_raised.set()")))
+                             sourceline.startswith("g_raised.set()")))
         finally:
             # Reap the spawned thread.
             leave_g.set()
@@ -775,9 +850,12 @@ class SysModuleTest(__TestCase):
         self.assertRaises(TypeError, sys.intern, S("abc"))
         if has_is_interned:
             self.assertIs(sys._is_interned(S("abc")), False)
-
+    
+    @support.cpython_only
     @requires_subinterpreters
     def test_subinterp_intern_dynamically_allocated(self):
+        # Implementation detail: Dynamically allocated strings
+        # are distinct between interpreters
         s = "never interned before" + str(random.randrange(0, 10**9))
         t = sys.intern(s)
         self.assertIs(t, s)
@@ -785,24 +863,58 @@ class SysModuleTest(__TestCase):
         interp = interpreters.create()
         interp.exec(textwrap.dedent(f'''
             import sys
-            t = sys.intern({s!r})
+
+            # set `s`, avoid parser interning & constant folding
+            s = str({s.encode()!r}, 'utf-8')
+
+            t = sys.intern(s)
+
             assert id(t) != {id(s)}, (id(t), {id(s)})
             assert id(t) != {id(t)}, (id(t), {id(t)})
             '''))
 
+    @support.cpython_only
     @requires_subinterpreters
     def test_subinterp_intern_statically_allocated(self):
+        # Implementation detail: Statically allocated strings are shared
+        # between interpreters.
         # See Tools/build/generate_global_objects.py for the list
         # of strings that are always statically allocated.
-        s = '__init__'
-        t = sys.intern(s)
+        for s in ('__init__', 'CANCELLED', '<module>', 'utf-8',
+                  '{{', '', '\n', '_', 'x', '\0', '\N{CEDILLA}', '\xff',
+                  ):
+            with self.subTest(s=s):
+                t = sys.intern(s)
 
-        interp = interpreters.create()
-        interp.exec(textwrap.dedent(f'''
-            import sys
-            t = sys.intern({s!r})
-            assert id(t) == {id(t)}, (id(t), {id(t)})
-            '''))
+                interp = interpreters.create()
+                interp.exec(textwrap.dedent(f'''
+                    import sys
+
+                    # set `s`, avoid parser interning & constant folding
+                    s = str({s.encode()!r}, 'utf-8')
+
+                    t = sys.intern(s)
+                    assert id(t) == {id(t)}, (id(t), {id(t)})
+                    '''))
+
+    @support.cpython_only
+    @requires_subinterpreters
+    def test_subinterp_intern_singleton(self):
+        # Implementation detail: singletons are used for 0- and 1-character
+        # latin1 strings.
+        for s in '', '\n', '_', 'x', '\0', '\N{CEDILLA}', '\xff':
+            with self.subTest(s=s):
+                interp = interpreters.create()
+                interp.exec(textwrap.dedent(f'''
+                    import sys
+
+                    # set `s`, avoid parser interning & constant folding
+                    s = str({s.encode()!r}, 'utf-8')
+
+                    assert id(s) == {id(s)}
+                    t = sys.intern(s)
+                    '''))
+                self.assertTrue(sys._is_interned(s))
 
     def test_sys_flags(self):
         self.assertTrue(sys.flags)
@@ -846,6 +958,7 @@ class SysModuleTest(__TestCase):
     def test_clear_type_cache(self):
         sys._clear_type_cache()
 
+    @force_not_colorized
     @support.requires_subprocess()
     def test_ioencoding(self):
         env = dict(os.environ)
@@ -855,21 +968,21 @@ class SysModuleTest(__TestCase):
 
         env["PYTHONIOENCODING"] = "cp424"
         p = subprocess.Popen([sys.executable, "-c", 'print(chr(0xa2))'],
-                            stdout = subprocess.PIPE, env=env)
+                             stdout = subprocess.PIPE, env=env)
         out = p.communicate()[0].strip()
         expected = ("\xa2" + os.linesep).encode("cp424")
         self.assertEqual(out, expected)
 
         env["PYTHONIOENCODING"] = "ascii:replace"
         p = subprocess.Popen([sys.executable, "-c", 'print(chr(0xa2))'],
-                            stdout = subprocess.PIPE, env=env)
+                             stdout = subprocess.PIPE, env=env)
         out = p.communicate()[0].strip()
         self.assertEqual(out, b'?')
 
         env["PYTHONIOENCODING"] = "ascii"
         p = subprocess.Popen([sys.executable, "-c", 'print(chr(0xa2))'],
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            env=env)
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             env=env)
         out, err = p.communicate()
         self.assertEqual(out, b'')
         self.assertIn(b'UnicodeEncodeError:', err)
@@ -877,8 +990,8 @@ class SysModuleTest(__TestCase):
 
         env["PYTHONIOENCODING"] = "ascii:"
         p = subprocess.Popen([sys.executable, "-c", 'print(chr(0xa2))'],
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            env=env)
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             env=env)
         out, err = p.communicate()
         self.assertEqual(out, b'')
         self.assertIn(b'UnicodeEncodeError:', err)
@@ -886,47 +999,47 @@ class SysModuleTest(__TestCase):
 
         env["PYTHONIOENCODING"] = ":surrogateescape"
         p = subprocess.Popen([sys.executable, "-c", 'print(chr(0xdcbd))'],
-                            stdout=subprocess.PIPE, env=env)
+                             stdout=subprocess.PIPE, env=env)
         out = p.communicate()[0].strip()
         self.assertEqual(out, b'\xbd')
 
-        @unittest.skipUnless(os_helper.FS_NONASCII,
-                            'requires OS support of non-ASCII encodings')
-        @unittest.skipUnless(sys.getfilesystemencoding() == locale.getpreferredencoding(False),
-                            'requires FS encoding to match locale')
-        @support.requires_subprocess()
-        def test_ioencoding_nonascii(self):
-            env = dict(os.environ)
+    @unittest.skipUnless(os_helper.FS_NONASCII,
+                         'requires OS support of non-ASCII encodings')
+    @unittest.skipUnless(sys.getfilesystemencoding() == locale.getpreferredencoding(False),
+                         'requires FS encoding to match locale')
+    @support.requires_subprocess()
+    def test_ioencoding_nonascii(self):
+        env = dict(os.environ)
 
-            env["PYTHONIOENCODING"] = ""
-            p = subprocess.Popen([sys.executable, "-c",
-                                    'print(%a)' % os_helper.FS_NONASCII],
-                                    stdout=subprocess.PIPE, env=env)
-            out = p.communicate()[0].strip()
-            self.assertEqual(out, os.fsencode(os_helper.FS_NONASCII))
+        env["PYTHONIOENCODING"] = ""
+        p = subprocess.Popen([sys.executable, "-c",
+                                'print(%a)' % os_helper.FS_NONASCII],
+                                stdout=subprocess.PIPE, env=env)
+        out = p.communicate()[0].strip()
+        self.assertEqual(out, os.fsencode(os_helper.FS_NONASCII))
 
-        @unittest.skipIf(sys.base_prefix != sys.prefix,
-                        'Test is not venv-compatible')
-        @support.requires_subprocess()
-        def test_executable(self):
-            # sys.executable should be absolute
-            self.assertEqual(os.path.abspath(sys.executable), sys.executable)
+    @unittest.skipIf(sys.base_prefix != sys.prefix,
+                     'Test is not venv-compatible')
+    @support.requires_subprocess()
+    def test_executable(self):
+        # sys.executable should be absolute
+        self.assertEqual(os.path.abspath(sys.executable), sys.executable)
 
-            # Issue #7774: Ensure that sys.executable is an empty string if argv[0]
-            # has been set to a non existent program name and Python is unable to
-            # retrieve the real program name
+        # Issue #7774: Ensure that sys.executable is an empty string if argv[0]
+        # has been set to a non existent program name and Python is unable to
+        # retrieve the real program name
 
-            # For a normal installation, it should work without 'cwd'
-            # argument. For test runs in the build directory, see #7774.
-            python_dir = os.path.dirname(os.path.realpath(sys.executable))
-            p = subprocess.Popen(
-                ["nonexistent", "-c",
-                'import sys; print(sys.executable.encode("ascii", "backslashreplace"))'],
-                executable=sys.executable, stdout=subprocess.PIPE, cwd=python_dir)
-            stdout = p.communicate()[0]
-            executable = stdout.strip().decode("ASCII")
-            p.wait()
-            self.assertIn(executable, ["b''", repr(sys.executable.encode("ascii", "backslashreplace"))])
+        # For a normal installation, it should work without 'cwd'
+        # argument. For test runs in the build directory, see #7774.
+        python_dir = os.path.dirname(os.path.realpath(sys.executable))
+        p = subprocess.Popen(
+            ["nonexistent", "-c",
+             'import sys; print(sys.executable.encode("ascii", "backslashreplace"))'],
+            executable=sys.executable, stdout=subprocess.PIPE, cwd=python_dir)
+        stdout = p.communicate()[0]
+        executable = stdout.strip().decode("ASCII")
+        p.wait()
+        self.assertIn(executable, ["b''", repr(sys.executable.encode("ascii", "backslashreplace"))])
 
     def check_fsencoding(self, fs_encoding, expected=None):
         self.assertIsNotNone(fs_encoding)
@@ -1167,6 +1280,7 @@ class SysModuleTest(__TestCase):
         self.assertIsInstance(level, int)
         self.assertGreater(level, 0)
 
+    @force_not_colorized
     @support.requires_subprocess()
     def test_sys_tracebacklimit(self):
         code = """if 1:
@@ -1180,7 +1294,7 @@ class SysModuleTest(__TestCase):
         """
         def check(tracebacklimit, expected):
             p = subprocess.Popen([sys.executable, '-c', code % tracebacklimit],
-                                stderr=subprocess.PIPE)
+                                 stderr=subprocess.PIPE)
             out = p.communicate()[1]
             self.assertEqual(out.splitlines(), expected)
 
@@ -1234,7 +1348,7 @@ class SysModuleTest(__TestCase):
             repr(args),  # sys.orig_argv
         ]
         self.assertEqual(proc.stdout.rstrip().splitlines(), expected,
-                        proc)
+                         proc)
 
     def test_module_names(self):
         self.assertIsInstance(sys.stdlib_module_names, frozenset)
@@ -1501,7 +1615,6 @@ class SizeofTest(__TestCase):
         self.assertEqual(sys.getsizeof(True), size('') + self.longdigit)
         self.assertEqual(sys.getsizeof(True, -1), size('') + self.longdigit)
 
-    @unittest.expectedFailure
     def test_objecttypes(self):
         # check all types defined in Objects/
         calcsize = struct.calcsize
@@ -1611,7 +1724,7 @@ class SizeofTest(__TestCase):
         def func():
             return sys._getframe()
         x = func()
-        check(x, size('3Pi2cP7P2ic??2P'))
+        check(x, size('3Pi2c2P7P2ic??2P'))
         # function
         def func(): pass
         check(func, size('15Pi'))
@@ -1812,7 +1925,6 @@ class SizeofTest(__TestCase):
             __slots__ = 'a', 'b', 'c'
         check(OD(x=[]), OrderedDict(x=[]), '3P')
 
-    @unittest.expectedFailure
     def test_pythontypes(self):
         # check all types defined in Python/
         size = test.support.calcobjsize
@@ -1831,7 +1943,8 @@ class SizeofTest(__TestCase):
         # symtable entry
         # XXX
         # sys.flags
-        check(sys.flags, vsize('') + self.P * len(sys.flags))
+        # FIXME: The +1 will not be necessary once gh-122575 is fixed
+        check(sys.flags, vsize('') + self.P * (1 + len(sys.flags)))
 
     def test_asyncgen_hooks(self):
         old = sys.get_asyncgen_hooks()
