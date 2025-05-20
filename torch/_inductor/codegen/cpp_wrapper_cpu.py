@@ -674,6 +674,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 self.prefix.writeline(
                     f"    extern const unsigned char __{name}_start[];"
                 )
+                if torch.xpu.is_available():
+                    self.prefix.writeline(
+                        f"    extern const unsigned char __{name}_end[];"
+                    )
             self.prefix.writeline("}")
 
     def codegen_model_constructor(self):
