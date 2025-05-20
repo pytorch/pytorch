@@ -1375,7 +1375,7 @@ class AOTInductorTestsTemplate:
         }
         self.check_model(Repro(), example_inputs, dynamic_shapes=spec)
 
-    @config.patch({"unbacked_symint_fallback": 1024})
+    @config.patch({"unbacked_symint_fallback": 128})
     def test_size_with_unbacked_add_and_mul_expr(self):
         # Edge case with torch._check(add_expr, mul_expr). When generating example
         # input sizes for autotuning, make sure they coalesce into a single size.
