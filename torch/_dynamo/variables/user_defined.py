@@ -1637,9 +1637,21 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
 
     _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
 
-    def __init__(self, value, **kwargs):
-        super().__init__(value, **kwargs)
-        self._tuple_vt = None
+    def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):
+        super().__init__(value, init_args=init_args, **kwargs)
+        self._tuple_vt = tuple_vt
+        if self._tuple_vt is None:
+            assert self.source is None, (
+                "tuple_vt must be constructed by builder.py when source is present"
+            )
+            # TODO this duplicates logic for `BuiltinVariable(tuple)`
+            from torch._dynamo.symbolic_convert import InstructionTranslator
+
+            tx = InstructionTranslator.current_tx()
+            elems = init_args[0].unpack_var_sequence(tx)
+            self._tuple_vt = variables.TupleVariable(
+                elems, mutation_type=ValueMutationNew()
+            )
 
     def set_underlying_tuple_vt(self, tuple_vt):
         self._tuple_vt = tuple_vt

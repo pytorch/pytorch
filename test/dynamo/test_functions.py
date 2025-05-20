@@ -4820,6 +4820,45 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(ref_tup.checked)
         self.assertTrue(res_tup.checked)
 
+    def test_udf_tuple_construction(self):
+        class MyTuple(tuple):
+            pass
+
+        def fn(x):
+            tup = MyTuple([1, 2, 3])
+            if 3 in tup:
+                x = torch.cos(x)
+            else:
+                x = torch.sin(x)
+            return x, tup
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref_x, ref_tup = fn(x)
+        res_x, res_tup = opt_fn(x)
+        self.assertEqual(ref_x, res_x)
+        self.assertEqual(ref_tup, res_tup)
+
+    def test_udf_tuple_construction_custom_new(self):
+        class MyTuple(tuple):
+            def __new__(cls, *args, **kwargs):
+                return super().__new__(cls, [1, 2, 3])
+
+        def fn(x):
+            tup = MyTuple()
+            if 3 in tup:
+                x = torch.cos(x)
+            else:
+                x = torch.sin(x)
+            return x, tup
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref_x, ref_tup = fn(x)
+        res_x, res_tup = opt_fn(x)
+        self.assertEqual(ref_x, res_x)
+        self.assertEqual(ref_tup, res_tup)
+
     def test_udf_tuple_reconstruction(self):
         class MyTuple(tuple):  # noqa: SLOT001
             pass
