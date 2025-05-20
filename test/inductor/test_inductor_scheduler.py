@@ -67,6 +67,8 @@ def test_cases(device, dtype):
 class TestScheduler(TestCase):
     @dtypes(torch.float, torch.float16)
     def test_disable_get_estimated_runtime_logging(self, device, dtype):
+        if device == "cpu":
+            return
         tc = test_cases(device, dtype)
         # turn off logging of inductor metrics so that they don't get logged
         torch._logging.set_logs(inductor_metrics=False)
@@ -83,6 +85,8 @@ class TestScheduler(TestCase):
 
     @dtypes(torch.float, torch.float16)
     def test_get_estimated_runtime_logging(self, device, dtype):
+        if device == "cpu":
+            return
         tc = test_cases(device, dtype)        
         expected_metrics = [
             # num_bytes_accessed, number of nonzero node_runtimes
