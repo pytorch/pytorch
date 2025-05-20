@@ -139,7 +139,7 @@ class CMathTests(__TestCase):
                 msg += ': zeros have different signs'
         self.fail(msg.format(x, y))
 
-    def assertComplexIdentical(self, x, y):
+    def assertComplexesAreIdentical(self, x, y):
         """Fail unless complex numbers x and y have equal values and signs.
 
         In particular, if x and y both have real (or imaginary) part
@@ -606,7 +606,7 @@ class CMathTests(__TestCase):
     @requires_IEEE_754
     def testTanhSign(self):
         for z in complex_zeros:
-            self.assertComplexIdentical(cmath.tanh(z), z)
+            self.assertComplexesAreIdentical(cmath.tanh(z), z)
 
     # The algorithm used for atan and atanh makes use of the system
     # log1p function; If that system function doesn't respect the sign
@@ -615,12 +615,12 @@ class CMathTests(__TestCase):
     @requires_IEEE_754
     def testAtanSign(self):
         for z in complex_zeros:
-            self.assertComplexIdentical(cmath.atan(z), z)
+            self.assertComplexesAreIdentical(cmath.atan(z), z)
 
     @requires_IEEE_754
     def testAtanhSign(self):
         for z in complex_zeros:
-            self.assertComplexIdentical(cmath.atanh(z), z)
+            self.assertComplexesAreIdentical(cmath.atanh(z), z)
 
 
 class IsCloseTests(test_math.IsCloseTests):
