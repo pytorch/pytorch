@@ -985,12 +985,11 @@ endif()
 include(cmake/public/utils.cmake)
 if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -O2 -fPIC")
-  if(NOT USE_XPU)
-    # This prevents use of `c10::optional`, `c10::nullopt` etc within the codebase
-    string(APPEND CMAKE_CXX_FLAGS " -DC10_NODEPRECATED")
-    string(APPEND CMAKE_CUDA_FLAGS " -DC10_NODEPRECATED")
-    string(APPEND CMAKE_OBJCXX_FLAGS " -DC10_NODEPRECATED")
-  endif()
+
+  # This prevents use of `c10::optional`, `c10::nullopt` etc within the codebase
+  string(APPEND CMAKE_CXX_FLAGS " -DC10_NODEPRECATED")
+  string(APPEND CMAKE_CUDA_FLAGS " -DC10_NODEPRECATED")
+  string(APPEND CMAKE_OBJCXX_FLAGS " -DC10_NODEPRECATED")
 
   # Eigen fails to build with some versions, so convert this to a warning
   # Details at http://eigen.tuxfamily.org/bz/show_bug.cgi?id=1459
