@@ -919,6 +919,40 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["subgroup"],
             f"The {BACKEND} backend does not support creating subgroups on CUDA devices",
         )
+        @require_world_size(4)
+        @skip_if_lt_x_gpu(4)
+        def test_new_subgroups_with_group_param(self):
+            # Initialize global test environment
+            self._init_global_test()
+            # Set up GPU devices for each rank
+            init_multigpu_helper(dist.get_world_size(), BACKEND)
+            # Create two subgroups: one with ranks [0,2] and another with ranks [1,3]
+            cur_subgroup, subgroups = dist.new_subgroups_by_enumeration(
+                ranks_per_subgroup_list=[[0, 2], [1, 3]]
+            )
+
+            # Further divide the current subgroup into sub-subgroups of size 1
+            cur_sub_subgroup, sub_subgroups = dist.new_subgroups(
+                group_size=1, group=cur_subgroup
+            )
+            # Verify we have 2 sub-subgroups (one for each rank in the original subgroup)
+            self.assertEqual(len(sub_subgroups), 2)
+            # Verify the current process's sub-subgroup has size 1
+            self.assertEqual(cur_sub_subgroup.size(), 1)
+            # Verify the current process is in its assigned sub-subgroup
+            self.assertFalse(dist._rank_not_in_group(group=cur_sub_subgroup))
+
+            # Clean up by destroying all created process groups
+            for sub_subgroup in sub_subgroups:
+                dist.destroy_process_group(sub_subgroup)
+
+            for subgroup in subgroups:
+                dist.destroy_process_group(subgroup)
+
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["subgroup"],
+            f"The {BACKEND} backend does not support creating subgroups on CUDA devices",
+        )
         @skip_if_no_gpu
         def test_new_subgroups_group_size_exceeds_world_size(self):
             with self.assertRaisesRegex(ValueError, "must not exceed"):
@@ -8634,7 +8668,7 @@ class DistributedTest:
             base_model = self._test_different_graph_across_ranks(
                 find_unused_parameters=True
             )
-            self.assertFalse(
+            self.assertTrue(
                 base_model._get_ddp_logging_data().get("has_rebuilt_buckets", 0)
             )
             static_model = self._test_different_graph_across_ranks(static_graph=True)
@@ -10291,7 +10325,7 @@ class DistributedTest:
             with OpPatcher():
                 ddp(input).sum().backward()
 
-        def _test_skip_all_reduce_unused_parameters(
+        def _test_unused_parameters_buckets(
             self,
             find_unused_parameters=False,
             static_graph=False,
@@ -10328,10 +10362,10 @@ class DistributedTest:
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_skip_all_reduce_unused_parameters(self):
-            base_model = self._test_skip_all_reduce_unused_parameters(
+            base_model = self._test_unused_parameters_buckets(
                 find_unused_parameters=True, static_graph=False
             )
-            test_model_1 = self._test_skip_all_reduce_unused_parameters(
+            test_model_1 = self._test_unused_parameters_buckets(
                 find_unused_parameters=True,
                 static_graph=False,
                 skip_all_reduce_unused_params=True,
@@ -10342,6 +10376,27 @@ class DistributedTest:
             )
             self.assertEqual(
                 test_model_1._get_ddp_logging_data().get("num_buckets_reduced"), 1
+            )
+
+            for i, j in zip(base_model.parameters(), test_model_1.parameters()):
+                self.assertEqual(i, j)
+
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
+        @skip_if_lt_x_gpu(2)
+        def test_rebuild_buckets_unused_parameters(self):
+            base_model = self._test_unused_parameters_buckets(
+                find_unused_parameters=False, static_graph=True
+            )
+            test_model_1 = self._test_unused_parameters_buckets(
+                find_unused_parameters=True,
+                static_graph=False,
+            )
+
+            self.assertEqual(
+                base_model._get_ddp_logging_data().get("has_rebuilt_buckets"), 1
+            )
+            self.assertEqual(
+                test_model_1._get_ddp_logging_data().get("has_rebuilt_buckets"), 1
             )
 
             for i, j in zip(base_model.parameters(), test_model_1.parameters()):
