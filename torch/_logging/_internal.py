@@ -676,8 +676,6 @@ Examples:
   TORCH_LOGS="+some.random.module,schedule" will set the log level of
   some.random.module to logging.DEBUG and enable the schedule artifact
 
-  TORCH_LOGS="graph_code_verbose" will enable verbose FX pass logs for graph code
-
   TORCH_LOGS_FORMAT="%(levelname)s: %(message)s" or any provided format
   string will set the output format
   Valid keys are "levelname", "message", "pathname", "levelno", "lineno",
