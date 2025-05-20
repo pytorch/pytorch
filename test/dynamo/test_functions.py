@@ -170,8 +170,8 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
                 in warning_message
             ):
                 break
-            else:
-                self.assertTrue(False, "Expected warning about lru_cache not found")
+        else:
+            self.assertTrue(False, "Expected warning about lru_cache not found")
 
     @make_test
     def test_add(a, b):

@@ -307,6 +307,8 @@ def out_wrapper(
                 result = fn(*args, is_out=(out is not None), **kwargs)  # type: ignore[arg-type]
             else:
                 result = fn(*args, **kwargs)
+            if result is NotImplemented:
+                return NotImplemented
             assert (
                 (isinstance(result, TensorLike) and is_tensor)
                 or (

@@ -6981,7 +6981,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
-    CPU, CUDA: rsub
+    CPU, CUDA, MPS: rsub
   autogen: rsub.Tensor_out
 
 - func: heaviside.out(Tensor self, Tensor values, *, Tensor(a!) out) -> Tensor(a!)

@@ -6,7 +6,7 @@ import math
 import os
 import sys
 import textwrap
-from itertools import count
+from itertools import chain, count
 from typing import Callable, Optional, Protocol, TYPE_CHECKING, Union
 
 import sympy
@@ -237,6 +237,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if V.graph.is_const_graph:
             # We do not write prefix for constant graph, it will be written by main module.
             return
+        if config.aot_inductor.custom_ops_to_c_shims:
+            # custom_ops_to_c_shims contains declaration of custom ops with C shim.
+            # TODO: this could be auto-generated from a passed-in custom op schema
+            custom_c_shims = list(
+                chain(*config.aot_inductor.custom_ops_to_c_shims.values())
+            )
+            declarations = "\n".join(
+                [f"export {textwrap.dedent(shim)};" for shim in custom_c_shims]
+            )
+            self.prefix.splice(
+                f"""
+                extern "C" {{
+                    {declarations}
+                }}
+                """
+            )
         if V.graph.aot_mode:
             self.prefix.writeline("namespace torch::aot_inductor {")
 
@@ -666,7 +682,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
             signature = kernel.get_signature().replace(name, kernel_ptr)
             self.prefix.writeline(f"    {signature} = torch::aot_inductor::{name};")
         self.prefix.writeline("};")
-        self.prefix.writeline("}  // namespace")
+        self.prefix.writeline("}  // namespace\n\n")
+
+        if config.aot_inductor.embed_cubin:
+            self.prefix.writeline('extern "C" {')
+            for name in sorted(declare_kernel):
+                self.prefix.writeline(
+                    f"    extern const unsigned char __{name}_start[];"
+                )
+            self.prefix.writeline("}")
 
     def codegen_model_constructor(self):
         """
