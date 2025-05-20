@@ -1347,7 +1347,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         auto string = pop(stack).toStringRef();                        \
         push(                                                          \
             stack,                                                     \
-            string.size() != 0 &&                                      \
+            !string.empty() &&                                         \
                 std::all_of(string.begin(), string.end(), [](char c) { \
                   return char_op(c);                                   \
                 }));                                                   \
