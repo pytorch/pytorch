@@ -1418,7 +1418,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
     ) -> bool:
         import cutlass_library.library as cutlass_lib
 
-        has_bias = len(self.input_nodes) >= 3 and self.input_nodes[2] is not None
+        has_bias = len(self.input_nodes) == 3 and self.input_nodes[2] is not None
         if has_bias:
             Bias = self.input_nodes[2]
             # bias dtype
