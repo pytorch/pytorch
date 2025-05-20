@@ -2602,7 +2602,12 @@ class TestLRScheduler(TestCase):
         optim2 = torch.optim.AdamW(model.parameters())
         optim2.load_state_dict(optim.state_dict())
         sch2 = LRClass(optim2, last_epoch=0)
-        self.assertEqual(sch2.get_last_lr()[0], optim.param_groups[0]["lr"])
+        self.assertEqual(
+            sch2._get_closed_form_lr()[0]
+            if hasattr(self, "_get_closed_form_lr")
+            else sch2.get_last_lr()[0],
+            optim.param_groups[0]["lr"],
+        )
 
     def test_lr_scheduler_checkpoint_on_plateau(self):
         model = torch.nn.Linear(3, 3)
@@ -2613,7 +2618,12 @@ class TestLRScheduler(TestCase):
         optim2 = torch.optim.AdamW(model.parameters())
         optim2.load_state_dict(optim.state_dict())
         sch2 = ReduceLROnPlateau(optim2, mode="min")
-        self.assertEqual(sch2.get_last_lr()[0], optim.param_groups[0]["lr"])
+        self.assertEqual(
+            sch2._get_closed_form_lr()[0]
+            if hasattr(self, "_get_closed_form_lr")
+            else sch2.get_last_lr()[0],
+            optim.param_groups[0]["lr"],
+        )
 
 
 instantiate_parametrized_tests(TestLRScheduler)
