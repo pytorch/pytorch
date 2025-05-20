@@ -540,15 +540,6 @@ def foreach_reduce(
                 new_sharded_dtensor_grad = _from_local_no_grad(
                     new_sharded_grad, fsdp_param._sharding_spec
                 )
-                # new_tensor = DTtensor.from_local()
-                fsdp_param.sharded_param_fully_shard = _from_local_no_grad(
-                    torch.split(
-                        fsdp_param.sharded_param._local_tensor,
-                        1024,
-                        dim=0,
-                    )[0],
-                    fsdp_param._sharding_spec,
-                )
                 fsdp_param.sharded_param_fully_shard.grad = new_sharded_dtensor_grad
                 fsdp_param._setattr_on_modules(fsdp_param.sharded_param_fully_shard)
             if not compiled_autograd_enabled():

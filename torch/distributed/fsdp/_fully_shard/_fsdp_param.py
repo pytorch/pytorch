@@ -207,6 +207,7 @@ class FSDPParam:
     contiguous_sharded_post_forward_stride: tuple[int, ...]
     _sharded_param_data: torch.Tensor  # 1D
     sharded_param: nn.Parameter  # ND
+    sharded_param_fully_shard: nn.Parameter  # ND
     _sharded_post_forward_param_data: Optional[torch.Tensor]  # 1D
     _sharded_post_forward_param: Optional[nn.Parameter]  # ND
     _unsharded_param: nn.Parameter  # ND
@@ -240,7 +241,11 @@ class FSDPParam:
             self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
         )
         self.grad_offload_event: Optional[torch.Event] = None
-        self._init_sharded_param(param, device, shard_placement_fn)
+        if hasattr(self.mesh_info, "replicate_mesh_size"):
+            second_shard_dim = self.mesh_info.replicate_mesh_size
+        else:
+            second_shard_dim = 1
+        self._init_sharded_param(param, device, shard_placement_fn, second_shard_dim)
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
         self._init_extensions()
@@ -261,6 +266,7 @@ class FSDPParam:
         param: nn.Parameter,
         device: torch.device,
         shard_placement_fn: Optional[Callable],
+        second_shard_dim: int,
     ):
         if param.device != device and param.device.type != "meta":
             raise AssertionError(
@@ -389,16 +395,21 @@ class FSDPParam:
         self.sharded_param.requires_grad_(param.requires_grad)
         # Let `param_data` be freed normally when its ref count reaches 0 when
         # the `fully_shard` call returns to allow provided parameters to alias
-        self._setattr_on_modules(self.sharded_param)
+        # self._setattr_on_modules(self.sharded_param)
         self.sharded_state = ShardedState.SHARDED
         self.sharded_param_fully_shard = _from_local_no_grad(
             torch.split(
                 self.sharded_param._local_tensor,
-                1024,
+                length // second_shard_dim,
                 dim=0,
             )[0],
             self._sharding_spec,
         )
+        self.sharded_param_fully_shard.requires_grad_(param.requires_grad)
+        self.sharded_param_fully_shard.grad = torch.empty_like(
+            self.sharded_param_fully_shard
+        )
+        self._setattr_on_modules(self.sharded_param_fully_shard)
 
     def _init_sharded_post_forward_param_metadata(self, param: torch.Tensor) -> None:
         mesh_info = self.post_forward_mesh_info

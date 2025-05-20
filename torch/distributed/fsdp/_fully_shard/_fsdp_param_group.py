@@ -127,7 +127,6 @@ class FSDPParamGroup:
     ):
         self.modules = modules  # permit ref cycle because 1:1 lifetime
         param_module_infos = _get_param_module_infos(params, modules)
-
         self.fsdp_params = [
             FSDPParam(
                 param,
