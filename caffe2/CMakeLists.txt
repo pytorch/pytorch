@@ -1083,11 +1083,6 @@ elseif(USE_CUDA)
           CUDA::cusolver
       )
     endif()
-    # NS: TODO, is this really necessary?
-    if(USE_MAGMA AND CAFFE2_STATIC_LINK_CUDA)
-      target_link_libraries(torch_cuda_linalg PRIVATE
-          CUDA::culibos ${CMAKE_DL_LIBS})
-    endif()
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/cuda/LinearAlgebraStubs.cpp PROPERTIES COMPILE_FLAGS "-DBUILD_LAZY_CUDA_LINALG")
     install(TARGETS torch_cuda_linalg DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
