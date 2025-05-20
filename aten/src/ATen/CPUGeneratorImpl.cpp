@@ -138,7 +138,7 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   using detail::CPUGeneratorImplStateLegacy;
 
   static_assert(std::is_standard_layout_v<CPUGeneratorImplState>, "CPUGeneratorImplState is not a PODType");
-  static constexpr size_t size = sizeof(CPUGeneratorImplState);
+  constexpr size_t size = sizeof(CPUGeneratorImplState);
 
   detail::check_rng_state(new_state);
 
@@ -148,8 +148,8 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   TORCH_CHECK(new_state_size == size, "Expected a CPUGeneratorImplState of size ", size,
             " but found the input RNG state size to be ", new_state_size);
 
-  auto rng_state = (CPUGeneratorImplState*)new_state.data();
-  CPUGeneratorImplStateLegacy* legacy_pod = &(rng_state->legacy_pod);
+  auto rng_state = new_state.data_ptr_impl<CPUGeneratorImplState>();
+  auto legacy_pod = &(rng_state->legacy_pod);
   // construct engine_
   // Note that CPUGeneratorImplStateLegacy stored a state array of 64 bit uints, whereas in our
   // redefined mt19937, we have changed to a state array of 32 bit uints. Hence, we are
