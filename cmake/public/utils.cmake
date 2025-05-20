@@ -353,8 +353,6 @@ function(torch_compile_options libname)
       set(MSVC_DEBINFO_OPTION "/Zi")
     endif()
 
-    set(MSVC_APPEND_OPTION)
-
     if(${MSVC_TOOLSET_VERSION} GREATER_EQUAL 142)
       # Add /permissive- flag for conformance mode to the compiler.
       # This will force more strict check to the code standard.
