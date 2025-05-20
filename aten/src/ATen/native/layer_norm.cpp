@@ -317,11 +317,15 @@ std::tuple<Tensor, Tensor> rms_norm_cpu(
       upcasted_result = upcasted_result.mul(weight_opt.value());
     }
 
+
+    // if nested do not make contiguous
+    if(input.is_nested() || (weight_opt.has_value() && weight_opt.value().is_nested())){
+      return std::make_tuple(upcasted_result, rqrst_input);
+    }
+    
+    // return std::make_tuple(upcasted_result, rqrst_input);
     return std::make_tuple(upcasted_result.contiguous(), rqrst_input.contiguous());
   });
-
-
-
   return std::make_tuple(
     std::get<0>(result).type_as(input), // Cast normalized result to original input type
     std::get<1>(result)                 // rsqrt_val (often kept in higher precision or as computed)
