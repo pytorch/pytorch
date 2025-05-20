@@ -21,6 +21,7 @@ These classes help Dynamo track and handle arbitrary Python objects during traci
 maintaining proper semantics while enabling optimizations where possible.
 """
 
+import _collections
 import builtins
 import collections
 import contextlib
@@ -1010,15 +1011,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def _getattr_static(self, name):
         subobj = inspect.getattr_static(self.value, name, NO_SUCH_SUBOBJ)
-        import _collections
 
         # In some cases, we have to do dynamic lookup because getattr_static is not enough. For example, threading.local
         # has side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
         if not object_has_getattribute(self.value) and (
             subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
-            or isinstance(
-                subobj, _collections._tuplegetter
-            )  # namedtuple fields are represented by _tuplegetter
             or (
                 inspect.ismemberdescriptor(subobj) and name in self.value.__slots__
             )  # handle memberdecriptor and slots
@@ -1160,6 +1157,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source
             ).call_function(tx, [], {})
+        elif isinstance(subobj, _collections._tuplegetter):
+            # namedtuple fields are represented by _tuplegetter, and here we
+            # emulate its `__get__`, which is implemented in C.
+            _, (idx, _) = subobj.__reduce__()
+            # Don't go through the `__getitem__` method anymore, see
+            # https://github.com/python/cpython/blob/470941782f74288823b445120f6383914b659f23/Modules/_collectionsmodule.c#L2690
+            assert isinstance(self, UserDefinedTupleVariable)
+            return self._tuple_vt.items[idx]
         elif isinstance(subobj, staticmethod):
             func = subobj.__get__(self.value)
             if source is not None:

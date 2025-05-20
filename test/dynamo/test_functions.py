@@ -4859,6 +4859,29 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref_x, res_x)
         self.assertEqual(ref_tup, res_tup)
 
+    def test_udf_namedtuple(self):
+        class MyTuple(NamedTuple):
+            a: torch.Tensor
+            b: torch.Tensor
+
+        class PairTensor(MyTuple):
+            def __new__(cls, a, b):
+                return super().__new__(cls, a, b)
+
+            def __add__(self, other):
+                return PairTensor(self.a + other.a, self.b + other.b)
+
+        def fn(pair1, pair2):
+            return pair1 + pair2
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        pair1 = PairTensor(torch.randn(4), torch.randn(2, 8))
+        pair2 = PairTensor(torch.randn(1), torch.randn(2, 1))
+        ref = fn(pair1, pair2)
+        res = opt_fn(pair1, pair2)
+        self.assertEqual(ref.a, res.a)
+        self.assertEqual(ref.b, res.b)
+
     def test_udf_tuple_reconstruction(self):
         class MyTuple(tuple):  # noqa: SLOT001
             pass
