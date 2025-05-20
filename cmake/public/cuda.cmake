@@ -323,7 +323,9 @@ foreach(diag cc_clobber_ignored
              base_class_has_different_dll_interface
              dll_interface_conflict_none_assumed
              dll_interface_conflict_dllexport_assumed
-             bad_friend_decl)
+             bad_friend_decl
+             # variable was declared but never referenced
+             177)
   list(APPEND SUPPRESS_WARNING_FLAGS --diag_suppress=${diag})
 endforeach()
 string(REPLACE ";" "," SUPPRESS_WARNING_FLAGS "${SUPPRESS_WARNING_FLAGS}")
@@ -360,6 +362,9 @@ list(APPEND CUDA_NVCC_FLAGS "--expt-relaxed-constexpr")
 
 # Set expt-extended-lambda to support lambda on device
 list(APPEND CUDA_NVCC_FLAGS "--expt-extended-lambda")
+if(WERROR)
+  list(APPEND CUDA_NVCC_FLAGS "--Werror" "all-warnings")
+endif()
 
 foreach(FLAG ${CUDA_NVCC_FLAGS})
   string(FIND "${FLAG}" " " flag_space_position)
