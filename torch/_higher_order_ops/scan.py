@@ -861,7 +861,6 @@ def scan_fake_tensor_mode(mode, combine_fn, init, xs, additional_inputs):
 def scan_functionalize(ctx, combine_fn, init, xs, additional_inputs):
     from torch._higher_order_ops.utils import (
         _check_alias_and_mutation,
-        _maybe_run_with_interpreter,
     )
 
     unwrapped_xs = ctx.unwrap_tensors(xs)
