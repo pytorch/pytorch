@@ -14,7 +14,7 @@ class CUTLASSOperationSerializer:
     """
 
     # not used, but keeping in case we want to generalize the serializer
-    _SUPPORTED_CLASSES: str = [
+    _SUPPORTED_CLASSES: list[str] = [
         "GemmOperation",
         "GemmKind",
         "TileDescription",
