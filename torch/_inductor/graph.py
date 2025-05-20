@@ -1061,7 +1061,15 @@ class GraphLowering(torch.fx.Interpreter):
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         target = self.qualify_name(target)
         if isinstance(example, SymTypes):
-            expr = example.node.expr
+            # if an input node represents a runtime assertion, use the original symbol and do not
+            # apply replacement on it if it was used in rutime assertions(TODO update the PR to add that part).
+            # skip unbacked to ubacked replacements (why)? idk just skip them lol
+            shape_env = example.node.shape_env
+            # execlude unbacked to unbacked replacement.
+            if not shape_env.is_unbacked_symint(example.node._expr) and not shape_env.is_unbacked_symint(example.node.expr):
+                expr = example.node._expr
+            else:
+                expr = example.node.expr
             self.graph_inputs[target] = expr
             self.graph_input_names.append(target)
             return expr
