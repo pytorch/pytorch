@@ -39,6 +39,7 @@ class InplaceableOp:
 
 
 _SCATTER_OP_TO_VIEW = {
+    torch.ops.aten.diagonal_scatter.default: torch.ops.aten.diagonal.default,
     torch.ops.aten.select_scatter.default: torch.ops.aten.select.int,
     torch.ops.aten.slice_scatter.default: torch.ops.aten.slice.Tensor,
     torch.ops.aten.as_strided_scatter.default: torch.ops.aten.as_strided.default,
