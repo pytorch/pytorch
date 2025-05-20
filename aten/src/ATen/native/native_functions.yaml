@@ -8327,6 +8327,11 @@
   variants: function, method
   tags: core
 
+- func: attn(Tensor Q, Tensor K, Tensor V) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: attn
+
 - func: scatter_reduce_.two(Tensor(a!) self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True) -> Tensor(a!)
   structured_delegate: scatter_reduce.two_out
   variants: method

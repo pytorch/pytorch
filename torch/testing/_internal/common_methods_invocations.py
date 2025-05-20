@@ -7210,6 +7210,15 @@ def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs
                           args=(1, idx, src, reduce),
                           kwargs={'include_self': True})
 
+def sample_inputs_attn(op_info, device, dtype, requires_grad, **kwargs):
+    make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    q_shape = (2, 3)
+    k_shape = (2, 3)
+    v_shape = (2, 4)
+
+    yield SampleInput(make(q_shape), make(k_shape), make(v_shape))
+
 def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, *, mode='lengths', **kwargs):
     def _tensor(shape, dtype=dtype, low=None, high=None):
         return make_tensor(shape, dtype=dtype, device=device, low=low, high=high, requires_grad=requires_grad)
@@ -21636,6 +21645,14 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
                          dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
         ),
+    ),
+    OpInfo(
+        'attn',
+        sample_inputs_func=sample_inputs_attn,
+        dtypes=[torch.float64, torch.float32, torch.bfloat16, torch.float16],
+        supports_autograd=True,
+        supports_gradgrad=True,
+        supports_out=False,
     ),
     OpInfo(
         'scatter_reduce',
