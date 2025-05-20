@@ -9,6 +9,7 @@ from typing_extensions import Self
 
 import sympy
 
+import torch
 from torch import dtype as torch_dtype
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 from torch._inductor.runtime.runtime_utils import dynamo_timed
@@ -58,6 +59,9 @@ class DeferredTritonCallWrapper:
     arg_types: list[Any]
 
     def generate(self, wrapper: CppWrapperGpu):
+        """
+        Generate the GPU kernel definition, as well as load and launch code.
+        """
         prefix = wrapper.prefix
         if self.kernel_name.startswith("multi_kernel_"):
             # MultiKernel will select one kernel after running the autotune block
@@ -132,10 +136,12 @@ class DeferredTritonCallWrapper:
             self.generate_load_kernel(prefix, kernel_var_name, params)
             self.generate_launch_kernel(prefix, wrapper, kernel_var_name, params)
         prefix.writeline("}")
-        # Ensure the cubin file is included in the package
-        V.graph.wrapper_code.additional_files.append(
-            params[get_cpp_wrapper_cubin_path_name()]
-        )
+
+        if not config.aot_inductor.embed_cubin:
+            # Ensure the cubin file is included in the package
+            V.graph.wrapper_code.additional_files.append(
+                params[get_cpp_wrapper_cubin_path_name()]
+            )
 
     def generate_grid(
         self,
@@ -160,12 +166,27 @@ class DeferredTritonCallWrapper:
     def generate_load_kernel(self, prefix, kernel_var_name, params):
         prefix.writeline(f"if ({kernel_var_name} == nullptr) {{")
         with prefix.indent():
-            load_kernel_args = [
-                cpp_string_literal(params[get_cpp_wrapper_cubin_path_name()]),
-                cpp_string_literal(params["mangled_name"]),
-                str(params["shared_mem"]),
-                "cubin_dir_",
-            ]
+            embed_kernel_args = [f"__{params['inductor_meta']['kernel_name']}_start"]
+            if torch.xpu.is_available():
+                # XPU needs the end address of the kernel to calculate the size of the kernel binary.
+                embed_kernel_args.append(
+                    f"__{params['inductor_meta']['kernel_name']}_end"
+                )
+
+            load_kernel_args = (
+                [
+                    *embed_kernel_args,
+                    cpp_string_literal(params["mangled_name"]),
+                    str(params["shared_mem"]),
+                ]
+                if V.graph.aot_mode and config.aot_inductor.embed_cubin
+                else [
+                    cpp_string_literal(params[get_cpp_wrapper_cubin_path_name()]),
+                    cpp_string_literal(params["mangled_name"]),
+                    str(params["shared_mem"]),
+                    "cubin_dir_",
+                ]
+            )
             prefix.writeline(
                 f"{kernel_var_name} = loadKernel({', '.join(load_kernel_args)}); "
             )
