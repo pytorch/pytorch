@@ -1601,7 +1601,7 @@ class test_configs:
     graphsafe_rng_func_ignores_fallback_random = False
 
     # TODO - temporary config before enabled by default
-    global_tiling_analysis: bool = True
+    global_tiling_analysis: bool = False
 
 
 if TYPE_CHECKING:
