@@ -1,9 +1,11 @@
 # Owner(s): ["module: inductor"]
+import itertools
 import logging
 import math
 import os
 import re
 import sysconfig
+import time
 import unittest
 import unittest.mock as mock
 from pathlib import Path
@@ -28,7 +30,7 @@ from torch._inductor import config
 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 from torch._inductor.codegen.cuda.cutlass_utils import get_max_alignment
 from torch._inductor.exc import InductorError
-from torch._inductor.ir import ChoiceCaller, FixedLayout
+from torch._inductor.ir import FixedLayout
 from torch._inductor.select_algorithm import NoValidChoicesError
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
@@ -61,6 +63,38 @@ def _get_path_without_sccache() -> str:
     return ":".join(path_envs)
 
 
+un_ops_under_test = [torch.relu]
+bin_ops_under_test = [torch.add, torch.mul, torch.sub, torch.div]
+
+evt_all_ops = parametrize(
+    "op", un_ops_under_test + bin_ops_under_test, name_fn=lambda f: f.__name__
+)
+
+evt_bin_ops = parametrize("op", bin_ops_under_test, name_fn=lambda f: f.__name__)
+
+evt_all_shapes = parametrize("shape", itertools.product([512, 1024], repeat=2))
+
+
+def gen_args(op, shape, dtype=torch.float16):
+    if op in bin_ops_under_test:
+        return (torch.rand(*shape, device="cuda:0", dtype=dtype),)
+    else:
+        return ()
+
+
+use_evt_config = config.patch(
+    {
+        "max_autotune": True,
+        "max_autotune_gemm_backends": "CUTLASS",
+        "cuda.cutlass_max_profiling_configs": 1,
+        "autotune_fallback_to_aten": False,
+        "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
+        "cuda.cutlass_tma_only": True,
+        "cuda.cutlass_epilogue_fusion_enabled": True,
+    }
+)
+
+
 @instantiate_parametrized_tests
 class TestCutlassBackend(TestCase):
     def setUp(self):
@@ -90,6 +124,22 @@ class TestCutlassBackend(TestCase):
         super().tearDown()
         clear_inductor_caches()
 
+    def run_evt_test(self, model, op, shape, num_fusions=1):
+        M, N = shape
+        a = torch.ones(M, N).cuda().half()
+        b = torch.ones(N, N).cuda().half()
+        extra_args = gen_args(op, (M, N))
+        model = model.cuda()
+
+        result = torch.compile(model)(a, b, extra_args)
+        ref_result = model(a, b, extra_args)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"],
+            num_fusions,
+        )
+        torch.testing.assert_close(result, ref_result)
+
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_threshold(self):
@@ -106,34 +156,26 @@ class TestCutlassBackend(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
                 "cuda.cutlass_backend_min_gemm_size": 100000,
                 "cuda.cutlass_max_profiling_configs": 2,
-                # allow fallback to aten as intended
-                "autotune_fallback_to_aten": True,
             }
         ):
-            from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+
+            def select_no_algorithm(*args, **kwargs):
+                raise NoValidChoicesError
 
             with mock.patch(
-                "torch._inductor.select_algorithm.autotune_select_algorithm"
-            ) as mocked_select_algorithm:
-                Y_compiled = torch.compile(mm, dynamic=False)(a, b)
-                Y = mm(a, b)
-                passed_choice_callers: list[ChoiceCaller] = mocked_select_algorithm[0][
-                    1
-                ]
-                assert all(
-                    isinstance(cc, ChoiceCaller) for cc in passed_choice_callers
-                ), "Argument 1 to autotune_select_algorithm should be a list of ChoiceCaller instances"
-                # We expect that no Cutlass Kernels are considered, due to the threshold
-                assert all(
-                    not isinstance(cc, CUDATemplateCaller)
-                    for cc in passed_choice_callers
-                ), "Cutlass Kernels should have been filtered, GEMM size is too small"
-            torch.testing.assert_close(Y_compiled, Y)
+                "torch._inductor.kernel.mm.autotune_select_algorithm",
+                wraps=select_no_algorithm,
+            ) as sa:
+                with self.assertRaisesRegex(InductorError, r".*NoValidChoicesError.*"):
+                    _ = torch.compile(mm, dynamic=False)(a, b)
+                args, _ = sa.call_args
+                _, choices, _, __ = args
+
+                self.assertEqual(choices, [])
 
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_import_cutlass(self):
@@ -143,6 +185,14 @@ class TestCutlassBackend(TestCase):
 
         import cutlass  # noqa: F401
         import cutlass_library  # noqa: F401
+
+    def test_cutlass_key(self):
+        from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
+
+        self.assertTrue(try_import_cutlass())
+        from torch._inductor.codecache import cutlass_key
+
+        self.assertIsNotNone(cutlass_key())
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -275,8 +325,12 @@ class TestCutlassBackend(TestCase):
             expected = model(a, b, c)
             actual, codes = run_and_get_code(compiled, a, b, c)
             torch.testing.assert_close(actual, expected)
+            pattern = r"cutlass_[\w]+\.cutlass_[\w]+"
+            match = re.search(pattern, codes[0])
+            self.assertTrue(match is not None)
+            cutlass_kernel = match.group()
             FileCheck().check_count(
-                "cuda_fused_0.cuda_fused_0",
+                cutlass_kernel,
                 2,
             ).run(codes[0])
 
@@ -320,10 +374,7 @@ class TestCutlassBackend(TestCase):
             expected = model(a, b, c)
             actual, codes = run_and_get_code(compiled, a, b, c)
             torch.testing.assert_close(actual, expected)
-            FileCheck().check_count(
-                "cuda_fused_0.cuda_fused_0",
-                1,
-            ).run(codes[0])
+            self.assertTrue(re.search(r"cutlass_.*.cutlass_.*", codes[0]))
             # Verifies expected number of precompilations
             self.assertEqual(
                 torch._dynamo.utils.counters["inductor"][
@@ -393,7 +444,7 @@ class TestCutlassBackend(TestCase):
             torch.testing.assert_close(actual, expected)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @parametrize("dynamic", (False,))
+    @parametrize("dynamic", (False, True))
     @parametrize("use_aoti", (False, True))
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -416,17 +467,20 @@ class TestCutlassBackend(TestCase):
         # M, N, K
         shapes = [
             (128, 128, 16),
+            (512, 512, 128),
         ]
+        shapes = shapes[0:1] if not dynamic else shapes
 
         x_shapes = [
             lambda M, N: (M, N),
-            # lambda M, N: (M, 1),
-            # lambda M, N: (1, N),
-            # lambda M, N: (N,),
+            lambda M, N: (M, 1),
+            lambda M, N: (1, N),
+            lambda M, N: (N,),
         ]
         for x_shape in x_shapes:
             torch._dynamo.reset()
             clear_inductor_caches()
+
             inputs = [
                 (
                     torch.randn(x_shape(M, N)).cuda().to(dtype),
@@ -435,6 +489,19 @@ class TestCutlassBackend(TestCase):
                 )
                 for (M, N, K) in shapes
             ]
+            dynamic_shapes = (
+                {
+                    "x": {
+                        i: v
+                        for i, v in enumerate(x_shape(Dim.DYNAMIC, Dim.DYNAMIC))
+                        if v != 1
+                    },
+                    "a": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                    "b": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                }
+                if dynamic
+                else None
+            )
             with config.patch(
                 {
                     "max_autotune": True,
@@ -446,7 +513,7 @@ class TestCutlassBackend(TestCase):
                 expected = [model(*input) for input in inputs]
                 if use_aoti:
                     actual = AOTIRunnerUtil.run_multiple(
-                        model, inputs, dynamic_shapes=None
+                        model, inputs, dynamic_shapes=dynamic_shapes
                     )
                 else:
                     compiled_model = torch.compile(model, dynamic=dynamic)
@@ -455,7 +522,7 @@ class TestCutlassBackend(TestCase):
                 torch.testing.assert_close(actual, expected)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @parametrize("dynamic", (False,))
+    @parametrize("dynamic", (False, True))
     @parametrize("use_aoti", (False, True))
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -478,15 +545,25 @@ class TestCutlassBackend(TestCase):
         # B, M, N, K
         shapes = [
             (10, 4096, 2048, 25728),
+            (20, 2048, 1024, 12864),
         ]
+        shapes = shapes[0:1] if not dynamic else shapes
 
         inputs = [
             (
                 torch.randn(B, M, K).cuda().to(dtype),
-                torch.randn(B, K, N).cuda().to(dtype),
+                torch.randn(B, N, K).cuda().to(dtype).permute(0, 2, 1),
             )
             for B, M, N, K in shapes
         ]
+        dynamic_shapes = (
+            {
+                "a": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC, 2: Dim.DYNAMIC},
+                "b": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC, 2: Dim.DYNAMIC},
+            }
+            if dynamic
+            else None
+        )
         with config.patch(
             {
                 "max_autotune": True,
@@ -497,7 +574,9 @@ class TestCutlassBackend(TestCase):
         ):
             expected = [model(*input) for input in inputs]
             if use_aoti:
-                actual = AOTIRunnerUtil.run_multiple(model, inputs, dynamic_shapes=None)
+                actual = AOTIRunnerUtil.run_multiple(
+                    model, inputs, dynamic_shapes=dynamic_shapes
+                )
             else:
                 compiled_model = torch.compile(model, dynamic=dynamic)
                 actual = [compiled_model(*input) for input in inputs]
@@ -836,8 +915,8 @@ class TestCutlassBackend(TestCase):
             f"('cuda', 'torch.float16', {k}, {n}, {n}, 1, 0)]"
         ]["high"]
         cutlass_kernels_count = 0
-        for kernel, time in high.items():
-            if kernel.startswith("cutlass_gemm") and not math.isinf(time):
+        for kernel, duration in high.items():
+            if kernel.startswith("cutlass_gemm") and not math.isinf(duration):
                 cutlass_kernels_count += 1
         assert cutlass_kernels_count > 0
 
@@ -1285,6 +1364,226 @@ class TestCutlassBackend(TestCase):
             }
         ):
             _ = torch.compile(model)(B)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @use_evt_config
+    def test_evt_flexible_layout(self):
+        class TestModel(torch.nn.Module):
+            def forward(self, B):
+                A = torch.zeros_like(B)
+                return (A @ B).relu()
+
+        M = 1024
+        B = torch.randn(M, M).cuda().half()
+        model = TestModel().cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "cuda.cutlass_max_profiling_configs": 1,
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            _ = torch.compile(model)(B)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_filtered_ops_cache(self):
+        class TestModel(torch.nn.Module):
+            def forward(self, B):
+                A = torch.zeros_like(B)
+                for _ in range(100):
+                    A = A @ B
+                return A
+
+        M = 1024
+        B = torch.randn(M, M).cuda().half()
+        model = TestModel().cuda()
+
+        start_time = time.time()
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "cuda.cutlass_max_profiling_configs": 1,
+            }
+        ):
+            _ = torch.compile(model)(B)
+        self.assertTrue(time.time() - start_time < 60)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_compilation_time(self):
+        M = 1024
+        A = torch.randn(M, M).cuda().half()
+        B = torch.randn(M, M).cuda().half()
+
+        start_time = time.time()
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "cuda.cutlass_max_profiling_configs": 1,
+            }
+        ):
+            _ = torch.compile(torch.mm)(A, B)
+        self.assertTrue(time.time() - start_time < 50)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_all_ops
+    @evt_all_shapes
+    def test_evt_fusions_basic(self, op, shape):
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, extra_args):
+                res = (a @ b).relu()  # add extra activation to not hit addmm path
+                return op(res, *extra_args)
+
+        self.run_evt_test(TestModel(), op, shape)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_bin_ops
+    def test_evt_broadcasting(self, op):
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, extra_args):
+                acc = a @ b
+                return acc, op(acc.relu(), *extra_args)
+
+        M = 1024
+        N = 512
+        a = torch.ones(M, N).cuda().half()
+        b = torch.ones(N, N).cuda().half()
+        extra_args = gen_args(op, (M, N))
+        model = TestModel().cuda()
+
+        result = torch.compile(model)(a, b, extra_args)
+        ref_result = model(a, b, extra_args)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+        )
+        torch.testing.assert_close(result, ref_result)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_all_ops
+    def test_evt_mixed_dtypes(self, op):
+        M = 1024
+        N = 256
+
+        fp32_tensor = torch.ones(M, N).cuda().float()
+
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, extra_args):
+                acc = a @ b
+                out0 = op(acc.relu(), *extra_args)
+                out1 = torch.add(out0, fp32_tensor)
+                return out1
+
+        model = TestModel().cuda()
+        a = torch.ones(M, N).cuda().half()
+        b = torch.ones(N, N).cuda().half()
+        extra_args = gen_args(op, (M, N), dtype=torch.float16)
+
+        # baseline is cutlass kernel + triton
+        # matches expected casting behavior
+        with config.patch({"cuda.cutlass_epilogue_fusion_enabled": False}):
+            ref_result = torch.compile(model)(a, b, extra_args)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 0
+        )
+
+        torch._dynamo.reset()
+        result = torch.compile(model)(a, b, extra_args)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"],
+            1,
+        )
+
+        torch.testing.assert_close(result, ref_result)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_all_ops
+    def test_evt_multi_op(self, op):
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, extra_args):
+                acc = a @ b
+                return torch.add(op(acc.relu(), *extra_args).relu(), acc)
+
+        self.run_evt_test(TestModel(), op, (1024, 512))
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_all_ops
+    def test_evt_reuse_matmul_input(self, op):
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, extra_args):
+                acc = a @ b
+                return torch.add(op(acc.relu(), *extra_args).relu(), a)
+
+        self.run_evt_test(TestModel(), op, (1024, 1024))  # shape needs to be square
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_all_ops
+    def test_evt_multi_output(self, op):
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, extra_args):
+                acc = a @ b
+                z0 = acc.relu()
+                z = op(z0, *extra_args)
+                y = z + z0
+                return z, y
+
+        M = 1024
+        N = 512
+        a = torch.ones(M, N).cuda().half()
+        b = torch.ones(N, N).cuda().half()
+        extra_args = gen_args(op, (M, N))
+        model = TestModel().cuda()
+
+        result = torch.compile(model)(a, b, extra_args)
+        ref_result = model(a, b, extra_args)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 2
+        )
+        torch.testing.assert_close(result, ref_result)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    def test_evt_return_accumulator(self):
+        op = torch.add
+
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, extra_args):
+                acc = a @ b
+                return acc, op(acc.relu(), *extra_args)
+
+        M = 1024
+        N = 512
+        a = torch.ones(M, N).cuda().half()
+        b = torch.ones(N, N).cuda().half()
+        extra_args = gen_args(op, (M, N))
+        model = TestModel().cuda()
+
+        result = torch.compile(model)(a, b, extra_args)
+        ref_result = model(a, b, extra_args)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+        )
+        torch.testing.assert_close(result, ref_result)
 
 
 if __name__ == "__main__":
