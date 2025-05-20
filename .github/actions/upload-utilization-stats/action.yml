@@ -47,6 +47,7 @@ runs:
         echo "job_id: ${{inputs.job_id}}"
         echo "job_name:  ${{inputs.job_name}}"
         echo "artifact_prefix: ${{inputs.artifact_prefix}}"
+        python3 --version
     - uses: nick-fields/retry@v3.0.0
       name: Setup dependencies
       with:
