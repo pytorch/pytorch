@@ -27,6 +27,8 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
+from .test_aot_inductor import disable_constant_renaming
+
 
 def skipif(predicate: Callable[[str, bool], bool], reason: str):
     def decorator(func):
@@ -562,9 +564,7 @@ class TestAOTInductorPackage(TestCase):
         lambda device, package_cpp_only: device == "cpu" or package_cpp_only,
         "No support for cpp only and cpu",
     )
-    # freezing uses different sets of parameters, but would be tested via the same
-    # mechanism
-    @torch._inductor.config.patch(freezing=False)
+    @disable_constant_renaming
     def test_update_weights(self):
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):

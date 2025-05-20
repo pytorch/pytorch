@@ -1714,9 +1714,7 @@ def compile_fx_aot(
 
     config_patches.update(
         cpp_wrapper=True,
-        freezing=config.freezing
-        if config.freezing is not None
-        else not config.aot_inductor.use_runtime_constant_folding,
+        freezing=config.freezing is None or config.freezing,
     )
 
     if output_path := config_patches.get(
