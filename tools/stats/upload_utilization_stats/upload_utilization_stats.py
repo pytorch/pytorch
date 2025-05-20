@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
 
-from __future__ import annotations
-
 import os
 import sys
-from typing import TYPE_CHECKING
+from pathlib import Path
 
-
-if TYPE_CHECKING:
-    from pathlib import Path  # noqa: TC004
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 import argparse
@@ -402,12 +397,20 @@ def handle_file(file_path: Path) -> str:
 
 def read_file(file_path: str | Path) -> str:
     try:
-        file_path = Path(file_path)
-        if file_path.is_file():
-            with file_path.open("r") as f:
-                return f.read()
+        if isinstance(file_path, Path):
+            if file_path.is_file():
+                with file_path.open("r") as f:
+                    return f.read()
+            else:
+                print(f"::warning file {file_path} does not exist.")
+        elif isinstance(file_path, str):
+            if os.path.isfile(file_path):
+                with open(file_path) as f:
+                    return f.read()
+            else:
+                print(f"::warning file {file_path} does not exist.")
         else:
-            print(f"::warning file {file_path} does not exist.")
+            print(f"::warning unsupported file_path type: {type(file_path)}")
     except Exception as e:
         print(f"::warning trying to read file {file_path} failed by: {e}")
     return ""
