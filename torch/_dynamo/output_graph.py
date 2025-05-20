@@ -154,7 +154,6 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
-graph_code_verbose_log = torch._logging.getArtifactLogger(__name__, "graph_code_verbose")
 graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 
