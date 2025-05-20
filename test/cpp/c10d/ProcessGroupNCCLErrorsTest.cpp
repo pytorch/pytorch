@@ -195,16 +195,27 @@ class ProcessGroupNCCLNoHeartbeatCaught
     asyncDebugDump.wait();
   }
 
+  class TestHeartbeatMonitor : public c10d::ProcessGroupNCCL::HeartbeatMonitor {
+    // Override the heartbeat monitor function to make sure that we capture
+    // the exception in the monitor thread because we cannot try-catch it in
+    // the main thread and we set a flag for the main thread to check.
+    void runLoop() override {
+      try {
+        c10d::ProcessGroupNCCL::HeartbeatMonitor::runLoop();
+      } catch (std::runtime_error& e) {
+        // Safe cast because we know it's a ProcessGroupNCCLNoHeartbeatCaught
+        auto* pg = static_cast<ProcessGroupNCCLNoHeartbeatCaught*>(pg_);
+        pg->hasMonitorThreadCaughtError_ = true;
+      }
+    }
+  };
+
  protected:
   // Override the heartbeat monitor function to make sure that we capture
   // the exception in the monitor thread because we cannot try-catch it in
   // the main thread and we set a flag for the main thread to check.
-  void heartbeatMonitor() override {
-    try {
-      c10d::ProcessGroupNCCL::heartbeatMonitor();
-    } catch (std::runtime_error& e) {
-      hasMonitorThreadCaughtError_ = true;
-    }
+  HeartbeatMonitor* getHeartbeatMonitor() override {
+    return TestHeartbeatMonitor::get();
   }
 
   // It's really hard to unit test std::abort. So we override it instead.
