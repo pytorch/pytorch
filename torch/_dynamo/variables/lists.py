@@ -131,10 +131,6 @@ class BaseListVariable(VariableTracker):
         if name == "__getitem__":
             from .tensor import TensorVariable
 
-            if len(args) != 1:
-                msg = f"{name} takes exactly one argument ({len(args)} given)"
-                raise_observed_exception(TypeError, tx, [ConstantVariable(msg)])
-
             assert not kwargs and len(args) == 1
             if isinstance(args[0], TensorVariable):
                 value = get_fake_value(args[0].as_proxy().node, tx)
@@ -151,35 +147,14 @@ class BaseListVariable(VariableTracker):
                     )
             else:
                 value = args[0]
-
-            if value.python_type() not in (int, slice):
-                msg = f"indices must be integers or slices, not {value.python_type()}"
-                raise_observed_exception(TypeError, tx, [ConstantVariable(msg)])
-
             return self.getitem_const(tx, value)
         elif name == "__contains__":
-            if len(args) != 1:
-                msg = f"{name} takes exactly one argument ({len(args)} given)"
-                raise_observed_exception(TypeError, tx, [ConstantVariable(msg)])
+            assert len(args) == 1
             assert not kwargs
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, polyfills.contains),
-                [self] + list(args),
-                kwargs,
-            )
-            # return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
+            return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
         elif name == "index":
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.index),
-                [self] + list(args),
-                kwargs,
-            )
-        elif name == "count":
-            if len(args) != 1:
-                msg = f"{name} takes exactly one argument ({len(args)} given)"
-                raise_observed_exception(TypeError, tx, [ConstantVariable(msg)])
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, polyfills.count),
                 [self] + list(args),
                 kwargs,
             )
