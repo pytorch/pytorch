@@ -2230,28 +2230,11 @@ class BuiltinVariable(VariableTracker):
 
     def call_delattr(
         self,
-        tx,
+        tx: "InstructionTranslator",
         obj: VariableTracker,
         name_var: VariableTracker,
     ):
-        """
-        Handle delattr(obj, name) call
-        """        
-        if isinstance(obj, UserDefinedObjectVariable) and hasattr(obj.value, "__delattr__"):
-            from torch._dynamo.variables.builtin import BuiltinVariable
-            return BuiltinVariable(delattr).call_function(tx, [obj, name_var], {})
-        from torch._dynamo.variables.misc import DeletedVariable
-        deleted_var = DeletedVariable()
-
-        if isinstance(obj, UserDefinedObjectVariable):
-            if hasattr(obj.value, "__delattr__") and obj.value.__delattr__ is object.__delattr__:
-                return self.call_setattr(tx, obj, name_var, deleted_var)
-        
-        return self.call_setattr(tx, obj, name_var, deleted_var)
-
-
-    def is_standard_delattr(val):
-        return val in (object.__delattr__, BaseException.__delattr__)
+        return obj.call_method(tx, "__delattr__", [name_var], {})
 
     def call_type(self, tx: "InstructionTranslator", obj: VariableTracker):
         try:
