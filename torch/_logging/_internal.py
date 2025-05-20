@@ -644,13 +644,7 @@ def help_message(verbose=False):
         printed_artifacts = log_registry.artifact_names
     else:
         printed_artifacts = log_registry.visible_artifacts
-
-    # Ensure graph_code_verbose is always listed with a description
-    if verbose and "graph_code_verbose" not in printed_artifacts:
-        printed_artifacts = set(printed_artifacts)
-        printed_artifacts.add("graph_code_verbose")
-        log_registry.artifact_descriptions["graph_code_verbose"] = "Verbose FX pass logs for graph code."
-
+        
     if verbose:
         heading = "All registered names"
     else:
