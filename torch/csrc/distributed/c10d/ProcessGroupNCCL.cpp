@@ -961,10 +961,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   propagatePgError_ = getCvarBool(TORCH_NCCL_PROPAGATE_ERROR, false);
   enableNanCheck_ = getCvarBool(TORCH_NCCL_NAN_CHECK, false);
   cudaEventCacheEnabled_.store(getCvarBool(TORCH_NCCL_CUDA_EVENT_CACHE, true));
+  waitTimeoutDumpInMilSec_ =
+      getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000 /*15 Sec*/);
   traceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 2000);
   enableCollectiveHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
-  waitTimeoutDumpInMilSec_ =
-        getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000 /*15 Sec*/);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
       getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_);
@@ -1027,8 +1027,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << traceBufferSize_
             << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_
             << ", TORCH_NCCL_CUDA_EVENT_CACHE: " << cudaEventCacheEnabled_;
-  heartbtMonitor_.init(globalRank(), this);
-  heartbtMonitor_.printLogMsg();
+  getHeartbeatMonitor()->init(globalRank(), this);
+  getHeartbeatMonitor()->printLogMsg();
 
   getGlobalRankStartAndStride(
       options_->global_ranks_in_group,
@@ -1433,7 +1433,7 @@ void ProcessGroupNCCL::abort() {
   // We need to wait for abort to finish before we can safely shut down
   // heartbeat monitoring thread.
   terminateHeartbeatMonitorThread_.store(true);
-  heartbtMonitor_.wakeUpMonitor();
+  getHeartbeatMonitor()->wakeUpMonitor();
 }
 
 // Difference between `abort()` and `shutdown()`:
@@ -1483,7 +1483,7 @@ void ProcessGroupNCCL::shutdown() {
   // Watchdog thread exiting, retire heartbeat monitoring thread now to avoid
   // false alarm
   terminateHeartbeatMonitorThread_.store(true);
-  heartbtMonitor_.wakeUpMonitor();
+  getHeartbeatMonitor()->wakeUpMonitor();
   // Destroy the communicator, reclaim resources
   LOG(INFO) << logPrefix() << "Watchdog joined, destroying NCCL communicators.";
   {
@@ -1538,14 +1538,14 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   terminateProcessGroup_.store(true);
   workMetaListCV_.notify_one();
   // Tell heartbeat thread:
-  heartbtMonitor_.stop();
+  getHeartbeatMonitor()->stop();
 
   // Wait for all threads to finish before returning
   if (ncclCommWatchdogThread_.joinable()) {
     ncclCommWatchdogThread_.join();
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
   }
-  heartbtMonitor_.wait();
+  getHeartbeatMonitor()->wait();
   if (onCompletionHookThread_.joinable()) {
     onCompletionHookThread_.join();
     LOG(INFO) << logPrefix()
@@ -1598,63 +1598,74 @@ void ProcessGroupNCCL::setEnableNanCheck(bool enableNanCheck) {
   enableNanCheck_ = enableNanCheck;
 }
 
+ProcessGroupNCCL::HeartbeatMonitor* ProcessGroupNCCL::getHeartbeatMonitor() {
+  return HeartbeatMonitor::get();
+}
+
 std::string ProcessGroupNCCL::HeartbeatMonitor::getNCCLWatchdogTimeoutErrorMsg(
-  const std::string& extraMsg) {
-return c10::str(
-    logPrefix(),
-    "Received a dump signal due to a collective timeout from ",
-    extraMsg,
-    " and we will try our best to dump the debug info. ",
-    "This is most likely caused by incorrect usages of collectives, e.g., wrong ",
-    "sizes used across ranks, the order of collectives is not same for all ranks ",
-    "or the scheduled collective, for some reason, didn't run. Additionally, ",
-    "this can be caused by GIL deadlock or other reasons such as network errors or ",
-    "bugs in the communications library (e.g. NCCL), etc. ");
+    const std::string& extraMsg) {
+  return c10::str(
+      logPrefix(),
+      "Received a dump signal due to a collective timeout from ",
+      extraMsg,
+      " and we will try our best to dump the debug info. ",
+      "This is most likely caused by incorrect usages of collectives, e.g., wrong ",
+      "sizes used across ranks, the order of collectives is not same for all ranks ",
+      "or the scheduled collective, for some reason, didn't run. Additionally, ",
+      "this can be caused by GIL deadlock or other reasons such as network errors or ",
+      "bugs in the communications library (e.g. NCCL), etc. ");
 }
 
 std::string ProcessGroupNCCL::HeartbeatMonitor::getNCCLWatchdogTimeoutExitMsg(
-  const std::string& exitReason) {
-return c10::str(
-    logPrefix(),
-    "Terminating the process after attempting to dump debug info, due to ",
-    exitReason,
-    ".");
+    const std::string& exitReason) {
+  return c10::str(
+      logPrefix(),
+      "Terminating the process after attempting to dump debug info, due to ",
+      exitReason,
+      ".");
 }
 
 void ProcessGroupNCCL::HeartbeatMonitor::wakeUpMonitor() {
   monitorWakeUpCV_.notify_one();
 }
 
-bool ProcessGroupNCCL::HeartbeatMonitor::dumpDebuggingInfo(bool includeStackTrace /*=true*/) {
+bool ProcessGroupNCCL::HeartbeatMonitor::dumpDebuggingInfo(
+    bool includeStackTrace /*=true*/) {
   return pg_->dumpDebuggingInfo(includeStackTrace);
 }
 
-void ProcessGroupNCCL::HeartbeatMonitor::setLastWorkListUpdateTime(std::chrono::time_point<std::chrono::steady_clock> time) {
+void ProcessGroupNCCL::HeartbeatMonitor::setLastWorkListUpdateTime(
+    std::chrono::time_point<std::chrono::steady_clock> time) {
   lastWorkListUpdateTime_ = time;
 }
 
 void ProcessGroupNCCL::HeartbeatMonitor::init(int rank, ProcessGroupNCCL* pg) {
   static c10::once_flag initFlag_;
-  c10::call_once(initFlag_, [&]() {
-    pg_ = pg;
-    rank_ = rank;
-    size_ = pg_->getSize();
-    heartbeatTimeoutInSec_ =
-        getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 8 /*8 Mins*/);
-    waitTimeoutDumpInMilSec_ =
-        getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000 /*15 Sec*/);
-    coordCheckIntervalMilSec_ = getCvarInt(TORCH_NCCL_COORD_CHECK_MILSEC, 1000);
-    // TODO, we should either deprecate TORCH_NCCL_DUMP_ON_TIMEOUT
-    // or change its name to reflect that dump happens on exception including
-    // both timeout and other errors.
-    dumpOnTimeoutOrEx_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, true);
-    // logging C++ stack isn't safe. Gate it with an ENV.
-    logCppStackOnUncleanShutdown_ =
-    getCvarBool(TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN, true);
-      watchdogHeartbeatMonitorEnabled_.store(
-          getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
-      globalLogPrefix_ = c10::str("[Global Rank ", rank, "] ");
-  });
+  c10::call_once(
+      initFlag_, [&]() { HeartbeatMonitor::get()->doInit(rank, pg); });
+}
+
+void ProcessGroupNCCL::HeartbeatMonitor::doInit(
+    int rank,
+    ProcessGroupNCCL* pg) {
+  pg_ = pg;
+  rank_ = rank;
+  size_ = pg_->getSize();
+  heartbeatTimeoutInSec_ =
+      getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 8 /*8 Mins*/);
+  waitTimeoutDumpInMilSec_ =
+      getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000 /*15 Sec*/);
+  coordCheckIntervalMilSec_ = getCvarInt(TORCH_NCCL_COORD_CHECK_MILSEC, 1000);
+  // TODO, we should either deprecate TORCH_NCCL_DUMP_ON_TIMEOUT
+  // or change its name to reflect that dump happens on exception including
+  // both timeout and other errors.
+  dumpOnTimeoutOrEx_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, true);
+  // logging C++ stack isn't safe. Gate it with an ENV.
+  logCppStackOnUncleanShutdown_ =
+      getCvarBool(TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN, true);
+  watchdogHeartbeatMonitorEnabled_.store(
+      getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
+  globalLogPrefix_ = c10::str("[Global Rank ", rank, "] ");
 }
 
 const std::string& ProcessGroupNCCL::HeartbeatMonitor::logPrefix() {
@@ -1664,16 +1675,16 @@ const std::string& ProcessGroupNCCL::HeartbeatMonitor::logPrefix() {
 void ProcessGroupNCCL::HeartbeatMonitor::printLogMsg() {
   static c10::once_flag printFlag_;
   c10::call_once(printFlag_, [&]() {
-    LOG(INFO) << logPrefix()
-              << "TORCH_NCCL_ENABLE_MONITORING (Whether to kill program when no watchdog heartbeat detected): "
-              << watchdogHeartbeatMonitorEnabled_.load()
-              << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeoutOrEx_
-              << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: "
-              << waitTimeoutDumpInMilSec_
-              << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
-              << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
-              << ", TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN: "
-              << logCppStackOnUncleanShutdown_;
+    LOG(INFO)
+        << logPrefix()
+        << "TORCH_NCCL_ENABLE_MONITORING (Whether to kill program when no watchdog heartbeat detected): "
+        << watchdogHeartbeatMonitorEnabled_.load()
+        << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeoutOrEx_
+        << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: " << waitTimeoutDumpInMilSec_
+        << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
+        << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
+        << ", TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN: "
+        << logCppStackOnUncleanShutdown_;
   });
 }
 
@@ -1921,9 +1932,8 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
   auto& cpp_dumper = get_cpp_trace_dumper();
   if (logCppStackOnUncleanShutdown_ && cpp_dumper.has_value()) {
     LOG(INFO) << logPrefix() << "Dumping c++ stacktraces:";
-    cpp_dumper.value()([&](const std::string& line) {
-      LOG(INFO) << logPrefix() << line;
-    });
+    cpp_dumper.value()(
+        [&](const std::string& line) { LOG(INFO) << logPrefix() << line; });
     LOG(INFO) << logPrefix() << "Finished c++ stacktraces dump.";
   }
 
@@ -1981,7 +1991,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
 
   try {
     VLOG(2) << logPrefix() << "Process group watchdog thread started!";
-    heartbtMonitor_.start();
+    getHeartbeatMonitor()->start();
     watchdogHandler();
     VLOG(2) << logPrefix()
             << "Process group watchdog thread terminated normally";
@@ -2280,7 +2290,8 @@ static int getRootIndex(const int rank, const int nRanks, const int nIds) {
 
 void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
-  heartbtMonitor_.setLastWorkListUpdateTime(std::chrono::steady_clock::now());
+  getHeartbeatMonitor()->setLastWorkListUpdateTime(
+      std::chrono::steady_clock::now());
   auto lastStatusUpdateTime = std::chrono::steady_clock::now();
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
 
@@ -2498,7 +2509,8 @@ void ProcessGroupNCCL::watchdogHandler() {
           completedWorkListCV_.notify_one();
         } else {
           it = workMetaList_.erase(it);
-          heartbtMonitor_.setLastWorkListUpdateTime(std::chrono::steady_clock::now());
+          getHeartbeatMonitor()->setLastWorkListUpdateTime(
+              std::chrono::steady_clock::now());
         }
       } else {
         // Increment the iterator if the current WorkNCCL object is not
@@ -3324,7 +3336,8 @@ void ProcessGroupNCCL::workEnqueue(
     pgStatus_->lastEnqueuedWorkName = opTypeToString(work->opType_);
     pgStatus_->lastEnqueuedNumelIn = work->numelIn_;
     pgStatus_->lastEnqueuedNumelOut = work->numelOut_;
-    heartbtMonitor_.setLastWorkListUpdateTime(std::chrono::steady_clock::now());
+    getHeartbeatMonitor()->setLastWorkListUpdateTime(
+        std::chrono::steady_clock::now());
   }
 }
 

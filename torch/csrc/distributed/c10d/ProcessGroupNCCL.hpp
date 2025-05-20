@@ -596,54 +596,88 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::string traceKeyEnd_;
   };
 
+  // Class that runs as part of a separate thread aside from watchdog
+  // thread because we need to check the heartbeat from watchdog thread
+  // so that when we get stuck in some NCCL/CUDA calls,
+  // we can dump the debugging information and abort the process./
+  // The thread is per class not per instance.
   class HeartbeatMonitor {
    public:
-    // Initialize
-    void init(int rank, ProcessGroupNCCL* pg);
+    // Return the singleton instance of HeartbeatMonitor.
+    static HeartbeatMonitor* get() {
+      static HeartbeatMonitor instance;
+      return &instance;
+    }
+    virtual ~HeartbeatMonitor() = default;
 
+    // Initialize the heartbeat monitor related variables.
+    static void init(int rank, ProcessGroupNCCL* pg);
+
+    // Start the heartbeat monitor thread.
     void start();
 
+    // Stop the heartbeat monitor thread.
     void wait();
 
-    void runLoop();
+    // Run the actual loop which the heartbeat monitor thread is running.
+    virtual void runLoop();
 
+    // notify the heartbeat monitor thread to stop.
     void stop();
 
+    // print out ENV settings for the heartbeat monitor thread.
     void printLogMsg();
 
+    // Wake up the heartbeat monitor thread.
     void wakeUpMonitor();
 
+    // Dump the debugging information.
     bool dumpDebuggingInfo(bool includeStackTrace = true);
 
-    void setLastWorkListUpdateTime(std::chrono::time_point<std::chrono::steady_clock> time);
+    // Set the last update time of watchdog thread.
+    void setLastWorkListUpdateTime(
+        std::chrono::time_point<std::chrono::steady_clock> time);
 
     // Returns the global log prefix, which is the same for all process groups
     const std::string& logPrefix();
 
+    // Util function to get the timeout error message
     std::string getNCCLWatchdogTimeoutErrorMsg(const std::string& extraMsg);
 
+    // Util function to get the timeout exit message
     std::string getNCCLWatchdogTimeoutExitMsg(const std::string& exitReason);
 
+   protected:
+    // We need to keep a reference to the PG instance so that we can access
+    // the member functions of the PG instance.
+    ProcessGroupNCCL* pg_;
+
    private:
+    HeartbeatMonitor() = default; // default constructor
+    void doInit(int rank, ProcessGroupNCCL* pg);
+
     // Whether or not to print C++ stack traces to logs on unclean shutdown.
     bool logCppStackOnUncleanShutdown_;
 
-    // The time interval used for deciding whether there is no watchdog heartbeat.
+    // The time interval used for deciding whether there is no watchdog
+    // heartbeat.
     int heartbeatTimeoutInSec_;
 
     // timeout for the dump to finish.
     int waitTimeoutDumpInMilSec_;
 
-    // Interval of check coordinated signals in ProcessGroupNCCL from other ranks
-    // e.g., trigger the dump of the debugging info for timeout when notified.
+    // Interval of check coordinated signals in ProcessGroupNCCL from other
+    // ranks e.g., trigger the dump of the debugging info for timeout when
+    // notified.
     int coordCheckIntervalMilSec_;
 
-    // We gate the heartbeat monitor thread so that we can roll it out gradually.
+    // We gate the heartbeat monitor thread so that we can roll it out
+    // gradually.
     std::atomic<bool> watchdogHeartbeatMonitorEnabled_{};
 
     // Monitor thread which checks the heartbeat of Watchdog thread.
-    // If the monitor thread finds there is no heartbeat, it will dump debug info
-    // and then kill the watchdog thread to avoid hang.
+    // If the monitor thread finds there is no heartbeat, it will dump debug
+    // info and then kill the watchdog thread to avoid hang.
     std::thread ncclHeartbeatMonitorThread_;
 
     // Whether or not we should terminate the heartbeat monitoring threads.
@@ -659,13 +693,16 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Mutex to Guard monitorWakeUpCV_
     std::mutex monitorMutex_;
 
+    // Global log prefix, which is the same for all process groups.
     std::string globalLogPrefix_;
 
+    // The last update time of watchdog thread.
     std::chrono::time_point<std::chrono::steady_clock> lastWorkListUpdateTime_;
 
-    ProcessGroupNCCL* pg_;
-
+    // Global rank of the process.
     int rank_;
+
+    // World size of the default process.
     int size_;
   };
 
@@ -935,6 +972,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void setEnableNanCheck(bool enableNanCheck);
 
  protected:
+  // Get the singleton instance of the heartbeat monitor.
+  virtual HeartbeatMonitor* getHeartbeatMonitor();
+
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(
       ncclUniqueId* ncclID,
@@ -1141,12 +1181,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const std::string& signal);
 
  protected:
-  // Function that runs as part of a separate thread aside from watchdog
-  // thread because we need to check the heartbeat from watchdog thread
-  // so that when we get stuck in some NCCL/CUDA calls,
-  // we can dump the debugging information and abort the process.
-  virtual void heartbeatMonitor();
-
   // Function that directly trigger std::abort so that the whole process
   // gets terminated.
   virtual void terminateProcess(const std::string& errMsg);
@@ -1173,9 +1207,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // comes with prefix and it is different across ProcessGroup NCCL instances
   // (aka, different ProcessGroups).
   c10::intrusive_ptr<Store> store_;
-
-  // timeout for the dump to finish.
-  int waitTimeoutDumpInMilSec_;
 
   // The lock which protects the write/read of
   // ephemeralTimeoutActive_/ephemeralTimeoutInflight_.
@@ -1239,6 +1270,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Heartbeat of watchdog thread.
   static std::atomic_uint64_t heartbeat_;
+
+  // timeout for the dump to finish.
+  int waitTimeoutDumpInMilSec_;
 
   // Size of ring buffer where we store NCCL Traces for debugging.
   int traceBufferSize_;
@@ -1345,8 +1379,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   bool desyncDebug_;
   DesyncDebugger desyncDebugger_;
 
-  HeartbeatMonitor heartbtMonitor_;
-
   // Whether or not to propagate detected errors to all ranks in the same PG
   // through TCPStore.
   bool propagatePgError_;
@@ -1395,8 +1427,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   size_t local_id_;
 
   std::string logPrefix_;
-
-  static std::string globalLogPrefix_;
 
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> intraNodeComm_;
 
