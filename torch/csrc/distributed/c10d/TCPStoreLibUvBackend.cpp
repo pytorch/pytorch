@@ -1515,7 +1515,7 @@ void LibUVStoreDaemon::queuePop(
   StreamWriter sw(client->iptr());
   sw.write_value<int64_t>(queue.size());
 
-  if (queue.size() > 0) {
+  if (!queue.empty()) {
     auto value = queue.front();
     queue.pop_front();
     sw.write_vector(value);

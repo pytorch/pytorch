@@ -638,7 +638,7 @@ def meta__cslt_sparse_mm(
     transpose_result: bool = False,
     alg_id: int = 0,
     split_k: int = 1,
-    split_k_one_kernel: bool = False,
+    split_k_mode: int = -1,
 ):
     assert dense_B.dtype in {
         torch.float32,
@@ -2174,10 +2174,11 @@ def meta_baddbmm(self, batch1, batch2, *, beta=1, alpha=1):
         self = self.expand((dim1, dim2, dim3))
     torch._check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor")
     torch._check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
-    torch._check(
-        self.dtype == batch1.dtype == batch2.dtype,
-        lambda: f"Input dtypes must be the same, got: input: {self.dtype}, batch1: {batch1.dtype}, batch2: {batch2.dtype}",
-    )
+    if not exp_config.skip_dtype_check_in_meta_registrations:
+        torch._check(
+            self.dtype == batch1.dtype == batch2.dtype,
+            lambda: f"Input dtypes must be the same, got: input: {self.dtype}, batch1: {batch1.dtype}, batch2: {batch2.dtype}",
+        )
     batch1_sizes = batch1.shape
     batch2_sizes = batch2.shape
     bs = batch1_sizes[0]
@@ -7130,6 +7131,18 @@ def _check_for_unsupported_isin_dtype(dtype):
         dtype not in (torch.bool, torch.complex128, torch.complex64),
         lambda: f"Unsupported input type encountered for isin(): {dtype}",
     )
+
+
+@register_meta(aten.embedding_dense_backward)
+def meta_embedding_dense_backward(
+    grad_output,
+    indices,
+    num_weights,
+    padding_idx,
+    scale_grad_by_freq,
+):
+    grad_weight = grad_output.new_empty((num_weights, grad_output.size(-1)))
+    return grad_weight
 
 
 @register_meta(aten._embedding_bag_backward)
