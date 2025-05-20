@@ -1764,7 +1764,9 @@ class InstructionTranslatorBase(
             exc.raise_observed_exception(
                 TypeError,
                 self,
-                args=[ConstantVariable.create("exceptions must derive from BaseException")],
+                args=[
+                    ConstantVariable.create("exceptions must derive from BaseException")
+                ],
             )
 
         # Handle https://peps.python.org/pep-0479/
