@@ -15,7 +15,6 @@ except ImportError:
 
 import gc
 import re
-import sys
 import textwrap
 import unittest
 import weakref

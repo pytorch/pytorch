@@ -2,7 +2,6 @@
 import functools
 import gc
 import itertools as it
-import sys
 import textwrap
 import unittest
 from collections.abc import Iterator

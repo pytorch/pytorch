@@ -3,7 +3,6 @@
 import functools
 import os
 import re
-import sys
 import textwrap
 import traceback
 import unittest
