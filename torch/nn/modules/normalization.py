@@ -126,8 +126,8 @@ class LayerNorm(Module):
             of size
 
             .. math::
-                [* \times \text{normalized\_shape}[0] \times \text{normalized\_shape}[1]
-                    \times \ldots \times \text{normalized\_shape}[-1]]
+                [* \times \text{{normalized\_shape}}[0] \times \text{{normalized\_shape}}[1]
+                    \times \ldots \times \text{{normalized\_shape}}[-1]]
 
             If a single integer is used, it is treated as a singleton list, and this module will
             normalize over the last dimension which is expected to be of that specific size.
@@ -137,14 +137,16 @@ class LayerNorm(Module):
             and zeros (for biases). Default: ``True``.
         bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
             :attr:`elementwise_affine` is ``True``). Default: ``True``.
+            {device}
+            {dtype}
 
 
     Attributes:
         weight: the learnable weights of the module of shape
-            :math:`\text{normalized\_shape}` when :attr:`elementwise_affine` is set to ``True``.
+            :math:`\text{{normalized\_shape}}` when :attr:`elementwise_affine` is set to ``True``.
             The values are initialized to 1.
         bias:   the learnable bias of the module of shape
-                :math:`\text{normalized\_shape}` when :attr:`elementwise_affine` is set to ``True``.
+                :math:`\text{{normalized\_shape}}` when :attr:`elementwise_affine` is set to ``True``.
                 The values are initialized to 0.
 
     Shape:
@@ -331,8 +333,8 @@ class RMSNorm(Module):
     the paper `Root Mean Square Layer Normalization <https://arxiv.org/pdf/1910.07467.pdf>`__
 
     .. math::
-        y_i = \frac{x_i}{\mathrm{RMS}(x)} * \gamma_i, \quad
-        \text{where} \quad \text{RMS}(x) = \sqrt{\epsilon + \frac{1}{n} \sum_{i=1}^{n} x_i^2}
+        y_i = \frac{x_i}{{\mathrm{{RMS}}(x)}} * \gamma_i, \quad
+        \text{{where}} \quad \text{{RMS}}(x) = \sqrt{{\epsilon + \frac{{1}}{{n}} \sum_{{i=1}}^{{n}} x_i^2}}
 
     The RMS is taken over the last ``D`` dimensions, where ``D``
     is the dimension of :attr:`normalized_shape`. For example, if :attr:`normalized_shape`
@@ -344,14 +346,16 @@ class RMSNorm(Module):
             of size
 
             .. math::
-                [* \times \text{normalized\_shape}[0] \times \text{normalized\_shape}[1]
-                    \times \ldots \times \text{normalized\_shape}[-1]]
+                [* \times \text{{normalized\_shape}}[0] \times \text{{normalized\_shape}}[1]
+                    \times \ldots \times \text{{normalized\_shape}}[-1]]
 
             If a single integer is used, it is treated as a singleton list, and this module will
             normalize over the last dimension which is expected to be of that specific size.
         eps: a value added to the denominator for numerical stability. Default: :func:`torch.finfo(x.dtype).eps`
         elementwise_affine: a boolean value that when set to ``True``, this module
             has learnable per-element affine parameters initialized to ones (for weights). Default: ``True``.
+        {device}
+        {dtype}
 
     Shape:
         - Input: :math:`(N, *)`
