@@ -676,6 +676,16 @@ class SizeVarAllocator:
                 self.unbacked_replacements[src] = dst
         return self.unbacked_replacements
 
+    @functools.lru_cache
+    def _sub_unbacked_exprs(self, expr: Expr) -> Expr:
+        # it's fine to cache this fn since SizeVarAllocator is a singleton.
+        replacements = self._get_unbacked_replacements()
+        while True:
+            new_expr = expr.subs(replacements)
+            if new_expr == expr:
+                return new_expr
+            expr = sympy.factor(new_expr)
+
     def atomically_apply_size_hint(
         self, expr: Union[Expr, int], *, fallback: Optional[int] = None
     ) -> Union[Expr, int]:
@@ -683,18 +693,9 @@ class SizeVarAllocator:
             return int(expr)
 
         if has_free_unbacked_symbols(expr):
-
-            def _sub_unbacked_exprs(expr: Expr) -> Expr:
-                replacements = self._get_unbacked_replacements()
-                while True:
-                    new_expr = expr.subs(replacements)
-                    if new_expr == expr:
-                        return new_expr
-                    expr = sympy.factor(new_expr)
-
             # Make sure to substitute with the factored version
             # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
-            expr = _sub_unbacked_exprs(sympy.factor(expr))
+            expr = self._sub_unbacked_exprs(sympy.factor(expr))
 
         # For multiple expressions that depend on an unbacked symint,
         # we want to compute them consistently for a size hint we have chosen.
