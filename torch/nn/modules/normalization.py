@@ -100,7 +100,8 @@ class LayerNorm(Module):
     the paper `Layer Normalization <https://arxiv.org/abs/1607.06450>`__
 
     .. math::
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+        y = \frac{{x - \mathrm{{E}}[x]}}{{ \sqrt{{\mathrm{{Var}}[x] + \epsilon}} }} * \gamma + \beta
+
 
     The mean and standard-deviation are calculated over the last `D` dimensions, where `D`
     is the dimension of :attr:`normalized_shape`. For example, if :attr:`normalized_shape`
@@ -136,8 +137,7 @@ class LayerNorm(Module):
             and zeros (for biases). Default: ``True``.
         bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
             :attr:`elementwise_affine` is ``True``). Default: ``True``.
-        {device}
-        {dtype}
+
 
     Attributes:
         weight: the learnable weights of the module of shape
@@ -229,7 +229,6 @@ class LayerNorm(Module):
         )
 
 docstr = LayerNorm.__doc__.format(**common_args)
-
 add_docstr(LayerNorm, docstr)
 
 class GroupNorm(Module):
