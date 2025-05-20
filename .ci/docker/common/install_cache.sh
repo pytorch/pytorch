@@ -4,7 +4,30 @@ set -ex
 
 install_ubuntu() {
   echo "Preparing to build sccache from source"
-  # Use dnf instead of apt-get for CentOS
+  apt-get update
+  # libssl-dev will not work as it is upgraded to libssl3 in Ubuntu-22.04.
+  # Instead use lib and headers from OpenSSL1.1 installed in `install_openssl.sh``
+  apt-get install -y cargo
+  echo "Checking out sccache repo"
+  git clone https://github.com/mozilla/sccache -b v0.10.0
+  cd sccache
+  echo "Building sccache"
+  cargo build --release
+  cp target/release/sccache /opt/cache/bin
+  echo "Cleaning up"
+  cd ..
+  rm -rf sccache
+  apt-get remove -y cargo rustc
+  apt-get autoclean && apt-get clean
+
+  echo "Downloading old sccache binary from S3 repo for PCH builds"
+  curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache-0.2.14a
+  chmod 755 /opt/cache/bin/sccache-0.2.14a
+}
+
+install_centos() {
+  echo "Preparing to build sccache from source"
+  # Use dnf for CentOS
   dnf install -y cargo git gcc openssl-devel
   echo "Checking out sccache repo"
   git clone https://github.com/mozilla/sccache -b v0.10.0
@@ -34,7 +57,14 @@ sed -e 's|PATH="\(.*\)"|PATH="/opt/cache/bin:\1"|g' -i /etc/environment
 export PATH="/opt/cache/bin:$PATH"
 
 # Setup compiler cache
-install_ubuntu
+# Detect OS and install accordingly
+if command -v dnf &> /dev/null; then
+  # CentOS/RHEL
+  install_centos
+else
+  # Ubuntu/Debian
+  install_ubuntu
+fi
 chmod a+x /opt/cache/bin/sccache
 
 function write_sccache_stub() {
