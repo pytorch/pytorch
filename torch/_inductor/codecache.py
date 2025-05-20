@@ -154,8 +154,13 @@ def get_cpp_wrapper_cubin_path_name() -> str:
     return "cubin_path" if torch.version.hip is None else "hsaco_path"
 
 
-def get_actual_cubin_format() -> str:
-    return "cubin" if torch.version.hip is None else "hsaco"
+def get_kernel_bin_format(device: str) -> str:
+    if device == "cuda":
+        return "cubin" if torch.version.hip is None else "hsaco"
+    elif device == "xpu":
+        return "spv"
+    else:
+        return ""
 
 
 @functools.lru_cache(None)
