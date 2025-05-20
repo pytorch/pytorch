@@ -52,7 +52,7 @@ cd triton
 as_jenkins git checkout ${TRITON_PINNED_COMMIT}
 as_jenkins git submodule update --init --recursive
 cd python
-pip install -r python/requirements.txt
+pip install -r requirements.txt
 # setup.py was moved to the upper folder
 cd ..
 
