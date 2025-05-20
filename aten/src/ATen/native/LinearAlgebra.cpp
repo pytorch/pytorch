@@ -1360,41 +1360,6 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 #endif
 
 
-static inline int64_t get_mkldnn_matmul_min_dim() {
-  static auto value = [&] {
-    const int64_t default_min_dim = [&] {
-      // Minimum dimension requirement for MKLDNN; derived based on experiments.
-      //it's enabled on all Neoverse cpus.
-      return is_arm_neoverse() ? 8 : 0;
-    }();
-    const auto value = c10::utils::get_env("TORCH_MKLDNN_MATMUL_MIN_DIM");
-    return value.has_value() ? std::stoi(value.value()) : default_min_dim;
-  }();
-  return value;
-}
-
-
-static inline int64_t get_mkldnn_matmul_min_size() {
-  static auto value = [&] {
-    const int64_t default_min_size = [&] {
-      // Minimum size requirement for MKLDNN; derived based on experiments.
-      // it's enabled on all Neoverse cpus.
-      return is_arm_neoverse() ? 8 * 1024 : 0;
-    }();
-    const auto value = c10::utils::get_env("TORCH_MKLDNN_MATMUL_MIN_SIZE");
-    return value.has_value() ? std::stoi(value.value()) : default_min_size;
-  }();
-  return value;
-}
-
-
-static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n) {
-  const int64_t min_dim = get_mkldnn_matmul_min_dim();
-  const int64_t min_size = get_mkldnn_matmul_min_size();
-  return at::globalContext().userEnabledMkldnn() && m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
-}
-
-
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
@@ -1514,8 +1479,7 @@ static void addmm_impl_cpu_(
   // that will call then into Arm® Compute Library (ACL) GEMM kernel and also
   // additionally have support for running kernel with BF16 instructions
   if (transpose_c) {
-    bool apply_heur = apply_mkldnn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1]);
-    if (apply_heur && transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
+    if (use_mkldnn_matmul(b, a, c) && transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
       try {
         mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
         // We have dispatched to ACL GEMM for single precision float
@@ -1771,8 +1735,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
         (strides[1] == 1 && (sizes[2] == 1 || strides[2] >= sizes[1]));
   };
 
-  bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
-  if (apply_heur && use_mkldnn_matmul(batch1, batch2, self_or_result)) {
+  if (use_mkldnn_matmul(batch1, batch2, self_or_result)) {
     try {
       mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
       return;

@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import functools
 import itertools
 import logging
 from collections import defaultdict
@@ -9,6 +10,11 @@ from sympy import Expr, symbols
 
 from torch import dtype as torch_dtype
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+from torch._inductor.scheduler import BaseSchedulerNode
+from torch._inductor.utils import Placeholder
+from torch.utils._sympy.value_ranges import ValueRanges
+
+from .cutlass_utils import DTYPE_TO_CUTLASS_TYPE
 
 
 if TYPE_CHECKING:
@@ -27,6 +33,7 @@ from ...ir import (
 from ...utils import sympy_product
 from ...virtualized import V
 from ..common import (
+    CSEVariable,
     IndentedBuffer,
     Kernel,
     OpOverrides,
@@ -234,6 +241,7 @@ class CUDATemplateKernel(CUDAKernel):
         self,
         inputs: list[IRNode],
         outputs: list[IRNode],
+        epilogue_inputs: list[IRNode],
         names_str: str = "",
         input_reorder: Optional[list[int]] = None,
     ) -> str:
@@ -251,7 +259,7 @@ class CUDATemplateKernel(CUDAKernel):
                            In this case, the `input_reorder` would be [2, 0, 1].
         """
         names = [x.strip() for x in names_str.strip().split(",")]
-        if len(inputs) + len(outputs) != len(names):
+        if len(inputs) + len(epilogue_inputs) + len(outputs) != len(names):
             raise RuntimeError(
                 f"{len(inputs) + len(outputs)=} != {len(names)=}, {inputs=}, {outputs=}, {names=}"
             )
@@ -268,12 +276,19 @@ class CUDATemplateKernel(CUDAKernel):
                 self.named_nodes[name] = node
                 self.args.input_buffers[node.get_name()] = name
 
+        for epilogue_input in epilogue_inputs:
+            if epilogue_input is not None:
+                self.named_nodes[epilogue_input.get_name()] = epilogue_input
+                self.args.input_buffers[epilogue_input.get_name()] = (
+                    epilogue_input.get_name()
+                )
+
         for name, node in zip(names[len(inputs) : len(inputs) + len(outputs)], outputs):
             if node is not None:
                 self.named_nodes[name] = node
                 self.args.output_buffers[node.get_name()] = name
 
-        arg_defs, *_ = self.args.cpp_argdefs()
+        arg_defs, *_ = self.args.cpp_argdefs(DTYPE_TO_CUTLASS_TYPE)
 
         self.init_layout_args()
         size_args = [
@@ -313,8 +328,8 @@ class CUDATemplateKernel(CUDAKernel):
             wrapper.initialized_kernels[name] = self
             # We always originally initialize name with "KERNEL_NAME". So, we
             # we replace with the real kernel name passed as an arg to this function.
-            self.signature = self.signature.replace("KERNEL_NAME", name)
-            _, call_args, arg_types = self.args.cpp_argdefs()
+            self.signature = self.signature.replace(str(Placeholder.KERNEL_NAME), name)
+            _, call_args, arg_types = self.args.cpp_argdefs(DTYPE_TO_CUTLASS_TYPE)
         else:
             _, call_args, _, arg_types = self.args.python_argdefs()
 
@@ -521,6 +536,18 @@ class CUDATemplateKernel(CUDAKernel):
                 f"At least 1 stride should be 1. Strides: {node.get_stride()=}"
             )
 
+    def load(self, name: str, index: Expr, mode: Any = None) -> CSEVariable:
+        """
+        Mock load function for memory planning to optimize allocations properly.
+        """
+        return self.create_cse_var(name, bounds=ValueRanges.unknown())
+
+    def store(self, name: str, index: Expr, value: Any, mode: Any = None) -> None:
+        """
+        Mock store function for memory planning to optimize allocations properly.
+        """
+        self.store_buffer_names.add(name)
+
 
 class CUDATemplateCaller(ChoiceCaller):
     """
@@ -540,8 +567,12 @@ class CUDATemplateCaller(ChoiceCaller):
         category: str,
         input_nodes: list[Buffer],
         layout: Layout,
-        make_kernel_render: Callable[[CUDATemplateBuffer, Optional[list[IRNode]]], str],
+        make_kernel_render: Callable[
+            [CUDATemplateBuffer, Optional[list[BaseSchedulerNode]]],
+            tuple[CUDATemplateKernel, functools.partial[str]],
+        ],
         bmreq: CUDABenchmarkRequest,
+        supports_epilogue_fusion: bool,
         template: "CUDATemplate",  # type: ignore[name-defined]
         info_kwargs: Optional[
             dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]
@@ -552,6 +583,7 @@ class CUDATemplateCaller(ChoiceCaller):
         self.category = category
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq
+        self.supports_epilogue_fusion = supports_epilogue_fusion
         self.template = template
         self.info_kwargs = info_kwargs
 
@@ -562,7 +594,7 @@ class CUDATemplateCaller(ChoiceCaller):
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
         return self.bmreq.benchmark(
-            *args, output_tensor=out
+            *args, out=out
         )  # @TODO: Hack for ensuring that Cutlass Kernel is preferred
 
     def __str__(self) -> str:
@@ -608,6 +640,7 @@ class CUDATemplateCaller(ChoiceCaller):
                 inputs=self.input_nodes,
                 make_kernel_render=self.make_kernel_render,
                 workspace_size=self.bmreq.workspace_size,
+                supports_epilogue_fusion=self.supports_epilogue_fusion,
                 template=self.template,
             )
         )

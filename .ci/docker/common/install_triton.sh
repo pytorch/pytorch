@@ -33,11 +33,9 @@ if [ -n "${UBUNTU_VERSION}" ];then
     apt-get install -y gpg-agent
 fi
 
-if [ -n "${CONDA_CMAKE}" ]; then
-  # Keep the current cmake and numpy version here, so we can reinstall them later
-  CMAKE_VERSION=$(get_pip_version cmake)
-  NUMPY_VERSION=$(get_pip_version numpy)
-fi
+# Keep the current cmake and numpy version here, so we can reinstall them later
+CMAKE_VERSION=$(get_pip_version cmake)
+NUMPY_VERSION=$(get_pip_version numpy)
 
 if [ -z "${MAX_JOBS}" ]; then
     export MAX_JOBS=$(nproc)
@@ -79,21 +77,19 @@ cp dist/*.whl /opt/triton
 # Install the wheel for docker builds that don't use multi stage
 pip_install dist/*.whl
 
-if [ -n "${CONDA_CMAKE}" ]; then
-  # TODO: This is to make sure that the same cmake and numpy version from install conda
-  # script is used. Without this step, the newer cmake version (3.25.2) downloaded by
-  # triton build step via pip will fail to detect conda MKL. Once that issue is fixed,
-  # this can be removed.
-  #
-  # The correct numpy version also needs to be set here because conda claims that it
-  # causes inconsistent environment.  Without this, conda will attempt to install the
-  # latest numpy version, which fails ASAN tests with the following import error: Numba
-  # needs NumPy 1.20 or less.
-  # Note that we install numpy with pip as conda might not have the version we want
-  if [ -n "${CMAKE_VERSION}" ]; then
-    pip_install "cmake==${CMAKE_VERSION}"
-  fi
-  if [ -n "${NUMPY_VERSION}" ]; then
-    pip_install "numpy==${NUMPY_VERSION}"
-  fi
+# TODO: This is to make sure that the same cmake and numpy version from install conda
+# script is used. Without this step, the newer cmake version (3.25.2) downloaded by
+# triton build step via pip will fail to detect conda MKL. Once that issue is fixed,
+# this can be removed.
+#
+# The correct numpy version also needs to be set here because conda claims that it
+# causes inconsistent environment.  Without this, conda will attempt to install the
+# latest numpy version, which fails ASAN tests with the following import error: Numba
+# needs NumPy 1.20 or less.
+# Note that we install numpy with pip as conda might not have the version we want
+if [ -n "${CMAKE_VERSION}" ]; then
+  pip_install "cmake==${CMAKE_VERSION}"
+fi
+if [ -n "${NUMPY_VERSION}" ]; then
+  pip_install "numpy==${NUMPY_VERSION}"
 fi

@@ -19,6 +19,7 @@ from ... import config
 from ...ir import Layout
 from ...runtime.runtime_utils import cache_dir
 from ...virtualized import V
+from ..cpp_utils import DTYPE_TO_CPP
 from .cuda_env import get_cuda_arch, get_cuda_version
 
 
@@ -307,6 +308,13 @@ def gen_ops() -> dict[Any, Any]:
     arch = get_cuda_arch()
     version = get_cuda_version()
     return _gen_ops_cached(arch, version)
+
+
+DTYPE_TO_CUTLASS_TYPE = {
+    **DTYPE_TO_CPP,
+    torch.float16: "__half",
+    torch.bfloat16: "__nv_bfloat16",
+}
 
 
 @functools.lru_cache(32)

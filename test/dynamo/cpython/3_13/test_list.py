@@ -50,8 +50,10 @@ sys.meta_path.insert(0, RedirectImportFinder())
 # ======= END DYNAMO PATCH =======
 
 import sys
+import textwrap
 import list_tests
 from test.support import cpython_only
+from test.support.script_helper import assert_python_ok
 import pickle
 import unittest
 
@@ -164,6 +166,19 @@ class ListTest(list_tests.CommonTest):
             lst * size
         with self.assertRaises((MemoryError, OverflowError)):
             lst *= size
+
+    def test_repr_mutate(self):
+        class Obj:
+            @staticmethod
+            def __repr__():
+                try:
+                    mylist.pop()
+                except IndexError:
+                    pass
+                return 'obj'
+
+        mylist = [Obj() for _ in range(5)]
+        self.assertEqual(repr(mylist), '[obj, obj, obj]')
 
     def test_repr_large(self):
         # Check the repr of large list objects
@@ -285,6 +300,31 @@ class ListTest(list_tests.CommonTest):
         list4 = [1]
         self.assertFalse(list3 == list4)
 
+    def test_lt_operator_modifying_operand(self):
+        # See gh-120298
+        class evil:
+            def __lt__(self, other):
+                other.clear()
+                return NotImplemented
+
+        a = [[evil()]]
+        with self.assertRaises(TypeError):
+            a[0] < a
+
+    def test_list_index_modifing_operand(self):
+        # See gh-120384
+        class evil:
+            def __init__(self, lst):
+                self.lst = lst
+            def __iter__(self):
+                yield from self.lst
+                self.lst.clear()
+
+        lst = list(range(5))
+        operand = evil(lst)
+        with self.assertRaises(ValueError):
+            lst[::-1] = operand
+
     @cpython_only
     def test_preallocation(self):
         iterable = [0] * 10
@@ -325,6 +365,36 @@ class ListTest(list_tests.CommonTest):
         lst = [X(), X()]
         X() in lst
 
+    def test_tier2_invalidates_iterator(self):
+        # GH-121012
+        for _ in range(100):
+            a = [1, 2, 3]
+            it = iter(a)
+            for _ in it:
+                pass
+            a.append(4)
+            self.assertEqual(list(it), [])
+
+    @unittest.expectedFailure
+    def test_deopt_from_append_list(self):
+        # gh-132011: it used to crash, because
+        # of `CALL_LIST_APPEND` specialization failure.
+        code = textwrap.dedent("""
+            l = []
+            def lappend(l, x, y):
+                l.append((x, y))
+            for x in range(3):
+                lappend(l, None, None)
+            try:
+                lappend(list, None, None)
+            except TypeError:
+                pass
+            else:
+                raise AssertionError
+        """)
+
+        rc, _, _ = assert_python_ok("-c", code)
+        self.assertEqual(rc, 0)
 
 if __name__ == "__main__":
     run_tests()

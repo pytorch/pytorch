@@ -120,9 +120,9 @@ class UserListTest(list_tests.CommonTest):
 
     # Decorate existing test with recursion limit, because
     # the test is for C structure, but `UserList` is a Python structure.
-    test_repr_deep = support.infinite_recursion(25)(
-        list_tests.CommonTest.test_repr_deep,
-    )
+    # test_repr_deep = support.infinite_recursion(25)(
+    #     list_tests.CommonTest.test_repr_deep,
+    # )
 
 if __name__ == "__main__":
     run_tests()
