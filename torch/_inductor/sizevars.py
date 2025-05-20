@@ -676,9 +676,9 @@ class SizeVarAllocator:
                 self.unbacked_replacements[src] = dst
         return self.unbacked_replacements
 
-    @functools.lru_cache
+    @functools.lru_cache  # noqa: B019
     def _sub_unbacked_exprs(self, expr: Expr) -> Expr:
-        # it's fine to cache this fn since SizeVarAllocator is a singleton.
+        # it's fine to cache this fn since self is a singleton
         replacements = self._get_unbacked_replacements()
         while True:
             new_expr = expr.subs(replacements)
