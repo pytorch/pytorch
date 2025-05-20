@@ -10,6 +10,7 @@ from torch._dispatch.python import suspend_functionalization
 from torch._higher_order_ops.utils import _maybe_run_with_interpreter, reenter_make_fx
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -17,6 +18,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 from .utils import (
+    _from_fun,
     _stack_pytree,
     _unstack_pytree,
     create_bw_fn,
@@ -102,6 +104,7 @@ def map(
         def wrapped_fn(*flat_args, f, xs_tree_spec, args_tree_spec, num_xs):
             xs = pytree.tree_unflatten(flat_args[:num_xs], xs_tree_spec)
             args = pytree.tree_unflatten(flat_args[num_xs:], args_tree_spec)
+            # TODO: Output check alternative 1
             # outs = f(xs, *args)
             # if pytree.tree_any(lambda elem: not isinstance(elem, torch.Tensor) if elem is not None else False, outs):
             #         raise RuntimeError(
@@ -153,7 +156,7 @@ class MapAutogradOp(torch.autograd.Function):
         num_pos_args = ctx._num_pos_args
         num_grads = len(flat_grads)
 
-        ctx._bw_f = create_bw_fn(ctx._f, fw_args)
+        bw_f = create_bw_fn(ctx._f, fw_args)
 
         # Create a wrapper around thefor the bw_f
         def bw_f_wrapper(*args):
@@ -165,27 +168,35 @@ class MapAutogradOp(torch.autograd.Function):
             fw_m_args, bw_f_tangents, pos_args = split_into_chunks(
                 args, [num_mapped_args, num_grads, num_pos_args]
             )
-            bw_f_primals = [*fw_m_args, *pos_args]
-            return ctx._bw_f(*bw_f_primals, *bw_f_tangents)
+            bw_f_primals = *fw_m_args, *pos_args
+            return bw_f(*bw_f_primals, *bw_f_tangents)
 
         def construct_args_single_step_bw():
-            fw_mapped_args_slice = _unstack_pytree(fw_mapped_args)[0]
-            flat_grads_slice = _unstack_pytree(flat_grads)[0]
-            return *fw_mapped_args_slice, *flat_grads_slice, *pos_args
+            unwrapped_mapped_xs = pytree.tree_map(_from_fun, fw_mapped_args)
+            example_xs = _unstack_pytree(unwrapped_mapped_xs)[0]
+            unwrapped_grads = pytree.tree_map(_from_fun, flat_grads)
+            example_grads = _unstack_pytree(unwrapped_grads)[0]
+            example_pos_args = [
+                _from_fun(arg) if isinstance(arg, torch.Tensor) else arg
+                for arg in pos_args
+            ]
+            return *example_xs, *example_grads, *example_pos_args
 
-        args_single_step_bw = construct_args_single_step_bw()
+        with suspend_functionalization(), disable_functional_mode():
+            with disable_proxy_modes_tracing():
+                args_single_step_bw = construct_args_single_step_bw()
 
-        # TODO: we need to materialize the bw graphs because dynamo is unable to
-        # trace through the joint funcion when torch.compile torch.autograd.grad.
-        fn_bw_gm = materialize_as_graph(
-            bw_f_wrapper,
-            args_single_step_bw,
-            ctx._fw_include_key_set,
-            ctx._fw_exclude_key_set,
-            force_enable_grad=True,
-        )
+            # TODO: we need to materialize the bw graphs because dynamo is unable to
+            # trace through the joint funcion when torch.compile torch.autograd.grad.
+            fn_bw_gm = materialize_as_graph(
+                bw_f_wrapper,
+                args_single_step_bw,
+                ctx._fw_include_key_set,
+                ctx._fw_exclude_key_set,
+                force_enable_grad=True,
+            )
 
-        grads = map_impl(fn_bw_gm, fw_mapped_args + list(flat_grads), pos_args)
+        grads = map_impl(fn_bw_gm, fw_mapped_args + flat_grads, pos_args)
 
         return None, None, *grads
 
@@ -226,6 +237,7 @@ def trace_map(proxy_mode, func_overload, f, xs, pos_args):
 def map_dense(f, xs, pos_args):
     pytrees = [f(*inp, *pos_args) for inp in _unstack_pytree(xs)]
     outs_flatten = pytree.tree_leaves(pytrees)
+    # TODO: Output check alternative 2
     if any(
         not isinstance(out, torch.Tensor) for out in outs_flatten if out is not None
     ):
@@ -236,8 +248,7 @@ def map_dense(f, xs, pos_args):
     return _stack_pytree(pytrees)
 
 
-# @map_impl.py_autograd_impl
-@map_impl.py_impl(DispatchKey.Autograd)
+@map_impl.py_autograd_impl
 def map_autograd(f, xs, pos_args):
     num_mapped_args = len(xs)
     flat_out = MapAutogradOp.apply(f, num_mapped_args, *xs, *pos_args)
