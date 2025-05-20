@@ -102,6 +102,7 @@
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/utils/verbose.h>
+#include <torch/csrc/vulkan/Module.h>
 
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <torch/csrc/profiler/combined_traceback.h>
@@ -1890,6 +1891,9 @@ PyObject* initModule() {
 #endif
 #ifdef USE_MPS
   torch::mps::initModule(module);
+#endif
+#ifdef USE_VULKAN
+  torch::vulkan::initModule(module);
 #endif
 #ifdef USE_XPU
   torch::xpu::initModule(module);

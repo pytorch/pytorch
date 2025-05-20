@@ -15,6 +15,8 @@
 #include <ATen/native/vulkan/api/Runtime.h>
 #include <ATen/native/vulkan/api/Shader.h>
 #include <ATen/native/vulkan/api/Utils.h>
+#include <c10/macros/Macros.h>
+#include <c10/util/Enumerate.h>
 
 namespace at {
 namespace native {
@@ -37,7 +39,7 @@ struct ContextConfig final {
 // to be if we were to make it explicit to the user.
 //
 
-class Context final {
+class TORCH_API Context final {
  public:
   explicit Context(size_t adapter_i, const ContextConfig&);
 
@@ -194,6 +196,14 @@ class Context final {
       const utils::uvec3&,
       VkFence fence_handle,
       Arguments&&...);
+  template <typename Container>
+  bool submit_compute_job_with_args_container(
+      const ShaderInfo&,
+      PipelineBarrier&,
+      const utils::uvec3&,
+      const utils::uvec3&,
+      VkFence fence_handle,
+      const Container&);
 
   void submit_cmd_to_gpu(
       VkFence fence_handle = VK_NULL_HANDLE,
@@ -202,7 +212,7 @@ class Context final {
   void flush();
 };
 
-class UniformParamsBuffer final {
+class TORCH_API UniformParamsBuffer final {
  private:
   Context* context_p_;
   size_t nbytes_;
@@ -299,11 +309,11 @@ class StorageBuffer final {
   }
 };
 
-bool available();
+TORCH_API bool available();
 
 // The global runtime is retrieved using this function, where it is declared as
 // a static local variable.
-Context* context();
+TORCH_API Context* context();
 
 namespace detail {
 
@@ -530,6 +540,83 @@ inline bool Context::submit_compute_job(
       descriptor_set,
       std::index_sequence_for<Arguments...>{},
       std::forward<Arguments>(arguments)...);
+
+  // Factor out template parameter independent code to minimize code bloat.
+  register_shader_dispatch(
+      descriptor_set, pipeline_barrier, shader, global_work_group);
+
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
+  if (enable_op_profiling_) {
+    querypool_.shader_profile_end(cmd_, log_idx);
+  }
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
+
+  submit_count_++;
+  if (fence_handle != VK_NULL_HANDLE ||
+      submit_count_ >= config_.cmdSubmitFrequency) {
+    submit_cmd_to_gpu(fence_handle);
+    return true;
+  }
+
+  return false;
+}
+
+template <typename Container>
+inline bool Context::submit_compute_job_with_args_container(
+    const ShaderInfo& shader,
+    PipelineBarrier& pipeline_barrier,
+    const utils::uvec3& global_work_group,
+    const utils::uvec3& local_work_group_size,
+    VkFence fence_handle,
+    const Container& arguments) {
+  // If any of the provided arguments does not have memory associated with it,
+  // then exit early as there is no work to be done. However, if a fence has
+  // been passed the command buffer is not empty, then the current command
+  // buffer must still be submitted so that the fence can be signaled.
+  if (std::any_of(arguments.begin(), arguments.end(), [](const auto& arg) {
+        return !arg;
+      })) {
+    if (fence_handle != VK_NULL_HANDLE && submit_count_ > 0) {
+      submit_cmd_to_gpu(fence_handle);
+      return true;
+    }
+    return false;
+  }
+
+  // Serialize recording to the shared command buffer. Do not initialize with a
+  // mutex just yet, since in some cases it will be externally managed.
+  std::unique_lock<std::mutex> cmd_lock;
+  // If a fence was passed, then assume that the host intends to sync with
+  // the GPU, implying there will be imminent calls to fence.wait() and flush().
+  // We therefore assume the mutex is externally managed in this case, and the
+  // calling thread has already locked the mutex prior to calling the function,
+  // and will release the mutex manually after calling flush(). This will
+  // prevent more dispatches from being recorded until we have flushed the
+  // Context.
+  if (fence_handle == VK_NULL_HANDLE) {
+    cmd_lock = std::unique_lock<std::mutex>(cmd_mutex_);
+  }
+
+  set_cmd();
+
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
+  uint32_t log_idx = UINT32_MAX;
+  if (enable_op_profiling_) {
+    log_idx = querypool_.shader_profile_begin(
+        cmd_,
+        shader.kernel_name,
+        create_extent3d(global_work_group),
+        create_extent3d(local_work_group_size));
+  }
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
+
+  // Factor out template parameter independent code to minimize code bloat.
+  DescriptorSet descriptor_set =
+      get_descriptor_set(shader, local_work_group_size);
+
+  for (const auto [ii, arg] : c10::enumerate(arguments)) {
+    descriptor_set.bind(ii, arg);
+  }
 
   // Factor out template parameter independent code to minimize code bloat.
   register_shader_dispatch(
