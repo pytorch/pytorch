@@ -69,7 +69,7 @@ try:
     not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 except ValueError as e:
     if "'not_implemented' not registered" in str(e):
-        import logging as not_implemented_log
+        not_implemented_log = logging.getLogger(__name__ + ".not_implemented")
     else:
         raise e
 
@@ -489,7 +489,12 @@ class FakeTensorConverter:
 
     # If you specify the device, it MUST be a meta tensor.
     def from_meta_and_device(
-        self, fake_mode: FakeTensorMode, t: Tensor, device: torch.device
+        self,
+        fake_mode: FakeTensorMode,
+        t: Tensor,
+        device: torch.device,
+        pytype: Optional[type[torch.Tensor]] = None,
+        dispatch_keys: Optional[torch.DispatchKeySet] = None,
     ) -> FakeTensor:
         assert (
             t.device.type == "meta"
@@ -499,7 +504,9 @@ class FakeTensorConverter:
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
-        out = FakeTensor(fake_mode, t, device)
+        out = FakeTensor(
+            fake_mode, t, device, pytype=pytype, dispatch_keys=dispatch_keys
+        )
         self.set_tensor_memo(t, out)
         return out
 
@@ -651,6 +658,12 @@ class FakeTensor(Tensor):
     # nested int.
     nested_int_memo = SymNumberMemoDescriptor(is_nested_int=True)
 
+    # FakeTensor doesn't fully emulate the original tensor's Python type
+    # and dispatch key set, therefore sometimes we want to track them
+    # separately.
+    pytype: Optional[type[Tensor]]
+    dispatch_keys: Optional[torch.DispatchKeySet]
+
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
     _mode_key = torch._C._TorchDispatchModeKey.FAKE
@@ -700,6 +713,8 @@ class FakeTensor(Tensor):
         device: torch.device,
         constant: Optional[Tensor] = None,
         real_tensor: Optional[Tensor] = None,
+        pytype: Optional[type[Tensor]] = None,
+        dispatch_keys: Optional[torch.DispatchKeySet] = None,
     ) -> Self:
         self = Tensor._make_subclass(
             cls,
@@ -742,6 +757,8 @@ class FakeTensor(Tensor):
         self.fake_device = device
         self.fake_mode = fake_mode
         self.constant = constant
+        self.pytype = pytype
+        self.dispatch_keys = dispatch_keys
         assert not isinstance(real_tensor, FakeTensor)
         self.real_tensor = real_tensor
         self.nonzero_memo = None
@@ -1011,7 +1028,7 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
     """
     Extract the TensorMetadata of a tensor.
     """
-    memory_format: Optional[torch.memory_format] = suggest_memory_format(t)
+    memory_format = suggest_memory_format(t)
     # Don't call is_contiguous() on a Tensor which has symbolic sizes or things
     # will go badly (guards will be messed up?)
     if (
@@ -1019,7 +1036,7 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
         or is_sparse_any(t)
         or not t.is_contiguous(memory_format=memory_format)
     ):
-        memory_format = None
+        memory_format = None  # type: ignore[assignment]
 
     storage_offset = t.storage_offset()
 

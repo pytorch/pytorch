@@ -59,7 +59,7 @@ namespace {
 // in data parallel, and should not be exposed as a user API.
 struct ReduceAdd : public autograd::Node {
   explicit ReduceAdd(const at::Device& destination_device)
-      : destination_device_(destination_device){};
+      : destination_device_(destination_device) {};
   ~ReduceAdd() override = default;
 
   // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)

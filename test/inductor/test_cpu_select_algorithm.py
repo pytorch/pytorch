@@ -307,7 +307,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 dtype == torch.float32
                 and epilogue == "add"
                 and not bias
-                and dynamo_config.dynamic_shapes
                 and not dynamo_config.assume_static_by_default
             )
         ):
@@ -1301,7 +1300,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 rtol=rtol,
             )
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 2)
-        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 2)
+        self.assertEqual(
+            counters["inductor"]["cpp_epilogue_fusion_counter"], 2 if TEST_MKL else 1
+        )
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1377,6 +1378,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize(
         "batch_size",
         (
+            1,
             17,
             32,
         ),
@@ -1428,8 +1430,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(w_int8pack).eval()
         self.common(mod, (x, w_scales))
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
-        vec_amx = VecAMX()
-        self._check_amx_counter(vec_amx)
+        if batch_size * mid_dim >= 16:
+            vec_amx = VecAMX()
+            self._check_amx_counter(vec_amx)
 
     @unittest.skipIf(
         not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
