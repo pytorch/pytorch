@@ -319,6 +319,20 @@ class _PipelineSchedule(ABC):
         """
         raise NotImplementedError
 
+    def eval_step(
+        self,
+        *args,
+        **kwargs,
+    ) -> Any:
+        """
+        Will go through all the microbatches and perform only the forward pass
+        """
+        previously_set_has_backward = self._has_backward
+        self._has_backward = False
+        output = self.step(args, kwargs)
+        self._has_backward = previously_set_has_backward
+        return output
+
     def _check_inputs(
         self,
         arg_mbs: Optional[list] = None,
