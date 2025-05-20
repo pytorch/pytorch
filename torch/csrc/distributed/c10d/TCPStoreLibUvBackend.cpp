@@ -155,7 +155,7 @@ class UvTcpSocket : public UvHandle {
   }
 
   void startRead() {
-    struct ::sockaddr_storage addr {};
+    struct ::sockaddr_storage addr{};
     int addrLen{sizeof(struct ::sockaddr_storage)};
 
     if (int err = uv_tcp_getpeername(
@@ -263,7 +263,7 @@ class UvTcpServer : public UvTcpSocket {
     auto res = c10::make_intrusive<UvTcpServer>(loop);
     res->handleReady();
     try {
-      struct sockaddr_storage addr {};
+      struct sockaddr_storage addr{};
       int uv_res = 0;
       if (useIpv6) {
         uv_res = uv_ip6_addr("::", port, (struct sockaddr_in6*)&addr);
