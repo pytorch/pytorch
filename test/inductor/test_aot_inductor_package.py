@@ -562,6 +562,9 @@ class TestAOTInductorPackage(TestCase):
         lambda device, package_cpp_only: device == "cpu" or package_cpp_only,
         "No support for cpp only and cpu",
     )
+    # freezing uses different sets of parameters, but would be tested via the same
+    # mechanism
+    @torch._inductor.config.patch(freezing=False)
     def test_update_weights(self):
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
