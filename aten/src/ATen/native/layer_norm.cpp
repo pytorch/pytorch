@@ -344,7 +344,8 @@ Tensor rms_norm_symint(
   _check_rms_norm_inputs_symint(input, normalized_shape, weight);
 
   // maybe dispatch to cpu if type isnt supported by the cuda impl
-  return std::get<0>(at::native_rms_norm_symint(input, normalized_shape, weight_opt, eps));
+  return std::get<0>(at::native_rms_norm(input, IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
+  // return std::get<0>(at::native_rms_norm_symint(input, normalized_shape, weight_opt, eps));
 }
 
 } // namespace at::native
