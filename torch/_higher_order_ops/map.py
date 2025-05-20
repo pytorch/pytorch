@@ -182,7 +182,7 @@ def map(
             #             f"Got types {[type(out) for out in pytree.tree_leaves(outs)]}."
             #         )
             # return outs
-            
+
             return f(xs, *args)
 
         inner_f = functools.partial(
@@ -197,6 +197,7 @@ def map(
     from torch._higher_order_ops.utils import _maybe_compile_and_run_fn
 
     return _maybe_compile_and_run_fn(run_flattened_map, f, flat_xs, flat_args)
+
 
 class MapAutogradOp(torch.autograd.Function):
     @staticmethod
@@ -263,12 +264,14 @@ def map_dense(f, xs, pos_args):
     outs_flatten = pytree.tree_leaves(pytrees)
     if any(
         # pytree.tree_map(lambda elem: not isinstance(elem, torch.Tensor), outs)
-            not isinstance(out, torch.Tensor) for out in outs_flatten if out is not None
-        ):
-            raise RuntimeError(
-                "Expect outputs of map only contains tensors or None. "
-                f"Got types {[type(out) for out in outs_flatten]}."
-            )
+        not isinstance(out, torch.Tensor)
+        for out in outs_flatten
+        if out is not None
+    ):
+        raise RuntimeError(
+            "Expect outputs of map only contains tensors or None. "
+            f"Got types {[type(out) for out in outs_flatten]}."
+        )
     return _stack_pytree(pytrees)
 
 
