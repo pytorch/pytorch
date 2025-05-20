@@ -555,22 +555,20 @@ class BaseSchedulerNode:
                         and can_match_buffer_size(input_buf.node, buf.node)
                         and single_index_in_fused_node(input_buf)
                     ):
-                        input_buf_name = input_buf.get_name()
-                        input_buf_name = self.scheduler.mutation_real_name.get(
-                            input_buf_name, input_buf_name
-                        )
                         # if there isn't a triton kernel, then we don't need to call triton-specific things.
                         # but TODO this might be a convenient place to signal to the Collective kernels to inplace
                         # (and, can we make "kernel" less generic of a name?)
-                        V.kernel.args.make_inplace(input_buf_name, buf.get_name())
+                        V.kernel.args.make_inplace(input_buf.get_name(), buf.get_name())
                         # mutations not tracked in cpp kernels
                         if isinstance(
                             V.kernel, torch._inductor.codegen.simd.SIMDKernel
                         ):
-                            V.kernel.mutations.add(input_buf_name)
+                            V.kernel.mutations.add(input_buf.get_name())
                             V.kernel.mutations.add(buf.get_name())
 
-                        V.kernel.inplace_update_buffers[buf.get_name()] = input_buf_name
+                        V.kernel.inplace_update_buffers[buf.get_name()] = (
+                            input_buf.get_name()
+                        )
                         break
 
     def codegen_originating_info(
@@ -2064,7 +2062,7 @@ class Scheduler:
         # mutation_real_name: Maps back to the original name for codegen
         # Example:
         # If you mutate buf0 inside of buf1's kernel, then:
-        # mutation_real_name = {"buf1" : "buf0"}
+        # mutation_real_name = {"buf0" : "buf1"}
         # all subsequent uses of buf0 become buf1's usage in dependency graph
         self.mutation_real_name: dict[str, str] = {}
 
@@ -2074,8 +2072,8 @@ class Scheduler:
         #                   (changed once per mutation)
         # Example:
         # If you mutate buf0 inside of buf1's kernel, then:
-        # mutation_renames = {"buf0" : "buf1"}
-        # in codegen we only use buf1, never buf0
+        # mutation_renames = {"buf1" : "buf0"}
+        # in codegen we only use buf0, never buf1
         self.mutation_renames: dict[str, str] = {}
 
         # Must run first to correctly set dependencies, before all other passes that rely on
@@ -2329,6 +2327,7 @@ class Scheduler:
 
         for node in self.nodes:
             log.debug("scheduling %s", node.node)
+
             # unbacked symbols don't follow ordinary buffer dependencies, so
             # we track their def/uses separately
             assert node.node is not None
