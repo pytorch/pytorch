@@ -4717,6 +4717,29 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ):
             f_compiled(a)
 
+    # https://github.com/pytorch/pytorch/issues/146598
+    @unittest.expectedFailure
+    def test_lru_cache_tracing(self):
+        from functools import lru_cache
+
+        counter = 0
+
+        @lru_cache
+        def cached_fn(x):
+            nonlocal counter
+            counter += 1
+            return x + 1
+
+        compiled_fn = torch.compile(cached_fn, backend="eager")
+
+        t = torch.randn(2, 2)
+        result1 = compiled_fn(t)
+        self.assertEqual(counter, 1)
+
+        result2 = compiled_fn(t)
+        self.assertEqual(counter, 1)
+        self.assertEqual(result1, result2)
+
     def test_dont_aggressively_write_assert(self):
         record_graph = torch._dynamo.testing.EagerAndRecordGraphs()
 
@@ -5431,6 +5454,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         mod = Mod()
         opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
         x = torch.randn(4)
+
         self.assertEqual(mod(x), opt_mod(x))
 
     def test_enum(self):

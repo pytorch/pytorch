@@ -1552,7 +1552,7 @@ init_command = [
 ]
 is_formatter = true
 
-# This linter prevents merge conlicts in csv files in pytorch by enforcing
+# This linter prevents merge conflicts in csv files in pytorch by enforcing
 # three lines of whitespace between entries such that unless people are modifying
 # the same line, merge conflicts should not arise in git or hg
 [[linter]]
