@@ -73,7 +73,7 @@ class MetalExprPrinter(ExprPrinter_):
         x = self.doprint(x)
         div = self.doprint(div)
         if expr.is_integer:
-            return f"({x}) / ({div})"
+            return f"c10::metal::floor_divide({x}, {div})"
         return f"metal::floor({x}) / ({div})"
 
     def _print_ModularIndexing(self, expr: sympy.Expr) -> str:
@@ -326,10 +326,8 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def floordiv(a: CSEVariable, b: CSEVariable) -> str:
-        # a and b are integer type
-        quot = f"{a} / {b}"
-        rem = f"{a} % {b}"
-        return f"(({a} < 0) != ({b} < 0) ? ({rem} != 0 ? {quot} - 1 : {quot}) : {quot})"
+        # a and b must be of integer type
+        return f"c10::metal::floor_divide({a}, {b})"
 
     @staticmethod
     def floor(x: CSEVariable) -> str:
