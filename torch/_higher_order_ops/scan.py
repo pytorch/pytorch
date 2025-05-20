@@ -859,9 +859,7 @@ def scan_fake_tensor_mode(mode, combine_fn, init, xs, additional_inputs):
 
 @scan_op.py_functionalize_impl
 def scan_functionalize(ctx, combine_fn, init, xs, additional_inputs):
-    from torch._higher_order_ops.utils import (
-        _check_alias_and_mutation,
-    )
+    from torch._higher_order_ops.utils import _check_alias_and_mutation
 
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_init = ctx.unwrap_tensors(init)
