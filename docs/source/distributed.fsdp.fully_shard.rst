@@ -9,7 +9,7 @@ targeting performant eager-mode while using per-parameter sharding for improved
 usability.
 
 - If you are new to FSDP, we recommend that you start with FSDP2 due to improved
-  usability.
+  usability. See `TorchTitan <https://github.com/pytorch/torchtitan/blob/main/docs/fsdp.md>`_ for code examples.
 - If you are currently using FSDP1, consider evaluating the following
   differences to see if you should switch to FSDP2:
 
