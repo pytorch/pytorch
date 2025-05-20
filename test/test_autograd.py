@@ -13351,14 +13351,6 @@ class TestAutogradStreamSynchronization(TestCase):
                 events["side_backward_start"].elapsed_time(events["side_backward_end"])
                 > 0
             )
-            # Although the autograd backward should always execute SideBw before MainBw,
-            # there is still a small chance the recorded events won't be in that order.
-            # self.assertTrue(
-            #     events["side_backward_start"].elapsed_time(
-            #         events["main_backward_start"]
-            #     )
-            #     > 0
-            # )
             # Overlap check: side's backward starts before side backward ends
             self.assertTrue(
                 events["main_backward_start"].elapsed_time(events["side_backward_end"])
