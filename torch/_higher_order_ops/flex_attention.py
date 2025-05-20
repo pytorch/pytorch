@@ -420,6 +420,9 @@ def flex_attention_functionalize(
         functional_score_mod = ctx.functionalize(score_mod)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         with TransformGetItemToIndex():
+            # TODO: So far only the input mutations are checked
+            # In the other HOPs, also aliases are checked which is
+            # omitted here
             mutates = _has_potential_branch_input_mutation(
                 score_mod, example_vals, pre_dispatch
             )
@@ -781,11 +784,12 @@ def sdpa_dense_backward(
 ]:
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
-    Bq, _, _, qk_head_dim = query.shape
+    Bq, Hq, seq_len_q, qk_head_dim = query.shape
     Bkv, Hkv, seq_len_kv, v_head_dim = value.shape
 
     # Get outputs before calling repeat interleave and permute to input stride orders
-    actual_grad_query = torch.empty_like(query)
+    actual_grad_query = query.new_empty((Bq, Hq, seq_len_q, qk_head_dim))
+    actual_grad_query = _permute_strides(actual_grad_query, query.stride())
 
     actual_grad_key = key.new_empty((Bq, Hkv, seq_len_kv, qk_head_dim))
     actual_grad_key = _permute_strides(actual_grad_key, key.stride())
