@@ -362,19 +362,23 @@ function(torch_compile_options libname)
       #    By default, the /permissive- option is set in new projects created by Visual Studio 2017 version 15.5 and later versions.
       #    We set the /permissive- flag from VS 2019 (MSVC_TOOLSET_VERSION 142) to avoid compiling issues for old toolkit.
       # 2. For MSVC VERSION: https://cmake.org/cmake/help/latest/variable/MSVC_TOOLSET_VERSION.html
-      set(MSVC_APPEND_OPTION "${MSVC_APPEND_OPTION} /permissive-")
+      target_compile_options(${libname} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/permissive->)
+      message("torch_compile_options: ${libname} append /permissive-")
     endif()
 
     if(${MSVC_TOOLSET_VERSION} GREATER_EQUAL 143)
       # Add /d2implyavx512upperregs- to disable compiler over-aggressive optimization, which caused involeved AVX512 register on AVX2 machine.
       # Reference: https://github.com/pytorch/pytorch/issues/145702#issuecomment-2874029459
-      set(MSVC_APPEND_OPTION "${MSVC_APPEND_OPTION} /d2implyavx512upperregs-")
+      target_compile_options(${libname} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/d2implyavx512upperregs->)
+      message("torch_compile_options: ${libname} append /d2implyavx512upperregs-")
     endif()
+
+    
 
     target_compile_options(${libname} PUBLIC
       $<$<COMPILE_LANGUAGE:CXX>:
         ${MSVC_RUNTIME_LIBRARY_OPTION}
-        $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${MSVC_DEBINFO_OPTION} ${MSVC_APPEND_OPTION}>
+        $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${MSVC_DEBINFO_OPTION}>
         /EHsc
         /bigobj>
       )
