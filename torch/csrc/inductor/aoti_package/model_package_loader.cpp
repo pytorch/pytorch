@@ -39,7 +39,7 @@ bool file_exists(const std::string& path) {
 #ifdef _WIN32
   return fs::exists(path);
 #else
-  struct stat rc {};
+  struct stat rc{};
   return lstat(path.c_str(), &rc) == 0;
 #endif
 }
@@ -217,7 +217,7 @@ bool recursive_rmdir(const std::string& path) {
   }
 
   struct dirent* entry = nullptr;
-  struct stat statbuf {};
+  struct stat statbuf{};
   bool success = true;
 
   // Iterate through directory entries
