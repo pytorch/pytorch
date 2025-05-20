@@ -1015,10 +1015,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 file_check = FileCheck().check(
                     f"def call({extra_str_from_graph_partition}args):"
                 )
-                for fwd_ag_block_info in [
-                    dict(
-                        overlapped_compute_op_str=(
-                            "triton_" if all_requires_grad else None
                         ),
                     ),
                     dict(

@@ -556,7 +556,9 @@ class BaseSchedulerNode:
                         and single_index_in_fused_node(input_buf)
                     ):
                         input_buf_name = input_buf.get_name()
-                        input_buf_name = self.scheduler.mutation_real_name.get(input_buf_name, input_buf_name)
+                        input_buf_name = self.scheduler.mutation_real_name.get(
+                            input_buf_name, input_buf_name
+                        )
                         # if there isn't a triton kernel, then we don't need to call triton-specific things.
                         # but TODO this might be a convenient place to signal to the Collective kernels to inplace
                         # (and, can we make "kernel" less generic of a name?)
@@ -568,9 +570,7 @@ class BaseSchedulerNode:
                             V.kernel.mutations.add(input_buf_name)
                             V.kernel.mutations.add(buf.get_name())
 
-                        V.kernel.inplace_update_buffers[buf.get_name()] = (
-                            input_buf_name
-                        )
+                        V.kernel.inplace_update_buffers[buf.get_name()] = input_buf_name
                         break
 
     def codegen_originating_info(
@@ -2329,8 +2329,6 @@ class Scheduler:
 
         for node in self.nodes:
             log.debug("scheduling %s", node.node)
-            # if node.get_name() == "op115":
-            #     print(f"ckpt1. node:{node}, node.node:{node.node}, read_writes:{node.read_writes}")
             # unbacked symbols don't follow ordinary buffer dependencies, so
             # we track their def/uses separately
             assert node.node is not None
@@ -2356,9 +2354,6 @@ class Scheduler:
                 if (r := unbacked_symbol_to_origin_node[s]) is not None:
                     for buf in self.name_to_node[r].get_outputs():
                         node.add_fake_dep(StarDep(buf.get_name()))
-            # if node.get_name() == "op115":
-            #     print(f"ckpt2. node:{node}, node.node:{node.node}, read_writes:{node.read_writes}")
-            # breakpoint()
 
             if (
                 len(node.read_writes.writes) == 1
@@ -2368,8 +2363,6 @@ class Scheduler:
                 node_mode = dep.mode
             else:
                 node_mode = None
-            # if node.get_name() == "op115":
-            #     print(f"ckpt3. node:{node}, node.node:{node.node}, read_writes:{node.read_writes}")
 
             # Handle output mutations
             for buf in node.get_outputs():
@@ -2392,21 +2385,13 @@ class Scheduler:
                                 WeakDep(other_name, mutating_buf=buf.get_name())
                             )
                             add_user(other_name, node, is_weak=True)
-            # if node.get_name() == "op115":
-            #     print(f"ckpt4. node:{node}, node.node:{node.node}, read_writes:{node.read_writes}")
 
             # add normal non-mutation dependencies
             for read in node.read_writes.reads:
                 if not isinstance(read, WeakDep):
                     add_user(read.name, node, node.can_inplace(read))
-            # if node.get_name() == "op115":
-            #     print(f"ckpt5. node:{node}, node.node:{node.node}, read_writes:{node.read_writes}")
 
             node.update_mutated_names(self.mutation_renames)
-            # if node.get_name() == "op115":
-            #     print(f"mutation_renames:{self.mutation_renames}")
-
-            #     print(f"ckpt6. node:{node}, node.node:{node.node}, read_writes:{node.read_writes}")
 
             # update our renaming scheme for the next iteration
             for buf in node.get_outputs():
@@ -4302,15 +4287,6 @@ class Scheduler:
         for partition, skip_cudagraph in zip(
             reversed(partitions), reversed(skip_cudagraphs)
         ):
-            if not skip_cudagraph:
-                i += 1
-
-            # for node in partition:
-            #     if node.get_name() == "op292":
-            #         print(f"partition idx: {10-i}, node.get_name():{node.get_name()}, node.last_usage:{node.last_usage}, \n node.node:{node.node}, \n node.read_writes:{node.read_writes}, \n mutation_real_name:{self.mutation_real_name}")
-            #         v = self.name_to_buf.get("buf218", None)
-            #         print(f"self.name_to_buf[buf218]:{v}")
-
             output_names: OrderedSet[str] = OrderedSet()
 
             for node in partition:
@@ -4386,23 +4362,6 @@ class Scheduler:
             symbol_inputs = self.get_graph_partition_symbol_inputs(
                 partition, input_nodes
             )
-
-            # if 10 - i == 1 and not skip_cudagraph:
-            #     print(f"partition idx: {10-i}, partition:{partition}, \npartition_input_names:{partition_input_names}\noutput_names:{output_names}, \nunmet_output_names:{unmet_output_names}, \nreturned_output_names:{returned_output_names}\n extra_output_names:{extra_output_names}\n read_writes:{read_writes}")
-            #     for node in partition:
-            #         print(f"partition idx: {10-i}, node.node:{node.node}, node.read_writes:{node.read_writes}")
-
-            #     __buf37 = self.name_to_buf["buf37"]
-            #     print(f"partition idx: {10-i}, __buf37:{__buf37}, \n __buf37 defining op:{__buf37.defining_op.node}")
-            #     print(f"partition idx: {10-i}, self.mutation_renames:{self.mutation_renames}")
-            #     __buf24 = self.name_to_buf["buf24"]
-            #     __buf24_name = "buf24"
-            #     print(f"partition idx: {10-i}, __buf24:{__buf24}, \n __buf24 defining op:{__buf24.defining_op.node}, is_none_layout(x.name):{is_none_layout(__buf24_name)}")
-
-            # if not skip_cudagraph:
-
-            # for node in partition:
-            #     print(f"node:{node}, node.node:{node.node}, node.read_writes:{node.read_writes}")
 
             partition_signature = GraphPartitionSignature(
                 symbol_inputs,
