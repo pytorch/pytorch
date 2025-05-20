@@ -81,7 +81,7 @@ class CompiledArtifact:
 
                 from .codecache import torch_key
 
-                writer = BytesWriter(0)
+                writer = BytesWriter()
                 writer.write_bytes(torch_key())
                 writer.write_str(key)
                 writer.write_bytes(artifact_bytes)
@@ -155,7 +155,7 @@ class CompiledArtifact:
                     )
 
                     entry = AOTAutogradCache._lookup(
-                        key, local=True, remote=False, args=[]
+                        key, local=True, remote=False, args=[], cache_info={}
                     )
 
                 assert entry is not None

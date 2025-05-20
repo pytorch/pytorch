@@ -35,11 +35,11 @@ namespace fs = std::filesystem;
 #endif
 
 namespace {
-bool file_exists(std::string& path) {
+bool file_exists(const std::string& path) {
 #ifdef _WIN32
   return fs::exists(path);
 #else
-  struct stat rc {};
+  struct stat rc{};
   return lstat(path.c_str(), &rc) == 0;
 #endif
 }
@@ -68,7 +68,7 @@ const std::string k_separator = "/";
 namespace torch::inductor {
 
 namespace {
-const nlohmann::json& load_json_file(std::string json_path) {
+const nlohmann::json& load_json_file(const std::string& json_path) {
   if (!file_exists(json_path)) {
     throw std::runtime_error("File not found: " + json_path);
   }
@@ -217,7 +217,7 @@ bool recursive_rmdir(const std::string& path) {
   }
 
   struct dirent* entry = nullptr;
-  struct stat statbuf {};
+  struct stat statbuf{};
   bool success = true;
 
   // Iterate through directory entries
@@ -264,7 +264,7 @@ bool recursive_rmdir(const std::string& path) {
 
 std::string compile_so(
     const std::string& cpp_filename,
-    const std::string& consts_filename) {
+    std::vector<std::string>& obj_filenames) {
   // Compile the cpp file into a .so
 
   size_t lastindex = cpp_filename.find_last_of('.');
@@ -280,8 +280,9 @@ std::string compile_so(
       cpp_filename.substr(0, lastindex) + "_linker_flags.json";
   const nlohmann::json linker_flags = load_json_file(linker_flags_path);
 
-  auto [link_cmd, output_so] = get_cpp_compile_command(
-      filename, {output_o, consts_filename}, linker_flags);
+  obj_filenames.push_back(output_o);
+  auto [link_cmd, output_so] =
+      get_cpp_compile_command(filename, obj_filenames, linker_flags);
 
   // Run the commands to generate a .so file
   int status = system(compile_cmd.c_str());
@@ -342,7 +343,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     const std::string& model_package_path,
     const std::string& model_name,
     const bool run_single_threaded,
-    const size_t num_runners) {
+    const size_t num_runners,
+    const c10::DeviceIndex device_index) {
   if (run_single_threaded) {
     if (num_runners != 1) {
       throw std::runtime_error(
@@ -368,7 +370,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   temp_dir_ = create_temp_dir();
   std::string so_filename;
   std::string cpp_filename;
-  std::string consts_filename;
+  std::vector<std::string> obj_filenames;
   std::string found_filenames; // Saving for bookkeeping
   std::string model_directory =
       "data" + k_separator + "aotinductor" + k_separator + model_name;
@@ -380,12 +382,14 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     if (filename_len == 0) {
       throw std::runtime_error("Failed to read filename");
     }
-    char* filename = new char[filename_len + 1];
-    if (!mz_zip_reader_get_filename(&zip_archive, i, filename, filename_len)) {
+    // filename_len returned by mz_zip_reader_get_filename includes the null
+    // terminator, so we need to subtract 1 here
+    std::string filename_str(filename_len - 1, '\0');
+    if (!mz_zip_reader_get_filename(
+            &zip_archive, i, filename_str.data(), filename_len)) {
       throw std::runtime_error("Failed to read filename");
     }
 
-    std::string filename_str(filename);
     found_filenames += filename_str;
     found_filenames += " ";
 
@@ -405,8 +409,10 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         if (lastSlash != std::string::npos) {
           filename = filename_str.substr(lastSlash + 1);
         }
-        output_path_str +=
-            k_separator + model_directory + k_separator + filename;
+        output_path_str.append(k_separator)
+            .append(model_directory)
+            .append(k_separator)
+            .append(filename);
       }
 
       LOG(INFO) << "Extract file: " << filename_str << " to "
@@ -428,7 +434,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
 
       // Extracts file to the temp directory
       mz_zip_reader_extract_file_to_file(
-          &zip_archive, filename, output_path_str.c_str(), 0);
+          &zip_archive, filename_str.c_str(), output_path_str.c_str(), 0);
 
       // Save the file for bookkeeping
       size_t extension_idx = output_path_str.find_last_of('.');
@@ -436,11 +442,9 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         std::string filename_extension = output_path_str.substr(extension_idx);
         if (filename_extension == ".cpp") {
           cpp_filename = output_path_str;
-        }
-        if (filename_extension == ".o") {
-          consts_filename = output_path_str;
-        }
-        if (filename_extension == ".so") {
+        } else if (filename_extension == ".o") {
+          obj_filenames.push_back(output_path_str);
+        } else if (filename_extension == ".so") {
           so_filename = output_path_str;
         }
       }
@@ -464,28 +468,31 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   // Compile the .so
   std::string so_path = !so_filename.empty()
       ? so_filename
-      : compile_so(cpp_filename, consts_filename);
+      : compile_so(cpp_filename, obj_filenames);
 
   // Load metadata which can be queried by user
   load_metadata(cpp_filename);
 
   // Construct the runner depending on the device information
-  std::string device = metadata_["AOTI_DEVICE_KEY"];
+  std::string device_key = metadata_["AOTI_DEVICE_KEY"];
 
-  if (device.empty()) {
+  if (device_key.empty()) {
     throw std::runtime_error("No device information found.");
   }
 
   std::unordered_map<std::string, CreateAOTIModelRunnerFunc>
       registered_aoti_runner = getAOTIModelRunnerRegistry();
 
-  if (registered_aoti_runner.find(device) == registered_aoti_runner.end()) {
-    throw std::runtime_error("Unsupported device found: " + device);
+  if (registered_aoti_runner.find(device_key) == registered_aoti_runner.end()) {
+    throw std::runtime_error("Unsupported device key found: " + device_key);
   }
 
+  c10::Device device = c10::Device(device_key);
+  device.set_index(device_index);
+
   std::string cubin_dir = temp_dir_ + k_separator + model_directory;
-  runner_ = registered_aoti_runner[device](
-      so_path, num_runners, device, cubin_dir, run_single_threaded);
+  runner_ = registered_aoti_runner[device_key](
+      so_path, num_runners, device.str(), cubin_dir, run_single_threaded);
 }
 
 AOTIModelPackageLoader::~AOTIModelPackageLoader() {
@@ -527,7 +534,7 @@ void AOTIModelPackageLoader::load_constants(
     bool user_managed) {
   std::unordered_map<std::string, std::string> constant_name_to_fqn =
       runner_->getConstantNamesToOriginalFQNs();
-  std::unordered_map<std::string, at::string> fqn_to_constant_name;
+  std::unordered_map<std::string, std::string> fqn_to_constant_name;
   for (const auto& it : constant_name_to_fqn) {
     fqn_to_constant_name.emplace(it.second, it.first);
   }
