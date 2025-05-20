@@ -1283,7 +1283,7 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
 Conv2dOpContext::State Conv2dOpContext::unpack() const {
   const c10::impl::GenericList unpacked_ = conv_context_.unpack();
 
-  TORCH_CHECK(unpacked_.size() > 0u, "unpacked_ does not have any elements!");
+  TORCH_CHECK(!unpacked_.empty(), "unpacked_ does not have any elements!");
 
   return Conv2dOpContext::State(
       unpacked_.get(Conv2dPackedContext::Unpacked::Weight).toTensor(),

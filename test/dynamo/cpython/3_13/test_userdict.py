@@ -266,9 +266,9 @@ class UserDictTest(mapping_tests.TestHashMappingProtocol):
 
     # Decorate existing test with recursion limit, because
     # the test is for C structure, but `UserDict` is a Python structure.
-    test_repr_deep = support.infinite_recursion(25)(
-        mapping_tests.TestHashMappingProtocol.test_repr_deep,
-    )
+    # test_repr_deep = support.infinite_recursion(25)(
+    #     mapping_tests.TestHashMappingProtocol.test_repr_deep,
+    # )
 
 
 if __name__ == "__main__":
