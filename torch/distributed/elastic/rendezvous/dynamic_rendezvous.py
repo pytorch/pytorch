@@ -320,9 +320,11 @@ def _remove_participant_epilogue(
     if state.complete:
         # If rendezvous was already complete and we still have participants left,
         # we need to start a new round if a participant leaves.
-        # We can only tigger a restart if there is a participant in the wait_list.
-        if not state.wait_list:
-            state.wait_list.add(next(iter(state.participants.keys())))
+        # A restart is only triggered if there is a participant in the wait_list.
+        # We move all participants to the wait_list so that all nodes have to rejoin
+        # the rendezvous.
+        state.wait_list.update(state.participants.keys())
+        state.participants.clear()
         state.complete = False
         state.round += 1
         logger.debug("Restarting rendezvous for round %s", state.round)
