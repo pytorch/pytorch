@@ -3,6 +3,7 @@ import copy
 import click
 
 import torch
+import torch._inductor.config
 
 
 class Serializer(torch.nn.Module):
@@ -32,7 +33,8 @@ def main(
 ) -> None:
     data = {}
     ep = torch.export.load(input_path)
-    with torch.no_grad():
+    # patch freezing off to make constant names more predictable
+    with torch.no_grad(), torch._inductor.config.patch(freezing=False):
         example_inputs = ep.example_inputs[0]
         # Get scripted original module.
         module = torch.jit.trace(copy.deepcopy(ep.module()), example_inputs)

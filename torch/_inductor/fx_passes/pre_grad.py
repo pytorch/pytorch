@@ -296,16 +296,6 @@ def pre_grad_passes(
             if example_inputs is not None:
                 gm = fuse_fx(gm, example_inputs)
             numpy_compat_normalization(gm.graph)
-            trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": "before_recompile_pre_grad",
-                    "encoding": "string",
-                },
-                payload_fn=lambda: gm.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                ),
-            )
             # We should always do the normalization_pass first
             if "normalization_pass" in config.pre_grad_fusion_options:
                 pattern_matcher_pass = PRE_GRAD_PATTERNS["normalization_pass"]
@@ -348,16 +338,6 @@ def pre_grad_passes(
 
     gm.graph.lint()
     gm.recompile()
-    trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "after_recompile_pre_grad",
-            "encoding": "string",
-        },
-        payload_fn=lambda: gm.print_readable(
-            print_output=False, include_stride=True, include_device=True
-        ),
-    )
 
     if (
         config.pattern_matcher
@@ -400,6 +380,8 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs) -> torch.fx.GraphModule:
     if torch.is_grad_enabled() or not is_cpu:
         return gm
     if config.freezing:
+        with GraphTransformObserver(gm, "remove_identity"):
+            gm = remove_identity(gm)
         with GraphTransformObserver(gm, "fuse_conv_bn"):
             gm = fuse_conv_bn(gm)
     return gm
@@ -415,6 +397,22 @@ def fetch_attr(target: str, mod):
             )
         attr_itr = getattr(attr_itr, atom)
     return attr_itr
+
+
+def remove_identity(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    """
+    Removes all identity layers from the module.
+    """
+
+    class IdentityRemover(torch.fx.Transformer):
+        def call_module(self, target, args, kwargs):
+            assert isinstance(target, str)
+            if isinstance(self.submodules[target], torch.nn.Identity):
+                assert len(args) == 1
+                return args[0]
+            return super().call_module(target, args, kwargs)
+
+    return IdentityRemover(gm).transform()
 
 
 def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModule:

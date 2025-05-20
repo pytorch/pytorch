@@ -543,7 +543,7 @@ class GraphModule(torch.nn.Module):
             self._tracer_extras = self.graph._tracer_extras
 
         # Dictionary to store metadata
-        self.meta: dict[str, Any] = {}
+        self.meta: dict[str, Any] = copy.deepcopy(getattr(root, "meta", {}))
         self._replace_hooks: list[Callable] = []
         self._create_node_hooks: list[Callable] = []
         self._erase_node_hooks: list[Callable] = []

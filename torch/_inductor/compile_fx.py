@@ -1155,7 +1155,16 @@ class _InProcessFxCompile(FxCompile):
             # pattern matcher passes might not preserve striding information
             # on node.meta["val"]. if in the future we rely on these being
             # correct we will need to fix.
-
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "before_post_grad_graph",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: gm.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                ),
+            )
             with V.set_fake_mode(fake_mode):
                 # has some issues with memory in training
                 cuda_context = get_cuda_device_context(gm)
@@ -1183,7 +1192,11 @@ class _InProcessFxCompile(FxCompile):
                     fast_sympy_print=True,
                 )
                 trace_structured(
-                    "inductor_post_grad_graph",
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "after_post_grad_graph",
+                        "encoding": "string",
+                    },
                     payload_fn=lambda: inductor_post_grad_graph_str,
                 )
                 if config.trace.enabled:
@@ -1690,9 +1703,6 @@ def compile_fx_aot(
 ) -> Union[list[str], str]:
     assert isinstance(model_, GraphModule), model_
 
-    # [See NOTE] Unwrapping subclasses AOT
-    unwrap_tensor_subclass_parameters(model_)
-
     if config_patches is None:
         config_patches = {}
 
@@ -2033,7 +2043,11 @@ def compile_fx(
         # TODO: Get rid of this?
         if isinstance(model_, GraphModule):
             trace_structured(
-                "inductor_pre_grad_graph",
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "before_pre_grad_graph",
+                    "encoding": "string",
+                },
                 payload_fn=lambda: model_.print_readable(
                     print_output=False, include_stride=True, include_device=True
                 )
@@ -2052,6 +2066,17 @@ def compile_fx(
             torch._inductor.debug._pre_grad_graph_id = id(model_.graph)
 
             model_ = _recursive_pre_grad_passes(model_, example_inputs_)
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "after_pre_grad_graph",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: model_.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                )
+                + f"\n\n # graph id: {id(model_.graph)}",
+            )
 
         # TODO: Move this before recursive pre-grad passes
         # NB: This short circuit never occurs for Dynamo produced graphs
@@ -2263,6 +2288,13 @@ def compile_fx(
 
         if V.aot_compilation:
             with functorch_config.patch(unlift_effect_tokens=True):
+                # Any model transformations involving torch.fx.Transformer (including
+                # one of the pre_grad passes above) erase the tensor unwrapping by
+                # returning a new GraphModule without the necessary member variables.
+                # Thus, we unwrap tensor subclasses as late as possible (since it's
+                # required by aot_export_module).
+                unwrap_tensor_subclass_parameters(model_)
+
                 gm, graph_signature = aot_export_module(
                     model_,
                     example_inputs_,
