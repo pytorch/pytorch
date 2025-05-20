@@ -56,6 +56,14 @@ endif()
 find_package(CUDAToolkit REQUIRED)
 
 cmake_policy(POP)
+if(NOT CUDAToolkit_FOUND)
+  message(WARNING
+    "PyTorch: CUDA cannot be found. Depending on whether you are building "
+    "PyTorch or a PyTorch dependent library, the next warning / error will "
+    "give you more info.")
+  set(CAFFE2_USE_CUDA OFF)
+  return()
+endif()
 
 if(NOT CMAKE_CUDA_COMPILER_VERSION VERSION_EQUAL CUDAToolkit_VERSION)
   message(FATAL_ERROR "Found two conflicting CUDA versions:\n"
@@ -63,10 +71,10 @@ if(NOT CMAKE_CUDA_COMPILER_VERSION VERSION_EQUAL CUDAToolkit_VERSION)
                       "V${CUDAToolkit_VERSION} in '${CUDAToolkit_INCLUDE_DIRS}'")
 endif()
 
-message(STATUS "PyTorch: CUDA detected: " ${CUDA_VERSION})
-message(STATUS "PyTorch: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
-message(STATUS "PyTorch: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
-if(CUDA_VERSION VERSION_LESS 11.0)
+message(STATUS "PyTorch: CUDA detected: " ${CUDAToolkit_VERSION})
+message(STATUS "PyTorch: CUDA nvcc is: " ${CUDAToolkit_NVCC_EXECUTABLE})
+message(STATUS "PyTorch: CUDA toolkit directory: " ${CUDAToolkit_ROOT})
+if(CUDAToolkit_VERSION VERSION_LESS 11.0)
   message(FATAL_ERROR "PyTorch requires CUDA 11.0 or above.")
 endif()
 
