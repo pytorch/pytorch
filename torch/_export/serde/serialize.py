@@ -15,6 +15,7 @@ import traceback
 import typing
 
 from collections import OrderedDict, namedtuple
+from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
@@ -35,9 +36,9 @@ import torch
 import torch.export.exported_program as ep
 from torch._export.verifier import load_verifier
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
-from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
+from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import treespec_dumps, treespec_loads
 from torch.utils._sympy.numbers import int_oo
@@ -572,6 +573,20 @@ class GraphModuleSerializer(metaclass=Final):
                 # AOTI compiled graph module in node.args[0] is stateful, and will fail the verifier check
                 # Skip serializing original_gm as a workaround
                 serializable_args[1] = None
+
+                serializable_weight_nodes = []
+                if serializable_args[2] is not None and isinstance(serializable_args[2], Iterable):
+                    for weight_node in serializable_args[2]:
+                        # skip passing custom obj into the weight arg as an hack
+                        # The schema of weight input is a list of Tensors.
+                        # Downstream runtime is not actively consuming the weighs arg for anything meaningful.
+                        if (
+                            isinstance(weight_node, torch.fx.Node)
+                            and isinstance(weight_node.meta.get("val", None), ep.CustomObjArgument)
+                        ):
+                            continue
+                        serializable_weight_nodes.append(weight_node)
+                    serializable_args[2] = serializable_weight_nodes
 
                 def serialize_tensor_list_output(node):
                     meta_val = node.meta.get("val", None)
@@ -1610,7 +1625,7 @@ class GraphModuleDeserializer(metaclass=Final):
         module_call_graph: list[ep.ModuleCallEntry]
         names_to_symbols: dict[str, sympy.Symbol]
         state_dict: dict[str, Union[torch.Tensor, torch.nn.Parameter]]
-        constants: dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]]
+        constants: dict[str, _ConstantAttributeType]
         example_inputs: Optional[tuple[tuple[torch.Tensor, ...], dict[str, Any]]]
 
     def __init__(self) -> None:

@@ -97,8 +97,6 @@ class WrapGeneric(HigherOrderOperator):
         *args,
         **kwargs,
     ):
-        import importlib
-
         # Dynamo already traces the body of HigherOrderOp beforehand when it
         # so no need to trace into it.
         import torch._dynamo  # noqa: F401

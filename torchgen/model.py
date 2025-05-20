@@ -6,8 +6,9 @@ import re
 from dataclasses import dataclass
 from enum import auto, Enum
 from typing import Callable, Optional, TYPE_CHECKING
+from typing_extensions import assert_never
 
-from torchgen.utils import assert_never, NamespaceHelper, OrderedSet
+from torchgen.utils import NamespaceHelper, OrderedSet
 
 
 if TYPE_CHECKING:

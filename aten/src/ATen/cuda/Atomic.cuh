@@ -410,7 +410,7 @@ template <typename T>
 __host__ __device__ T safe_max(T a, T b) {
   #if defined(__HIPCC__)
   // TODO: remove this special case for HIP when issue is fixed:
-  //       https://github.com/ROCm-Developer-Tools/HIP/issues/2209
+  //       https://github.com/ROCm/hip/issues/2209
     T max = at::_isnan(a) ? a : (at::_isnan(b) ? b : std::max<T>(a, b));
   #else
     T max = at::_isnan(b) ? b : std::max<T>(a, b);
@@ -470,7 +470,7 @@ template <typename T>
 __host__ __device__ T safe_min(T a, T b) {
   #if defined(__HIPCC__)
   // TODO: remove this special case for HIP when issue is fixed:
-  //       https://github.com/ROCm-Developer-Tools/HIP/issues/2209
+  //       https://github.com/ROCm/hip/issues/2209
     T min = at::_isnan(a) ? a : (at::_isnan(b) ? b : std::min<T>(a, b));
   #else
     T min = at::_isnan(b) ? b : std::min<T>(a, b);
