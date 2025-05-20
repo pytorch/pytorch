@@ -82,7 +82,7 @@ disable_progress = True
 verbose_progress = False
 
 # precompilation timeout
-precompilation_timeout_seconds: int = 60*60
+precompilation_timeout_seconds: int = 60 * 60
 
 # use fx aot graph codegen cache
 fx_graph_cache: bool = Config(
