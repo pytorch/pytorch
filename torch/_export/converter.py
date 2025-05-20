@@ -6,7 +6,7 @@ import typing
 import warnings
 from collections.abc import Sequence
 from contextlib import contextmanager
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.export._trace
@@ -229,7 +229,7 @@ def get_dtype_as_int(tensor):
 # Those operators will be automatically populated to a instance method
 # of TS2FXGraphConverter with name convert_<namespace>_<opname>().
 # Please check __init__ for method population implementations.
-kind_to_standard_operators: dict[str, Callable[..., Any]] = {
+kind_to_standard_operators = {
     "prim::max": builtins.max,
     "prim::min": builtins.min,
     "prim::TupleIndex": operator.getitem,
