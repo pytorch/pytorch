@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import re
 import unittest
 import weakref
 
@@ -182,6 +183,70 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             a_grad,
             "tensor 'a' requires_grad mismatch. expected requires_grad=0",
         )
+
+    @torch._dynamo.config.patch(recompile_limit=8)
+    def test_dynamic_whitelist_suggestion(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(4, 4)
+                self.attr = torch.randn(4)
+                self.mode = "a"
+            def forward(self, x):
+                if self.mode == "a":
+                    return self.lin(x) + self.attr
+                else:
+                    return self.lin(x) - self.attr
+
+        def run():
+            torch.compiler.reset()
+            opt_f = torch.compile(Foo(), backend="eager", dynamic=False)
+            opt_f(torch.randn(7, 4))
+            opt_f.mode = "b"
+            opt_f.lin = torch.nn.Linear(5, 5)
+            opt_f.attr = torch.randn(5)
+            opt_f(torch.randn(9, 5))
+
+        with log_settings(kwargs_to_settings(recompiles=True)):
+            with self.assertLogs(logger=torch._dynamo.guards.recompiles_log, level="DEBUG") as logs:
+                run()
+
+                # check recompile reason only points to .mode attribute
+                re_msg = (
+                    r".*triggered by the following guard failure\(s\)(.*\n)*.*"
+                    r"0\/0: self.mode == \'a\'(.*\n)*.*"
+                    r"Multiple size mismatches found(.*\n)*.*"
+                )
+                self.assertRegex(logs.records[0].msg, re_msg)
+                self.assertTrue("size mismatch at index" not in logs.records[0].msg)
+
+                # check whitelist
+                match = re.search(r'TORCH_COMPILE_DYNAMIC_SOURCES="(.*)"', logs.records[0].msg)
+                self.assertTrue(match is not None)
+                whitelist = match.group(1)
+                for src_name in [
+                    "L['x']",
+                    "L['self'].attr",
+                    "L['self']._modules['lin']._parameters['bias']",
+                    "L['self']._modules['lin']._parameters['weight']",
+                ]:
+                    self.assertTrue(src_name in whitelist)
+
+        with log_settings(kwargs_to_settings(recompiles_verbose=True)):
+            with self.assertLogs(logger=torch._dynamo.guards.recompiles_verbose_log, level="DEBUG") as logs:
+                run()
+
+                # check all recompile reasons
+                re_msg = (
+                    r".*triggered by the following guard failure\(s\)(.*\n)*.*"
+                    r"0\/0: self.mode == \'a\'(.*\n)*.*"
+                    r"tensor 'x' size mismatch at index 0(.*\n)*.*"
+                    r"tensor 'self.attr' size mismatch at index 0(.*\n)*.*"
+                    r"tensor 'self._modules\['lin'\]._parameters\['bias'\]' size mismatch at index 0(.*\n)*.*"
+                    r"tensor 'self._modules\['lin'\]._parameters\['weight'\]' size mismatch at index 0(.*\n)*.*"
+                    r"Multiple size mismatches found(.*\n)*.*"
+                )
+                self.assertRegex(logs.records[0].msg, re_msg)
 
     def test_mismatched_type(self):
         a = torch.rand(3, 4, 5)
