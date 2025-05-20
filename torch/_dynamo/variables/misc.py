@@ -463,17 +463,7 @@ class ExceptionVariable(VariableTracker):
             if isinstance(val, ConstantVariable) and val.value is None:
                 self.__traceback__ = val
             else:
-                unimplemented_v2(
-                    gb_type="Set Exception object `__traceback__` attribute to not-`None`",
-                    context=f"call_setattr {self} {name}",
-                    explanation="Dynamo does not support setting the attribute "
-                    "'__traceback__' on tracked exception objects to anything "
-                    "other than None.",
-                    hints=[
-                        "Avoid setting '__traceback__' on exception objects "
-                        "within traced code, or set it to None."
-                    ],
-                )
+                raise_error("__traceback__ must be a traceback or None")
         else:
             unimplemented_v2(
                 gb_type="Unsupported attribute assignment on Exception object",
