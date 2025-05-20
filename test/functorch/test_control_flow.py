@@ -887,12 +887,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1):
         )
 
     def test_cond_autograd_pytree_input(self):
-        # TODO: This is an unexpected behavior for cond
-        # Without this additional multiplication,
-        # the output of the backward graph would alias the
-        # inputs, as the gradients are just 1s and thus get optimized
         def true_fn(x):
-            return (x["t"][0] * 2.0) + x["t"][1]["b"] * x["t"][2][0]
+            return x["t"][0] + x["t"][1]["b"] * x["t"][2][0]
 
         def false_fn(x):
             return x["t"][0] * (x["t"][2][0] / x["t"][1]["b"])
