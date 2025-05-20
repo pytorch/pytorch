@@ -1100,6 +1100,11 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
 
 class SIMDScheduling(BaseScheduling):
+    """
+    Single Instruction Multiple Data parent class used for fusion across
+    multiple different backends.
+    """
+
     kernel_type: type[Any] = SIMDKernel  # override in subclass
 
     def group_fn(self, sizes):
@@ -2076,37 +2081,41 @@ class SIMDScheduling(BaseScheduling):
             prod = 1
             prev_var_coalesced_score = 0
 
-            for v, v_range in zip(splitting_vars, ranges):
-                prod *= v_range
+            # iterate from non-dense to dense
+            for v, v_range in zip(reversed(splitting_vars), reversed(ranges)):
                 if v not in vars_to_use:
+                    prod *= v_range
                     prev_var_coalesced_score = coalesce_analysis.coalesced_by_var.get(
                         v, 0
                     )
                     continue
 
-                # If this is the split variable and we're using it as such
                 if use_split_var and v == tiling_var:
                     var_tiling = coalesce_analysis.suggested_split
                     assert var_tiling is not None
-                    # Add the original range up to this point
-                    if prod > 1:
-                        splits.append(prod // var_tiling.tiling_factor)
-                        split_scores.append(var_tiling.score)
 
-                    prod = var_tiling.tiling_factor  # Remaining size
-                    # if we end up splitting on this, v will be coalesced as well
-                    prev_var_coalesced_score = coalesce_analysis.coalesced_by_var.get(
-                        v, 0
-                    )
+                    tile = var_tiling.tiling_factor
+                    remainder = FloorDiv(v_range, var_tiling.tiling_factor)
 
-                else:
-                    # splitting on this var
-                    splits.append(prod)
+                    splits.append(prod * tile)
                     split_scores.append(coalesce_analysis.coalesced_by_var.get(v, 0))
-                    prod = 1
 
-            splits.append(prod)
-            split_scores.append(prev_var_coalesced_score)
+                    splits.append(remainder)
+                    split_scores.append(var_tiling.score)
+
+                    continue
+
+                prod *= v_range
+                splits.append(prod)
+                split_scores.append(coalesce_analysis.coalesced_by_var.get(v, 0))
+                prod = 1
+
+            if prod != 1:
+                splits.append(prod)
+                split_scores.append(prev_var_coalesced_score)
+
+            splits.reverse()
+            split_scores.reverse()
 
             scored_sub_split[key] = (splits, split_scores)
             return (splits, split_scores)
@@ -2142,6 +2151,15 @@ class SIMDScheduling(BaseScheduling):
                 )
             )
 
+        if torch._inductor.config.triton.max_tiles == 3 and reduction_numel == 1:
+            for vars_to_use in itertools.combinations(overlapping_iter_vars, 2):
+                score_split.append(
+                    (
+                        process_node_vars(vars_to_use, is_pointwise=True),
+                        process_node_vars(is_pointwise=False),
+                    )
+                )
+
         tilings: list[tuple[CandidateTiling, dict[str, sympy.Expr]]] = []
         for (pw_split, pw_score), (red_split, red_score) in score_split:
             candidate = CandidateTiling(
@@ -2157,11 +2175,13 @@ class SIMDScheduling(BaseScheduling):
             if cls.tiling_is_compatible(
                 node_schedule, pointwise_numel, reduction_numel, cand.tiling
             ):
-                if len(cand.tiling) > torch._inductor.config.triton.max_tiles:
+                # we always include default reduction numel == 1, dont include
+                tiling_len = len(cand.tiling) - (1 if reduction_numel == 1 else 0)
+                if tiling_len > torch._inductor.config.triton.max_tiles:
                     perf_hint_log.info(
                         "Found optimal tiling with %s tiles but torch._inductor.config.triton.max_tiles "
                         "set to %s. Consider increasing",
-                        len(cand.tiling),
+                        tiling_len,
                         torch._inductor.config.triton.max_tiles,
                     )
                     continue
@@ -2240,7 +2260,7 @@ class SIMDScheduling(BaseScheduling):
         # Tiled reductions are gated by a config flag.
         default_tiling = cls.create_tiling([numel], [reduction_numel])
 
-        # TODO: enable by default
+        # # TODO: enable by default
         if (
             torch._inductor.config.test_configs.global_tiling_analysis
             and coalesce_analysis
