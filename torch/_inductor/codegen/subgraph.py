@@ -9,6 +9,7 @@ from torch._inductor.ir import (
     add_symbolic_shapes_for_inputs_to_subgraph,
     Buffer,
     get_free_symbols,
+    gm_original_output_strides,
     ir_node_to_tensor,
     Layout,
 )
@@ -57,6 +58,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         import torch._inductor.config as inductor_config
         from torch._inductor.graph import GraphLowering
 
+        gm_original_output_strides(self.gm)
         bm_graph_lowering = GraphLowering(
             gm=self.gm,
             example_inputs=self.example_inputs,
@@ -76,6 +78,17 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         sym_inputs = [
             int(V.graph.sizevars.shape_env.size_hint(sym_var)) for sym_var in sym_inputs
         ]
+
+        if len(sym_inputs) == 0:
+            # Sanity check that args are same layout as example inputs
+            # Only do it if there are no symbolic inputs, otherwise
+            # the dynamic dim will be realized to the same size as args
+            for ar, example_inp in zip(args, self.example_inputs):
+                # Sanity check that args are same layout as example inputs
+                if isinstance(ar, torch.Tensor):
+                    assert isinstance(example_inp, torch.Tensor)
+                    assert ar.shape == example_inp.shape
+                    assert ar.stride() == example_inp.stride()
 
         if len(sym_inputs) == 0:
             # Sanity check that args are same layout as example inputs

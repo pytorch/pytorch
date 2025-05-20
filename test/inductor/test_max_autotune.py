@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from typing import Callable, Optional
 from unittest import mock
+from unittest.mock import MagicMock
 
 import torch
 from torch import multiprocessing as mp, nn
@@ -1040,6 +1041,49 @@ class TestMaxAutotune(TestCase):
                 f(a, b),
                 atol=1e-2,
                 rtol=1e-2,
+            )
+
+    @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        autotune_fallback_to_aten=False,
+    )
+    def test_max_autotune_decompose_k_output_stride(self):
+        def f(a, b):
+            a = a.transpose(0, 1)
+            return a @ b
+
+        a = torch.randn((32768, 256), device="cuda", dtype=torch.bfloat16)
+        b = torch.randn((32768, 1152), device="cuda", dtype=torch.bfloat16)
+
+        b = b[:, :1096]
+
+        # Force only decomposeK choice
+        with mock.patch(
+            "torch._inductor.kernel.mm.V.choices.get_base_mm_configs"
+        ) as base_mm_mock, mock.patch(
+            "torch._inductor.kernel.mm.use_decompose_k_choice"
+        ) as decompose_mock:
+            mm_configs_mock = MagicMock()
+            mm_configs_mock.return_value = []
+            base_mm_mock.return_value = mm_configs_mock
+            decompose_mock.return_value = True
+            compiled_f = torch.compile(f)
+            out, code = run_and_get_code(compiled_f, a, b)
+
+            # Output stride equal to original gm output stride
+            # If output stride is not correctly checked, this will be (1152, 1) which can cause nans
+            self.assertEqual(out.stride(), (1096, 1))
+
+            FileCheck().check_not("extern_kernels.bmm_dtype").check(
+                "decompose_k"
+            ).check(" empty_strided_cuda((256, 1096), (1096, 1), torch.bfloat16)").run(
+                code[0]
             )
 
 
