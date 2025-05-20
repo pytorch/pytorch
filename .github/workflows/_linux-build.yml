@@ -74,6 +74,32 @@ on:
           Overwrite the number of jobs to use for the build
         required: false
         type: string
+      disable-monitor:
+        description: |
+          Disable utilization monitoring for build job
+        required: false
+        type: boolean
+        default: false
+      monitor-log-interval:
+        description: |
+          Set the interval for the monitor script to log utilization.
+        required: false
+        type: number
+        default: 5
+      monitor-data-collect-interval:
+        description: |
+          Set the interval for the monitor script to collect data.
+        required: false
+        type: number
+        default: 1
+
+      allow-reuse-old-whl:
+        description: |
+          If set, the build try to pull an old wheel from s3 that was built on a
+          commit with no cpp changes from this commit
+        required: false
+        type: boolean
+        default: false
 
     secrets:
       HUGGING_FACE_HUB_TOKEN:
@@ -132,6 +158,15 @@ jobs:
           role-session-name: gha-linux-build
           aws-region: us-east-1
 
+      - name: Check if can use old whl build
+        id: use-old-whl
+        uses: ./.github/actions/reuse-old-whl
+        if: ${{ inputs.allow-reuse-old-whl && github.event_name == 'push' }}
+        with:
+          build-environment: ${{ inputs.build-environment }}
+          run-id: ${{ github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -141,7 +176,7 @@ jobs:
 
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && steps.use-old-whl.outputs.reuse != 'true'
         env:
           ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         shell: bash
@@ -151,7 +186,7 @@ jobs:
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && steps.use-old-whl.outputs.reuse != 'true'
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -176,17 +211,38 @@ jobs:
           selected-test-configs: ${{ inputs.selected-test-configs }}
           job-name: ${{ steps.get-job-id.outputs.job-name }}
 
+      - name: Start monitoring script
+        id: monitor-script
+        if: ${{ !inputs.disable-monitor }}
+        shell: bash
+        continue-on-error: true
+        env:
+          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+          WORKFLOW_RUN_ID: ${{github.run_id}}
+          MONITOR_LOG_INTERVAL: ${{ inputs.monitor-log-interval }}
+          MONITOR_DATA_COLLECT_INTERVAL: ${{ inputs.monitor-data-collect-interval }}
+        run: |
+          mkdir -p ../../usage_logs
+          python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7
+          python3 -m tools.stats.monitor \
+          --log-interval "$MONITOR_LOG_INTERVAL" \
+          --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" \
+          > "../../usage_logs/usage_log_build_${JOB_ID}.txt" 2>&1 &
+          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
+
       - name: Download pytest cache
         uses: ./.github/actions/pytest-cache-download
         continue-on-error: true
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && steps.use-old-whl.outputs.reuse != 'true'
         with:
           cache_dir: .pytest_cache
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
           s3_bucket: ${{ inputs.s3-bucket }}
 
       - name: Build
-        if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
+        if: (steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == '') && steps.use-old-whl.outputs.reuse != 'true'
         id: build
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
@@ -280,14 +336,23 @@ jobs:
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
 
+      - name: Stop monitoring script
+        if: ${{ always() && steps.monitor-script.outputs.monitor-script-pid }}
+        shell: bash
+        continue-on-error: true
+        env:
+          MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
+        run: |
+          kill "$MONITOR_SCRIPT_PID"
+
       - name: Archive artifacts into zip
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && steps.use-old-whl.outputs.reuse != 'true'
         run: |
           zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .additional_ci_files
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-generates-artifacts && (steps.build.outcome != 'skipped' || steps.use-old-whl.outputs.reuse == 'true') && inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           name: ${{ inputs.build-environment }}
           retention-days: 14
@@ -297,12 +362,31 @@ jobs:
 
       - name: Store PyTorch Build Artifacts for s390x
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.build-environment == 'linux-s390x-binary-manywheel'
+        if: inputs.build-generates-artifacts && (steps.build.outcome != 'skipped' || steps.use-old-whl.outputs.reuse == 'true') && inputs.build-environment == 'linux-s390x-binary-manywheel'
         with:
           name: ${{ inputs.build-environment }}
           retention-days: 14
           if-no-files-found: error
           path: artifacts.zip
+
+      - name: copy logs
+        shell: bash
+        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel'}}
+        continue-on-error: true
+        run: |
+          rm -f ./usage_logs
+          mkdir -p ./usage_logs
+          cp ../../usage_logs/usage_log_build_*.txt ./usage_logs/
+
+      - name: Upload raw usage log to s3
+        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel'}}
+        uses: seemethere/upload-artifact-s3@v5
+        with:
+          s3-prefix: |
+            ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
+          retention-days: 14
+          if-no-files-found: warn
+          path: usage_logs/usage_log_build_*.txt
 
       - name: Upload sccache stats
         if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
@@ -310,6 +394,18 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           build-time: ${{ steps.build.outputs.build_time }}
+
+      - name: Upload utilization stats
+        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
+        continue-on-error: true
+        uses: ./.github/actions/upload-utilization-stats
+        with:
+          job_id: ${{ steps.get-job-id.outputs.job-id }}
+          job_name: ${{ steps.get-job-id.outputs.job-name }}
+          workflow_name: ${{ github.workflow }}
+          workflow_run_id: ${{github.run_id}}
+          workflow_attempt: ${{github.run_attempt}}
+          artifact_prefix: usage_log_build_${{ steps.get-job-id.outputs.job-id }}
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main

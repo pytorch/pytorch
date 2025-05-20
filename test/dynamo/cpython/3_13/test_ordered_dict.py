@@ -56,7 +56,9 @@ import builtins
 import contextlib
 import copy
 import gc
+import operator
 import pickle
+import re
 from random import randrange, shuffle
 import struct
 import sys
@@ -64,7 +66,7 @@ import unittest
 import weakref
 from collections.abc import MutableMapping
 from test import mapping_tests, support
-from test.support import import_helper
+from test.support import import_helper, suppress_immortalization
 
 
 py_coll = import_helper.import_fresh_module('collections',
@@ -346,7 +348,6 @@ class OrderedDictTests:
         # different length implied inequality
         self.assertNotEqual(od1, OrderedDict(pairs[:-1]))
 
-    @xfailIfTorchDynamo
     def test_copying(self):
         OrderedDict = self.OrderedDict
         # Check that ordered dicts are copyable, deepcopyable, picklable,
@@ -722,6 +723,7 @@ class OrderedDictTests:
         dict.update(od, [('spam', 1)])
         self.assertNotIn('NULL', repr(od))
 
+    @suppress_immortalization()
     def test_reference_loop(self):
         # Issue 25935
         OrderedDict = self.OrderedDict
@@ -794,10 +796,43 @@ class OrderedDictTests:
         # when it's mutated and returned from __next__:
         self.assertTrue(gc.is_tracked(next(it)))
 
+
+class _TriggerSideEffectOnEqual:
+    count = 0   # number of calls to __eq__
+    trigger = 1 # count value when to trigger side effect
+
+    def __eq__(self, other):
+        if self.__class__.count == self.__class__.trigger:
+            self.side_effect()
+        self.__class__.count += 1
+        return True
+
+    def __hash__(self):
+        # all instances represent the same key
+        return -1
+
+    def side_effect(self):
+        raise NotImplementedError
+
 class PurePythonOrderedDictTests(OrderedDictTests, __TestCase):
 
     module = py_coll
     OrderedDict = py_coll.OrderedDict
+
+    def test_issue119004_attribute_error(self):
+        class Key(_TriggerSideEffectOnEqual):
+            def side_effect(self):
+                del dict1[TODEL]
+
+        TODEL = Key()
+        dict1 = self.OrderedDict(dict.fromkeys((0, TODEL, 4.2)))
+        dict2 = self.OrderedDict(dict.fromkeys((0, Key(), 4.2)))
+        # This causes an AttributeError due to the linked list being changed
+        msg = re.escape("'NoneType' object has no attribute 'key'")
+        self.assertRaisesRegex(AttributeError, msg, operator.eq, dict1, dict2)
+        self.assertEqual(Key.count, 2)
+        self.assertDictEqual(dict1, dict.fromkeys((0, 4.2)))
+        self.assertDictEqual(dict2, dict.fromkeys((0, Key(), 4.2)))
 
 
 class CPythonBuiltinDictTests(__TestCase):
@@ -819,8 +854,86 @@ for method in (
 del method
 
 
+
+class CPythonOrderedDictSideEffects:
+
+    def check_runtime_error_issue119004(self, dict1, dict2):
+        msg = re.escape("OrderedDict mutated during iteration")
+        self.assertRaisesRegex(RuntimeError, msg, operator.eq, dict1, dict2)
+
+    def test_issue119004_change_size_by_clear(self):
+        class Key(_TriggerSideEffectOnEqual):
+            def side_effect(self):
+                dict1.clear()
+
+        dict1 = self.OrderedDict(dict.fromkeys((0, Key(), 4.2)))
+        dict2 = self.OrderedDict(dict.fromkeys((0, Key(), 4.2)))
+        self.check_runtime_error_issue119004(dict1, dict2)
+        self.assertEqual(Key.count, 2)
+        self.assertDictEqual(dict1, {})
+        self.assertDictEqual(dict2, dict.fromkeys((0, Key(), 4.2)))
+
+    def test_issue119004_change_size_by_delete_key(self):
+        class Key(_TriggerSideEffectOnEqual):
+            def side_effect(self):
+                del dict1[TODEL]
+
+        TODEL = Key()
+        dict1 = self.OrderedDict(dict.fromkeys((0, TODEL, 4.2)))
+        dict2 = self.OrderedDict(dict.fromkeys((0, Key(), 4.2)))
+        self.check_runtime_error_issue119004(dict1, dict2)
+        self.assertEqual(Key.count, 2)
+        self.assertDictEqual(dict1, dict.fromkeys((0, 4.2)))
+        self.assertDictEqual(dict2, dict.fromkeys((0, Key(), 4.2)))
+
+    def test_issue119004_change_linked_list_by_clear(self):
+        class Key(_TriggerSideEffectOnEqual):
+            def side_effect(self):
+                dict1.clear()
+                dict1['a'] = dict1['b'] = 'c'
+
+        dict1 = self.OrderedDict(dict.fromkeys((0, Key(), 4.2)))
+        dict2 = self.OrderedDict(dict.fromkeys((0, Key(), 4.2)))
+        self.check_runtime_error_issue119004(dict1, dict2)
+        self.assertEqual(Key.count, 2)
+        self.assertDictEqual(dict1, dict.fromkeys(('a', 'b'), 'c'))
+        self.assertDictEqual(dict2, dict.fromkeys((0, Key(), 4.2)))
+
+    def test_issue119004_change_linked_list_by_delete_key(self):
+        class Key(_TriggerSideEffectOnEqual):
+            def side_effect(self):
+                del dict1[TODEL]
+                dict1['a'] = 'c'
+
+        TODEL = Key()
+        dict1 = self.OrderedDict(dict.fromkeys((0, TODEL, 4.2)))
+        dict2 = self.OrderedDict(dict.fromkeys((0, Key(), 4.2)))
+        self.check_runtime_error_issue119004(dict1, dict2)
+        self.assertEqual(Key.count, 2)
+        self.assertDictEqual(dict1, {0: None, 'a': 'c', 4.2: None})
+        self.assertDictEqual(dict2, dict.fromkeys((0, Key(), 4.2)))
+
+    def test_issue119004_change_size_by_delete_key_in_dict_eq(self):
+        class Key(_TriggerSideEffectOnEqual):
+            trigger = 0
+            def side_effect(self):
+                del dict1[TODEL]
+
+        TODEL = Key()
+        dict1 = self.OrderedDict(dict.fromkeys((0, TODEL, 4.2)))
+        dict2 = self.OrderedDict(dict.fromkeys((0, Key(), 4.2)))
+        self.assertEqual(Key.count, 0)
+        # the side effect is in dict.__eq__ and modifies the length
+        self.assertNotEqual(dict1, dict2)
+        self.assertEqual(Key.count, 2)
+        self.assertDictEqual(dict1, dict.fromkeys((0, 4.2)))
+        self.assertDictEqual(dict2, dict.fromkeys((0, Key(), 4.2)))
+
+
 @unittest.skipUnless(c_coll, 'requires the C version of the collections module')
-class CPythonOrderedDictTests(OrderedDictTests, __TestCase):
+class CPythonOrderedDictTests(OrderedDictTests,
+                              CPythonOrderedDictSideEffects,
+                              __TestCase):
 
     module = c_coll
     OrderedDict = c_coll.OrderedDict
@@ -876,7 +989,6 @@ class CPythonOrderedDictTests(OrderedDictTests, __TestCase):
                 del od['c']
         self.assertEqual(list(od), list('bdeaf'))
 
-    @xfailIfTorchDynamo
     def test_iterators_pickling(self):
         OrderedDict = self.OrderedDict
         pairs = [('c', 1), ('b', 2), ('a', 3), ('d', 4), ('e', 5), ('f', 6)]
