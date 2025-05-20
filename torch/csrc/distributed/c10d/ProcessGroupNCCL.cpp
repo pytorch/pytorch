@@ -1636,6 +1636,8 @@ bool ProcessGroupNCCL::HeartbeatMonitor::dumpDebuggingInfo(
 
 void ProcessGroupNCCL::HeartbeatMonitor::setLastWorkListUpdateTime(
     std::chrono::time_point<std::chrono::steady_clock> time) {
+  // We intentially let the race condition to happen but this is ok
+  // as long as we update the time, we know we are making progress.
   lastWorkListUpdateTime_ = time;
 }
 
