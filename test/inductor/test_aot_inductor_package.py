@@ -19,7 +19,12 @@ from torch._inductor.package import AOTICompiledModel, load_package, package_aot
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.export import Dim
-from torch.testing._internal.common_utils import IS_FBCODE, skipIfXpu, TEST_CUDA
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    skipIfRocm,
+    skipIfXpu,
+    TEST_CUDA,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -178,6 +183,7 @@ class TestAOTInductorPackage(TestCase):
         self.check_model(Model(), example_inputs)
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
+    @skipIfRocm  # build system may be different
     @skipIfXpu  # build system may be different
     def test_compile_after_package(self):
         if not self.package_cpp_only:
@@ -205,6 +211,8 @@ class TestAOTInductorPackage(TestCase):
 
             options = {
                 "aot_inductor.package_cpp_only": self.package_cpp_only,
+                # Require kernels to be compiled into .o files
+                "aot_inductor.embed_cubin": True,
             }
             ep = torch.export.export(model, example_inputs, strict=True)
             package_path = torch._inductor.aoti_compile_and_package(
@@ -216,6 +224,10 @@ class TestAOTInductorPackage(TestCase):
                 zip_ref.extractall(tmp_dir)
                 tmp_path = Path(tmp_dir) / "data" / "aotinductor" / "model"
                 self.assertTrue(tmp_path.exists())
+                if self.device == GPU_TYPE:
+                    self.assertTrue(not list(tmp_path.glob("*.cubin")))
+                    self.assertTrue(list(tmp_path.glob("*.cubin.o")))
+
                 build_path = tmp_path / "build"
                 self.assertTrue(not build_path.exists())
 
