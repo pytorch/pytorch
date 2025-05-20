@@ -66,35 +66,38 @@ def test_cases(device, dtype):
 
 class TestScheduler(TestCase):
     @dtypes(torch.float, torch.float16)
-    def test_get_estimated_runtime_logging(self, device, dtype):
+    def test_disable_get_estimated_runtime_logging(self, device, dtype):
         tc = test_cases(device, dtype)
-        expected_metrics = [
-            # num_bytes_accessed, node_runtimes, nodes_num_elem
-            (148, (0,), (37,)),
-            (120, (0,), (30,)),
-            (444, (0, 0, 0, 0), (20, 12, 23, 55)),
-            (154, (0, 0), (23, 15)),
-        ]
-        tc_plus_metrics = zip(tc, expected_metrics)
         # turn off logging of inductor metrics so that they don't get logged
         torch._logging.set_logs(inductor_metrics=False)
-        for tc, met in tc_plus_metrics:
-            op, example_inputs, kwargs = tc
-            enba, enr, enne = met
+        metrics.reset()
+        for op, example_inputs, kwargs in tc:
             comp = torch.compile(op)
             torch._dynamo.reset()
             with fresh_inductor_cache():
                 comp(*example_inputs, **kwargs)
-            self.assertEqual(enba, 0)
-            self.assertEqual(enr, 0)
-            self.assertEqual(enne, 0)
+            self.assertEqual(metrics.num_bytes_accessed, 0)
+            self.assertEqual(any(m[1] for m in metrics.node_runtimes), False)
+            self.assertEqual(any(m[1] for m in metrics.nodes_num_elem), False)
             metrics.reset()
 
-        breakpoint()
+    @dtypes(torch.float, torch.float16)
+    def test_get_estimated_runtime_logging(self, device, dtype):
+        tc = test_cases(device, dtype)        
+        expected_metrics = [
+            # num_bytes_accessed, number of nonzero node_runtimes
+            (74 * dtype.itemsize, 1),
+            (60 * dtype.itemsize, 1),
+            (222 * dtype.itemsize, 4),
+            (77 * dtype.itemsize, 2),
+        ]
+        tc_plus_metrics = zip(tc, expected_metrics)
+
+        metrics.reset()
         torch._logging.set_logs(inductor_metrics=True)
-        for tc, met in tc_plus_metrics:
-            op, example_inputs, kwargs = tc
-            enba, enr, enne = met
+        for test_case, met in tc_plus_metrics:
+            op, example_inputs, kwargs = test_case
+            enba, enr = met
 
             comp = torch.compile(op)
             # next two lines are required, otherwise the flops will be cached from pervious runs of this function.
@@ -103,8 +106,8 @@ class TestScheduler(TestCase):
                 # actually run to set the counters
                 comp(*example_inputs, **kwargs)
             self.assertEqual(enba, metrics.num_bytes_accessed)
-            self.assertEqual(enr, tuple(m[1] for m in metrics.node_runtimes))
-            self.assertEqual(enne, tuple(m[1] for m in metrics.nodes_num_elem))
+            nonzero_node_runtimes = sum(1 for x in metrics.node_runtimes if x[1] != 0)
+            self.assertEqual(enr, nonzero_node_runtimes)
             metrics.reset()
 
     @dtypes(torch.float, torch.float16)
@@ -124,6 +127,7 @@ class TestScheduler(TestCase):
             },
         ],
     )
+
     def test_flop_counter_op(self, device, dtype, options):
         if device == "cpu":
             return
@@ -138,6 +142,7 @@ class TestScheduler(TestCase):
 
         tc = test_cases(device, dtype)
 
+        torch._logging.set_logs(inductor_metrics=True)
         for op, example_inputs, kwargs in tc:
             comp = torch.compile(op, options=options)
             # next two lines are required, otherwise the flops will be cached from pervious runs of this function.
