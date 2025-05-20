@@ -1156,7 +1156,7 @@ class TestFxGraphCache(TestCase):
         """
         Test that we bump the generated_kernel_count metric on a cache hit.
         """
-
+        torch._logging.set_logs(inductor_metrics=True)
         def fn(x, y):
             return (x * y + y,)
 

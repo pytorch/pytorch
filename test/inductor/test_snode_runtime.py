@@ -32,6 +32,7 @@ def calculate_runtime(f, *args) -> float:
     Assumes all inputs are fp32
     """
     metrics.reset()
+    torch._logging.set_logs(inductor_metrics=True)
     torch.compile(f, backend=compile_but_use_eager)(*args)
     print(metrics.node_runtimes)
 

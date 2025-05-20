@@ -44,7 +44,7 @@ def cT(device, dtype):
 inductor_metrics_log = torch._logging.getArtifactLogger(__name__, "inductor_metrics")
 
 
-def test_cases(device, dtype):
+def _test_cases(device, dtype):
     T = cT(device, dtype)
 
     def composite(x, y, z):
@@ -69,7 +69,7 @@ class TestScheduler(TestCase):
     def test_disable_get_estimated_runtime_logging(self, device, dtype):
         if device == "cpu":
             return
-        tc = test_cases(device, dtype)
+        tc = _test_cases(device, dtype)
         # turn off logging of inductor metrics so that they don't get logged
         torch._logging.set_logs(inductor_metrics=False)
         metrics.reset()
@@ -87,7 +87,7 @@ class TestScheduler(TestCase):
     def test_get_estimated_runtime_logging(self, device, dtype):
         if device == "cpu":
             return
-        tc = test_cases(device, dtype)        
+        tc = _test_cases(device, dtype)        
         expected_metrics = [
             # num_bytes_accessed, number of nonzero node_runtimes
             (74 * dtype.itemsize, 1),
@@ -144,7 +144,7 @@ class TestScheduler(TestCase):
         ):
             return
 
-        tc = test_cases(device, dtype)
+        tc = _test_cases(device, dtype)
 
         torch._logging.set_logs(inductor_metrics=True)
         for op, example_inputs, kwargs in tc:

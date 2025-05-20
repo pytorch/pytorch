@@ -45,6 +45,7 @@ class Func:
 
 
 def bench(shape, layer_id, p, fusion_types=None):
+    torch._logging.set_logs(inductor_metrics=True)
     if fusion_types is None:
         fusion_types = [""]
     dtype = torch.float16
