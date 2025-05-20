@@ -187,9 +187,9 @@ class CudaReproTests(TestCase):
             # padded bias should have an expanded dim
             FileCheck().check("buf0 =").check_same(", 0, ").run(code[0])
             # single fused padded kernel
-            FileCheck().check("def call").check_count(
-                "empty_strided_cuda", 1, exactly=True
-            ).check("return").run(code[0])
+            FileCheck().check_count("empty_strided_cuda(", 1, exactly=True).check(
+                "return"
+            ).run(code[0])
 
             self.assertEqual(out, f(*inputs))
 
