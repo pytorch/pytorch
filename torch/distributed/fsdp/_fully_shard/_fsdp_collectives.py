@@ -1,12 +1,11 @@
-import copy
 from itertools import chain
-from typing import Callable, cast, List, NamedTuple, Optional, Union
+from typing import Callable, cast, NamedTuple, Optional, Union
 
 import torch
 import torch.distributed as dist
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.distributed_c10d import ReduceOp
-from torch.distributed.tensor import DeviceMesh, DTensor
+from torch.distributed.tensor import DTensor
 
 from ._fsdp_common import (
     _get_dim0_padded_size,
@@ -150,102 +149,6 @@ def foreach_all_gather(
     device_handle = _get_device_handle(device.type)
     with device_handle.stream(all_gather_copy_in_stream):
         param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
-        (
-            param_all_gather_input_dtypes,
-            param_all_gather_input_numels,  # does not take the replicated dim
-            dtype,
-        ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
-        if dtype == torch.uint8:
-            all_gather_inputs = [
-                t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
-            ]
-        else:
-            all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
-        inp_split_sizes = [t.numel() for t in all_gather_inputs]
-        all_gather_input_numel = sum(inp_split_sizes)
-        all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
-            all_gather_inputs,
-            inp_split_sizes,
-            all_gather_input_numel,
-            world_size,
-            rank,
-            dtype,
-            device,
-        )
-        del param_all_gather_inputs
-    all_gather_stream.wait_stream(all_gather_copy_in_stream)
-    with device_handle.stream(all_gather_stream):
-        all_gather_work = dist.all_gather_into_tensor(
-            output_tensor=all_gather_output,
-            input_tensor=all_gather_input,
-            group=group,
-            async_op=async_op,
-        )
-        all_gather_event = all_gather_stream.record_event()
-        return AllGatherResult(
-            all_gather_output,
-            all_gather_event,
-            all_gather_work,
-            param_all_gather_input_dtypes,
-            param_all_gather_input_numels,
-            inp_split_sizes,
-        )
-
-
-@torch.no_grad()
-def foreach_all_gather_twice(
-    fsdp_params: list[FSDPParam],
-    groups: List[dist.ProcessGroup],
-    async_op: bool,
-    all_gather_copy_in_stream: torch.Stream,
-    all_gather_stream: torch.Stream,
-    device: torch.device,
-) -> Optional[AllGatherResult]:
-    group = groups[0]
-    world_size, rank = group.size(), group.rank()
-    device_handle = _get_device_handle(device.type)
-    with device_handle.stream(all_gather_copy_in_stream):
-        param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
-        (
-            param_all_gather_input_dtypes,
-            param_all_gather_input_numels,  # does not take the replicated dim
-            dtype,
-        ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
-        if dtype == torch.uint8:
-            all_gather_inputs = [
-                t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
-            ]
-        else:
-            all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
-        inp_split_sizes = [t.numel() for t in all_gather_inputs]
-        all_gather_input_numel = sum(inp_split_sizes)
-        all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
-            all_gather_inputs,
-            inp_split_sizes,
-            all_gather_input_numel,
-            world_size,
-            rank,
-            dtype,
-            device,
-        )
-        del param_all_gather_inputs
-    all_gather_stream.wait_stream(all_gather_copy_in_stream)
-    with device_handle.stream(all_gather_stream):
-        all_gather_work = dist.all_gather_into_tensor(
-            output_tensor=all_gather_output,
-            input_tensor=all_gather_input,
-            group=group,
-            async_op=async_op,
-        )
-        all_gather_event = all_gather_stream.record_event()
-
-    group = groups[1]
-    world_size, rank = group.size(), group.rank()
-    device_handle = _get_device_handle(device.type)
-    all_gather_copy_in_stream.wait_stream(all_gather_stream)
-    with device_handle.stream(all_gather_copy_in_stream):
-        # param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
-        param_all_gather_inputs = [all_gather_output.flatten()]
         (
             param_all_gather_input_dtypes,
             param_all_gather_input_numels,  # does not take the replicated dim
@@ -485,9 +388,9 @@ def foreach_reduce(
     for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
         if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
             continue
-        assert (
-            unsharded_grad.size(shard_dim) % world_size == 0
-        ), f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
+        assert unsharded_grad.size(shard_dim) % world_size == 0, (
+            f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
+        )
         chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
         unsharded_grads[i] = torch.cat(chunks, dim=0)
     padded_unsharded_sizes = tuple(
