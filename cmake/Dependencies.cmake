@@ -1094,6 +1094,14 @@ if(USE_NCCL)
   endif()
 endif()
 
+# ---[ XCCL
+if(USE_XCCL)
+  if(NOT USE_XPU)
+    message(WARNING "Not using XPU, so disabling USE_XCCL. Suppress this warning with -DUSE_XCCL=OFF.")
+    caffe2_update_option(USE_XCCL OFF)
+  endif()
+endif()
+
 # ---[ UCC
 if(USE_UCC)
   if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
