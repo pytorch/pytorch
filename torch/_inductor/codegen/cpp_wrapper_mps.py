@@ -13,29 +13,28 @@ class CppWrapperMps(CppWrapperGpu):
         subgraph_name: Optional[str],
         parent_wrapper: Optional[PythonWrapperCodegen],
         partition_signatures: Optional[GraphPartitionSignature] = None,
-    ):
+    ) -> "CppWrapperMps":
         return CppWrapperMps()
 
     def _generate_kernel_call_helper(
         self,
         kernel_name: str,
-        call_args,
-        *,
-        device=None,
-        triton=True,
-        arg_types=None,
-        raw_keys=None,
-        raw_args=None,
-        triton_meta=None,
-        graph_name="",
-        original_fxnode_name=None,
-    ):
+        call_args: list[str],
+        **kwargs,
+    ) -> None:
         """
-        Generates kernel call code.
-
-        triton: Defines whether the GPU backend uses Triton for codegen.
-                Otherwise it uses the CUDA language for codegen.
-                Only valid when cuda == True.
+        Generates MPS kernel call code. It should look something like:
+        ```
+        auto mps_lib_0_func = mps_lib_0.getKernelFunction("generated_kernel");
+        auto mps_lib_0_func_handle = AOTIMetalKernelFunctionHandle(mps_lib_0_func.get());
+        mps_lib_0_func->runCommandBlock([&] {
+            mps_lib_0_func->startEncoding();
+            aoti_torch_mps_set_arg(mps_lib_0_func_handle, 0, buf0);
+            aoti_torch_mps_set_arg(mps_lib_0_func_handle, 1, arg0_1);
+            ...
+            mps_lib_0_func->dispatch(9);
+        });
+        ```
         """
         new_args = []
         for idx, arg in enumerate(call_args[:-2]):
@@ -63,13 +62,12 @@ class CppWrapperMps(CppWrapperGpu):
         with debug_printer_manager:
             self.writeline(self.wrap_kernel_call(kernel_name, new_args))
 
-    def wrap_kernel_call(self, name, call_args):
+    def wrap_kernel_call(self, name: str, call_args: list[str]) -> str:
         lib_name = name[: -len("_func")]
         calling_args = "        ".join(call_args)
         return f"""
     auto {name} = {lib_name}.getKernelFunction("generated_kernel");
-    AOTIMetalKernelFunctionOpaque* {name}_handle = new AOTIMetalKernelFunctionOpaque();
-    {name}_handle->kernelFunction = {name};
+    auto {name}_handle = AOTIMetalKernelFunctionHandle({name}.get());
     {name}->runCommandBlock([&] {{
         {name}->startEncoding();
         {calling_args}

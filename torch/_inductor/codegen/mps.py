@@ -931,11 +931,6 @@ class MetalScheduling(SIMDScheduling):
             mps_lib_name = f"mps_lib_{wrapper.next_kernel_suffix()}"
 
             if V.graph.cpp_wrapper:
-                # TODO this is not being used
-                cpp_definition = f"""
-                    at::native::mps::DynamicMetalShaderLibrary {mps_lib_name}("// Empty library");
-                    AOTI_TORCH_ERROR_CODE_CHECK({mps_lib_name}.getFunctionNames().size() == 0);
-                """
                 src_code = (
                     f"at::native::mps::DynamicMetalShaderLibrary {mps_lib_name}"
                     + src_code
@@ -943,7 +938,6 @@ class MetalScheduling(SIMDScheduling):
                 kernel_name = f"{mps_lib_name}_func"
             else:
                 kernel_name = f"{mps_lib_name}.generated_kernel"
-                cpp_definition = None
 
             wrapper.src_to_kernel[src_code] = kernel_name
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
