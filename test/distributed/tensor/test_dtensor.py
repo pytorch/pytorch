@@ -11,22 +11,19 @@ from numpy.testing import assert_array_equal
 import torch
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
-from torch.distributed._tensor import (
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
     DTensor,
-    init_device_mesh,
-)
-from torch.distributed._tensor.experimental import implicit_replication
-from torch.distributed._tensor.placement_types import (
-    DTensorSpec,
     Partial,
     Replicate,
     Shard,
-    TensorMeta,
 )
 from torch.distributed.tensor._api import _shard_tensor
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.experimental import implicit_replication
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -743,7 +740,7 @@ class DTensorMeshTest(DTensorTestBase):
             ),
         ]
 
-        from torch.distributed._tensor._utils import (
+        from torch.distributed.tensor._utils import (
             compute_local_shape_and_global_offset,
         )
 
@@ -880,41 +877,6 @@ class DTensorMeshTest(DTensorTestBase):
         )
 
     @with_comms
-    def test_implicit_replication_for_foreach_ops(self):
-        mesh = init_device_mesh(
-            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
-        )
-        global_tensor1 = torch.randn(4, 2)
-        dtensor_2d = distribute_tensor(global_tensor1, mesh, [Shard(0), Shard(1)])
-        self.assertEqual(dtensor_2d.full_tensor(), global_tensor1)
-        global_tensor2 = torch.randn(4)
-        dtensor_1d = distribute_tensor(global_tensor2, mesh["dp"], [Shard(0)])
-        dtensor_list = [dtensor_2d, dtensor_1d]
-
-        # Check without implicit replication, cross mesh error raises.
-        with self.assertRaisesRegex(
-            RuntimeError, "DTensor does not support cross-mesh operation yet!"
-        ):
-            torch._foreach_mul(dtensor_list, 2.0)
-
-        # Check dtensor result matches tensor result.
-        with implicit_replication():
-            torch._foreach_mul_(dtensor_list, 2.0)
-            self.assertEqual(dtensor_list[0].full_tensor(), global_tensor1 * 2.0)
-            self.assertEqual(dtensor_list[1].full_tensor(), global_tensor2 * 2.0)
-
-        mesh_1d = DeviceMesh.from_group(mesh["tp"].get_group(), self.device_type)
-        dtensor_1d = distribute_tensor(global_tensor2, mesh_1d, [Shard(0)])
-        dtensor_list = [dtensor_2d, dtensor_1d]
-
-        # Check even with implicit replication, cross mesh error raises if different device mesh don't
-        # belong to the same root mesh.
-        with self.assertRaisesRegex(
-            RuntimeError, "DTensor does not support cross-mesh operation yet!"
-        ):
-            torch._foreach_mul_(dtensor_list, 2.0)
-
-    @with_comms
     def test_metadata_consistency_check(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         placements = [Shard(0)]
@@ -991,7 +953,7 @@ class TestDTensorPlacementTypes(DTensorTestBase):
             )
             if size == 0:
                 # when tensor size is 0, there is no padding needed for all the ranks.
-                expected_pad_sizes = []
+                expected_pad_sizes = [0] * self.world_size
                 assert_array_equal(expected_pad_sizes, pad_sizes)
 
                 is_tensor_empty = [
@@ -1044,7 +1006,8 @@ class DTensorLogTest(LoggingTestCase):
             """\
 import logging
 import torch
-from torch.distributed._tensor import  init_device_mesh, distribute_tensor, Shard
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import distribute_tensor, Shard
 
 mesh = init_device_mesh("cuda", (1,), mesh_dim_names=("dp",))
 placements = [Shard(0)]

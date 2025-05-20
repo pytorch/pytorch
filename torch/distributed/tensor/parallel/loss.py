@@ -17,6 +17,7 @@ from torch.distributed.tensor._ops._math_ops import (
     Reduction,
     replicate_reduction_dims,
 )
+from torch.distributed.tensor._ops.utils import normalize_dim
 from torch.distributed.tensor.placement_types import Placement
 
 
@@ -125,13 +126,12 @@ def _propagate_tensor_meta(
 # NOTE: The implementation follows torch._decomp.decomposition._log_softmax,
 # with all_reduce manually inserted to perform distributed computation.
 def _log_softmax(x, dim, half_to_float, mesh, mesh_dim):
-    x = x.contiguous()
     if half_to_float:
         assert x.dtype == torch.half
     computation_dtype, result_dtype = utils.elementwise_dtypes(
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
-    x = x.to(computation_dtype)
+    x = x.to(dtype=computation_dtype, memory_format=torch.contiguous_format)
     if x.numel() == 0:
         shifted = x
     else:
@@ -161,6 +161,7 @@ def _log_softmax_handler(
     half_to_float = cast(bool, args[2])
 
     spec = x._spec
+    dim = normalize_dim(dim, x.dim())
     mesh_dim = _find_all_reduce_mesh_dim(spec.placements, dim)
 
     output_tensor_meta = _propagate_tensor_meta(op_call, args, kwargs)

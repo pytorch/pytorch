@@ -11,7 +11,7 @@ from typing import Any, Optional, TYPE_CHECKING
 
 import torch.nn
 
-from . import utils, variables
+from . import graph_break_hints, utils, variables
 from .bytecode_transformation import (
     bytecode_from_template,
     create_call_function,
@@ -19,7 +19,7 @@ from .bytecode_transformation import (
     create_instruction,
 )
 from .codegen import PyCodegen
-from .exc import SideEffectsError, unimplemented
+from .exc import SideEffectsError, unimplemented_v2
 from .source import GlobalSource, LocalCellSource, LocalSource, Source
 from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
@@ -186,8 +186,12 @@ class SideEffects:
                 "unintended variable modifications."
             )
         if not is_side_effect_safe(item.mutation_type):
-            unimplemented(
-                "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)"
+            # TODO plumb HOP information here
+            unimplemented_v2(
+                gb_type="HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)",
+                context="",
+                explanation="This is not supported.",
+                hints=[],
             )
 
     def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
@@ -202,12 +206,22 @@ class SideEffects:
             assert self.is_attribute_mutation(item)
         result = self.store_attr_mutations[item][name]
         if not deleted_ok and isinstance(result, variables.DeletedVariable):
-            unimplemented("read deleted attribute")
+            unimplemented_v2(
+                gb_type="Attempted to read a deleted variable",
+                context=f"item: {item}, name: {name}",
+                explanation="",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
         return result
 
     def store_cell(self, cellvar, value):
         if cellvar.is_immutable():
-            unimplemented("Dynamo currently doesn't support writing to such cell")
+            unimplemented_v2(
+                gb_type="Write to immutable cell",
+                context=f"cellvar: {cellvar}, value: {value}",
+                explanation="Dynamo doesn't support writing to immutable/sourceless cell variables.",
+                hints=[*graph_break_hints.DIFFICULT],
+            )
         assert isinstance(cellvar, variables.CellVariable)
         assert isinstance(value, variables.VariableTracker)
         self.store_attr(cellvar, "cell_contents", value)
@@ -218,7 +232,12 @@ class SideEffects:
             return self.load_attr(cellvar, "cell_contents", check=False)
         if cellvar.pre_existing_contents:
             return cellvar.pre_existing_contents
-        unimplemented("cannot read uninitialized cell")
+        unimplemented_v2(
+            gb_type="Read uninitialized cell",
+            context=str(cellvar),
+            explanation="Attempted to read a cell variable that has not been populated yet.",
+            hints=[*graph_break_hints.USER_ERROR],
+        )
 
     def load_global(self, gvar: VariableTracker, name: str):
         assert isinstance(gvar, variables.VariableTracker)
@@ -237,6 +256,7 @@ class SideEffects:
             int.__getattribute__,
             str.__getattribute__,
             list.__getattribute__,
+            BaseException.__getattribute__,
         )
 
     def is_attribute_mutation(self, item):
@@ -275,9 +295,7 @@ class SideEffects:
         variable: VariableTracker,
         mutation_type_cls=ValueMutationExisting,
     ):
-        """Start tracking a new variable for mutation"""
-        assert variable.source is not None
-
+        """Start tracking an existing or new variable for mutation"""
         if id(item) in self.id_to_variable:
             raise AssertionError(
                 f"{variable} is already tracked for mutation. This could be "
@@ -333,9 +351,9 @@ class SideEffects:
         from .variables.torch_function import TorchFunctionModeVariable
         from .variables.user_defined import is_forbidden_context_manager
 
-        variable_cls: type[
+        variable_cls: type[variables.UserDefinedObjectVariable] = (
             variables.UserDefinedObjectVariable
-        ] = variables.UserDefinedObjectVariable
+        )
         if issubclass(
             user_cls, TorchFunctionMode
         ) and TorchFunctionModeVariable.is_supported_torch_function_mode(user_cls):
@@ -358,6 +376,8 @@ class SideEffects:
             variable_cls = variables.MutableMappingVariable
         elif is_frozen_dataclass(user_cls):
             variable_cls = FrozenDataClassVariable
+        elif issubclass(user_cls, BaseException):
+            variable_cls = variables.UserDefinedExceptionObjectVariable
         assert issubclass(variable_cls, variables.UserDefinedObjectVariable)
         return variable_cls
 
@@ -489,7 +509,8 @@ class SideEffects:
             # Also recurse through the new value to detect alive AttributeMutationNew.
             if var in self.store_attr_mutations:
                 VariableTracker.visit(
-                    visit, self.store_attr_mutations[var]  # noqa: F821
+                    visit,  # noqa: F821
+                    self.store_attr_mutations[var],
                 )
 
         def is_live(var: VariableTracker):
@@ -553,12 +574,18 @@ class SideEffects:
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
 
     def codegen_save_tempvars(self, cg: PyCodegen):
-        # Make sure we codegen these modified VT to their source by default, so
-        # that mutation and aliasing are properly accounted for.
+        # We must codegen modified VT to their source by default, so that
+        # mutation and aliasing are properly accounted for.
+        #
+        # Since newly constructed objects don't have a source, we manually
+        # codegen their construction and store them to a newly assigned local
+        # source. Note that `ValueMutationNew` isn't tracked by SideEffects.
         for var in self._get_modified_vars():
-            if isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
-                var, variables.CellVariable
-            ):
+            if not isinstance(var.mutation_type, AttributeMutationNew):
+                assert var.source is not None
+                continue
+
+            if isinstance(var, variables.CellVariable):
                 # Cells created in the root frame are created either by
                 # `MAKE_CELL` or by them being in `co_cellvars`, so we only emit
                 # `make_cell` for the non-root-frame cells here.
@@ -572,13 +599,38 @@ class SideEffects:
                     var.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
                 elif var.source is None:
                     var.source = LocalCellSource(var.local_name)
-            elif isinstance(var.mutation_type, AttributeMutationNew):
-                if isinstance(var, variables.AutogradFunctionContextVariable):
-                    unimplemented("AutogradFunctionContextVariable escaped")
-
+            elif isinstance(var, variables.TensorVariable):
+                # NOTE: for historical reasons we never assigned local sources
+                # to newly constructed tensor object, so we keep it that way.
+                # They are always loaded from output of the fx graph, so one can
+                # think of it as having a "OutputGraphSource" for codegen
+                # purposes.
+                #
+                # However, tensor subclass objects are different, because the
+                # reconstruction logic in `PyCodegen` loads the data tensor from
+                # graph output and then calls `as_subclass`, meaning we must
+                # assign a source to it to ensure we only reconstruct one
+                # subclass instance.
+                if isinstance(
+                    var, variables.torch_function.TensorWithTFOverrideVariable
+                ):
+                    # Don't codegen from temp source assigned from the 1st pass.
+                    cg(var, allow_cache=False)
+                    cg.add_cache(var)
+                    # `add_cache` generates STORE and consumes TOS, but we never
+                    # cleared it. TODO move this call into `add_cache`
+                    cg.clear_tos()
+                    var.source = LocalSource(cg.tempvars[var])
+            elif isinstance(var, variables.AutogradFunctionContextVariable):
+                unimplemented_v2(
+                    gb_type="AutogradFunctionContextVariable escaped Dynamo-traced region",
+                    context="",
+                    explanation="We cannot reconstruct a torch.autograd.Function's context object.",
+                    hints=[],
+                )
+            else:
                 # Reconstruct the bytecode for
                 # base_cls.__new__(user_cls, *args)
-
                 if isinstance(var, variables.UserDefinedObjectVariable):
 
                     def load_new_method():
@@ -602,10 +654,6 @@ class SideEffects:
 
                 cg.add_cache(var)
                 var.source = LocalSource(cg.tempvars[var])
-            else:
-                # The remaning cases here are `AttributeMutationExisting` and
-                # `MutableSideEffects`, which have sources already.
-                assert var.source is not None
 
         for ctx, args in self.save_for_backward:
             cg(ctx.source)
@@ -723,7 +771,14 @@ class SideEffects:
                     isinstance(var.maxlen, variables.ConstantVariable)
                     and var.maxlen.value is None
                 ):
-                    unimplemented("side effect on existing deque with limited maxlen")
+                    unimplemented_v2(
+                        gb_type="Side effect on existing deque with limited maxlen",
+                        context="",
+                        explanation="This is not supported.",
+                        hints=[
+                            "Don't use a deque with `maxlen` specified.",
+                        ],
+                    )
 
                 # old.extend(new), this runs last
                 cg(var.source)
@@ -958,7 +1013,7 @@ class SideEffects:
                     else:
                         cg.tx.output.update_co_names(name)
                         cg(value)
-                        cg(var.source)
+                        cg(var)
                         suffixes.append([create_instruction("STORE_ATTR", argval=name)])
             elif isinstance(var, variables.ListIteratorVariable):
                 for _ in range(var.index):

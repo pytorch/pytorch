@@ -144,7 +144,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
   ~ProcessGroupMPI() override;
 
   // Abort the MPI program, needs to be called when exception is detected
-  void abort();
+  void abort() override;
 
   const std::string getBackendName() const override {
     return std::string(MPI_BACKEND_NAME);
@@ -195,6 +195,11 @@ class TORCH_API ProcessGroupMPI : public Backend {
   c10::intrusive_ptr<Work> reduce_scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
+
+  c10::intrusive_ptr<Work> _reduce_scatter_base(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
   c10::intrusive_ptr<Work> alltoall_base(

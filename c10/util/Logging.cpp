@@ -20,7 +20,7 @@ C10_DEFINE_bool(
     caffe2_use_fatal_for_enforce,
     false,
     "If set true, when CAFFE_ENFORCE is not met, abort instead "
-    "of throwing an exception.");
+    "of throwing an exception.")
 
 namespace c10 {
 
@@ -37,7 +37,7 @@ void SetStackTraceFetcher(std::function<::c10::Backtrace()> fetcher) {
   GetFetchStackTrace() = std::move(fetcher);
 }
 
-void SetStackTraceFetcher(std::function<string()> fetcher) {
+void SetStackTraceFetcher(std::function<std::string()> fetcher) {
   SetStackTraceFetcher([fetcher = std::move(fetcher)] {
     return std::make_shared<PrecomputedLazyValue<std::string>>(fetcher());
   });
@@ -125,21 +125,21 @@ bool IsAPIUsageDebugMode() {
   return val.has_value() && !val.value().empty(); // any non-empty value
 }
 
-void APIUsageDebug(const string& event) {
+void APIUsageDebug(const std::string& event) {
   // use stderr to avoid messing with glog
   std::cerr << "PYTORCH_API_USAGE " << event << '\n';
 }
 
 APIUsageLoggerType* GetAPIUsageLogger() {
   static APIUsageLoggerType func =
-      IsAPIUsageDebugMode() ? &APIUsageDebug : [](const string&) {};
+      IsAPIUsageDebugMode() ? &APIUsageDebug : [](const std::string&) {};
   return &func;
 }
 
 APIUsageMetadataLoggerType* GetAPIUsageMetadataLogger() {
   static APIUsageMetadataLoggerType func =
       [](const std::string&,
-         const std::map<std::string, std::string>& metadata_map) {};
+         const std::map<std::string, std::string>& /*metadata_map*/) {};
   return &func;
 }
 
@@ -273,9 +273,12 @@ DECLARE_bool(logtostderr);
 // This backward compatibility flags are in order to deal with cases where
 // Caffe2 are not built with glog, but some init flags still pass in these
 // flags. They may go away in the future.
-C10_DEFINE_int32(minloglevel, 0, "Equivalent to glog minloglevel");
-C10_DEFINE_int32(v, 0, "Equivalent to glog verbose");
-C10_DEFINE_bool(logtostderr, false, "Equivalent to glog logtostderr");
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+C10_DEFINE_int32(minloglevel, 0, "Equivalent to glog minloglevel")
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+C10_DEFINE_int32(v, 0, "Equivalent to glog verbose")
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+C10_DEFINE_bool(logtostderr, false, "Equivalent to glog logtostderr")
 #endif // !defined(c10_USE_GLOG)
 
 #ifdef C10_USE_GLOG
@@ -375,7 +378,7 @@ void ShowLogInfoToStderr() {
 C10_DEFINE_int(
     caffe2_log_level,
     c10::GLOG_WARNING,
-    "The minimum log level that caffe2 will output.");
+    "The minimum log level that caffe2 will output.")
 
 namespace c10 {
 
@@ -383,7 +386,7 @@ void initLogging() {
   detail::setLogLevelFlagFromEnv();
 }
 
-bool InitCaffeLogging(int* argc, char** argv) {
+bool InitCaffeLogging(int* argc, char** /*argv*/) {
   // When doing InitCaffeLogging, we will assume that caffe's flag parser has
   // already finished.
   if (*argc == 0)

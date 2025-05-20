@@ -11,10 +11,11 @@ from ..common import Kernel, OpOverrides, WorkspaceArg, WorkspaceZeroMode
 from ..cpp_utils import CppPrinter
 from .rocm_benchmark_request import ROCmBenchmarkRequest
 from .rocm_template_buffer import ROCmTemplateBuffer
+from .rocm_utils import DTYPE_TO_ROCM_TYPE
 
 
 if TYPE_CHECKING:
-    from torch._inductor.codegen.rocm.rocm_template import ROCmTemplate
+    from torch._inductor.codegen.rocm.rocm_template import ArgInfo, ROCmTemplate
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +41,12 @@ class ROCmTemplateKernel(ROCmKernel):
 
     _EXTRA_CPP_ARGS = "size_t* workspace_size, uint8_t* workspace, hipStream_t stream"
 
-    def __init__(self, kernel_name) -> None:
+    def __init__(
+        self,
+        kernel_name: str,
+        runtime_arg_info: list["ArgInfo"],
+        runtime_arg_values: list[Any],
+    ) -> None:
         """
         Initializes a new instance of the ROCmTemplateKernel class.
 
@@ -51,6 +57,8 @@ class ROCmTemplateKernel(ROCmKernel):
         self.kernel_name = kernel_name
         # Mapping from arg name to IRNode.
         self.named_nodes: dict[str, IRNode] = {}
+        self.runtime_arg_info = runtime_arg_info
+        self.runtime_arg_values = runtime_arg_values
 
     def get_signature(self):
         return self.signature
@@ -102,9 +110,11 @@ class ROCmTemplateKernel(ROCmKernel):
                 self.named_nodes[name] = node
                 self.args.output_buffers[node.get_name()] = name
 
-        arg_defs, *_ = self.args.cpp_argdefs()
+        arg_defs, *_ = self.args.cpp_argdefs(DTYPE_TO_ROCM_TYPE)
 
-        signature = f"int {self.kernel_name}({', '.join(arg_defs + size_args)}, {self._EXTRA_CPP_ARGS})"
+        runtime_arg_defs = [f"{arg.ty} {arg.name}" for arg in self.runtime_arg_info]
+
+        signature = f"int {self.kernel_name}({', '.join(arg_defs + size_args + runtime_arg_defs)},{self._EXTRA_CPP_ARGS})"
         self.signature = signature
         return signature
 
@@ -132,9 +142,10 @@ class ROCmTemplateKernel(ROCmKernel):
             # Kinda hacky because we always originally initialize name with "KERNEL_NAME"
             # So, we replace with the real kernel name passed as an arg to this function.
             self.signature = self.signature.replace("KERNEL_NAME", name)
-            _, call_args, arg_types = self.args.cpp_argdefs()
+            _, call_args, arg_types = self.args.cpp_argdefs(DTYPE_TO_ROCM_TYPE)
         else:
             _, call_args, _, arg_types = self.args.python_argdefs()
+
         kernel_args = []
         for arg in call_args:
             # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
@@ -149,6 +160,7 @@ class ROCmTemplateKernel(ROCmKernel):
         size_args = [
             f"{V.graph.sizevars.simplify(sarg)}" for sarg in node.template.size_args()
         ]
+
         if V.graph.cpp_wrapper:
             kernel_args.extend(size_args)
         else:
@@ -156,6 +168,11 @@ class ROCmTemplateKernel(ROCmKernel):
 
         if V.graph.cpp_wrapper:
             arg_types.extend(["int"] * len(node.template.size_args()))
+
+        # the runtime args come right after the size args
+        kernel_args.extend(self.runtime_arg_values)
+        for arg in self.runtime_arg_info:
+            arg_types.append(arg.ty)
 
         # workspace_size ptr is NULL to mark this call is not intended for retrieving workspace_size.
         # workspace_size should have already been retrieved prior to this call.
@@ -180,13 +197,9 @@ class ROCmTemplateKernel(ROCmKernel):
             kernel_args.append("nullptr" if V.graph.cpp_wrapper else "None")
         if V.graph.cpp_wrapper:
             arg_types.append("uint8_t*")
-
-        current_device = V.graph.get_current_device_or_throw()
         wrapper.generate_kernel_call(
             name,
             kernel_args,
-            device_index=current_device.index,
-            gpu=True,
             triton=False,
             arg_types=arg_types,
         )
@@ -217,7 +230,9 @@ class ROCmTemplateCaller(ChoiceCaller):
         ],
         bmreq: ROCmBenchmarkRequest,
         template: "ROCmTemplate",  # type: ignore[name-defined]
-        info_kwargs: Optional[dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]],  # type: ignore[type-arg]
+        info_kwargs: Optional[
+            dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]
+        ],  # type: ignore[type-arg]
     ) -> None:
         super().__init__(name, input_nodes, layout, description="")
         self.category = category
@@ -232,7 +247,7 @@ class ROCmTemplateCaller(ChoiceCaller):
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(*args, output_tensor=out)
+        return self.bmreq.benchmark(*args, out=out)
 
     def __str__(self) -> str:
         return f"ROCmTemplateCaller(source_file={self.bmreq.source_file}, {self.info_dict()})"

@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import copy
 import functools
 import unittest
@@ -13,20 +14,14 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch._C import FileCheck
 from torch._inductor.utils import run_and_get_triton_code
-from torch.distributed._tensor import (
-    DeviceMesh,
-    DTensor,
-    init_device_mesh,
-    Partial,
-    Replicate,
-    Shard,
-)
-from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
     CheckpointImpl,
 )
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.tensor import DeviceMesh, DTensor, Partial, Replicate, Shard
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -127,6 +122,60 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = fn(x)
         res.to_local().sum().backward()
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_dtensor_basic_export(self):
+        mesh = DeviceMesh("cuda", torch.arange(self.world_size))
+
+        param = torch.randn(4, 4)
+        param_x = DTensor.from_local(param, mesh, [Shard(0)], run_check=False)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.nn.Buffer(param_x)
+
+            def forward(self, x):
+                inter = self.buffer + DTensor.from_local(
+                    x, mesh, [Shard(0)], run_check=False
+                )
+                return inter.to_local()
+
+        torch.utils._pytree.register_constant(
+            torch.distributed.tensor._dtensor_spec.DTensorSpec
+        )
+        torch.utils._pytree.register_constant(DeviceMesh)
+
+        ep = torch.export.export_for_training(
+            Foo(), (torch.randn(4, 4, dtype=torch.float64),), strict=False
+        )
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, b_buffer, x):
+    _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(x, dtype = torch.float64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default = None
+    to = torch.ops.aten.to.dtype_layout(x, dtype = torch.float64, layout = torch.strided, device = device(type='cuda'));  x = None
+    view_as = torch.ops.aten.view_as.default(to, to);  to = None
+    dtensor___init__0 = self.dtensor___init__0
+    dtensor_const_func_spec0 = self.dtensor_const_func_spec0
+    flat_apply = torch.ops.higher_order.flat_apply(dtensor_const_func_spec0, dtensor___init__0, view_as, False);  dtensor_const_func_spec0 = dtensor___init__0 = view_as = None
+    add = torch.ops.aten.add.Tensor(b_buffer, flat_apply);  b_buffer = flat_apply = None
+    access_subclass_inner_tensor_default_4 = torch.ops.export.access_subclass_inner_tensor.default(add, '_local_tensor');  add = None
+    view_as_1 = torch.ops.aten.view_as.default(access_subclass_inner_tensor_default_4, access_subclass_inner_tensor_default_4);  access_subclass_inner_tensor_default_4 = None
+    return (view_as_1,)""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            str(ep.run_decompositions({}).graph_module.code).strip(),
+            """\
+def forward(self, b_parametrizations_buffer_original0, x):
+    _assert_tensor_metadata = torch.ops.aten._assert_tensor_metadata.default(x, None, None, torch.float64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata = None
+    _to_copy = torch.ops.aten._to_copy.default(x, dtype = torch.float64, layout = torch.strided, device = device(type='cuda', index=0));  x = None
+    view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
+    add = torch.ops.aten.add.Tensor(b_parametrizations_buffer_original0, view);  b_parametrizations_buffer_original0 = view = None
+    view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
+    return (view_1,)""",  # noqa: B950
+        )
+
     def test_placement_compile(self):
         def fn(x):
             a = 0
@@ -154,7 +203,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn, compiled_out)
 
     def test_device_mesh_compile(self):
-        def fn(x):
+        def fn(x: DeviceMesh):
             # test size()
             a = x.size()
             b = x.size(0)
@@ -163,13 +212,14 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             # test get_coordinate()
             coord = x.get_coordinate()
             # test get_group()
-            group = x.get_group()
-            return size, coord, group
+            group0 = x.get_group(0)
+            group1 = x.get_group(mesh_dim=1)
+            return size, coord, group0, group1
 
         # Cant be fullgraph=True because ProcessGroup is not reconstructible in dynamo
         compiled_fn = torch.compile(backend="aot_eager")(fn)
 
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).unsqueeze(1))
         opt_fn = fn(mesh)
         compiled_out = compiled_fn(mesh)
         self.assertEqual(opt_fn, compiled_out)
@@ -830,9 +880,17 @@ class TestDTensorCompileE2E(DTensorTestBase):
     def world_size(self):
         return 4
 
+    # multiprocess relies on pickling the source code
+    # so compiled autograd tests can't dynamically wrap this class
+    def _bwd_ctx(self, use_ca):
+        if not use_ca:
+            return contextlib.nullcontext()
+        return torch._dynamo.compiled_autograd._enable(torch.compile)
+
     @with_comms
     @parametrize("is_seq_parallel", [True, False])
-    def test_tp_compile_fullgraph(self, is_seq_parallel):
+    @parametrize("use_ca", [True, False])
+    def test_tp_compile_fullgraph(self, is_seq_parallel, use_ca):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         model = SimpleModel(self.device_type)
@@ -886,13 +944,15 @@ class TestDTensorCompileE2E(DTensorTestBase):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         compiled_mod = torch.compile(model, backend=cnt, fullgraph=True)
         compiled_out = compiled_mod(inp)
-        compiled_out.sum().backward()
+        with self._bwd_ctx(use_ca):
+            compiled_out.sum().backward()
         self.assertEqual(compiled_out, out)
         self.assertEqual(cnt.frame_count, 1)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_2d_fsdp_tp_compile(self):
+    @parametrize("use_ca", [True, False])
+    def test_2d_fsdp_tp_compile(self, use_ca):
         data_parallel_size = 2
         model = SimpleModel(self.device_type)
         model_copy = copy.deepcopy(model)
@@ -935,13 +995,16 @@ class TestDTensorCompileE2E(DTensorTestBase):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         compiled_2d = torch.compile(fsdp_2d, backend=cnt)
         compiled_output = compiled_2d(inp)
+        with self._bwd_ctx(use_ca):
+            compiled_output.sum().backward()
 
         self.assertEqual(out, compiled_output)
         self.assertEqual(cnt.frame_count, 1)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_2d_fsdp_tp_ac_compile(self):
+    @parametrize("use_ca", [True, False])
+    def test_2d_fsdp_tp_ac_compile(self, use_ca):
         dp_degree = 2
         tp_degree = self.world_size // dp_degree
         model = SimpleModel(self.device_type)
@@ -984,7 +1047,8 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
         # backward pass
         out.sum().backward()
-        compiled_output.sum().backward()
+        with self._bwd_ctx(use_ca):
+            compiled_output.sum().backward()
 
         # compare the gradients:
         for n, p in zip(fsdp_2d.parameters(), compiled_2d.parameters()):
@@ -992,7 +1056,8 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_compile_dtensor_redistribute_backward(self):
+    @parametrize("use_ca", [True, False])
+    def test_compile_dtensor_redistribute_backward(self, use_ca):
         mesh = DeviceMesh(device_type="cuda", mesh=torch.arange(self.world_size))
 
         def fn(x, y):
@@ -1016,7 +1081,8 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
         # Now run and assert the backward + gradients
         ref.sum().backward()
-        res.sum().backward()
+        with self._bwd_ctx(use_ca):
+            res.sum().backward()
 
         self.assertEqual(x_ref.grad, x.grad)
         self.assertEqual(y_ref.grad, y.grad)

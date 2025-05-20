@@ -111,6 +111,12 @@ non_deterministic:
   - sam_fast
 
 
+disable_cudagraph:
+  # tts_angular is flaky with cudagraphs. Its speedup
+  # oscillates from .05 to 1.05
+  - tts_angular
+
+
 dtype:
   force_amp_for_fp16_bf16_models:
     - DALLE2_pytorch
@@ -235,6 +241,16 @@ skip:
     - hf_T5_generate
     - opacus_cifar10
     - speech_transformer
+
+  export_not_supported:
+    - doctr_reco_predictor
+    - doctr_det_predictor
+    - drq
+    - llama
+    - sam_fast
+    - soft_actor_critic
+    - timm_efficientdet
+    - vision_maskrcnn
 
   # Models that should only run in --multiprocess mode
   multiprocess:

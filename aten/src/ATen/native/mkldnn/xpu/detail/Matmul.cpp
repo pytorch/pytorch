@@ -30,9 +30,8 @@ sycl::event matmul(
       "oneDNN input matrixes must have the same ranks");
   TORCH_CHECK(result.defined(), "oneDNN matmul result should be defined");
 
-  at::Device cur_device = at::Device(at::kXPU, c10::xpu::current_device());
-  auto engine = GpuEngineManager::Instance().get_engine(cur_device);
-  auto stream = GpuStreamManager::Instance().get_stream();
+  auto& engine = GpuEngineManager::Instance().get_engine();
+  auto& stream = GpuStreamManager::Instance().get_stream();
 
   at::Tensor m1 = mat1;
   at::Tensor m2 = mat2;
@@ -42,7 +41,7 @@ sycl::event matmul(
   m1 = is_onednn_matmul_strides(m1) ? m1 : m1.contiguous();
   m2 = is_onednn_matmul_strides(m2) ? m2 : m2.contiguous();
   at::Tensor dst =
-      is_onednn_matmul_strides(result, true) ? result : result.contiguous();
+      is_onednn_matmul_strides(result) ? result : result.contiguous();
 
   int64_t m = dst.size(-2);
   int64_t n = dst.size(-1);
@@ -195,7 +194,12 @@ sycl::event matmul(
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
   if (m1_dt == dnnl::memory::data_type::f32) {
-    pattr.set_fpmath_mode(dnnl::fpmath_mode::strict);
+    bool allow_tf32 = at::globalContext().allowTF32OneDNN();
+    if (allow_tf32) {
+      pattr.set_fpmath_mode(dnnl::fpmath_mode::tf32);
+    } else {
+      pattr.set_fpmath_mode(dnnl::fpmath_mode::strict);
+    }
   }
 
   // STEP3: create primitive

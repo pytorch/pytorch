@@ -58,8 +58,8 @@ from torch._dynamo.debug_utils import (
     NopInputReader,
     same_two_models,
 )
-from torch._dynamo.trace_rules import is_fbcode
 from torch._dynamo.utils import clone_inputs, counters, same
+from torch._environment import is_fbcode
 from torch._inductor.output_code import OutputCode
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -81,7 +81,7 @@ log = logging.getLogger(__name__)
 
 
 inductor_config = import_module("torch._inductor.config")
-use_buck = inductor_config.is_fbcode()
+use_buck = is_fbcode()
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #                           MAIN ENTRY POINT
@@ -250,7 +250,7 @@ def wrap_compiler_debug(
 
 
 def maybe_fbcode_instructions():
-    if is_fbcode:
+    if is_fbcode():
         extra_deps_formatted = "\n".join([f'        "{dep}",' for dep in extra_deps])
         if len(extra_deps_formatted) > 0:
             extra_deps_formatted = "\n" + extra_deps_formatted
@@ -610,7 +610,8 @@ ACCURACY_FAILS: dict[str, Callable[[nn.Module, Any], bool]] = {
 def repro_minifier_query(options, mod, load_args):
     mod, args = repro_common(options, mod, load_args)
     fail_fn = functools.partial(
-        ACCURACY_FAILS[options.accuracy], check_str=options.check_str  # type: ignore[call-arg]
+        ACCURACY_FAILS[options.accuracy],
+        check_str=options.check_str,  # type: ignore[call-arg]
     )
     if fail_fn(mod, args):
         sys.exit(1)
@@ -685,9 +686,10 @@ def repro_analyze(options, mod, load_args):
     reader = torch.utils._content_store.ContentStoreReader(options.save_dir)
 
     new_args = clone_inputs(args)
-    with intermediate_hook(save_hook), tqdm(
-        desc="Saving inductor intermediates", total=total
-    ) as pbar:
+    with (
+        intermediate_hook(save_hook),
+        tqdm(desc="Saving inductor intermediates", total=total) as pbar,
+    ):
         assert not isinstance(compiled, str)
         compiled(new_args)
         assert not new_args
@@ -711,9 +713,10 @@ def repro_analyze(options, mod, load_args):
 
     if not options.skip_check_deterministic:
         new_args = clone_inputs(args)
-        with intermediate_hook(check_hook), tqdm(
-            desc="Checking inductor determinism", total=total
-        ) as pbar:
+        with (
+            intermediate_hook(check_hook),
+            tqdm(desc="Checking inductor determinism", total=total) as pbar,
+        ):
             compiled(new_args)
             assert not new_args
 

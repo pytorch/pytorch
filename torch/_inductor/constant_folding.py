@@ -125,7 +125,8 @@ class ConstantFolder(torch.fx.Interpreter):
                 and is_woq_int8_pattern(next(iter(node.users)))
             )
         ) and is_const_source(
-            node.args[0], self.lifted_constant_names  # type: ignore[arg-type]
+            node.args[0],  # type: ignore[arg-type]
+            self.lifted_constant_names,
         ):
             # Case 1: int8_weight -> dq -> bf16_weight
             # Case 2: int8_weight -> permute -> dq -> bf16_weight
@@ -232,6 +233,10 @@ class ConstantFolder(torch.fx.Interpreter):
             return self.unknown_value
 
         out = self._deduce_value(node)
+
+        if isinstance(out, torch._C.ScriptObject):
+            return out
+
         if out == self.unknown_value:
             return self.unknown_value
 
@@ -369,7 +374,7 @@ def run_and_get_constant_graph(
     # We rewrite the tags, if it's a constant being directly consumed, without
     # any folding opportunity, we keep it in main gm.
     for node in gm.graph.nodes:
-        if node.op == "getattr" or (node.name in (lifted_constant_names or ())):
+        if node.op == "get_attr" or (node.name in (lifted_constant_names or ())):
             untag(node)
 
     new_graph = torch.fx.Graph()

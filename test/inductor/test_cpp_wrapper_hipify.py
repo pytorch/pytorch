@@ -54,22 +54,6 @@ class TestCppWrapperHipify(TestCase):
                 }                                              \\
             } while (0);
 
-            namespace {
-
-            struct Grid {
-                Grid(uint32_t x, uint32_t y, uint32_t z)
-                  : grid_x(x), grid_y(y), grid_z(z) {}
-                uint32_t grid_x;
-                uint32_t grid_y;
-                uint32_t grid_z;
-
-                bool is_non_zero() {
-                    return grid_x > 0 && grid_y > 0 && grid_z > 0;
-                }
-            };
-
-            }  // anonymous namespace
-
             static inline hipFunction_t loadKernel(
                     std::string filePath,
                     const std::string &funcName,
@@ -84,6 +68,21 @@ class TestCppWrapperHipify(TestCase):
                 hipModule_t mod;
                 hipFunction_t func;
                 CUDA_DRIVER_CHECK(hipModuleLoad(&mod, filePath.c_str()));
+                CUDA_DRIVER_CHECK(hipModuleGetFunction(&func, mod, funcName.c_str()));
+                if (sharedMemBytes > 0) {
+                    CUDA_DRIVER_CHECK(hipFuncSetAttribute(
+                        func,
+                        hipFuncAttributeMaxDynamicSharedMemorySize,
+                        sharedMemBytes
+                    ))
+                }
+                return func;
+            }
+
+            static inline hipFunction_t loadKernel(const void* start, const std::string &funcName, uint32_t sharedMemBytes) {
+                hipModule_t mod;
+                hipFunction_t func;
+                CUDA_DRIVER_CHECK(hipModuleLoadData(&mod, start));
                 CUDA_DRIVER_CHECK(hipModuleGetFunction(&func, mod, funcName.c_str()));
                 if (sharedMemBytes > 0) {
                     CUDA_DRIVER_CHECK(hipFuncSetAttribute(

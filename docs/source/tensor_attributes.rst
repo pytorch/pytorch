@@ -15,13 +15,14 @@ torch.dtype
 .. class:: dtype
 
 A :class:`torch.dtype` is an object that represents the data type of a
-:class:`torch.Tensor`. PyTorch has twelve different data types:
+:class:`torch.Tensor`. PyTorch has several different data types:
 
 ========================== ===========================================   ===========================
 Data type                  dtype                                         Legacy Constructors
 ========================== ===========================================   ===========================
 32-bit floating point      ``torch.float32`` or ``torch.float``          ``torch.*.FloatTensor``
 64-bit floating point      ``torch.float64`` or ``torch.double``         ``torch.*.DoubleTensor``
+32-bit complex             ``torch.complex32`` or ``torch.chalf``
 64-bit complex             ``torch.complex64`` or ``torch.cfloat``
 128-bit complex            ``torch.complex128`` or ``torch.cdouble``
 16-bit floating point [1]_ ``torch.float16`` or ``torch.half``           ``torch.*.HalfTensor``

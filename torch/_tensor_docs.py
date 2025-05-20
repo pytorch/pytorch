@@ -6,7 +6,7 @@ from torch._C import _add_docstr as add_docstr
 from torch._torch_docs import parse_kwargs, reproducibility_notes
 
 
-def add_docstr_all(method, docstr):
+def add_docstr_all(method: str, docstr: str) -> None:
     add_docstr(getattr(torch._C.TensorBase, method), docstr)
 
 
@@ -3163,7 +3163,10 @@ Args:
 Example:
 
     >>> self = torch.tensor([[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]])
-    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]], dtype=torch.bool)
+    >>> mask = torch.tensor(
+    ...     [[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]],
+    ...     dtype=torch.bool,
+    ... )
     >>> source = torch.tensor([[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]])
     >>> self.masked_scatter_(mask, source)
     tensor([[0, 0, 0, 0, 1],
@@ -3645,7 +3648,7 @@ Example:
     # Example 1: Padding
     >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
     >>> static_size = 4
-    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
     tensor([[  0,   0],
             [  1,   0],
             [  1,   1],
@@ -3654,20 +3657,20 @@ Example:
     # Example 2: Truncating
     >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
     >>> static_size = 2
-    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
     tensor([[  0,   0],
             [  1,   0]], dtype=torch.int64)
 
     # Example 3: 0 size
     >>> input_tensor = torch.tensor([10])
     >>> static_size = 0
-    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
     tensor([], size=(0, 1), dtype=torch.int64)
 
     # Example 4: 0 rank input
     >>> input_tensor = torch.tensor(10)
     >>> static_size = 2
-    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
     tensor([], size=(2, 0), dtype=torch.int64)
 """,
 )
@@ -4163,9 +4166,9 @@ Unlike :meth:`~Tensor.expand`, this function copies the tensor's data.
 .. warning::
 
     :meth:`~Tensor.repeat` behaves differently from
-    `numpy.repeat <https://docs.scipy.org/doc/numpy/reference/generated/numpy.repeat.html>`_,
+    `numpy.repeat <https://numpy.org/doc/stable/reference/generated/numpy.repeat.html>`_,
     but is more similar to
-    `numpy.tile <https://docs.scipy.org/doc/numpy/reference/generated/numpy.tile.html>`_.
+    `numpy.tile <https://numpy.org/doc/stable/reference/generated/numpy.tile.html>`_.
     For the operator similar to `numpy.repeat`, see :func:`torch.repeat_interleave`.
 
 Args:
@@ -5196,6 +5199,13 @@ inferred from the arguments of ``self.to(*args, **kwargs)``.
     has the correct :class:`torch.dtype` and :class:`torch.device`, then ``self`` is returned.
     Otherwise, the returned tensor is a copy of ``self`` with the desired
     :class:`torch.dtype` and :class:`torch.device`.
+
+.. note::
+
+    If ``self`` requires gradients (``requires_grad=True``) but the target
+    ``dtype`` specified is an integer type, the returned tensor will implicitly
+    set ``requires_grad=False``. This is because only tensors with
+    floating-point or complex dtypes can require gradients.
 
 Here are the ways to call ``to``:
 
@@ -6554,7 +6564,10 @@ Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
 Example:
 
     >>> self = torch.tensor([0, 0, 0, 0, 0])
-    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]], dtype=torch.bool)
+    >>> mask = torch.tensor(
+    ...     [[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]],
+    ...     dtype=torch.bool,
+    ... )
     >>> source = torch.tensor([[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]])
     >>> self.masked_scatter(mask, source)
     tensor([[0, 0, 0, 0, 1],

@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 # This test requires libaoti_custom_ops.so to be built, which happnes when BUILD_TEST = 1
 import logging
+import os
 import sys
 import unittest
 
@@ -19,6 +20,8 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
+    skipIfRocm,
+    skipIfXpu,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.triton_utils import HAS_CUDA
@@ -130,7 +133,7 @@ class AOTInductorTestsTemplate:
             torch.randn(3, 3, device=self.device),
             torch.randn(3, 3, device=self.device),
         )
-        with config.patch("aot_inductor.output_path", "model.so"):
+        with config.patch("aot_inductor.output_path", "model.pt2"):
             with self.assertRaises(Exception):
                 self.check_model(m, args)
 
@@ -355,6 +358,37 @@ class AOTInductorTestsTemplate:
         self.assertEqual(len(inps), 0)
         self.assertTrue(sentinel_seen)
 
+    @skipIfXpu
+    @skipIfRocm
+    def test_custom_op_square(self) -> None:
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aoti_custom_ops.fn_square(x)
+
+        m = Model().to(device=self.device)
+        args = (torch.randn(2, 3, device=self.device),)
+        with config.patch(
+            "aot_inductor.custom_ops_to_c_shims",
+            {
+                torch.ops.aoti_custom_ops.fn_square.default: [
+                    """
+                AOTITorchError
+                aoti_torch_cpu_fn_square(
+                    AtenTensorHandle input,
+                    AtenTensorHandle* ret)""",
+                    """
+                AOTITorchError
+                aoti_torch_cuda_fn_square(
+                    AtenTensorHandle input,
+                    AtenTensorHandle* ret)""",
+                ],
+            },
+        ), config.patch(
+            "aot_inductor.custom_op_libs",
+            ["aoti_custom_ops"],
+        ):
+            self.check_model(m, args)
+
 
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)
@@ -387,6 +421,8 @@ class AOTICustomOpTestCase(TestCase):
             lib_file_path = find_library_location("libaoti_custom_ops.so")
             if IS_WINDOWS:
                 lib_file_path = find_library_location("aoti_custom_ops.dll")
+            if not os.path.exists(lib_file_path):
+                raise unittest.SkipTest("libaoti_custom_ops not built!")
             torch.ops.load_library(str(lib_file_path))
         super().setUp()
 

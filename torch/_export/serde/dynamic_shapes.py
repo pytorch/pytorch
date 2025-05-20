@@ -6,7 +6,6 @@ from torch._dynamo.exc import UserError, UserErrorType
 from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
     _DerivedDim,
-    _Dim,
     _DimHint,
     _tree_map_with_path,
     Dim,
@@ -19,7 +18,7 @@ from .serialize import _dataclass_to_dict
 @dataclasses.dataclass
 class RootDim:
     """
-    This represents a _Dim object.
+    This represents a Dim object.
     """
 
     min: int
@@ -137,7 +136,7 @@ def _dump_dynamic_shapes(
         if not isinstance(tensor, torch.Tensor):
             return None
         if shape is None:
-            return [Dim.STATIC] * len(tensor.shape)  # type: ignore[attr-defined]
+            return [Dim.STATIC] * len(tensor.shape)
 
         out = []
         if isinstance(shape, dict):
@@ -150,7 +149,7 @@ def _dump_dynamic_shapes(
         return out
 
     def _track_dim_from_dims(
-        val: Union[None, int, _DimHint, _Dim]
+        val: Union[None, int, _DimHint, Dim]
     ) -> Union[None, int, str]:
         """
         Tracks dims, ranges, derived dims from the standardized dynamic_shapes spec.
@@ -158,9 +157,9 @@ def _dump_dynamic_shapes(
         if val is None or isinstance(val, int):  # non-tensor input or static
             return val
         if isinstance(val, _DimHint):  # store enum as string
-            return val.__class__.__name__ + "." + val.name
+            return val.__class__.__name__ + "." + val.type.name
 
-        assert isinstance(val, _Dim)
+        assert isinstance(val, Dim)
 
         # track root dim
         root = val.root if isinstance(val, _DerivedDim) else val  # type: ignore[attr-defined]
@@ -290,20 +289,22 @@ def _load_dynamic_shapes(
             modulus, remainder = sympy.polys.polytools.div(expr, symbol)
             ddim = dim_cache[name]
             if modulus != 1:
-                ddim = int(modulus) * ddim
+                ddim = int(modulus) * ddim  # type: ignore[assignment, operator]
             if remainder != 0:
-                ddim = ddim + int(remainder)
+                ddim = ddim + int(remainder)  # type: ignore[assignment, operator]
             dim_cache[_expr] = ddim  # cache derived dims
 
     def deserialize_shape(
         val: Union[None, int, str]
-    ) -> Union[None, int, _Dim, _DimHint]:
+    ) -> Union[None, int, Dim, _DimHint]:
         if val is None or isinstance(val, int):
             return val
         elif val == "_DimHint.AUTO":
-            return _DimHint.AUTO
+            return _DimHint.AUTO()
+        elif val == "_DimHint.DYNAMIC":
+            return _DimHint.DYNAMIC()
         elif val == "_DimHint.STATIC":
-            return _DimHint.STATIC
+            return _DimHint.STATIC()
         if not isinstance(val, str):
             raise UserError(
                 UserErrorType.INVALID_INPUT,
@@ -316,6 +317,6 @@ def _load_dynamic_shapes(
                 "Expected dims in `spec['dynamic_shapes']` to be tracked in `spec['dims']`, "
                 f"got {val} which is not in {dims.keys()}",
             )
-        return dim_cache[val]
+        return dim_cache[val]  # type: ignore[return-value]
 
     return tree_map(deserialize_shape, dynamic_shapes)

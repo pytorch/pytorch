@@ -6,21 +6,23 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
-from torch.distributed._tensor import DeviceMesh
-from torch.distributed._tensor.experimental._attention import (
+from torch.distributed.tensor import DeviceMesh
+from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.experimental._attention import (
     _AttentionContextParallel,
     _CausalBehavior,
     _cp_options,
+    _DispatchMode,
     _is_causal_behavior,
     _RotateMethod,
     context_parallel,
     context_parallel_unshard,
     set_rotate_method,
 )
-from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -41,7 +43,8 @@ if PLATFORM_SUPPORTS_FLASH_ATTENTION:
     backends.append(SDPBackend.FLASH_ATTENTION)
 if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
     backends.append(SDPBackend.EFFICIENT_ATTENTION)
-
+if PLATFORM_SUPPORTS_CUDNN_ATTENTION:
+    backends.append(SDPBackend.CUDNN_ATTENTION)
 
 rotater_enum_to_str = {
     _RotateMethod.ALL_GATHER: "allgather",
@@ -74,6 +77,10 @@ class RingAttentionTest(DTensorTestBase):
                 "load_balance": [True, False],
                 "rotater": [_RotateMethod.ALL_TO_ALL, _RotateMethod.ALL_GATHER],
                 "test_forward_only": [True, False],
+                "dispatch_mode": [
+                    _DispatchMode.MONKEY_PATCH,
+                    _DispatchMode.TORCH_FUNCTION,
+                ],
             },
             self._test_ring_attention_sdpa,
         )
@@ -86,7 +93,10 @@ class RingAttentionTest(DTensorTestBase):
         load_balance: bool,
         rotater: _RotateMethod,
         test_forward_only: bool,
+        dispatch_mode: _DispatchMode,
     ) -> None:
+        torch.distributed.tensor.experimental._attention._dispatch_mode = dispatch_mode
+
         def fn_eval(fn, *args, **kwargs):
             if test_forward_only:
                 with torch.no_grad():
@@ -110,7 +120,10 @@ class RingAttentionTest(DTensorTestBase):
         nheads = 8
         torch.manual_seed(10)
         dtype = (
-            torch.bfloat16 if backend == SDPBackend.FLASH_ATTENTION else torch.float32
+            torch.bfloat16
+            if backend == SDPBackend.FLASH_ATTENTION
+            or backend == SDPBackend.CUDNN_ATTENTION
+            else torch.float32
         )
 
         _cp_options.enable_load_balance = load_balance
@@ -214,6 +227,10 @@ class RingAttentionTest(DTensorTestBase):
             cp_q.requires_grad = False
             cp_k.requires_grad = False
             cp_v.requires_grad = False
+
+        torch.distributed.tensor.experimental._attention._dispatch_mode = (
+            _DispatchMode.MONKEY_PATCH
+        )
 
     def test_is_causal_behavior(self) -> None:
         _cp_options.enable_load_balance = False
@@ -360,6 +377,9 @@ class RingAttentionTest(DTensorTestBase):
             self.device_type,
             torch.arange(0, self.world_size),
         )
+        # early init DTensor RNG tracker to avoid broadcast be captuured in comm_mode
+        torch.distributed.tensor._random.manual_seed(10, device_mesh)
+
         dtype = torch.bfloat16
         bs = 2
         args = ModelArgs()
