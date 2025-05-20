@@ -52,10 +52,10 @@ class ElasticDistributedSampler(DistributedSampler):
         g = torch.Generator()
         g.manual_seed(self.epoch)
         indices = (
-            torch.randperm(len(self.dataset) - self.start_index, generator=g)  # type: ignore[arg-type]
-            .add(self.start_index)
+            torch.randperm(len(self.dataset), generator=g)  # type: ignore[arg-type]
             .tolist()
         )
+        indices = indices[self.start_index:]
 
         # add extra samples to make it evenly divisible
         indices += indices[: (self.total_size - len(indices))]
