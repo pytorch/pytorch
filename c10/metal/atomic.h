@@ -32,18 +32,18 @@ struct AtomicType<int> {
 // atomic type
 template <typename T>
 static inline void atomic_add_helper(
-    device ::metal::atomic<int>* data,
+    device ::metal::atomic<uint>* data,
     long offset,
-    float value) {
+    T value) {
   auto ptr = data + (offset >> 1);
   auto old = ::metal::atomic_load_explicit(ptr, ::metal::memory_order_relaxed);
   union {
-    int i;
+    uint i;
     T t[2];
   } val;
   do {
     val.i = old;
-    val.t[offset & 1] += static_cast<T>(value);
+    val.t[offset & 1] += value;
   } while (!::metal::atomic_compare_exchange_weak_explicit(
       ptr,
       &old,
@@ -54,8 +54,8 @@ static inline void atomic_add_helper(
 
 template <>
 struct AtomicType<half> {
-  using type = ::metal::atomic<int>;
-  static inline void atomic_add(device type* data, long offset, float value) {
+  using type = ::metal::atomic<uint>;
+  static inline void atomic_add(device type* data, long offset, half value) {
     atomic_add_helper<half>(data, offset, value);
   }
 };
@@ -63,8 +63,8 @@ struct AtomicType<half> {
 #if __METAL_VERSION__ >= 310
 template <>
 struct AtomicType<bfloat> {
-  using type = ::metal::atomic<int>;
-  static inline void atomic_add(device type* data, long offset, float value) {
+  using type = ::metal::atomic<uint>;
+  static inline void atomic_add(device type* data, long offset, bfloat value) {
     atomic_add_helper<bfloat>(data, offset, value);
   }
 };

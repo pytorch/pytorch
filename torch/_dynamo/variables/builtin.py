@@ -17,6 +17,7 @@ from typing import Callable, TYPE_CHECKING, Union
 
 import torch
 from torch import sym_float, sym_int
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, graph_break_hints, polyfills, variables
@@ -56,7 +57,7 @@ from ..utils import (
     str_methods,
     tensortype_to_dtype,
 )
-from .base import ValueMutationNew, VariableTracker
+from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import EventVariable, StreamVariable
 from .dicts import (
@@ -900,6 +901,12 @@ class BuiltinVariable(VariableTracker):
                             *[x.as_python_constant() for x in args],
                         )
                     except Exception as exc:
+                        raise_observed_exception(
+                            type(exc),
+                            tx,
+                            args=list(map(ConstantVariable.create, exc.args)),
+                        )
+                    except AsPythonConstantNotImplementedError as exc:
                         unimplemented_v2(
                             gb_type="constant fold exception",
                             context=f"attempted to run function {fn} with arguments {args}",
@@ -921,13 +928,19 @@ class BuiltinVariable(VariableTracker):
                                     k: v.as_python_constant() for k, v in kwargs.items()
                                 },
                             )
-                        except Exception as exc:
+                        except AsPythonConstantNotImplementedError as exc:
                             unimplemented_v2(
                                 gb_type="constant fold exception",
-                                context=f"attempted to run function {fn} with arguments {args} {kwargs}",
+                                context=f"attempted to run function {fn} with arguments {args}",
                                 explanation="Encountered exception when attempting to constant fold.",
                                 hints=[*graph_break_hints.DYNAMO_BUG],
                                 from_exc=exc,
+                            )
+                        except Exception as exc:
+                            raise_observed_exception(
+                                type(exc),
+                                tx,
+                                args=list(map(ConstantVariable.create, exc.args)),
                             )
                         return VariableTracker.build(tx, res)
 
@@ -1527,7 +1540,7 @@ class BuiltinVariable(VariableTracker):
                         and isinstance(obj, ConstDictVariable)
                         and not istype(obj, SetVariable)
                     ):
-                        tx.output.guard_on_key_order.add(obj.source.name())
+                        tx.output.guard_on_key_order.add(obj.source)
 
                     install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
@@ -1674,7 +1687,16 @@ class BuiltinVariable(VariableTracker):
         assert not kwargs
         if not args:
             return SetVariable([], mutation_type=ValueMutationNew())
-        assert len(args) == 1
+        if len(args) != 1:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    ConstantVariable.create(
+                        f"set() takes 1 positional argument but {len(args)} were given"
+                    )
+                ],
+            )
         arg = args[0]
         if isinstance(arg, variables.SetVariable):
             return arg.clone(mutation_type=ValueMutationNew())
@@ -1690,35 +1712,36 @@ class BuiltinVariable(VariableTracker):
                 if isinstance(out, SetVariable):
                     return out
                 return BuiltinVariable(set).call_set(tx, out)
-        unimplemented_v2(
-            gb_type="failed to construct builtin set()",
-            context=f"set(): {args} {kwargs}",
-            explanation="Unable to call builtin set() with provided arguments.",
-            hints=[
-                *graph_break_hints.USER_ERROR,
-                *graph_break_hints.SUPPORTABLE,
-            ],
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[ConstantVariable.create("failed to construct builtin set()")],
         )
 
     def call_frozenset(self, tx: "InstructionTranslator", *args, **kwargs):
         assert not kwargs
         if not args:
             return FrozensetVariable([])
-        assert len(args) == 1
+        if len(args) != 1:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    ConstantVariable.create(
+                        f"frozenset() takes 1 positional argument but {len(args)} were given"
+                    )
+                ],
+            )
         arg = args[0]
         if isinstance(arg, variables.FrozensetVariable):
             return FrozensetVariable([x.vt for x in arg.set_items])
         elif arg.has_unpack_var_sequence(tx):
             items = arg.unpack_var_sequence(tx)
             return FrozensetVariable(items)
-        unimplemented_v2(
-            gb_type="failed to construct builtin frozenset()",
-            context=f"frozenset(): {args} {kwargs}",
-            explanation="Unable to call builtin frozenset() with provided arguments.",
-            hints=[
-                *graph_break_hints.USER_ERROR,
-                *graph_break_hints.SUPPORTABLE,
-            ],
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[ConstantVariable.create("failed to construct builtin frozenset()")],
         )
 
     def call_zip(self, tx: "InstructionTranslator", *args, **kwargs):
@@ -1803,6 +1826,9 @@ class BuiltinVariable(VariableTracker):
             return variables.ConstantVariable.create(
                 isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value)
             )
+
+        if isinstance(arg, variables.UserDefinedExceptionClassVariable):
+            return ConstantVariable.create(isinstance(arg_type, isinstance_type))
 
         isinstance_type_tuple: tuple[type, ...]
         if isinstance(isinstance_type, type) or callable(
@@ -1988,14 +2014,27 @@ class BuiltinVariable(VariableTracker):
                 )
             ):
                 unimplemented_v2(
-                    gb_type="Failed to trace builtin operator",
+                    gb_type="Failed to trace unittest method",
                     context=f"function: unittest.TestCase.{name}",
-                    explanation=f"Dynamo does not know how to trace builtin operator `{name}` ",
+                    explanation=f"Dynamo does not know how to trace unittest method `{name}` ",
                     hints=[
-                        f"Avoid calling builtin `{name}`. "
+                        f"Avoid calling `TestCase.{name}`. "
                         "Please report an issue to PyTorch.",
                     ],
                 )
+            if isinstance(obj, TensorVariable):
+                fake_val = obj.proxy.node.meta["example_value"]
+                if (
+                    isinstance(fake_val, torch.Tensor)
+                    and is_sparse_any(fake_val)
+                    and (not tx.export or not config.capture_sparse_compute)
+                ):
+                    unimplemented_v2(
+                        gb_type="Attempted to wrap sparse Tensor",
+                        context="",
+                        explanation="torch.compile does not support sparse Tensors",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
 
             try:
                 return obj.var_getattr(tx, name)

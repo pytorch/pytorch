@@ -97,7 +97,8 @@ Reducer::Reducer(
     bool gradient_as_bucket_view,
     std::unordered_map<size_t, std::string> param_names,
     int64_t first_bucket_bytes_cap,
-    bool skip_all_reduce_unused_params)
+    bool skip_all_reduce_unused_params,
+    bool use_python_reducer)
     : params_(std::move(params)),
       process_group_(std::move(process_group)),
       expect_sparse_gradients_(std::move(expect_sparse_gradients)),
@@ -121,7 +122,8 @@ Reducer::Reducer(
       comm_hook_(nullptr),
       ddp_debug_level_(debug_level()),
       param_names_(std::move(param_names)),
-      first_bucket_bytes_cap_(first_bucket_bytes_cap) {
+      first_bucket_bytes_cap_(first_bucket_bytes_cap),
+      use_python_reducer_(use_python_reducer) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_INTERNAL_ASSERT(!params_.empty(), "Expected at least one parameter.");
 
@@ -199,8 +201,9 @@ Reducer::Reducer(
                 this->autograd_hook(variable_index);
                 return outputs;
               },
-              [=](torch::autograd::CompiledNodeArgs& args) {
-                TORCH_INTERNAL_ASSERT(
+              [this](torch::autograd::CompiledNodeArgs& args) {
+                TORCH_CHECK(
+                    this->use_python_reducer_,
                     "Compiled autograd is not compatible with C++ DDP Reducer, please use torch._dynamo.config.optimize_ddp=\"python_reducer\".");
               })),
           grad_accumulator);
@@ -924,7 +927,11 @@ void Reducer::mark_variable_ready(size_t variable_index) {
       }
       // Check that all buckets were completed and had their work kicked off.
       TORCH_INTERNAL_ASSERT(next_bucket_ == buckets_.size());
-      if (static_graph_after_first_iteration() && should_rebuild_buckets()) {
+      if ((static_graph_after_first_iteration() ||
+           dynamic_graph_find_unused()) &&
+          should_rebuild_buckets()) {
+        LOG(INFO) << "rebuilting buckets for unused_parameters, size: "
+                  << unused_parameters_.size();
         for (const auto& unused_index : unused_parameters_) {
           push_rebuilt_params(unused_index);
         }
@@ -1845,6 +1852,11 @@ void Reducer::sync_bucket_indices(
   indices_accessor_Index = 0;
   for (const auto i : c10::irange(num_buckets)) {
     const auto& bucket_size = bucket_sizes_accessor[static_cast<int64_t>(i)];
+    TORCH_CHECK_WITH(
+        IndexError,
+        bucket_size >= 0 && bucket_size <= indices_accessor.size(0),
+        "received invalid bucket_size, was abort called?");
+
     std::vector<size_t> bucket;
     bucket.reserve(bucket_size);
     for (const auto j : c10::irange(bucket_size)) {

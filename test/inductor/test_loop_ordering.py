@@ -44,7 +44,7 @@ class MockScheduler:
     def get_backend(cls, *args):
         return TritonScheduling(cls)
 
-    def can_buffer_be_removed_through_fusion(*args, **kwargs):
+    def can_buffer_be_removed_through_fusion(self, *args, **kwargs):
         return False
 
 
