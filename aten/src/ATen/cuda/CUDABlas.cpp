@@ -194,9 +194,13 @@ static size_t _parseChosenWorkspaceSize() {
   }
   size_t workspace_size = 76*1024; /* Use 76 MB for hipBLASLt */
 #else
+#if defined(FBCODE_CAFFE2)
   size_t workspace_size = 1024; /* default size in KiB according to #73328 */
+#else
+  // default to CUBLAS_WORKSPACE_CONFIG workspace size
+  size_t workspace_size = at::cuda::getChosenWorkspaceSize() / 1024;
 #endif
-
+#endif
   if (val.has_value()) {
     try {
       workspace_size = std::stoi(val.value());
@@ -236,7 +240,12 @@ struct CublasLtWorkspace {
   CublasLtWorkspace() {
     size = _getWorkspaceSize();
 #ifndef USE_ROCM
-    static bool unified = c10::utils::check_env("TORCH_CUBLASLT_UNIFIED_WORKSPACE") == true;
+    constexpr auto envvar = "TORCH_CUBLASLT_UNIFIED_WORKSPACE";
+#if defined(FBCODE_CAFFE2)
+    static bool unified = c10::utils::check_env(envvar) == true;
+#else
+    static bool unified = c10::utils::has_env(envvar) ? c10::utils::check_env(envvar) == true : true;
+#endif
     if (unified) {
       auto cublasWorkspaceSize = at::cuda::getChosenWorkspaceSize();
       if (cublasWorkspaceSize < size) {
@@ -378,10 +387,20 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
 
 template <typename Dtype, typename C_Dtype = Dtype>
 static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
+#if defined(USE_ROCM) && ROCM_VERSION == 60400
+  // regression in ROCm 6.4, planned fixed in 6.4.1, hipblaslt TT fp32 calculation errors
+  // best to disallow hipblaslt for this specific case
+  if constexpr (std::is_same_v<Dtype, float>) {
+    if (_cublasOpFromChar(transa) == CUBLAS_OP_T && _cublasOpFromChar(transb) == CUBLAS_OP_T) {
+        return false;
+    }
+  }
+#endif
   cudaDataType_t abType = CUDA_R_32F;
   cudaDataType_t cType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
+  CuBlasLtMatmulPreference preference;
 #ifndef USE_ROCM
   at::Half halpha;
   at::Half hbeta;
@@ -411,6 +430,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     if (prop->major >= 7 && at::globalContext().allowFP16AccumulationCuBLAS()) {
       computeType = CUBLAS_COMPUTE_16F;
+      scaleType = CUDA_R_16F;
       halpha = alpha;
       hbeta = beta;
       alpha_ptr = &halpha;
@@ -419,9 +439,21 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
 #endif
     abType = CUDA_R_16F;
     cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16F;
+#ifndef USE_ROCM
+    if (!at::globalContext().allowFP16ReductionCuBLAS()) {
+      preference.setAttribute(CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK,
+        CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE | CUBLASLT_REDUCTION_SCHEME_NONE);
+    }
+#endif
   } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
     abType = CUDA_R_16BF;
     cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16BF;
+#ifndef USE_ROCM
+    if (!at::globalContext().allowBF16ReductionCuBLAS()) {
+      preference.setAttribute(CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK,
+        CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE | CUBLASLT_REDUCTION_SCHEME_NONE);
+    }
+#endif
   } else {
     static_assert(false && sizeof(Dtype), "at::cuda::blas::bgemm_internal_cublaslt: not implemented");
   }
@@ -456,8 +488,6 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
     Bdesc.setAttribute(CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, strideb);
     Cdesc.setAttribute(CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, stridec);
   }
-
-  CuBlasLtMatmulPreference preference;
 
 #ifndef USE_ROCM
   uint32_t a_alignment = _getAlignment(reinterpret_cast<uintptr_t>(a));
@@ -1552,6 +1582,7 @@ bool gemm_and_bias(
   cudaDataType_t cType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
+  CuBlasLtMatmulPreference preference;
   void * alpha_ptr = &alpha_val;
   void * beta_ptr = &beta_val;
 #ifndef USE_ROCM
@@ -1581,9 +1612,21 @@ bool gemm_and_bias(
 #endif
     abType = CUDA_R_16F;
     cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16F;
+#ifndef USE_ROCM
+    if (!at::globalContext().allowFP16ReductionCuBLAS()) {
+      preference.setAttribute(CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK,
+        CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE | CUBLASLT_REDUCTION_SCHEME_NONE);
+    }
+#endif
   } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
     abType = CUDA_R_16BF;
     cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16BF;
+#ifndef USE_ROCM
+    if (!at::globalContext().allowBF16ReductionCuBLAS()) {
+      preference.setAttribute(CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK,
+        CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE | CUBLASLT_REDUCTION_SCHEME_NONE);
+    }
+#endif
   }
 
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
@@ -1617,7 +1660,6 @@ bool gemm_and_bias(
   CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
   CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
 
-  CuBlasLtMatmulPreference preference;
   auto ltworkspace = CublasLtWorkspace();
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
 

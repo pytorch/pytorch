@@ -673,8 +673,8 @@ void initPythonBindings(PyObject* module) {
       {nullptr},
   };
 
-  static PyTypeObject RecordFunctionFast_Type = { PyVarObject_HEAD_INIT(nullptr,
-                                                                        0)
+  static PyTypeObject RecordFunctionFast_Type = {
+      PyVarObject_HEAD_INIT(nullptr, 0)
   };
 
   RecordFunctionFast_Type.tp_name = "torch._C._profiler.RecordFunctionFast",

@@ -20,7 +20,7 @@ class CppWrapperMps(CppWrapperGpu):
         self,
         kernel_name: str,
         call_args: list[str],
-        **kwargs,
+        **kwargs: dict[str, Any],
     ) -> None:
         """
         Generates MPS kernel call code. It should look something like:
