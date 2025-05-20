@@ -60,12 +60,15 @@ import unittest
 import pickle
 import weakref
 import errno
+from codecs import BOM_UTF8
+from itertools import product
 from textwrap import dedent
 
 from test.support import (captured_stderr, check_impl_detail,
                           cpython_only, gc_collect,
                           no_tracing, script_helper,
-                          SuppressCrashReport)
+                          SuppressCrashReport,
+                          force_not_colorized)
 from test.support.import_helper import import_module
 from test.support.os_helper import TESTFN, unlink
 from test.support.warnings_helper import check_warnings
@@ -110,7 +113,6 @@ class ExceptionTests(__TestCase):
             self.assertEqual(buf1, buf2)
             self.assertEqual(exc.__name__, excname)
 
-    @xfailIfTorchDynamo
     def testRaising(self):
         self.raise_catch(AttributeError, "AttributeError")
         self.assertRaises(AttributeError, getattr, sys, "undefined_attribute")
@@ -281,7 +283,6 @@ class ExceptionTests(__TestCase):
         check = self.check
         check('"\\\n"(1 for c in I,\\\n\\', 2, 2)
 
-    @unittest.expectedFailure
     def testSyntaxErrorOffset(self):
         check = self.check
         check('def fact(x):\n\treturn x!\n', 2, 10)
@@ -371,8 +372,8 @@ class ExceptionTests(__TestCase):
         check('def f():\n  global x\n  nonlocal x', 2, 3)
 
         # Errors thrown by future.c
-        check('from __future__ import doesnt_exist', 1, 1)
-        check('from __future__ import braces', 1, 1)
+        check('from __future__ import doesnt_exist', 1, 24)
+        check('from __future__ import braces', 1, 24)
         check('x=1\nfrom __future__ import division', 2, 1)
         check('foo(1=2)', 1, 5)
         check('def f():\n  x, y: int', 2, 3)
@@ -647,7 +648,6 @@ class ExceptionTests(__TestCase):
         with self.assertRaisesRegex(TypeError, "state is not a dictionary"):
             e.__setstate__(42)
 
-    @xfailIfTorchDynamo
     def test_notes(self):
         for e in [BaseException(1), Exception(2), ValueError(3)]:
             with self.subTest(e=e):
@@ -1390,6 +1390,29 @@ class ExceptionTests(__TestCase):
         for klass in klasses:
             self.assertEqual(str(klass.__new__(klass)), "")
 
+    def test_unicode_error_str_does_not_crash(self):
+        # Test that str(UnicodeError(...)) does not crash.
+        # See https://github.com/python/cpython/issues/123378.
+
+        for start, end, objlen in product(
+            range(-5, 5),
+            range(-5, 5),
+            range(7),
+        ):
+            obj = 'a' * objlen
+            with self.subTest('encode', objlen=objlen, start=start, end=end):
+                exc = UnicodeEncodeError('utf-8', obj, start, end, '')
+                self.assertIsInstance(str(exc), str)
+
+            with self.subTest('translate', objlen=objlen, start=start, end=end):
+                exc = UnicodeTranslateError(obj, start, end, '')
+                self.assertIsInstance(str(exc), str)
+
+            encoded = obj.encode()
+            with self.subTest('decode', objlen=objlen, start=start, end=end):
+                exc = UnicodeDecodeError('utf-8', encoded, start, end, '')
+                self.assertIsInstance(str(exc), str)
+
     @no_tracing
     def test_badisinstance(self):
         # Bug #2542: if issubclass(e, MyException) raises an exception,
@@ -1495,6 +1518,7 @@ class ExceptionTests(__TestCase):
 
     @cpython_only
     @unittest.skipIf(_testcapi is None, "requires _testcapi")
+    @force_not_colorized
     def test_recursion_normalizing_infinite_exception(self):
         # Issue #30697. Test that a RecursionError is raised when
         # maximum recursion depth has been exceeded when creating
@@ -1891,6 +1915,8 @@ class NameErrorTests(__TestCase):
         except self.failureException:
             with support.captured_stderr() as err:
                 sys.__excepthook__(*sys.exc_info())
+        else:
+            self.fail("assertRaisesRegex should have failed.")
 
         self.assertIn("aab", err.getvalue())
 
@@ -2041,17 +2067,21 @@ class ImportErrorTests(__TestCase):
                 self.assertEqual(exc.path, orig.path)
 
 
+def run_script(source):
+    if isinstance(source, str):
+        with open(TESTFN, 'w', encoding='utf-8') as testfile:
+            testfile.write(dedent(source))
+    else:
+        with open(TESTFN, 'wb') as testfile:
+            testfile.write(source)
+    _rc, _out, err = script_helper.assert_python_failure('-Wd', '-X', 'utf8', TESTFN)
+    return err.decode('utf-8').splitlines()
+
 class AssertionErrorTests(__TestCase):
     def tearDown(self):
         unlink(TESTFN)
 
-    def write_source(self, source):
-        with open(TESTFN, 'w') as testfile:
-            testfile.write(dedent(source))
-        _rc, _out, err = script_helper.assert_python_failure('-Wd', '-X', 'utf8', TESTFN)
-        return err.decode('utf-8').splitlines()
-
-    @xfailIfTorchDynamo
+    @force_not_colorized
     def test_assertion_error_location(self):
         cases = [
             ('assert None',
@@ -2082,11 +2112,32 @@ class AssertionErrorTests(__TestCase):
                     'AssertionError',
                 ],
             ),
-            ('assert 1 > 2, "message"',
+            ('assert 1 > 2, "messäge"',
                 [
-                    '    assert 1 > 2, "message"',
+                    '    assert 1 > 2, "messäge"',
                     '           ^^^^^',
-                    'AssertionError: message',
+                    'AssertionError: messäge',
+                ],
+            ),
+            ('assert 1 > 2, "messäge"'.encode(),
+                [
+                    '    assert 1 > 2, "messäge"',
+                    '           ^^^^^',
+                    'AssertionError: messäge',
+                ],
+            ),
+            ('# coding: latin1\nassert 1 > 2, "messäge"'.encode('latin1'),
+                [
+                    '    assert 1 > 2, "messäge"',
+                    '           ^^^^^',
+                    'AssertionError: messäge',
+                ],
+            ),
+            (BOM_UTF8 + 'assert 1 > 2, "messäge"'.encode(),
+                [
+                    '    assert 1 > 2, "messäge"',
+                    '           ^^^^^',
+                    'AssertionError: messäge',
                 ],
             ),
 
@@ -2124,11 +2175,11 @@ class AssertionErrorTests(__TestCase):
             ),
         ]
         for source, expected in cases:
-            with self.subTest(source):
-                result = self.write_source(source)
+            with self.subTest(source=source):
+                result = run_script(source)
                 self.assertEqual(result[-3:], expected)
 
-    @xfailIfTorchDynamo
+    @force_not_colorized
     def test_multiline_not_highlighted(self):
         cases = [
             ("""
@@ -2155,12 +2206,16 @@ class AssertionErrorTests(__TestCase):
             ),
         ]
         for source, expected in cases:
-            with self.subTest(source):
-                result = self.write_source(source)
+            with self.subTest(source=source):
+                result = run_script(source)
                 self.assertEqual(result[-len(expected):], expected)
 
 
+@support.force_not_colorized_test_class
 class SyntaxErrorTests(__TestCase):
+    maxDiff = None
+
+    @force_not_colorized
     def test_range_of_offsets(self):
         cases = [
             # Basic range from 2->7
@@ -2251,46 +2306,123 @@ class SyntaxErrorTests(__TestCase):
                     self.assertIn(expected, err.getvalue())
                     the_exception = exc
 
+    def test_subclass(self):
+        class MySyntaxError(SyntaxError):
+            pass
+
+        try:
+            raise MySyntaxError("bad bad", ("bad.py", 1, 2, "abcdefg", 1, 7))
+        except SyntaxError as exc:
+            with support.captured_stderr() as err:
+                sys.__excepthook__(*sys.exc_info())
+            self.assertIn("""
+  File "bad.py", line 1
+    abcdefg
+     ^^^^^
+""", err.getvalue())
+
     def test_encodings(self):
+        self.addCleanup(unlink, TESTFN)
         source = (
             '# -*- coding: cp437 -*-\n'
             '"┬ó┬ó┬ó┬ó┬ó┬ó" + f(4, x for x in range(1))\n'
         )
-        try:
-            with open(TESTFN, 'w', encoding='cp437') as testfile:
-                testfile.write(source)
-            rc, out, err = script_helper.assert_python_failure('-Wd', '-X', 'utf8', TESTFN)
-            err = err.decode('utf-8').splitlines()
-
-            self.assertEqual(err[-3], '    "┬ó┬ó┬ó┬ó┬ó┬ó" + f(4, x for x in range(1))')
-            self.assertEqual(err[-2], '                          ^^^^^^^^^^^^^^^^^^^')
-        finally:
-            unlink(TESTFN)
+        err = run_script(source.encode('cp437'))
+        self.assertEqual(err[-3], '    "┬ó┬ó┬ó┬ó┬ó┬ó" + f(4, x for x in range(1))')
+        self.assertEqual(err[-2], '                          ^^^^^^^^^^^^^^^^^^^')
 
         # Check backwards tokenizer errors
         source = '# -*- coding: ascii -*-\n\n(\n'
-        try:
-            with open(TESTFN, 'w', encoding='ascii') as testfile:
-                testfile.write(source)
-            rc, out, err = script_helper.assert_python_failure('-Wd', '-X', 'utf8', TESTFN)
-            err = err.decode('utf-8').splitlines()
-
-            self.assertEqual(err[-3], '    (')
-            self.assertEqual(err[-2], '    ^')
-        finally:
-            unlink(TESTFN)
+        err = run_script(source)
+        self.assertEqual(err[-3], '    (')
+        self.assertEqual(err[-2], '    ^')
 
     def test_non_utf8(self):
         # Check non utf-8 characters
-        try:
-            with open(TESTFN, 'bw') as testfile:
-                testfile.write(b"\x89")
-            rc, out, err = script_helper.assert_python_failure('-Wd', '-X', 'utf8', TESTFN)
-            err = err.decode('utf-8').splitlines()
+        self.addCleanup(unlink, TESTFN)
+        err = run_script(b"\x89")
+        self.assertIn("SyntaxError: Non-UTF-8 code starting with '\\x89' in file", err[-1])
 
-            self.assertIn("SyntaxError: Non-UTF-8 code starting with '\\x89' in file", err[-1])
-        finally:
-            unlink(TESTFN)
+
+    def test_string_source(self):
+        def try_compile(source):
+            with self.assertRaises(SyntaxError) as cm:
+                compile(source, '<string>', 'exec')
+            return cm.exception
+
+        exc = try_compile('return "ä"')
+        self.assertEqual(str(exc), "'return' outside function (<string>, line 1)")
+        self.assertIsNone(exc.text)
+        self.assertEqual(exc.offset, 1)
+        self.assertEqual(exc.end_offset, 12)
+
+        exc = try_compile('return "ä"'.encode())
+        self.assertEqual(str(exc), "'return' outside function (<string>, line 1)")
+        self.assertIsNone(exc.text)
+        self.assertEqual(exc.offset, 1)
+        self.assertEqual(exc.end_offset, 12)
+
+        exc = try_compile(BOM_UTF8 + 'return "ä"'.encode())
+        self.assertEqual(str(exc), "'return' outside function (<string>, line 1)")
+        self.assertIsNone(exc.text)
+        self.assertEqual(exc.offset, 1)
+        self.assertEqual(exc.end_offset, 12)
+
+        exc = try_compile('# coding: latin1\nreturn "ä"'.encode('latin1'))
+        self.assertEqual(str(exc), "'return' outside function (<string>, line 2)")
+        self.assertIsNone(exc.text)
+        self.assertEqual(exc.offset, 1)
+        self.assertEqual(exc.end_offset, 12)
+
+        exc = try_compile('return "ä" #' + 'ä'*1000)
+        self.assertEqual(str(exc), "'return' outside function (<string>, line 1)")
+        self.assertIsNone(exc.text)
+        self.assertEqual(exc.offset, 1)
+        self.assertEqual(exc.end_offset, 12)
+
+        exc = try_compile('return "ä" # ' + 'ä'*1000)
+        self.assertEqual(str(exc), "'return' outside function (<string>, line 1)")
+        self.assertIsNone(exc.text)
+        self.assertEqual(exc.offset, 1)
+        self.assertEqual(exc.end_offset, 12)
+
+    def test_file_source(self):
+        self.addCleanup(unlink, TESTFN)
+        err = run_script('return "ä"')
+        self.assertEqual(err[-3:], [
+                         '    return "ä"',
+                         '    ^^^^^^^^^^',
+                         "SyntaxError: 'return' outside function"])
+
+        err = run_script('return "ä"'.encode())
+        self.assertEqual(err[-3:], [
+                         '    return "ä"',
+                         '    ^^^^^^^^^^',
+                         "SyntaxError: 'return' outside function"])
+
+        err = run_script(BOM_UTF8 + 'return "ä"'.encode())
+        self.assertEqual(err[-3:], [
+                         '    return "ä"',
+                         '    ^^^^^^^^^^',
+                         "SyntaxError: 'return' outside function"])
+
+        err = run_script('# coding: latin1\nreturn "ä"'.encode('latin1'))
+        self.assertEqual(err[-3:], [
+                         '    return "ä"',
+                         '    ^^^^^^^^^^',
+                         "SyntaxError: 'return' outside function"])
+
+        err = run_script('return "ä" #' + 'ä'*1000)
+        self.assertEqual(err[-2:], [
+                         '    ^^^^^^^^^^^',
+                         "SyntaxError: 'return' outside function"])
+        self.assertEqual(err[-3][:100], '    return "ä" #' + 'ä'*84)
+
+        err = run_script('return "ä" # ' + 'ä'*1000)
+        self.assertEqual(err[-2:], [
+                         '    ^^^^^^^^^^^',
+                         "SyntaxError: 'return' outside function"])
+        self.assertEqual(err[-3][:100], '    return "ä" # ' + 'ä'*83)
 
     def test_attributes_new_constructor(self):
         args = ("bad.py", 1, 2, "abcdefg", 1, 100)

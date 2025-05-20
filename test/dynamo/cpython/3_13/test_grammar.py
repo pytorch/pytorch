@@ -267,7 +267,6 @@ class TokenTests(__TestCase):
         check("1e2_", "invalid decimal literal")
         check("1e+", "invalid decimal literal")
 
-    @xfailIfTorchDynamo
     def test_end_of_numerical_literals(self):
         def check(test, error=False):
             with self.subTest(expr=test):

@@ -495,12 +495,10 @@ class FileContextTestCase(__TestCase):
     def testWithOpen(self):
         tfn = tempfile.mktemp()
         try:
-            f = None
             with open(tfn, "w", encoding="utf-8") as f:
                 self.assertFalse(f.closed)
                 f.write("Booh\n")
             self.assertTrue(f.closed)
-            f = None
             with self.assertRaises(ZeroDivisionError):
                 with open(tfn, "r", encoding="utf-8") as f:
                     self.assertFalse(f.closed)
@@ -733,7 +731,7 @@ class TestContextDecorator(__TestCase):
         self.assertEqual(state, [1, 'something else', 999])
 
 
-class TestBaseExitStack:
+class _TestBaseExitStack:
     exit_stack = None
 
     @support.requires_docstrings
@@ -1194,7 +1192,7 @@ class TestBaseExitStack:
         self.assertIs(exc.__cause__, exc.__context__)
 
 
-class TestExitStack(TestBaseExitStack, __TestCase):
+class TestExitStack(_TestBaseExitStack, __TestCase):
     exit_stack = ExitStack
     callback_error_internal_frames = [
         ('__exit__', 'raise exc'),
@@ -1202,7 +1200,7 @@ class TestExitStack(TestBaseExitStack, __TestCase):
     ]
 
 
-class TestRedirectStream:
+class _TestRedirectStream:
 
     redirect_stream = None
     orig_stream = None
@@ -1259,13 +1257,13 @@ class TestRedirectStream:
         self.assertEqual(s, "Hello World!\n")
 
 
-class TestRedirectStdout(TestRedirectStream, __TestCase):
+class TestRedirectStdout(_TestRedirectStream, __TestCase):
 
     redirect_stream = redirect_stdout
     orig_stream = "stdout"
 
 
-class TestRedirectStderr(TestRedirectStream, __TestCase):
+class TestRedirectStderr(_TestRedirectStream, __TestCase):
 
     redirect_stream = redirect_stderr
     orig_stream = "stderr"

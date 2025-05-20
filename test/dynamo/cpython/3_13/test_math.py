@@ -243,6 +243,9 @@ def result_check(expected, got, ulp_tol=5, abs_tol=0.0):
 
     # Check exactly equal (applies also to strings representing exceptions)
     if got == expected:
+        if not got and not expected:
+            if math.copysign(1, got) != math.copysign(1, expected):
+                return f"expected {expected}, got {got} (zero has wrong sign)"
         return None
 
     failure = "not equal"
@@ -866,11 +869,13 @@ class MathTests(__TestCase):
         # Test allowable types (those with __float__)
         self.assertEqual(hypot(12.0, 5.0), 13.0)
         self.assertEqual(hypot(12, 5), 13)
-        self.assertEqual(hypot(1, -1), math.sqrt(2))
-        self.assertEqual(hypot(1, FloatLike(-1.)), math.sqrt(2))
+        self.assertEqual(hypot(0.75, -1), 1.25)
+        self.assertEqual(hypot(-1, 0.75), 1.25)
+        self.assertEqual(hypot(0.75, FloatLike(-1.)), 1.25)
+        self.assertEqual(hypot(FloatLike(-1.), 0.75), 1.25)
         self.assertEqual(hypot(Decimal(12), Decimal(5)), 13)
         self.assertEqual(hypot(Fraction(12, 32), Fraction(5, 32)), Fraction(13, 32))
-        self.assertEqual(hypot(bool(1), bool(0), bool(1), bool(1)), math.sqrt(3))
+        self.assertEqual(hypot(True, False, True, True, True), 2.0)
 
         # Test corner cases
         self.assertEqual(hypot(0.0, 0.0), 0.0)     # Max input is zero
@@ -1026,9 +1031,9 @@ class MathTests(__TestCase):
         self.assertEqual(dist((D(14), D(1)), (D(2), D(-4))), D(13))
         self.assertEqual(dist((F(14, 32), F(1, 32)), (F(2, 32), F(-4, 32))),
                          F(13, 32))
-        self.assertEqual(dist((True, True, False, True, False),
-                              (True, False, True, True, False)),
-                         sqrt(2.0))
+        self.assertEqual(dist((True, True, False, False, True, True),
+                              (True, False, True, False, False, False)),
+                         2.0)
 
         # Test corner cases
         self.assertEqual(dist((13.25, 12.5, -3.25),
@@ -1320,7 +1325,6 @@ class MathTests(__TestCase):
         self.assertEqual(math.log(INF), INF)
         self.assertTrue(math.isnan(math.log10(NAN)))
 
-    @xfailIfTorchDynamo
     def testSumProd(self):
         sumprod = math.sumprod
         Decimal = decimal.Decimal
@@ -1381,7 +1385,7 @@ class MathTests(__TestCase):
         with self.assertRaises(RuntimeError):
             sumprod(raise_after(5), range(10))
 
-        from test.test_iter import BasicIterClass
+        from test_iter import BasicIterClass
 
         self.assertEqual(sumprod(BasicIterClass(1), [1]), 0)
         self.assertEqual(sumprod([1], BasicIterClass(1)), 0)
@@ -1457,7 +1461,7 @@ class MathTests(__TestCase):
                 return f'Flt({int(self)})'
 
         def baseline_sumprod(p, q):
-            """This defines the target behavior including expections and special values.
+            """This defines the target behavior including exceptions and special values.
             However, it is subject to rounding errors, so float inputs should be exactly
             representable with only a few bits.
             """
@@ -1768,7 +1772,6 @@ class MathTests(__TestCase):
         self.ftest('radians(-45)', math.radians(-45), -math.pi/4)
         self.ftest('radians(0)', math.radians(0), 0)
 
-    @xfailIfTorchDynamo
     @requires_IEEE_754
     def testRemainder(self):
         from fractions import Fraction
@@ -1942,7 +1945,7 @@ class MathTests(__TestCase):
         try:
             self.assertTrue(math.isnan(math.tan(INF)))
             self.assertTrue(math.isnan(math.tan(NINF)))
-        except:
+        except ValueError:
             self.assertRaises(ValueError, math.tan, INF)
             self.assertRaises(ValueError, math.tan, NINF)
         self.assertTrue(math.isnan(math.tan(NAN)))
@@ -2111,6 +2114,13 @@ class MathTests(__TestCase):
                 result = 'ValueError'
             except OverflowError:
                 result = 'OverflowError'
+
+            # C99+ says for math.h's sqrt: If the argument is +∞ or ±0, it is
+            # returned, unmodified.  On another hand, for csqrt: If z is ±0+0i,
+            # the result is +0+0i.  Lets correct zero sign of er to follow
+            # first convention.
+            if id in ['sqrt0002', 'sqrt0003', 'sqrt1001', 'sqrt1023']:
+                er = math.copysign(er, ar)
 
             # Default tolerances
             ulp_tol, abs_tol = 5, 0.0
@@ -2688,9 +2698,10 @@ class FMATests(__TestCase):
 
         # If any input is a NaN, the result should be a NaN, too.
         for a, b in itertools.product(values, repeat=2):
-            self.assertIsNaN(math.fma(math.nan, a, b))
-            self.assertIsNaN(math.fma(a, math.nan, b))
-            self.assertIsNaN(math.fma(a, b, math.nan))
+            with self.subTest(a=a, b=b):
+                self.assertIsNaN(math.fma(math.nan, a, b))
+                self.assertIsNaN(math.fma(a, math.nan, b))
+                self.assertIsNaN(math.fma(a, b, math.nan))
 
     def test_fma_infinities(self):
         # Cases involving infinite inputs or results.
@@ -2702,62 +2713,67 @@ class FMATests(__TestCase):
         for c in non_nans:
             for infinity in [math.inf, -math.inf]:
                 for zero in [0.0, -0.0]:
-                    with self.assertRaises(ValueError):
-                        math.fma(infinity, zero, c)
-                    with self.assertRaises(ValueError):
-                        math.fma(zero, infinity, c)
+                    with self.subTest(c=c, infinity=infinity, zero=zero):
+                        with self.assertRaises(ValueError):
+                            math.fma(infinity, zero, c)
+                        with self.assertRaises(ValueError):
+                            math.fma(zero, infinity, c)
 
         # ValueError when a*b and c both infinite of opposite signs.
         for b in positives:
-            with self.assertRaises(ValueError):
-                math.fma(math.inf, b, -math.inf)
-            with self.assertRaises(ValueError):
-                math.fma(math.inf, -b, math.inf)
-            with self.assertRaises(ValueError):
-                math.fma(-math.inf, -b, -math.inf)
-            with self.assertRaises(ValueError):
-                math.fma(-math.inf, b, math.inf)
-            with self.assertRaises(ValueError):
-                math.fma(b, math.inf, -math.inf)
-            with self.assertRaises(ValueError):
-                math.fma(-b, math.inf, math.inf)
-            with self.assertRaises(ValueError):
-                math.fma(-b, -math.inf, -math.inf)
-            with self.assertRaises(ValueError):
-                math.fma(b, -math.inf, math.inf)
+            with self.subTest(b=b):
+                with self.assertRaises(ValueError):
+                    math.fma(math.inf, b, -math.inf)
+                with self.assertRaises(ValueError):
+                    math.fma(math.inf, -b, math.inf)
+                with self.assertRaises(ValueError):
+                    math.fma(-math.inf, -b, -math.inf)
+                with self.assertRaises(ValueError):
+                    math.fma(-math.inf, b, math.inf)
+                with self.assertRaises(ValueError):
+                    math.fma(b, math.inf, -math.inf)
+                with self.assertRaises(ValueError):
+                    math.fma(-b, math.inf, math.inf)
+                with self.assertRaises(ValueError):
+                    math.fma(-b, -math.inf, -math.inf)
+                with self.assertRaises(ValueError):
+                    math.fma(b, -math.inf, math.inf)
 
         # Infinite result when a*b and c both infinite of the same sign.
         for b in positives:
-            self.assertEqual(math.fma(math.inf, b, math.inf), math.inf)
-            self.assertEqual(math.fma(math.inf, -b, -math.inf), -math.inf)
-            self.assertEqual(math.fma(-math.inf, -b, math.inf), math.inf)
-            self.assertEqual(math.fma(-math.inf, b, -math.inf), -math.inf)
-            self.assertEqual(math.fma(b, math.inf, math.inf), math.inf)
-            self.assertEqual(math.fma(-b, math.inf, -math.inf), -math.inf)
-            self.assertEqual(math.fma(-b, -math.inf, math.inf), math.inf)
-            self.assertEqual(math.fma(b, -math.inf, -math.inf), -math.inf)
+            with self.subTest(b=b):
+                self.assertEqual(math.fma(math.inf, b, math.inf), math.inf)
+                self.assertEqual(math.fma(math.inf, -b, -math.inf), -math.inf)
+                self.assertEqual(math.fma(-math.inf, -b, math.inf), math.inf)
+                self.assertEqual(math.fma(-math.inf, b, -math.inf), -math.inf)
+                self.assertEqual(math.fma(b, math.inf, math.inf), math.inf)
+                self.assertEqual(math.fma(-b, math.inf, -math.inf), -math.inf)
+                self.assertEqual(math.fma(-b, -math.inf, math.inf), math.inf)
+                self.assertEqual(math.fma(b, -math.inf, -math.inf), -math.inf)
 
         # Infinite result when a*b finite, c infinite.
         for a, b in itertools.product(finites, finites):
-            self.assertEqual(math.fma(a, b, math.inf), math.inf)
-            self.assertEqual(math.fma(a, b, -math.inf), -math.inf)
+            with self.subTest(b=b):
+                self.assertEqual(math.fma(a, b, math.inf), math.inf)
+                self.assertEqual(math.fma(a, b, -math.inf), -math.inf)
 
         # Infinite result when a*b infinite, c finite.
         for b, c in itertools.product(positives, finites):
-            self.assertEqual(math.fma(math.inf, b, c), math.inf)
-            self.assertEqual(math.fma(-math.inf, b, c), -math.inf)
-            self.assertEqual(math.fma(-math.inf, -b, c), math.inf)
-            self.assertEqual(math.fma(math.inf, -b, c), -math.inf)
+            with self.subTest(b=b, c=c):
+                self.assertEqual(math.fma(math.inf, b, c), math.inf)
+                self.assertEqual(math.fma(-math.inf, b, c), -math.inf)
+                self.assertEqual(math.fma(-math.inf, -b, c), math.inf)
+                self.assertEqual(math.fma(math.inf, -b, c), -math.inf)
 
-            self.assertEqual(math.fma(b, math.inf, c), math.inf)
-            self.assertEqual(math.fma(b, -math.inf, c), -math.inf)
-            self.assertEqual(math.fma(-b, -math.inf, c), math.inf)
-            self.assertEqual(math.fma(-b, math.inf, c), -math.inf)
+                self.assertEqual(math.fma(b, math.inf, c), math.inf)
+                self.assertEqual(math.fma(b, -math.inf, c), -math.inf)
+                self.assertEqual(math.fma(-b, -math.inf, c), math.inf)
+                self.assertEqual(math.fma(-b, math.inf, c), -math.inf)
 
     # gh-73468: On some platforms, libc fma() doesn't implement IEE 754-2008
     # properly: it doesn't use the right sign when the result is zero.
     @unittest.skipIf(
-        sys.platform.startswith(("freebsd", "wasi"))
+        sys.platform.startswith(("freebsd", "wasi", "netbsd", "emscripten"))
         or (sys.platform == "android" and platform.machine() == "x86_64"),
         f"this platform doesn't implement IEE 754-2008 properly")
     def test_fma_zero_result(self):
@@ -2765,23 +2781,24 @@ class FMATests(__TestCase):
 
         # Zero results from exact zero inputs.
         for b in nonnegative_finites:
-            self.assertIsPositiveZero(math.fma(0.0, b, 0.0))
-            self.assertIsPositiveZero(math.fma(0.0, b, -0.0))
-            self.assertIsNegativeZero(math.fma(0.0, -b, -0.0))
-            self.assertIsPositiveZero(math.fma(0.0, -b, 0.0))
-            self.assertIsPositiveZero(math.fma(-0.0, -b, 0.0))
-            self.assertIsPositiveZero(math.fma(-0.0, -b, -0.0))
-            self.assertIsNegativeZero(math.fma(-0.0, b, -0.0))
-            self.assertIsPositiveZero(math.fma(-0.0, b, 0.0))
+            with self.subTest(b=b):
+                self.assertIsPositiveZero(math.fma(0.0, b, 0.0))
+                self.assertIsPositiveZero(math.fma(0.0, b, -0.0))
+                self.assertIsNegativeZero(math.fma(0.0, -b, -0.0))
+                self.assertIsPositiveZero(math.fma(0.0, -b, 0.0))
+                self.assertIsPositiveZero(math.fma(-0.0, -b, 0.0))
+                self.assertIsPositiveZero(math.fma(-0.0, -b, -0.0))
+                self.assertIsNegativeZero(math.fma(-0.0, b, -0.0))
+                self.assertIsPositiveZero(math.fma(-0.0, b, 0.0))
 
-            self.assertIsPositiveZero(math.fma(b, 0.0, 0.0))
-            self.assertIsPositiveZero(math.fma(b, 0.0, -0.0))
-            self.assertIsNegativeZero(math.fma(-b, 0.0, -0.0))
-            self.assertIsPositiveZero(math.fma(-b, 0.0, 0.0))
-            self.assertIsPositiveZero(math.fma(-b, -0.0, 0.0))
-            self.assertIsPositiveZero(math.fma(-b, -0.0, -0.0))
-            self.assertIsNegativeZero(math.fma(b, -0.0, -0.0))
-            self.assertIsPositiveZero(math.fma(b, -0.0, 0.0))
+                self.assertIsPositiveZero(math.fma(b, 0.0, 0.0))
+                self.assertIsPositiveZero(math.fma(b, 0.0, -0.0))
+                self.assertIsNegativeZero(math.fma(-b, 0.0, -0.0))
+                self.assertIsPositiveZero(math.fma(-b, 0.0, 0.0))
+                self.assertIsPositiveZero(math.fma(-b, -0.0, 0.0))
+                self.assertIsPositiveZero(math.fma(-b, -0.0, -0.0))
+                self.assertIsNegativeZero(math.fma(b, -0.0, -0.0))
+                self.assertIsPositiveZero(math.fma(b, -0.0, 0.0))
 
         # Exact zero result from nonzero inputs.
         self.assertIsPositiveZero(math.fma(2.0, 2.0, -4.0))
@@ -2887,12 +2904,14 @@ class FMATests(__TestCase):
              '0x1.f5467b1911fd6p-2', '0x1.b5cee3225caa5p-1'),
         ]
         for a_hex, b_hex, c_hex, expected_hex in test_values:
-            a = float.fromhex(a_hex)
-            b = float.fromhex(b_hex)
-            c = float.fromhex(c_hex)
-            expected = float.fromhex(expected_hex)
-            self.assertEqual(math.fma(a, b, c), expected)
-            self.assertEqual(math.fma(b, a, c), expected)
+            with self.subTest(a_hex=a_hex, b_hex=b_hex, c_hex=c_hex,
+                              expected_hex=expected_hex):
+                a = float.fromhex(a_hex)
+                b = float.fromhex(b_hex)
+                c = float.fromhex(c_hex)
+                expected = float.fromhex(expected_hex)
+                self.assertEqual(math.fma(a, b, c), expected)
+                self.assertEqual(math.fma(b, a, c), expected)
 
     # Custom assertions.
     def assertIsNaN(self, value):

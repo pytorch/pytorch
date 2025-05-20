@@ -56,6 +56,7 @@ import doctest
 import unittest
 import weakref
 import inspect
+import types
 
 from test import support
 
@@ -139,9 +140,12 @@ class FinalizationTest(__TestCase):
         self.assertEqual(gc.garbage, old_garbage)
 
     def test_lambda_generator(self):
-        # Issue #23192: Test that a lambda returning a generator behaves
+        # bpo-23192, gh-119897: Test that a lambda returning a generator behaves
         # like the equivalent function
         f = lambda: (yield 1)
+        self.assertIsInstance(f(), types.GeneratorType)
+        self.assertEqual(next(f()), 1)
+
         def g(): return (yield 1)
 
         # test 'yield from'
@@ -291,6 +295,102 @@ class GeneratorTest(__TestCase):
 
         #This should not raise
         loop()
+
+    @unittest.expectedFailure
+    def test_genexpr_only_calls_dunder_iter_once(self):
+
+        class Iterator:
+
+            def __init__(self):
+                self.val = 0
+
+            def __next__(self):
+                if self.val == 2:
+                    raise StopIteration
+                self.val += 1
+                return self.val
+
+            # No __iter__ method
+
+        class C:
+
+            def __iter__(self):
+                return Iterator()
+
+        self.assertEqual([1,2], list(i for i in C()))
+
+
+class ModifyUnderlyingIterableTest(__TestCase):
+    iterables = [
+        range(0),
+        range(20),
+        [1, 2, 3],
+        (2,),
+        {13, 48, 211},
+        frozenset((15, 8, 6)),
+        {1: 2, 3: 4},
+    ]
+
+    non_iterables = [
+        None,
+        42,
+        3.0,
+        2j,
+    ]
+
+    def genexpr(self):
+        return (x for x in range(10))
+
+    def genfunc(self):
+        def gen(it):
+            for x in it:
+                yield x
+        return gen(range(10))
+
+    def process_tests(self, get_generator):
+        for obj in self.iterables:
+            g_obj = get_generator(obj)
+            with self.subTest(g_obj=g_obj, obj=obj):
+                self.assertListEqual(list(g_obj), list(obj))
+
+            g_iter = get_generator(iter(obj))
+            with self.subTest(g_iter=g_iter, obj=obj):
+                self.assertListEqual(list(g_iter), list(obj))
+
+        err_regex = "'.*' object is not iterable"
+        for obj in self.non_iterables:
+            g_obj = get_generator(obj)
+            with self.subTest(g_obj=g_obj):
+                self.assertRaisesRegex(TypeError, err_regex, list, g_obj)
+
+    def test_modify_f_locals(self):
+        def modify_f_locals(g, local, obj):
+            g.gi_frame.f_locals[local] = obj
+            return g
+
+        def get_generator_genexpr(obj):
+            return modify_f_locals(self.genexpr(), '.0', obj)
+
+        def get_generator_genfunc(obj):
+            return modify_f_locals(self.genfunc(), 'it', obj)
+
+        self.process_tests(get_generator_genexpr)
+        self.process_tests(get_generator_genfunc)
+
+    def test_new_gen_from_gi_code(self):
+        def new_gen_from_gi_code(g, obj):
+            generator_func = types.FunctionType(g.gi_code, {})
+            return generator_func(obj)
+
+        def get_generator_genexpr(obj):
+            return new_gen_from_gi_code(self.genexpr(), obj)
+
+        def get_generator_genfunc(obj):
+            return new_gen_from_gi_code(self.genfunc(), obj)
+
+        self.process_tests(get_generator_genexpr)
+        self.process_tests(get_generator_genfunc)
+
 
 class ExceptionTest(__TestCase):
     # Tests for the issue #23353: check that the currently handled exception
@@ -2292,6 +2392,16 @@ Check some syntax errors for yield expressions:
 Traceback (most recent call last):
   ...
 SyntaxError: 'yield' outside function
+
+>>> f=lambda: (yield from (1,2)), (yield from (3,4))
+Traceback (most recent call last):
+  ...
+SyntaxError: 'yield from' outside function
+
+>>> yield from [1,2]
+Traceback (most recent call last):
+  ...
+SyntaxError: 'yield from' outside function
 
 >>> def f(): x = yield = y
 Traceback (most recent call last):
