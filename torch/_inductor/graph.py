@@ -1066,7 +1066,7 @@ class GraphLowering(torch.fx.Interpreter):
             # skip unbacked to ubacked replacements (why)? idk just skip them lol
             shape_env = example.node.shape_env
             # execlude unbacked to unbacked replacement.
-            if not shape_env.is_unbacked_symint(example.node._expr) and not shape_env.is_unbacked_symint(example.node.expr):
+            if  isinstance(example.node._expr, sympy.Symbol) and not shape_env.is_unbacked_symint(example.node._expr) and isinstance(example.node.expr, sympy.Symbol)  and not shape_env.is_unbacked_symint(example.node.expr):
                 expr = example.node._expr
             else:
                 expr = example.node.expr
