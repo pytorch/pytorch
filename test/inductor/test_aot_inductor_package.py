@@ -15,6 +15,7 @@ from typing import Callable
 from parameterized import parameterized_class
 
 import torch
+from torch._inductor.codecache import get_actual_cubin_format
 from torch._inductor.package import AOTICompiledModel, load_package, package_aoti
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_inductor_cache
@@ -225,8 +226,13 @@ class TestAOTInductorPackage(TestCase):
                 tmp_path = Path(tmp_dir) / "data" / "aotinductor" / "model"
                 self.assertTrue(tmp_path.exists())
                 if self.device == GPU_TYPE:
-                    self.assertTrue(not list(tmp_path.glob("*.cubin")))
-                    self.assertTrue(list(tmp_path.glob("*.cubin.o")))
+                    self.assertTrue(
+                        not list(tmp_path.glob(f"*.{get_actual_cubin_format()}"))
+                    )
+                    # Check if the generated .cubin.o files exist and use unique kernel names
+                    self.assertTrue(
+                        list(tmp_path.glob(f"triton_*.{get_actual_cubin_format()}.o"))
+                    )
 
                 build_path = tmp_path / "build"
                 self.assertTrue(not build_path.exists())
