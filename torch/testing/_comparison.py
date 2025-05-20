@@ -133,7 +133,7 @@ def _make_bitwise_mismatch_msg(
     default_identifier: str,
     identifier: Optional[Union[str, Callable[[str], str]]] = None,
     extra: Optional[str] = None,
-    first_mismatch_idx: Optional[int] = None,
+    first_mismatch_idx: Optional[tuple[int]] = None,
 ):
     """Makes a mismatch error message for bitwise values.
 
@@ -143,7 +143,7 @@ def _make_bitwise_mismatch_msg(
             ``default_identifier``. Can be passed as callable in which case it will be called with
             ``default_identifier`` to create the description at runtime.
         extra (Optional[str]): Extra information to be placed after the message header and the mismatch statistics.
-        first_mismatch_idx (Optional[int]): the index of the first mismatch.
+        first_mismatch_idx (Optional[tuple[int]]): the index of the first mismatch, for each dimension.
     """
     if identifier is None:
         identifier = default_identifier
@@ -296,12 +296,12 @@ def make_tensor_mismatch_msg(
     )
     if actual.dtype.is_floating_point and actual.dtype.itemsize == 1:
         # skip checking for max_abs_diff and max_rel_diff for float8-like values
-        first_mismatch_idx = torch.nonzero(~matches, as_tuple=False)[0].item()
+        first_mismatch_idx = tuple(torch.nonzero(~matches, as_tuple=False)[0].tolist())
         return _make_bitwise_mismatch_msg(
             default_identifier="Tensor-likes",
             identifier=identifier,
             extra=extra,
-            first_mismatch_idx=int(first_mismatch_idx),
+            first_mismatch_idx=first_mismatch_idx,
         )
 
     actual_flat = actual.flatten()
