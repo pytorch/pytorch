@@ -11,6 +11,7 @@ from ..common import Kernel, OpOverrides, WorkspaceArg, WorkspaceZeroMode
 from ..cpp_utils import CppPrinter
 from .rocm_benchmark_request import ROCmBenchmarkRequest
 from .rocm_template_buffer import ROCmTemplateBuffer
+from .rocm_utils import DTYPE_TO_ROCM_TYPE
 
 
 if TYPE_CHECKING:
@@ -109,7 +110,7 @@ class ROCmTemplateKernel(ROCmKernel):
                 self.named_nodes[name] = node
                 self.args.output_buffers[node.get_name()] = name
 
-        arg_defs, *_ = self.args.cpp_argdefs()
+        arg_defs, *_ = self.args.cpp_argdefs(DTYPE_TO_ROCM_TYPE)
 
         runtime_arg_defs = [f"{arg.ty} {arg.name}" for arg in self.runtime_arg_info]
 
@@ -141,7 +142,7 @@ class ROCmTemplateKernel(ROCmKernel):
             # Kinda hacky because we always originally initialize name with "KERNEL_NAME"
             # So, we replace with the real kernel name passed as an arg to this function.
             self.signature = self.signature.replace("KERNEL_NAME", name)
-            _, call_args, arg_types = self.args.cpp_argdefs()
+            _, call_args, arg_types = self.args.cpp_argdefs(DTYPE_TO_ROCM_TYPE)
         else:
             _, call_args, _, arg_types = self.args.python_argdefs()
 
@@ -246,7 +247,7 @@ class ROCmTemplateCaller(ChoiceCaller):
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(*args, output_tensor=out)
+        return self.bmreq.benchmark(*args, out=out)
 
     def __str__(self) -> str:
         return f"ROCmTemplateCaller(source_file={self.bmreq.source_file}, {self.info_dict()})"
