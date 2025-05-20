@@ -540,7 +540,9 @@ class AutogradCompilerInstance:
                     setattr(
                         self.fx_tracer.root, qualname, getattr(ctx._bw_module, name)
                     )
-                    result = self.fx_tracer.graph.node_copy(node, lambda n: value_remap[n])
+                    result = self.fx_tracer.graph.node_copy(
+                        node, lambda n: value_remap[n]
+                    )
                     result.target = qualname
                     value_remap[node] = result
                 else:
