@@ -44,3 +44,32 @@ class TestDCE(JitTestCase):
         # freezing inlines t1.__init__(), after which DCE can occur.
         t2 = torch.jit.freeze(t2)
         FileCheck().check_not("prim::SetAttr").run(t2.graph)
+
+    def test_mutated_simple(self):
+        def fn(x: torch.Tensor):
+            y = x.sin()
+            y_slice = y[::2]
+            y_slice.add_(x[::2])
+            z = y.cos()
+            return z
+
+        fn_s = torch.jit.script(fn)
+        torch._C._jit_pass_dce_graph(fn_s.graph)
+
+        FileCheck().check("aten::add_").run(fn_s.graph)
+
+    def test_mutated_loop(self):
+        def fn(x: torch.Tensor):
+            y = x.sin()
+            y_slice = y[::2]
+            y_slice.add_(x[::2])
+            for _ in range(2):
+                y_slice = y[::2]
+                y = y.repeat(2)
+            z = y.cos()
+            return z
+
+        fn_s = torch.jit.script(fn)
+        torch._C._jit_pass_dce_graph(fn_s.graph)
+
+        FileCheck().check("aten::add_").run(fn_s.graph)

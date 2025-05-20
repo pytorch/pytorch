@@ -9,6 +9,8 @@
 
 namespace torch::jit {
 
+class ValueAndMemoryLocationSet;
+
 /**
  * Alias analysis pass.
  *
@@ -69,6 +71,12 @@ class AliasDb {
   // Does `n` write to an alias of one of the values in `vs`?
   // if `recurseBlocks` is true, consider writes on the nodes in `n`s sub-blocks
   TORCH_API bool writesToAlias(Node* n, const ValueSet& vs) const;
+
+  // Does `n` write to any of the values in `vls`?
+  TORCH_API bool writesToAlias(Node* n, const ValueAndMemoryLocationSet& vls)
+      const;
+
+  TORCH_API ValueAndMemoryLocationSet getValueAndMemoryLocationSet() const;
 
   // Does `a` and `b` potentially share a memory location or do either
   // hold in memory any element that exists in the other
@@ -170,6 +178,7 @@ class AliasDb {
   void enablePreciseTupleContainerAnalysis();
 
   friend struct MutationRemover;
+  friend class ValueAndMemoryLocationSet;
 
  private:
   // Helper for topologically-safe node moves.
@@ -197,6 +206,7 @@ class AliasDb {
   // if `recurseBlocks` is true, gather reads on the nodes in `n`s sub-blocks
   MemoryLocations getReads(Node* n) const;
   void getReadsImpl(Node* n, MemoryLocations& ret) const;
+  MemoryLocations getMemoryLocations(Value* v) const;
 
   /**
    * Wildcard methods
@@ -316,5 +326,38 @@ class AliasDb {
 // Useful if you are using the AliasDb mutation API and want to check you did
 // the right thing.
 TORCH_API void Lint(const AliasDb* db);
+
+/**
+ * ValueAndMemoryLocationSet
+ *
+ * A insert-only set of values which also maintains a MemoryLocations bitset
+ * of the memory locations that the values alias. It is insert-only. It
+ * should be constructed by calling aliasDb.getValueAndMemoryLocationSet().
+ *
+ * WARNING:
+ *  * The AliasDb must not be mutated after construction of a
+ *    ValueAndMemoryLocationsSet, or else the MemoryLocations stored in the
+ *    ValueAndMemoryLocationSet will no longer be accurate.
+ *  * A ValueAndMemoryLocationsSet is tied to an instsance of AliasDb but
+ *    does not own the AliasDb. It is the user's responsibility to ensure
+ *    that the AliasDb outlives the ValuesAndMemoryLocationsSet.
+ *
+ * The use case for this is to be able to implement writesToAlias
+ * more efficiently for a set of values.
+ */
+class ValueAndMemoryLocationSet {
+ public:
+  TORCH_API void insert(Value* v);
+  TORCH_API ValueSet& getValueSet();
+
+  friend class AliasDb;
+
+ private:
+  ValueAndMemoryLocationSet(const AliasDb* db) : aliasDb_(db) {}
+
+  const AliasDb* aliasDb_;
+  ValueSet valueSet_;
+  MemoryLocations memoryLocations_;
+};
 
 } // namespace torch::jit

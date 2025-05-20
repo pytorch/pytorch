@@ -85,14 +85,16 @@ void IpcChannel::send_fd(int dst_pid, int fd) {
   memset(cbuf, 0, sizeof(cbuf));
 
   // Create message header
-  struct msghdr msg {
-    // destination socket address and size of it
-    // message content in msg_iov and number of such structs (1 in our case)
-    // auxiliary data with the value of fd and size of it
-    .msg_name = (void*)&addr, .msg_namelen = sizeof(struct sockaddr_un),
-    .msg_iov = &io, .msg_iovlen = 1, .msg_control = cbuf,
-    .msg_controllen = sizeof(cbuf)
-  };
+  struct msghdr msg{
+      // destination socket address and size of it
+      // message content in msg_iov and number of such structs (1 in our case)
+      // auxiliary data with the value of fd and size of it
+      .msg_name = (void*)&addr,
+      .msg_namelen = sizeof(struct sockaddr_un),
+      .msg_iov = &io,
+      .msg_iovlen = 1,
+      .msg_control = cbuf,
+      .msg_controllen = sizeof(cbuf)};
 
   // This points to the first control message header
   // With SCM_RIGHTS we let the kernel know that we are passing file
