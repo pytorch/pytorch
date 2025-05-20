@@ -123,10 +123,18 @@ def early_config_prune(configs, named_args):
 
 # Copied from fbgemm grouped_gemm.py
 triton_grouped_mm_source = r"""
+{% if SCALED %}
 {% if A_IS_2D or B_IS_2D %}
 {{def_kernel("a_ptr", "b_ptr", "scale_a_ptr", "scale_b_ptr", "offsets_ptr")}}
 {% else %}
 {{def_kernel("a_ptr", "b_ptr", "scale_a_ptr", "scale_b_ptr")}}
+{% endif %}
+{% else %}
+{% if A_IS_2D or B_IS_2D %}
+{{def_kernel("a_ptr", "b_ptr", "offsets_ptr")}}
+{% else %}
+{{def_kernel("a_ptr", "b_ptr")}}
+{% endif %}
 {% endif %}
     tidx = tl.program_id(0)
 
@@ -158,15 +166,20 @@ triton_grouped_mm_source = r"""
     A_STRIDE_K = {{stride("a_ptr", -1)}}
 {% if not A_IS_2D %}
     A_STRIDE_G = {{stride("a_ptr", 0)}}
+{% if SCALED %}
     SCALE_A_STRIDE_G = {{stride("scale_a_ptr", 0)}}
+{% endif %}
 {% endif %}
     B_STRIDE_N = {{stride("b_ptr", -1)}}
     B_STRIDE_K = {{stride("b_ptr", -2)}}
 {% if not B_IS_2D %}
     B_STRIDE_G = {{stride("b_ptr", 0)}}
+{% if SCALED %}
     SCALE_B_STRIDE_G = {{stride("scale_b_ptr", 0)}}
 {% endif %}
+{% endif %}
 
+{% if USE_TMA_LOAD %}
     # fixme: a_desc = tl.make_tensor_descriptor(
     a_desc = tl._experimental_make_tensor_descriptor(
         a_ptr,
@@ -198,6 +211,7 @@ triton_grouped_mm_source = r"""
         block_shape=[1, BLOCK_N, BLOCK_K],
 {% endif %}
     )
+{% endif %}
 
 {% if M_IS_DYNAMIC %}
     m_end_offset = 0
@@ -215,11 +229,15 @@ triton_grouped_mm_source = r"""
         m_start_offset = m_end_offset
         m_end_offset = tl.load(offsets_ptr + g)
         m_size = m_end_offset - m_start_offset
+{% if SCALED %}
         m_scale_start_offset = m_start_offset
+{% endif %}
 {% else %}
         m_start_offset = 0
         m_size = M
+{% if SCALED %}
         m_scale_start_offset = g * M
+{% endif %}
 {% endif %}
 
         if m_size > 0:
@@ -228,11 +246,15 @@ triton_grouped_mm_source = r"""
             n_start_offset = n_end_offset
             n_end_offset = tl.load(offsets_ptr + g)
             n_size = n_end_offset - n_start_offset
+{% if SCALED %}
             n_scale_start_offset = n_start_offset
+{% endif %}
 {% else %}
             n_start_offset = 0
             n_size = N
+{% if SCALED %}
             n_scale_start_offset = g * N
+{% endif %}
 {% endif %}
 {% if K_IS_DYNAMIC %}
             # Move across groups
@@ -323,6 +345,7 @@ triton_grouped_mm_source = r"""
 
                 offs_am = tile_m_idx * BLOCK_M + tl.arange(0, BLOCK_M)
                 offs_bn = tile_n_idx * BLOCK_N + tl.arange(0, BLOCK_N)
+{% if SCALED %}
                 scale_a = tl.load(
                     scale_a_ptr
 {% if A_IS_2D %}
@@ -344,6 +367,9 @@ triton_grouped_mm_source = r"""
                     mask=offs_bn[None, :] < n_size,
                 )
                 c = accumulator.to(tl.float32) * scale_a * scale_b
+{% else %}
+                c = accumulator.to(tl.float32)
+{% endif %}
 
 {% if M_IS_DYNAMIC %}
                 idx_m = (m_start_offset + offs_am[:, None])
@@ -366,6 +392,12 @@ triton_grouped_mm_source = r"""
             iterated_tiles += num_tiles
 """
 
+
+triton_grouped_mm_template = TritonTemplate(
+    name="grouped_mm",
+    grid=persistent_grouped_mm_grid,
+    source=triton_grouped_mm_source,
+)
 
 triton_scaled_grouped_mm_template = TritonTemplate(
     name="scaled_grouped_mm",
@@ -419,6 +451,14 @@ def grouped_mm_args(
         assert out_dtype is None, "out_dtype is ignored if layout is specified."
 
     return (mat1_size, mat2_size, layout, mat1, mat2, offs)
+
+
+aten__grouped_mm = ExternKernelChoice(
+    torch._grouped_mm,
+    "at::_grouped_mm",
+    op_overload=aten._grouped_mm,
+    has_out_variant=True,
+)
 
 
 aten__scaled_grouped_mm = ExternKernelChoice(
@@ -515,7 +555,9 @@ def _tuned_grouped_mm_common(
         mat_b.get_dtype(),
         layout,
     )
-    check_supported_striding(mat_a, mat_b)
+
+    if scale_a is not None and scale_b is not None:
+        check_supported_striding(mat_a, mat_b)
 
     # workaround for Inductor not supporting optional tensor input arguments
     input_nodes: list[Any] = [mat_a, mat_b]
@@ -543,6 +585,7 @@ def _tuned_grouped_mm_common(
     # multiplicands here, relying on meta function checks for
     # everything else.
     if is_nonzero and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result):
+        scaled = scale_a is not None
         if len(m1_size) == 2:
             if len(m2_size) == 2:
                 _, k1 = m1_size
@@ -571,12 +614,16 @@ def _tuned_grouped_mm_common(
                 V.graph.sizevars.guard_equals(k1, k2)
                 a_is_2d, b_is_2d = False, False
 
+        # The tl.make_tensor_descriptor() imposes this limitation.
+        use_tma_load = mat_a.get_stride()[-1] == 1 and mat_b.get_stride()[-2] == 1
+
         kwargs = {
+            "SCALED": scaled,
             "A_IS_2D": a_is_2d,
             "B_IS_2D": b_is_2d,
             "USE_FAST_ACCUM": use_fast_accum,
             "NUM_SMS": get_num_sms(),
-            "USE_TMA_LOAD": True,
+            "USE_TMA_LOAD": use_tma_load,
         }
 
         for config in early_config_prune(grouped_mm_configs(), kwargs):
@@ -597,6 +644,35 @@ def _tuned_grouped_mm_common(
     }
     return autotune_select_algorithm(
         algorithm_name, choices, input_nodes, layout, input_gen_fns=input_gen_fns
+    )
+
+
+@register_lowering(aten._grouped_mm, type_promotion_kind=None)
+def tuned_grouped_mm(
+    mat_a: TensorBox,
+    mat_b: TensorBox,
+    offs: Optional[TensorBox] = None,
+    bias: Optional[TensorBox] = None,
+    out_dtype: Optional[torch.dtype] = None,
+    layout: Optional[Layout] = None,
+) -> TensorBox:
+    """Auto-tuning for _grouped_mm() operator."""
+
+    return _tuned_grouped_mm_common(
+        "aten._grouped_mm",
+        "grouped_mm",
+        aten__grouped_mm,
+        triton_grouped_mm_template,
+        mat_a,
+        mat_b,
+        None,
+        None,
+        offs,
+        bias,
+        None,
+        out_dtype,
+        False,
+        layout,
     )
 
 
