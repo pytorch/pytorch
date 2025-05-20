@@ -1216,9 +1216,12 @@ def aot_dispatch_autograd(
             if num_symints_saved_for_bw > 0:
                 try:
                     # See Note: [Backward graph lazy lowering]
-                    compiled_bw_func = aot_config.bw_compiler(
-                        copy.deepcopy(bw_module), placeholder_list
-                    )
+                    with torch._subclasses.fake_tensor.unset_fake_temporarily():
+                        bw_module_copy = copy.deepcopy(bw_module)
+                        compiled_bw_func = aot_config.bw_compiler(
+                            bw_module_copy, placeholder_list
+                        )
+                        del bw_module_copy
                 except Exception as e:
                     exc = e
                     trace_structured(
