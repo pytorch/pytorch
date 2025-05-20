@@ -914,9 +914,6 @@ enable_linear_binary_folding = (
 # Adds NVTX annotations aroung training phases
 annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0") == "1"
 
-# Enable caching codegen of triton templates.
-enable_caching_generated_triton_templates: bool = False
-
 
 # config specific to codegen/cpp.py
 class cpp:
