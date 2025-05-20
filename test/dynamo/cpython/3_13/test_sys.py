@@ -850,7 +850,7 @@ class SysModuleTest(__TestCase):
         self.assertRaises(TypeError, sys.intern, S("abc"))
         if has_is_interned:
             self.assertIs(sys._is_interned(S("abc")), False)
-    
+
     @support.cpython_only
     @requires_subinterpreters
     def test_subinterp_intern_dynamically_allocated(self):
