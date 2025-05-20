@@ -4,10 +4,8 @@ set -ex
 
 install_ubuntu() {
   echo "Preparing to build sccache from source"
-  apt-get update
-  # libssl-dev will not work as it is upgraded to libssl3 in Ubuntu-22.04.
-  # Instead use lib and headers from OpenSSL1.1 installed in `install_openssl.sh``
-  apt-get install -y cargo
+  # Use dnf instead of apt-get for CentOS
+  dnf install -y cargo git gcc openssl-devel
   echo "Checking out sccache repo"
   git clone https://github.com/mozilla/sccache -b v0.10.0
   cd sccache
@@ -17,8 +15,8 @@ install_ubuntu() {
   echo "Cleaning up"
   cd ..
   rm -rf sccache
-  apt-get remove -y cargo rustc
-  apt-get autoclean && apt-get clean
+  dnf remove -y cargo rustc
+  dnf clean all
 
   echo "Downloading old sccache binary from S3 repo for PCH builds"
   curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache-0.2.14a
