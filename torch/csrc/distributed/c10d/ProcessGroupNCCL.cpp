@@ -2842,24 +2842,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
   // For batch_isend_irecv, ncclGroupStart() would be called upfront
   bool batchP2P = ncclActiveGroupCounter_ > 0;
   bool singleP2POp = isP2POp(opType, batchP2P);
-  // For point-to-point communication, lower rank of the two will get unique id.
-  if (rank_ == 0 || (singleP2POp && p2pRank == 0)) {
-    C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID), std::nullopt);
-  }
-
-  if (getCvarBool(TORCH_NCCL_BCAST_UNIQUEID, true) && !isSendRecvSelf) {
-    // Broadcast so that each process can have a unique NCCL ID
-    auto timeStarted = std::chrono::steady_clock::now();
-    broadcastUniqueNCCLID(&ncclID, singleP2POp, deviceKey, p2pRank);
-    auto timerDeltaMs =
-        std::chrono::duration_cast<std::chrono::duration<double>>(
-            std::chrono::steady_clock::now() - timeStarted)
-            .count() *
-        1000;
-    LOG(INFO) << logPrefix()
-              << "ProcessGroupNCCL broadcast unique ID through store took "
-              << timerDeltaMs << " ms";
-  }
 
   // Get the device index
   auto deviceIndex = device.index();
