@@ -7,6 +7,7 @@
 #include <torch/library.h>
 #include <c10/util/irange.h>
 #include <c10/util/strides.h>
+#include <ATen/EmptyTensor.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/ATen.h>
@@ -318,14 +319,14 @@ static at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymInt
 
   auto stride = at::detail::computeStride(self.sym_sizes(), self.sym_strides(), inferred_size);
   if (!stride.has_value()){
-    // We hit this when we decompose a reshape into clone + unsafe_view. But we do not receive the clone here,
-    // but rather the origianl tensor before the clone. So we clone again to compute the stride of the output.
+    // With unbacked symints, computeStride could fail even on contiguous tensors. In this case, we can
+    // use the strides of an empty tensor of inferred_size.
+    TORCH_INTERNAL_ASSERT(self.is_contiguous(), "view is not valid");
 
-    if (!stride.has_value()) {
-      auto tmp = self_.contiguous();
-      stride = at::detail::computeStride(tmp.sym_sizes(), tmp.sym_strides(), inferred_size);
-    }
+    stride = at::detail::empty_symint_meta(inferred_size, std::nullopt,std::nullopt, std::nullopt, std::nullopt, std::nullopt).sym_strides();
+
   }
+
   out.unsafeGetTensorImpl()->set_sizes_and_strides(inferred_size, stride.value());
   return out;
 }
