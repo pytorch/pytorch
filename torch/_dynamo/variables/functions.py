@@ -29,10 +29,13 @@ import inspect
 import itertools
 import sys
 import types
+import warnings
 from collections.abc import Sequence
+from types import FunctionType
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 from unittest.mock import patch
+from weakref import WeakKeyDictionary
 
 import torch
 
@@ -47,7 +50,6 @@ from ..exc import (
     ObservedUserStopIteration,
     raise_observed_exception,
     SkipFrame,
-    unimplemented,
     unimplemented_v2,
     Unsupported,
 )
@@ -89,6 +91,104 @@ if TYPE_CHECKING:
 
 
 _F = TypeVar("_F", bound=Callable)
+CO_VARARGS = 0x04
+CO_VARKEYWORDS = 0x08
+
+
+# Module‐level cache keyed by the function object
+_spec_cache = WeakKeyDictionary()
+
+
+class FunctionSpec:
+    def __init__(self, func: FunctionType):
+        code = func.__code__
+        vn = code.co_varnames
+
+        self.posonly_count = code.co_posonlyargcount
+        self.arg_count = code.co_argcount
+        self.kwonly_count = code.co_kwonlyargcount
+
+        self.posonly_names = vn[: self.posonly_count]
+        self.pos_or_kw_names = vn[self.posonly_count : self.arg_count]
+        self.all_pos_names = self.posonly_names + self.pos_or_kw_names
+        self.kwonly_names = vn[self.arg_count : self.arg_count + self.kwonly_count]
+
+        off = self.arg_count + self.kwonly_count
+        self.varargs_name = vn[off] if code.co_flags & CO_VARARGS else None
+        off += 1 if self.varargs_name else 0
+        self.varkw_name = vn[off] if code.co_flags & CO_VARKEYWORDS else None
+
+    def update_defaults(self, func: FunctionType):
+        # Defaults can change from function call to function call. So re-update
+        # them on every call.
+        self.defaults = func.__defaults__ or ()
+        self.kwdefaults = func.__kwdefaults__ or {}
+
+        # Map positional‐default names → their index in self.defaults
+        self.pos_default_map = dict(
+            zip(self.all_pos_names[-len(self.defaults) :], range(len(self.defaults)))
+        )
+
+
+def _get_spec(func: FunctionType) -> FunctionSpec:
+    spec = _spec_cache.get(func)
+    if spec is None:
+        spec = FunctionSpec(func)
+        _spec_cache[func] = spec
+    return spec
+
+
+def bind_args_cached(func, tx, fn_source, args, kwargs):
+    spec = _get_spec(func)
+    spec.update_defaults(func)
+    ba = {}
+    rem_kw = dict(kwargs)
+
+    # 1) Bind all positional (pos-only + pos-or-kw)
+    for i, name in enumerate(spec.all_pos_names):
+        if i < len(args):
+            ba[name] = wrap_bound_arg(tx, args[i])
+        elif name in rem_kw:
+            if name in spec.posonly_names:
+                raise TypeError(f"{name} is positional-only")
+            ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
+        elif name in spec.pos_default_map:
+            idx = spec.pos_default_map[name]
+            default_source = None
+            if fn_source:
+                default_source = DefaultsSource(fn_source, idx)
+            ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
+        else:
+            raise TypeError(f"Missing required positional argument: {name}")
+
+    # 2) *args
+    extra = args[len(spec.all_pos_names) :]
+    if spec.varargs_name:
+        ba[spec.varargs_name] = wrap_bound_arg(tx, tuple(extra))
+    elif extra:
+        raise TypeError(
+            f"Too many positional arguments: got {len(args)}, expected {len(spec.all_pos_names)}"
+        )
+
+    # 3) Keyword-only
+    for name in spec.kwonly_names:
+        if name in rem_kw:
+            ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
+        elif name in spec.kwdefaults:
+            kwdefault_source = None
+            if fn_source:
+                kwdefault_source = DefaultsSource(fn_source, name, is_kw=True)
+            ba[name] = wrap_bound_arg(tx, spec.kwdefaults[name], kwdefault_source)
+        else:
+            raise TypeError(f"Missing required keyword-only argument: {name}")
+
+    # 4) **kwargs
+    if spec.varkw_name:
+        ba[spec.varkw_name] = wrap_bound_arg(tx, rem_kw)
+    elif rem_kw:
+        raise TypeError(f"Unexpected keyword arguments: {list(rem_kw)}")
+
+    return ba
 
 
 def wrap_bound_arg(tx: "InstructionTranslator", val, source=None):
@@ -279,46 +379,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         this function, create new bindings for initial locals.
         """
         assert not self.is_constant
-        root_tx = parent.output.root_tx
-        wrap = functools.partial(wrap_bound_arg, tx=root_tx)
 
         fn: types.FunctionType = self.fn
-        defaults = fn.__defaults__ or []
-        defaults_sources = [
-            None if self.source is None else DefaultsSource(self.source, idx)
-            for idx, _ in enumerate(defaults)
-        ]
-        fake_func = types.FunctionType(
-            fn.__code__,
-            fn.__globals__,
-            fn.__name__,
-            tuple(
-                [
-                    wrap(val=arg, source=source)
-                    for arg, source in zip(defaults, defaults_sources)
-                ]
-            ),
-            fn.__closure__,
-        )
-        if fn.__kwdefaults__:
-            kwdefaults_sources = {
-                k: (
-                    None
-                    if self.source is None
-                    else DefaultsSource(self.source, k, is_kw=True)
-                )
-                for k in fn.__kwdefaults__
-            }
-            fake_func.__kwdefaults__ = {
-                k: wrap(val=v, source=kwdefaults_sources[k])
-                for k, v in fn.__kwdefaults__.items()
-            }
 
-        bound = inspect.signature(fake_func).bind(*args, **kwargs)
-        bound.apply_defaults()
-        result = dict(bound.arguments.items())
+        if not isinstance(fn, FunctionType):
+            raise TypeError("Only supports regular Python functions.")
+        root_tx = parent.output.root_tx
+        result = bind_args_cached(fn, root_tx, self.source, args, kwargs)
 
-        wrap_args_kwargs(root_tx, result)
         init_cellvars(parent, result, fn.__code__)
         closure = self.fn.__closure__ or ()
         assert len(closure) == len(self.fn.__code__.co_freevars)
@@ -378,6 +446,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # Handle patch_dynamo_config call
+
         if self.fn is torch._dynamo.patch_dynamo_config:
             try:
                 args_const = [arg.as_python_constant() for arg in args]
@@ -400,16 +469,27 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             fn_var = bound.args[0]
             if not isinstance(fn_var, BaseUserFunctionVariable):
                 typ = fn_var.python_type()
-                unimplemented(
-                    f"`nonstrict_trace` expects a callable, but got value of type <{typ.__name__}>"
+                msg = f"`nonstrict_trace` expects a callable, but got value of type <{typ.__name__}>"
+                unimplemented_v2(
+                    gb_type="TypeError from user code",
+                    context=f"call_function({self.value}, {args}, {kwargs})",
+                    explanation=msg,
+                    hints=[
+                        *graph_break_hints.USER_ERROR,
+                    ],
                 )
 
             if not isinstance(fn_var, UserFunctionVariable):
                 fn_name = fn_var.get_name()
-                unimplemented(
-                    f"""
-Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region.
-"""  # NOQA: B950
+                msg = f"Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region."  # noqa: B950
+                unimplemented_v2(
+                    gb_type="Limitation of `nonstrict_trace",
+                    context=f"{self}",
+                    explanation=msg,
+                    hints=[
+                        f"make sure definition of {fn_name} is outside ",
+                        "`torch.compile` region",
+                    ],
                 )
 
             fn = fn_var.fn
@@ -1310,14 +1390,6 @@ class SkipFunctionVariable(VariableTracker):
                     "Remove the `torch._dynamo.graph_break()` call.",
                 ],
             )
-        elif isinstance(self.value, types.WrapperDescriptorType):
-            msg = (
-                f"Graph break due to unsupported wrapper descriptor {self.value}. "
-                f"Please file an issue on GitHub "
-                f"so the PyTorch team can add support for it. "
-            )
-            torch._dynamo.utils.warn_once(msg)
-            unimplemented(msg)
         else:
             if config.dont_skip_tracing:
                 from .builder import SourcelessBuilder
@@ -1328,6 +1400,8 @@ class SkipFunctionVariable(VariableTracker):
                 if not isinstance(rebuilt_fn, SkipFunctionVariable):
                     return rebuilt_fn.call_function(tx, args, kwargs)
             qualname = getattr(self.value, "__qualname__", "<unknown qualname>")
+            module_or = getattr(self.value, "__module__", None)
+            module_name = "<unknown module>" if module_or is None else str(module_or)
             try:
                 path = inspect.getfile(self.value)
                 explanation = (
@@ -1349,10 +1423,10 @@ class SkipFunctionVariable(VariableTracker):
                     ]
             except TypeError:
                 known_python_builtin_modules = {"_abc", "_warnings"}
-                if self.value.__module__ in known_python_builtin_modules:
+                if module_or in known_python_builtin_modules:
                     explanation = (
                         f"Dynamo does not know how to trace the Python builtin "
-                        f"`{self.value.__module__}.{qualname}`."
+                        f"`{module_name}.{qualname}`."
                     )
                     hints = [
                         "If you are attempting to call a logging function (e.g. `_warnings.warn`), "
@@ -1360,11 +1434,8 @@ class SkipFunctionVariable(VariableTracker):
                         "Please file an issue on GitHub "
                         "so the PyTorch team can add support for it. ",
                     ]
-                elif (
-                    self.value.__module__ is not None
-                    and self.value.__module__.startswith("optree")
-                ):
-                    explanation = f"Dynamo cannot trace optree C/C++ function {self.value.__module__}.{qualname}."
+                elif module_or is not None and module_or.startswith("optree"):
+                    explanation = f"Dynamo cannot trace optree C/C++ function {module_name}.{qualname}."
                     hints = [
                         " Consider using torch.utils._pytree - "
                         "https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py"
@@ -1373,7 +1444,7 @@ class SkipFunctionVariable(VariableTracker):
                     torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
                 else:
                     explanation = (
-                        f"Dynamo does not know how to trace the builtin `{self.value.__module__}.{qualname}.` "
+                        f"Dynamo does not know how to trace the builtin `{module_name}.{qualname}.` "
                         f"This function is either a Python builtin (e.g. _warnings.warn) "
                         f"or a third-party C/C++ Python extension (perhaps created with pybind)."
                     )
@@ -1398,7 +1469,7 @@ class SkipFunctionVariable(VariableTracker):
             reason = self.reason if self.reason else "<missing reason>"
             unimplemented_v2(
                 gb_type="Attempted to call function marked as skipped",
-                context=f"module: {self.value.__module__}, qualname: {qualname}, skip reason: {reason}",
+                context=f"module: {module_name}, qualname: {qualname}, skip reason: {reason}",
                 explanation=explanation,
                 hints=hints,
             )
@@ -1465,6 +1536,12 @@ class WrapperUserFunctionVariable(VariableTracker):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        if hasattr(self.wrapper_obj, "cache_info"):
+            warnings.warn(
+                "Dynamo detected a call to a `functools.lru_cache` wrapped function."
+                "Dynamo currently ignores `functools.lru_cache` and directly traces the wrapped function."
+                "`functools.lru_cache` wrapped functions that read outside state may not be traced soundly."
+            )
         return variables.UserFunctionVariable(
             polyfills.getattr_and_trace
         ).call_function(
@@ -1548,8 +1625,13 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         args = ()
 
         if "async_op" in kwargs and kwargs["async_op"].as_python_constant():
-            unimplemented(
-                f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.fn}"
+            unimplemented_v2(
+                gb_type="async_op=True for distributed collectives",
+                context=f"{self.fn}, {args=}, {kwargs=}",
+                explanation=f"`torch.compile` doesn't support `async_op=True for {self.fn}",
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
 
         if self.fn in (
@@ -1583,7 +1665,14 @@ class FunctoolsWrapsVariable(UserFunctionVariable):
             def wraps(fn):
                 if isinstance(fn, variables.NestedUserFunctionVariable):
                     return fn.clone(wrapped_fn=args[0])
-                unimplemented(f"functools.wraps({fn})")
+                unimplemented_v2(
+                    gb_type="functools.wraps",
+                    context=f"{fn}",
+                    explanation="`torch.compile` can't trace `functools.wraps` on functions defined outside the compile region",
+                    hints=[
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
 
             return variables.LambdaVariable(wraps)
 
@@ -1609,7 +1698,14 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
             return variables.UserDefinedClassVariable(
                 value, mutation_type=ValueMutationNew()
             )
-        unimplemented("namedtuple with non constant args")
+        unimplemented_v2(
+            gb_type="namedtuple construction",
+            context=f"{args=}, {kwargs=}",
+            explanation="`torch.compile` only support certain input types for namedtuple",
+            hints=[
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
 
 class FunctoolsPartialVariable(VariableTracker):
@@ -1856,10 +1952,8 @@ class SysFunctionVariable(VariableTracker):
     def call_function(self, tx, args, kwargs):
         if self.value is sys.exc_info:
             return self.exc_info(tx)
-        elif self.value is sys.exception:
-            return self.exception(tx)
-        else:
-            unimplemented(f"sys.{self.value.__name__}")
+        assert self.value is sys.exception
+        return self.exception(tx)
 
 
 from torch._higher_order_ops.triton_kernel_wrap import (
@@ -1886,7 +1980,14 @@ class DynamoTritonHOPifier(TritonHOPifier):
         if isinstance(grid, BaseListVariable):
             return grid.as_proxy()
         else:
-            unimplemented(f"grid for the triton kernel is {type(grid)}")
+            unimplemented_v2(
+                gb_type="unsupported grid type for triton hop check_grid",
+                context=f"grid type = {type(grid)}",
+                explanation="`torch.compile` only supports list-like grid for check_grid",
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
     def call_grid(self, grid, meta, tx):
         meta = {variables.ConstantVariable.create(k): v for k, v in meta.items()}
