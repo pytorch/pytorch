@@ -11993,7 +11993,7 @@ class TestConsistency(TestCaseMPS):
     NEW_ALLOW_LIST = defaultdict(list)
     NEW_ALLOW_LIST_GRAD = defaultdict(list)
 
-    @ops(mps_ops_modifier(test_consistency_op_db), allowed_dtypes=MPS_DTYPES)
+    @ops(test_consistency_op_db, allowed_dtypes=MPS_DTYPES)
     def test_output_match(self, device, dtype, op):
         self.assertEqual(device, "mps:0")
         include_conjugated_inputs = dtype.is_complex and op.test_conjugated_samples
@@ -12163,12 +12163,7 @@ class TestConsistency(TestCaseMPS):
 class TestErrorInputs(TestCase):
     _ignore_not_implemented_error = True
 
-    @ops(
-        mps_ops_error_inputs_modifier(
-            [op for op in test_error_inputs_op_db if op.error_inputs_func is not None]
-        ),
-        dtypes=OpDTypes.none
-    )
+    @ops(test_error_inputs_op_db)
     def test_error_inputs(self, device, op):
         self.assertEqual(device, "mps:0")
 
