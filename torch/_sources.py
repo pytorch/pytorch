@@ -118,7 +118,7 @@ class ParsedDef(NamedTuple):
     file_lineno: int
 
 
-UNARY_OPS = {
+UNARY_OPS: dict = {
     ast.UAdd: operator.pos,
     ast.USub: operator.neg,
     ast.Not: operator.not_,
