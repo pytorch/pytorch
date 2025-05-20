@@ -353,7 +353,7 @@ class ValueAndMemoryLocationSet {
   friend class AliasDb;
 
  private:
-  ValueAndMemoryLocationSet(const AliasDb* db) : aliasDb_(db){};
+  ValueAndMemoryLocationSet(const AliasDb* db) : aliasDb_(db) {}
 
   const AliasDb* aliasDb_;
   ValueSet valueSet_;
