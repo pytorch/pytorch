@@ -15,6 +15,7 @@ import shutil
 import time
 import traceback
 from abc import ABC, abstractmethod
+from copy import copy
 from dataclasses import dataclass
 from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 
@@ -380,6 +381,10 @@ class InductorOutput(Generic[TOut], ABC):
     """
 
     @abstractmethod
+    def pre_save(self) -> None:
+        ...
+
+    @abstractmethod
     def load(self, example_inputs) -> TOut:
         ...
 
@@ -389,9 +394,54 @@ class InductorOutput(Generic[TOut], ABC):
 
 
 @dataclass
+class CompiledFxGraphLoadable(InductorOutput[CompiledFxGraph]):
+    """
+    A full compiled fx graph that doesn't need to lookup the FxGraphCache
+    to run
+    """
+
+    result: CompiledFxGraph
+
+    def pre_save(self) -> None:
+        disk_compiled_graph = copy(self.result)
+        disk_compiled_graph.prepare_for_serialization()
+        self.result = disk_compiled_graph
+        return
+
+    def load(self, example_inputs) -> CompiledFxGraph:
+        self.example_inputs = example_inputs
+
+        return self.result
+
+    def post_compile(
+        self, result: CompiledFxGraph, fx_config: _CompileFxKwargs
+    ) -> CompiledFxGraph:
+        constants = CompiledFxGraphConstants()
+        # Cache hit specific post compile
+        graph, cache_info = FxGraphCache.cache_hit_post_compile(result, {}, constants)
+        if graph is None:
+            raise BypassAOTAutogradCache("Failed to reload cache entry from disk")
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "fx_graph_bundled_cache_hit",  # always a hit
+                "encoding": "json",
+            },
+            payload_fn=lambda: json.dumps(cache_info),
+        )
+        counters["inductor"]["fxgraph_cache_hit"] += 1
+        # Run normal post compile
+        graph.post_compile(self.example_inputs, constants, fx_config)
+        return graph
+
+
+@dataclass
 class FxGraphCacheLoadable(InductorOutput[CompiledFxGraph]):
     fx_graph_cache_info: tuple[str, list[str]]
     fx_graph_guard_expr: Optional[str]
+
+    def pre_save(self):
+        return
 
     def _is_backward(self) -> bool:
         return False
@@ -498,6 +548,18 @@ class CompiledBackward(GenericCompiledBackward[CompiledFxGraph], FxGraphCacheLoa
         return True
 
 
+# Forward types don't have any extra parameters, so this is just a TypeAlias, in essence
+class BundledCompiledForward(CompiledFxGraphLoadable):
+    pass
+
+
+@dataclass
+class BundledCompiledBackward(
+    GenericCompiledBackward[CompiledFxGraph], CompiledFxGraphLoadable
+):
+    pass
+
+
 TForward = TypeVar("TForward", bound=InductorOutput)
 TBackward = TypeVar("TBackward", bound=GenericCompiledBackward)
 
@@ -550,6 +612,15 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
     sanitized_aot_config: AOTConfig
 
     guards_expr: Optional[str]
+
+    def pre_save(self):
+        """
+        Perform any preparations to make the cache entry ready for serialization.
+        """
+        check_metadata_cacheable(self.runtime_metadata)
+        self.compiled_fw.pre_save()
+        if self.compiled_bw is not None:
+            self.compiled_bw.pre_save()
 
     # Turn cache entry into the original callable
     def wrap_post_compile(
@@ -733,6 +804,15 @@ class AOTAutogradCacheEntry(
     """
     Regular AOTAutogradCacheEntry: saves the forward/backward FxGraphCache keys
     and looks them up in FxGraphCache on load
+    """
+
+
+class BundledAOTAutogradCacheEntry(
+    GenericAOTAutogradCacheEntry[BundledCompiledForward, BundledCompiledBackward]
+):
+    """
+    AOTAutogradCacheEntry where we save the entire CompiledFxGraph instead
+    of relying on cache keys from FxGraphCache
     """
 
 
@@ -1041,7 +1121,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
     def save(key: str, entry: GenericAOTAutogradCacheEntry, remote: bool):
         """Save a single entry into the cache."""
         try:
-            check_metadata_cacheable(entry.runtime_metadata)
+            entry.pre_save()
             content = pickle.dumps(entry)
             CacheArtifactManager.record_artifact(
                 CacheArtifactType.AOT_AUTOGRAD, key, content
@@ -1091,3 +1171,103 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
             "FbRemoteAOTAutogradCache",
             "RemoteAOTAutogradCache",
         )
+
+    @staticmethod
+    def make_entry(
+        compiled_fw_func: CompiledFxGraph,
+        compiled_bw_func: Optional[CompiledFxGraph],
+        aot_joint_graph_str: Optional[str],
+        aot_forward_graph_str: Optional[str],
+        aot_backward_graph_str: Optional[str],
+        runtime_metadata: ViewAndMutationMeta,
+        dispatch_wrappers: list[CompilerWrapper],
+        maybe_subclass_meta: Optional[SubclassMeta],
+        num_fw_outs_saved_for_bw: Optional[int],
+        indices_of_inps_to_detach: list[int],
+        forward_time_taken_ns: int,
+        backward_time_taken_ns: int,
+        sanitized_aot_config: AOTConfig,
+        guards_expr: Optional[str],
+        backward_state_indices: Optional[list[int]],
+        num_symints_saved_for_bw: Optional[int],
+    ) -> GenericAOTAutogradCacheEntry:
+        if config.bundled_autograd_cache:
+            # Helper function to unwrap all the wrappers we added during aotdispatch
+            # They get reapplied on cache load
+            def unwrap_compiled_fx_graph(obj):
+                while hasattr(obj, "__wrapped__"):
+                    obj = obj.__wrapped__
+                assert isinstance(obj, CompiledFxGraph)
+                return obj
+
+            compiled_fw_graph = unwrap_compiled_fx_graph(compiled_fw_func)
+            bundled_compiled_forward = BundledCompiledForward(compiled_fw_graph)
+            bundled_compiled_backward = None
+            if compiled_bw_func is not None:
+                assert backward_state_indices is not None
+                assert num_symints_saved_for_bw is not None
+                compiled_bw_graph = unwrap_compiled_fx_graph(compiled_bw_func)
+                bundled_compiled_backward = BundledCompiledBackward(
+                    compiled_bw_graph, backward_state_indices, num_symints_saved_for_bw
+                )
+
+            return BundledAOTAutogradCacheEntry(
+                compiled_fw=bundled_compiled_forward,
+                compiled_bw=bundled_compiled_backward,
+                aot_joint_graph_str=aot_joint_graph_str,
+                aot_forward_graph_str=aot_forward_graph_str,
+                aot_backward_graph_str=aot_backward_graph_str,
+                runtime_metadata=runtime_metadata,
+                dispatch_wrappers=dispatch_wrappers,
+                maybe_subclass_meta=maybe_subclass_meta,
+                num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
+                indices_of_inps_to_detach=indices_of_inps_to_detach,
+                forward_time_taken_ns=forward_time_taken_ns,
+                backward_time_taken_ns=backward_time_taken_ns,
+                sanitized_aot_config=sanitized_aot_config,
+                guards_expr=guards_expr,
+            )
+
+        else:
+            fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
+            fw_debug_lines = getattr(
+                compiled_fw_func, "_fx_graph_cache_debug_lines", []
+            )
+
+            assert fw_key is not None
+            compiled_forward = CompiledForward(
+                fx_graph_cache_info=(fw_key, fw_debug_lines),
+                fx_graph_guard_expr=getattr(compiled_fw_func, "guards_expr", None),
+            )
+            compiled_backward = None
+            if compiled_bw_func is not None:
+                bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
+                bw_debug_lines = getattr(
+                    compiled_bw_func, "_fx_graph_cache_debug_lines", []
+                )
+                assert bw_key is not None
+                assert backward_state_indices is not None
+                assert num_symints_saved_for_bw is not None
+                compiled_backward = CompiledBackward(
+                    fx_graph_cache_info=(bw_key, bw_debug_lines),
+                    fx_graph_guard_expr=getattr(compiled_bw_func, "guards_expr", None),
+                    backward_state_indices=backward_state_indices,
+                    num_symints_saved_for_bw_=num_symints_saved_for_bw,
+                )
+
+            return AOTAutogradCacheEntry(
+                compiled_fw=compiled_forward,
+                compiled_bw=compiled_backward,
+                aot_joint_graph_str=aot_joint_graph_str,
+                aot_forward_graph_str=aot_forward_graph_str,
+                aot_backward_graph_str=aot_backward_graph_str,
+                runtime_metadata=runtime_metadata,
+                dispatch_wrappers=dispatch_wrappers,
+                maybe_subclass_meta=maybe_subclass_meta,
+                num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
+                indices_of_inps_to_detach=indices_of_inps_to_detach,
+                forward_time_taken_ns=forward_time_taken_ns,
+                backward_time_taken_ns=backward_time_taken_ns,
+                sanitized_aot_config=sanitized_aot_config,
+                guards_expr=guards_expr,
+            )
