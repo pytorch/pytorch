@@ -4,14 +4,11 @@
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
-typedef struct {
-  std::shared_ptr<at::native::mps::MetalKernelFunction> kernelFunction;
-} AOTIMetalKernelFunctionOpaque;
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+struct AOTIMetalKernelFunctionOpaque;
 using AOTIMetalKernelFunctionHandle = AOTIMetalKernelFunctionOpaque*;
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_set_arg(

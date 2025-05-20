@@ -1,10 +1,8 @@
-#if !defined(C10_MOBILE) && !defined(ANDROID)
+#if defined(__APPLE__)
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_mps.h>
 
 namespace torch::inductor {
 
-// NOTICE: Following APIs are subject to change due to active development
-// We provide NO BC guarantee for these APIs
 AOTIModelContainerRunnerMps::AOTIModelContainerRunnerMps(
     const std::string& model_so_path,
     size_t num_models,
