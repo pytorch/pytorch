@@ -3997,8 +3997,8 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
         return _reshape_view_helper_core_alg(a, shape, allow_copy)
     except GuardOnDataDependentSymNode as e:
-        # For compile this function is only called on view operations since reshape_symint will do a clone and 
-        # compose to view before calling thisGuardOnDataDependentSymNode does not show up for eager.
+        # For compile this function is only called on view operations since reshape_symint will do a clone and
+        # compose to view before calling this. GuardOnDataDependentSymNode does not show up for eager.
         assert not allow_copy
         return _view_simple(a, shape, e)
 

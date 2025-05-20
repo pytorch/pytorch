@@ -318,12 +318,12 @@ static at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymInt
 
   auto stride = at::detail::computeStride(self.sym_sizes(), self.sym_strides(), inferred_size);
   if (!stride.has_value()){
-    // See if the view is valid. If it's not, then we copy.
-    // It's OK to copy, because _unsafe_view(x) guarantees that x isn't used
-    // anymore.
+    // We hit this when we decompose a reshape into clone + unsafe_view. But we do not receive the clone here,
+    // but rather the origianl tensor before the clone. So we clone again to compute the stride of the output.
+
     if (!stride.has_value()) {
       auto tmp = self_.contiguous();
-      stride = tmp.sym_strides();
+      stride = at::detail::computeStride(tmp.sym_sizes(), tmp.sym_strides(), inferred_size);
     }
   }
   out.unsafeGetTensorImpl()->set_sizes_and_strides(inferred_size, stride.value());
