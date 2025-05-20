@@ -264,7 +264,7 @@ def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
         # would have outputs that are aliasing inputs.
         # For example in cases where the backward of the function is simply
         # passing the upstream gradients through.
-        maybe_clone = clone_outputs_aliasing_inputs(primals)
+        maybe_clone = clone_outputs_aliasing_inputs(args_and_grad_outs)
 
         return [
             (
