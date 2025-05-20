@@ -138,7 +138,7 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   using detail::CPUGeneratorImplStateLegacy;
 
   static_assert(std::is_standard_layout_v<CPUGeneratorImplState>, "CPUGeneratorImplState is not a PODType");
-  static const size_t size = sizeof(CPUGeneratorImplState);
+  static constexpr size_t size = sizeof(CPUGeneratorImplState);
 
   detail::check_rng_state(new_state);
 
