@@ -3343,7 +3343,7 @@ def get_guard_fail_reason_helper(
         reason_str = strip_local_scope(f"{compile_id}: " + "; ".join(all_reasons))
     else:
         reason_str = strip_local_scope(f"{compile_id}: " + "; ".join(all_reasons[:1]))
-    
+
     if return_all:
         return reason_str, reasons, failure_reasons
     return reason_str
@@ -3357,7 +3357,9 @@ def get_guard_fail_reason(
 ) -> tuple[str, list[str], list[str]]:
     if isinstance(guard_manager, DeletedGuardManagerWrapper):
         return f"{compile_id}: {guard_manager.invalidation_reason}", [], []
-    reason_str, code_reasons, fail_reasons = get_guard_fail_reason_helper(guard_manager, f_locals, compile_id, return_all=True)
+    reason_str, code_reasons, fail_reasons = get_guard_fail_reason_helper(  # type: ignore[misc]
+        guard_manager, f_locals, compile_id, return_all=True
+    )
     guard_failures[orig_code_map[code]].append(reason_str)
 
     try:
@@ -3373,7 +3375,9 @@ def get_guard_fail_reason(
     return reason_str, code_reasons, fail_reasons
 
 
-def _extract_recompiled_dynamic_sources(fail_reasons: list[str], frame_locals: dict[str, object], guard_manager: GuardFn) -> tuple[list[str], bool]:
+def _extract_recompiled_dynamic_sources(
+    fail_reasons: list[str], frame_locals: dict[str, object], guard_manager: GuardFn
+) -> tuple[list[str], bool]:
     """
     Goes through a list of guard failure reasons, and extracts source names for tensors we've dynamically recompiled.
     Returns a list of sources, and a boolean indicating whether a parameter was included.
@@ -3381,21 +3385,25 @@ def _extract_recompiled_dynamic_sources(fail_reasons: list[str], frame_locals: d
     scope = {"L": frame_locals, "G": guard_manager.global_scope["G"]}
     scope.update(guard_manager.closure_vars)
     has_parameter = False
-    shape_sources = OrderedSet()
+    shape_sources: OrderedSet[str] = OrderedSet()
     pattern = r"tensor '(.*)' size mismatch at index .* expected (\d+), actual (\d+).*"
     for reason in fail_reasons:
         if (match := re.search(pattern, reason)) is not None:
             name, size_orig, size_new = match.groups()
             tensor = eval(name, scope)
             size_orig, size_new = int(size_orig), int(size_new)
-            if size_orig >= 2 and size_new >= 2:  # these suggestions won't help for 0/1 specialization.
+            if (
+                size_orig >= 2 and size_new >= 2
+            ):  # these suggestions won't help for 0/1 specialization.
                 if isinstance(tensor, torch.nn.Parameter):
                     has_parameter = True
                 shape_sources.add(name)
     return list(shape_sources), has_parameter
 
 
-def _suggest_dynamic_whitelist(dynamic_sources: OrderedSet, has_dynamic_parameter: bool) -> str:
+def _suggest_dynamic_whitelist(
+    dynamic_sources: OrderedSet[str], has_dynamic_parameter: bool
+) -> str:
     """
     Adds suggested dynamic whitelist to recompile logging, based on detected sources.
     """
@@ -3405,8 +3413,8 @@ def _suggest_dynamic_whitelist(dynamic_sources: OrderedSet, has_dynamic_paramete
         if len(dynamic_sources) > 1:
             reason_str += "\nMultiple size mismatches found. "
         reason_str += (
-            f"The following environment variable would enable dynamic compilation to start, avoiding this recompile: "
-            + f"TORCH_COMPILE_DYNAMIC_SOURCES=\"{','.join(dynamic_sources)}\""
+            "The following environment variable would enable dynamic compilation to start, avoiding this recompile: "
+            + f'TORCH_COMPILE_DYNAMIC_SOURCES="{",".join(dynamic_sources)}"'
         )
     if has_dynamic_parameter:
         reason_str += (
@@ -3425,7 +3433,7 @@ def get_and_maybe_log_recompilation_reasons(
     Raises a RecompileError if `config.error_on_recompile` is enabled.
     """
     reasons = []
-    dynamic_sources = OrderedSet()
+    dynamic_sources: OrderedSet[str] = OrderedSet()
     has_dynamic_parameter = False
     while cache_entry is not None:
         reason, _, fail_reasons = get_guard_fail_reason(
@@ -3437,7 +3445,11 @@ def get_and_maybe_log_recompilation_reasons(
         if reason:
             reasons.append(reason)
             if not isinstance(cache_entry.guard_manager, DeletedGuardManagerWrapper):
-                new_dynamic_sources, dynamic_param = _extract_recompiled_dynamic_sources(fail_reasons, frame.f_locals, cache_entry.guard_manager)
+                new_dynamic_sources, dynamic_param = (
+                    _extract_recompiled_dynamic_sources(
+                        fail_reasons, frame.f_locals, cache_entry.guard_manager
+                    )
+                )
                 dynamic_sources.update(new_dynamic_sources)
                 has_dynamic_parameter |= dynamic_param
         cache_entry = cache_entry.next
@@ -3458,7 +3470,9 @@ def get_and_maybe_log_recompilation_reasons(
         guard_failure_details = (
             f"triggered by the following guard failure(s):\n{failures}"
         )
-        guard_failure_details += _suggest_dynamic_whitelist(dynamic_sources, has_dynamic_parameter)
+        guard_failure_details += _suggest_dynamic_whitelist(
+            dynamic_sources, has_dynamic_parameter
+        )
         message = (
             f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}\n"
             f"{textwrap.indent(guard_failure_details, '    ')}"

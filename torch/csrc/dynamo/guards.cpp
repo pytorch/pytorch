@@ -1416,7 +1416,9 @@ class GuardDebugInfo {
 
   // This constructor is used for evaluable code parts only.
   GuardDebugInfo(bool result, py::list code_parts, int num_guards_executed)
-      : result(result), verbose_code_parts(std::move(code_parts)), num_guards_executed(num_guards_executed) {}
+      : result(result),
+        verbose_code_parts(std::move(code_parts)),
+          num_guards_executed(num_guards_executed) {}
 
   GuardDebugInfo(
       bool result,
@@ -2627,7 +2629,8 @@ class GuardManager {
       num_guards_executed++;
       if (!debug_info.result) {
         guards_failed = true;
-        if (!debug_info.verbose_code_parts.empty() && verbose_code_parts.empty()) {
+        if (!debug_info.verbose_code_parts.empty() &&
+            verbose_code_parts.empty()) {
           verbose_code_parts = debug_info.verbose_code_parts;
         }
         guard_fail_reasons += debug_info.failure_reasons;
@@ -2636,7 +2639,7 @@ class GuardManager {
 
     if (guards_failed) {
       return GuardDebugInfo(
-        false, verbose_code_parts, guard_fail_reasons, num_guards_executed);
+          false, verbose_code_parts, guard_fail_reasons, num_guards_executed);
     }
     return GuardDebugInfo(true, num_guards_executed);
   }
@@ -2654,7 +2657,8 @@ class GuardManager {
       num_guards_executed += debug_info.num_guards_executed;
       if (!debug_info.result) {
         guards_failed = true;
-        if (!debug_info.verbose_code_parts.empty() && verbose_code_parts.empty()) {
+        if (!debug_info.verbose_code_parts.empty() &&
+            verbose_code_parts.empty()) {
           verbose_code_parts = debug_info.verbose_code_parts;
         }
         guard_fail_reasons += debug_info.failure_reasons;
@@ -2663,7 +2667,7 @@ class GuardManager {
 
     if (guards_failed) {
       return GuardDebugInfo(
-        false, verbose_code_parts, guard_fail_reasons, num_guards_executed);
+          false, verbose_code_parts, guard_fail_reasons, num_guards_executed);
     }
     return GuardDebugInfo(true, num_guards_executed);
   }

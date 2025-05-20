@@ -192,6 +192,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
                 self.lin = torch.nn.Linear(4, 4)
                 self.attr = torch.randn(4)
                 self.mode = "a"
+
             def forward(self, x):
                 if self.mode == "a":
                     return self.lin(x) + self.attr
@@ -208,7 +209,9 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             opt_f(torch.randn(9, 5))
 
         with log_settings(kwargs_to_settings(recompiles=True)):
-            with self.assertLogs(logger=torch._dynamo.guards.recompiles_log, level="DEBUG") as logs:
+            with self.assertLogs(
+                logger=torch._dynamo.guards.recompiles_log, level="DEBUG"
+            ) as logs:
                 run()
 
                 # check recompile reason only points to .mode attribute
@@ -221,7 +224,9 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
                 self.assertTrue("size mismatch at index" not in logs.records[0].msg)
 
                 # check whitelist
-                match = re.search(r'TORCH_COMPILE_DYNAMIC_SOURCES="(.*)"', logs.records[0].msg)
+                match = re.search(
+                    r'TORCH_COMPILE_DYNAMIC_SOURCES="(.*)"', logs.records[0].msg
+                )
                 self.assertTrue(match is not None)
                 whitelist = match.group(1)
                 for src_name in [
@@ -233,7 +238,9 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
                     self.assertTrue(src_name in whitelist)
 
         with log_settings(kwargs_to_settings(recompiles_verbose=True)):
-            with self.assertLogs(logger=torch._dynamo.guards.recompiles_verbose_log, level="DEBUG") as logs:
+            with self.assertLogs(
+                logger=torch._dynamo.guards.recompiles_verbose_log, level="DEBUG"
+            ) as logs:
                 run()
 
                 # check all recompile reasons
