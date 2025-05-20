@@ -460,6 +460,12 @@ max_autotune_subproc_graceful_timeout_seconds = 0.0
 # DEPRECATED. This setting is ignored.
 max_autotune_subproc_terminate_timeout_seconds = 0.0
 
+# Maximum time in seconds to wait for precompilation of kernels during autotuning
+precompilation_timeout_seconds: int = Config(
+    default= 60 * 60,
+    type=int,
+)
+
 # If autotuning in subprocess, whether to use multiple devices
 autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
 

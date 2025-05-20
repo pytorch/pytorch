@@ -1821,7 +1821,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # arg, the function will be called instead of
         # generating a random torch.Tensor for benchmarking.
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
-        precompilation_timeout_seconds: int = 60 * 60,
+        precompilation_timeout_seconds: int = config.precompilation_timeout_seconds,
         return_multi_template=False,
     ):
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
@@ -2000,7 +2000,7 @@ class AlgorithmSelectorCache(PersistentCache):
         choices,
         name: str,
         inputs_key: str,
-        precompilation_timeout_seconds: Optional[int] = 60 * 60,
+        precompilation_timeout_seconds: Optional[int] = config.precompilation_timeout_seconds,
     ) -> Callable[[], None]:
         """
         Returns a function that precompiles the given choices.
