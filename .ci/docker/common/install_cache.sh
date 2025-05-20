@@ -57,14 +57,19 @@ sed -e 's|PATH="\(.*\)"|PATH="/opt/cache/bin:\1"|g' -i /etc/environment
 export PATH="/opt/cache/bin:$PATH"
 
 # Setup compiler cache
-# Detect OS and install accordingly
-if command -v dnf &> /dev/null; then
-  # CentOS/RHEL
-  install_centos
-else
-  # Ubuntu/Debian
-  install_ubuntu
-fi
+ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
+case "$ID" in
+  ubuntu)
+    install_ubuntu
+    ;;
+  centos)
+    install_centos
+    ;;
+  *)
+    echo "Unable to determine OS..."
+    exit 1
+    ;;
+esac
 chmod a+x /opt/cache/bin/sccache
 
 function write_sccache_stub() {
