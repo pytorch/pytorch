@@ -2259,6 +2259,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skip_on_cpu
     def test_epilogue_fused(self, device):
+        # set so that metrics appear
+        torch._logging.set_logs(inductor_metrics=True)
+
         @torch.compile
         def f(q, k, v):
             out = flex_attention(q, k, v)

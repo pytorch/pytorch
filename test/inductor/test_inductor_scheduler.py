@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import torch
+import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
 from torch._inductor.ir import FixedLayout
@@ -40,7 +41,72 @@ def cT(device, dtype):
     return T
 
 
+inductor_metrics_log = torch._logging.getArtifactLogger(__name__, "inductor_metrics")
+
+
+def test_cases(device, dtype):
+    T = cT(device, dtype)
+
+    def composite(x, y, z):
+        tmp = torch.mm(x + 10, y / 12)
+        return torch.mm(tmp, z)
+
+    def composite_relu(x, y):
+        tmp = torch.mm(x, y)
+        return torch.relu(tmp)
+
+    test_cases = [
+        (torch.mm, [T(4, 5), T(5, 6)], {}),
+        (torch.add, [T(4, 5), T(4, 5)], {}),
+        (composite, [T(5, 4), T(4, 3), T(3, 12)], {}),
+        (composite_relu, [T(5, 4), T(4, 3)], {}),
+    ]
+    return test_cases
+
+
 class TestScheduler(TestCase):
+    @dtypes(torch.float, torch.float16)
+    def test_get_estimated_runtime_logging(self, device, dtype):
+        tc = test_cases(device, dtype)
+        expected_metrics = [
+            # num_bytes_accessed, node_runtimes, nodes_num_elem
+            (148, (0,), (37,)),
+            (120, (0,), (30,)),
+            (444, (0, 0, 0, 0), (20, 12, 23, 55)),
+            (154, (0, 0), (23, 15)),
+        ]
+        tc_plus_metrics = zip(tc, expected_metrics)
+        # turn off logging of inductor metrics so that they don't get logged
+        torch._logging.set_logs(inductor_metrics=False)
+        for tc, met in tc_plus_metrics:
+            op, example_inputs, kwargs = tc
+            enba, enr, enne = met
+            comp = torch.compile(op)
+            torch._dynamo.reset()
+            with fresh_inductor_cache():
+                comp(*example_inputs, **kwargs)
+            self.assertEqual(enba, 0)
+            self.assertEqual(enr, 0)
+            self.assertEqual(enne, 0)
+            metrics.reset()
+
+        breakpoint()
+        torch._logging.set_logs(inductor_metrics=True)
+        for tc, met in tc_plus_metrics:
+            op, example_inputs, kwargs = tc
+            enba, enr, enne = met
+
+            comp = torch.compile(op)
+            # next two lines are required, otherwise the flops will be cached from pervious runs of this function.
+            torch._dynamo.reset()
+            with fresh_inductor_cache():
+                # actually run to set the counters
+                comp(*example_inputs, **kwargs)
+            self.assertEqual(enba, metrics.num_bytes_accessed)
+            self.assertEqual(enr, tuple(m[1] for m in metrics.node_runtimes))
+            self.assertEqual(enne, tuple(m[1] for m in metrics.nodes_num_elem))
+            metrics.reset()
+
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @parametrize(
@@ -69,23 +135,10 @@ class TestScheduler(TestCase):
             )
         ):
             return
-        T = cT(device, dtype)
 
-        def composite(x, y, z):
-            tmp = torch.mm(x + 10, y / 12)
-            return torch.mm(tmp, z)
+        tc = test_cases(device, dtype)
 
-        def composite_relu(x, y):
-            tmp = torch.mm(x, y)
-            return torch.relu(tmp)
-
-        test_cases = [
-            (torch.mm, [T(4, 5), T(5, 6)], {}),
-            (torch.add, [T(4, 5), T(4, 5)], {}),
-            (composite, [T(5, 4), T(4, 3), T(3, 12)], {}),
-            (composite_relu, [T(5, 4), T(4, 3)], {}),
-        ]
-        for op, example_inputs, kwargs in test_cases:
+        for op, example_inputs, kwargs in tc:
             comp = torch.compile(op, options=options)
             # next two lines are required, otherwise the flops will be cached from pervious runs of this function.
             torch._dynamo.reset()
