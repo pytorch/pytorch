@@ -398,6 +398,11 @@ class MultiplicativeLR(LRScheduler):
                     f"Expected {len(optimizer.param_groups)} lr_lambdas, but got {len(lr_lambda)}"
                 )
             self.lr_lambdas = list(lr_lambda)
+        for lr_lambda in self.lr_lambdas:
+            if not callable(lr_lambda):
+                raise TypeError(
+                    f"lr_lambda should be a function, but got {type(lr_lambda).__name__}"
+                )
         super().__init__(optimizer, last_epoch)
 
     @override
@@ -995,39 +1000,39 @@ class PolynomialLR(LRScheduler):
 
 
 class CosineAnnealingLR(LRScheduler):
-    r"""Set the learning rate of each parameter group using a cosine annealing schedule.
+    r"""
+    Set the learning rate of each parameter group using a cosine annealing schedule.
 
-    The :math:`\eta_{max}` is set to the initial lr and
-    :math:`T_{cur}` is the number of epochs since the last restart in SGDR:
-
-    .. math::
-        \begin{aligned}
-            \eta_t & = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})\left(1
-            + \cos\left(\frac{T_{cur}}{T_{max}}\pi\right)\right),
-            & T_{cur} \neq (2k+1)T_{max}; \\
-            \eta_{t+1} & = \eta_{t} + \frac{1}{2}(\eta_{max} - \eta_{min})
-            \left(1 - \cos\left(\frac{1}{T_{max}}\pi\right)\right),
-            & T_{cur} = (2k+1)T_{max}.
-        \end{aligned}
-
-    When last_epoch=-1, sets initial lr as lr. Notice that because the schedule
-    is defined recursively, the learning rate can be simultaneously modified
-    outside this scheduler by other operators. If the learning rate is set
-    solely by this scheduler, the learning rate at each step becomes:
+    The learning rate is updated recursively using:
 
     .. math::
-        \eta_t = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})\left(1 +
-        \cos\left(\frac{T_{cur}}{T_{max}}\pi\right)\right)
+        \eta_{t+1} = \eta_{\min} + (\eta_t - \eta_{\min}) \cdot
+        \frac{1 + \cos\left(\frac{(T_{cur}+1) \pi}{T_{max}}\right)}
+            {1 + \cos\left(\frac{T_{cur} \pi}{T_{max}}\right)}
 
-    It has been proposed in
-    `SGDR: Stochastic Gradient Descent with Warm Restarts`_. Note that this only
-    implements the cosine annealing part of SGDR, and not the restarts.
+    This implements a recursive approximation of the closed-form schedule proposed in
+    `SGDR: Stochastic Gradient Descent with Warm Restarts`_:
+
+    .. math::
+        \eta_t = \eta_{\min} + \frac{1}{2}(\eta_{\max} - \eta_{\min}) \left(
+            1 + \cos\left(\frac{T_{cur} \pi}{T_{max}}\right) \right)
+
+    where:
+
+    - :math:`\eta_t` is the learning rate at step :math:`t`
+    - :math:`T_{cur}` is the number of epochs since the last restart
+    - :math:`T_{max}` is the maximum number of epochs in a cycle
+
+    Note:
+        Although SGDR includes periodic restarts, this implementation performs cosine annealing
+        **without restarts**, so :math:`T_{cur} = t` and increases monotonically with each call
+        to :meth:`step`.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
         T_max (int): Maximum number of iterations.
         eta_min (float): Minimum learning rate. Default: 0.
-        last_epoch (int): The index of last epoch. Default: -1.
+        last_epoch (int): The index of the last epoch. Default: -1.
 
     .. _SGDR\: Stochastic Gradient Descent with Warm Restarts:
         https://arxiv.org/abs/1608.03983
@@ -1788,7 +1793,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
             epoch = self.last_epoch + 1
             self.T_cur = self.T_cur + 1
             if self.T_cur >= self.T_i:
-                self.T_cur = self.T_cur - self.T_i
+                self.T_cur = self.T_cur % self.T_i
                 self.T_i = self.T_i * self.T_mult
         else:
             if epoch < 0:

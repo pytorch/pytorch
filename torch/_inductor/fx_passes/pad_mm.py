@@ -326,7 +326,7 @@ def should_exclude_padding_time(match: Match, arg_name: str) -> bool:
     if not fetch_fake_tensors(match, (arg_name,))[0].is_contiguous():
         return False
 
-    # TODO - see issue https://githpub.com/pytorch/pytorch/issues/128889
+    # TODO - see issue https://github.com/pytorch/pytorch/issues/128889
     # We would only able to completely plan these out if we were only doing
     # first dimension padding. non-first we would still need a copy
     # because these outputs are fixed dense.

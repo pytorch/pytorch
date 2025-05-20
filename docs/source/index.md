@@ -33,13 +33,16 @@ Features described in this documentation are classified by release status:
 :maxdepth: 2
 
 pytorch-api
+notes
 ```
 
 ```{toctree}
 :glob:
+:hidden:
 :maxdepth: 2
 
-notes
+community/index
+C++ <https://docs.pytorch.org/cppdocs/>
 ```
 
 ## Indices and tables

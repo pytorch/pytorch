@@ -158,37 +158,19 @@ def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., A
         return None
     if fn in _maybe_layout_constraints:
         return _maybe_layout_constraints[fn]
-    # OpOverload with custom lowerings override tag-based layout constraints
-    if fn in lowerings:
-        _maybe_layout_constraints[fn] = None
+    return None
+
+
+def tag_to_layout_constraint(tag):
+    if tag == torch._C.Tag.needs_exact_strides:
+        return constrain_to_fake_tensors
+    if tag == torch._C.Tag.needs_contiguous_strides:
+        return require_contiguous_strides
+    if tag == torch._C.Tag.needs_fixed_stride_order:
+        return constrain_to_fx_strides
+    if tag == torch._C.Tag.flexible_layout:
         return None
-    # We lazily register tag-based layout constraints.
-
-    def handle_layout_constraint_tag(tag):
-        if tag is torch._C.Tag.needs_fixed_stride_order:
-            _maybe_layout_constraints[fn] = constrain_to_fx_strides
-            return _maybe_layout_constraints[fn]
-        elif tag is torch._C.Tag.flexible_layout:
-            _maybe_layout_constraints[fn] = None
-            return None
-        else:
-            raise AssertionError(f"Unknown layout constraint tag: {tag}")
-
-    tag = get_layout_constraint_tag(fn)
-    return handle_layout_constraint_tag(tag)
-
-
-def get_layout_constraint_tag(fn):
-    tags_by_priority = [
-        torch._C.Tag.needs_fixed_stride_order,
-        torch._C.Tag.flexible_layout,
-    ]
-    for tag in tags_by_priority:
-        if tag in fn.tags:
-            return tag
-    if torch._library.utils.is_builtin(fn):
-        return torch._C.Tag.flexible_layout
-    return getattr(torch._C.Tag, config.custom_op_default_layout_constraint)
+    raise AssertionError(f"Unknown layout constraint tag: {tag}")
 
 
 def assert_nyi(cond, msg):
@@ -1150,13 +1132,14 @@ def repeat(x, repeats):
                     index[i] = ModularIndexing(index[i], 1, old_size[i])
         return x_loader(index)
 
-    old_size_product = V.graph.sizevars.size_hint(sympy_product(old_size))
-    if old_size_product > 0 and not free_unbacked_symbols(new_size):
-        # maybe realize the input but skip for unbacked symints since it'll
-        # choke on the size hint.
-        x.mark_reuse(
-            V.graph.sizevars.size_hint(sympy_product(new_size)) // old_size_product
-        )
+    if not free_unbacked_symbols(old_size) and not free_unbacked_symbols(new_size):
+        old_size_product = V.graph.sizevars.size_hint(sympy_product(old_size))
+        if old_size_product > 0:
+            # maybe realize the input but skip for unbacked symints since it'll
+            # choke on the size hint.
+            x.mark_reuse(
+                V.graph.sizevars.size_hint(sympy_product(new_size)) // old_size_product
+            )
 
     x_loader = x.make_loader()
     return Pointwise.create(
@@ -2345,15 +2328,21 @@ def searchsorted(
             )
 
     device = self.get_device()
-    return Pointwise.create(
+    result = Pointwise.create(
         device=device,
         dtype=index_dtype,
         inner_fn=inner_fn,
         ranges=self.shape,
     )
+    # see [NOTE: inductor bucketize realize]
+    result.realize()
+
+    return result
 
 
-@register_lowering(aten.bucketize, type_promotion_kind=None)
+@register_lowering(
+    aten.bucketize, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
+)
 def bucketize(
     input: TensorBox,
     boundaries: TensorBox,
@@ -2393,12 +2382,23 @@ def bucketize(
 
         return indices
 
-    return Pointwise.create(
+    result = Pointwise.create(
         device=device,
         dtype=index_dtype,
         inner_fn=inner_fn,
         ranges=input.get_size(),
     )
+
+    # [NOTE: inductor bucketize realize]
+    # bucketize_binary_search is relatively expensive, so we don't want to re-compute
+    # it unnecessarily. If we run bucketize() and then broadcast the result, we don't
+    # want this to be fused into a large number of duplicate bucketize() computations
+    # for each of the elements in the result.
+    #
+    # If no broadcasting occurs, fusions can still occur in scheduler.py
+    result.realize()
+
+    return result
 
 
 def require_dense(_, *args, **kwargs):
@@ -2411,6 +2411,15 @@ def require_dense(_, *args, **kwargs):
 def require_contiguous(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
         ir.IRNode, ir.ExternKernel.require_contiguous, (args, kwargs)
+    )
+    return args, kwargs
+
+
+def require_contiguous_strides(_, *args, **kwargs):
+    # TODO: combine this with require_contiguous after
+    # https://github.com/pytorch/pytorch/pull/148235 lands.
+    args, kwargs = pytree.tree_map_only(
+        ir.IRNode, ir.ExternKernel.require_contiguous_strides, (args, kwargs)
     )
     return args, kwargs
 
@@ -2612,6 +2621,10 @@ make_fallback(aten.exponential.default, warn=False)  # (fails accuracy on test_t
 make_fallback(aten._pdist_forward)  # Has decomp. Needs benchmarks
 make_fallback(aten.soft_margin_loss_backward, warn=False)  # py_impl?
 make_fallback(aten._fused_rms_norm, warn=False)  # (MPS-only and faster than decomp)
+if torch.xpu.is_available():
+    make_fallback(
+        aten.embedding_dense_backward, warn=False
+    )  # (XPU-only and faster than decomp)
 
 
 # 1.5) Easy or Impossible
@@ -3105,6 +3118,7 @@ def _assert_scalar(data, msg):
     # NB: These will be handled at codegen time
     # Not sure if we are guaranteed to be able to serve out truth from the
     # deferred_runtime_asserts, TODO: try this assert out
+    # See [NOTE] Codegen runtime asserts in Inductor
     # assert bool(data.scalar), data
     return None
 
@@ -3333,7 +3347,6 @@ def gather(x, dim, index, sparse_grad=False):
         # Empty index case. Return an empty array with the same shape
         return new_empty(x, index.get_size())
 
-    assert index.get_dtype() == torch.int64
     size = x.get_size()
     offset = len(size) == 0
     dim = _validate_dim(x, dim, offset)
@@ -3591,17 +3604,6 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 
 
 def index_put_fallback(self, indices, values, accumulate):
-    deterministic = torch.are_deterministic_algorithms_enabled()
-    if is_triton(values) and (accumulate or deterministic):
-        msg = (
-            "index put with accumulate."
-            if not deterministic
-            else "deterministic index put."
-        )
-        if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
-            msg = f"{msg} Found from : \n {stack_trace}"
-        V.graph.disable_cudagraphs_reason = msg
-
     ir.IndexPutFallback(V.graph.current_node.target, self, indices, values, accumulate)
     return self
 
@@ -6103,7 +6105,7 @@ def div_mode(a, b, rounding_mode=None):
     both_boolean = is_boolean_type(a) and is_boolean_type(b)
 
     # floordiv and truncdiv need special handling for integer tensors on Triton,
-    # see the discussion at https://github.com/openai/triton/issues/605
+    # see the discussion at https://github.com/triton-lang/triton/issues/605
     if rounding_mode == "floor":
         assert not both_boolean, "floordiv operands can not be boolean at the same time"
         return floordiv(a, b) if both_integer else floor(div(a, b))
@@ -6306,7 +6308,10 @@ def cummax(x, axis=None):
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
-    kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
+    kwargs["inner_fns"] = (
+        x.make_loader(),
+        lambda idx: ops.index_expr(idx[axis], torch.int64),
+    )
     values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type]
     if values is None:
         return fallback_cummax(x, dim=axis)
@@ -6326,7 +6331,10 @@ def cummin(x, axis=None):
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
-    kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
+    kwargs["inner_fns"] = (
+        x.make_loader(),
+        lambda idx: ops.index_expr(idx[axis], torch.int64),
+    )
     values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type]
     if values is None:
         return fallback_cummin(x, dim=axis)
@@ -6913,8 +6921,8 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
 
 
 @register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)
-def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, operands):
-    result = ir.InvokeSubgraph.create(subgraph_fn, operands)
+def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, *operands):
+    result = ir.InvokeSubgraph.create(subgraph_fn, *operands)
     return list(map(TensorBox.create, result))
 
 

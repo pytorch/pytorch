@@ -325,13 +325,13 @@ Python Docs
 PyTorch documentation is generated from python source using
 `Sphinx <https://www.sphinx-doc.org/en/master/>`__. Generated HTML is
 copied to the docs folder in the main branch of
-`pytorch.github.io <https://github.com/pytorch/pytorch.github.io/tree/master/docs>`__,
+`pytorch.org/docs <https://pytorch.org/docs/main>`__,
 and is served via GitHub pages.
 
 -  Site: https://pytorch.org/docs
 -  GitHub: https://github.com/pytorch/pytorch/tree/main/docs
 -  Served from:
-   `https://github.com/pytorch/pytorch.github.io/tree/master/docs <https://github.com/pytorch/pytorch.github.io/tree/master/docs>`__
+   `https://pytorch.org/docs/main <https://pytorch.org/docs/main>`__
 
 C++ Docs
 ~~~~~~~~
