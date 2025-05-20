@@ -775,7 +775,7 @@ class MetalKernel(SIMDKernel):
         """Called at the end to generate a final kernel string"""
         self.codegen_body()
         code = IndentedBuffer()
-        code.writeline('compile_mps_shader("""')
+        code.writeline("compile_mps_shader('''")
         idx_vars = self.active_range_trees()
         with code.indent():
             for header in self.headers:
@@ -796,7 +796,15 @@ class MetalKernel(SIMDKernel):
                     dtype_str = self.dtype_to_str(V.graph.get_dtype(outer))
                     code.writeline(f"device {dtype_str}* {inner},")
                 for outer, inner in self.args.input_buffers.items():
-                    dtype_str = self.dtype_to_str(V.graph.get_dtype(outer))
+                    dtype = V.graph.get_dtype(outer)
+                    # MPS does not support float64, but scalar inputs are fine
+                    if dtype == torch.float64:
+                        outer_buf = V.graph.try_get_buffer(outer)
+                        if outer_buf is None or outer_buf.get_size() != []:
+                            raise RuntimeError("float64 is not supported by MPS")
+                        dtype_str = "float"
+                    else:
+                        dtype_str = self.dtype_to_str(dtype)
                     code.writeline(f"constant {dtype_str}* {inner},")
                 for outer, inner in self.args.sizevars.items():
                     code.writeline(f"constant long& {inner},")
@@ -825,7 +833,7 @@ class MetalKernel(SIMDKernel):
                 code.splice(self.indexing_code)
                 code.splice(self.body)
             code.writeline("}")
-        code.writeline('""")')
+        code.writeline("''')")
 
         return code.getvalue()
 

@@ -1789,6 +1789,16 @@ def create_precompile_key(
 
 
 class AlgorithmSelectorCache(PersistentCache):
+    """
+    A persistent cache for algorithm selection results used in autotuning of GEMMs
+    and convolutions.
+
+    This classes includes precompilation and benchmarking of the kernels.
+
+    The cache is keyed by input characteristics (sizes, strides, dtypes, etc.) but
+    doesn't depend on the output layout.
+    """
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
@@ -2076,14 +2086,15 @@ class AlgorithmSelectorCache(PersistentCache):
             return None, elapsed_ns // 1000
 
         def on_complete(future):
-            _, precompile_elapsed_us = future.result()
-            elapsed_seconds = precompile_elapsed_us / 1e6
-            elapsed_times[future] = elapsed_seconds
-            log.debug(
-                "Precompilation complete for future: %s, elapsed time: %.02fs",
-                future,
-                elapsed_seconds,
-            )
+            if not future.exception():
+                _, precompile_elapsed_us = future.result()
+                elapsed_seconds = precompile_elapsed_us / 1e6
+                elapsed_times[future] = elapsed_seconds
+                log.debug(
+                    "Precompilation complete for future: %s, elapsed time: %.02fs",
+                    future,
+                    elapsed_seconds,
+                )
 
         executor = ThreadPoolExecutor(max_workers=num_workers)
         async_compile = torch._inductor.async_compile.AsyncCompile()
@@ -2130,15 +2141,29 @@ class AlgorithmSelectorCache(PersistentCache):
                 timeout=precompilation_timeout_seconds,
             ):
                 if e := future.exception():
-                    log.error(
-                        "Exception %s for benchmark choice %s", e, futures[future]
+                    from torch._inductor.codegen.cuda.cuda_kernel import (
+                        CUDATemplateCaller,
                     )
+
+                    if isinstance(e, CUDACompileError) and isinstance(
+                        futures[future], CUDATemplateCaller
+                    ):
+                        log.debug(
+                            "Exception %s for benchmark choice %s",
+                            e,
+                            futures[future],
+                            exc_info=True,
+                        )
+                    else:
+                        log.error(
+                            "Exception %s for benchmark choice %s", e, futures[future]
+                        )
                 else:
                     counters["inductor"]["select_algorithm_num_precompiles"] += 1
                     log.info(
                         "Precompiling benchmark choice %s took %.02fs",
-                        futures[future],
-                        elapsed_times[future],
+                        futures.get(future),
+                        elapsed_times.get(future),
                     )
 
             executor.shutdown(wait=True)
@@ -2238,25 +2263,38 @@ class AlgorithmSelectorCache(PersistentCache):
             try:
                 timing = cls.benchmark_choice(choice, autotune_args)
             except CUDACompileError as e:
-                log.error(
-                    "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
-                    str(e),
-                )
+                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+
+                if not isinstance(choice, CUDATemplateCaller):
+                    log.error(
+                        "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
+                        e,
+                    )
                 timing = float("inf")
             except NotImplementedError as e:
                 log.warning("Not yet implemented: %s", e)
                 timing = float("inf")
             except RuntimeError as e:
+                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+
                 msg = str(e)
                 if "invalid argument" in msg:
                     msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
                 else:
                     if "illegal memory access" in msg:
                         msg += "\n\nEither error in template or triton bug.\n"
-                log.error(
-                    "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
-                    msg,
-                )
+
+                if isinstance(choice, CUDATemplateCaller):
+                    log.debug(
+                        "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
+                        msg,
+                        exc_info=True,
+                    )
+                else:
+                    log.error(
+                        "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
+                        msg,
+                    )
                 timing = float("inf")
             except AssertionError as e:
                 raise AssertionError(  # noqa: B904
