@@ -72,7 +72,7 @@ class ShaderRegisterInit final {
  public:
   ShaderRegisterInit(InitFn* init_fn) {
     init_fn();
-  };
+  }
 };
 
 // The global shader registry is retrieved using this function, where it is

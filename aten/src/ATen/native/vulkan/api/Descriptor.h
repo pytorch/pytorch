@@ -8,6 +8,7 @@
 
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
+#include <c10/macros/Macros.h>
 
 #include <unordered_map>
 
@@ -16,7 +17,7 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-class DescriptorSet final {
+class TORCH_API DescriptorSet final {
  public:
   explicit DescriptorSet(VkDevice, VkDescriptorSet, ShaderLayout::Signature);
 

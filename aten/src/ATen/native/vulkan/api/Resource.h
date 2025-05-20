@@ -9,6 +9,7 @@
 #include <ATen/native/vulkan/api/Allocator.h>
 #include <ATen/native/vulkan/api/Types.h>
 #include <ATen/native/vulkan/api/Utils.h>
+#include <c10/macros/Macros.h>
 
 #include <mutex>
 #include <ostream>
@@ -70,7 +71,7 @@ struct MemoryAllocation final {
   }
 };
 
-class VulkanBuffer final {
+class TORCH_API VulkanBuffer final {
  public:
   struct BufferProperties final {
     VkDeviceSize size;
@@ -168,7 +169,7 @@ class VulkanBuffer final {
   VkMemoryRequirements get_memory_requirements() const;
 };
 
-class MemoryMap final {
+class TORCH_API MemoryMap final {
  public:
   explicit MemoryMap(
       const VulkanBuffer& buffer,
@@ -202,7 +203,7 @@ class MemoryMap final {
   void invalidate();
 };
 
-struct BufferMemoryBarrier final {
+struct TORCH_API BufferMemoryBarrier final {
   VkBufferMemoryBarrier handle;
 
   BufferMemoryBarrier(
@@ -211,7 +212,7 @@ struct BufferMemoryBarrier final {
       const VulkanBuffer& buffer);
 };
 
-class ImageSampler final {
+class TORCH_API ImageSampler final {
  public:
   struct Properties final {
     VkFilter filter;
@@ -249,7 +250,7 @@ class ImageSampler final {
   friend void swap(ImageSampler& lhs, ImageSampler& rhs) noexcept;
 };
 
-class VulkanImage final {
+class TORCH_API VulkanImage final {
  public:
   struct ImageProperties final {
     VkImageType image_type;
@@ -396,7 +397,7 @@ class VulkanImage final {
   VkMemoryRequirements get_memory_requirements() const;
 };
 
-struct ImageMemoryBarrier final {
+struct TORCH_API ImageMemoryBarrier final {
   VkImageMemoryBarrier handle;
 
   ImageMemoryBarrier(
@@ -407,7 +408,7 @@ struct ImageMemoryBarrier final {
       const VulkanImage& image);
 };
 
-class SamplerCache final {
+class TORCH_API SamplerCache final {
  public:
   explicit SamplerCache(VkDevice device);
 
@@ -436,7 +437,7 @@ class SamplerCache final {
   void purge();
 };
 
-class MemoryAllocator final {
+class TORCH_API MemoryAllocator final {
  public:
   explicit MemoryAllocator(
       VkInstance instance,
@@ -497,7 +498,7 @@ class MemoryAllocator final {
   }
 };
 
-class VulkanFence final {
+class TORCH_API VulkanFence final {
  public:
   // TODO: This is required for the lazy allocation pattern in api/Tensor.
   //       It will be disabled pending future refactors.
@@ -546,7 +547,7 @@ class VulkanFence final {
 
 // A pool to track created Fences and reuse ones that are available.
 // Only intended to be modified by one thread at a time.
-struct FencePool final {
+struct TORCH_API FencePool final {
   VkDevice device_;
 
   std::stack<VulkanFence> pool_;

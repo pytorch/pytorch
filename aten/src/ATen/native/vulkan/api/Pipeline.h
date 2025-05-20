@@ -8,6 +8,7 @@
 
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
+#include <c10/macros/Macros.h>
 
 #include <mutex>
 #include <unordered_map>
@@ -17,7 +18,7 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-struct PipelineBarrier final {
+struct TORCH_API PipelineBarrier final {
   struct Stages final {
     VkPipelineStageFlags src;
     VkPipelineStageFlags dst;
@@ -47,7 +48,7 @@ VkAccessFlags vk_access(const PipelineStageFlags, const MemoryAccessFlags);
 VkPipelineStageFlags vk_stage(const PipelineStageFlags);
 VkImageLayout vk_layout(const PipelineStageFlags, const MemoryAccessFlags);
 
-class PipelineLayout final {
+class TORCH_API PipelineLayout final {
  public:
   explicit PipelineLayout(VkDevice, VkDescriptorSetLayout);
 
@@ -74,7 +75,7 @@ class PipelineLayout final {
   friend void swap(PipelineLayout& lhs, PipelineLayout& rhs) noexcept;
 };
 
-class ComputePipeline final {
+class TORCH_API ComputePipeline final {
  public:
   struct Descriptor final {
     VkPipelineLayout pipeline_layout;
@@ -110,7 +111,7 @@ class ComputePipeline final {
   friend void swap(ComputePipeline& lhs, ComputePipeline& rhs) noexcept;
 };
 
-class PipelineLayoutCache final {
+class TORCH_API PipelineLayoutCache final {
  public:
   explicit PipelineLayoutCache(VkDevice device);
 
@@ -144,7 +145,7 @@ class PipelineLayoutCache final {
   void purge();
 };
 
-class ComputePipelineCache final {
+class TORCH_API ComputePipelineCache final {
  public:
   explicit ComputePipelineCache(VkDevice device);
 
