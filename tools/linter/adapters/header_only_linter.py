@@ -117,9 +117,9 @@ def check_file(
                         f"contains {CPP_TEST_GLOBS}.\n"
                         "Please add a .cpp test using the symbol without "
                         "linking anything to verify that the symbol is in "
-                        "fact header-only. If not already there, please "
-                        "add the .cpp file to CPP_TEST_GLOBS in "
-                        "tools/linters/adapters/header_only_linter.py."
+                        "fact header-only. If you already have a test but it's"
+                        " not found, please add the .cpp file to CPP_TEST_GLOBS"
+                        " in tools/linters/adapters/header_only_linter.py."
                     ),
                 )
             )
