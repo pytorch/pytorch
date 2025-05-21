@@ -32,7 +32,7 @@ from torch._subclasses.fake_tensor import is_fake
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import raise_observed_exception, unimplemented
+from ..exc import raise_observed_exception, unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..source import is_from_local_source
 from ..utils import (
@@ -346,7 +346,13 @@ class ConstDictVariable(VariableTracker):
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         key = ConstDictVariable._HashableTracker(arg)
         if key not in self.items:
-            unimplemented(f"dict KeyError: {arg.value}")
+            msg = f"Dictionary key {arg.value} not found during tracing"
+            unimplemented_v2(
+                gb_type="dict_key_error",
+                context=f"Key {arg.value}",
+                explanation=msg,
+                hints=["Check if the key exists in the dictionary before accessing it"],
+            )
         return self.items[key]
 
     def maybe_getitem_const(self, arg: VariableTracker):
@@ -591,7 +597,14 @@ class ConstDictVariable(VariableTracker):
             if name in self.user_cls.__dict__:
                 return ConstantVariable.create(True)
             return ConstantVariable.create(False)
-        unimplemented(f"hasattr on {self.user_cls} is not supported")
+
+        msg = f"hasattr on {self.user_cls} is not supported"
+        unimplemented_v2(
+            gb_type="unsupported_hasattr",
+            context=f"Class {self.user_cls}",
+            explanation=msg,
+            hints=["Consider using a regular dictionary instead"],
+        )
 
     def clone(self, **kwargs):
         self.install_dict_keys_match_guard()
@@ -611,9 +624,15 @@ class MappingProxyVariable(VariableTracker):
     def reconstruct(self, codegen: "PyCodegen"):
         # load types.MappingProxyType
         if self.source:
-            unimplemented(
-                "Can't reconstruct an existing mapping variable because"
-                " the connection to the original dict will be lost"
+            msg = (
+                f"MappingProxyVariable {self.source} is not supported because "
+                "can't reconstruct a mapping proxy variable as it will be lost"
+            )
+            unimplemented_v2(
+                gb_type="mapping_proxy_reconstruction",
+                context=f"Source: {self.source}",
+                explanation=msg,
+                hints=["Create a new mapping proxy instead of using an existing one"],
             )
         codegen.add_push_null(
             lambda: codegen.extend_output(
@@ -634,14 +653,21 @@ class MappingProxyVariable(VariableTracker):
         kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if self.source and tx.output.side_effects.has_existing_dict_mutation():
-            unimplemented(
-                "A dict has been modified while we have an existing mappingproxy object. "
-                "A mapping proxy object, as the name suggest, proxies a mapping "
-                "object (usually a dict). If the original dict object mutates, it "
-                "is reflected in the proxy object as well. For an existing proxy "
-                "object, we do not know the original dict it points to. Therefore, "
-                "for correctness we graph break when there is dict mutation and we "
-                "are trying to access a proxy object."
+            msg = """A dict has been modified while we have an existing mappingproxy object.
+                    A mapping proxy object, as the name suggest, proxies a mapping
+                    object (usually a dict). If the original dict object mutates, it
+                    is reflected in the proxy object as well. For an existing proxy
+                    object, we do not know the original dict it points to. Therefore,
+                    for correctness we graph break when there is dict mutation and we
+                    are trying to access a proxy object."""
+
+            unimplemented_v2(
+                gb_type="mapping_proxy_with_dict_mutation",
+                context=f"Source: {self.source}, Dict mutation detected",
+                explanation=msg,
+                hints=[
+                    "Avoid modifying dictionaries that might be referenced by mapping proxy objects"
+                ],
             )
         return self.dv_dict.call_method(tx, name, args, kwargs)
 
