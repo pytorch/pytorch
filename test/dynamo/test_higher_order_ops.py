@@ -3165,7 +3165,7 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
         self.assertEqual(fn(ones, ones, ones), torch.tensor([3.0]))
 
     def test_hopify_generic_wrap(self):
-        from torch._higher_order_ops.wrap import wrap_generic
+        from torch._higher_order_ops.wrap import dynamo_bypassing_wrapper
 
         def my_hop_fn_impl(fn, *args, k=1, **kwargs):
             def wrapper(*args, **kwargs):
@@ -3177,8 +3177,8 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
             return wrapper
 
         def my_hop_fn(fn, *args, k=1, **kwargs):
-            return wrap_generic(
-                fn, *args, wrapper_fn=functools.partial(my_hop_fn_impl, k=k), **kwargs
+            return dynamo_bypassing_wrapper(
+                fn, functools.partial(my_hop_fn_impl, k=k), *args, **kwargs
             )
 
         def my_hop_fn_2_impl(fn, *args, g=None):
@@ -3192,8 +3192,8 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
             return wrapper
 
         def my_hop_fn_2(fn, *args, g=None, **kwargs):
-            return wrap_generic(
-                fn, *args, wrapper_fn=functools.partial(my_hop_fn_2_impl, g=g), **kwargs
+            return dynamo_bypassing_wrapper(
+                fn, functools.partial(my_hop_fn_2_impl, g=g), *args, **kwargs
             )
 
         def gn(x, h=1):
