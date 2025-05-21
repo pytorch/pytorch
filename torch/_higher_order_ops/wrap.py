@@ -87,12 +87,18 @@ class WrapWithAutocast(HigherOrderOperator):
 wrap_with_autocast = WrapWithAutocast()
 
 
+# This HOP allows you to bypass dynamo tracing of the wrapper function while
+# still tracing the inner function.
+# The wrapper function should receive a single callable argument, and return
+# a callable that takes the same arguments as the inner function.
 class DynamoBypassingWrapper(HigherOrderOperator):
     def __init__(self):
         super().__init__("dynamo_bypassing_wrapper")
 
     def __call__(
         self,
+        wrapper_fn_or_key,
+        inner_fn,
         *args,
         **kwargs,
     ):
@@ -101,20 +107,16 @@ class DynamoBypassingWrapper(HigherOrderOperator):
         import torch._dynamo  # noqa: F401
         from torch._dynamo import disable
 
-        is_compiling = (
-            torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
-            is not None
-        )
-
+        is_compiling = isinstance(wrapper_fn_or_key, str)
         if is_compiling:
-            gmod, args = args[0], args[1:]
-            wrapper_fn = gmod.meta["_dynamo_bypassing_wrapper_fn"]
+            assert isinstance(inner_fn, torch.fx.GraphModule)
+            wrapper_fn = inner_fn.meta[wrapper_fn_or_key]
         else:
-            wrapper_fn, gmod, args = args[0], args[1], args[2:]
+            wrapper_fn = wrapper_fn_or_key
 
         @disable
         def wrapper():
-            return wrapper_fn(gmod)(*args, **kwargs)
+            return wrapper_fn(inner_fn)(*args, **kwargs)
 
         return wrapper()
 
