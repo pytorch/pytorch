@@ -1236,7 +1236,6 @@ CUSTOM_HANDLERS = {
     "test_ci_sanity_check_fail": run_ci_sanity_check,
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
-    "test_cpp_extensions_open_device_registration": run_test_with_openreg,
     "test_openreg": run_test_with_openreg,
     "test_transformers_privateuse1": run_test_with_openreg,
 }
