@@ -2260,6 +2260,7 @@ class TestAutotuneCache(TestCase):
     @unittest.skipIf(
         TEST_WITH_ROCM, "Requires static cuda launcher, which does not support ROCM"
     )
+    @config.patch({"use_static_cuda_launcher": True})
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"autotune_local_cache": False})
@@ -2284,7 +2285,7 @@ class TestAutotuneCache(TestCase):
         f_compiled = torch.compile(f, fullgraph=True)
 
         with PatchCaches():
-            f_compiled(x, y, a, b)
+            a1 = f_compiled(x, y, a, b)
 
             self.assertEqual(global_stats.autotune_remote, Stats(2, 0, 2))
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
@@ -2292,7 +2293,8 @@ class TestAutotuneCache(TestCase):
 
             # Don't reset FxGraphCache, see that it loads again
             torch._dynamo.reset()
-            f_compiled(x, y, a, b)
+            a2 = f_compiled(x, y, a, b)
+            self.assertEqual(a1, a2)
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
