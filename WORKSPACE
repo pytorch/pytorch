@@ -168,7 +168,7 @@ new_local_repository(
 
 new_local_repository(
     name = "opentelemetry-cpp",
-    build_file = "//third_party::opentelemetry-cpp.BUILD",
+    build_file = "//third_party:opentelemetry-cpp.BUILD",
     path = "third_party/opentelemetry-cpp",
 )
 
