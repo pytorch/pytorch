@@ -1205,17 +1205,20 @@ class BuiltinVariable(VariableTracker):
                 and args[1].has_unpack_var_sequence(tx)
                 and not kwargs
             ):
+                init_args = args[1].unpack_var_sequence(tx)
+                tuple_vt = variables.TupleVariable(
+                    init_args, mutation_type=ValueMutationNew()
+                )
                 if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
-                    init_args = args[1].unpack_var_sequence(tx)
-                    return variables.TupleVariable(
-                        init_args, mutation_type=ValueMutationNew()
-                    )
+                    return tuple_vt
 
-                return tx.output.side_effects.track_new_user_defined_object(
+                result = tx.output.side_effects.track_new_user_defined_object(
                     self,
                     args[0],
                     args[1:],
                 )
+                result.set_underlying_tuple_vt(tuple_vt)
+                return result
 
             if self.fn is list:
                 list_vt = ListVariable([], mutation_type=ValueMutationNew())
