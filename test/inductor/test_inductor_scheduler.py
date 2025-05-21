@@ -87,7 +87,7 @@ class TestScheduler(TestCase):
     def test_get_estimated_runtime_logging(self, device, dtype):
         if device == "cpu":
             return
-        tc = _test_cases(device, dtype)        
+        tc = _test_cases(device, dtype)
         expected_metrics = [
             # num_bytes_accessed, number of nonzero node_runtimes
             (74 * dtype.itemsize, 1),
@@ -131,7 +131,6 @@ class TestScheduler(TestCase):
             },
         ],
     )
-
     def test_flop_counter_op(self, device, dtype, options):
         if device == "cpu":
             return
