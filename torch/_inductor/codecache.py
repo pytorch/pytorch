@@ -162,6 +162,15 @@ def get_cpp_wrapper_cubin_path_name() -> str:
     return "cubin_path" if torch.version.hip is None else "hsaco_path"
 
 
+def get_kernel_bin_format(device: str) -> str:
+    if device == "cuda":
+        return "cubin" if torch.version.hip is None else "hsaco"
+    elif device == "xpu":
+        return "spv"
+    else:
+        return ""
+
+
 @functools.lru_cache(None)
 def get_global_cache_path_impl(global_cache_dir: str) -> Optional[Path]:
     return (
@@ -1527,6 +1536,17 @@ class CudaKernelParamCache:
                 config.aot_inductor.output_path
             )[0],
         )
+        if config.aot_inductor.package_cpp_only:
+            assert config.triton.unique_kernel_names, (
+                "package_cpp_only requires triton kernel names to be unique"
+            )
+            dir_name = os.path.dirname(path)
+            _, ext = os.path.splitext(path)
+            # Construct the new full path
+            new_path = os.path.join(dir_name, params["mangled_name"] + ext)
+            os.rename(path, new_path)
+            path = new_path
+
         params[get_cpp_wrapper_cubin_path_name()] = path
 
         cls.cache[key] = params
