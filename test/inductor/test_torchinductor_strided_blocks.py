@@ -1168,6 +1168,37 @@ class CommonTemplate:
             compile_kwargs={"fullgraph": True},
         )
 
+    # Integration test to test block analysis with index expressions using
+    # negative strides.
+    # This test case has the following index:
+    # index_relative_to_xyr_index = -256*((xindex//64)) - (ModularIndexing(xindex, 1, 8))
+    #    - 16*(ModularIndexing(xindex, 8, 8)) + 1911
+    # subexpr = -256*((xindex//64)) - (ModularIndexing(xindex, 1, 8)) - 16*(ModularIndexing(xindex, 8, 8))
+    # Block analysis should produce the following:
+    # BlockParameters(
+    #   shape=[8, 8, 8],
+    #   block_shape=[((XBLOCK + 63)//64), Min(8, ((XBLOCK + 7)//8)), Min(8, XBLOCK) ],
+    #   strides=[-256, -16, -1],
+    #   offsets=[(xoffset//64), ModularIndexing(xoffset, 8, 8), ModularIndexing(xoffset, 1, 8)]
+    #   )
+    # constant_offset = 1911
+    def test_negative_strides(self):
+        def model(x, y):
+            # Slice in reverse order via a negative stride
+            return torch.flip(x, [0, 1, 2]) + y
+
+        x, y = (
+            self._discontiguous_tensor((8, 8, 8), device=self.device) for _ in range(2)
+        )
+        run_and_compare(
+            self,
+            model,
+            x,
+            y,
+            expected_num_triton_kernels=1,
+            expected_num_block_pointers=3,
+        )
+
 
 @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
 @config.patch(cpu_backend="triton")
