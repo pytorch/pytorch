@@ -762,6 +762,14 @@ compile_threads: Optional[int] = None if is_fbcode() else decide_compile_threads
 # compiled by triton (instead of using triton's own launcher)
 use_static_cuda_launcher: bool = static_cuda_launcher_default()
 
+# Attempt to statically launch user defined triton kernels
+# Requires use_static_cuda_launcher
+static_launch_user_defined_triton_kernels: bool = Config(
+    justknob="pytorch/inductor:static_launch_user_defined_triton_kernels",
+    env_name_force="TORCHINDUCTOR_STATIC_LAUNCH_USER_DEFINED_TRITON_KERNELS",
+    default=False,
+)
+
 # Raise error if we bypass the launcher
 strict_static_cuda_launcher: bool = (
     os.environ.get("TORCHINDUCTOR_STRICT_STATIC_CUDA_LAUNCHER", "0") == "1"
@@ -913,6 +921,9 @@ enable_linear_binary_folding = (
 
 # Adds NVTX annotations aroung training phases
 annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0") == "1"
+
+# Enable caching codegen of triton templates.
+enable_caching_generated_triton_templates: bool = False
 
 
 # config specific to codegen/cpp.py
@@ -1309,6 +1320,11 @@ class aot_inductor:
     # Embed generated .cubin files into the .so
     embed_cubin: bool = False
 
+    # Custom ops that have implemented C shim wrappers, defined as an op to C shim declaration dict
+    custom_ops_to_c_shims: dict[torch._ops.OpOverload, list[str]] = {}
+    # custom op libs that have implemented C shim wrappers
+    custom_op_libs: Optional[list[str]] = None
+
 
 class cuda:
     """Settings for cuda backend, today this consists of cutlass"""
@@ -1353,7 +1369,7 @@ class cuda:
     cutlass_max_profiling_configs: Optional[int] = None
 
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
-    cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4]
+    cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4, 8]
 
     # Whether to use CUTLASS EVT for epilogue fusion
     cutlass_epilogue_fusion_enabled = False
@@ -1415,6 +1431,11 @@ class cuda:
     # use compile command to create kernel .cu and .so name
     cutlass_hash_with_compile_cmd: bool = (
         os.environ.get("TORCHINDUCTOR_CUTLASS_HASH_WITH_COMPILE_CMD", "0") == "1"
+    )
+
+    # Experimental. Prescreen top x configs before tuning on swizzle.
+    cutlass_prescreening: bool = (
+        os.environ.get("TORCHINDUCTOR_CUTLASS_PRESCREENING", "1") == "1"
     )
 
 
