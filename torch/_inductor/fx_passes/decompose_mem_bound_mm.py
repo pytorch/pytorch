@@ -19,14 +19,14 @@ MIN_FIRST_DIMENSION_DECOMPOSITION = 10240
 MAX_OTHER_DIMENSION_DECOMPOSITION = 32
 
 min_first_dimension_decomposition = MIN_FIRST_DIMENSION_DECOMPOSITION
-max_other_dimention_decomposition = MAX_OTHER_DIMENSION_DECOMPOSITION
+max_other_dimension_decomposition = MAX_OTHER_DIMENSION_DECOMPOSITION
 if "decompose_mm_pass" in config.post_grad_fusion_options:
     min_first_dimension_decomposition = config.post_grad_fusion_options[
         "decompose_mm_pass"
     ].get("min_first_dimension_decomposition", MIN_FIRST_DIMENSION_DECOMPOSITION)
-    max_other_dimention_decomposition = config.post_grad_fusion_options[
+    max_other_dimension_decomposition = config.post_grad_fusion_options[
         "decompose_mm_pass"
-    ].get("max_other_dimention_decomposition", MAX_OTHER_DIMENSION_DECOMPOSITION)
+    ].get("max_other_dimension_decomposition", MAX_OTHER_DIMENSION_DECOMPOSITION)
 
 
 def check_device(a: Tensor, b: Tensor, device="cuda") -> bool:
@@ -51,9 +51,9 @@ def should_decompose_bmm(mat1, mat2) -> bool:
         if mat1.shape[0] < min_first_dimension_decomposition:
             return False
         # 2 of m, n, k must be <= MAX_OTHER_DIMENSION_DECOMPOSITION
-        if (mat1.shape[1] < max_other_dimention_decomposition) + (
-            mat1.shape[2] < max_other_dimention_decomposition
-        ) + (mat2.shape[2] < max_other_dimention_decomposition) < 2:
+        if (mat1.shape[1] < max_other_dimension_decomposition) + (
+            mat1.shape[2] < max_other_dimension_decomposition
+        ) + (mat2.shape[2] < max_other_dimension_decomposition) < 2:
             return False
         return True
     elif check_device(mat1, mat2, device="cpu"):
@@ -73,8 +73,8 @@ def should_decompose_mm(mat1, mat2) -> bool:
     return (
         check_device(mat1, mat2, device="cuda")
         and statically_known_true(mat1.shape[0] >= min_first_dimension_decomposition)
-        and statically_known_true(mat2.shape[0] < max_other_dimention_decomposition)
-        and statically_known_true(mat2.shape[1] < max_other_dimention_decomposition)
+        and statically_known_true(mat2.shape[0] < max_other_dimension_decomposition)
+        and statically_known_true(mat2.shape[1] < max_other_dimension_decomposition)
     ) or (
         check_device(mat1, mat2, device="cpu")
         and statically_known_true(mat1.shape[0] == 1)
