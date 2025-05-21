@@ -915,7 +915,6 @@ class CachingAutotuner(KernelInterface):
     def benchmark_all_configs(self, *args, **kwargs):
         with dynamo_timed(
             "CachingAutotuner.benchmark_all_configs",
-            log_pt2_compile_event=True,
             metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
             dynamo_compile_column_us="runtime_triton_autotune_time_us",
             compile_id=self.compile_id,

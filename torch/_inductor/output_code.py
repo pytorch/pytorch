@@ -690,7 +690,6 @@ class CompiledFxGraph(OutputCode):
         try:
             with dynamo_timed(
                 "PyCodeCache.load_by_key_path",
-                log_pt2_compile_event=True,
             ):
                 code_cache = PyCodeCache.load_by_key_path(
                     self.cache_key,

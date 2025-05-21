@@ -336,7 +336,7 @@ class CppWrapperGpu(CppWrapperCpu):
             )
 
     def generate(self, is_inference):
-        with dynamo_timed("CppWrapperGpu.generate", log_pt2_compile_event=True):
+        with dynamo_timed("CppWrapperGpu.generate"):
             return super().generate(is_inference)
 
     def finalize_prefix(self):

@@ -473,7 +473,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         if bw_graph is None:
             assert suffix is None
             with dynamo_timed(
-                "invoke_subgraph_trace_joint_graph", log_pt2_compile_event=True
+                "invoke_subgraph_trace_joint_graph"
             ):
                 bw_graph = trace_joint_graph_as_bwd(
                     subgraph,
@@ -544,7 +544,7 @@ def _(ctx, subgraph, identifier, *operands):
 def _(subgraph, identifier, *operands):
     from torch._dynamo.utils import dynamo_timed
 
-    with dynamo_timed("invoke_subgraph_fake_tensor", log_pt2_compile_event=True):
+    with dynamo_timed("invoke_subgraph_fake_tensor"):
         return subgraph(*operands)
 
 
@@ -559,7 +559,7 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
     if graph is None:
         from torch._dynamo.utils import dynamo_timed
 
-        with dynamo_timed("invoke_subgraph_proxy_tensor", log_pt2_compile_event=True):
+        with dynamo_timed("invoke_subgraph_proxy_tensor"):
             graph = reenter_make_fx(subgraph)(*operands)
 
         from torch._guards import detect_fake_mode

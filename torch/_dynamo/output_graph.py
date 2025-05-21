@@ -523,7 +523,7 @@ class OutputGraph(OutputGraphGuardsState):
         self.compiler_trace_stack.enter_context(
             dynamo_timed(
                 "bytecode_tracing",
-                log_pt2_compile_event=True,
+                
             )
         )
 
@@ -1421,7 +1421,7 @@ class OutputGraph(OutputGraphGuardsState):
                 get_interface_for_device(device_types.pop()).device(  # type: ignore[attr-defined]
                     compile_pg.rank() % torch.accelerator.device_count()
                 ),
-                dynamo_timed("compiler_collective", log_pt2_compile_event=True),
+                dynamo_timed("compiler_collective"),
             ):
                 all_states = [None] * compile_pg.size()
                 dist.all_gather_object(all_states, ds.local_state, group=compile_pg)
@@ -1571,7 +1571,7 @@ class OutputGraph(OutputGraphGuardsState):
         with dynamo_timed(
             "OutputGraph.call_user_compiler",
             phase_name="backend_compile",
-            log_pt2_compile_event=True,
+            
             log_waitcounter=True,
             waitcounter_name_override="compile_aot_autograd",
             dynamo_compile_column_us="aot_autograd_cumulative_compile_time_us",

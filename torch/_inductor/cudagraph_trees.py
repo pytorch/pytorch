@@ -407,7 +407,7 @@ def dynamo_timed_cudagraph(
     """
     with dynamo_timed(
         name,
-        log_pt2_compile_event=True,
+        
         compile_id=compile_id,
         is_backward=mode == CompilationMode.BACKWARD,
         dynamo_compile_column_us="runtime_cudagraphify_time_us",

@@ -787,7 +787,7 @@ def aot_dispatch_autograd(
     )
 
     fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
-    with dynamo_timed("aot_trace_joint_graph", log_pt2_compile_event=True):
+    with dynamo_timed("aot_trace_joint_graph"):
         fx_g, joint_inputs, maybe_subclass_meta = aot_dispatch_autograd_graph(
             flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
         )

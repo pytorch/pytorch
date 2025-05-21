@@ -2247,7 +2247,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     ), metrics_context, dynamo_timed(
                         "backward._backward_impl",
                         phase_name="entire_backward_compile",
-                        log_pt2_compile_event=True,
+                        
                         dynamo_compile_column_us="backward_cumulative_compile_time_us",
                         log_waitcounter=True,
                         waitcounter_name_override="entire_backward_compile",

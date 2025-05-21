@@ -948,7 +948,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.prefix.writeline("}")
 
     def generate(self, is_inference):
-        with dynamo_timed("CppWrapperCpu.generate", log_pt2_compile_event=True):
+        with dynamo_timed("CppWrapperCpu.generate"):
             self.write_wrapper_decl()
             return super().generate(is_inference)
 

@@ -812,7 +812,7 @@ def _compile(
             CompileContext.get().attempt = attempt
             try:
                 with dynamo_timed(
-                    f"compile_attempt_{attempt}", log_pt2_compile_event=True
+                    f"compile_attempt_{attempt}"
                 ):
                     out_code = transform_code_object(code, transform)
                 break
@@ -923,7 +923,7 @@ def _compile(
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
         nonlocal cache_entry
-        with dynamo_timed("build_guards", log_pt2_compile_event=True):
+        with dynamo_timed("build_guards"):
             check_fn = CheckFunctionManager(
                 code,
                 output,
@@ -956,7 +956,7 @@ def _compile(
         _use_lazy_graph_module(config.use_lazy_graph_module),
         compile_context(CompileContext(compile_id)),
         chromium_event_timed(
-            "dynamo", reset_event_log_on_exit=True, log_pt2_compile_event=True
+            "dynamo", reset_event_log_on_exit=True
         ),
         _WaitCounter("pytorch.wait_counter.entire_forward_compile").guard(),
         metrics_context,

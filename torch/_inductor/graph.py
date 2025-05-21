@@ -2219,7 +2219,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.scheduler = Scheduler(self.operations)
 
     def codegen(self) -> tuple[ValueWithLineMap, ValueWithLineMap]:
-        with dynamo_timed("GraphLowering.codegen", log_pt2_compile_event=True):
+        with dynamo_timed("GraphLowering.codegen"):
             self.init_wrapper_code()
 
             self._update_scheduler()
@@ -2247,7 +2247,7 @@ class GraphLowering(torch.fx.Interpreter):
         kerenls). The wrapper code is not finalized (via `.generate()`
         call), as this will be done in the parent graph's `codegen()`.
         """
-        with dynamo_timed("GraphLowering.codegen_subgraph", log_pt2_compile_event=True):
+        with dynamo_timed("GraphLowering.codegen_subgraph"):
             self.wrapper_code = parent_graph.wrapper_code
             self.device_ops = parent_graph.device_ops
             self.cpp_wrapper = parent_graph.cpp_wrapper
@@ -2278,7 +2278,6 @@ class GraphLowering(torch.fx.Interpreter):
         with dynamo_timed(
             "GraphLowering.compile_to_module",
             phase_name="code_gen",
-            log_pt2_compile_event=True,
             dynamo_compile_column_us="inductor_code_gen_cumulative_compile_time_us",
         ):
             return self._compile_to_module()
@@ -2354,7 +2353,7 @@ class GraphLowering(torch.fx.Interpreter):
                 lambda: {"filename": path},
                 payload_fn=lambda: wrapper_code.value,
             )
-        with dynamo_timed("PyCodeCache.load_by_key_path", log_pt2_compile_event=True):
+        with dynamo_timed("PyCodeCache.load_by_key_path"):
             mod = PyCodeCache.load_by_key_path(
                 key,
                 path,

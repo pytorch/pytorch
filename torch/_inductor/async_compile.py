@@ -388,9 +388,7 @@ class AsyncCompile:
         else:
             with dynamo_timed(
                 "async_compile.precompile",
-                log_pt2_compile_event=True,
                 dynamo_compile_column_us="triton_compile_time_us",
-                log_waitcounter=True,
                 waitcounter_name_override="compile_triton",
             ):
                 start_ns = time_ns()
@@ -477,9 +475,7 @@ class AsyncCompile:
         if get_compile_threads() > 1:
             with dynamo_timed(
                 "async_compile.wait",
-                log_pt2_compile_event=True,
                 dynamo_compile_column_us="triton_compile_time_us",
-                log_waitcounter=True,
                 waitcounter_name_override="compile_triton",
             ):
                 self._wait_futures(scope)

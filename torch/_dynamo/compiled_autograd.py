@@ -288,7 +288,7 @@ class AutogradCompilerInstance:
             "compiled_autograd",
             self.start_time_ns,
             {"graph_id": self.id},
-            log_pt2_compile_event=True,
+            
         )
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
@@ -1041,7 +1041,7 @@ class AutogradCompilerInstance:
             time.time_ns(),
             {"graph_id": self.id},
             self.start_time_ns,
-            log_pt2_compile_event=True,
+            
         )
         self.compile_context.__exit__(None, None, None)
         return runtime_wrapper, self.compiler_fn(graph)

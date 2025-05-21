@@ -429,7 +429,6 @@ def _recursive_pre_grad_passes(
 ) -> GraphModule:
     with dynamo_timed(
         "_recursive_pre_grad_passes",
-        log_pt2_compile_event=True,
         dynamo_compile_column_us="pre_grad_pass_time_us",
     ):
         add_passes = config.add_pre_grad_passes
@@ -447,7 +446,6 @@ def _recursive_joint_graph_passes(
 ) -> None:
     with dynamo_timed(
         "_recursive_joint_graph_passes",
-        log_pt2_compile_event=True,
         dynamo_compile_column_us="joint_graph_pass_time_us",
     ):
         # invoke_subgraph already runs the _recursive_joint_graph_passes.  In
@@ -465,7 +463,6 @@ def _recursive_joint_graph_passes(
 def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> None:
     with dynamo_timed(
         "_recursive_post_grad_passes",
-        log_pt2_compile_event=True,
         dynamo_compile_column_us="post_grad_pass_time_us",
     ):
         for subgraph_name in _get_subgraph_names(gm):
@@ -700,8 +697,6 @@ def compile_fx_inner(
             dynamo_utils.dynamo_timed(
                 "compile_fx_inner",
                 phase_name="inductor_compile",
-                log_pt2_compile_event=True,
-                log_waitcounter=True,
                 waitcounter_name_override="compile_inductor",
                 dynamo_compile_column_us="inductor_cumulative_compile_time_us",
             )
@@ -778,9 +773,7 @@ def _compile_fx_inner(
         if backend is not None
     )
 
-    with dynamo_timed(
-        "fx_codegen_and_compile", log_pt2_compile_event=True, log_waitcounter=True
-    ):
+    with dynamo_timed("fx_codegen_and_compile"):
         use_cache = (
             not config.force_disable_caches
             and (config.fx_graph_cache or fx_graph_remote_cache)
@@ -1146,9 +1139,7 @@ class _InProcessFxCompile(FxCompile):
             # .view() call.
             view_to_reshape(gm)
 
-            with dynamo_timed(
-                "additional_fake_tensor_prop", log_pt2_compile_event=True
-            ):
+            with dynamo_timed( "additional_fake_tensor_prop"):
                 # It is safe to run FakeTensorProp under no_grad because by the time
                 # we're in inductor, we assume that AOTAutograd has already "taken care"
                 # of autograd, so there should be no more autograd-related API's in the
@@ -1341,9 +1332,7 @@ class _InProcessFxCompile(FxCompile):
 
                     compiled_fn: Any
                     compiled_fn_runner = None
-                    with dynamo_timed(
-                        "GraphLowering.compile_to_fn", log_pt2_compile_event=True
-                    ):
+                    with dynamo_timed( "GraphLowering.compile_to_fn"):
                         if graph.aot_mode:
                             from .codecache import AotCodeCompiler
 
@@ -1371,9 +1360,7 @@ class _InProcessFxCompile(FxCompile):
                                     serialized_extern_kernel_nodes,
                                 )
 
-                            with dynamo_timed(
-                                "AotCodeCompiler.compile", log_pt2_compile_event=True
-                            ):
+                            with dynamo_timed( "AotCodeCompiler.compile"):
                                 # Directly return the file path with the compiled code
                                 compiled_fn = AotCodeCompiler.compile(
                                     graph,
@@ -1743,7 +1730,7 @@ def compile_fx_aot(
         torch._guards.compile_context(saved_compile_context),
         chromium_event_timed(
             "compile_fx_aot",
-            log_pt2_compile_event=True,
+            
             reset_event_log_on_exit=True,
         ),
         get_metrics_context(),
@@ -2235,7 +2222,7 @@ def compile_fx(
             )
 
             with dynamo_utils.dynamo_timed(
-                "min_cut_rematerialization_partition", log_pt2_compile_event=True
+                "min_cut_rematerialization_partition"
             ):
                 return min_cut_rematerialization_partition(
                     gm,

@@ -2159,7 +2159,6 @@ class AlgorithmSelectorCache(PersistentCache):
             log.debug("Starting autotuning")
             with dynamo_timed(
                 f"{name}_template_autotuning",
-                log_pt2_compile_event=True,
                 dynamo_compile_column_us="compile_time_autotune_time_us",
             ):
                 return make_benchmark_fn()(choices)
@@ -2172,7 +2171,7 @@ class AlgorithmSelectorCache(PersistentCache):
             precompile_start_ts = time.time()
             with dynamo_timed(
                 f"{name}_template_precompiling",
-                log_pt2_compile_event=True,
+                
                 dynamo_compile_column_us="compile_time_autotune_time_us",
             ):
                 precompile_fn()

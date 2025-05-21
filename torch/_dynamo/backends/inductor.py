@@ -18,7 +18,7 @@ from torch._dynamo.utils import dynamo_timed
 
 @register_backend
 def inductor(*args, **kwargs):
-    with dynamo_timed("inductor_import", log_pt2_compile_event=True):
+    with dynamo_timed("inductor_import"):
         # do import here to avoid loading inductor into memory when it is not used
         from torch._inductor.compile_fx import compile_fx
 

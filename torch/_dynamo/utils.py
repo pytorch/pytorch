@@ -350,7 +350,7 @@ class CompileEventLogger:
         CompileEventLogger.chromium("my_event", foo=bar)
 
     - I want to log my event to both chromium + pt2_compile_events:
-    with dynamo_timed("my_event", log_pt2_compile_event=True):
+    with dynamo_timed("my_event"):
         CompileEventLogger.pt2_compile("my_event", foo=bar)
 
     - I want to add information to dynamo events and dynamo_compile
@@ -618,12 +618,12 @@ def dynamo_timed(
     key: str,
     # TODO(masneral): Deprecate this param.
     phase_name: Optional[str] = None,
-    log_pt2_compile_event: bool = False,
+    log_pt2_compile_event: bool = True,
     metadata: Optional[dict[str, object]] = None,
     dynamo_compile_column_us: Optional[str] = None,
     compile_id: Optional[CompileId] = None,
     is_backward: Optional[bool] = None,
-    log_waitcounter: bool = False,
+    log_waitcounter: bool = True,
     waitcounter_name_override: Optional[str] = None,
 ) -> Generator[Any, None, None]:
     """

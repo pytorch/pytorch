@@ -658,7 +658,7 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
     path = code_state_path(cache_key)
     if path is not None and os.path.exists(path):
         with dynamo_timed(
-            name := "pgo.get_local_code_state", log_pt2_compile_event=True
+            name := "pgo.get_local_code_state"
         ):
             CompileEventLogger.pt2_compile(name, cache_key=cache_key)
             # Read lock not necessary as we always write atomically write to
@@ -683,7 +683,7 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
     if remote_cache is not None:
         with dynamo_timed(
             name := "pgo.get_remote_code_state",
-            log_pt2_compile_event=True,
+            
             dynamo_compile_column_us="pgo_get_remote_code_state_time_us",
         ):
             CompileEventLogger.pt2_compile(name, cache_key=cache_key)
@@ -769,7 +769,7 @@ def write_local_impl(cache_key: str, pickled_code: bytes) -> Optional[tuple[str,
 
 
 def put_local_code_state(cache_key: str) -> None:
-    with dynamo_timed(name := "pgo.put_local_code_state", log_pt2_compile_event=True):
+    with dynamo_timed(name := "pgo.put_local_code_state"):
         CompileEventLogger.pt2_compile(name, cache_key=cache_key)
         assert _CODE_STATE is not None
 
@@ -797,7 +797,7 @@ def put_local_code_state(cache_key: str) -> None:
 def put_remote_code_state(cache_key: str) -> None:
     with dynamo_timed(
         name := "pgo.put_remote_code_state",
-        log_pt2_compile_event=True,
+        
         dynamo_compile_column_us="pgo_put_remote_code_state_time_us",
     ):
         CompileEventLogger.pt2_compile(name, cache_key=cache_key)

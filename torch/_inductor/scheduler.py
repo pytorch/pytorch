@@ -2604,7 +2604,7 @@ class Scheduler:
         Combine eligible nodes into FusedSchedulerNodes.
         """
         with dynamo_timed(
-            "Scheduler.fused_nodes", log_pt2_compile_event=True, log_waitcounter=True
+            "Scheduler.fused_nodes",  log_waitcounter=True
         ):
             for i in range(10):
                 old_len = len(nodes)
@@ -2652,7 +2652,7 @@ class Scheduler:
         backend = self.get_backend(device)
         with dynamo_timed(
             "benchmark_fused_nodes",
-            log_pt2_compile_event=True,
+            
             dynamo_compile_column_us="compile_time_autotune_time_us",
         ):
             return backend.benchmark_fused_nodes(nodes)
