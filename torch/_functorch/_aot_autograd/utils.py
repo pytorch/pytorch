@@ -122,7 +122,7 @@ def call_func_at_runtime_with_args(
 
     context = torch._C._DisableAutocast if disable_amp else nullcontext
     with context():
-        if hasattr(f, "_boxed_call"):
+        if getattr(f, "_boxed_call", False):
             out = normalize_as_list(f(args))
         else:
             # TODO: Please remove soon

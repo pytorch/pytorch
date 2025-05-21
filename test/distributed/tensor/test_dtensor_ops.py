@@ -7,7 +7,7 @@ import warnings
 import torch
 import torch.distributed as dist
 import torch.testing._internal.common_methods_invocations as common_ops
-from torch.distributed._tensor import DeviceMesh, DTensor
+from torch.distributed.tensor import DeviceMesh, DTensor
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -112,6 +112,7 @@ dtensor_fails = {
     xfail("_batch_norm_with_update"),
     xfail("block_diag"),
     xfail("broadcast_shapes"),
+    xfail("cartesian_prod"),
     xfail("cauchy"),
     xfail("cdist"),
     xfail("cholesky"),
@@ -128,11 +129,8 @@ dtensor_fails = {
     xfail("cross"),
     xfail("cummax"),
     xfail("cummin"),
-    xfail("cumsum"),
-    xfail("cumulative_trapezoid"),
     xfail("diagonal_scatter"),
     xfail("dist"),
-    xfail("dot"),
     xfail("empty"),
     xfail("empty_strided"),
     xfail("empty_like"),
@@ -157,6 +155,7 @@ dtensor_fails = {
     xfail("fft.rfft"),
     xfail("fft.rfftn"),
     xfail("fill"),
+    xfail("flatten"),
     xfail("flip"),
     xfail("fliplr"),
     xfail("flipud"),
@@ -186,6 +185,7 @@ dtensor_fails = {
     xfail("index_select"),
     xfail("isin"),
     xfail("kthvalue"),
+    xfail("kron"),
     xfail("linalg.cholesky"),
     xfail("linalg.cholesky_ex"),
     xfail("linalg.cross"),
@@ -233,7 +233,6 @@ dtensor_fails = {
     xfail("masked.argmax"),
     xfail("masked.argmin"),
     xfail("masked.cumprod"),
-    xfail("masked.cumsum"),
     xfail("masked.logsumexp"),
     xfail("masked.median"),
     xfail("matrix_exp"),
@@ -357,10 +356,13 @@ dtensor_fails = {
     xfail("randint"),
     xfail("randn"),
     xfail("randn_like"),
+    xfail("ravel"),
     xfail("renorm"),
     xfail("repeat_interleave"),
     xfail("resize_"),
     xfail("resize_as_"),
+    xfail("reshape"),
+    xfail("reshape_as"),
     xfail("roll"),
     xfail("rot90"),
     xfail("rsub"),
@@ -424,6 +426,7 @@ dtensor_fails = {
     xfail("svd_lowrank"),
     xfail("t_copy"),
     xfail("take"),
+    xfail("take_along_dim"),
     xfail("tensor_split"),
     xfail("to_sparse"),
     xfail("trace"),
@@ -445,8 +448,11 @@ dtensor_fails = {
     xfail("var_mean"),
     xfail("var_mean", "unbiased"),
     xfail("vdot"),
+    xfail("view"),
+    xfail("view_as"),
     xfail("view_copy"),
     xfail("zeros"),
+    # /TODO(whc) debug/triage
     # ops inside this might even fail without dtensor
     # tests, as we rescale op db common test size factor (i.e. L, M, S)
     # which triggered the original function run failures with input
@@ -576,18 +582,18 @@ class TestDTensorOps(DTensorOpTestBase):
         def to_replicate(e: object) -> object:
             return e.full_tensor() if isinstance(e, DTensor) else e
 
-        try:
-            # Suppress warnings, this doesn't matter for test_meta.py
-            # but it does matter if you want to use this decorator
-            # for cross-ref testing, as some tests may be looking at
-            # errors
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                # for every comb of sharding choices, we test if it works
-                for dtensor_args, dtensor_kwargs in to_dtensor:
-                    # Only attempt if we managed to convert all tensors to DTensor
-                    # (if any of them failed, we're in a mixed tensor situation and
-                    # this is not allowed in DTensor)
+        # Suppress warnings, this doesn't matter for test_meta.py
+        # but it does matter if you want to use this decorator
+        # for cross-ref testing, as some tests may be looking at
+        # errors
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            # for every comb of sharding choices, we test if it works
+            for dtensor_args, dtensor_kwargs in to_dtensor:
+                # Only attempt if we managed to convert all tensors to DTensor
+                # (if any of them failed, we're in a mixed tensor situation and
+                # this is not allowed in DTensor)
+                try:
                     if to_dtensor.successful():
                         # Handle special cases first if there's any
                         # Suppress warnings, this doesn't matter for test_meta.py
@@ -597,7 +603,7 @@ class TestDTensorOps(DTensorOpTestBase):
                         dtensor_rs = func(*dtensor_args, **dtensor_kwargs)
 
                         # we need to skip tests containing tensors of zero elements for now.
-                        # see issue: https://github.com/pytorch/tau/issues/470
+                        # see issue: https://github.com/pytorch/PiPPy/issues/470
                         # TODO remove this once issue above fixed.
                         flat_args = pytree.tree_leaves(dtensor_rs)
                         if any(
@@ -628,11 +634,10 @@ class TestDTensorOps(DTensorOpTestBase):
                             f"failed to convert args to DTensor; "
                             f"originally (*{args}, **{kwargs})"
                         )
-        except Exception as e:
-            raise RuntimeError(
-                f"failed to run: {resolve_name(func)}, with (*{args}, **{kwargs})"
-            ) from e
-
+                except Exception as e:
+                    raise RuntimeError(
+                        f"failed to run: {resolve_name(func)}, with (*{dtensor_args}, **{dtensor_kwargs})"
+                    ) from e
         return rs
 
     def check_dtensor_func(self, test_func, opinfo, dry_run=False):

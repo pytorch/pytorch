@@ -8,8 +8,6 @@
 #include <c10/cuda/driver_api.h>
 #endif
 
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
-
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -17,9 +15,12 @@
 #include <ATen/ops/empty_like.h>
 #endif
 
+
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/cuda/AsyncMM.cuh>
+
+#if defined(USE_ROCM) || (defined(CUDART_VERSION) && CUDART_VERSION >= 12030)
 
 #define INT_SWITCH_CASE(name, val, ...) \
   case val: {                           \
@@ -37,6 +38,16 @@
       constexpr int k_world_size = -1;             \
       __VA_ARGS__();                               \
     }                                              \
+  }
+
+#define DISPATCH_WORLD_SIZES_NO_DEFAULT(world_size, ...)                 \
+  switch (world_size) {                                                  \
+    INT_SWITCH_CASE(k_world_size, 8, __VA_ARGS__);                       \
+    INT_SWITCH_CASE(k_world_size, 4, __VA_ARGS__);                       \
+    INT_SWITCH_CASE(k_world_size, 2, __VA_ARGS__);                       \
+    default: {                                                           \
+      TORCH_CHECK(false, "Not implemented for world_size=", world_size); \
+    }                                                                    \
   }
 
 #define DISPATCH_ALIGNMENTS_16_8_4(alignment, ...)                    \
@@ -62,7 +73,7 @@ size_t get_and_verify_alignment(const at::Tensor& input, const char* op_name) {
   const size_t min_alignment = std::max(4l, input.element_size());
   // Only check the offset since the multicast address is always at least
   // 128-bit aligned
-  const size_t ptr_alignment = get_alignment(
+  const size_t ptr_alignment = at::native::memory::get_alignment(
       static_cast<size_t>(input.storage_offset() * input.element_size()));
   TORCH_CHECK(
       ptr_alignment >= min_alignment,
@@ -74,7 +85,7 @@ size_t get_and_verify_alignment(const at::Tensor& input, const char* op_name) {
       "-byte aligned.");
 
   const size_t size_alignment =
-      get_alignment(static_cast<size_t>(input.numel() * input.element_size()));
+      at::native::memory::get_alignment(static_cast<size_t>(input.numel() * input.element_size()));
   TORCH_CHECK(
       size_alignment >= min_alignment,
       op_name,
@@ -113,6 +124,7 @@ void init_elementwise_launch_config(
   }
 }
 
+#if !defined(USE_ROCM) //No multi-cast support on ROCm yet
 template <typename T, int alignment>
 static __global__ void multimem_all_reduce_kernel(
     T* input_mc_ptr,
@@ -215,7 +227,7 @@ static __global__ void multimem_one_shot_all_reduce_kernel(
   auto stride = blockDim.x * gridDim.x * numel_per_thread;
   for (size_t i = offset; i < numel; i += stride) {
     auto vec = multimem_ld_reduce_add<alignment>(input_mc_ptr + i);
-    st_vec<alignment>(output_ptr + i, vec);
+    at::native::memory::st_vec<alignment>(output_ptr + i, vec);
   }
 
   __syncthreads();
@@ -308,7 +320,7 @@ static __global__ void multimem_all_gather_kernel(
   auto offset = (blockDim.x * blockIdx.x + threadIdx.x) * alignment;
   auto stride = blockDim.x * gridDim.x * alignment;
   for (size_t i = offset; i < bytes_per_rank; i += stride) {
-    auto vec = ld_vec<alignment>(input_ptr + i);
+    auto vec = at::native::memory::ld_vec<alignment>(input_ptr + i);
     multimem_st<alignment>(output_mc_ptr + start + i, vec);
   }
 
@@ -384,10 +396,12 @@ at::Tensor multimem_all_gather_out(
   return out;
 }
 
+#endif //no multi-cast support on ROCm
+
 // One-shot all-reduce is register-intensive because it stages values loaded
 // from peers in registers before performing reduction. Setting the thread
 // count to 512 to prevent/alleviate register spill.
-constexpr size_t one_shot_all_reduce_max_num_blocks = 8;
+constexpr size_t one_shot_all_reduce_max_num_blocks = 24;
 constexpr size_t one_shot_all_reduce_max_num_threads = 512;
 
 template <typename T, int alignment, int k_world_size>
@@ -395,6 +409,7 @@ static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
     void one_shot_all_reduce_kernel(
         T** input_ptrs,
         T* output_ptr,
+        T* input_ptr,
         size_t input_offset,
         size_t numel,
         uint32_t** signal_pads,
@@ -402,25 +417,32 @@ static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
         size_t world_size) {
   static_assert(alignment % sizeof(T) == 0);
   constexpr size_t numel_per_thread = alignment / sizeof(T);
-
-  sync_remote_blocks<std::memory_order_relaxed>(signal_pads, rank, world_size);
-  __syncthreads();
-
+  // copy input to shared ptr
   auto offset = (blockDim.x * blockIdx.x + threadIdx.x) * numel_per_thread;
   auto stride = blockDim.x * gridDim.x * numel_per_thread;
+  if (input_ptr) {
+    for (size_t i = offset; i < numel; i += stride) {
+      Vec<alignment> vec_st = at::native::memory::ld_vec<alignment>(input_ptr + i);
+      at::native::memory::st_vec<alignment>(input_ptrs[rank] + input_offset + i, vec_st);
+    }
+  }
+  // TODO make it sync with one block for no-copy case
+  sync_remote_blocks<std::memory_order_acq_rel>(signal_pads, rank, world_size);
+  __syncthreads();
 
   for (size_t i = offset; i < numel; i += stride) {
     auto vec = load_and_reduce<T, alignment, k_world_size>(
         input_ptrs, rank, world_size, input_offset + i);
-    st_vec<alignment>(output_ptr + i, vec);
+    at::native::memory::st_vec<alignment>(output_ptr + i, vec);
   }
 
   __syncthreads();
-  sync_remote_blocks<std::memory_order_relaxed>(signal_pads, rank, world_size);
+  sync_remote_blocks<std::memory_order_acq_rel>(signal_pads, rank, world_size);
 }
 
-at::Tensor one_shot_all_reduce_out(
+at::Tensor one_shot_all_reduce_out_impl(
     const at::Tensor& input,
+    const std::optional<at::Tensor>& local_input,
     std::string reduce_op,
     std::string group_name,
     at::Tensor out) {
@@ -430,11 +452,25 @@ at::Tensor one_shot_all_reduce_out(
       out.is_contiguous(), "one_shot_all_reduce: output must be contiguous.");
   TORCH_CHECK(
       out.sizes() == input.sizes(),
-      "one_shot_all_reduce: input/output size mismatch.");
+      "one_shot_all_reduce: input/output size mismatch, input.sizes(): ",
+      input.sizes(),
+      ", output.sizes(): ",
+      out.sizes());
   TORCH_CHECK(
       reduce_op == "sum",
       "one_shot_all_reduce: only sum is supported for now.");
-
+  if (local_input.has_value()) {
+    TORCH_CHECK(
+        local_input->is_contiguous(),
+        "one_shot_all_reduce: local input must be contiguous.");
+    TORCH_CHECK(
+        local_input->numel() <= input.numel(),
+        "one_shot_all_reduce: local input size must be smaller than symm buffer size.");
+  }
+  if (input.numel() == 0) {
+    TORCH_CHECK(input.scalar_type() == out.scalar_type());
+    return out;
+  }
   auto symm_mem = c10d::symmetric_memory::rendezvous(input, group_name);
   TORCH_CHECK(
       symm_mem != nullptr,
@@ -442,6 +478,13 @@ at::Tensor one_shot_all_reduce_out(
 
   const size_t alignment =
       get_and_verify_alignment(input, "one_shot_all_reduce");
+  if (local_input.has_value()) {
+    const size_t local_alignment =
+        get_and_verify_alignment(*local_input, "one_shot_all_reduce");
+    TORCH_CHECK(
+        alignment == local_alignment,
+        "one_shot_all_reduce: local input and symm buffer must have the same alignment.");
+  }
 
   int num_blocks = 0, num_threads = 0;
   init_elementwise_launch_config(
@@ -466,6 +509,8 @@ at::Tensor one_shot_all_reduce_out(
                     reinterpret_cast<scalar_t**>(
                         symm_mem->get_buffer_ptrs_dev()),
                     out.data_ptr<scalar_t>(),
+                    local_input.has_value() ? local_input->data_ptr<scalar_t>()
+                                            : nullptr,
                     input.storage_offset(),
                     input.numel(),
                     reinterpret_cast<uint32_t**>(
@@ -479,20 +524,135 @@ at::Tensor one_shot_all_reduce_out(
   return out;
 }
 
+at::Tensor one_shot_all_reduce_out(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name,
+    at::Tensor out) {
+  return one_shot_all_reduce_out_impl(
+      input, std::nullopt, reduce_op, group_name, out);
+}
+
+at::Tensor one_shot_all_reduce_copy_out(
+    const at::Tensor& input,
+    const at::Tensor& local_input,
+    std::string reduce_op,
+    std::string group_name,
+    at::Tensor out) {
+  return one_shot_all_reduce_out_impl(
+      input, local_input, reduce_op, group_name, out);
+}
+
 at::Tensor one_shot_all_reduce(
     const at::Tensor& input,
     std::string reduce_op,
     std::string group_name) {
   auto out = at::empty_like(input);
-  return one_shot_all_reduce_out(input, reduce_op, group_name, out);
+  return one_shot_all_reduce_out_impl(
+      input, std::nullopt, reduce_op, group_name, out);
+}
+
+at::Tensor one_shot_all_reduce_copy(
+    const at::Tensor& input,
+    const at::Tensor& local_input,
+    std::string reduce_op,
+    std::string group_name) {
+  auto out = at::empty_like(local_input);
+  return one_shot_all_reduce_out_impl(
+      input, local_input, reduce_op, group_name, out);
 }
 
 constexpr size_t two_shot_all_reduce_max_num_blocks = 24;
-constexpr size_t two_shot_all_reduce_max_num_threads = 512;
+constexpr size_t two_shot_all_reduce_max_num_threads = 1024;
+
+template <
+    typename T,
+    int alignment,
+    int k_world_size,
+    bool reduce_scatter = false,
+    bool split_last_dim = false>
+static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
+    void two_shot_all_reduce_kernel(
+        T** input_ptrs,
+        T* output_ptr,
+        size_t input_offset,
+        size_t numel,
+        uint32_t** signal_pads,
+        size_t rank,
+        size_t world_size,
+        size_t last_dim_size = 0) {
+  static_assert(alignment % sizeof(T) == 0);
+  constexpr size_t numel_per_thread = alignment / sizeof(T);
+  int32_t N_last_dim =
+      last_dim_size / world_size; // used only for split_last_dim reduce_scatter
+  sync_remote_blocks<std::memory_order_acq_rel>(signal_pads, rank, world_size);
+  __syncthreads();
+
+  const size_t numel_per_rank =
+      at::round_up(numel, numel_per_thread * world_size) / world_size;
+  const size_t start = split_last_dim ? last_dim_size / world_size * rank
+                                      : numel_per_rank * rank;
+
+  auto offset = (blockDim.x * blockIdx.x + threadIdx.x) * numel_per_thread;
+  auto stride = blockDim.x * gridDim.x * numel_per_thread;
+  for (size_t i = offset; i < numel_per_rank; i += stride) {
+    if constexpr (!reduce_scatter) {
+      // we call reduce-scatter only with evenly divisible number of elements
+      if (start + i >= numel) {
+        continue;
+      }
+    }
+    size_t idx = i;
+    if constexpr (split_last_dim) {
+      idx = i / N_last_dim * last_dim_size + i % N_last_dim;
+    }
+    auto vec = load_and_reduce<T, alignment, k_world_size>(
+        input_ptrs, rank, world_size, input_offset + start + idx);
+    // store to local buffer or to output
+    if constexpr (reduce_scatter) {
+      at::native::memory::st_vec<alignment>(output_ptr + i, vec);
+    } else {
+      at::native::memory::st_vec<alignment>(input_ptrs[rank] + input_offset + start + i, vec);
+    }
+  }
+
+  __syncthreads();
+  sync_remote_blocks<std::memory_order_acq_rel>(signal_pads, rank, world_size);
+  if constexpr (reduce_scatter) {
+    return;
+  }
+  __syncthreads();
+  for (size_t i = offset; i < numel_per_rank; i += stride) {
+    Vec<alignment> tmp[k_world_size];
+#pragma unroll k_world_size
+    for (size_t step = 0; step < k_world_size; ++step) {
+      size_t remote_rank = (rank + step) % k_world_size;
+      size_t remote_start = numel_per_rank * remote_rank;
+      if (remote_start + i >= numel) {
+        continue;
+      }
+      tmp[step] = at::native::memory::ld_vec<alignment>(
+          input_ptrs[remote_rank] + input_offset + remote_start + i);
+    }
+#pragma unroll k_world_size
+    for (size_t step = 0; step < k_world_size; ++step) {
+      size_t remote_rank = (rank + step) % k_world_size;
+      size_t remote_start = numel_per_rank * remote_rank;
+      if (remote_start + i >= numel) {
+        continue;
+      }
+      at::native::memory::st_vec<alignment>(output_ptr + remote_start + i, tmp[step]);
+    }
+  }
+  // need to make sure all blocks exit simultaneously so that the data
+  // is not corrupted by the subsequent kernels
+  __syncthreads();
+  sync_remote_blocks<std::memory_order_acq_rel>(signal_pads, rank, world_size);
+}
 
 template <typename T, int alignment, int k_world_size>
 static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
-    void two_shot_all_reduce_kernel(
+    void two_shot_all_reduce_kernel_inplace(
         T** input_ptrs,
         size_t input_offset,
         size_t numel,
@@ -519,7 +679,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
         input_ptrs, rank, world_size, input_offset + start + i);
     for (size_t step = 0; step < world_size; ++step) {
       size_t remote_rank = (rank + step) % world_size;
-      st_vec<alignment>(
+      at::native::memory::st_vec<alignment>(
           input_ptrs[remote_rank] + input_offset + start + i, vec);
     }
   }
@@ -528,8 +688,9 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
   sync_remote_blocks<std::memory_order_acq_rel>(signal_pads, rank, world_size);
 }
 
-at::Tensor two_shot_all_reduce_(
+at::Tensor two_shot_all_reduce_impl(
     at::Tensor input,
+    std::optional<at::Tensor> output,
     std::string reduce_op,
     std::string group_name) {
   TORCH_CHECK(
@@ -546,6 +707,31 @@ at::Tensor two_shot_all_reduce_(
   const size_t alignment =
       get_and_verify_alignment(input, "two_shot_all_reduce");
 
+  if (output.has_value()) {
+    TORCH_CHECK(
+        output->is_contiguous(),
+        "two_shot_all_reduce: output must be contiguous.");
+    const size_t output_alignment =
+        get_and_verify_alignment(*output, "two_shot_all_reduce");
+    TORCH_CHECK(
+        alignment <= output_alignment,
+        "two_shot_all_reduce: output alignment must be equal to or larger than input.");
+    TORCH_CHECK(
+        output->sizes() == input.sizes(),
+        "two_shot_all_reduce: input/output size mismatch, input.sizes(): ",
+        input.sizes(),
+        ", output.sizes(): ",
+        output->sizes());
+    if (input.numel() == 0) {
+      TORCH_CHECK(output->scalar_type() == input.scalar_type());
+      return *output;
+    }
+  } else {
+    if (input.numel() == 0) {
+      return input;
+    }
+  }
+
   int num_blocks = 0, num_threads = 0;
   init_elementwise_launch_config(
       input.numel(),
@@ -557,32 +743,312 @@ at::Tensor two_shot_all_reduce_(
       num_blocks,
       num_threads);
 
-  AT_DISPATCH_FLOAT_AND_BFLOAT16(
-      input.scalar_type(), "two_shot_all_reduce", [&]() {
-        DISPATCH_ALIGNMENTS_16_8_4(alignment, [&]() {
-          DISPATCH_WORLD_SIZES(symm_mem->get_world_size(), [&]() {
-            two_shot_all_reduce_kernel<scalar_t, k_alignment, k_world_size>
-                <<<num_blocks,
-                   num_threads,
-                   0,
-                   at::cuda::getCurrentCUDAStream()>>>(
-                    reinterpret_cast<scalar_t**>(
-                        symm_mem->get_buffer_ptrs_dev()),
-                    input.storage_offset(),
-                    input.numel(),
-                    reinterpret_cast<uint32_t**>(
-                        symm_mem->get_signal_pad_ptrs_dev()),
-                    symm_mem->get_rank(),
-                    symm_mem->get_world_size());
-            C10_CUDA_KERNEL_LAUNCH_CHECK();
+  if (!output.has_value()) {
+    AT_DISPATCH_FLOAT_AND_BFLOAT16(
+        input.scalar_type(), "two_shot_all_reduce", [&]() {
+          DISPATCH_ALIGNMENTS_16_8_4(alignment, [&]() {
+            DISPATCH_WORLD_SIZES(symm_mem->get_world_size(), [&]() {
+              two_shot_all_reduce_kernel_inplace<
+                  scalar_t,
+                  k_alignment,
+                  k_world_size>
+                  <<<num_blocks,
+                     num_threads,
+                     0,
+                     at::cuda::getCurrentCUDAStream()>>>(
+                      reinterpret_cast<scalar_t**>(
+                          symm_mem->get_buffer_ptrs_dev()),
+                      input.storage_offset(),
+                      input.numel(),
+                      reinterpret_cast<uint32_t**>(
+                          symm_mem->get_signal_pad_ptrs_dev()),
+                      symm_mem->get_rank(),
+                      symm_mem->get_world_size());
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+            });
           });
         });
-      });
+    return input;
+  } else {
+    AT_DISPATCH_FLOAT_AND_BFLOAT16(
+        input.scalar_type(), "two_shot_all_reduce", [&]() {
+          DISPATCH_ALIGNMENTS_16_8_4(alignment, [&]() {
+            DISPATCH_WORLD_SIZES_NO_DEFAULT(symm_mem->get_world_size(), [&]() {
+              two_shot_all_reduce_kernel<scalar_t, k_alignment, k_world_size>
+                  <<<num_blocks,
+                     num_threads,
+                     0,
+                     at::cuda::getCurrentCUDAStream()>>>(
+                      reinterpret_cast<scalar_t**>(
+                          symm_mem->get_buffer_ptrs_dev()),
+                      output->data_ptr<scalar_t>(),
+                      input.storage_offset(),
+                      input.numel(),
+                      reinterpret_cast<uint32_t**>(
+                          symm_mem->get_signal_pad_ptrs_dev()),
+                      symm_mem->get_rank(),
+                      symm_mem->get_world_size());
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+            });
+          });
+        });
+    return *output;
+  }
+}
+
+at::Tensor two_shot_all_reduce_(
+    at::Tensor input,
+    std::string reduce_op,
+    std::string group_name) {
+  return two_shot_all_reduce_impl(input, std::nullopt, reduce_op, group_name);
+}
+
+at::Tensor two_shot_all_reduce_out(
+    at::Tensor input,
+    std::string reduce_op,
+    std::string group_name,
+    at::Tensor output) {
+  return two_shot_all_reduce_impl(input, output, reduce_op, group_name);
+}
+
+at::Tensor reduce_scatter_out(
+    at::Tensor input,
+    std::string group_name,
+    bool split_last_dim,
+    at::Tensor output) {
+  TORCH_CHECK(
+      input.is_contiguous(), "reduce_scatter: input must be contiguous.");
+  TORCH_CHECK(
+      output.is_contiguous(), "reduce_scatter: output must be contiguous.");
+
+  auto symm_mem = c10d::symmetric_memory::rendezvous(input, group_name);
+  TORCH_CHECK(
+      symm_mem != nullptr,
+      "reduce_scatter: input must be allocated with empty_strided_p2p().");
+
+  const size_t alignment = get_and_verify_alignment(input, "reduce_scatter");
+
+  const size_t output_alignment =
+      get_and_verify_alignment(input, "reduce_scatter");
+
+  TORCH_CHECK(
+      input.numel() %
+              (symm_mem->get_world_size() *
+               (alignment / input.element_size())) ==
+          0,
+      "expected number of elements to be divisible by world_size * alignment, number of elements ",
+      input.numel(),
+      " world size ",
+      symm_mem->get_world_size(),
+      "alignment ",
+      alignment);
+
+  if (split_last_dim) {
+    TORCH_CHECK(input.dim() == output.dim());
+    bool are_equal_except_last = std::equal(
+        input.sizes().begin(), input.sizes().end() - 1, output.sizes().begin());
+    TORCH_CHECK(
+        are_equal_except_last,
+        "reduce_scatter expected input and output to have same sizes except in the last dimension");
+    TORCH_CHECK(
+        output.size(-1) == input.size(-1) / symm_mem->get_world_size(),
+        "reduce_scatter expected output last dim size to be input last dim size / world_size");
+
+    TORCH_CHECK(
+        input.size(-1) %
+                (symm_mem->get_world_size() *
+                 (alignment / input.element_size())) ==
+            0,
+        "expected last dimension to be divisible by world_size * alignment, last dimension ",
+        input.size(-1),
+        " world size ",
+        symm_mem->get_world_size(),
+        "alignment ",
+        alignment);
+  } else {
+    TORCH_CHECK(input.dim() == 1, "reduce_scatter expected 1D input");
+    TORCH_CHECK(output.dim() == 1, "reduce_scatter expected 1D output");
+    TORCH_CHECK(output.numel() == input.numel() / symm_mem->get_world_size());
+  }
+  if (input.numel() == 0) {
+    TORCH_CHECK(input.scalar_type() == output.scalar_type());
+    return output;
+  }
+
+  TORCH_CHECK(
+      output_alignment >= alignment,
+      "reduce_scatter: output alignment should be not smaller than input alignment");
+
+  int num_blocks = 0, num_threads = 0;
+  init_elementwise_launch_config(
+      input.numel(),
+      input.element_size(),
+      alignment,
+      symm_mem->get_world_size(),
+      two_shot_all_reduce_max_num_blocks,
+      two_shot_all_reduce_max_num_threads,
+      num_blocks,
+      num_threads);
+  if (split_last_dim) {
+    AT_DISPATCH_FLOAT_AND_BFLOAT16(
+        input.scalar_type(), "two_shot_all_reduce", [&]() {
+          DISPATCH_ALIGNMENTS_16_8_4(alignment, [&]() {
+            DISPATCH_WORLD_SIZES_NO_DEFAULT(symm_mem->get_world_size(), [&]() {
+              two_shot_all_reduce_kernel<
+                  scalar_t,
+                  k_alignment,
+                  k_world_size,
+                  true,
+                  true>
+                  <<<num_blocks,
+                     num_threads,
+                     0,
+                     at::cuda::getCurrentCUDAStream()>>>(
+                      reinterpret_cast<scalar_t**>(
+                          symm_mem->get_buffer_ptrs_dev()),
+                      output.data_ptr<scalar_t>(),
+                      input.storage_offset(),
+                      input.numel(),
+                      reinterpret_cast<uint32_t**>(
+                          symm_mem->get_signal_pad_ptrs_dev()),
+                      symm_mem->get_rank(),
+                      symm_mem->get_world_size(),
+                      input.size(-1));
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+            });
+          });
+        });
+  } else {
+    AT_DISPATCH_FLOAT_AND_BFLOAT16(
+        input.scalar_type(), "two_shot_all_reduce", [&]() {
+          DISPATCH_ALIGNMENTS_16_8_4(alignment, [&]() {
+            DISPATCH_WORLD_SIZES_NO_DEFAULT(symm_mem->get_world_size(), [&]() {
+              two_shot_all_reduce_kernel<
+                  scalar_t,
+                  k_alignment,
+                  k_world_size,
+                  true,
+                  false>
+                  <<<num_blocks,
+                     num_threads,
+                     0,
+                     at::cuda::getCurrentCUDAStream()>>>(
+                      reinterpret_cast<scalar_t**>(
+                          symm_mem->get_buffer_ptrs_dev()),
+                      output.data_ptr<scalar_t>(),
+                      input.storage_offset(),
+                      input.numel(),
+                      reinterpret_cast<uint32_t**>(
+                          symm_mem->get_signal_pad_ptrs_dev()),
+                      symm_mem->get_rank(),
+                      symm_mem->get_world_size(),
+                      input.size(-1));
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+            });
+          });
+        });
+  }
+  return output;
+}
+} // namespace
+#elif defined(CUDART_VERSION) && CUDART_VERSION < 12030
+namespace {
+at::Tensor multimem_all_reduce_(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "multimem_all_reduce_: requires CUDA 12.3+.");
   return input;
 }
 
+at::Tensor multimem_one_shot_all_reduce_out(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name,
+    at::Tensor out) {
+  TORCH_CHECK(false, "multimem_one_shot_all_reduce_out: requires CUDA 12.3+.");
+  return out;
+}
+
+at::Tensor multimem_one_shot_all_reduce(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "multimem_one_shot_all_reduce: requires CUDA 12.3+.");
+  return input;
+}
+
+at::Tensor multimem_all_gather_out(
+    const at::Tensor& input,
+    std::string group_name,
+    at::Tensor out) {
+  TORCH_CHECK(false, "multimem_all_gather_out: requires CUDA 12.3+.");
+  return out;
+}
+
+at::Tensor one_shot_all_reduce_out(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name,
+    at::Tensor out) {
+  TORCH_CHECK(false, "one_shot_all_reduce_out: requires CUDA 12.3+.");
+  return out;
+}
+
+at::Tensor one_shot_all_reduce_copy_out(
+    const at::Tensor& input,
+    const at::Tensor& local_input,
+    std::string reduce_op,
+    std::string group_name,
+    at::Tensor out) {
+  TORCH_CHECK(false, "one_shot_all_reduce_copy_out: requires CUDA 12.3+.");
+  return out;
+}
+
+at::Tensor one_shot_all_reduce(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "one_shot_all_reduce: requires CUDA 12.3+.");
+  return input;
+}
+
+at::Tensor one_shot_all_reduce_copy(
+    const at::Tensor& input,
+    const at::Tensor& local_input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "one_shot_all_reduce_copy: requires CUDA 12.3+.");
+  return input;
+}
+
+at::Tensor two_shot_all_reduce_(
+    at::Tensor input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "two_shot_all_reduce_: requires CUDA 12.3+.");
+  return input;
+}
+
+at::Tensor two_shot_all_reduce_out(
+    at::Tensor input,
+    std::string reduce_op,
+    std::string group_name,
+    at::Tensor output) {
+  TORCH_CHECK(false, "two_shot_all_reduce_out: requires CUDA 12.3+.");
+  return output;
+}
+
+at::Tensor reduce_scatter_out(
+    at::Tensor input,
+    std::string group_name,
+    bool split_last_dim,
+    at::Tensor output) {
+  TORCH_CHECK(false, "reduce_scatter_out: requires CUDA 12.3+.");
+  return output;
+}
 } // namespace
-#endif // #if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
+#endif // #if defined(CUDART_VERSION) && CUDART_VERSION < 12030
 
 namespace {
 
@@ -591,7 +1057,6 @@ at::Tensor memset32_(
     int64_t offset,
     int64_t val,
     int64_t count) {
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   TORCH_CHECK(
       input.dim() == 1 && input.is_contiguous() &&
           input.scalar_type() == c10::ScalarType::UInt32,
@@ -615,7 +1080,6 @@ at::Tensor memset32_(
       "symm_mem::memset32_: val must be in the range of "
       "[0, 4294967295] (uint32_t).")
 
-  auto element_size = c10::elementSize(input.scalar_type());
   TORCH_CHECK(
       offset + count <= input.numel(),
       "symm_mem::memset32_: offset + count (",
@@ -625,14 +1089,20 @@ at::Tensor memset32_(
       ")");
 
   auto addr = reinterpret_cast<uint32_t*>(input.data_ptr()) + offset;
-
   c10::cuda::CUDAGuard guard(input.device());
+
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto driver_api = c10::cuda::DriverAPI::get();
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemsetD32Async_(
       reinterpret_cast<CUdeviceptr>(addr),
       val,
       count,
       at::cuda::getCurrentCUDAStream()));
+#elif defined(USE_ROCM)
+  C10_HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(addr),
+                                   val,
+                                   count,
+                                   at::cuda::getCurrentCUDAStream()));
 #else
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
@@ -644,7 +1114,6 @@ at::Tensor stream_write_value32_(
     at::Tensor& input,
     int64_t offset,
     int64_t val) {
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   TORCH_CHECK(
       input.dim() == 1 && input.is_contiguous() &&
           input.scalar_type() == c10::ScalarType::UInt32,
@@ -664,7 +1133,6 @@ at::Tensor stream_write_value32_(
       "symm_mem::stream_write_value32_: "
       "val must be in the range of [0, 4294967295] (uint32_t).")
 
-  auto element_size = c10::elementSize(input.scalar_type());
   TORCH_CHECK(
       offset < input.numel(),
       "symm_mem::stream_write_value32_: offset (",
@@ -674,8 +1142,9 @@ at::Tensor stream_write_value32_(
       ")");
 
   auto addr = reinterpret_cast<uint32_t*>(input.data_ptr()) + offset;
-
   c10::cuda::CUDAGuard guard(input.device());
+
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto driver_api = c10::cuda::DriverAPI::get();
   // According to the documentation of CUstreamWriteValue_flags,
   // cuStreamWriteValue32 will provide a memory fence before the write, which
@@ -686,6 +1155,12 @@ at::Tensor stream_write_value32_(
       reinterpret_cast<CUdeviceptr>(addr),
       val,
       0));
+#elif defined(USE_ROCM)
+  C10_HIP_CHECK(hipStreamWriteValue32(
+                                      at::cuda::getCurrentCUDAStream(),
+                                      reinterpret_cast<void*>(addr),
+                                      val,
+                                      0));
 #else
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
@@ -696,7 +1171,18 @@ at::Tensor stream_write_value32_(
 } // namespace
 
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
+#if defined(USE_ROCM) || defined(CUDART_VERSION)
+  m.impl("one_shot_all_reduce", ::one_shot_all_reduce);
+  m.impl("one_shot_all_reduce_out", ::one_shot_all_reduce_out);
+  m.impl("one_shot_all_reduce_copy", ::one_shot_all_reduce_copy);
+  m.impl("one_shot_all_reduce_copy_out", ::one_shot_all_reduce_copy_out);
+  m.impl("two_shot_all_reduce_", ::two_shot_all_reduce_);
+  m.impl("two_shot_all_reduce_out", ::two_shot_all_reduce_out);
+  m.impl("reduce_scatter_out", ::reduce_scatter_out);
+
+  m.impl("_async_input_mm", c10d::cuda::detail::async_input_mm);
+#endif
+#if defined(CUDART_VERSION)
   m.impl("multimem_all_reduce_", ::multimem_all_reduce_);
 
   // NOTE: [multimem_one_shot_all_reduce]
@@ -710,10 +1196,6 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl(
       "multimem_one_shot_all_reduce_out", ::multimem_one_shot_all_reduce_out);
   m.impl("multimem_all_gather_out", ::multimem_all_gather_out);
-  m.impl("one_shot_all_reduce", ::one_shot_all_reduce);
-  m.impl("one_shot_all_reduce_out", ::one_shot_all_reduce_out);
-  m.impl("two_shot_all_reduce_", ::two_shot_all_reduce_);
-  m.impl("_async_input_mm", c10d::cuda::detail::async_input_mm);
 #endif
   m.impl("stream_write_value32_", ::stream_write_value32_);
   m.impl("memset32_", ::memset32_);

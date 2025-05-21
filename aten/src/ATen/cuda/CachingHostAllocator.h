@@ -18,25 +18,52 @@ namespace at::cuda {
 // call between host and device, and passed the corresponding context from the
 // allocation. This is currently invoked by at::native::copy_kernel_cuda.
 //
-TORCH_CUDA_CPP_API c10::Allocator* getCachingHostAllocator();
+C10_DEPRECATED_MESSAGE(
+  "at::cuda::getCachingHostAllocator() is deprecated. Please use at::getHostAllocator(at::kCUDA) instead.")
+inline TORCH_CUDA_CPP_API at::HostAllocator* getCachingHostAllocator() {
+  return at::getHostAllocator(at::kCUDA);
+}
 
 // Records an event in the specified stream. The allocation corresponding to the
 // input `ptr`/`ctx` will not be re-used until the event has occurred.
-TORCH_CUDA_CPP_API bool CachingHostAllocator_recordEvent(
+C10_DEPRECATED_MESSAGE(
+  "at::cuda::CachingHostAllocator_recordEvent(...) is deprecated. Please use at::getHostAllocator(at::kCUDA)->record_event(...) instead.")
+inline TORCH_CUDA_CPP_API bool CachingHostAllocator_recordEvent(
     void* ptr,
     void* ctx,
-    c10::cuda::CUDAStream stream);
-
-// Releases cached pinned memory allocations via cudaHostFree
-TORCH_CUDA_CPP_API void CachingHostAllocator_emptyCache();
-
-inline TORCH_CUDA_CPP_API at::DataPtr HostAlloc(size_t size) {
-  return getCachingHostAllocator()->allocate(size);
+    c10::cuda::CUDAStream stream) {
+  return getHostAllocator(at::kCUDA)->record_event(ptr, ctx, stream.unwrap());
 }
 
-TORCH_CUDA_CPP_API at::HostStats CachingHostAllocator_getStats();
+// Releases cached pinned memory allocations via cudaHostFree
+C10_DEPRECATED_MESSAGE(
+  "at::cuda::CachingHostAllocator_emptyCache() is deprecated. Please use at::getHostAllocator(at::kCUDA)->empty_cache() instead.")
+inline TORCH_CUDA_CPP_API void CachingHostAllocator_emptyCache() {
+  getHostAllocator(at::kCUDA)->empty_cache();
+}
 
-TORCH_CUDA_CPP_API void CachingHostAllocator_resetAccumulatedStats();
-TORCH_CUDA_CPP_API void CachingHostAllocator_resetPeakStats();
+C10_DEPRECATED_MESSAGE(
+  "at::cuda::HostAlloc(...) is deprecated. Please use at::getHostAllocator(at::kCUDA)->allocate(...) instead.")
+inline TORCH_CUDA_CPP_API at::DataPtr HostAlloc(size_t size) {
+  return getHostAllocator(at::kCUDA)->allocate(size);
+}
+
+C10_DEPRECATED_MESSAGE(
+  "at::cuda::CachingHostAllocator_getStats() is deprecated. Please use at::getHostAllocator(at::kCUDA)->get_stats() instead.")
+inline TORCH_CUDA_CPP_API at::HostStats CachingHostAllocator_getStats() {
+  return getHostAllocator(at::kCUDA)->get_stats();
+}
+
+C10_DEPRECATED_MESSAGE(
+  "at::cuda::CachingHostAllocator_resetAccumulatedStats() is deprecated. Please use at::getHostAllocator(at::kCUDA)->reset_accumulated_stats() instead.")
+inline TORCH_CUDA_CPP_API void CachingHostAllocator_resetAccumulatedStats() {
+  getHostAllocator(at::kCUDA)->reset_accumulated_stats();
+}
+
+C10_DEPRECATED_MESSAGE(
+  "at::cuda::CachingHostAllocator_resetPeakStats() is deprecated. Please use at::getHostAllocator(at::kCUDA)->reset_peak_stats() instead.")
+inline TORCH_CUDA_CPP_API void CachingHostAllocator_resetPeakStats() {
+  getHostAllocator(at::kCUDA)->reset_peak_stats();
+}
 
 } // namespace at::cuda

@@ -347,9 +347,10 @@ class CustomOpDef:
                             fn = self._backend_fns[device_type]
                             return inspect.getmodule(fn)
 
-                        utils.check_aliasing_constraint(
+                        utils._c_check_aliasing_constraint(
                             self._name,
-                            utils.iter_tensors(args, kwargs),
+                            args,
+                            kwargs,
                             result,
                             get_module,
                         )
@@ -614,7 +615,7 @@ class CustomOpDef:
 
         lib.define(
             schema_str,
-            tags=[_C.Tag.pt2_compliant_tag, _C.Tag.needs_fixed_stride_order, *tags],
+            tags=[_C.Tag.pt2_compliant_tag, *tags],
         )
         self._opoverload = utils.lookup_op(self._qualname)
 

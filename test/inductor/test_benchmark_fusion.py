@@ -12,9 +12,9 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
     get_func_call,
-    get_kernel_launch,
     HAS_CPU,
     HAS_CUDA,
+    IS_BIG_GPU,
 )
 
 
@@ -132,6 +132,9 @@ class BenchmarkFusionTestTemplate:
 
         self.common(f, (a, b))
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     @config.patch(max_autotune_gemm_backends="TRITON")
     def test_avoid_register_spilling(self):
         if self.device != "cuda":
@@ -163,8 +166,8 @@ class BenchmarkFusionTestTemplate:
                 return
 
             # should be multiple triton invocations
-            FileCheck().check(get_func_call()).check_count(
-                get_kernel_launch(), 2, exactly=True
+            FileCheck().check("async_compile.wait").check_count(
+                ".run", 2, exactly=True
             ).run(out_code[0])
 
         with config.patch(
@@ -177,17 +180,9 @@ class BenchmarkFusionTestTemplate:
             _, out_code2 = run_and_get_code(foo_c, m, inp)
 
         for c in out_code[0], out_code2[0]:
-            FileCheck().check(get_func_call()).check(
-                "device_guard" if config.cpp_wrapper else "DeviceGuard"
-            ).check_count("empty_strided", 1, exactly=True).check_regex(
-                r"output_handles\[[0-9]+\] = buf[0-9]+\.release\(\)"
-                if config.cpp_wrapper
-                else r"buf[0-9]+ = buf[0-9]+; del buf[0-9]+"
-            ).check(
-                "" if config.cpp_wrapper else "return"
-            ).run(
-                c
-            )
+            FileCheck().check("async_compile.wait").check("DeviceGuard").check_count(
+                "empty_strided_cuda", 1, exactly=True
+            ).check_regex("buf[0-9]* = buf[0-9]*; del buf[0-9]*").check("return").run(c)
 
     def test_tield_kernel_fusion(self):
         def f(x):

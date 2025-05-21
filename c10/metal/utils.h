@@ -92,9 +92,10 @@ template <typename T>
   return ::metal::isunordered(a, b) ? NAN : ::metal::max(a, b);
 }
 
-template <typename T>
-::metal::enable_if_t<::metal::is_integral_v<T>, T> max(T a, T b) {
-  return ::metal::max(a, b);
+template <typename T, typename U>
+::metal::enable_if_t<::metal::is_integral_v<T>&& ::metal::is_integral_v<U>, T>
+max(T a, U b) {
+  return ::metal::max(a, static_cast<T>(b));
 }
 
 template <typename T>
@@ -102,9 +103,10 @@ template <typename T>
   return ::metal::isunordered(a, b) ? NAN : ::metal::min(a, b);
 }
 
-template <typename T>
-::metal::enable_if_t<::metal::is_integral_v<T>, T> min(T a, T b) {
-  return ::metal::min(a, b);
+template <typename T, typename U>
+::metal::enable_if_t<::metal::is_integral_v<T>&& ::metal::is_integral_v<U>, T>
+min(T a, U b) {
+  return ::metal::min(a, static_cast<T>(b));
 }
 
 #if __METAL_VERSION__ >= 310
@@ -146,20 +148,88 @@ template <typename T>
 constexpr constant bool is_scalar_integral_v =
     ::metal::is_integral_v<T> && ::metal::is_scalar_v<T>;
 
-template <typename T, typename U>
-inline ::metal::enable_if_t<::metal::is_same_v<U, T>, T> cast_to(const U from) {
+// floor_divide
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_integral_v<T> && is_scalar_integral_v<U>,
+        bool> = true>
+inline decltype(T(0) + U(0)) floor_divide(T x, U y) {
+  const auto quot = x / y;
+  return (x < 0) == (y < 0) ? quot : (x % y != 0) ? quot - 1 : quot;
+}
+// cast_to primitives
+//  - No-op if types as the same
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<::metal::is_same_v<U, T>, bool> = true>
+inline T cast_to(const U from) {
   return from;
 }
-
-template <typename T, typename U>
-inline ::metal::enable_if_t<is_complex_v<T>, T> cast_to(const U from) {
-  return T(float(from), 0.0);
+//  - Simple cast between scalar and complex dtypes
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        !::metal::is_same_v<U, T> && (is_complex_v<T> == is_complex_v<U>),
+        bool> = true>
+inline T cast_to(const U from) {
+  return static_cast<T>(from);
 }
 
-template <typename T, typename U>
-inline ::metal::enable_if_t<!::metal::is_same_v<U, T> && !is_complex_v<T>, T>
-cast_to(const U from) {
-  return static_cast<T>(from);
+// - Scalar to complex
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<is_complex_v<T> && !is_complex_v<U>, bool> = true>
+inline T cast_to(const U from) {
+  return T(float(from), 0.0);
+}
+// - Complex to scalar (should not really be used, but exists for compliteness)
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<!is_complex_v<T> && is_complex_v<U>, bool> = true>
+inline T cast_to(const U from) {
+  return static_cast<T>(from.x);
+}
+
+// Generalizable math operators (used for both scalar and complex)
+template <typename U, typename V>
+using common_dtype = decltype(U(0) + V(0));
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<!is_complex_v<T>, bool> = true>
+inline common_dtype<T, U> mul(const T x, const U y) {
+  return x * y;
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<is_complex_v<T> && is_complex_v<U>, bool> = true>
+inline common_dtype<T, U> mul(const T x, const U y) {
+  return T(x.x * y.x - x.y * y.y, x.x * y.y + x.y * y.x);
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<!is_complex_v<T>, bool> = true>
+inline common_dtype<T, U> div(const T x, const U y) {
+  return x / y;
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<is_complex_v<T> && is_complex_v<U>, bool> = true>
+inline common_dtype<T, U> div(const T x, const U y) {
+  return T(::metal::dot(x, y), x.y * y.x - x.x * y.y) / ::metal::dot(y, y);
 }
 
 } // namespace metal

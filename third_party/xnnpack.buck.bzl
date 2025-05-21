@@ -2249,6 +2249,10 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         exported_deps = [
             ":subgraph",
         ],
+        compiler_flags = select({
+            "DEFAULT": [],
+            "ovr_config//os:macos": ["-fvisibility=default"],
+        }),
         platforms = (APPLE, ANDROID, CXX, WINDOWS),
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS + [
             "-DXNN_NO_Q8_OPERATORS",
