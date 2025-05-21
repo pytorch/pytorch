@@ -4356,10 +4356,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                     and symbol_is_type(val, SymT.UNBACKED_INT)
                 )
             )
-            if str(node) == "item_1":
-                self.assertEqual(str(bindings), "{u1: ()}")
-            else:
-                self.assertTrue(bindings is None)
+            self.assertTrue(bindings is None)
 
     def test_raise_user_error_when_guard_on_data_dependent_operation(self):
         class M(torch.nn.Module):
