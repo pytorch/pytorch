@@ -447,6 +447,7 @@ def init_backend_registration() -> None:
     from .cpp_wrapper_cpu import CppWrapperCpu
     from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
     from .cpp_wrapper_gpu import CppWrapperGpu
+    from .cpp_wrapper_mps import CppWrapperMps
     from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
     from .mps import MetalScheduling
@@ -494,7 +495,7 @@ def init_backend_registration() -> None:
             "mps",
             MetalScheduling,
             PythonWrapperCodegen,
-            CppWrapperGpu,
+            CppWrapperMps,
         )
 
     private_backend = torch._C._get_privateuse1_backend_name()
