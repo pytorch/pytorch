@@ -93,7 +93,6 @@ class DynamoBypassingWrapper(HigherOrderOperator):
 
     def __call__(
         self,
-        gmod,
         *args,
         **kwargs,
     ):
@@ -102,13 +101,16 @@ class DynamoBypassingWrapper(HigherOrderOperator):
         import torch._dynamo  # noqa: F401
         from torch._dynamo import disable
 
-        is_compiling = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL) is not None
+        is_compiling = (
+            torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
+            is not None
+        )
 
         if is_compiling:
+            gmod, args = args[0], args[1:]
             wrapper_fn = gmod.meta["_dynamo_bypassing_wrapper_fn"]
         else:
-            wrapper_fn = args[0]
-            args = args[1:]
+            wrapper_fn, gmod, args = args[0], args[1], args[2:]
 
         @disable
         def wrapper():

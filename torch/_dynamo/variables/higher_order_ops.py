@@ -2529,7 +2529,7 @@ class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 
-        func_var = args[1]
+        func_var = args[0]
 
         if isinstance(func_var, torch._dynamo.variables.UserFunctionVariable):
             func = func_var.fn
@@ -2551,7 +2551,7 @@ class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
             _,
         ) = self.create_wrapped_node(
             tx,
-            args[0],
+            args[1],
             args[2:],
             kwargs,
             str(func),
