@@ -649,6 +649,50 @@ static std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_p
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
+static C10_ALWAYS_INLINE void _check_rms_norm_inputs(
+  IntArrayRef normalized_shape,
+  const Tensor& weight, std::optional<int64_t> weight_bdim) {
+
+const auto normalized_ndim = normalized_shape.size();
+TORCH_CHECK(
+    normalized_ndim >= 1,
+    "Expected normalized_shape to be at least 1-dimensional, i.e., ",
+    "containing at least one element, but got normalized_shape = ",
+    normalized_shape);
+}
+
+static std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>>
+native_rms_norm_batch_rule(
+    const Tensor& input, std::optional<int64_t> input_bdim,
+    IntArrayRef normalized_shape,
+    const std::optional<Tensor>& weight_opt, std::optional<int64_t> weight_bdim,
+    std::optional<double> eps) {
+  auto input_ = moveBatchDimToFront(input, input_bdim);
+  using limits = std::numeric_limits<float>;
+  float eps_val = eps.value_or(limits::epsilon());
+  if (!weight_bdim){
+    auto [result0, rstd] = at::native_rms_norm(input_, normalized_shape, weight_opt, eps_val);
+    const auto stats_bdim = compute_stat_bdim(input_bdim, rstd);
+    return std::make_tuple(std::move(result0), 0, std::move(rstd), stats_bdim);
+  }
+
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  _check_rms_norm_inputs(normalized_shape, weight, weight_bdim);
+
+  const auto input_logical_rank = rankWithoutBatchDim(input, input_bdim);
+  const auto result = at::native_rms_norm(input_, normalized_shape, std::nullopt, eps_val);
+  auto [result0, rstd] = result;
+  const auto stats_bdim = compute_stat_bdim(input_bdim, rstd);
+
+  if (weight.defined()) {
+    auto weight_ = moveBatchDimToFront(weight, weight_bdim);
+    weight_ = maybePadToLogicalRank(weight_, /*has_bdim*/weight_bdim, input_logical_rank);
+    result0 = result0 * weight_;
+  }
+  return std::make_tuple(result0, 0, rstd, stats_bdim);
+}
+
 template <typename F, F Func>
 struct NativeBatchNormBatchRuleHelper {
   static std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>> apply(
@@ -876,7 +920,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("native_group_norm", native_group_norm_plumbing);
   m.impl("native_group_norm_backward", native_group_norm_backward_plumbing);
   VMAP_SUPPORT(native_layer_norm, native_layer_norm_batch_rule);
+  VMAP_SUPPORT(native_rms_norm, native_rms_norm_batch_rule);
   m.impl("native_layer_norm_backward", native_layer_norm_backward_plumbing);
 }
+
+
 
 } // namespace at::functorch
