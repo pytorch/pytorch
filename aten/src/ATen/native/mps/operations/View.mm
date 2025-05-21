@@ -147,8 +147,7 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
 
     [computeEncoder setComputePipelineState:gatherPSO];
     mtl_setArgs(computeEncoder,
-                // ConstMTLBufferTensor(src),
-                src,
+                ConstMTLBufferTensor(src),
                 dst.has_storage() ? dst : output,
                 src_sizes,
                 src_strides,
