@@ -66,6 +66,7 @@ def _test_cases(device, dtype):
 
 class TestScheduler(TestCase):
     @dtypes(torch.float, torch.float16)
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_disable_get_estimated_runtime_logging(self, device, dtype):
         if device == "cpu":
             return
@@ -84,6 +85,7 @@ class TestScheduler(TestCase):
             metrics.reset()
 
     @dtypes(torch.float, torch.float16)
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_get_estimated_runtime_logging(self, device, dtype):
         if device == "cpu":
             return
