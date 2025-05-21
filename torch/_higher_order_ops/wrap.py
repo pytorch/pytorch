@@ -89,8 +89,10 @@ wrap_with_autocast = WrapWithAutocast()
 
 # This HOP allows you to bypass dynamo tracing of the wrapper function while
 # still tracing the inner function.
-# The wrapper function should receive a single callable argument, and return
-# a callable that takes the same arguments as the inner function.
+# Takes two callables: The first, `wrapper_fn`, accepts `inner_fn` and returns a
+# callable with the same signature. The second is the `inner_fn` itself. Any
+# extra *args and **kwargs are forwarded to `wrapper_fn(inner_fn)` when it is
+# executed.
 class DynamoBypassingWrapper(HigherOrderOperator):
     def __init__(self):
         super().__init__("dynamo_bypassing_wrapper")
