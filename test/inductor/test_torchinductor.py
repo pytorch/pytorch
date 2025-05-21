@@ -13074,15 +13074,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         f = torch.compile(f)
 
         x, y, cpu_scalar_tensor = (
-            torch.randn(2, 2, device="cuda"),
-            torch.randn(2, 2, device="cuda"),
+            torch.randn(2, 2, device=self.device),
+            torch.randn(2, 2, device=self.device),
             torch.tensor(1, device="cpu"),
         )
         _, code = run_and_get_code(f, x, y, cpu_scalar_tensor)
 
-        # f has only 1 scheduler node which reads cpu_scalar_tensor.
-        # So we don't have any partitions.
-        FileCheck().check("runner = Runner(partitions=[])").run(code[0])
+        if not config.cpp_wrapper:
+            # f has only 1 scheduler node which reads cpu_scalar_tensor.
+            # So we don't have any partitions.
+            FileCheck().check("runner = Runner(partitions=[])").run(code[0])
 
     @torch._inductor.config.patch("graph_partition", True)
     def test_graph_partition_read_cpu_tensor_buffer(self):
@@ -13094,15 +13095,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         f = torch.compile(f)
 
         x, y, cpu_scalar_tensor = (
-            torch.randn(2, 2, device="cuda"),
-            torch.randn(2, 2, device="cuda"),
+            torch.randn(2, 2, device=self.device),
+            torch.randn(2, 2, device=self.device),
             torch.tensor(1, device="cpu"),
         )
         _, code = run_and_get_code(f, x, y, cpu_scalar_tensor)
 
-        # f has only 1 scheduler node which reads cpu_scalar_tensor.
-        # So we don't have any partitions.
-        FileCheck().check("runner = Runner(partitions=[])").run(code[0])
+        if not config.cpp_wrapper:
+            # f has only 1 scheduler node which reads cpu_scalar_tensor.
+            # So we don't have any partitions.
+            FileCheck().check("runner = Runner(partitions=[])").run(code[0])
 
     @torch._inductor.config.patch("graph_partition", True)
     def test_graph_partition_no_inputs(self):
