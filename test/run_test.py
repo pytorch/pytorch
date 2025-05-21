@@ -510,7 +510,7 @@ def run_test(
             )
         )
         unittest_args.extend(test_module.get_pytest_args())
-        replacement = {"-f": "-x"}
+        replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
 
     if options.showlocals:

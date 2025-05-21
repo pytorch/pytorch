@@ -17,6 +17,7 @@ from torch.distributed.tensor.experimental._attention import (
     _FlexAttentionSequentialSharder,
     _is_causal_behavior,
     _RotateMethod,
+    _set_dispatch_mode,
     context_parallel,
     context_parallel_unshard,
     set_rotate_method,
@@ -526,8 +527,10 @@ class RingFlexAttentionTest(DTensorTestBase):
         )
 
         # set CP context dispatch mode to use TorchDispatchMode for flex_attention
-        torch.distributed.tensor.experimental._attention._dispatch_mode = (
-            _DispatchMode.TORCH_DISPATCH
+        _set_dispatch_mode("torch_dispatch")
+        assert (
+            torch.distributed.tensor.experimental._attention._dispatch_mode
+            == _DispatchMode.TORCH_DISPATCH
         )
 
         # prepare input buffer
@@ -569,8 +572,8 @@ class RingFlexAttentionTest(DTensorTestBase):
         cp_out, cp_lse = context_parallel_unshard(
             device_mesh, [cp_out, cp_lse], [2, 2], sharder
         )
-        torch.testing.assert_close(cp_out, expect_out, atol=1e-1, rtol=1e-2)
-        torch.testing.assert_close(cp_lse, expect_lse, atol=1e-1, rtol=1e-2)
+        torch.testing.assert_close(cp_out, expect_out, atol=1e-6, rtol=1e-2)
+        torch.testing.assert_close(cp_lse, expect_lse, atol=1e-6, rtol=1e-2)
 
         # unshard the gradient
         cp_q_grad, cp_k_grad, cp_v_grad = context_parallel_unshard(

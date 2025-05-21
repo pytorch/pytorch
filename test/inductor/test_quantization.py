@@ -103,7 +103,9 @@ class TestQuantization(TestCase):
         post_grad_fusion_options={
             "activation_quantization_aten_pass": {
                 "quant_type": "torch.float8_e5m2",
+                "use_scaling": True,
                 "size_in_mb": 0.0,
+                "exclude_primals": True,
             },
         },
     )

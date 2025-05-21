@@ -30,6 +30,7 @@ from typing import (
 )
 
 import torch
+from torch._dynamo.utils import set_feature_use
 from torch._prims_common import compute_required_storage_length
 from torch.utils._ordered_set import OrderedSet
 
@@ -1078,7 +1079,7 @@ class CachingAutotuner(KernelInterface):
             dict(
                 zip(
                     [
-                        *self.fn.arg_names,
+                        *self.triton_meta["signature"].keys(),
                         *self.inductor_meta.get("extra_launcher_args", ()),
                     ],
                     args,
@@ -1288,6 +1289,9 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         self.kernel.cubin_path = cubin_location
 
     def make_launcher(self) -> LauncherType:
+        # If at least one static make_launcher call occurs,
+        # we're sure static cuda launcher was used for this compile
+        set_feature_use("static_cuda_launcher", True)
         # Load the binary on the parent
         if not self.kernel.cubin_path:
             self.reload_cubin_path()
@@ -2585,8 +2589,6 @@ class GridExpr:
 
     def __post_init__(self) -> None:
         assert self.mode in ("python", "cpp")
-        if self.mode == "python":
-            self.prefix.append("from torch.utils._sympy.functions import FloorDiv")
 
     def generate(self, meta: dict[str, int]) -> None:
         raise NotImplementedError
@@ -2599,9 +2601,7 @@ class GridExpr:
         if isinstance(numel, int) and isinstance(block, int):
             return ceildiv(numel, block)  # constant fold
         if self.mode == "python":
-            # Use FloorDiv instead of // so we can get better sympy expressions for
-            # dynamic shapes.
-            return f"-FloorDiv(({numel}), -({block}))"
+            return f"-(({numel}) // -({block}))"
         # trick above doesn't work in C++ due to rounding differences
         return f"(({numel} + ({block} - 1)) / ({block}))"
 
