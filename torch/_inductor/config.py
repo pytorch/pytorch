@@ -674,6 +674,13 @@ def decide_worker_start_method() -> str:
 
 worker_start_method: str = decide_worker_start_method()
 
+# Whether to log from subprocess workers that are launched.
+worker_suppress_logging: bool = Config(
+    justknob="pytorch/compiler:worker_suppress_logging",
+    env_name_force="TORCHINDUCTOR_WORKER_SUPPRESS_LOGGING",
+    default=True,
+)
+
 # Flags to turn on all_reduce fusion. These 2 flags should be automaticaly turned
 # on by DDP and should not be set by the users.
 _fuse_ddp_communication = False
