@@ -94,7 +94,7 @@ _shape_t = Union[int, list[int], Size]
 
 
 class LayerNorm(Module):
-    r"""Applies Layer Normalization over a mini-batch of inputs.
+    __doc__ = r"""Applies Layer Normalization over a mini-batch of inputs.
 
     This layer implements the operation as described in
     the paper `Layer Normalization <https://arxiv.org/abs/1607.06450>`__
