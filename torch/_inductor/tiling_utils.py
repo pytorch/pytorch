@@ -414,7 +414,7 @@ def apply_var_mapping(
 
 def extract_normalized_read_writes(
     node: Union["FusedSchedulerNode", "SchedulerNode"],
-) -> FusedNormalizedReadsWrites:
+) -> Optional[FusedNormalizedReadsWrites]:
     """Extracts index variables, reduce variables, read/write expressions, and variable ranges from a fused node."""
     reads: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
     writes: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
@@ -427,6 +427,12 @@ def extract_normalized_read_writes(
         if not V.graph.scheduler.can_buffer_be_removed_through_fusion(buf, op_names)
     )
     inputs = OrderedSet(dep.name for dep in node.read_writes.reads)
+
+    # TODO - a few dynamic shapes issues to resolve
+    for buf_name in itertools.chain(inputs, outputs):
+        if buf := V.graph.try_get_buffer(buf_name):
+            if buf.get_free_symbol_uses():
+                return None
 
     pw_splits, red_splits = NodeSplitGetter(node).get_node_splits()
 
@@ -556,7 +562,7 @@ class CoalesceVarAnalysis:
 
 def analyze_memory_coalescing(
     fused_node: Union["FusedSchedulerNode", "SchedulerNode"],
-) -> CoalesceVarAnalysis:
+) -> Optional[CoalesceVarAnalysis]:
     """
     Find variables that coalesce the reads and writes and score the total size.
 
@@ -571,6 +577,9 @@ def analyze_memory_coalescing(
     """
 
     norm_read_writes = extract_normalized_read_writes(fused_node)
+
+    if norm_read_writes is None:
+        return None
 
     reads = norm_read_writes.reads
     writes = norm_read_writes.writes
