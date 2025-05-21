@@ -153,14 +153,10 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
         return ctx.wrap_tensors(out)
 
     def gen_schema(self, subgraph, *operands, **kwargs):
-        from .schema import CFunctionSchemaGen, HopArgumentInfoGen
+        from .schema import HopSchemaGenerator
 
         if not isinstance(subgraph, torch.fx.GraphModule):
             subgraph = materialize_as_graph(subgraph, operands)
-
-        assert isinstance(
-            subgraph, torch.fx.GraphModule
-        ), f"NYI non GraphModule subgraph got {subgraph}"
 
         fake_args = [
             ph.meta["example_value"] if "example_value" in ph.meta else ph.meta["val"]
@@ -189,40 +185,19 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
                 f"Alias info: inp-inp alias: {inp_inp_alias}, inp-out alias: {inp_out_alias}, out-out alias{out_out_alias}"
                 f"This may lead to silent incorrectness."
             )
-        args = [
-            HopArgumentInfoGen.from_example(
-                subgraph, name="subgraph", default_value=None, is_mutated=False
-            )
-        ]
-        for idx, arg in enumerate((*operands, *kwargs.items())):
-            if isinstance(arg, tuple):
-                # kwargs value are treated as default argument
-                arg_name, example_value = arg
-                default = example_value
-                kw_only = True
-            else:
-                arg_name = f"arg{idx}"
-                example_value = arg
-                default = None
-                kw_only = False
-            args.append(
-                HopArgumentInfoGen.from_example(
-                    example_value=example_value,
-                    name=arg_name,
-                    default_value=default,
-                    is_mutated=idx in mutated_inp_idx,
-                    kw_only=kw_only,
-                )
-            )
 
-        # The output is represented as a single argument
-        out = HopArgumentInfoGen.from_example(
-            example_value=output,
-            name="out",
-            default_value=None,
-            is_mutated=False,
-        )
-        return CFunctionSchemaGen.from_hop_argument_info(str(self), args, out)
+        schema_gen = HopSchemaGenerator(self)
+        schema_gen.add_arg("subgraph", subgraph)
+        for idx, arg in enumerate(operands):
+            schema_gen.add_arg(f"arg{idx}", arg, is_mutated=idx in mutated_inp_idx)
+
+        for name, arg in kwargs.items():
+            schema_gen.add_arg(name, arg, default_value=arg, kw_only=True)
+
+        for out in output:
+            schema_gen.add_output(out)
+
+        return schema_gen.gen_schema()
 
 
 class BaseHOPFunction(torch.autograd.Function):
