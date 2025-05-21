@@ -1,0 +1,7 @@
+name: Target determinator for Sandcastle CI during land time
+jobs:
+  pytorch-git-build-conda-env:
+    steps:
+      - name: Echo
+        run: echo 'hello world'
+
