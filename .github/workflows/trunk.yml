@@ -109,6 +109,7 @@ jobs:
       # Same as the build job
       python-version: 3.9.12
       test-matrix: ${{ needs.macos-py3-arm64-build.outputs.test-matrix }}
+      disable-monitor: false
     secrets: inherit
 
   win-vs2022-cpu-py3-build:
