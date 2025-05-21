@@ -15,6 +15,7 @@ from typing import Callable
 from parameterized import parameterized_class
 
 import torch
+from torch._inductor.codecache import get_kernel_bin_format
 from torch._inductor.package import AOTICompiledModel, load_package, package_aoti
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_inductor_cache
@@ -205,6 +206,8 @@ class TestAOTInductorPackage(TestCase):
 
             options = {
                 "aot_inductor.package_cpp_only": self.package_cpp_only,
+                # Require kernels to be compiled into .o files
+                "aot_inductor.embed_cubin": True,
             }
             ep = torch.export.export(model, example_inputs, strict=True)
             package_path = torch._inductor.aoti_compile_and_package(
@@ -216,6 +219,12 @@ class TestAOTInductorPackage(TestCase):
                 zip_ref.extractall(tmp_dir)
                 tmp_path = Path(tmp_dir) / "data" / "aotinductor" / "model"
                 self.assertTrue(tmp_path.exists())
+                if self.device == GPU_TYPE:
+                    kernel_bin = get_kernel_bin_format(self.device)
+                    self.assertTrue(not list(tmp_path.glob(f"*.{kernel_bin}")))
+                    # Check if .cubin.o files exist and use unique kernel names
+                    self.assertTrue(list(tmp_path.glob(f"triton_*.{kernel_bin}.o")))
+
                 build_path = tmp_path / "build"
                 self.assertTrue(not build_path.exists())
 

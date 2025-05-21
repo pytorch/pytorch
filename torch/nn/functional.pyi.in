@@ -17,6 +17,11 @@ from .common_types import (
     _size_any_t,
 )
 
+__all__ = [
+    "GRID_SAMPLE_INTERPOLATION_MODES",
+    "GRID_SAMPLE_PADDING_MODES",
+]
+
 # 'TypedDict' is a new accepted type that represents a dictionary with a fixed set of allowed keys.
 # It is standards-track but not in `typing` yet. We leave this hear to be uncommented once the feature
 # is wide-spread.
@@ -47,36 +52,66 @@ def _canonical_mask(
     target_type: _dtype,
     check_other: bool = True,
 ) -> Tensor | None: ...
+
+__all__ += ["_canonical_mask"]
+
 def _none_or_dtype(input: Tensor | None) -> _dtype | None: ...
+
+__all__ += ["_none_or_dtype"]
+
 def adaptive_avg_pool2d(input: Tensor, output_size: _size_2_opt_t) -> Tensor: ...
+
+__all__ += ["adaptive_avg_pool2d"]
+
 def adaptive_avg_pool3d(input: Tensor, output_size: _size_3_opt_t) -> Tensor: ...
+
+__all__ += ["adaptive_avg_pool3d"]
+
 def adaptive_max_pool1d_with_indices(
     input: Tensor,
     output_size: _size,
     return_indices: bool = ...,
 ) -> tuple[Tensor, Tensor]: ...
+
+__all__ += ["adaptive_max_pool1d_with_indices"]
+
 def adaptive_max_pool2d_with_indices(
     input: Tensor,
     output_size: _size_2_opt_t,
     return_indices: bool = ...,
 ) -> tuple[Tensor, Tensor]: ...
+
+__all__ += ["adaptive_max_pool2d_with_indices"]
+
 def adaptive_max_pool3d_with_indices(
     input: Tensor,
     output_size: _size_3_opt_t,
     return_indices: bool = ...,
 ) -> tuple[Tensor, Tensor]: ...
+
+__all__ += ["adaptive_max_pool3d_with_indices"]
+
 def affine_grid(
     theta: Tensor,
     size: list[int],
     align_corners: Any | None = ...,
 ) -> Tensor: ...
+
+__all__ += ["affine_grid"]
+
 def alpha_dropout(
     input: Tensor,
     p: float = ...,
     training: bool = ...,
     inplace: bool = ...,
 ) -> Tensor: ...
+
+__all__ += ["alpha_dropout"]
+
 def assert_int_or_pair(arg: Any, arg_name: Any, message: Any) -> None: ...
+
+__all__ += ["assert_int_or_pair"]
+
 def batch_norm(
     input: Tensor,
     running_mean: Tensor | None,
@@ -87,6 +122,9 @@ def batch_norm(
     momentum: float = ...,
     eps: float = ...,
 ) -> Tensor: ...
+
+__all__ += ["batch_norm"]
+
 def binary_cross_entropy_with_logits(
     input: Tensor,
     target: Tensor,
@@ -96,6 +134,9 @@ def binary_cross_entropy_with_logits(
     reduction: str = ...,
     pos_weight: Tensor | None = ...,
 ) -> Tensor: ...
+
+__all__ += ["binary_cross_entropy_with_logits"]
+
 def binary_cross_entropy(
     input: Tensor,
     target: Tensor,
@@ -104,7 +145,13 @@ def binary_cross_entropy(
     reduce: bool | None = ...,
     reduction: str = ...,
 ) -> Tensor: ...
+
+__all__ += ["binary_cross_entropy"]
+
 def celu(input: Tensor, alpha: float = ..., inplace: bool = ...) -> Tensor: ...
+
+__all__ += ["celu"]
+
 def cosine_embedding_loss(
     input1: Tensor,
     input2: Tensor,
@@ -114,6 +161,9 @@ def cosine_embedding_loss(
     reduce: bool | None = ...,
     reduction: str = ...,
 ) -> Tensor: ...
+
+__all__ += ["cosine_embedding_loss"]
+
 def cross_entropy(
     input: Tensor,
     target: Tensor,
@@ -124,6 +174,9 @@ def cross_entropy(
     reduction: str = ...,
     label_smoothing: float = ...,
 ) -> Tensor: ...
+
+__all__ += ["cross_entropy"]
+
 def ctc_loss(
     log_probs: Tensor,
     targets: Tensor,
@@ -133,31 +186,49 @@ def ctc_loss(
     reduction: str = ...,
     zero_infinity: bool = ...,
 ) -> Tensor: ...
+
+__all__ += ["ctc_loss"]
+
 def dropout(
     input: Tensor,
     p: float = ...,
     training: bool = ...,
     inplace: bool = ...,
 ) -> Tensor: ...
+
+__all__ += ["dropout"]
+
 def dropout1d(
     input: Tensor,
     p: float = ...,
     training: bool = ...,
     inplace: bool = ...,
 ) -> Tensor: ...
+
+__all__ += ["dropout1d"]
+
 def dropout2d(
     input: Tensor,
     p: float = ...,
     training: bool = ...,
     inplace: bool = ...,
 ) -> Tensor: ...
+
+__all__ += ["dropout2d"]
+
 def dropout3d(
     input: Tensor,
     p: float = ...,
     training: bool = ...,
     inplace: bool = ...,
 ) -> Tensor: ...
+
+__all__ += ["dropout3d"]
+
 def elu(input: Tensor, alpha: float = ..., inplace: bool = ...) -> Tensor: ...
+
+__all__ += ["elu"]
+
 def embedding_bag(
     input: Tensor,
     weight: Tensor,
@@ -171,6 +242,9 @@ def embedding_bag(
     include_last_offset: bool = ...,
     padding_idx: int | None = ...,
 ) -> Tensor: ...
+
+__all__ += ["embedding_bag"]
+
 def embedding(
     input: Tensor,
     weight: Tensor,
@@ -180,12 +254,18 @@ def embedding(
     scale_grad_by_freq: bool = ...,
     sparse: bool = ...,
 ) -> Tensor: ...
+
+__all__ += ["embedding"]
+
 def feature_alpha_dropout(
     input: Tensor,
     p: float = ...,
     training: bool = ...,
     inplace: bool = ...,
 ) -> Tensor: ...
+
+__all__ += ["feature_alpha_dropout"]
+
 def fold(
     input: Tensor,
     output_size: _size_any_t,
@@ -194,6 +274,9 @@ def fold(
     padding: _size_any_t = ...,
     stride: _size_any_t = ...,
 ) -> Tensor: ...
+
+__all__ += ["fold"]
+
 def fractional_max_pool2d_with_indices(
     input: Tensor,
     kernel_size: _size,
@@ -202,6 +285,9 @@ def fractional_max_pool2d_with_indices(
     return_indices: bool = ...,
     _random_samples: Tensor | None = ...,
 ) -> tuple[Tensor, Tensor]: ...
+
+__all__ += ["fractional_max_pool2d_with_indices"]
+
 def fractional_max_pool3d_with_indices(
     input: Tensor,
     kernel_size: _size,
@@ -210,6 +296,9 @@ def fractional_max_pool3d_with_indices(
     return_indices: bool = ...,
     _random_samples: Tensor | None = ...,
 ) -> tuple[Tensor, Tensor]: ...
+
+__all__ += ["fractional_max_pool3d_with_indices"]
+
 def gaussian_nll_loss(
     input: Tensor,
     target: Tensor,
@@ -218,7 +307,13 @@ def gaussian_nll_loss(
     eps: float | None = ...,
     reduction: str | None = ...,
 ) -> Tensor: ...
+
+__all__ += ["gaussian_nll_loss"]
+
 def glu(input: Tensor, dim: int = ...) -> Tensor: ...
+
+__all__ += ["glu"]
+
 def grid_sample(
     input: Tensor,
     grid: Tensor,
@@ -226,6 +321,9 @@ def grid_sample(
     padding_mode: str = ...,
     align_corners: Any | None = ...,
 ) -> Tensor: ...
+
+__all__ += ["grid_sample"]
+
 def group_norm(
     input: Tensor,
     num_groups: int,
@@ -233,6 +331,9 @@ def group_norm(
     bias: Tensor | None = ...,
     eps: float = ...,
 ) -> Tensor: ...
+
+__all__ += ["group_norm"]
+
 def gumbel_softmax(
     logits: Tensor,
     tau: float = ...,
@@ -240,14 +341,26 @@ def gumbel_softmax(
     eps: float = ...,
     dim: int = ...,
 ) -> Tensor: ...
+
+__all__ += ["gumbel_softmax"]
+
 def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor: ...
+
+__all__ += ["hardsigmoid"]
+
 def hardswish(input: Tensor, inplace: bool = False) -> Tensor: ...
+
+__all__ += ["hardswish"]
+
 def hardtanh(
     input: Tensor,
     min_val: float = ...,
     max_val: float = ...,
     inplace: bool = ...,
 ) -> Tensor: ...
+
+__all__ += ["hardtanh"]
+
 def hinge_embedding_loss(
     input: Tensor,
     target: Tensor,
@@ -256,12 +369,18 @@ def hinge_embedding_loss(
     reduce: bool | None = ...,
     reduction: str = ...,
 ) -> Tensor: ...
+
+__all__ += ["hinge_embedding_loss"]
+
 def huber_loss(
     input: Tensor,
     target: Tensor,
     reduction: str = ...,
     delta: float = ...,
 ) -> Tensor: ...
+
+__all__ += ["huber_loss"]
+
 def instance_norm(
     input: Tensor,
     running_mean: Tensor | None = ...,
@@ -272,6 +391,9 @@ def instance_norm(
     momentum: float = ...,
     eps: float = ...,
 ) -> Tensor: ...
+
+__all__ += ["instance_norm"]
+
 def interpolate(
     input: Any,
     size: Any | None = ...,
@@ -281,6 +403,9 @@ def interpolate(
     recompute_scale_factor: Any | None = ...,
     antialias: bool = ...,
 ): ...
+
+__all__ += ["interpolate"]
+
 def kl_div(
     input: Tensor,
     target: Tensor,
@@ -289,6 +414,9 @@ def kl_div(
     reduction: str = ...,
     log_target: bool = ...,
 ) -> Tensor: ...
+
+__all__ += ["kl_div"]
+
 def l1_loss(
     input: Tensor,
     target: Tensor,
@@ -296,6 +424,9 @@ def l1_loss(
     reduce: bool | None = ...,
     reduction: str = ...,
 ) -> Tensor: ...
+
+__all__ += ["l1_loss"]
+
 def layer_norm(
     input: Tensor,
     normalized_shape: Sequence[int],
@@ -303,11 +434,17 @@ def layer_norm(
     bias: Tensor | None = ...,
     eps: float = ...,
 ) -> Tensor: ...
+
+__all__ += ["layer_norm"]
+
 def leaky_relu(
     input: Tensor,
     negative_slope: float = ...,
     inplace: bool = ...,
 ) -> Tensor: ...
+
+__all__ += ["leaky_relu"]
+
 def local_response_norm(
     input: Tensor,
     size: int,
@@ -315,12 +452,18 @@ def local_response_norm(
     beta: float = ...,
     k: float = ...,
 ) -> Tensor: ...
+
+__all__ += ["local_response_norm"]
+
 def log_softmax(
     input: Tensor,
     dim: int | None = ...,
     _stacklevel: int = ...,
     dtype: _dtype | None = ...,
 ) -> Tensor: ...
+
+__all__ += ["log_softmax"]
+
 def lp_pool1d(
     input: Tensor,
     norm_type: float,
@@ -328,6 +471,9 @@ def lp_pool1d(
     stride: _size | None | int = ...,
     ceil_mode: bool = ...,
 ) -> Tensor: ...
+
+__all__ += ["lp_pool1d"]
+
 def lp_pool2d(
     input: Tensor,
     norm_type: float,
@@ -335,6 +481,9 @@ def lp_pool2d(
     stride: _size | None | int = ...,
     ceil_mode: bool = ...,
 ) -> Tensor: ...
+
+__all__ += ["lp_pool2d"]
+
 def lp_pool3d(
     input: Tensor,
     norm_type: float,
@@ -342,6 +491,9 @@ def lp_pool3d(
     stride: _size | None | int = ...,
     ceil_mode: bool = ...,
 ) -> Tensor: ...
+
+__all__ += ["lp_pool3d"]
+
 def margin_ranking_loss(
     input1: Tensor,
     input2: Tensor,
@@ -351,6 +503,9 @@ def margin_ranking_loss(
     reduce: bool | None = ...,
     reduction: str = ...,
 ) -> Tensor: ...
+
+__all__ += ["margin_ranking_loss"]
+
 def max_pool1d_with_indices(
     input: Tensor,
     kernel_size: _size,
@@ -360,6 +515,9 @@ def max_pool1d_with_indices(
     ceil_mode: bool = ...,
     return_indices: bool = ...,
 ) -> tuple[Tensor, Tensor]: ...
+
+__all__ += ["max_pool1d_with_indices"]
+
 def max_pool2d_with_indices(
     input: Tensor,
     kernel_size: _size,
@@ -369,6 +527,9 @@ def max_pool2d_with_indices(
     ceil_mode: bool = ...,
     return_indices: bool = ...,
 ) -> tuple[Tensor, Tensor]: ...
+
+__all__ += ["max_pool2d_with_indices"]
+
 def max_pool3d_with_indices(
     input: Tensor,
     kernel_size: _size,
@@ -378,6 +539,9 @@ def max_pool3d_with_indices(
     ceil_mode: bool = ...,
     return_indices: bool = ...,
 ) -> tuple[Tensor, Tensor]: ...
+
+__all__ += ["max_pool3d_with_indices"]
+
 def max_unpool1d(
     input: Tensor,
     indices: Tensor,
@@ -386,6 +550,9 @@ def max_unpool1d(
     padding: _size = ...,
     output_size: _size | None = ...,
 ) -> Tensor: ...
+
+__all__ += ["max_unpool1d"]
+
 def max_unpool2d(
     input: Tensor,
     indices: Tensor,
@@ -394,6 +561,9 @@ def max_unpool2d(
     padding: _size = ...,
     output_size: _size | None = ...,
 ) -> Tensor: ...
+
+__all__ += ["max_unpool2d"]
+
 def max_unpool3d(
     input: Tensor,
     indices: Tensor,
@@ -402,7 +572,13 @@ def max_unpool3d(
     padding: _size = ...,
     output_size: _size | None = ...,
 ) -> Tensor: ...
+
+__all__ += ["max_unpool3d"]
+
 def mish(input: Tensor, inplace: bool = False) -> Tensor: ...
+
+__all__ += ["mish"]
+
 def mse_loss(
     input: Tensor,
     target: Tensor,
@@ -410,6 +586,9 @@ def mse_loss(
     reduce: bool | None = ...,
     reduction: str = ...,
 ) -> Tensor: ...
+
+__all__ += ["mse_loss"]
+
 def multi_head_attention_forward(
     query: Tensor,
     key: Tensor,
@@ -437,6 +616,9 @@ def multi_head_attention_forward(
     average_attn_weights: bool = True,
     is_causal: bool = False,
 ) -> tuple[Tensor, Tensor | None]: ...
+
+__all__ += ["multi_head_attention_forward"]
+
 def multi_margin_loss(
     input: Tensor,
     target: Tensor,
@@ -447,6 +629,9 @@ def multi_margin_loss(
     reduce: bool | None = ...,
     reduction: str = ...,
 ) -> Tensor: ...
+
+__all__ += ["multi_margin_loss"]
+
 def multilabel_margin_loss(
     input: Tensor,
     target: Tensor,
@@ -454,6 +639,9 @@ def multilabel_margin_loss(
     reduce: bool | None = ...,
     reduction: str = ...,
 ) -> Tensor: ...
+
+__all__ += ["multilabel_margin_loss"]
+
 def multilabel_soft_margin_loss(
     input: Tensor,
     target: Tensor,
@@ -462,6 +650,9 @@ def multilabel_soft_margin_loss(
     reduce: bool | None = ...,
     reduction: str = ...,
 ) -> Tensor: ...
+
+__all__ += ["multilabel_soft_margin_loss"]
+
 def nll_loss(
     input: Tensor,
     target: Tensor,
@@ -471,6 +662,9 @@ def nll_loss(
     reduce: bool | None = ...,
     reduction: str = ...,
 ) -> Tensor: ...
+
+__all__ += ["nll_loss"]
+
 def normalize(
     input: Tensor,
     p: float = ...,
@@ -478,6 +672,9 @@ def normalize(
     eps: float = ...,
     out: Tensor | None = ...,
 ) -> Tensor: ...
+
+__all__ += ["normalize"]
+
 def poisson_nll_loss(
     input: Tensor,
     target: Tensor,
@@ -488,14 +685,26 @@ def poisson_nll_loss(
     reduce: bool | None = ...,
     reduction: str = ...,
 ) -> Tensor: ...
+
+__all__ += ["poisson_nll_loss"]
+
 def relu(input: Tensor, inplace: bool = ...) -> Tensor: ...
+
+__all__ += ["relu"]
+
 def relu6(input: Tensor, inplace: bool = ...) -> Tensor: ...
+
+__all__ += ["relu6"]
+
 def rms_norm(
     input: Tensor,
     normalized_shape: Sequence[int],
     weight: Tensor | None = ...,
     eps: float | None = ...,
 ) -> Tensor: ...
+
+__all__ += ["rms_norm"]
+
 def rrelu(
     input: Tensor,
     lower: float = ...,
@@ -503,9 +712,21 @@ def rrelu(
     training: bool = ...,
     inplace: bool = ...,
 ) -> Tensor: ...
+
+__all__ += ["rrelu"]
+
 def selu(input: Tensor, inplace: bool = ...) -> Tensor: ...
+
+__all__ += ["selu"]
+
 def sigmoid(input: Any) -> Tensor: ...
+
+__all__ += ["sigmoid"]
+
 def silu(input: Tensor, inplace: bool = False) -> Tensor: ...
+
+__all__ += ["silu"]
+
 def smooth_l1_loss(
     input: Tensor,
     target: Tensor,
@@ -514,6 +735,9 @@ def smooth_l1_loss(
     reduction: str = ...,
     beta: float = ...,
 ) -> Tensor: ...
+
+__all__ += ["smooth_l1_loss"]
+
 def soft_margin_loss(
     input: Tensor,
     target: Tensor,
@@ -521,27 +745,48 @@ def soft_margin_loss(
     reduce: bool | None = ...,
     reduction: str = ...,
 ) -> Tensor: ...
+
+__all__ += ["soft_margin_loss"]
+
 def softmax(
     input: Tensor,
     dim: int | None = ...,
     _stacklevel: int = ...,
     dtype: _dtype | None = ...,
 ) -> Tensor: ...
+
+__all__ += ["softmax"]
+
 def softmin(
     input: Tensor,
     dim: int | None = ...,
     _stacklevel: int = ...,
     dtype: _dtype | None = ...,
 ) -> Tensor: ...
+
+__all__ += ["softmin"]
+
 def softsign(input: Any): ...
+
+__all__ += ["softsign"]
+
 def tanh(input: Any): ...
+
+__all__ += ["tanh"]
+
 def tanhshrink(input: Any): ...
+
+__all__ += ["tanhshrink"]
+
 def threshold(
     input: Tensor,
     threshold: float,
     value: float,
     inplace: bool = ...,
 ) -> Tensor: ...
+
+__all__ += ["threshold"]
+
 def triplet_margin_loss(
     anchor: Tensor,
     positive: Tensor,
@@ -554,6 +799,9 @@ def triplet_margin_loss(
     reduce: bool | None = ...,
     reduction: str = ...,
 ) -> Tensor: ...
+
+__all__ += ["triplet_margin_loss"]
+
 def triplet_margin_with_distance_loss(
     anchor: Tensor,
     positive: Tensor,
@@ -564,6 +812,9 @@ def triplet_margin_with_distance_loss(
     swap: bool = ...,
     reduction: str = ...,
 ) -> Tensor: ...
+
+__all__ += ["triplet_margin_with_distance_loss"]
+
 def unfold(
     input: Tensor,
     kernel_size: _size_any_t,
@@ -571,16 +822,25 @@ def unfold(
     padding: _size_any_t = ...,
     stride: _size_any_t = ...,
 ) -> Tensor: ...
+
+__all__ += ["unfold"]
+
 def upsample_bilinear(
     input: Any,
     size: Any | None = ...,
     scale_factor: Any | None = ...,
 ): ...
+
+__all__ += ["upsample_bilinear"]
+
 def upsample_nearest(
     input: Any,
     size: Any | None = ...,
     scale_factor: Any | None = ...,
 ): ...
+
+__all__ += ["upsample_nearest"]
+
 def upsample(
     input: Any,
     size: Any | None = ...,
@@ -589,6 +849,10 @@ def upsample(
     align_corners: Any | None = ...,
 ): ...
 
+__all__ += ["upsample"]
+
 ${imported_hints}
 
 ${dispatched_hints}
+
+${extra_nn_functional___all__}

@@ -507,6 +507,43 @@ class TestDynamoTimed(TestCase):
         self.assertEqual(compilation_events[0].ir_count, second)
 
     @dynamo_config.patch({"log_compilation_metrics": True})
+    @inductor_config.patch({"force_disable_caches": True})
+    def test_dynamic_shape_feature_use(self):
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+
+            @torch.compile()
+            def f(x):
+                return x * x
+
+            f(torch.randn(4))
+            f(torch.randn(3))
+            compilation_events = [
+                arg[0][0].feature_usage for arg in log_event.call_args_list
+            ]
+        self.assertIn(
+            ("dynamo.automatic_dynamic_shapes", True), compilation_events[1].items()
+        )
+
+        compilation_events = []
+        with dynamo_config.patch({"automatic_dynamic_shapes": False}), mock.patch(
+            "torch._dynamo.utils.log_compilation_event"
+        ) as log_event:
+
+            @torch.compile()
+            def f(x):
+                return x * x
+
+            f(torch.randn(4))
+            f(torch.randn(3))
+            compilation_events = [
+                arg[0][0].feature_usage for arg in log_event.call_args_list
+            ]
+        self.assertIn(
+            ("dynamo.automatic_dynamic_shapes", False), compilation_events[1].items()
+        )
+
+    @dynamo_config.patch({"log_compilation_metrics": True})
     def test_num_params(self):
         import torch.nn as nn
         import torch.nn.functional as F

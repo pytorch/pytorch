@@ -52,7 +52,7 @@ jobs:
       docker-image: ${{ needs.linux-focal-cuda12_6-py3_10-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_6-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       # disable monitor in perf tests for more investigation
-      disable-monitor: true
+      disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
     secrets: inherit
