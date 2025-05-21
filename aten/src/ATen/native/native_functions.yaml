@@ -3317,6 +3317,7 @@
 
 - func: rms_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight=None, float? eps=None) -> Tensor
   dispatch:
+    MPS: rms_norm_mps
     CompositeImplicitAutograd: rms_norm_symint
 
 - func: native_rms_norm(Tensor input, int[] normalized_shape, Tensor? weight, float? eps) -> (Tensor, Tensor)
