@@ -15530,6 +15530,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
                # Some negative padding cases cause a segfault on MPS
                DecorateInfo(unittest.skip("Not fully supported on MPS"), 'TestConsistency'),
+               DecorateInfo(unittest.skip("Not fully supported on MPS"), 'TestCOW'),
            ),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_out=False),

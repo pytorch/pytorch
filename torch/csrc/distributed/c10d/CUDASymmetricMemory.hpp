@@ -37,7 +37,7 @@ class CUDASymmetricMemory : public SymmetricMemory {
       int rank,
       int world_size);
 
-  ~CUDASymmetricMemory() override{};
+  ~CUDASymmetricMemory() override {};
 
   std::vector<void*> get_buffer_ptrs() override;
   std::vector<void*> get_signal_pad_ptrs() override;
