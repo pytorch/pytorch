@@ -15,16 +15,12 @@ from typing import Callable
 from parameterized import parameterized_class
 
 import torch
+from torch._inductor.codecache import get_kernel_bin_format
 from torch._inductor.package import AOTICompiledModel, load_package, package_aoti
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.export import Dim
-from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    skipIfRocm,
-    skipIfXpu,
-    TEST_CUDA,
-)
+from torch.testing._internal.common_utils import IS_FBCODE, skipIfXpu, TEST_CUDA
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -183,7 +179,6 @@ class TestAOTInductorPackage(TestCase):
         self.check_model(Model(), example_inputs)
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
-    @skipIfRocm  # build system may be different
     @skipIfXpu  # build system may be different
     def test_compile_after_package(self):
         if not self.package_cpp_only:
@@ -225,8 +220,10 @@ class TestAOTInductorPackage(TestCase):
                 tmp_path = Path(tmp_dir) / "data" / "aotinductor" / "model"
                 self.assertTrue(tmp_path.exists())
                 if self.device == GPU_TYPE:
-                    self.assertTrue(not list(tmp_path.glob("*.cubin")))
-                    self.assertTrue(list(tmp_path.glob("*.cubin.o")))
+                    kernel_bin = get_kernel_bin_format(self.device)
+                    self.assertTrue(not list(tmp_path.glob(f"*.{kernel_bin}")))
+                    # Check if .cubin.o files exist and use unique kernel names
+                    self.assertTrue(list(tmp_path.glob(f"triton_*.{kernel_bin}.o")))
 
                 build_path = tmp_path / "build"
                 self.assertTrue(not build_path.exists())

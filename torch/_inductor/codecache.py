@@ -104,7 +104,7 @@ from .virtualized import V
 
 
 if config.is_fbcode():
-    from triton.fb import build_paths
+    from triton.fb.build import build_paths
 
     from torch._inductor.fb.utils import (
         log_global_cache_errors,
@@ -150,8 +150,25 @@ output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 log = logging.getLogger(__name__)
 
 
+def use_re_build() -> bool:
+    if config.is_fbcode():
+        from triton.fb.re_build_helper import should_build_locally
+
+        return not should_build_locally()
+    return False
+
+
 def get_cpp_wrapper_cubin_path_name() -> str:
     return "cubin_path" if torch.version.hip is None else "hsaco_path"
+
+
+def get_kernel_bin_format(device: str) -> str:
+    if device == "cuda":
+        return "cubin" if torch.version.hip is None else "hsaco"
+    elif device == "xpu":
+        return "spv"
+    else:
+        return ""
 
 
 @functools.lru_cache(None)
@@ -1519,6 +1536,17 @@ class CudaKernelParamCache:
                 config.aot_inductor.output_path
             )[0],
         )
+        if config.aot_inductor.package_cpp_only:
+            assert config.triton.unique_kernel_names, (
+                "package_cpp_only requires triton kernel names to be unique"
+            )
+            dir_name = os.path.dirname(path)
+            _, ext = os.path.splitext(path)
+            # Construct the new full path
+            new_path = os.path.join(dir_name, params["mangled_name"] + ext)
+            os.rename(path, new_path)
+            path = new_path
+
         params[get_cpp_wrapper_cubin_path_name()] = path
 
         cls.cache[key] = params
@@ -3109,19 +3137,40 @@ def _cuda_compiler() -> Optional[str]:
     return "nvcc"
 
 
-def _cutlass_include_paths() -> list[str]:
+def _cutlass_path() -> str:
     if config.is_fbcode():
         from libfb.py import parutil
 
-        cutlass_path = parutil.get_dir_path("cutlass-3-headers")
+        return parutil.get_dir_path("cutlass-3-headers")
     else:
-        cutlass_path = config.cuda.cutlass_dir
+        return config.cuda.cutlass_dir
+
+
+def _cutlass_paths() -> list[str]:
+    return [
+        "include",
+        "tools/library/include",
+        "tools/library/src",
+        "tools/util/include",
+    ]
+
+
+def _clone_cutlass_paths(build_root: str) -> list[str]:
+    paths = _cutlass_paths()
+    cutlass_root = _cutlass_path()
+    for path in _cutlass_paths():
+        old_path = os.path.join(cutlass_root, path)
+        new_path = os.path.join(build_root, path)
+        shutil.copytree(old_path, new_path, dirs_exist_ok=True)
+    return paths
+
+
+def _cutlass_include_paths() -> list[str]:
+    cutlass_path = _cutlass_path()
     return [
         # Use realpath to get canonical absolute paths, in order not to mess up cache keys
-        os.path.realpath(os.path.join(cutlass_path, "include")),
-        os.path.realpath(os.path.join(cutlass_path, "tools/library/include")),
-        os.path.realpath(os.path.join(cutlass_path, "tools/library/src")),
-        os.path.realpath(os.path.join(cutlass_path, "tools/util/include")),
+        os.path.realpath(os.path.join(cutlass_path, path))
+        for path in _cutlass_paths()
     ]
 
 
@@ -3150,6 +3199,11 @@ def _cuda_lib_options() -> list[str]:
     from torch.utils import cpp_extension
 
     lpaths = cpp_extension.library_paths(device_type="cuda")
+    if use_re_build():
+        lpaths += [
+            build_paths.sdk_lib,
+            os.path.join(build_paths.sdk_lib, "stubs"),
+        ]
     extra_ldflags: list[str] = []
     if is_linux():
         _transform_cuda_paths(lpaths)
@@ -3232,7 +3286,13 @@ def cuda_compile_command(
 ) -> str:
     if extra_args is None:
         extra_args = []
-    include_paths = _cutlass_include_paths()
+    if use_re_build():
+        build_path = os.path.dirname(dst_file)
+        include_paths = _clone_cutlass_paths(build_path)
+        src_files = [os.path.basename(src_file) for src_file in src_files]
+        dst_file = os.path.basename(dst_file)
+    else:
+        include_paths = _cutlass_include_paths()
     cuda_lib_options = _cuda_lib_options()
     nvcc_host_compiler_options = _nvcc_host_compiler_options()
     nvcc_compiler_options = _nvcc_compiler_options()
@@ -3362,10 +3422,10 @@ class CUDACodeCache:
         Returns the hash key of source code, and the path to the file.
         """
 
-        cuda_command = repr(
-            cuda_compile_command(["dummy_input"], "dummy_output", dst_file_ext)
-        )
         if config.cuda.cutlass_hash_with_compile_cmd:
+            cuda_command = repr(
+                cuda_compile_command(["dummy_input"], "dummy_output", dst_file_ext)
+            )
             extra = cuda_command
         else:
             extra = repr(
@@ -3422,9 +3482,18 @@ class CUDACodeCache:
                     log.debug("CUDA Compilation: %s", cmd)
                     cmd_parts = cmd.split(" ")
                     try:
-                        subprocess.check_output(
-                            cmd_parts, stderr=subprocess.STDOUT, env=os.environ
-                        )
+                        if use_re_build():
+                            from triton.fb.re_build_helper import run_build_command
+
+                            run_build_command(
+                                cmd_parts,
+                                os.path.dirname(input_path),
+                                os.path.basename(output_path),
+                            )
+                        else:
+                            subprocess.check_output(
+                                cmd_parts, stderr=subprocess.STDOUT, env=os.environ
+                            )
                     except subprocess.CalledProcessError as error:
                         error_json = json.dumps(
                             [cmd_parts, error.output.decode("utf-8")]
@@ -3597,6 +3666,9 @@ class StaticAutotunerFuture(CodeCacheFuture):
     def result(self) -> CachingAutotuner:
         assert self.reload_kernel_from_src is not None
         with dynamo_timed("StaticAutotunerFuture.warm_precompile"):
+            self.static_autotuner.recheck_autotune_cache(
+                reload_kernel_from_src=self.reload_kernel_from_src
+            )
             self.static_autotuner.precompile(  # type: ignore[union-attr]
                 warm_cache_only=False,
                 reload_kernel=self.reload_kernel_from_src,

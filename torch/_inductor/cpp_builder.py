@@ -32,8 +32,7 @@ from torch.torch_version import TorchVersion
 
 
 if config.is_fbcode():
-    from triton.fb import build_paths  # noqa: F401
-    from triton.fb.build import _run_build_command
+    from triton.fb.build import _run_build_command, build_paths
 
     from torch._inductor.fb.utils import (
         log_global_cache_errors,
@@ -1323,6 +1322,9 @@ def get_cpp_torch_device_options(
                 if not compile_only:
                     # Only add link args, when compile_only is false.
                     passthrough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
+
+    if config.aot_inductor.custom_op_libs:
+        libraries += config.aot_inductor.custom_op_libs
 
     return (
         definitions,

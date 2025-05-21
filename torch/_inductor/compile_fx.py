@@ -219,7 +219,13 @@ def get_static_input_idxs(num_fixed: int) -> list[int]:
 def record_original_output_strides(gm: GraphModule) -> None:
     output_node = gm.graph.find_nodes(op="output")[0]
     output_strides = []
-    for output in output_node.args[0]:
+
+    if not isinstance(output_node.args[0], torch.fx.Node):
+        output_node_args = output_node.args[0]
+    else:
+        output_node_args = output_node.args
+
+    for output in output_node_args:
         if (
             isinstance(output, torch.fx.Node)
             and (val := output.meta.get("val")) is not None
@@ -1155,7 +1161,16 @@ class _InProcessFxCompile(FxCompile):
             # pattern matcher passes might not preserve striding information
             # on node.meta["val"]. if in the future we rely on these being
             # correct we will need to fix.
-
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "before_post_grad_graph",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: gm.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                ),
+            )
             with V.set_fake_mode(fake_mode):
                 # has some issues with memory in training
                 cuda_context = get_cuda_device_context(gm)
@@ -1183,7 +1198,11 @@ class _InProcessFxCompile(FxCompile):
                     fast_sympy_print=True,
                 )
                 trace_structured(
-                    "inductor_post_grad_graph",
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "after_post_grad_graph",
+                        "encoding": "string",
+                    },
                     payload_fn=lambda: inductor_post_grad_graph_str,
                 )
                 if config.trace.enabled:
@@ -2030,7 +2049,11 @@ def compile_fx(
         # TODO: Get rid of this?
         if isinstance(model_, GraphModule):
             trace_structured(
-                "inductor_pre_grad_graph",
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "before_pre_grad_graph",
+                    "encoding": "string",
+                },
                 payload_fn=lambda: model_.print_readable(
                     print_output=False, include_stride=True, include_device=True
                 )
@@ -2049,6 +2072,17 @@ def compile_fx(
             torch._inductor.debug._pre_grad_graph_id = id(model_.graph)
 
             model_ = _recursive_pre_grad_passes(model_, example_inputs_)
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "after_pre_grad_graph",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: model_.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                )
+                + f"\n\n # graph id: {id(model_.graph)}",
+            )
 
         # TODO: Move this before recursive pre-grad passes
         # NB: This short circuit never occurs for Dynamo produced graphs
