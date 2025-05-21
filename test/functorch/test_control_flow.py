@@ -12,6 +12,7 @@ from torch._higher_order_ops.associative_scan import (
     _fake_associative_scan,
     associative_scan,
 )
+from torch._higher_order_ops.map import _fake_map
 from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._higher_order_ops.while_loop import while_loop
 from torch._subclasses.functional_tensor import (
@@ -71,16 +72,6 @@ def from_fun_old(t):
         torch._sync(t)
         return torch._from_functional_tensor(t)
     return t
-
-
-def _fake_map(f, x, *args):
-    from functorch.experimental.control_flow import _stack_pytree, _unstack_pytree
-
-    x_pytrees = _unstack_pytree(x)
-    zs = []
-    for xp in x_pytrees:
-        zs.append(f(xp, *args))
-    return _stack_pytree(zs)
 
 
 def _fake_while_loop(cond_fn, body_fn, operands):
