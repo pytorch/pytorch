@@ -8123,7 +8123,6 @@
 - func: lift_fresh(Tensor(a) self) -> Tensor(a)
   dispatch:
     CompositeExplicitAutograd: lift_fresh
-  tags: view
 
 # Like lift, but it clones the input.
 - func: lift_fresh_copy(Tensor self) -> Tensor

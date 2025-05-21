@@ -5,7 +5,6 @@ import torch
 import numpy as np
 
 import math
-from collections.abc import Sequence
 import random
 from functools import partial
 from itertools import product, combinations, permutations
@@ -22,6 +21,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfTorchDynamo,
     IS_WINDOWS)
+from torch.testing._internal.opinfo.utils import compute_reduced_shape
 from torch.testing._internal.common_device_type import (
     OpDTypes, expectedFailureMeta, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
     onlyNativeDeviceTypes, onlyCUDA, largeTensorTest, ops, precisionOverride)
@@ -65,33 +65,6 @@ def _rand_shape(dim, min_size, max_size):
         shape.append(random.randint(min_size, max_size))
     return tuple(shape)
 
-def _reduced_shape(shape, empty_dim_as_none=False, dim=None, keepdim=False):
-    """Computes the expected reduced shape given dim and keepdim
-
-    Args:
-        shape: The shape to reduce
-        dim : The dimensions to reduce
-        keepdim: If true, reduced dimensions have size 1 in the reduced shape,
-            otherwise they are removed from the reduced shape.
-
-    Returns:
-        The reduced shape
-    """
-    if dim is None or (empty_dim_as_none and dim == []):
-        return [1] * len(shape) if keepdim else []
-
-    # Wrap negative dims
-    dim = dim if isinstance(dim, Sequence) else [dim]
-    dim = {i if i >= 0 else len(shape) + i for i in dim}
-
-    result = []
-    for i, size in enumerate(shape):
-        if i not in dim:
-            result.append(size)
-        elif keepdim:
-            result.append(1)
-
-    return result
 
 class TestReductions(TestCase):
 
@@ -106,7 +79,7 @@ class TestReductions(TestCase):
         args, kwargs = next(op.generate_args_kwargs(t, **dim_keepdim))
         result = op(t, *args, **dim_keepdim, **kwargs)
         empty_dim_as_none = (op.name == "linalg.vector_norm" or op.name == "_refs.linalg.vector_norm")
-        expected_shape = _reduced_shape(shape, empty_dim_as_none, **dim_keepdim)
+        expected_shape = compute_reduced_shape(shape, empty_dim_as_none, **dim_keepdim)
         self.assertEqual(result.shape, expected_shape, f"""
         expected output shape to be {expected_shape} but got {list(result.shape)}
         for input shape {shape} and {dim_keepdim}
@@ -315,7 +288,7 @@ class TestReductions(TestCase):
         for dim in [1] + [[1, 2]] if op.supports_multiple_dims else []:
             args, kwargs = next(op.generate_args_kwargs(t, dim=dim))
             result = op(t, *args, dim=dim, **kwargs)
-            self.assertEqual(result.shape, _reduced_shape(t.shape, dim=dim))
+            self.assertEqual(result.shape, compute_reduced_shape(t.shape, dim=dim))
 
     def _test_noncontiguous(self, op: ReductionOpInfo, t: torch.Tensor, **reduction_kwargs):
         """Helper method to test noncontiguous input tensors."""

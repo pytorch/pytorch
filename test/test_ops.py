@@ -41,6 +41,7 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_methods_invocations import (
     BinaryUfuncInfo,
     op_db,
+    OpInfo,
     ops_and_refs,
     python_ref_db,
     ReductionOpInfo,
@@ -73,6 +74,7 @@ from torch.testing._internal.common_utils import (
     unMarkDynamoStrictTest,
 )
 from torch.testing._internal.inductor_utils import maybe_skip_size_asserts
+from torch.testing._internal.opinfo.utils import compute_reduced_shape
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
@@ -329,7 +331,7 @@ class TestCommon(TestCase):
     def test_view_tag_coverage(self):
         # These operators have the inferred property is_view according to their declaration in native_functions.yaml
         # but they are not pure view operators since they create a copy under certain conditions
-        not_view_operators = ["to", "copy"]
+        not_view_operators = ["to", "copy", "lift_fresh"]
 
         # These are registered in register_prim_ops.cpp or register_special_ops.cpp
         # they are not registered to CompositeExplicitAutograd and hence should not carry the view tag.
@@ -2365,6 +2367,72 @@ class _TestTagsMode(TorchDispatchMode):
         return rs
 
 
+class _TestViewTagsMode(TorchDispatchMode):
+    def __init__(self, test_case: TestCase):
+        super().__init__()
+        self.test_case = test_case
+        self.base_tensors = []
+        self.output_tensors = []
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        # Sometimes, a single operator calls internally to a view operator more than once.
+        # This is why we need to store the outputs in an array
+        # Checking that the output tensor is view inside __torch_dispatch__ doesn't work
+        # since inside the dispatch, the tensor is not yet marked as view of the input tensor
+        output = func(*args, **kwargs)
+        # A detached tensor is not a view according to _is_view()
+        if torch.Tag.view in func.tags and "detach" not in func.name():
+            base_tensor = args[0]._base if args[0]._is_view() else args[0]
+            self.base_tensors.append(base_tensor)
+            self.output_tensors.append(output)
+
+        return output
+
+    def assert_all_views(self):
+        base_tensors, output_tensors = self.base_tensors, self.output_tensors
+        for base, output in zip(base_tensors, output_tensors):
+            # Some operators return list of views, like split
+            outputs = output if isinstance(output, Sequence) else [output]
+            for o in outputs:
+                self._assert_view_of(o, base)
+
+    def _assert_view_of(self, view_tensor, base_tensor):
+        self.test_case.assertTrue(view_tensor._is_view())
+        self.test_case.assertIs(view_tensor._base, base_tensor)
+
+
+class _TestReductionTagsMode(TorchDispatchMode):
+    """
+    This class provides a torch dispatch that verify that all operators marked as reduction indeed reduce the
+    dimension of the input tensor
+    """
+
+    def __init__(self, test_case: TestCase):
+        super().__init__()
+        self.test_case = test_case
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        output = func(*args, **kwargs)
+        # These are reduction operators but with different schema
+        operators_to_skip = [
+            "prims::var",
+            "aten::linalg_vector_norm",
+            "aten::norm.ScalarOpt_dim",
+        ]
+        if torch.Tag.reduction not in func.tags or func.name() in operators_to_skip:
+            return output
+
+        input_tensor = args[0]
+        dims = args[1] if len(args) >= 2 else (kwargs.get("dims") or kwargs.get("dim"))
+        keepdim = args[2] if len(args) >= 3 else kwargs.get("keepdim", False)
+
+        expected_shape = compute_reduced_shape(input_tensor.shape, True, dims, keepdim)
+        outputs = output if isinstance(output, Sequence) else [output]
+        for o in outputs:
+            self.test_case.assertEqual(o.shape, expected_shape)
+        return output
+
+
 # Test to verify the correctness for tags in `tags.yaml`, also available for access through `torch.Tags`
 @unMarkDynamoStrictTest
 class TestTags(TestCase):
@@ -2384,6 +2452,16 @@ class TestTags(TestCase):
                 aten_name = op.aten_name if op.aten_name is not None else op.name
                 opoverloadpacket = getattr(torch.ops.aten, aten_name, None)
                 check_inplace_view(opoverloadpacket, input, rs, old_size, old_stride)
+
+    @ops(op_db, dtypes=OpDTypes.any_one)
+    def test_view_ops(self, device, dtype, op: OpInfo):
+        # Verify that all operators marked with view indeed return a view of the input fake tensor
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample in samples:
+            with _TestViewTagsMode(self) as view_tag_mode:
+                op(sample.input, *sample.args, **sample.kwargs)
+
+            view_tag_mode.assert_all_views()
 
 
 class TestSelfKwarg(TestCase):
@@ -2741,16 +2819,7 @@ class TestFakeTensor(TestCase):
                 continue
 
             def run_with_fake_mode_and_verify(fake_mode, match_results=True):
-                def map_to_fake(e):
-                    if isinstance(e, torch.Tensor):
-                        return fake_mode.from_tensor(e)
-                    else:
-                        return e
-
-                input = tree_map(map_to_fake, sample.input)
-                args = tree_map(map_to_fake, sample.args)
-                kwargs = tree_map(map_to_fake, sample.kwargs)
-
+                input, args, kwargs = self._map_sample_to_fake(fake_mode, sample)
                 try:
                     with context():
                         with fake_mode:
@@ -2819,6 +2888,56 @@ class TestFakeTensor(TestCase):
                     allow_dynamic_output_shape_mode, match_results=False
                 )
 
+    def _map_sample_to_fake(self, fake_mode, sample):
+        def map_to_fake(e):
+            if isinstance(e, torch.Tensor):
+                return fake_mode.from_tensor(e)
+            else:
+                return e
+
+        input = tree_map(map_to_fake, sample.input)
+        args = tree_map(map_to_fake, sample.args)
+        kwargs = tree_map(map_to_fake, sample.kwargs)
+        return input, args, kwargs
+
+    def _verify_op_with_fake_mode(self, fake_mode, op, input, args, kwargs):
+        try:
+            with fake_mode:
+                op(input, *args, **kwargs)
+        except RuntimeError:
+            return False
+        return True
+
+    @ops(op_db, dtypes=OpDTypes.any_one)
+    def test_reduction_ops(self, device, dtype, op: OpInfo):
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample in samples:
+            fake_mode = FakeTensorMode()
+            input, args, kwargs = self._map_sample_to_fake(fake_mode, sample)
+
+            if not self._verify_op_with_fake_mode(fake_mode, op, input, args, kwargs):
+                continue
+
+            with _TestReductionTagsMode(self):
+                with fake_mode:
+                    op(input, *args, **kwargs)
+
+    @ops(op_db, dtypes=OpDTypes.any_one)
+    def test_view_ops(self, device, dtype, op: OpInfo):
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample in samples:
+            fake_mode = FakeTensorMode()
+            input, args, kwargs = self._map_sample_to_fake(fake_mode, sample)
+
+            if not self._verify_op_with_fake_mode(fake_mode, op, input, args, kwargs):
+                continue
+
+            with _TestViewTagsMode(self) as view_tag_mode:
+                with fake_mode:
+                    op(input, *args, **kwargs)
+
+            view_tag_mode.assert_all_views()
+
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_pointwise_ops(self, device, dtype, op):
         name = op.name
@@ -2853,15 +2972,7 @@ class TestFakeTensor(TestCase):
         for sample in samples:
             mode = FakeTensorMode()
 
-            def map_to_fake(e):
-                if isinstance(e, torch.Tensor):
-                    return mode.from_tensor(e)
-                else:
-                    return e
-
-            input = tree_map(map_to_fake, sample.input)
-            args = tree_map(map_to_fake, sample.args)
-            kwargs = tree_map(map_to_fake, sample.kwargs)
+            input, args, kwargs = self._map_sample_to_fake(mode, sample)
 
             try:
                 op(input, *args, **kwargs)
