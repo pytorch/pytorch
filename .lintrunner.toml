@@ -1521,7 +1521,7 @@ code = 'RUFF'
 include_patterns = [
     '**/*.py',
     '**/*.pyi',
-    'torch/utils/data/*.ipynb',
+    '**/*.ipynb',
     'pyproject.toml',
 ]
 exclude_patterns = [
