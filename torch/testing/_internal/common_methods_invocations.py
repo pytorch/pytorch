@@ -12919,6 +12919,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.half,)),
                # RuntimeError: view size is not compatible with input tensor's size and stride
                DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCOW', 'test_cow_input_with_grad_not_mutated', device_type='mps'),
            )),
     BinaryUfuncInfo('complex',
                     dtypes=floating_types_and(torch.half),
@@ -18251,6 +18252,8 @@ op_db: list[OpInfo] = [
                         # Analytical:
                         # tensor([[-0.0047]], dtype=torch.float64, grad_fn=<CopySlices>)
                         DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
+                        DecorateInfo(
+                            unittest.skip("Skipped!"), 'TestCOW', 'test_cow_input_with_grad_not_mutated', device_type='mps'),
                     )),
     # TODO(@kshitij12345): Refactor similar to `mvlgamma` entries.
     # To test reference numerics against multiple values of argument `n`,
