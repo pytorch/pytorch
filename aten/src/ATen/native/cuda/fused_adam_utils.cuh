@@ -25,11 +25,11 @@ template <
     bool amsgrad>
 C10_DEVICE inline void adam_math(
     scalar_type r_args[depth][kILP],
-    const double& lr,
-    const double& beta1,
-    const double& beta2,
-    const double& weight_decay,
-    const double& eps,
+    const opmath_t& lr,
+    const opmath_t& beta1,
+    const opmath_t& beta2,
+    const opmath_t& weight_decay,
+    const opmath_t& eps,
     const bool& maximize,
     const float* grad_scale_ptr,
     const float* found_inf_ptr,
@@ -41,19 +41,23 @@ C10_DEVICE inline void adam_math(
     // Load values.
     opmath_t param = static_cast<opmath_t>(r_args[kParamIdx][ii]);
     opmath_t grad = static_cast<opmath_t>(r_args[kGradIdx][ii]);
-    if (grad_scale_ptr) {
-      grad /= (static_cast<double>(*grad_scale_ptr));
-    }
-    const opmath_t grad_to_store = grad;
-    if (maximize) {
-      grad = -grad;
-    }
     opmath_t exp_avg = static_cast<opmath_t>(r_args[kExpAvgIdx][ii]);
     opmath_t exp_avg_sq = static_cast<opmath_t>(r_args[kExpAvgSqIdx][ii]);
     opmath_t max_exp_avg_sq;
-    if (amsgrad) {
+    if constexpr (amsgrad) {
       max_exp_avg_sq = static_cast<opmath_t>(r_args[kMaxExpAvgSqIdx][ii]);
     }
+
+    // Scale gradient for AMP.
+    if (grad_scale_ptr) {
+      grad /= (static_cast<opmath_t>(*grad_scale_ptr));
+    }
+    const opmath_t grad_to_store = grad;
+
+    if (maximize) {
+      grad = -grad;
+    }
+
     // Update param, grad, 1st and 2nd order momentum.
     if (weight_decay != 0) {
       if constexpr (adam_mode == ADAM_MODE::ORIGINAL) {
@@ -66,9 +70,10 @@ C10_DEVICE inline void adam_math(
     // ref: https://developer.nvidia.com/blog/lerp-faster-cuda/
     exp_avg = beta1 * exp_avg + (1 - beta1) * grad;
     exp_avg_sq = beta2 * exp_avg_sq + (1 - beta2) * grad * grad;
+
     const opmath_t step_size = lr / bias_correction1;
     opmath_t denom;
-    if (amsgrad) {
+    if constexpr (amsgrad) {
       max_exp_avg_sq = std::max(max_exp_avg_sq, exp_avg_sq);
       denom = (std::sqrt(max_exp_avg_sq) / bias_correction2_sqrt) + eps;
     } else {
@@ -83,7 +88,7 @@ C10_DEVICE inline void adam_math(
     }
     r_args[kExpAvgIdx][ii] = exp_avg;
     r_args[kExpAvgSqIdx][ii] = exp_avg_sq;
-    if (amsgrad) {
+    if constexpr (amsgrad) {
       r_args[kMaxExpAvgSqIdx][ii] = max_exp_avg_sq;
     }
   }
@@ -107,6 +112,7 @@ struct FusedAdamMathFunctor {
       depth == 4 || depth == 5,
       "depth of 4 for Adam, depth of 5 for Adam with AMSGrad.");
   using opmath_t = at::opmath_type<scalar_type>;
+
   C10_DEVICE __forceinline__ void operator()(
       int chunk_size,
       FusedOptimizerTensorListMetadata<depth>& tl,
@@ -121,18 +127,25 @@ struct FusedAdamMathFunctor {
       const float* found_inf_ptr) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
-    const double lr_double = lr_ptr ? *lr_ptr : lr;
+    const opmath_t lr_opmath =
+        lr_ptr ? static_cast<opmath_t>(*lr_ptr) : static_cast<opmath_t>(lr);
 
     if (found_inf_ptr && *found_inf_ptr == 1) {
       return;
     }
     const auto [bias_correction1, bias_correction2_sqrt] =
-        [&]() -> std::pair<double, double> {
-      auto* step_count =
-          reinterpret_cast<const float*>(tl.state_steps_addresses[tensor_loc]);
-      const auto bias_correction1 = 1 - at::native::pow_(beta1, *step_count);
-      const auto bias_correction2 = 1 - at::native::pow_(beta2, *step_count);
-      const auto bias_correction2_sqrt = std::sqrt(bias_correction2);
+        [&]() -> std::pair<opmath_t, opmath_t> {
+      opmath_t step_count =
+          static_cast<opmath_t>(*reinterpret_cast<const float*>(
+              tl.state_steps_addresses[tensor_loc]));
+
+      const opmath_t bias_correction1 =
+          1 - at::native::pow_(static_cast<opmath_t>(beta1), step_count);
+
+      const opmath_t bias_correction2 =
+          1 - at::native::pow_(static_cast<opmath_t>(beta2), step_count);
+      const opmath_t bias_correction2_sqrt = std::sqrt(bias_correction2);
+
       return {bias_correction1, bias_correction2_sqrt};
     }();
 
@@ -142,6 +155,7 @@ struct FusedAdamMathFunctor {
 
     const bool all_aligned{
         init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)};
+
     if ((n % kILP == 0) && (chunk_size % kILP == 0) && all_aligned) {
       for (int64_t i_start = threadIdx.x;
            i_start * kILP < n && i_start * kILP < chunk_size;
@@ -152,11 +166,11 @@ struct FusedAdamMathFunctor {
         }
         adam_math<scalar_type, opmath_t, depth, adam_mode, amsgrad>(
             r_args,
-            lr_double,
-            beta1,
-            beta2,
-            weight_decay,
-            eps,
+            lr_opmath,
+            static_cast<opmath_t>(beta1),
+            static_cast<opmath_t>(beta2),
+            static_cast<opmath_t>(weight_decay),
+            static_cast<opmath_t>(eps),
             maximize,
             grad_scale_ptr,
             found_inf_ptr,
@@ -175,7 +189,7 @@ struct FusedAdamMathFunctor {
         load_args<depth>(r_args, args, i_start, chunk_size, n);
         adam_math<scalar_type, opmath_t, depth, adam_mode, amsgrad>(
             r_args,
-            lr_double,
+            lr_opmath,
             beta1,
             beta2,
             weight_decay,
