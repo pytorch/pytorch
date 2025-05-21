@@ -92,6 +92,7 @@ try:
             check_model,
             check_model_with_multiple_inputs,
             code_check_count,
+            disable_constant_renaming,
         )
         from .test_control_flow import (
             CondModels,
@@ -106,6 +107,7 @@ try:
             check_model,
             check_model_with_multiple_inputs,
             code_check_count,
+            disable_constant_renaming,
         )
         from test_control_flow import (  # @manual=fbcode//caffe2/test/inductor:control_flow-library
             CondModels,
@@ -122,20 +124,6 @@ except (unittest.SkipTest, ImportError):
     if __name__ == "__main__":
         sys.exit(0)
     raise
-
-
-def disable_constant_renaming(func):
-    """Disable configuration parameters that can result in constants being folded or
-    renamed, or in additional kernel fusions post-folding.  This is useful when specific
-    constants are being queried for."""
-
-    def wrapper(*args, **kwargs):
-        with config.patch(
-            {"freezing": False, "aot_inductor.use_runtime_constant_folding": False}
-        ):
-            func(*args, **kwargs)
-
-    return wrapper
 
 
 class AOTInductorTestsTemplate:
