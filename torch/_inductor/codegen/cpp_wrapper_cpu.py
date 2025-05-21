@@ -666,7 +666,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
             signature = kernel.get_signature().replace(name, kernel_ptr)
             self.prefix.writeline(f"    {signature} = torch::aot_inductor::{name};")
         self.prefix.writeline("};")
-        self.prefix.writeline("}  // namespace")
+        self.prefix.writeline("}  // namespace\n\n")
+
+        if config.aot_inductor.embed_cubin:
+            self.prefix.writeline('extern "C" {')
+            for name in sorted(declare_kernel):
+                self.prefix.writeline(
+                    f"    extern const unsigned char __{name}_start[];"
+                )
+                if torch.xpu.is_available():
+                    self.prefix.writeline(
+                        f"    extern const unsigned char __{name}_end[];"
+                    )
+            self.prefix.writeline("}")
 
     def codegen_model_constructor(self):
         """
@@ -1353,7 +1365,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.kernel_numel_expr.add((arg.inner, graph))
             self.writeline(f"int64_t {arg.inner} = {cexpr(arg.inner_expr)};")
         else:
-            self.writeline(f"{cexpr(arg.inner_expr)};")
+            self.writeline(f"{arg.inner} = {cexpr(arg.inner_expr)};")
 
     def codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)

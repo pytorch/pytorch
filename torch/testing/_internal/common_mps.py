@@ -14,6 +14,7 @@ if torch.backends.mps.is_available():
         ops: Sequence[OpInfo],
         device_type: Optional[str] = None,
         xfail_exclusion: Optional[list[str]] = None,
+        skip_instead_of_xfail: bool = False,
     ) -> Sequence[OpInfo]:
         if xfail_exclusion is None:
             xfail_exclusion = []
@@ -22,6 +23,7 @@ if torch.backends.mps.is_available():
         SUPPORTED_COMPLEX_OPS = {
             "__radd__",
             "__rmul__",
+            "__rsub__",
             "__getitem__",
             "_unsafe_masked_index",
             "abs",
@@ -74,6 +76,9 @@ if torch.backends.mps.is_available():
             "kron",
             "linalg.diagonal",
             "linalg.svd",
+            "log10",
+            "log2",
+            "log",
             "mH",
             "mT",
             "masked_fill",
@@ -113,6 +118,7 @@ if torch.backends.mps.is_available():
             "resolve_conj",
             "resolve_neg",
             "rsqrt",
+            "rsub",
             "scalar_tensor",
             "select",
             "sgn",
@@ -230,10 +236,7 @@ if torch.backends.mps.is_available():
             "linalg.pinv",
             "linspace",
             "linspacetensor_overload",
-            "log10",
             "log1p",
-            "log2",
-            "log",
             "logical_and",
             "logical_not",
             "logical_or",
@@ -376,7 +379,6 @@ if torch.backends.mps.is_available():
             "linalg.eigvals": None,
             "put": None,
             "nn.functional.conv_transpose3d": None,
-            "__rsub__": None,
             "cauchy_": None,
             "cauchy": None,
             "cholesky_inverse": None,
@@ -448,7 +450,6 @@ if torch.backends.mps.is_available():
             "ormqr": None,
             "pca_lowrank": None,
             "qr": None,
-            "rsub": None,
             "scatter_reduceamax": [torch.int32, torch.int64]
             if MACOS_VERSION < 15.0
             else [torch.int64],
@@ -789,60 +790,106 @@ if torch.backends.mps.is_available():
                 ON_MPS_XFAILLIST,
             ]:
                 if key in xfaillist and key not in xfail_exclusion:
-                    addDecorator(
-                        op,
-                        DecorateInfo(unittest.expectedFailure, dtypes=xfaillist[key]),
-                    )
+                    if skip_instead_of_xfail:
+                        addDecorator(
+                            op,
+                            DecorateInfo(
+                                unittest.skip("Skipped!"), dtypes=xfaillist[key]
+                            ),
+                        )
+                    else:
+                        addDecorator(
+                            op,
+                            DecorateInfo(
+                                unittest.expectedFailure, dtypes=xfaillist[key]
+                            ),
+                        )
 
             if (
                 key in MACOS_BEFORE_14_4_XFAILLIST
                 and key not in xfail_exclusion
                 and (MACOS_VERSION < 14.4)
             ):
-                addDecorator(
-                    op,
-                    DecorateInfo(
-                        unittest.expectedFailure,
-                        dtypes=MACOS_BEFORE_14_4_XFAILLIST[key],
-                    ),
-                )
+                if skip_instead_of_xfail:
+                    addDecorator(
+                        op,
+                        DecorateInfo(
+                            unittest.skip("Skipped!"),
+                            dtypes=MACOS_BEFORE_14_4_XFAILLIST[key],
+                        ),
+                    )
+                else:
+                    addDecorator(
+                        op,
+                        DecorateInfo(
+                            unittest.expectedFailure,
+                            dtypes=MACOS_BEFORE_14_4_XFAILLIST[key],
+                        ),
+                    )
 
             if (
                 key in MACOS_BEFORE_13_3_XFAILLIST
                 and key not in xfail_exclusion
                 and (torch.backends.mps.is_macos13_or_newer() and MACOS_VERSION < 13.3)
             ):
-                addDecorator(
-                    op,
-                    DecorateInfo(
-                        unittest.expectedFailure,
-                        dtypes=MACOS_BEFORE_13_3_XFAILLIST[key],
-                    ),
-                )
+                if skip_instead_of_xfail:
+                    addDecorator(
+                        op,
+                        DecorateInfo(
+                            unittest.skip("Skipped!"),
+                            dtypes=MACOS_BEFORE_13_3_XFAILLIST[key],
+                        ),
+                    )
+                else:
+                    addDecorator(
+                        op,
+                        DecorateInfo(
+                            unittest.expectedFailure,
+                            dtypes=MACOS_BEFORE_13_3_XFAILLIST[key],
+                        ),
+                    )
 
             if (
                 key in MACOS_AFTER_13_1_XFAILLIST
                 and key not in xfail_exclusion
                 and torch.backends.mps.is_macos13_or_newer(2)
             ):
-                addDecorator(
-                    op,
-                    DecorateInfo(
-                        unittest.expectedFailure, dtypes=MACOS_AFTER_13_1_XFAILLIST[key]
-                    ),
-                )
+                if skip_instead_of_xfail:
+                    addDecorator(
+                        op,
+                        DecorateInfo(
+                            unittest.skip("Skipped!"),
+                            dtypes=MACOS_AFTER_13_1_XFAILLIST[key],
+                        ),
+                    )
+                else:
+                    addDecorator(
+                        op,
+                        DecorateInfo(
+                            unittest.expectedFailure,
+                            dtypes=MACOS_AFTER_13_1_XFAILLIST[key],
+                        ),
+                    )
 
             if (
                 key in MACOS_13_3_XFAILLIST
                 and key not in xfail_exclusion
                 and (MACOS_VERSION >= 13.3)
             ):
-                addDecorator(
-                    op,
-                    DecorateInfo(
-                        unittest.expectedFailure, dtypes=MACOS_13_3_XFAILLIST[key]
-                    ),
-                )
+                if skip_instead_of_xfail:
+                    addDecorator(
+                        op,
+                        DecorateInfo(
+                            unittest.skip("Skipped!"), dtypes=MACOS_13_3_XFAILLIST[key]
+                        ),
+                    )
+                else:
+                    addDecorator(
+                        op,
+                        DecorateInfo(
+                            unittest.expectedFailure, dtypes=MACOS_13_3_XFAILLIST[key]
+                        ),
+                    )
 
             # If ops is not supported for complex types, expect it to fail
             if key not in SUPPORTED_COMPLEX_OPS and (
@@ -859,7 +906,10 @@ if torch.backends.mps.is_available():
 
         return ops
 
-    def mps_ops_grad_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
+    def mps_ops_grad_modifier(
+        ops: Sequence[OpInfo],
+        skip_instead_of_xfail: bool = False,
+    ) -> Sequence[OpInfo]:
         XFAILLIST_GRAD = {
             # Unimplemented ops
             "_segment_reduce": [torch.float16, torch.float32],
@@ -986,40 +1036,69 @@ if torch.backends.mps.is_available():
         for op in ops:
             key = op.name + op.variant_test_name
             if key in XFAILLIST_GRAD:
-                addDecorator(
-                    op,
-                    DecorateInfo(unittest.expectedFailure, dtypes=XFAILLIST_GRAD[key]),
-                )
+                if skip_instead_of_xfail:
+                    addDecorator(
+                        op, DecorateInfo(unittest.skip, dtypes=XFAILLIST_GRAD[key])
+                    )
+                else:
+                    addDecorator(
+                        op,
+                        DecorateInfo(
+                            unittest.expectedFailure, dtypes=XFAILLIST_GRAD[key]
+                        ),
+                    )
 
             if key in SKIPLIST_GRAD:
                 addDecorator(op, DecorateInfo(unittest.skip, dtypes=SKIPLIST_GRAD[key]))
 
             if key in ON_MPS_XFAILLIST:
-                addDecorator(
-                    op,
-                    DecorateInfo(
-                        unittest.expectedFailure, dtypes=ON_MPS_XFAILLIST[key]
-                    ),
-                )
+                if skip_instead_of_xfail:
+                    addDecorator(
+                        op, DecorateInfo(unittest.skip, dtypes=ON_MPS_XFAILLIST[key])
+                    )
+                else:
+                    addDecorator(
+                        op,
+                        DecorateInfo(
+                            unittest.expectedFailure, dtypes=ON_MPS_XFAILLIST[key]
+                        ),
+                    )
 
             if key in MACOS_BEFORE_13_3_XFAILLIST_GRAD and (
                 torch.backends.mps.is_macos13_or_newer() and MACOS_VERSION < 13.3
             ):
-                addDecorator(
-                    op,
-                    DecorateInfo(
-                        unittest.expectedFailure,
-                        dtypes=MACOS_BEFORE_13_3_XFAILLIST_GRAD[key],
-                    ),
-                )
+                if skip_instead_of_xfail:
+                    addDecorator(
+                        op,
+                        DecorateInfo(
+                            unittest.skip, dtypes=MACOS_BEFORE_13_3_XFAILLIST_GRAD[key]
+                        ),
+                    )
+                else:
+                    addDecorator(
+                        op,
+                        DecorateInfo(
+                            unittest.expectedFailure,
+                            dtypes=MACOS_BEFORE_13_3_XFAILLIST_GRAD[key],
+                        ),
+                    )
 
             if key in MACOS_13_3_XFAILLIST_GRAD and (MACOS_VERSION >= 13.3):
-                addDecorator(
-                    op,
-                    DecorateInfo(
-                        unittest.expectedFailure, dtypes=MACOS_13_3_XFAILLIST_GRAD[key]
-                    ),
-                )
+                if skip_instead_of_xfail:
+                    addDecorator(
+                        op,
+                        DecorateInfo(
+                            unittest.skip, dtypes=MACOS_13_3_XFAILLIST_GRAD[key]
+                        ),
+                    )
+                else:
+                    addDecorator(
+                        op,
+                        DecorateInfo(
+                            unittest.expectedFailure,
+                            dtypes=MACOS_13_3_XFAILLIST_GRAD[key],
+                        ),
+                    )
         return ops
 
     def mps_ops_error_inputs_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
