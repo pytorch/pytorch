@@ -16,12 +16,6 @@ void initModule(PyObject* module) {
     }
   });
 
-  m.def("_accelerator_deviceCount", []() {
-    auto device_type = at::accelerator::getAccelerator(false);
-    torch::utils::maybe_initialize_device(device_type);
-    return at::accelerator::deviceCount();
-  });
-
   m.def("_accelerator_setDeviceIndex", [](c10::DeviceIndex device_index) {
     // If device index is negative, no-op
     if (device_index < 0) {
@@ -65,6 +59,18 @@ void initModule(PyObject* module) {
       py::gil_scoped_release no_gil;
       at::accelerator::synchronizeDevice(device_index);
     }
+  });
+
+  m.def("_accelerator_exchangeDevice", [](c10::DeviceIndex device_index) {
+    const auto device_type = at::accelerator::getAccelerator(true).value();
+    torch::utils::maybe_initialize_device(device_type);
+    return at::accelerator::exchangeDevice(device_index);
+  });
+
+  m.def("_accelerator_maybeExchangeDevice", [](c10::DeviceIndex device_index) {
+    const auto device_type = at::accelerator::getAccelerator(true).value();
+    torch::utils::maybe_initialize_device(device_type);
+    return at::accelerator::maybeExchangeDevice(device_index);
   });
 }
 

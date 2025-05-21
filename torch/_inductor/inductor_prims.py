@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import functools
 import logging
+import operator
 from typing import Optional, TYPE_CHECKING
 
 import torch
@@ -119,7 +121,28 @@ prepare_softmax_online = make_prim(
 )
 
 
-def _low_memory_max_pool2d_with_offsets_aten(
+def _flattened_index_to_nd(indices, width):
+    dim = len(width)
+
+    if dim == 1:
+        return [indices]
+    elif dim >= 2:
+        m = functools.reduce(operator.mul, width[1:])
+        ih = indices // m
+        indices_new = indices - (ih * m)
+        return [ih, *_flattened_index_to_nd(indices_new, width[1:])]
+    else:
+        raise ValueError(f"Unknown dim: {dim}")
+
+
+def _flatten_index(indices, width):
+    result = indices[0]
+    for d in range(1, len(indices)):
+        result = width[d] * result + indices[d]
+    return result
+
+
+def _low_memory_max_pool_with_offsets_aten(
     self,
     kernel_size,
     stride,
@@ -127,80 +150,69 @@ def _low_memory_max_pool2d_with_offsets_aten(
     dilation,
     ceil_mode,
 ):
-    vals, indices = torch.ops.aten.max_pool2d_with_indices(
-        self, kernel_size, stride, padding, dilation, ceil_mode
-    )
+    dim = len(kernel_size)
+    if dim == 2:
+        vals, indices = torch.ops.aten.max_pool2d_with_indices(
+            self, kernel_size, stride, padding, dilation, ceil_mode
+        )
+    else:
+        vals, indices = torch.ops.aten.max_pool3d_with_indices(
+            self, kernel_size, stride, padding, dilation, ceil_mode
+        )
 
-    input_width = self.shape[-1]
-    kernel_width = kernel_size[1]
+    idhw = _flattened_index_to_nd(indices, self.shape[-dim:])
 
-    bh_shape = [1] * self.ndim
-    bh_shape[-2] = -1
-    bh = torch.arange(indices.shape[-2], dtype=torch.int64, device=self.device).view(
-        bh_shape
-    )
+    dhw_inc = []
 
-    bw_shape = [1] * self.ndim
-    bw_shape[-1] = -1
-    bw = torch.arange(indices.shape[-1], dtype=torch.int64, device=self.device).view(
-        bw_shape
-    )
+    for d in range(dim):
+        bh_shape = [1] * self.ndim
+        bh_shape[-dim + d] = -1
+        bh = torch.arange(
+            indices.shape[-dim + d], dtype=torch.int64, device=self.device
+        ).view(bh_shape)
+        hbase = bh * stride[d] - padding[d]
+        h_inc = (idhw[d] - hbase) // dilation[d]
+        dhw_inc.append(h_inc)
 
-    hbase = bh * stride[0] - padding[0]
-    wbase = bw * stride[1] - padding[1]
-
-    ih = indices // input_width
-    iw = indices - (ih * input_width)
-
-    h_inc = (ih - hbase) // dilation[0]
-    w_inc = (iw - wbase) // dilation[1]
-
-    offsets = h_inc * kernel_width + w_inc
+    offsets = _flatten_index(dhw_inc, kernel_size)
 
     return vals, offsets.to(torch.int8)
 
 
-def _low_memory_max_pool2d_offsets_to_indices_aten(
+def _low_memory_max_pool_offsets_to_indices_aten(
     offsets,
-    kernel_width,
-    input_width,
+    kernel_size,
+    input_size,
     stride,
     padding,
     dilation,
 ):
+    dim = len(kernel_size)
     offsets = offsets.to(torch.int64)
-    h_inc = offsets // kernel_width
-    w_inc = offsets - (h_inc * kernel_width)
+    dhw_inc = _flattened_index_to_nd(offsets, kernel_size)
 
-    bh_shape = [1] * offsets.ndim
-    bh_shape[-2] = -1
-    bh = torch.arange(offsets.shape[-2], dtype=torch.int64, device=offsets.device).view(
-        bh_shape
-    )
+    idhw = []
+    for d in range(dim):
+        bh_shape = [1] * offsets.ndim
+        bh_shape[-dim + d] = -1
+        bh = torch.arange(
+            offsets.shape[-dim + d], dtype=torch.int64, device=offsets.device
+        ).view(bh_shape)
+        hbase = bh * stride[d] - padding[d]
+        idhw.append(hbase + dhw_inc[d] * dilation[d])
 
-    bw_shape = [1] * offsets.ndim
-    bw_shape[-1] = -1
-    bw = torch.arange(offsets.shape[-1], dtype=torch.int64, device=offsets.device).view(
-        bw_shape
-    )
-
-    hbase = bh * stride[0] - padding[0]
-    wbase = bw * stride[1] - padding[1]
-
-    ih = hbase + h_inc * dilation[0]
-    iw = wbase + w_inc * dilation[1]
-    return ih * input_width + iw
+    return _flatten_index(idhw, input_size)
 
 
-_low_memory_max_pool2d_with_offsets = make_prim(
-    "_low_memory_max_pool2d_with_offsets(Tensor self, SymInt[2] kernel_size, SymInt[2] stride,  SymInt[2] padding, SymInt[2] dilation, bool ceil_mode) -> (Tensor, Tensor)",  # noqa: B950
-    _low_memory_max_pool2d_with_offsets_aten,
+_low_memory_max_pool_with_offsets = make_prim(
+    "_low_memory_max_pool_with_offsets(Tensor self, SymInt[] kernel_size, SymInt[] stride,  SymInt[] padding, SymInt[] dilation, bool ceil_mode) -> (Tensor, Tensor)",  # noqa: B950
+    _low_memory_max_pool_with_offsets_aten,
     return_type=(_prims.RETURN_TYPE.NEW, _prims.RETURN_TYPE.NEW),
     doc="Instead of returning indices, returns indices offsets.",
 )
 
-_low_memory_max_pool2d_offsets_to_indices = make_prim(
-    "_low_memory_max_pool2d_offsets_to_indices(Tensor self, SymInt kernel_w, SymInt input_w, SymInt[2] stride, SymInt[2] padding, SymInt[2] dilation) -> Tensor",  # noqa: B950
-    _low_memory_max_pool2d_offsets_to_indices_aten,
+_low_memory_max_pool_offsets_to_indices = make_prim(
+    "_low_memory_max_pool_offsets_to_indices(Tensor self, SymInt[] kernel_size, SymInt[] input_size, SymInt[] stride, SymInt[] padding, SymInt[] dilation) -> Tensor",  # noqa: B950
+    _low_memory_max_pool_offsets_to_indices_aten,
     doc="Convert small int offsets to regular indices.",
 )

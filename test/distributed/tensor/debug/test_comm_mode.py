@@ -4,8 +4,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
-from torch.distributed._tensor import DeviceMesh, DTensor
-from torch.distributed._tensor.placement_types import Shard
+from torch.distributed.tensor import DeviceMesh, DTensor, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import requires_nccl
 from torch.testing._internal.common_utils import run_tests, TestCase
