@@ -2,7 +2,6 @@
 
 import os
 import unittest
-import types
 
 import psutil
 import pytorch_openreg  # noqa: F401
@@ -21,7 +20,9 @@ class TestPrivateUse1(TestCase):
 
     def test_backend_name(self):
         self.assertEqual(torch._C._get_privateuse1_backend_name(), "openreg")
-        with self.assertRaisesRegex(RuntimeError, "torch.register_privateuse1_backend() has already been set"):  # type: ignore
+        # backend can be renamed to the same name multiple times
+        torch.utils.rename_privateuse1_backend("openreg")
+        with self.assertRaisesRegex(RuntimeError, "has already been set"):  # type: ignore[misc]
             torch.utils.rename_privateuse1_backend("dev")
 
 
@@ -98,12 +99,12 @@ class TestOpenReg(TestCase):
         self.assertEqual(generator.device.index, 1)
 
     def test_rng_state(self):
-        state = torch.openreg.get_rng_state(0) # type: ignore
-        torch.openreg.set_rng_state(state, 0) # type: ignore
+        state = torch.openreg.get_rng_state(0)  # type: ignore[misc]
+        torch.openreg.set_rng_state(state, 0)  # type: ignore[misc]
 
     def test_manual_seed(self):
-        torch.openreg.manual_seed_all(2024) # type: ignore
-        self.assertEqual(torch.openreg.initial_seed(), 2024) # type: ignore
+        torch.openreg.manual_seed_all(2024)  # type: ignore[misc]
+        self.assertEqual(torch.openreg.initial_seed(), 2024)  # type: ignore[misc]
 
     # Autograd
     @unittest.skipIf(not IS_LINUX, "Only works on linux")
