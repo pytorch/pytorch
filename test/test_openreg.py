@@ -1,8 +1,8 @@
 # Owner(s): ["module: PrivateUse1"]
 
 import os
-import unittest
 import types
+import unittest
 
 import psutil
 import pytorch_openreg  # noqa: F401
@@ -21,8 +21,38 @@ class TestPrivateUse1(TestCase):
 
     def test_backend_name(self):
         self.assertEqual(torch._C._get_privateuse1_backend_name(), "openreg")
-        with self.assertRaisesRegex(RuntimeError, "torch.register_privateuse1_backend() has already been set"):  # type: ignore
+        with self.assertRaisesRegex(RuntimeError, "has already been set"):  # type: ignore[misc]
             torch.utils.rename_privateuse1_backend("dev")
+
+    def test_backend_module_registration(self):
+        def generate_faked_module():
+            return types.ModuleType("fake_module")
+
+        with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):  # type: ignore[misc]
+            torch._register_device_module("dev", generate_faked_module())
+        with self.assertRaisesRegex(RuntimeError, "The runtime module of"):  # type: ignore[misc]
+            torch._register_device_module("openreg", generate_faked_module())
+
+    def test_backend_generate_methods(self):
+        with self.assertRaisesRegex(RuntimeError, "The custom device module of"):  # type: ignore[misc]
+            torch.utils.generate_methods_for_privateuse1_backend()  # type: ignore[misc]
+
+        self.assertTrue(hasattr(torch.Tensor, "is_openreg"))
+        self.assertTrue(hasattr(torch.Tensor, "openreg"))
+        self.assertTrue(hasattr(torch.TypedStorage, "is_openreg"))
+        self.assertTrue(hasattr(torch.TypedStorage, "openreg"))
+        self.assertTrue(hasattr(torch.UntypedStorage, "is_openreg"))
+        self.assertTrue(hasattr(torch.UntypedStorage, "openreg"))
+        self.assertTrue(hasattr(torch.nn.Module, "openreg"))
+        self.assertTrue(hasattr(torch.nn.utils.rnn.PackedSequence, "is_openreg"))
+        self.assertTrue(hasattr(torch.nn.utils.rnn.PackedSequence, "openreg"))
+
+    def test_backend_module_function(self):
+        with self.assertRaisesRegex(RuntimeError, "Try to call torch.openreg"):  # type: ignore[misc]
+            torch.utils.backend_registration._get_custom_mod_func("func_name_")  # type: ignore[misc]
+        self.assertTrue(
+            torch.utils.backend_registration._get_custom_mod_func("device_count")() == 2  # type: ignore[misc]
+        )
 
 
 class TestOpenReg(TestCase):
@@ -98,12 +128,12 @@ class TestOpenReg(TestCase):
         self.assertEqual(generator.device.index, 1)
 
     def test_rng_state(self):
-        state = torch.openreg.get_rng_state(0) # type: ignore
-        torch.openreg.set_rng_state(state, 0) # type: ignore
+        state = torch.openreg.get_rng_state(0)  # type: ignore[misc]
+        torch.openreg.set_rng_state(state, 0)  # type: ignore[misc]
 
     def test_manual_seed(self):
-        torch.openreg.manual_seed_all(2024) # type: ignore
-        self.assertEqual(torch.openreg.initial_seed(), 2024) # type: ignore
+        torch.openreg.manual_seed_all(2024)  # type: ignore[misc]
+        self.assertEqual(torch.openreg.initial_seed(), 2024)  # type: ignore[misc]
 
     # Autograd
     @unittest.skipIf(not IS_LINUX, "Only works on linux")
