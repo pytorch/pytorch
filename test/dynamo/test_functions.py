@@ -37,6 +37,7 @@ from torch.nn import functional as F
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    make_dynamo_test,
     parametrize,
 )
 
@@ -52,6 +53,10 @@ flag = True
 
 
 class CustomDictSubclass(collections.OrderedDict):
+    pass
+
+
+class SetSubclass(set):
     pass
 
 
@@ -1734,6 +1739,33 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return a - b
 
     @make_test
+    def test_set_ctor_iterable(x):
+        var = set(["apple", "banana", "cherry"])
+        if isinstance(var, set):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_set_equality_frozenset(x):
+        var = set("abc")
+        other = frozenset("abc")
+        if var == other:
+            return x + 1
+        else:
+            return x - 1
+
+    @unittest.expectedFailure
+    @make_test
+    def test_set_in_frozenset(x):
+        var = set("abc")
+        other = set([frozenset("abc")])
+        if var in other:
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_set_update_bytecode(x):
         # This produces bytecode SET_UPDATE since python 3.9
         var = {"apple", "banana", "cherry"}
@@ -1817,7 +1849,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             z = a - b
         return x, y, z
 
-    @parametrize("_type", [set])
+    @parametrize("_type", [set, frozenset])
     def test_set_union(self, _type):
         @make_test
         def fn(a, b):
@@ -1926,6 +1958,44 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             y = a - b
         return x, y
 
+    @make_test
+    def test_set_discard(a, b):
+        set1 = {"apple", "banana", "cherry"}
+        set2 = {"google", "microsoft", "apple"}
+        set1.discard("banana")
+        set2.discard("cherry")
+        if "banana" in set1:
+            x = a + b
+        else:
+            x = a - b
+        if "cherry" in set2:
+            y = a + b
+        else:
+            y = a - b
+        return x, y
+
+    @make_test
+    def test_set_pop(a, b):
+        set1 = {"apple", "banana", "cherry"}
+        e = set1.pop()
+        if e in set1:
+            x = a + b
+        else:
+            x = a - b
+        return x
+
+    def test_set_to_frozenset(self):
+        @make_test
+        def fn(a, b):
+            set1 = {"apple", "banana", "cherry"}
+            set2 = frozenset({"google", "microsoft", "apple"})
+            if type(frozenset(set1)) is frozenset and type(set(set2)) is set:
+                return a + b
+            else:
+                return a - b
+
+        fn(self)
+
     def test_set_keys_view(self):
         from collections.abc import KeysView
 
@@ -2002,6 +2072,48 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x = torch.rand(4)
         self.assertEqual(fn(x), opt_fn(x))
         self.assertEqual(len(s), 3)
+
+    @parametrize("_type", [set, frozenset, SetSubclass], name_fn=lambda x: x.__name__)
+    @parametrize("op", ["and_", "or_", "sub", "xor"])
+    @make_dynamo_test
+    def test_set_binary_ops(self, _type, op):
+        s1 = _type({"a", "b", "c"})
+        s2 = _type({"b", "c", "d"})
+        set_op = {
+            "and_": "intersection",
+            "or_": "union",
+            "sub": "difference",
+            "xor": "symmetric_difference",
+        }.get(op)
+        r1 = getattr(s1, set_op)(s2)
+        r2 = getattr(operator, op)(s1, s2)
+        assert r1 == r2
+
+    @parametrize("_type", [set, SetSubclass], name_fn=lambda x: x.__name__)
+    @parametrize("op", ["iand", "ior", "isub", "ixor"])
+    @make_dynamo_test
+    def test_set_inplace_binary_ops(self, _type, op):
+        s1 = _type({"a", "b", "c"})
+        s2 = _type({"b", "c", "d"})
+        set_op = {
+            "iand": "intersection_update",
+            "ior": "update",
+            "isub": "difference_update",
+            "ixor": "symmetric_difference_update",
+        }.get(op)
+        r1 = s1.copy()
+        r2 = s1.copy()
+        getattr(r1, set_op)(s2)
+        getattr(operator, op)(r2, s2)
+        assert r1 == r2
+
+    @parametrize("_type", [set, frozenset, SetSubclass], name_fn=lambda x: x.__name__)
+    @make_dynamo_test
+    def test_set___eq__(self, _type):
+        s1 = _type({"a", "b", "c"})
+        s2 = _type({"b", "c", "d"})
+        assert s1 == s1
+        assert s1 != s2
 
     @make_test
     def test_tuple_iadd(a, b):
@@ -4373,6 +4485,33 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                 return a + b
             else:
                 return a - b
+
+        fn(self)
+
+    @parametrize(
+        "method_name",
+        [
+            "copy",
+            "difference",
+            "intersection",
+            "symmetric_difference",
+            "union",
+        ],
+    )
+    def test_frozenset_return_type(self, method_name):
+        @make_test
+        def fn(a, b):
+            set1 = frozenset({"apple", "banana", "cherry"})
+            set2 = frozenset({"google", "microsoft", "apple"})
+            if method_name == "copy":
+                result = set1.copy()
+            else:
+                result = getattr(set1, method_name)(set2)
+            if type(result) is frozenset:
+                x = a + b
+            else:
+                x = a - b
+            return x
 
         fn(self)
 
