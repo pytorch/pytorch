@@ -186,14 +186,18 @@ def register_comm_lowerings():
         register_lowering,
     )
 
-    def register_comm_lowering(fn):
-        add_layout_constraint(fn, constrain_to_fx_strides)
+    def register_comm_lowering(fn, should_fix_layout: bool = True):
+        if should_fix_layout:
+            add_layout_constraint(fn, constrain_to_fx_strides)
         return register_lowering(fn)
 
     c10d = torch.ops._c10d_functional
 
-    @register_comm_lowering(c10d.all_reduce)  # type: ignore[misc]
+    @register_comm_lowering(c10d.all_reduce, False)  # type: ignore[misc]
     def _all_reduce(inp: ir.TensorBox, reduce_op: str, group_name: str) -> ir.TensorBox:
+        # Fixing the layout will invalidate all the allreduce lowering.
+        # TODO: figuring out all the side effect of removing this line and
+        # appropriately fix this for all other communicaiton lowerings.
         if _should_lower_as_one_shot_all_reduce(inp, reduce_op, group_name):
             return _one_shot_all_reduce(inp, reduce_op, group_name)
 
@@ -213,7 +217,7 @@ def register_comm_lowerings():
         )
         return inp
 
-    @register_comm_lowering(c10d.all_reduce_)  # type: ignore[misc]
+    @register_comm_lowering(c10d.all_reduce_, False)  # type: ignore[misc]
     def _all_reduce_(
         inp: ir.TensorBox, reduce_op: str, group_name: str
     ) -> ir.TensorBox:
