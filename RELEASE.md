@@ -373,8 +373,9 @@ The patch release process takes around 4-5 weeks to complete.
   * Should the new patch release be created?
   * Timeline execution for the patch release
 3. Cherry picking phase starts after the decision is made to create a patch release. At this point, a new release tracker for the patch release is created, and an announcement will be made on official channels [example announcement](https://dev-discuss.pytorch.org/t/pytorch-release-2-0-1-important-information/1176). The authors of the fixes to regressions will be asked to create their own cherry picks. This process normally takes 2 weeks.
-4. Building Binaries, Promotion to Stable and testing. After all cherry picks have been merged, Release Managers trigger a new build and produce a new release candidate. An announcement is made on the official channel about the RC availability at this point. This process normally takes 2 weeks.
-5. General Availability
+4. Updating `version.txt` in the release branch to match expected patch release version, see https://github.com/pytorch/pytorch/commit/f77213d3dae5d103a39cdaf93f21863843571e8d as an example
+5. Building Binaries, Promotion to Stable and testing. After all cherry picks have been merged, Release Managers trigger a new build and produce a new release candidate. An announcement is made on the official channel about the RC availability at this point. This process normally takes 2 weeks.
+6. General Availability
 
 ### Triage
 
