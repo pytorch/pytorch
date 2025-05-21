@@ -1918,7 +1918,7 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
 
 def unsupported_output_tensor(t: torch.Tensor, node=None):
     "Do not support writing tensor but can read from it"
-    if node.target is aten.view.dtype and t.dtype.is_complex:
+    if node is not None and node.target is aten.view.dtype and t.dtype.is_complex:
         return False
     if unsupported_input_tensor(t, node):
         return True
