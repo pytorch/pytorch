@@ -77,6 +77,29 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 
         return super().__call__(subgraph, identifier, *operands)
 
+    def gen_schema(self, subgraph, identifier, *operands):
+        from torch._higher_order_ops.schema import HopSchemaGenerator
+        from torch._higher_order_ops.utils import (
+            check_input_alias_and_mutation_return_ouputs,
+        )
+
+        schema_gen = HopSchemaGenerator(self)
+        schema_gen.add_arg("subgraph", subgraph)
+        schema_gen.add_arg("identifier", identifier)
+        example_inputs = [
+            n.meta["val"] if "val" in n.meta else n.meta["example_value"]
+            for n in subgraph.graph.find_nodes(op="placeholder")
+        ]
+        _, _, _, mutated_inputs, outputs = check_input_alias_and_mutation_return_ouputs(
+            subgraph, example_inputs
+        )
+        for idx, arg in enumerate(operands):
+            schema_gen.add_arg(f"arg{idx}", arg, is_mutated=idx in mutated_inputs)
+        for out in outputs:
+            schema_gen.add_output(out)
+
+        return schema_gen.gen_schema()
+
 
 invoke_subgraph = InvokeSubgraphHOP()
 
