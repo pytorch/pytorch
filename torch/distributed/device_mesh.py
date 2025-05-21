@@ -417,6 +417,7 @@ else:
         of mesh reduces across rows (0, 1, 2, 3) and (4, 5, 6, 7).
 
         Example::
+
             >>> # xdoctest: +SKIP("no rank")
             >>> from torch.distributed.device_mesh import DeviceMesh
             >>>
@@ -700,6 +701,7 @@ else:
                 Calling mesh_3d["cp", "dp"] on rank 2, 3, 6, 7 returns a 2D submesh of DeviceMesh:([[2, 6], [3, 7]]).
 
             Example::
+
                 >>> # xdoctest: +SKIP("no rank")
                 >>> from torch.distributed.device_mesh import DeviceMesh
                 >>>
@@ -926,6 +928,7 @@ else:
             Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 3, 7 would return 3.
 
             Example::
+
                 >>> # xdoctest: +SKIP("no rank")
                 >>> from torch.distributed.device_mesh import DeviceMesh
                 >>>
@@ -1008,6 +1011,7 @@ else:
             DeviceMesh: A :class:`DeviceMesh` object representing the device layout.
 
         Example::
+
             >>> # xdoctest: +SKIP("no rank")
             >>> from torch.distributed.device_mesh import init_device_mesh
             >>>
