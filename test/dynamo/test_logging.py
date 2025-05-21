@@ -934,6 +934,7 @@ exclusions = {
     "graph_breaks",
     "graph",
     "graph_code",
+    "graph_code_verbose",
     "graph_sizes",
     "ddp_graphs",
     "perf_hints",
