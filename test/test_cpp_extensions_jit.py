@@ -1216,10 +1216,10 @@ class TestCppExtensionJIT(common.TestCase):
         build_dir = tempfile.mkdtemp()
         src_path = os.path.join(build_dir, "NCCLAllocator.cpp")
 
-        with open(src_path, encoding="gbk", mode="w") as f:
+        with open(src_path, mode="w") as f:
             f.write(cpp_source)
 
-        #initially success is true
+        #initially success is false
         success = False
         try:
             #try to build the module
