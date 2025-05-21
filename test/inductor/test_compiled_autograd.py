@@ -2923,7 +2923,16 @@ main()
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
         # Compiled autograd lifts custom autograd.Function bwd instead of tracing it.
         # Must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
-        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+        if inductor_config.graph_partition:
+            # instead of skipping cudagraph, graph partition splits off cpu inputs/outputs and ops
+            # and cudagraphify the remaining computation. So there is no cudagraph skip.
+            expected_cudagraph_skips = 0
+        else:
+            expected_cudagraph_skips = 1
+
+        self.assertEqual(
+            counters["inductor"]["cudagraph_skips"], expected_cudagraph_skips
+        )
 
     @scoped_load_inline
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
