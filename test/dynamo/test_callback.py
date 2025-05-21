@@ -18,25 +18,12 @@ class CallbackTests(TestCase):
         return super().tearDown()
         callback_handler.clear()
 
-    def test_callbacks_without_duplicate_prevention(self) -> None:
-        callback_handler._CompilationCallbackHandler__prevent_duplicate_callbacks = (
-            False
-        )
-
-        with callback_handler.install_callbacks(), callback_handler.install_callbacks():
-            self.assertEqual(self._on_compile_start.call_count, 2)
-        self.assertEqual(self._on_compile_end.call_count, 2)
-
     def test_callbacks_with_duplicate_prevention(self) -> None:
-        callback_handler._CompilationCallbackHandler__prevent_duplicate_callbacks = True
-
         with callback_handler.install_callbacks(), callback_handler.install_callbacks():
             self._on_compile_start.assert_called_once()
         self._on_compile_end.assert_called_once()
 
     def test_counter(self) -> None:
-        callback_handler._CompilationCallbackHandler__prevent_duplicate_callbacks = True
-
         with callback_handler.install_callbacks():
             self.assertEqual(
                 callback_handler._CompilationCallbackHandler__pending_callbacks_counter,
@@ -47,7 +34,6 @@ class CallbackTests(TestCase):
         )
 
     def test_counter_assertion(self) -> None:
-        callback_handler._CompilationCallbackHandler__prevent_duplicate_callbacks = True
         callback_handler._CompilationCallbackHandler__pending_callbacks_counter -= 1
 
         with self.assertRaises(

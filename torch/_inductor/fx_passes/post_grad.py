@@ -46,7 +46,13 @@ from ..pattern_matcher import (
     register_replacement,
     stable_topological_sort,
 )
-from ..utils import decode_device, get_gpu_type, is_gpu, is_pointwise_use
+from ..utils import (
+    decode_device,
+    get_gpu_type,
+    is_gpu,
+    is_pointwise_use,
+    OPTIMUS_EXCLUDE_POST_GRAD,
+)
 from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
 from .ddp_fusion import fuse_ddp_communication
@@ -115,16 +121,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config.pattern_matcher:
         lazy_init()
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "before_recompile_post_grad",
-                "encoding": "string",
-            },
-            payload_fn=lambda: gm.print_readable(
-                print_output=False, include_stride=True, include_device=True
-            ),
-        )
         GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
             functools.partial(group_batch_fusion_passes, pre_grad=False)
         )
@@ -137,8 +133,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 patterns.apply
             )
         for pass_name in config.post_grad_fusion_options:
-            # skip all patterns for group batch fusions
-            if pass_name in POST_GRAD_FUSIONS:
+            # skip all patterns for group batch fusions or quantization patterns
+            if pass_name in POST_GRAD_FUSIONS or pass_name in OPTIMUS_EXCLUDE_POST_GRAD:
                 continue
             pattern_matcher_pass = POST_GRAD_PATTERNS[pass_name]
             inductor_before_change = save_inductor_dict(
@@ -206,16 +202,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     )
 
     gm.recompile()
-    trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "after_recompile_post_grad",
-            "encoding": "string",
-        },
-        payload_fn=lambda: gm.print_readable(
-            print_output=False, include_stride=True, include_device=True
-        ),
-    )
     gm.graph.lint()
 
 
@@ -485,6 +471,21 @@ def lazy_init():
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
+    if torch.distributed.is_available():
+
+        def check():
+            # This is a wait node, and `other_node`` is some collective node.
+            # Eager semantics allow waits to be issued in a different order than
+            # the collectives. Reordering this wait node might reorder collectives
+            # which cause hangs. Once we have SPMD mode, we can safely reorder them.
+            # However, increasing the locality between a collective and its wait node
+            # is generally worse for performance.
+            return node.target != torch.ops._c10d_functional.wait_tensor.default
+    else:
+
+        def check():
+            return True
+
     def visit(other_node):
         if (
             other_node.op == "call_function"
@@ -492,6 +493,7 @@ def reorder_for_locality(graph: torch.fx.Graph):
             and all((n in seen_nodes) for n in other_node.users)
             and get_mutation_region_id(graph, node)
             == get_mutation_region_id(graph, other_node)
+            and check()
         ):
             # move node's producers right before it
             node.prepend(other_node)
@@ -813,9 +815,14 @@ def register_noop_decomp(targets, nop_arg=0):
 def slice_noop(self, dim=0, start=None, end=None, step=1):
     if start is None or end is None:
         return False
+
+    slice_dim_size = self.shape[dim]
     if (
         statically_known_true(sym_eq(start, 0))
-        and statically_known_true(end >= 2**63 - 1)
+        and (
+            statically_known_true(end >= 2**63 - 1)
+            or statically_known_true(end >= slice_dim_size)
+        )
         and statically_known_true(sym_eq(step, 1))
     ):
         return True
@@ -828,7 +835,16 @@ def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
         start = 0
     if end is None:
         end = 2**63 - 1
-    if start == 0 and end >= 2**63 - 1 and step == 1:
+    slice_scatter_dim_size = self.shape[dim]
+    if (
+        self.shape == src.shape
+        and start == 0
+        and (
+            statically_known_true(end >= 2**63 - 1)
+            or statically_known_true(end >= slice_scatter_dim_size)
+        )
+        and step == 1
+    ):
         return True
     return False
 
@@ -868,9 +884,14 @@ def cat_noop(inputs, dim=0):
     return len(inputs) == 1
 
 
-@register_noop_decomp(aten.view)
-def view_noop(arg, size):
-    return arg.shape == size
+@register_noop_decomp(aten.view.default)
+def view_default_noop(arg, size):
+    return statically_known_true(sym_eq(arg.shape, tuple(size)))
+
+
+@register_noop_decomp(aten.view.dtype)
+def view_dtype_noop(arg, dtype):
+    return arg.dtype == dtype
 
 
 # Note, we also always have a check for identical metadata, which is why these
@@ -1167,6 +1188,14 @@ def view_to_reshape(gm):
     """
     Replace view ops in the GraphModule to reshape ops.
     """
+    subgraph_names: OrderedSet[str] = OrderedSet(
+        x.target for x in gm.graph.find_nodes(op="get_attr")
+    )
+
+    for child_name, child_mod in gm.named_children():
+        if child_name in subgraph_names and isinstance(child_mod, torch.fx.GraphModule):
+            view_to_reshape(child_mod)
+
     for nd in gm.graph.find_nodes(
         op="call_function", target=torch.ops.aten.view.default
     ):

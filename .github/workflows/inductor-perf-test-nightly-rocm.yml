@@ -77,14 +77,15 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
 
-  linux-focal-rocm-py3_10-inductor-benchmark-build:
+  linux-jammy-rocm-py3_10-inductor-benchmark-build:
     if: github.repository_owner == 'pytorch'
     name: rocm-py3_10-inductor-benchmark-build
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm-py3_10
-      docker-image-name: pytorch-linux-focal-rocm-n-py3
+      build-environment: linux-jammy-rocm-py3_10
+      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       test-matrix: |
         { include: [
           { config: "inductor_huggingface_perf_rocm", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.mi300.2" },
@@ -102,19 +103,21 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-rocm-py3_10-inductor-benchmark-test:
+  linux-jammy-rocm-py3_10-inductor-benchmark-test:
     permissions:
       id-token: write
       contents: read
     name: rocm-py3_10-inductor-benchmark-test
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-focal-rocm-py3_10-inductor-benchmark-build
+    needs: linux-jammy-rocm-py3_10-inductor-benchmark-build
     with:
-      build-environment: linux-focal-rocm-py3_10
+      build-environment: linux-jammy-rocm-py3_10
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-cudagraphs_low_precision-true
-      docker-image: ${{ needs.linux-focal-rocm-py3_10-inductor-benchmark-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-rocm-py3_10-inductor-benchmark-build.outputs.test-matrix }}
+      docker-image: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.test-matrix }}
       timeout-minutes: 720
       # Disable monitor in perf tests for more investigation
       disable-monitor: true
+      monitor-log-interval: 10
+      monitor-data-collect-interval: 2
     secrets: inherit

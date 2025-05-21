@@ -18,7 +18,7 @@
 
 namespace torch::jit {
 
-void removePrintOps(Block* block) {
+static void removePrintOps(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
        ++it) {
     for (auto b : it->blocks()) {
@@ -46,7 +46,7 @@ void RemovePrintOps(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("After RemovePrintOps: ", graph);
 }
 
-void checkONNXCompatibility(const c10::FunctionSchema& schema) {
+static void checkONNXCompatibility(const c10::FunctionSchema& schema) {
   // in ONNX, all inputs are tensors, no support for tensor list
   // so at most one input tensor list is supported
   bool has_tensor_list = false;
@@ -74,7 +74,7 @@ void checkONNXCompatibility(const c10::FunctionSchema& schema) {
   }
 }
 
-void preprocessCaffe2Ops(Block* block) {
+static void preprocessCaffe2Ops(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
        ++it) {
     for (auto b : it->blocks()) {
@@ -246,7 +246,7 @@ py::dict BlockToONNX(
   return py::dict();
 }
 
-bool ConstantFoldCondition(torch::jit::Value* output) {
+static bool ConstantFoldCondition(torch::jit::Value* output) {
   auto fold_condition = output->node()->kind() != c10::onnx::Constant &&
       ConstantValueMap::HasValue(output->debugName());
   auto reliable_value =
