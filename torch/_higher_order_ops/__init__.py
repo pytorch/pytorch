@@ -63,6 +63,7 @@ __all__ = [
     "wrap_with_set_grad_enabled",
     "wrap_with_autocast",
     "wrap_activation_checkpoint",
+    "dynamo_bypassing_wrapper",
     "strict_mode",
     "aoti_call_delegate",
     "map",
