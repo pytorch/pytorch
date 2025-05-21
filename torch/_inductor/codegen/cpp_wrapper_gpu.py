@@ -9,6 +9,7 @@ from typing_extensions import Self
 
 import sympy
 
+import torch
 from torch import dtype as torch_dtype
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 from torch._inductor.runtime.runtime_utils import dynamo_timed
@@ -165,9 +166,16 @@ class DeferredTritonCallWrapper:
     def generate_load_kernel(self, prefix, kernel_var_name, params):
         prefix.writeline(f"if ({kernel_var_name} == nullptr) {{")
         with prefix.indent():
+            embed_kernel_args = [f"__{params['inductor_meta']['kernel_name']}_start"]
+            if torch.xpu.is_available():
+                # XPU needs the end address of the kernel to calculate the size of the kernel binary.
+                embed_kernel_args.append(
+                    f"__{params['inductor_meta']['kernel_name']}_end"
+                )
+
             load_kernel_args = (
                 [
-                    f"__{params['inductor_meta']['kernel_name']}_start",
+                    *embed_kernel_args,
                     cpp_string_literal(params["mangled_name"]),
                     str(params["shared_mem"]),
                 ]
