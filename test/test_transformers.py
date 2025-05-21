@@ -1913,8 +1913,8 @@ class TestSDPAFailureModes(NNTestCase):
         query = torch.rand([2**16, 2, 2, 8], device='cuda', dtype=torch.float16)
         key = torch.rand([2**16, 2, 2, 8], device='cuda', dtype=torch.float16)
         value = torch.rand([2**16, 2, 2, 8], device='cuda', dtype=torch.float16)
-        error_str = (r"Efficient attention cannot produce valid seed, " \
-                        r"logsumexp and offset outputs when the batch size exceeds \(65535\)\.")
+        error_str = (r"Efficient attention cannot produce valid seed, "
+                     r"logsumexp and offset outputs when the batch size exceeds \(65535\)\.")
         with self.assertRaisesRegex(RuntimeError, error_str):
             torch._scaled_dot_product_efficient_attention(query, key, value, attn_bias=None, compute_log_sumexp=True)
 
