@@ -92,6 +92,8 @@ from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
+from .graph_utils import _get_flat_args
+
 
 if typing.TYPE_CHECKING:
     from collections.abc import (
@@ -112,7 +114,7 @@ except ModuleNotFoundError:
 try:
     import torch._logging
     import torch._numpy as tnp
-    from torch._guards import detect_fake_mode  # noqa: F401n
+    from torch._guards import detect_fake_mode  # noqa: F401
     from torch._logging import LazyString
 
     from . import config
@@ -1243,7 +1245,6 @@ class CompilationMetrics:
     runtime_cudagraphify_time_us: Optional[int] = None
     runtime_triton_autotune_time_us: Optional[int] = None
     dynamo_compile_time_before_restart_us: Optional[int] = None
-    cuda_synchronize_time_us: Optional[int] = None  # TODO: instrument
     distributed_ephemeral_timeout_us: Optional[int] = None
     structured_logging_overhead_us: Optional[int] = None
     remote_fx_graph_cache_get_time_us: Optional[int] = None
@@ -1546,7 +1547,7 @@ def record_compilation_metrics(
         "dynamo_config": _get_dynamo_config_for_logging(),
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "cuda_version": torch.version.cuda,
-        "triton_version": triton.__version__ if has_triton_package() else "",
+        "triton_version": triton.__version__ if has_triton() else "",
         "remote_cache_version": remote_cache_version,
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
         "python_version": sys.version,
@@ -3151,6 +3152,20 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         tx, (node.args, node.kwargs), allow_non_graph_fake
     )
 
+    if (
+        torch._dynamo.config.use_graph_deduplication
+        or torch._dynamo.config.track_nodes_for_deduplication
+    ):
+        flat_args_kwargs = get_fake_values_from_nodes(
+            tx, _get_flat_args(node, {}), allow_non_graph_fake
+        )
+        id_to_initial_version = {
+            id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
+        }
+    else:
+        flat_args_kwargs = []
+        id_to_initial_version = {}
+
     nnmodule = None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
         # If the first argument is nn.Module, should copy to fake mode.
@@ -3290,6 +3305,17 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         _ = pytree.tree_map_only(
             torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
         )
+
+    if (
+        torch._dynamo.config.use_graph_deduplication
+        or torch._dynamo.config.track_nodes_for_deduplication
+    ):
+        tx.output.region_tracker.track_node_mutations(
+            node,
+            flat_args_kwargs,
+            id_to_initial_version,
+        )
+
     return ret_val
 
 
@@ -3803,14 +3829,15 @@ def build_checkpoint_variable(**options):
     )
 
 
-def is_compile_supported(device_type: str) -> bool:
+def is_compile_supported(device_type):
     from .eval_frame import is_dynamo_supported
 
+    type = torch.device(device_type).type
     compile_supported = is_dynamo_supported()
-    if device_type == "cpu":
+    if type == "cpu":
         pass
-    elif device_type in ["cuda", "xpu"] and compile_supported:
-        compile_supported = has_triton(device_type)
+    elif type in ["cuda", "xpu"] and compile_supported:
+        compile_supported = has_triton()
     else:
         compile_supported = False
     return compile_supported
