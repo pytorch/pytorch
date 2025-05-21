@@ -1218,10 +1218,10 @@ def aot_dispatch_autograd(
                     # See Note: [Backward graph lazy lowering]
                     with torch._subclasses.fake_tensor.unset_fake_temporarily():
                         bw_module_copy = copy.deepcopy(bw_module)
-                        compiled_bw_func = aot_config.bw_compiler(
-                            bw_module_copy, placeholder_list
-                        )
-                        del bw_module_copy
+                    compiled_bw_func = aot_config.bw_compiler(
+                        bw_module_copy, placeholder_list
+                    )
+                    del bw_module_copy
                 except Exception as e:
                     exc = e
                     trace_structured(
