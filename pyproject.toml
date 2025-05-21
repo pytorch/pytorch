@@ -3,16 +3,16 @@ name = "torch"
 requires-python = ">=3.9"
 license = {text = "BSD-3-Clause"}
 dynamic = [
-  "authors",
-  "classifiers",
-  "entry-points",
-  "dependencies",
-  "description",
-  "keywords",
-  "optional-dependencies",
-  "readme",
-  "scripts",
-  "version",
+    "authors",
+    "classifiers",
+    "entry-points",
+    "dependencies",
+    "description",
+    "keywords",
+    "optional-dependencies",
+    "readme",
+    "scripts",
+    "version",
 ]
 
 [project.urls]
@@ -188,9 +188,13 @@ select = [
     "RUF017",
     "RUF018", # no assignment in assert
     "RUF019", # unnecessary-key-check
+    "RUF020", # never union
     "RUF024", # from keys mutable
     "RUF026", # default factory kwarg
     "RUF030", # No print statement in assert
+    "RUF033", # default values __post_init__ dataclass
+    "RUF041", # simplify nested Literal
+    "RUF048", # properly parse `__version__`
     "RUF200", # validate pyproject.toml
     "S324", # for hashlib FIPS compliance
     "SLOT",
