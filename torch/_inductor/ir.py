@@ -490,6 +490,37 @@ def try_match_insignificant_strides(
     return TensorBox(ReinterpretView(data=storage, layout=new_layout))
 
 
+def gm_original_output_strides(gm: torch.fx.GraphModule) -> None:
+    output_node = gm.graph.find_nodes(op="output")[0]
+    output_node.meta["user_visible_output_idxs"] = [
+        idx for idx, _ in enumerate(output_node.args)
+    ]
+    from torch._inductor.compile_fx import record_original_output_strides
+
+    record_original_output_strides(gm)
+
+
+def add_symbolic_shapes_for_inputs_to_subgraph(
+    inputs: list[Buffer], subgraph: GraphLowering
+) -> list[Expr]:
+    sym_vars: OrderedSet[Expr] = OrderedSet()
+    for inp in inputs:
+        sym_vars |= get_free_symbols(inp.get_size(), unbacked_only=False)
+        sym_vars |= get_free_symbols(inp.get_stride(), unbacked_only=False)
+
+    sym_inputs = []
+    for sym_var in sym_vars:
+        assert sym_var in V.graph.graph_inputs.values()
+
+        for graph_inp in V.graph.graph_inputs:
+            if V.graph.graph_inputs[graph_inp] == sym_var:
+                subgraph.graph_inputs[graph_inp] = sym_var
+                subgraph.graph_input_names.append(graph_inp)
+                sym_inputs.append(sym_var)
+
+    return sym_inputs
+
+
 class IRNode:
     _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
 
@@ -6074,9 +6105,14 @@ class SubgraphBuffer(ExternKernel):
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
-        self.subgraph = V.graph.make_subgraph(
-            self.gm, self.example_inputs, subgraph_name
+        gm_original_output_strides(self.gm)
+        self.subgraph = V.graph.make_subgraph(self.gm, example_inputs, subgraph_name)
+
+        sym_inputs = add_symbolic_shapes_for_inputs_to_subgraph(
+            self.inputs, self.subgraph
         )
+        self.sym_inputs = [sym_var.name for sym_var in sym_inputs]
+
         import torch._inductor.config as inductor_config
 
         with V.set_graph_handler(self.subgraph):
@@ -6095,10 +6131,9 @@ class SubgraphBuffer(ExternKernel):
                 self.name = graph.name
 
         outer_inputs = [t.codegen_reference() for t in self.inputs]
-
         wrapper.codegen_subgraph_with_flattened_outputs(
             CodegenGraph(self.subgraph),
-            outer_inputs,
+            [*self.sym_inputs, *outer_inputs],
             [self.name],
         )
 
