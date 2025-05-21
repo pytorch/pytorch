@@ -661,7 +661,7 @@ class _TorchDynamoContext:
         is_fx_tracing = torch.fx._symbolic_trace.is_fx_tracing
 
         @functools.wraps(fn)
-        def _fn(*args, **kwargs):
+        def compile_wrapper(*args, **kwargs):
             prior = set_eval_frame(None)
             try:
                 if is_fx_tracing():
@@ -705,7 +705,7 @@ class _TorchDynamoContext:
                     while cur_exn.__cause__ is not None:
                         cur_exn.__cause__.with_traceback(None)
                         cur_exn = cur_exn.__cause__
-                    raise e.with_traceback(None) from e.__cause__
+                    raise e.with_traceback(None) from e.__cause__  # User compiler error
                 except ShortenTraceback as e:
                     # Failures in the backend likely don't have useful
                     # data in the TorchDynamo frames, so we strip them out.
@@ -724,16 +724,16 @@ class _TorchDynamoContext:
                 _maybe_set_eval_frame(prior)
 
         # hooks to properly handle inlining
-        _fn._torchdynamo_inline = fn  # type: ignore[attr-defined]
+        compile_wrapper._torchdynamo_inline = fn  # type: ignore[attr-defined]
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
-        _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+        compile_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
 
         # when compiling user function instead of nn.Module
         # provide public api _fn.get_compiler_config()
-        assert not hasattr(_fn, "get_compiler_config")
-        _fn.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
+        assert not hasattr(compile_wrapper, "get_compiler_config")
+        compile_wrapper.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
 
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
@@ -774,7 +774,7 @@ class _TorchDynamoContext:
                 )
             always_optimize_code_objects[fn.__code__] = True
 
-        return _fn
+        return compile_wrapper
 
 
 class OptimizeContext(_TorchDynamoContext):
