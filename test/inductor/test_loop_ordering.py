@@ -865,6 +865,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
 
             coalesce_analysis = tiling_utils.analyze_memory_coalescing(nodes[0])
             self.assertEqual(coalesce_analysis.suggested_split.tiling_factor, 64)
+            return nodes
 
             return nodes
 
