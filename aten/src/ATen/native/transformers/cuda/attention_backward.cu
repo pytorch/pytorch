@@ -570,7 +570,10 @@ _efficient_attention_backward(
 #else // USE_CUDA
   at::Tensor workspace;
   cudaDeviceProp* p = at::cuda::getDeviceProperties(query.device().index());
-  const int computeCapability = p->major * 10 + p->minor;
+  int computeCapability = p->major * 10 + p->minor;
+  if (computeCapability == 121) {
+    computeCapability = 120;
+  }
 
   bool kernel_launched = false;
   const auto maxK = std::max(query.size(3), value.size(3));

@@ -464,6 +464,18 @@ std::string getNcclVersion() {
   return versionString;
 }
 
+int getNcclVersionNumber() {
+  static int version = []() {
+    int version = 0;
+    ncclResult_t status = ncclGetVersion(&version);
+    if (status != ncclSuccess) {
+      return 0; // Error.
+    }
+    return version;
+  }();
+  return version;
+}
+
 size_t hashTensors(const std::vector<at::Tensor>& tensors) {
   size_t hash = 0;
   for (auto& tensor : tensors) {
@@ -560,6 +572,17 @@ std::string getNcclErrorDetailStr(
       interpret = "Unknown NCCL error!";
   }
   return interpret + err;
+}
+
+// Helper function that gets the data type and issues error if not supported
+ncclDataType_t getNcclDataType(at::ScalarType type) {
+  auto it = ncclDataType.find(type);
+  TORCH_CHECK_WITH(
+      TypeError,
+      it != ncclDataType.end(),
+      "Input tensor data type is not supported for NCCL process group: ",
+      type);
+  return it->second;
 }
 
 // Dump proxyTrace log to stdout
