@@ -2007,8 +2007,6 @@
     "cast_symbool_to_symint_guardless",
     "constrain_range",
     "constrain_unify",
-    "definitely_false",
-    "definitely_true",
     "guard_or_true",
     "guard_or_false",
     "error",
@@ -2385,15 +2383,6 @@
   ],
   "torch.utils.collect_env": [
     "namedtuple"
-  ],
-  "torch.utils.data.datapipes.gen_pyi": [
-    "Any",
-    "Dict",
-    "List",
-    "Set",
-    "Tuple",
-    "Union",
-    "defaultdict"
   ],
   "torch.utils.data.datapipes.utils.snapshot": [
     "IterDataPipe",

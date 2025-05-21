@@ -66,4 +66,5 @@ __all__ = [
     "wrap_activation_checkpoint",
     "strict_mode",
     "aoti_call_delegate",
+    "map",
 ]

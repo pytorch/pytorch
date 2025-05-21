@@ -14,6 +14,7 @@ import re
 import sys
 import textwrap
 import time
+from collections.abc import Sequence
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from types import ModuleType
@@ -47,8 +48,10 @@ from .codegen.common import (
     KernelTemplate,
     OpOverrides,
     WorkspaceArg,
+    WorkspaceZeroMode,
 )
 from .codegen.simd_kernel_features import SIMDKernelFeatures
+from .codegen.subgraph import SubgraphChoiceCaller
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
@@ -1308,6 +1311,23 @@ class TritonTemplate(KernelTemplate):
 
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
 
+        workspace_args = []
+        if workspace_arg is not None:
+            # Create workspace tensor
+            workspace_size = workspace_arg.count
+            workspace_tensor = torch.empty_strided(
+                (workspace_size,),
+                (1,),
+                dtype=torch.uint8,
+                device=layout.device.type,
+            )
+
+            # Handle zero initialization if needed
+            if workspace_arg.zero_mode != WorkspaceZeroMode.UNINITIALIZED:
+                workspace_tensor.zero_()
+
+            workspace_args.append(workspace_tensor)
+
         options = result.kernel_options
 
         def make_kernel_render(out_node):
@@ -1344,7 +1364,7 @@ class TritonTemplate(KernelTemplate):
             module_path=result.mod.__file__,
             module_cache_key=result.mod.key,
             kernel_name=f"triton_{self.name}",
-            extra_args=[*extra_args, *grid],
+            extra_args=[*extra_args, *workspace_args, *grid],
             num_stages=num_stages,
             num_warps=num_warps,
             num_consumer_groups=num_consumer_groups,
@@ -1354,7 +1374,6 @@ class TritonTemplate(KernelTemplate):
             kpack=kwargs.get("kpack", 2),
             input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),  # type: ignore[arg-type]
             output_tensor_meta=TensorMeta.from_irnodes(layout),
-            workspace_arg=workspace_arg,
         )
 
         return TritonTemplateCaller(
@@ -1377,6 +1396,9 @@ class TritonTemplate(KernelTemplate):
                 "GROUP_M": kwargs.get("GROUP_M", -1),
                 "allow_tf32": str(kwargs.get("ALLOW_TF32", None)),
                 "acc_type": str(kwargs.get("ACC_TYPE", None)),
+                "matrix_instr_nonkdim": kwargs.get("matrix_instr_nonkdim", 0),
+                "waves_per_eu": kwargs.get("waves_per_eu", 0),
+                "kpack": kwargs.get("kpack", 2),
             },
             mutated_inputs=mutated_inputs,
             workspace_arg=workspace_arg,
@@ -1478,7 +1500,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None
-        return self.bmreq.benchmark(*args, output_tensor=out)
+        return self.bmreq.benchmark(*args, out=out)
 
     def precompile(self):
         assert self.bmreq is not None
@@ -1767,6 +1789,16 @@ def create_precompile_key(
 
 
 class AlgorithmSelectorCache(PersistentCache):
+    """
+    A persistent cache for algorithm selection results used in autotuning of GEMMs
+    and convolutions.
+
+    This classes includes precompilation and benchmarking of the kernels.
+
+    The cache is keyed by input characteristics (sizes, strides, dtypes, etc.) but
+    doesn't depend on the output layout.
+    """
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
@@ -1862,151 +1894,6 @@ class AlgorithmSelectorCache(PersistentCache):
 
         inputs_key = create_inputs_key(input_nodes)
 
-        def precompile(choices) -> Callable[[], None]:
-            log.debug("Starting precompilation")
-
-            def no_op(*args, **kwargs):
-                return
-
-            if (
-                precompilation_timeout_seconds is None
-                or precompilation_timeout_seconds <= 0
-            ):
-                log.debug("Precompilation timeout is None or <= 0, returning no_op")
-                return no_op
-
-            num_workers = min(get_num_workers(), len(choices))
-
-            if num_workers <= 0:
-                return no_op
-
-            # https://github.com/python/cpython/issues/106905
-            if (
-                sys.version_info.major == 3
-                and sys.version_info.minor == 11
-                and sys.version_info.micro <= 8
-            ):
-                return no_op
-
-            # check local and global cache before precompiling
-            timings = self.lookup(
-                choices,
-                name,
-                inputs_key,
-                benchmark=None,
-            )
-
-            if timings and len(timings) == len(choices):
-                # compilation in precompile stage is much cheaper than that in
-                # autotuning stage
-                log.debug(
-                    "Found all %d timings in cache, returning no_op", len(timings)
-                )
-                return no_op
-
-            if config.search_autotune_cache and not (
-                config.max_autotune or config.max_autotune_gemm
-            ):
-                return no_op
-
-            precompile_key = create_precompile_key(name, inputs_key, choices)
-            if precompile_func := self.precompile_cache.get(precompile_key):
-                log.debug("Precompile function found in cache, returning it")
-                return precompile_func
-
-            log.info(
-                "Multithreaded precompilation for %d choices using %d worker threads",
-                len(choices),
-                num_workers,
-            )
-
-            # In rare circumstances, because python threads inherit global state,
-            # thread pool executor can race and leave stdout/stderr in a state
-            # different than the original values. we explicitly restore the state
-            # here to avoid this issue.
-
-            def precompile_with_captured_stdout(choice) -> tuple[None, int]:
-                log.debug("Precompiling choice with captured stdout: %s", choice)
-                start_ns = time.time_ns()
-                with restore_stdout_stderr():
-                    choice.precompile()
-                elapsed_ns = time.time_ns() - start_ns
-                # Return tuple as triton async compile (_worker_compile_triton)
-                # returns tuple[CachingAutotuner, int]
-                return None, elapsed_ns // 1000
-
-            def on_complete(future):
-                _, precompile_elapsed_us = future.result()
-                elapsed_seconds = precompile_elapsed_us / 1e6
-                elapsed_times[future] = elapsed_seconds
-                log.debug(
-                    "Precompilation complete for future: %s, elapsed time: %.02fs",
-                    future,
-                    elapsed_seconds,
-                )
-
-            executor = ThreadPoolExecutor(max_workers=num_workers)
-            async_compile = torch._inductor.async_compile.AsyncCompile()
-
-            futures: dict[concurrent.futures.Future[Any], ChoiceCaller] = {}
-            elapsed_times: dict[concurrent.futures.Future[Any], float] = {}
-
-            # Some choices only differ in runtime arguments, so we
-            # skip a choice if it has the same hash as a previously seen choice
-            seen_choices: OrderedSet[ChoiceCaller] = OrderedSet()
-            for c in choices:
-                # Skip choices which we have already issued a precompile
-                if c.hash_key() in seen_choices:
-                    log.debug("Skipping already seen choice: %s", c)
-                    continue
-                else:
-                    seen_choices.add(c.hash_key())
-
-                if hasattr(c, "precompile"):
-                    triton_cuda_choice = isinstance(
-                        c, TritonTemplateCaller
-                    ) and isinstance(c.bmreq, TritonGPUBenchmarkRequest)
-                    if triton_cuda_choice and async_compile.use_process_pool():
-                        with open(c.bmreq.module_path) as file:
-                            source_code = file.read()
-                        future = async_compile.triton(
-                            kernel_name=c.bmreq.kernel_name, source_code=source_code
-                        ).future
-                        log.debug("Submitted triton async compile for choice: %s", c)
-                    else:
-                        future = executor.submit(precompile_with_captured_stdout, c)
-                        log.debug("Submitted precompile for choice: %s", c)
-
-                    future.add_done_callback(on_complete)
-                    futures[future] = c
-
-            @functools.lru_cache(None)
-            @restore_stdout_stderr()
-            def wait_on_futures():
-                log.debug("Waiting on futures")
-                counters["inductor"]["select_algorithm_precompile"] += 1
-                for future in as_completed(
-                    futures,
-                    timeout=precompilation_timeout_seconds,
-                ):
-                    if e := future.exception():
-                        log.error(
-                            "Exception %s for benchmark choice %s", e, futures[future]
-                        )
-                    else:
-                        counters["inductor"]["select_algorithm_num_precompiles"] += 1
-                        log.info(
-                            "Precompiling benchmark choice %s took %.02fs",
-                            futures[future],
-                            elapsed_times[future],
-                        )
-
-                executor.shutdown(wait=True)
-
-            self.precompile_cache[precompile_key] = wait_on_futures
-
-            return wait_on_futures
-
         def autotune(choices):
             log.debug("Starting autotuning")
             with dynamo_timed(
@@ -2020,7 +1907,7 @@ class AlgorithmSelectorCache(PersistentCache):
             # Initialize the suprocess pool so it will warmup early.
             torch._inductor.autotune_process.get_tuning_process_pool()
 
-        def do_autotuning(precompile_fn):
+        def do_autotuning(choices, precompile_fn):
             precompile_start_ts = time.time()
             with dynamo_timed(
                 f"{name}_template_precompiling",
@@ -2031,6 +1918,19 @@ class AlgorithmSelectorCache(PersistentCache):
             precompile_elapse = time.time() - precompile_start_ts
             log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
 
+            candidates = self.prescreen_choices(choices)
+            if candidates:
+                prescreening_start_ts = time.time()
+                timings = self.lookup(
+                    candidates,
+                    name,
+                    inputs_key,
+                    autotune,
+                )
+                choices = self.prune_choices_postscreen(choices, timings)
+                prescreening_elapse = time.time() - prescreening_start_ts
+                log.debug("Prescreening elapsed time: %.02fs", prescreening_elapse)
+
             autotune_start_ts = time.time()
             timings = self.lookup(
                 choices,
@@ -2038,6 +1938,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 inputs_key,
                 autotune,
             )
+
             autotune_elapse = time.time() - autotune_start_ts
             log.debug("Autotuning elapsed time: %.02fs", autotune_elapse)
 
@@ -2063,12 +1964,17 @@ class AlgorithmSelectorCache(PersistentCache):
 
             return timings
 
-        precompile_fn = precompile(choices)
+        precompile_fn = self.make_precompile_fn(
+            choices,
+            name,
+            inputs_key,
+            precompilation_timeout_seconds=precompilation_timeout_seconds,
+        )
 
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
 
             def get_timings():
-                timings = do_autotuning(precompile_fn)
+                timings = do_autotuning(choices, precompile_fn)
                 min_extern_choice = float("inf")
                 for choice, timing in timings.items():
                     if isinstance(choice, ExternKernelCaller):
@@ -2103,8 +2009,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 )
             )
 
-        # TODO - dont want to precompile if we have a cache hit
-        timings = do_autotuning(precompile_fn)
+        timings = do_autotuning(choices, precompile_fn)
         if timings == {} or choices[0] not in timings:
             return choices[0].output_node()
 
@@ -2113,158 +2018,446 @@ class AlgorithmSelectorCache(PersistentCache):
         log.debug("selected choice: %s", str(selected_choice))
         return selected_choice
 
-    @classmethod
-    def make_benchmark_fn(
-        cls,
+    def make_precompile_fn(
+        self,
         choices,
-        input_nodes,
-        layout,
-        input_gen_fns=None,
-    ):
+        name: str,
+        inputs_key: str,
+        precompilation_timeout_seconds: Optional[int] = 60 * 60,
+    ) -> Callable[[], None]:
+        """
+        Returns a function that precompiles the given choices.
+        """
+        log.debug("Starting precompilation")
+
+        def no_op(*args, **kwargs):
+            return
+
+        if (
+            precompilation_timeout_seconds is None
+            or precompilation_timeout_seconds <= 0
+        ):
+            log.debug("Precompilation timeout is None or <= 0, returning no_op")
+            return no_op
+
+        num_workers = min(get_num_workers(), len(choices))
+
+        if num_workers <= 0:
+            return no_op
+
+        # https://github.com/python/cpython/issues/106905
+        if (
+            sys.version_info.major == 3
+            and sys.version_info.minor == 11
+            and sys.version_info.micro <= 8
+        ):
+            return no_op
+
+        # check local and global cache before precompiling
+        timings = self.lookup(
+            choices,
+            name,
+            inputs_key,
+            benchmark=None,
+        )
+
+        if timings and len(timings) == len(choices):
+            # compilation in precompile stage is much cheaper than that in
+            # autotuning stage
+            log.debug("Found all %d timings in cache, returning no_op", len(timings))
+            return no_op
+
+        if config.search_autotune_cache and not (
+            config.max_autotune or config.max_autotune_gemm
+        ):
+            return no_op
+
+        precompile_key = create_precompile_key(name, inputs_key, choices)
+        if precompile_func := self.precompile_cache.get(precompile_key):
+            log.debug("Precompile function found in cache, returning it")
+            return precompile_func
+
+        log.info(
+            "Multithreaded precompilation for %d choices using %d worker threads",
+            len(choices),
+            num_workers,
+        )
+
+        # In rare circumstances, because python threads inherit global state,
+        # thread pool executor can race and leave stdout/stderr in a state
+        # different than the original values. we explicitly restore the state
+        # here to avoid this issue.
+
+        def precompile_with_captured_stdout(choice) -> tuple[None, int]:
+            log.debug("Precompiling choice with captured stdout: %s", choice)
+            start_ns = time.time_ns()
+            with restore_stdout_stderr():
+                choice.precompile()
+            elapsed_ns = time.time_ns() - start_ns
+            # Return tuple as triton async compile (_worker_compile_triton)
+            # returns tuple[CachingAutotuner, int]
+            return None, elapsed_ns // 1000
+
+        def on_complete(future):
+            if not future.exception():
+                _, precompile_elapsed_us = future.result()
+                elapsed_seconds = precompile_elapsed_us / 1e6
+                elapsed_times[future] = elapsed_seconds
+                log.debug(
+                    "Precompilation complete for future: %s, elapsed time: %.02fs",
+                    future,
+                    elapsed_seconds,
+                )
+
+        executor = ThreadPoolExecutor(max_workers=num_workers)
+        async_compile = torch._inductor.async_compile.AsyncCompile()
+
+        futures: dict[concurrent.futures.Future[Any], ChoiceCaller] = {}
+        elapsed_times: dict[concurrent.futures.Future[Any], float] = {}
+
+        # Some choices only differ in runtime arguments, so we
+        # skip a choice if it has the same hash as a previously seen choice
+        seen_choices: OrderedSet[str] = OrderedSet()
+        for c in choices:
+            # Skip choices which we have already issued a precompile
+            if c.hash_key() in seen_choices:
+                log.debug("Skipping already seen choice: %s", c)
+                continue
+            else:
+                seen_choices.add(c.hash_key())
+
+            if hasattr(c, "precompile"):
+                triton_cuda_choice = isinstance(c, TritonTemplateCaller) and isinstance(
+                    c.bmreq, TritonGPUBenchmarkRequest
+                )
+                if triton_cuda_choice and async_compile.use_process_pool():
+                    with open(c.bmreq.module_path) as file:
+                        source_code = file.read()
+                    future = async_compile.triton(
+                        kernel_name=c.bmreq.kernel_name, source_code=source_code
+                    ).future
+                    log.debug("Submitted triton async compile for choice: %s", c)
+                else:
+                    future = executor.submit(precompile_with_captured_stdout, c)
+                    log.debug("Submitted precompile for choice: %s", c)
+
+                future.add_done_callback(on_complete)
+                futures[future] = c
+
+        @functools.lru_cache(None)
+        @restore_stdout_stderr()
+        def wait_on_futures():
+            log.debug("Waiting on futures")
+            counters["inductor"]["select_algorithm_precompile"] += 1
+            for future in as_completed(
+                futures,
+                timeout=precompilation_timeout_seconds,
+            ):
+                if e := future.exception():
+                    from torch._inductor.codegen.cuda.cuda_kernel import (
+                        CUDATemplateCaller,
+                    )
+
+                    if isinstance(e, CUDACompileError) and isinstance(
+                        futures[future], CUDATemplateCaller
+                    ):
+                        log.debug(
+                            "Exception %s for benchmark choice %s",
+                            e,
+                            futures[future],
+                            exc_info=True,
+                        )
+                    else:
+                        log.error(
+                            "Exception %s for benchmark choice %s", e, futures[future]
+                        )
+                else:
+                    counters["inductor"]["select_algorithm_num_precompiles"] += 1
+                    log.info(
+                        "Precompiling benchmark choice %s took %.02fs",
+                        futures.get(future),
+                        elapsed_times.get(future),
+                    )
+
+            executor.shutdown(wait=True)
+
+        self.precompile_cache[precompile_key] = wait_on_futures
+
+        return wait_on_futures
+
+    @classmethod
+    def get_inputs(
+        cls,
+        choices: Sequence[ChoiceCaller],
+        input_nodes: list[ir.IRNode],
+        layout: ir.Layout,
+        input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
+    ) -> AutotuneArgs:
+        """
+        Factory method to create AutotuneArgs from a list of ChoiceCallers.
+        """
         if input_gen_fns is None:
             input_gen_fns = {}
 
-        def get_inputs(
-            choices: Union[list[ExternKernelCaller], list[TritonTemplateCaller]],
-        ) -> AutotuneArgs:
-            # de-duplicate args
-            unique_example_inputs = {
-                x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
-                for i, x in enumerate(input_nodes)
-            }
-            example_inputs = list(unique_example_inputs.values())
-            example_inputs_extern = [
-                (
-                    unique_example_inputs[input_node.get_name()]
-                    if unique_example_inputs[input_node.get_name()].is_mkldnn
-                    else torch.as_strided(
-                        unique_example_inputs[input_node.get_name()],
-                        V.graph.sizevars.size_hints(
-                            input_node.get_size(),
-                            fallback=config.unbacked_symint_fallback,
-                        ),
-                        V.graph.sizevars.size_hints(
-                            input_node.get_stride(),
-                            fallback=config.unbacked_symint_fallback,
-                        ),
-                        V.graph.sizevars.size_hint(
-                            input_node.get_layout().offset,
-                            fallback=config.unbacked_symint_fallback,
-                        ),
-                    )
+        # de-duplicate args
+        unique_example_inputs = {
+            x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
+            for i, x in enumerate(input_nodes)
+        }
+        example_inputs = list(unique_example_inputs.values())
+        example_inputs_extern = [
+            (
+                unique_example_inputs[input_node.get_name()]
+                if unique_example_inputs[input_node.get_name()].is_mkldnn
+                else torch.as_strided(
+                    unique_example_inputs[input_node.get_name()],
+                    V.graph.sizevars.size_hints(
+                        input_node.get_size(),
+                        fallback=config.unbacked_symint_fallback,
+                    ),
+                    V.graph.sizevars.size_hints(
+                        input_node.get_stride(),
+                        fallback=config.unbacked_symint_fallback,
+                    ),
+                    V.graph.sizevars.size_hint(
+                        input_node.get_layout().offset,
+                        fallback=config.unbacked_symint_fallback,
+                    ),
                 )
-                for input_node in input_nodes
-            ]
-            out = cls.benchmark_example_value(layout)
-            out_extern = torch.as_strided(
-                out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
             )
-            expected = None
-            if VERIFY:
-                choices[0].benchmark(*example_inputs_extern, out=out_extern)
-                expected = out_extern.clone()
+            for input_node in input_nodes
+        ]
+        out = cls.benchmark_example_value(layout)
+        out_extern = torch.as_strided(
+            out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
+        )
+        expected = None
+        if VERIFY:
+            choices[0].benchmark(*example_inputs_extern, out=out_extern)
+            expected = out_extern.clone()
 
-            return AutotuneArgs.from_choice_args(
-                example_inputs,
-                example_inputs_extern,
-                out,
-                out_extern,
-                expected,
-            )
+        return AutotuneArgs.from_choice_args(
+            example_inputs,
+            example_inputs_extern,
+            out,
+            out_extern,
+            expected,
+        )
 
-        if DEBUG:
-            print(f"{len(choices)} tuning requests:")
+    @classmethod
+    def benchmark_choice(
+        cls, choice: ChoiceCaller, autotune_args: AutotuneArgs
+    ) -> float:
+        is_extern = isinstance(choice, (ExternKernelCaller, SubgraphChoiceCaller))
+        benchmark_tensors = autotune_args.get_benchmark_tensors(is_extern)
+        inpts, output = benchmark_tensors.unpack()
+        output.zero_()
+        result = choice.benchmark(*inpts, out=output)
+        device_type = next(
+            (tensor.device.type for tensor in inpts if is_gpu(tensor.device.type)),
+            "cuda",
+        )
+        device_interface = get_interface_for_device(device_type)
+        if device_interface.is_available():
+            device_interface.synchronize()  # shake out any CUDA errors
 
-        def benchmark_choice_in_current_process(
-            choice: ChoiceCaller, autotune_args: AutotuneArgs
-        ) -> float:
-            is_extern = isinstance(choice, ExternKernelCaller)
-            benchmark_tensors = autotune_args.get_benchmark_tensors(is_extern)
-            inpts, output = benchmark_tensors.unpack()
-            output.zero_()
-            result = choice.benchmark(*inpts, out=output)
-            device_type = next(
-                (tensor.device.type for tensor in inpts if is_gpu(tensor.device.type)),
-                "cuda",
-            )
-            device_interface = get_interface_for_device(device_type)
-            if device_interface.is_available():
-                device_interface.synchronize()  # shake out any CUDA errors
+        if VERIFY and autotune_args.expected is not None:
+            autotune_args.verify(**VERIFY)
+        return result
 
-            if VERIFY and autotune_args.expected is not None:
-                autotune_args.verify(**VERIFY)
-            return result
+    @classmethod
+    def benchmark_choices(
+        cls,
+        choices: Sequence[ChoiceCaller],
+        autotune_args: AutotuneArgs,
+    ) -> dict[ChoiceCaller, float]:
+        timings = {}
+        for choice in choices:
+            try:
+                timing = cls.benchmark_choice(choice, autotune_args)
+            except CUDACompileError as e:
+                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 
-        def benchmark_in_current_process(
-            choices: Union[list[ExternKernelCaller], list[TritonTemplateCaller]],
-        ) -> dict[Union[ExternKernelCaller, TritonTemplateCaller], float]:
-            inputs = get_inputs(choices)
-            timings = {}
-            for choice in choices:
-                try:
-                    timing = benchmark_choice_in_current_process(choice, inputs)
-                except CUDACompileError as e:
+                if not isinstance(choice, CUDATemplateCaller):
                     log.error(
                         "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
-                        str(e),
+                        e,
                     )
-                    timing = float("inf")
-                except NotImplementedError as e:
-                    log.warning("Not yet implemented: %s", e)
-                    timing = float("inf")
-                except RuntimeError as e:
-                    msg = str(e)
-                    if "invalid argument" in msg:
-                        msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
-                    else:
-                        if "illegal memory access" in msg:
-                            msg += "\n\nEither error in template or triton bug.\n"
+                timing = float("inf")
+            except NotImplementedError as e:
+                log.warning("Not yet implemented: %s", e)
+                timing = float("inf")
+            except RuntimeError as e:
+                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+
+                msg = str(e)
+                if "invalid argument" in msg:
+                    msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
+                else:
+                    if "illegal memory access" in msg:
+                        msg += "\n\nEither error in template or triton bug.\n"
+
+                if isinstance(choice, CUDATemplateCaller):
+                    log.debug(
+                        "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
+                        msg,
+                        exc_info=True,
+                    )
+                else:
                     log.error(
                         "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
                         msg,
                     )
-                    timing = float("inf")
-                except AssertionError as e:
-                    raise AssertionError(  # noqa: B904
-                        f"Incorrect result from choice {choice}\n\n{e}"
-                    )
-                except Exception as e:
-                    try:
-                        from triton.runtime.autotuner import OutOfResources
+                timing = float("inf")
+            except AssertionError as e:
+                raise AssertionError(  # noqa: B904
+                    f"Incorrect result from choice {choice}\n\n{e}"
+                )
+            except Exception as e:
+                try:
+                    from triton.runtime.autotuner import OutOfResources
 
-                        if isinstance(e, OutOfResources):
-                            log.warning(e)
-                            timing = float("inf")
-                        else:
-                            raise e
-                    except ImportError:
-                        raise e from None
+                    if isinstance(e, OutOfResources):
+                        log.warning(e)
+                        timing = float("inf")
+                    else:
+                        raise e
+                except ImportError:
+                    raise e from None
 
-                timings[choice] = timing
+            timings[choice] = timing
 
-            return timings
+        return timings
 
-        def benchmark_in_sub_process(
-            choices: Union[list[ExternKernelCaller], list[TritonTemplateCaller]],
-        ):
-            from . import autotune_process
+    @classmethod
+    def benchmark_in_current_process(
+        cls,
+        choices: Sequence[ChoiceCaller],
+        input_nodes: list[ir.IRNode],
+        layout: ir.Layout,
+        input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
+    ) -> dict[ChoiceCaller, float]:
+        inputs = cls.get_inputs(choices, input_nodes, layout, input_gen_fns)
+        return cls.benchmark_choices(choices, inputs)
 
-            # only benchmark triton kernel in sub process for now.
-            # ATen/Extern kernel are still benchmarked in the current process.
-            extern = [c for c in choices if isinstance(c, ExternKernelCaller)]
-            triton = [c for c in choices if not isinstance(c, ExternKernelCaller)]
+    @classmethod
+    def benchmark_in_sub_process(
+        cls,
+        choices: Sequence[ChoiceCaller],
+        input_nodes: list[ir.IRNode],
+        layout: ir.Layout,
+        input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
+    ):
+        from . import autotune_process
 
-            timings = benchmark_in_current_process(extern)
-            timings.update(autotune_process.benchmark_in_sub_process(triton))  # type: ignore[arg-type]
-            return timings
+        # only benchmark triton kernel in sub process for now.
+        # ATen/Extern kernel are still benchmarked in the current process.
+        extern = [c for c in choices if isinstance(c, ExternKernelCaller)]
+        triton = [c for c in choices if not isinstance(c, ExternKernelCaller)]
 
-        benchmark = (
-            benchmark_in_sub_process
-            if config.autotune_in_subproc
-            else benchmark_in_current_process
+        timings = cls.benchmark_in_current_process(
+            extern, input_nodes, layout, input_gen_fns
         )
+        timings.update(autotune_process.benchmark_in_sub_process(triton))  # type: ignore[arg-type]
+        return timings
 
-        return benchmark
+    @classmethod
+    def make_benchmark_fn(
+        cls,
+        choices: Sequence[ChoiceCaller],
+        input_nodes: list[ir.IRNode],
+        layout: ir.Layout,
+        input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
+    ):
+        if DEBUG:
+            print(f"{len(choices)} tuning requests:")
+
+        if config.autotune_in_subproc:
+            return functools.partial(
+                cls.benchmark_in_sub_process,
+                input_nodes=input_nodes,
+                layout=layout,
+                input_gen_fns=input_gen_fns,
+            )
+        else:
+            return functools.partial(
+                cls.benchmark_in_current_process,
+                input_nodes=input_nodes,
+                layout=layout,
+                input_gen_fns=input_gen_fns,
+            )
+
+    @staticmethod
+    def prescreen_choices(
+        choices: list[ChoiceCaller],
+    ) -> list[ChoiceCaller]:
+        """
+        Add prescreening phase. Motivation is to reduce the number of autotuning needed,
+        for example, when there are runtime params.
+        """
+        # prescreen cutlass
+        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+
+        candidates = []
+        if (
+            config.cuda.cutlass_prescreening
+            and len(config.cuda.cutlass_max_profiling_swizzle_options) > 1
+        ):
+            candidates.extend(
+                [
+                    c
+                    for c in choices
+                    if isinstance(c, CUDATemplateCaller)
+                    # hardcoded to only look at swizzle=2
+                    if c.info_dict().get("swizzle") == "2"
+                ]
+            )
+
+        # skip prescreening if the number of candidates is too small
+        if len(candidates) < 10:
+            return []
+
+        return candidates  # type: ignore[return-value]
+
+    @staticmethod
+    def prune_choices_postscreen(
+        choices: list[ChoiceCaller],
+        candidate_timings: dict[ChoiceCaller, float],
+    ) -> list[ChoiceCaller]:
+        """
+        Prune the choices after prescreening.
+        """
+        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+
+        if len(candidate_timings) < 10:
+            return []
+
+        log.debug("Before pruning using prescreening timings, %d choices", len(choices))
+        sorted_choices = sorted(
+            candidate_timings.keys(), key=lambda choice: candidate_timings[choice]
+        )
+        num_to_keep = max(int(math.sqrt(len(choices)) / 4), 8)
+
+        # prune choices based on prescreening timings
+        candidates_to_prune = OrderedSet(
+            candidate.bmreq.hash_key  # type: ignore[attr-defined]
+            for candidate in sorted_choices[num_to_keep:]
+        )
+        for candidate in sorted_choices[:num_to_keep]:
+            if candidate_timings[candidate] == float("inf"):
+                candidates_to_prune.add(candidate.bmreq.hash_key)  # type: ignore[attr-defined]
+            else:
+                if isinstance(candidate, CUDATemplateCaller):
+                    candidate.bmreq.ensure_dll_loaded()
+
+        choices = [
+            choice
+            for choice in choices
+            if choice.bmreq.hash_key not in candidates_to_prune  # type: ignore[attr-defined]
+        ]
+
+        log.debug("After pruning using prescreening timings, %d choices", len(choices))
+        return choices
 
     @staticmethod
     def log_results(

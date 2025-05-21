@@ -15,6 +15,7 @@ import traceback
 import typing
 
 from collections import OrderedDict, namedtuple
+from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
@@ -572,6 +573,20 @@ class GraphModuleSerializer(metaclass=Final):
                 # AOTI compiled graph module in node.args[0] is stateful, and will fail the verifier check
                 # Skip serializing original_gm as a workaround
                 serializable_args[1] = None
+
+                serializable_weight_nodes = []
+                if serializable_args[2] is not None and isinstance(serializable_args[2], Iterable):
+                    for weight_node in serializable_args[2]:
+                        # skip passing custom obj into the weight arg as an hack
+                        # The schema of weight input is a list of Tensors.
+                        # Downstream runtime is not actively consuming the weighs arg for anything meaningful.
+                        if (
+                            isinstance(weight_node, torch.fx.Node)
+                            and isinstance(weight_node.meta.get("val", None), ep.CustomObjArgument)
+                        ):
+                            continue
+                        serializable_weight_nodes.append(weight_node)
+                    serializable_args[2] = serializable_weight_nodes
 
                 def serialize_tensor_list_output(node):
                     meta_val = node.meta.get("val", None)

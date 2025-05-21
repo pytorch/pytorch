@@ -23,7 +23,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING
 import torch
 import torch.utils.dlpack
 from torch import Tensor
-from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
+from torch._dynamo.utils import detect_fake_mode, dynamo_timed, lazy_format_graph_code
 from torch._guards import CompileContext, TracingContext
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
@@ -37,13 +37,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torchgen.utils import dataclass_repr
 
 from .. import config
-from .autograd_cache import (
-    AOTAutogradCache,
-    AOTAutogradCacheEntry,
-    CompiledBackward,
-    CompiledForward,
-    should_use_remote_autograd_cache,
-)
+from .autograd_cache import AOTAutogradCache, should_use_remote_autograd_cache
 from .dispatch_and_compile_graph import (
     aot_dispatch_autograd_graph,
     aot_dispatch_base_graph,
@@ -55,7 +49,6 @@ from .runtime_wrappers import (
     AOTDispatchSubclassWrapper,
     AOTSyntheticBaseWrapper,
     AutogradLazyBackwardCompileInfo,
-    CachedAutogradLazyBackwardCompileInfo,
     CompilerWrapper,
     DebugAssertWrapper,
     EffectTokensWrapper,
@@ -186,7 +179,10 @@ def aot_dispatch_base(
     aot_forward_graph_str = None
     if aot_config.cache_info is not None:
         aot_forward_graph_str = fw_module.print_readable(
-            print_output=False, include_stride=True, include_device=True
+            print_output=False,
+            include_stride=True,
+            include_device=True,
+            fast_sympy_print=True,
         )
 
     fakified_out_wrapper = FakifiedOutWrapper()
@@ -257,13 +253,12 @@ def aot_dispatch_base(
     )
     cache_info = aot_config.cache_info
     if cache_info is not None:
-        if fw_key := getattr(compiled_fw, "_fx_graph_cache_key", None):
-            debug_lines = getattr(compiled_fw, "_fx_graph_cache_debug_lines", [])
+        if hasattr(compiled_fw, "_fx_graph_cache_key"):
             time_taken_ns = time.time_ns() - cache_info.start_time_ns
             guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
-            entry = AOTAutogradCacheEntry(
-                compiled_fw=CompiledForward((fw_key, debug_lines), getattr(compiled_fw, "guards_expr", None)),  # type: ignore[arg-type]
-                compiled_bw=None,
+            entry = AOTAutogradCache.make_entry(
+                compiled_fw_func=compiled_fw,  # type: ignore[arg-type]
+                compiled_bw_func=None,
                 aot_joint_graph_str=None,
                 aot_forward_graph_str=aot_forward_graph_str,
                 aot_backward_graph_str=None,
@@ -276,7 +271,8 @@ def aot_dispatch_base(
                 backward_time_taken_ns=0,
                 sanitized_aot_config=sanitize_aot_config(aot_config),
                 guards_expr=guards_expr,
-                cached_lazy_backward_info=None,
+                backward_state_indices=None,
+                num_symints_saved_for_bw=None,
             )
             AOTAutogradCache.save(
                 cache_info.cache_key, entry, remote=should_use_remote_autograd_cache()
@@ -537,9 +533,9 @@ def run_joint_graph_passes_on_hops(
             and node.target is invoke_subgraph
             and isinstance(node.args[1], str)
         ):
-            if node.args[1].startswith("___forward"):
+            if node.args[1].startswith("fw"):
                 fw_hop_nodes.append(node)
-            elif node.args[1].startswith("___backward"):
+            elif node.args[1].startswith("bw"):
                 bw_hop_nodes.append(node)
 
     if not bw_hop_nodes:
@@ -554,7 +550,7 @@ def run_joint_graph_passes_on_hops(
     bw_to_fw_hop_node = dict(zip(list(reversed(bw_hop_nodes)), fw_hop_nodes))
 
     for node in bw_hop_nodes:
-        identifier = node.args[1].replace("___backward", "")
+        identifier = node.args[1].removeprefix("bw")
 
         # If partitioning already done for this identifier, skip. This saves
         # redundant joint graph passes for same subgraphs.
@@ -650,7 +646,7 @@ def run_joint_graph_passes_on_hops(
     already_added_new_hop_mods = set()
 
     def add_new_hop_gm(new_subgraph_mod, name):
-        new_subgraph_attr_name = f"{name}_post_graph"
+        new_subgraph_attr_name = f"partitioned_{name}"
         if new_subgraph_attr_name in already_added_new_hop_mods:
             return new_subgraph_attr_name
 
@@ -668,7 +664,7 @@ def run_joint_graph_passes_on_hops(
         new_call_function_node.meta["val"] = tuple(out_example_vals)
 
     for bw_node in reversed(bw_hop_nodes):
-        identifier = bw_node.args[1].replace("___backward", "")
+        identifier = bw_node.args[1].removeprefix("bw")
 
         # Make changes to the corresponding fw and bw node pair simultaneously.
         # The removes the need of any bookkeeping.
@@ -695,9 +691,7 @@ def run_joint_graph_passes_on_hops(
 
         # Insert the new_fw_hop_gm into the joint_gm
         with joint_gm.graph.inserting_after(fw_node):
-            new_fw_mod_attr_name = add_new_hop_gm(
-                new_fw_hop_gm, f"___forward{identifier}"
-            )
+            new_fw_mod_attr_name = add_new_hop_gm(new_fw_hop_gm, f"fw{identifier}")
             new_fw_mod_attr = joint_gm.graph.get_attr(new_fw_mod_attr_name)
 
         # new_hop_fw_gm output signature is (*fw_outs, *saved_tensors)
@@ -707,7 +701,7 @@ def run_joint_graph_passes_on_hops(
                 args=(
                     new_fw_mod_attr,
                     new_fw_mod_attr_name,
-                    fw_node.args[2],
+                    *fw_node.args[2:],
                 ),
             )
             propagate_meta_info(new_fw_hop_gm, new_fw_node, fw_node)
@@ -744,7 +738,7 @@ def run_joint_graph_passes_on_hops(
 
         num_primals = new_hop_graphs[identifier].old_num_fw_inputs
         assert num_primals is not None
-        tangents = list(bw_node.args[2][num_primals:])
+        tangents = list(bw_node.args[2 + num_primals :])
         operands = sym_nodes + saved_tensor_nodes + tangents
 
         # Insert the new_bw_hop_gm into the joint_gm
@@ -758,7 +752,7 @@ def run_joint_graph_passes_on_hops(
                 args=(
                     new_bw_mod_attr,
                     new_bw_mod_attr_name,
-                    tuple(operands),
+                    *operands,
                 ),
             )
             propagate_meta_info(new_bw_hop_gm, new_bw_node, bw_node)
@@ -793,9 +787,10 @@ def aot_dispatch_autograd(
     )
 
     fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
-    fx_g, joint_inputs, maybe_subclass_meta = aot_dispatch_autograd_graph(
-        flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
-    )
+    with dynamo_timed("aot_trace_joint_graph", log_pt2_compile_event=True):
+        fx_g, joint_inputs, maybe_subclass_meta = aot_dispatch_autograd_graph(
+            flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
+        )
 
     # Copied from aot_dispatch_autograd_graph.
     disable_amp = torch._C._is_any_autocast_enabled()
@@ -1282,23 +1277,10 @@ def aot_dispatch_autograd(
         # close over aot_config.cache_info, since aot_config never changes.
         # But closing over random variables is confusing IMO, so I'm leaving it.
         def try_save_cache_entry(  # noqa: F811
-            compiled_bw_func, lazy_backward_info, _fw_metadata, aot_config
+            compiled_bw_func, _fw_metadata, aot_config
         ):
-            bw_module = lazy_backward_info.bw_module
-            bw_module.meta = {}
-            for node in bw_module.graph.nodes:
-                node.meta = {}
-
             fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
-            fw_debug_lines = getattr(
-                compiled_fw_func, "_fx_graph_cache_debug_lines", []
-            )
             bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
-            bw_debug_lines = getattr(
-                compiled_bw_func, "_fx_graph_cache_debug_lines", []
-            )
-            fw_info = (fw_key, fw_debug_lines)
-            bw_info = (bw_key, bw_debug_lines)
             cache_info = aot_config.cache_info
             if cache_info is not None and fw_key and bw_key:
                 assert forward_time_taken_ns is not None
@@ -1314,14 +1296,10 @@ def aot_dispatch_autograd(
                 aot_backward_graph_str: Optional[str] = bw_module_str
                 aot_joint_graph_str: Optional[str] = joint_graph_str
                 guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
-                entry = AOTAutogradCacheEntry(
-                    CompiledForward(fw_info, getattr(compiled_fw_func, "guards_expr", None)),  # type: ignore[arg-type]
-                    CompiledBackward(
-                        bw_info,  # type: ignore[arg-type]
-                        getattr(compiled_bw_func, "guards_expr", None),
-                        backward_state_indices,
-                        num_symints_saved_for_bw,
-                    ),
+
+                entry = AOTAutogradCache.make_entry(
+                    compiled_fw_func,  # type: ignore[arg-type]
+                    compiled_bw_func,
                     aot_joint_graph_str,
                     aot_forward_graph_str,
                     aot_backward_graph_str,
@@ -1334,18 +1312,15 @@ def aot_dispatch_autograd(
                     backward_time_taken_ns,
                     sanitized_aot_config=sanitize_aot_config(aot_config),
                     guards_expr=guards_expr,
-                    cached_lazy_backward_info=CachedAutogradLazyBackwardCompileInfo(
-                        bw_module
-                    ),
+                    backward_state_indices=backward_state_indices,
+                    num_symints_saved_for_bw=num_symints_saved_for_bw,
                 )
                 remote = should_use_remote_autograd_cache()
                 AOTAutogradCache.save(cache_info.cache_key, entry, remote)
 
         if compiled_bw_func is not None:
             # If we already compiled it we can just run it right now without waiting
-            try_save_cache_entry(
-                compiled_bw_func, lazy_backward_info, fw_metadata, aot_config
-            )
+            try_save_cache_entry(compiled_bw_func, fw_metadata, aot_config)
             try_save_cache_entry = None
 
     compiled_fn = AOTDispatchAutograd.post_compile(
