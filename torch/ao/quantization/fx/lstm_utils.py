@@ -105,7 +105,7 @@ def _get_lstm_with_individually_observed_parts(
     # TODO: maybe make this work for layer_bw as well
     for layer in quantizable_lstm.layers:
         cell = layer.layer_fw.cell  # type: ignore[union-attr]
-        assert isinstance(cell, torch.nn.Module)
+        assert isinstance(cell, torch.nn.Module), "cell should be a nn.Module"
         cell = prepare_fx(cell, cell_qm, example_inputs, backend_config=backend_config)
         # HACK: Manually replace the activation_post_process following these ops.
         # This is needed for FloatFunctional ops because there is currently no way

@@ -686,6 +686,7 @@ def remove_parametrizations(
     parametrizations = module.parametrizations[tensor_name]
     if parametrizations.is_tensor:
         original = parametrizations.original
+        assert isinstance(original, torch.Tensor), "is_tensor promised us a Tensor"
         if leave_parametrized:
             with torch.no_grad():
                 t = getattr(module, tensor_name)
@@ -697,7 +698,6 @@ def remove_parametrizations(
                 if type(original) is torch.Tensor:
                     _maybe_set(original, t)
                 else:
-                    assert isinstance(original, torch.Tensor)
                     try:
                         _maybe_set(original, t)
                     except RuntimeError as e:
