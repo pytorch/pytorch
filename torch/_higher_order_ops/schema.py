@@ -19,6 +19,7 @@ class HopArgumentInfo:
     # Whether this arugment gets mutated in the hop subgraph.
     # For output, this should always be False
     is_mutated: bool
+    kw_only: bool
 
 
 class HopArgumentInfoGen:
@@ -29,6 +30,7 @@ class HopArgumentInfoGen:
         name: str = "",
         default_value: Optional[Any],
         is_mutated: bool = False,
+        kw_only: bool = False,
     ) -> HopArgumentInfo:
         if default_value is not None:
             assert type(example_value) == type(default_value)
@@ -37,6 +39,7 @@ class HopArgumentInfoGen:
             example_value=example_value,
             default_value=default_value,
             is_mutated=is_mutated,
+            kw_only=kw_only,
         )
 
 
@@ -70,7 +73,12 @@ class CArgumentGen:
         alias_set = set({f"alias::a{arg_idx}"}) if arg_info.is_mutated else set()
         alias_info = torch._C._AliasInfo(arg_info.is_mutated, alias_set, alias_set)  # type: ignore[attr-defined]
         return torch._C.Argument(
-            arg_info.name, typ, None, arg_info.default_value, False, alias_info
+            arg_info.name,
+            typ,
+            None,
+            arg_info.default_value,
+            arg_info.kw_only,
+            alias_info,
         )
 
 

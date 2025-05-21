@@ -924,7 +924,7 @@ def infer_size(shape: ShapeType, numel: int) -> tuple[int, ...]:
     Infers the size of a dim with size -1, if it exists.
     Also checks that new shape is compatible with the number of elements.
     """
-    from torch.fx.experimental.symbolic_shapes import definitely_true, guard_or_false
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     dim = None
     newsize = 1
@@ -952,7 +952,7 @@ def infer_size(shape: ShapeType, numel: int) -> tuple[int, ...]:
             lambda: (
                 f"cannot reshape tensor of 0 elements into shape {list(shape)} because the "
                 f"unspecified dimension size -1 can be any value and is ambiguous"
-                if definitely_true(numel == 0)
+                if guard_or_false(numel == 0)
                 else f"shape '{list(shape)}' is invalid for input of size {numel}"
             ),
         )

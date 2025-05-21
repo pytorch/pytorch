@@ -769,7 +769,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x.ndim
 
-        msg = "Currently only support accessing overridden attributes that are functions or properties, but got <class 'int'>"
+        msg = "`torch.compile` only support tracing certain types of overriden tensor subclass attributes"
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
@@ -1041,6 +1041,24 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             pass
 
         def fn(x):
+            x = x.t()
+            x = x.T
+            return x + 1
+
+        fn_opt = compile_full_eager(fn)
+
+        x = torch.randn(2, 2).as_subclass(MySubclass)
+        res_exp = fn(x)
+        res_act = fn_opt(x)
+        self.assertEqual(res_exp, res_act)
+
+    def test_subclass_with_disabled_torch_function(self):
+        class MySubclass(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+        def fn(x):
+            x = x.t()
+            x = x.T
             return x + 1
 
         fn_opt = compile_full_eager(fn)
@@ -2135,9 +2153,9 @@ class GraphModule(torch.nn.Module):
             extern_node_serializer: Optional[Callable[[list[Any]], Any]] = None,
         ):
             if dynamic:
-                self.assertEqual(static_input_idxs, [0, 1, 2, 3, 4])
+                self.assertEqual(static_input_idxs, [2, 3, 4])
             else:
-                self.assertEqual(static_input_idxs, [0, 1, 2])
+                self.assertEqual(static_input_idxs, [1, 2])
             return gm
 
         compiler = functools.partial(compile_fx, inner_compile=inner_compile)

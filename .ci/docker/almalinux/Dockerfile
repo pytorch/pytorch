@@ -1,5 +1,6 @@
 ARG CUDA_VERSION=12.4
 ARG BASE_TARGET=cuda${CUDA_VERSION}
+ARG ROCM_IMAGE=rocm/dev-almalinux-8:6.3-complete
 FROM amd64/almalinux:8 as base
 
 ENV LC_ALL en_US.UTF-8
@@ -7,10 +8,6 @@ ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US.UTF-8
 
 ARG DEVTOOLSET_VERSION=11
-
-ENV LC_ALL en_US.UTF-8
-ENV LANG en_US.UTF-8
-ENV LANGUAGE en_US.UTF-8
 
 RUN yum -y update
 RUN yum -y install epel-release
@@ -64,6 +61,12 @@ ENV DESIRED_CUDA=12.6
 FROM cuda as cuda12.8
 RUN bash ./install_cuda.sh 12.8
 ENV DESIRED_CUDA=12.8
+
+FROM ${ROCM_IMAGE} as rocm
+ENV PYTORCH_ROCM_ARCH="gfx900;gfx906;gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201"
+ADD ./common/install_mkl.sh install_mkl.sh
+RUN bash ./install_mkl.sh && rm install_mkl.sh
+ENV MKLROOT /opt/intel
 
 # Install MNIST test data
 FROM base as mnist

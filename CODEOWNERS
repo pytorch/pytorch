@@ -134,7 +134,7 @@ torch/profiler/ @sraikund16
 test/functorch/test_aotdispatch.py @ezyang @Chillee
 
 # Dataloader
-torch/utils/data/ @andrewkho @divyanshk
+torch/utils/data/ @divyanshk @ramanishsingh
 
 # hipify
 torch/utils/hipify/ @jeffdaily @jithunnair-amd

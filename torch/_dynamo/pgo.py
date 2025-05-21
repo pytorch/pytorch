@@ -15,10 +15,12 @@ import base64
 import copy
 import dataclasses
 import enum
+import functools
 import logging
 import os
 import pickle
 import re
+import zlib
 from collections import defaultdict
 from typing import Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Self
@@ -103,15 +105,57 @@ LOCK_TIMEOUT = 10
 # across attempts.  No need to have one mechanism to do everything.
 
 
+@functools.cache
+def _hash_containing_file(filepath: str) -> str:
+    # if the file does not exists we consider filepath to be the hash.
+    if not os.path.exists(filepath):
+        return filepath
+
+    with open(filepath, "rb") as file:
+        content = file.read()
+        crc32_value = zlib.crc32(content)
+        hash = format(crc32_value & 0xFFFFFFFF, "08x")
+        return hash
+
+
 @dataclasses.dataclass(frozen=True)
 class CodeId:
     filename: str
     firstlineno: int
     name: str
+    # When a job restart, the code can be copied to a different path than the previous attempt. In that case
+    # self.filename will have a different value,  we do not want to consider those differences. Instead we
+    # hash the content of the file and use it as an identifier of the file.
+    #
+    # self.filename is kept in the object to give readable information/pointer to the actual file, in a local
+    # code state it will refer to the first seen file path.
+    file_hash: str
+
+    # Exclude file name.
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, CodeId):
+            return False
+        return (
+            self.file_hash == other.file_hash
+            and self.firstlineno == other.firstlineno
+            and self.name == other.name
+        )
+
+    # Ensure if two CodeIds are the same, then they have the same hash by excluding filename.
+    def __hash__(self) -> int:
+        return hash((self.file_hash, self.name, self.firstlineno))
+
+    def __str__(self) -> str:
+        return f"hash({self.file_hash}){self.filename}:{self.firstlineno}:{self.name}"
 
     @staticmethod
     def make(code: types.CodeType) -> CodeId:
-        return CodeId(code.co_filename, code.co_firstlineno, code.co_name)
+        return CodeId(
+            code.co_filename,
+            code.co_firstlineno,
+            code.co_name,
+            _hash_containing_file(code.co_filename),
+        )
 
 
 @dataclasses.dataclass
@@ -557,7 +601,7 @@ def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
 
 def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
     return "\n".join(
-        f"{k.filename}:{k.firstlineno}:{k.name}:\n"
+        f"{k}:\n"
         + "\n".join(
             f"  {src}: {fs.render()}" for src, fs in v.automatic_dynamic.items()
         )

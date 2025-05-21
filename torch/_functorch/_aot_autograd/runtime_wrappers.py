@@ -1484,18 +1484,10 @@ def merge_view_inputs(
 # with compiled autograd. See: https://github.com/pytorch/pytorch/pull/149229#discussion_r2002122645.
 @dataclass
 class AutogradLazyBackwardCompileInfo:
-    bw_module: torch.fx.GraphModule
+    bw_module: Callable
     placeholder_list: list[Any]
     saved_context: Optional[TracingContext]
     saved_compile_context: Optional[CompileContext]
-
-
-# On an AOT Autograd cache hit, we already have a lowered backward, so there is usually
-# no need to keep information around for a new lazy compilation. Except for compiled autograd,
-# which wants to retrace this backward into a larger graph, and it needs the graph module to do so.
-@dataclass
-class CachedAutogradLazyBackwardCompileInfo:
-    bw_module: torch.fx.GraphModule  # missing a couple of fields compared to AutogradLazyBackwardCompileInfo's bw_module
 
 
 def _raise_if_functorch_active():
@@ -1917,11 +1909,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         backward_state_indices: list[int],
         disable_amp: bool,
         indices_of_inps_to_detach: list[int],
-        lazy_backward_info: Optional[
-            Union[
-                AutogradLazyBackwardCompileInfo, CachedAutogradLazyBackwardCompileInfo
-            ]
-        ],
+        lazy_backward_info: Optional[AutogradLazyBackwardCompileInfo],
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
@@ -2229,9 +2217,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 if CompiledFunction.compiled_bw is None:
                     assert lazy_backward_info is not None
-                    assert isinstance(
-                        lazy_backward_info, AutogradLazyBackwardCompileInfo
-                    )
 
                     if not saved_tensors_use_once:
                         fw_metadata.bw_donated_idxs = []
@@ -2276,7 +2261,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         if try_save_cache_entry is not None:
                             try_save_cache_entry(
                                 CompiledFunction.compiled_bw,
-                                lazy_backward_info,
                                 fw_metadata,
                                 aot_config,
                             )

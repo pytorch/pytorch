@@ -93,7 +93,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(schemas), 1)
         self.assertExpectedInline(
             str(schemas[0]),
-            """invoke_quant_test(Any subgraph, Tensor arg0, Tensor arg1, str scheme="nf4") -> ((Tensor))""",  # noqa: B950
+            """invoke_quant_test(Any subgraph, Tensor arg0, Tensor arg1, *, str scheme="nf4") -> ((Tensor))""",  # noqa: B950
         )
 
     def test_schema_gen_pytree_in_out(self):
@@ -121,7 +121,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(schemas), 1)
         self.assertExpectedInline(
             str(schemas[0]),
-            """invoke_quant_test(Any subgraph, Tensor arg0, Tensor arg1, str scheme="nf4") -> (Tensor, Tensor, Tensor, Tensor)""",  # noqa: B950
+            """invoke_quant_test(Any subgraph, Tensor arg0, Tensor arg1, *, str scheme="nf4") -> (Tensor, Tensor, Tensor, Tensor)""",  # noqa: B950
         )
 
     def test_schema_gen_single_return_with_mutation(self):
@@ -296,7 +296,6 @@ class GraphModule(torch.nn.Module):
             mm: "f32[3, 3]" = torch.ops.aten.mm.default(arg0_1, arg1_1)
             clone: "f32[3, 3]" = torch.ops.aten.clone.default(mm)
             sin: "f32[3, 3]" = torch.ops.aten.sin.default(mm);  mm = None
-            cos: "f32[3, 3]" = torch.ops.aten.cos.default(sin);  cos = None
             sin_1: "f32[3, 3]" = torch.ops.aten.sin.default(sin);  sin = None
             neg: "f32[3, 3]" = torch.ops.aten.neg.default(sin_1);  sin_1 = None
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg2_1, neg);  arg2_1 = neg = None
