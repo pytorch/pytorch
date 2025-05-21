@@ -1012,6 +1012,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
     std::vector<Tensor> log_sumexp_chunks;
     std::vector<Tensor> seed_chunks;
     std::vector<Tensor> offset_chunks;
+    int expected_chunks = static_cast<int>(
+        std::ceil(static_cast<double>(batch_size) / MAX_BATCH_SIZE)
+    );
+
+    attention_chunks.reserve(expected_chunks);
+    log_sumexp_chunks.reserve(expected_chunks);
+    seed_chunks.reserve(expected_chunks);
+    offset_chunks.reserve(expected_chunks);
 
     for (int64_t start = 0; start < batch_size; start += MAX_BATCH_SIZE) {
       int64_t end = std::min(start + MAX_BATCH_SIZE, batch_size);
@@ -1027,10 +1035,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
       auto [attn, log_sumexp, seed, offset] =
           process_chunk(query_chunk, key_chunk, value_chunk, bias_chunk);
 
-      attention_chunks.push_back(attn);
-      log_sumexp_chunks.push_back(log_sumexp);
-      seed_chunks.push_back(seed);
-      offset_chunks.push_back(offset);
+      attention_chunks.push_back(std::move(attn));
+      log_sumexp_chunks.push_back(std::move(log_sumexp));
+      seed_chunks.push_back(std::move(seed));
+      offset_chunks.push_back(std::move(offset));
     }
 
     Tensor attention = at::cat(attention_chunks, 0);

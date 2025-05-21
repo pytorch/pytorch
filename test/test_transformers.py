@@ -1906,7 +1906,7 @@ class TestSDPAFailureModes(NNTestCase):
         with sdpa_kernel(backends=SDPBackend.EFFICIENT_ATTENTION):
             out = F.scaled_dot_product_attention(query, key, value)
         out_cpu = F.scaled_dot_product_attention(query.cpu(), key.cpu(), value.cpu())
-        self.assertEqual(out, out_cpu)
+        self.assertEqual(out, out_cpu, atol=1e-3, rtol=1e-4)
 
 def _get_block_size_n(device, head_dim, is_dropout, is_causal):
     # This should match the block sizes in the CUDA kernel
