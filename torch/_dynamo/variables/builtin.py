@@ -63,6 +63,7 @@ from .ctx_manager import EventVariable, StreamVariable
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
+    DictKeysVariable,
     DictViewVariable,
     FrozensetVariable,
     is_hashable,
@@ -2418,6 +2419,22 @@ class BuiltinVariable(VariableTracker):
             sym_num=None,
         )
 
+    def call_xor(self, tx: "InstructionTranslator", a, b):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+            return a.call_method(tx, "__xor__", [b], {})
+
+    def call_ixor(self, tx: "InstructionTranslator", a, b):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+            return a.call_method(tx, "__ixor__", [b], {})
+
+    def call_sub(self, tx: "InstructionTranslator", a, b):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+            return a.call_method(tx, "__sub__", [b], {})
+
+    def call_isub(self, tx: "InstructionTranslator", a, b):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+            return a.call_method(tx, "__isub__", [b], {})
+
     def call_and_(self, tx: "InstructionTranslator", a, b):
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
@@ -2432,17 +2449,9 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
-        if isinstance(a, (SetVariable, UserDefinedSetVariable)):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
             return a.call_method(tx, "__and__", [b], {})
         # None no-ops this handler and lets the driving function proceed
-
-    def call_ixor(self, tx: "InstructionTranslator", a, b):
-        if isinstance(a, (SetVariable, UserDefinedSetVariable)):
-            return a.call_method(tx, "__ixor__", [b], {})
-
-    def call_isub(self, tx: "InstructionTranslator", a, b):
-        if isinstance(a, (SetVariable, UserDefinedSetVariable)):
-            return a.call_method(tx, "__isub__", [b], {})
 
     def call_iand(self, tx: "InstructionTranslator", a, b):
         # Rely on constant_handler
@@ -2458,7 +2467,7 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
-        if isinstance(a, (SetVariable, UserDefinedSetVariable)):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
             return a.call_method(tx, "__iand__", [b], {})
 
     def call_or_(self, tx: "InstructionTranslator", a, b):
@@ -2475,12 +2484,14 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
-        if isinstance(a, (SetVariable, UserDefinedSetVariable)):
-            return a.call_method(tx, "__or__", [b], {})
 
         # This call looks like `{"one": torch.ones(1)} | {"two": torch.ones(2)}`.
-        if isinstance(a, ConstDictVariable):
-            return a.call_method(tx, "__or__", args=[b], kwargs={})
+        if isinstance(
+            a,
+            (ConstDictVariable, DictKeysVariable, SetVariable, UserDefinedSetVariable),
+        ):
+            return a.call_method(tx, "__or__", [b], {})
+
         # None no-ops this handler and lets the driving function proceed
         return None
 
@@ -2498,12 +2509,14 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
-        if isinstance(a, (SetVariable, UserDefinedSetVariable)):
-            return a.call_method(tx, "__ior__", [b], {})
 
         # This call looks like `{"one": torch.ones(1)} |= {"two": torch.ones(2)}`.
-        if isinstance(a, ConstDictVariable):
-            return a.call_method(tx, "__ior__", args=[b], kwargs={})
+        if isinstance(
+            a,
+            (ConstDictVariable, DictKeysVariable, SetVariable, UserDefinedSetVariable),
+        ):
+            return a.call_method(tx, "__ior__", [b], {})
+
         # None no-ops this handler and lets the driving function proceed
         return None
 

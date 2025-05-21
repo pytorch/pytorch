@@ -584,6 +584,9 @@ class ConstDictVariable(VariableTracker):
             args[0].install_dict_keys_match_guard()
             new_dict_vt.items.update(args[0].items)
             return new_dict_vt
+        elif name == "__ior__":
+            self.call_method(tx, "update", args, kwargs)
+            return self
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -1091,6 +1094,20 @@ class DictKeysVariable(DictViewVariable):
     ) -> "VariableTracker":
         if name == "__contains__":
             return self.dv_dict.call_method(tx, name, args, kwargs)
+        elif name in (
+            "__and__",
+            "__iand__",
+            "__or__",
+            "__ior__",
+            "__sub__",
+            "__isub__",
+            "__xor__",
+            "__ixor__",
+        ):
+            # These methods always returns a set
+            m = getattr(self.set_items, name)
+            r = m(args[0].set_items)
+            return SetVariable(r)
         if name in cmp_name_to_op_mapping:
             if not isinstance(args[0], (SetVariable, DictKeysVariable)):
                 return ConstantVariable.create(NotImplemented)
