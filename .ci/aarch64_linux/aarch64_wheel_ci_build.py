@@ -54,14 +54,16 @@ def build_ArmComputeLibrary() -> None:
     for d in ["arm_compute", "include", "utils", "support", "src"]:
         shutil.copytree(f"{acl_checkout_dir}/{d}", f"{acl_install_dir}/{d}")
 
-def replace_tag(filename: str) -> None:
-    with open(filename, 'r') as f:
+
+def replace_tag(filename) -> None:
+    with open(filename) as f:
         lines = f.read().split("\\n")
-        for i,line in enumerate(lines):
+        for i, line in enumerate(lines):
             if line.startswith("Tag:"):
                 lines[i] = line.replace("-linux_", "-manylinux_2_28_")
-                print(f'Updated tag from {line} to {lines[i]}')
+                print(f"Updated tag from {line} to {lines[i]}")
                 break
+
 
 def package_cuda_wheel(wheel_path, desired_cuda) -> None:
     """
@@ -117,10 +119,10 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
             f"cd {folder}/tmp/torch/lib/; "
             f"patchelf --set-rpath '$ORIGIN' --force-rpath {folder}/tmp/torch/lib/{lib_name}"
         )
-        
+
     # Make sure the wheel is tagged with manylinux_2_28
     for f in os.scandir(f"{folder}/tmp/"):
-         if f.is_dir() and f.name.endswith(".dist-info"):
+        if f.is_dir() and f.name.endswith(".dist-info"):
             replace_tag(f"{f.path}/WHEEL")
 
     os.mkdir(f"{folder}/cuda_wheel")
