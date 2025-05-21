@@ -473,9 +473,9 @@ def innermost_fn(fn):
     unaltered_fn = fn
     while hasattr(unaltered_fn, "_torchdynamo_orig_callable"):
         unaltered_fn = unaltered_fn._torchdynamo_orig_callable
-        assert callable(unaltered_fn), (
-            f"A callable function is expected, but {type(unaltered_fn)} is provided."
-        )
+        assert callable(
+            unaltered_fn
+        ), f"A callable function is expected, but {type(unaltered_fn)} is provided."
     return unaltered_fn
 
 
@@ -630,9 +630,9 @@ class _TorchDynamoContext:
                 cls_obj._call_impl = self(cls_obj._call_impl)
             return cls_obj
 
-        assert callable(fn), (
-            f"A callable function is expected, but {type(fn)} is provided."
-        )
+        assert callable(
+            fn
+        ), f"A callable function is expected, but {type(fn)} is provided."
 
         try:
             filename = inspect.getsourcefile(fn)
@@ -661,7 +661,7 @@ class _TorchDynamoContext:
         is_fx_tracing = torch.fx._symbolic_trace.is_fx_tracing
 
         @functools.wraps(fn)
-        def _fn(*args, **kwargs):
+        def compile_wrapper(*args, **kwargs):
             prior = set_eval_frame(None)
             try:
                 if is_fx_tracing():
@@ -705,7 +705,7 @@ class _TorchDynamoContext:
                     while cur_exn.__cause__ is not None:
                         cur_exn.__cause__.with_traceback(None)
                         cur_exn = cur_exn.__cause__
-                    raise e.with_traceback(None) from e.__cause__
+                    raise e.with_traceback(None) from e.__cause__  # User compiler error
                 except ShortenTraceback as e:
                     # Failures in the backend likely don't have useful
                     # data in the TorchDynamo frames, so we strip them out.
@@ -724,16 +724,16 @@ class _TorchDynamoContext:
                 _maybe_set_eval_frame(prior)
 
         # hooks to properly handle inlining
-        _fn._torchdynamo_inline = fn  # type: ignore[attr-defined]
+        compile_wrapper._torchdynamo_inline = fn  # type: ignore[attr-defined]
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
-        _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+        compile_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
 
         # when compiling user function instead of nn.Module
         # provide public api _fn.get_compiler_config()
-        assert not hasattr(_fn, "get_compiler_config")
-        _fn.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
+        assert not hasattr(compile_wrapper, "get_compiler_config")
+        compile_wrapper.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
 
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
@@ -774,7 +774,7 @@ class _TorchDynamoContext:
                 )
             always_optimize_code_objects[fn.__code__] = True
 
-        return _fn
+        return compile_wrapper
 
 
 class OptimizeContext(_TorchDynamoContext):
@@ -877,9 +877,9 @@ class DisableContext(_TorchDynamoContext):
                 cls_obj._call_impl = self(cls_obj._call_impl)
             return cls_obj
 
-        assert callable(fn), (
-            f"A callable function is expected, but {type(fn)} is provided."
-        )
+        assert callable(
+            fn
+        ), f"A callable function is expected, but {type(fn)} is provided."
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
@@ -945,9 +945,9 @@ def get_compiler_fn(compiler_fn):
 
 class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
     def __call__(self, fn):
-        assert callable(fn), (
-            f"A callable function is expected, but {type(fn)} is provided."
-        )
+        assert callable(
+            fn
+        ), f"A callable function is expected, but {type(fn)} is provided."
         return fn
 
 
@@ -987,9 +987,9 @@ def is_inductor_supported():
 
 def check_for_incompatible_configs():
     # Some of the configs should be mutually exclusive
-    assert not (config.suppress_errors and config.fail_on_recompile_limit_hit), (
-        "Dynamo configs suppress_error and fail_on_recompile_limit_hit can not both be active at the same time."
-    )
+    assert not (
+        config.suppress_errors and config.fail_on_recompile_limit_hit
+    ), "Dynamo configs suppress_error and fail_on_recompile_limit_hit can not both be active at the same time."
 
 
 def optimize(*args, **kwargs):
@@ -998,9 +998,9 @@ def optimize(*args, **kwargs):
         if ca_kwargs_override:
             # NOTE: The process of translating other `torch.compile` kwargs to `torch._dynamo.optimize` kwargs
             # is more complicated, we will add it in the future when needed.
-            assert set(ca_kwargs_override.keys()) == {"fullgraph"}, (
-                f"Only `fullgraph` kwarg override is supported for now, but got {ca_kwargs_override.keys()}"
-            )
+            assert set(ca_kwargs_override.keys()) == {
+                "fullgraph"
+            }, f"Only `fullgraph` kwarg override is supported for now, but got {ca_kwargs_override.keys()}"
             kwargs["nopython"] = ca_kwargs_override["fullgraph"]
         return optimize(*args, **kwargs)
 
@@ -1519,9 +1519,9 @@ def rewrite_signature(
         # as part of the function signature.
         for kwonly_arg in fullargspec.kwonlyargs:
             kwonlydefaults = fullargspec.kwonlydefaults or {}
-            assert kwonly_arg in kwargs or kwonly_arg in kwonlydefaults, (
-                f"Missing keyword only argument {kwonly_arg}"
-            )
+            assert (
+                kwonly_arg in kwargs or kwonly_arg in kwonlydefaults
+            ), f"Missing keyword only argument {kwonly_arg}"
 
         return input_strs
 
@@ -1631,9 +1631,9 @@ def export(
         check_if_dynamo_supported()
         torch._C._log_api_usage_once("torch._dynamo.export")
         if decomposition_table is not None:
-            assert aten_graph, (
-                "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
-            )
+            assert (
+                aten_graph
+            ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
         if pre_dispatch:
             assert aten_graph, "pre_dispatch=True can only be used when aten_graph=True"
         f = innermost_fn(f)
@@ -1648,9 +1648,9 @@ def export(
 
         def guard_export_print(guards: _guards.GuardsSet):
             nonlocal out_guards
-            assert out_guards is None, (
-                "whole graph export entails exactly one guard export"
-            )
+            assert (
+                out_guards is None
+            ), "whole graph export entails exactly one guard export"
             out_guards = guards
 
         example_inputs = []
@@ -1659,9 +1659,9 @@ def export(
             gm: torch.fx.GraphModule, inner_example_inputs
         ):
             nonlocal graph
-            assert graph is None, (
-                "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
-            )
+            assert (
+                graph is None
+            ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
             graph = gm
 
             nonlocal fake_mode, example_inputs
@@ -1833,9 +1833,9 @@ def export(
             raise constraint_violation_error
 
         if graph is None:
-            assert same_signature, (
-                "Failed to produce a graph during tracing as no tensor operations were found and same_signature is False."
-            )
+            assert (
+                same_signature
+            ), "Failed to produce a graph during tracing as no tensor operations were found and same_signature is False."
             # If the module does not contain any tensor computation, we would create a graph with inputs and outputs.
             # To be consitant with the graph traced by dynano, `graph` will have only tensor inputs as placeholders
             # and tensor outputs as output nodes. non-tensor inputs and outputs will be added when rewriting signature.
