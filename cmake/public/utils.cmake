@@ -183,7 +183,7 @@ macro(caffe2_interface_library SRC DST)
     # use the populated INTERFACE_LINK_LIBRARIES property, because if one of the
     # dependent library is not a target, cmake creates a $<LINK_ONLY:src> wrapper
     # and then one is not able to find target "src". For more discussions, check
-    #   https://gitlab.kitware.com/cmake/cmake/issues/15415
+    #   https://cmake.org/Bug/print_bug_page.php?bug_id=15415
     #   https://cmake.org/pipermail/cmake-developers/2013-May/019019.html
     # Specifically the following quote
     #
@@ -324,14 +324,6 @@ endmacro()
 #
 macro(torch_cuda_get_nvcc_gencode_flag store_var)
   # setting nvcc arch flags
-  if((NOT DEFINED TORCH_CUDA_ARCH_LIST) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
-    message(WARNING
-        "In the future we will require one to explicitly pass "
-        "TORCH_CUDA_ARCH_LIST to cmake instead of implicitly setting it as an "
-        "env variable. This will become a FATAL_ERROR in future version of "
-        "pytorch.")
-    set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
-  endif()
   if(DEFINED CUDA_ARCH_NAME)
     message(WARNING
         "CUDA_ARCH_NAME is no longer used. Use TORCH_CUDA_ARCH_LIST instead. "
@@ -361,6 +353,8 @@ function(torch_compile_options libname)
       set(MSVC_DEBINFO_OPTION "/Zi")
     endif()
 
+    set(MSVC_APPEND_OPTION)
+
     if(${MSVC_TOOLSET_VERSION} GREATER_EQUAL 142)
       # Add /permissive- flag for conformance mode to the compiler.
       # This will force more strict check to the code standard.
@@ -368,8 +362,16 @@ function(torch_compile_options libname)
       #    By default, the /permissive- option is set in new projects created by Visual Studio 2017 version 15.5 and later versions.
       #    We set the /permissive- flag from VS 2019 (MSVC_TOOLSET_VERSION 142) to avoid compiling issues for old toolkit.
       # 2. For MSVC VERSION: https://cmake.org/cmake/help/latest/variable/MSVC_TOOLSET_VERSION.html
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /permissive-" PARENT_SCOPE)
+      target_compile_options(${libname} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/permissive->)
     endif()
+
+    if(${MSVC_TOOLSET_VERSION} GREATER_EQUAL 143)
+      # Add /d2implyavx512upperregs- to disable compiler over-aggressive optimization, which caused involeved AVX512 register on AVX2 machine.
+      # Reference: https://github.com/pytorch/pytorch/issues/145702#issuecomment-2874029459
+      target_compile_options(${libname} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/d2implyavx512upperregs->)
+    endif()
+
+
 
     target_compile_options(${libname} PUBLIC
       $<$<COMPILE_LANGUAGE:CXX>:
@@ -383,6 +385,7 @@ function(torch_compile_options libname)
       -Wall
       -Wextra
       -Wdeprecated
+      -Wunused
       -Wno-unused-parameter
       -Wno-missing-field-initializers
       -Wno-array-bounds
@@ -390,13 +393,11 @@ function(torch_compile_options libname)
       -Wno-strict-overflow
       -Wno-strict-aliasing
       )
-    list(APPEND private_compile_options -Wunused-function)
-    list(APPEND private_compile_options -Wunused-variable)
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      list(APPEND private_compile_options -Wunused-but-set-variable -Wredundant-move)
+      list(APPEND private_compile_options -Wredundant-move)
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-      list(APPEND private_compile_options -Wunused-private-field -Wextra-semi -Wno-error=extra-semi -Wmove)
+      list(APPEND private_compile_options -Wextra-semi -Wno-error=extra-semi -Wmove)
     else()
       list(APPEND private_compile_options
         # Considered to be flaky.  See the discussion at
@@ -409,9 +410,9 @@ function(torch_compile_options libname)
         -Werror
         -Werror=inconsistent-missing-override
         -Werror=inconsistent-missing-destructor-override
-        -Werror=unused-function
-        -Werror=unused-variable
         -Werror=pedantic
+        -Werror=unused
+        -Wno-error=unused-parameter
       )
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         list(APPEND private_compile_options -Werror=unused-but-set-variable)

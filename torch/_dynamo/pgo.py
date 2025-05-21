@@ -15,10 +15,12 @@ import base64
 import copy
 import dataclasses
 import enum
+import functools
 import logging
 import os
 import pickle
 import re
+import zlib
 from collections import defaultdict
 from typing import Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Self
@@ -35,7 +37,6 @@ from torch._dynamo.utils import (
 )
 from torch._environment import is_fbcode
 from torch._logging._internal import trace_structured_artifact
-from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 
 
 if TYPE_CHECKING:
@@ -104,15 +105,57 @@ LOCK_TIMEOUT = 10
 # across attempts.  No need to have one mechanism to do everything.
 
 
+@functools.cache
+def _hash_containing_file(filepath: str) -> str:
+    # if the file does not exists we consider filepath to be the hash.
+    if not os.path.exists(filepath):
+        return filepath
+
+    with open(filepath, "rb") as file:
+        content = file.read()
+        crc32_value = zlib.crc32(content)
+        hash = format(crc32_value & 0xFFFFFFFF, "08x")
+        return hash
+
+
 @dataclasses.dataclass(frozen=True)
 class CodeId:
     filename: str
     firstlineno: int
     name: str
+    # When a job restart, the code can be copied to a different path than the previous attempt. In that case
+    # self.filename will have a different value,  we do not want to consider those differences. Instead we
+    # hash the content of the file and use it as an identifier of the file.
+    #
+    # self.filename is kept in the object to give readable information/pointer to the actual file, in a local
+    # code state it will refer to the first seen file path.
+    file_hash: str
+
+    # Exclude file name.
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, CodeId):
+            return False
+        return (
+            self.file_hash == other.file_hash
+            and self.firstlineno == other.firstlineno
+            and self.name == other.name
+        )
+
+    # Ensure if two CodeIds are the same, then they have the same hash by excluding filename.
+    def __hash__(self) -> int:
+        return hash((self.file_hash, self.name, self.firstlineno))
+
+    def __str__(self) -> str:
+        return f"hash({self.file_hash}){self.filename}:{self.firstlineno}:{self.name}"
 
     @staticmethod
     def make(code: types.CodeType) -> CodeId:
-        return CodeId(code.co_filename, code.co_firstlineno, code.co_name)
+        return CodeId(
+            code.co_filename,
+            code.co_firstlineno,
+            code.co_name,
+            _hash_containing_file(code.co_filename),
+        )
 
 
 @dataclasses.dataclass
@@ -493,6 +536,20 @@ def get_cache_key() -> Optional[str]:
     return None
 
 
+def rewrite_cache_key_for_mega_cache(original_key: str) -> str:
+    """
+    The PGO cache artifact key for a MAST job contains the job name and the version.
+    When we want to use the cache artifact on a different MAST job, we need to
+    update the key to use the new MAST job's name and version.
+    """
+    if not original_key.startswith("mast:"):
+        # if original_key is overriden, then dont change it
+        return original_key
+    if (new_key := get_cache_key()) is not None:
+        return new_key
+    return original_key
+
+
 # This solely controls local PGO
 def code_state_path(cache_key: str) -> Optional[str]:
     if not torch._dynamo.config.automatic_dynamic_local_pgo:
@@ -544,7 +601,7 @@ def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
 
 def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
     return "\n".join(
-        f"{k.filename}:{k.firstlineno}:{k.name}:\n"
+        f"{k}:\n"
         + "\n".join(
             f"  {src}: {fs.render()}" for src, fs in v.automatic_dynamic.items()
         )
@@ -576,6 +633,8 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
         set_feature_use("pgo", True)
         _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
         return _CODE_STATE
+
+    from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 
     # Attempt local
     path = code_state_path(cache_key)
@@ -697,6 +756,8 @@ def put_local_code_state(cache_key: str) -> None:
         assert _CODE_STATE is not None
 
         pickled_code = pickle.dumps(_CODE_STATE)
+
+        from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 
         CacheArtifactManager.record_artifact(
             CacheArtifactType.PGO, cache_key, pickled_code

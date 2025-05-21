@@ -110,6 +110,20 @@ bool PrefixStore::hasExtendedApi() const {
   return store_->hasExtendedApi();
 }
 
+void PrefixStore::queuePush(
+    const std::string& key,
+    const std::vector<uint8_t>& value) {
+  store_->queuePush(joinKey(key), value);
+}
+
+std::vector<uint8_t> PrefixStore::queuePop(const std::string& key, bool block) {
+  return store_->queuePop(joinKey(key), block);
+}
+
+int64_t PrefixStore::queueLen(const std::string& key) {
+  return store_->queueLen(joinKey(key));
+}
+
 c10::intrusive_ptr<Store> PrefixStore::getUnderlyingStore() {
   return store_;
 }
