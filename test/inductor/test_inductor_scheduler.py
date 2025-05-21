@@ -83,6 +83,7 @@ class TestScheduler(TestCase):
             self.assertEqual(any(m[1] for m in metrics.node_runtimes), False)
             self.assertEqual(any(m[1] for m in metrics.nodes_num_elem), False)
             metrics.reset()
+        torch._logging.set_logs()
 
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
@@ -106,15 +107,14 @@ class TestScheduler(TestCase):
             enba, enr = met
 
             comp = torch.compile(op)
-            # next two lines are required, otherwise the flops will be cached from pervious runs of this function.
             torch._dynamo.reset()
             with fresh_inductor_cache():
-                # actually run to set the counters
                 comp(*example_inputs, **kwargs)
             self.assertEqual(enba, metrics.num_bytes_accessed)
             nonzero_node_runtimes = sum(1 for x in metrics.node_runtimes if x[1] != 0)
             self.assertEqual(enr, nonzero_node_runtimes)
             metrics.reset()
+        torch._logging.set_logs()
 
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
@@ -167,6 +167,7 @@ class TestScheduler(TestCase):
             if op != torch.add:
                 self.assertNotEqual(reference_flops, 0, msg=f"op = {op} is 0 flops")
             counters["inductor"]["flop_count"] = 0
+        torch._logging.set_logs()
 
 
 instantiate_device_type_tests(TestScheduler, globals())

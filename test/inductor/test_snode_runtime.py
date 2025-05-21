@@ -40,6 +40,7 @@ def calculate_runtime(f, *args) -> float:
     for pair in metrics.node_runtimes:
         ret += pair[1]
 
+    torch._logging.set_logs()
     return ret
 
 

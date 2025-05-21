@@ -3103,6 +3103,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         torch._inductor.metrics.generated_kernel_count = 0
         loaded_model(inp)
         self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
+        torch._logging.set_logs()
 
     def test_save_and_load_all_backends(self):
         torch._logging.set_logs(inductor_metrics=True)
@@ -3128,6 +3129,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 self.assertEqual(opt_success, loaded_success)
             except torch._dynamo.exc.BackendCompilerFailed:
                 pass
+
+    torch._logging.set_logs()
 
     def test_monkeypatching_forward(self):
         class FakeModule(torch.nn.Module):
