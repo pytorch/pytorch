@@ -30,7 +30,7 @@ from typing import Optional, TYPE_CHECKING
 
 from torch._subclasses.fake_tensor import is_fake
 
-from .. import polyfills, variables
+from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented_v2
 from ..guards import GuardBuilder, install_guard
@@ -202,9 +202,9 @@ class ConstDictVariable(VariableTracker):
 
         def __eq__(self, other: "ConstDictVariable._HashableTracker") -> bool:
             Hashable = ConstDictVariable._HashableTracker
-            assert isinstance(other, Hashable) or ConstantVariable.is_literal(other), (
-                type(other)
-            )
+            assert isinstance(other, Hashable) or ConstantVariable.is_literal(
+                other
+            ), type(other)
             if isinstance(other, Hashable):
                 return Hashable._eq_impl(self.underlying_value, other.underlying_value)
 
@@ -348,10 +348,13 @@ class ConstDictVariable(VariableTracker):
         if key not in self.items:
             msg = f"Dictionary key {arg.value} not found during tracing"
             unimplemented_v2(
-                gb_type="dict_key_error",
+                gb_type="key not found in dict",
                 context=f"Key {arg.value}",
                 explanation=msg,
-                hints=["Check if the key exists in the dictionary before accessing it"],
+                hints=[
+                    "Check if the key exists in the dictionary before accessing it.",
+                    *graph_break_hints.USER_ERROR,
+                ],
             )
         return self.items[key]
 
@@ -600,7 +603,7 @@ class ConstDictVariable(VariableTracker):
 
         msg = f"hasattr on {self.user_cls} is not supported"
         unimplemented_v2(
-            gb_type="unsupported_hasattr",
+            gb_type="unsupported hasattr operation",
             context=f"Class {self.user_cls}",
             explanation=msg,
             hints=["Consider using a regular dictionary instead"],
@@ -625,14 +628,16 @@ class MappingProxyVariable(VariableTracker):
         # load types.MappingProxyType
         if self.source:
             msg = (
-                f"MappingProxyVariable {self.source} is not supported because "
-                "can't reconstruct a mapping proxy variable as it will be lost"
+                f"Preexisting MappingProxyVariable (source: {self.source}) cannot be reconstructed"
+                "because the connection to the original dict will be lost."
             )
             unimplemented_v2(
-                gb_type="mapping_proxy_reconstruction",
+                gb_type="mapping proxy cannot be reconstructed",
                 context=f"Source: {self.source}",
                 explanation=msg,
-                hints=["Create a new mapping proxy instead of using an existing one"],
+                hints=[
+                    "Use a mapping proxy constructed in the same `torch.compile` region."
+                ],
             )
         codegen.add_push_null(
             lambda: codegen.extend_output(
@@ -662,7 +667,7 @@ class MappingProxyVariable(VariableTracker):
                     are trying to access a proxy object."""
 
             unimplemented_v2(
-                gb_type="mapping_proxy_with_dict_mutation",
+                gb_type="mapping proxy affected by dictionary mutation",
                 context=f"Source: {self.source}, Dict mutation detected",
                 explanation=msg,
                 hints=[
