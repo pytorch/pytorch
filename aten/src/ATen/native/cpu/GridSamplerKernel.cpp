@@ -694,7 +694,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
     gx = gx * gx_mult;
     gy = gy * gy_mult;
 
-    constexpr int64_t step = Vec::size();
+    const int64_t step = Vec::size();
     auto interleaved_gGrid = interleave2(gx, gy);
     auto gGrid_ptr = gGrid_slice.data() + offset * 2;
     std::get<0>(interleaved_gGrid).store(gGrid_ptr,
@@ -1010,7 +1010,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
     gx = gx * gx_mult;
     gy = gy * gy_mult;
 
-    constexpr int64_t step = Vec::size();
+    const int64_t step = Vec::size();
     auto interleaved_gGrid = interleave2(gx, gy);
     auto gGrid_ptr = gGrid_slice.data() + offset * 2;
     std::get<0>(interleaved_gGrid).store(gGrid_ptr,
@@ -1041,7 +1041,7 @@ static inline void grid_sample_2d_grid_slice_iterator(
 
   using Vec = Vectorized<scalar_t>;
   using iVec = Vectorized<int_same_size_t<scalar_t>>;
-  constexpr int64_t step = Vec::size();
+  const int64_t step = Vec::size();
 
   // Loop over each output pixel in grid.
   // We consider the following three cases (after slicing out the batch

@@ -37,8 +37,8 @@ public:
 
   using value_type = float;
   using size_type = int;
-  static inline constexpr size_type size() {
-    return SVE_FLOAT_VEC_SIZE;
+  static inline size_type size() {
+    return svcntw();
   }
   inline Vectorized() {}
   inline Vectorized(const float val) {
@@ -84,8 +84,7 @@ public:
     return result;
   }
 
-  template <uint64_t mask>
-  static inline Vectorized<float> blend(const Vectorized<float>& a, const Vectorized<float>& b) {
+  static inline Vectorized<float> blend(const Vectorized<float>& a, const Vectorized<float>& b, const uint64_t mask) {
     // Build an array of flags: each element is 1 if the corresponding bit in 'mask' is set, 0 otherwise.
     __at_align__ int32_t flag_arr[size()];
     for (int i = 0; i < size(); i++) {

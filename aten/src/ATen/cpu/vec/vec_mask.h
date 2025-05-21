@@ -2,6 +2,8 @@
 
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec_n.h>
+
+#include <cassert>
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
 
@@ -38,9 +40,9 @@ struct VecMaskLoad {
   static inline VectorizedN<data_t, data_n> apply(
       const data_t* ptr,
       const VecMask<mask_t, mask_n>& vec_mask) {
-    constexpr typename VecMask<mask_t, mask_n>::size_type size =
+    const typename VecMask<mask_t, mask_n>::size_type size =
         VecMask<mask_t, mask_n>::size();
-    static_assert(VectorizedN<data_t, data_n>::size() >= size);
+    assert((VectorizedN<data_t, data_n>::size() >= size));
     __at_align__ data_t data[size];
     __at_align__ mask_t mask[size];
     auto mask_ = VectorizedN<mask_t, mask_n>(vec_mask);
@@ -134,7 +136,7 @@ class VecMask {
   template <typename U, int L>
   static VecMask<T, N> from(const VectorizedN<U, L>& b_vec) {
     __at_align__ U b_buf[size()];
-    if constexpr (size() >= VectorizedN<U, L>::size()) {
+    if (size() >= VectorizedN<U, L>::size()) {
       b_vec.store(b_buf);
       for (int i = VectorizedN<U, L>::size(); i < size(); i++) {
         b_buf[i] = static_cast<U>(0);
@@ -235,16 +237,18 @@ class VecMask {
   template <
       typename U,
       int L,
-      std::enable_if_t<L >= 2 && VectorizedN<U, L>::size() >= size(), int> = 0>
+      std::enable_if_t<L >= 2, int> = 0>
   VectorizedN<U, L> loadu(const U* ptr) const {
+    assert((VectorizedN<U, L>::size() >= size()));
     return VecMaskLoad<U, L, T, N>::apply(ptr, *this);
   }
 
   template <
       typename U,
       int L,
-      std::enable_if_t<L == 1 && Vectorized<U>::size() >= size(), int> = 0>
+      std::enable_if_t<L == 1, int> = 0>
   Vectorized<U> loadu(const U* ptr) const {
+    assert((Vectorized<U>::size() >= size()));
     return VecMaskLoad<U, L, T, N>::apply(ptr, *this);
   }
 };

@@ -134,7 +134,7 @@ namespace {
     TYPED_TEST(Memory, UnAlignedLoadStore) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
-        constexpr size_t b_size = vec::size() * sizeof(VT);
+        const size_t b_size = vec::size() * sizeof(VT);
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN unsigned char ref_storage[128 * b_size];
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
@@ -164,7 +164,7 @@ namespace {
         for (size_t offset = 0; offset < b_size; offset += 1) {
             unsigned char* p1 = ref_storage + offset;
             unsigned char* p2 = storage + offset;
-            for (; p1 + b_size <= std::end(ref_storage); p1 += b_size, p2 += b_size) {
+            for (; p1 + b_size <= &ref_storage[128 * b_size]; p1 += b_size, p2 += b_size) {
                 vec v = vec::loadu(p1);
                 v.store(p2);
             }
@@ -653,7 +653,7 @@ namespace {
     TYPED_TEST(Interleave, Interleave) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
-        constexpr auto N = vec::size() * 2LL;
+        const auto N = vec::size() * 2LL;
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT vals[N];
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
@@ -663,7 +663,7 @@ namespace {
         for (VT& v : vals) {
             v = generator.get();
         }
-        copy_interleave(vals, interleaved);
+        copy_interleave<VT>(vals, interleaved, N);
         auto a = vec::loadu(vals);
         auto b = vec::loadu(vals + vec::size());
         auto cc = interleave2(a, b);
@@ -673,7 +673,7 @@ namespace {
     TYPED_TEST(Interleave, DeInterleave) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
-        constexpr auto N = vec::size() * 2LL;
+        const auto N = vec::size() * 2LL;
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT vals[N];
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
@@ -683,7 +683,7 @@ namespace {
         for (VT& v : vals) {
             v = generator.get();
         }
-        copy_interleave(vals, interleaved);
+        copy_interleave<VT>(vals, interleaved, N);
         // test interleaved with vals this time
         auto a = vec::loadu(interleaved);
         auto b = vec::loadu(interleaved + vec::size());
@@ -1017,78 +1017,70 @@ namespace {
             RESOLVE_OVERLOAD(filter_fmadd));
     }
 #endif
-    template<typename vec, typename VT, int64_t mask>
-    typename std::enable_if_t<(mask < 0 || mask> 255), void>
+    template<typename vec, typename VT>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()])
-    {
+    void test_blend(VT * expected_val, VT * a, VT * b, int64_t mask) {
+        if (mask >= 0 && mask <= 255) {
+          // generate expected_val
+          int64_t m = mask;
+          for (int64_t i = 0; i < vec::size(); i++) {
+              expected_val[i] = (m & 0x01) ? b[i] : a[i];
+              m = m >> 1;
+          }
+          // test with blend
+          auto vec_a = vec::loadu(a);
+          auto vec_b = vec::loadu(b);
+          auto expected = vec::loadu(expected_val);
+          auto actual = vec::blend(vec_a, vec_b, mask);
+          auto mask_str = std::string("\nblend mask: ") + std::to_string(mask);
+          if (AssertVectorized<vec>(std::string(NAME_INFO(test_blend)) + mask_str, expected, actual).check()) return;
+          test_blend<vec, VT>(expected_val, a, b, mask - 1);
+        }
     }
-    template<typename vec, typename VT, int64_t mask>
-    typename std::enable_if_t<(mask >= 0 && mask <= 255), void>
+    template<typename vec, typename VT>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()]) {
-        // generate expected_val
-        int64_t m = mask;
-        for (int64_t i = 0; i < vec::size(); i++) {
-            expected_val[i] = (m & 0x01) ? b[i] : a[i];
-            m = m >> 1;
-        }
-        // test with blend
-        auto vec_a = vec::loadu(a);
-        auto vec_b = vec::loadu(b);
-        auto expected = vec::loadu(expected_val);
-        auto actual = vec::template blend<mask>(vec_a, vec_b);
-        auto mask_str = std::string("\nblend mask: ") + std::to_string(mask);
-        if (AssertVectorized<vec>(std::string(NAME_INFO(test_blend)) + mask_str, expected, actual).check()) return;
-        test_blend<vec, VT, mask - 1>(expected_val, a, b);
+    bool test_blendv(VT * expected_val, VT * a, VT * b, VT * mask, int64_t idx, size_t N) {
+        if ((size_t) idx == N) {
+          using bit_rep = BitType<VT>;
+          // generate expected_val
+          for (int64_t i = 0; i < vec::size(); i++) {
+              bit_rep hex_mask = 0;
+              hex_mask=c10::bit_cast<bit_rep>(mask[i]);
+              expected_val[i] = (hex_mask & 0x01) ? b[i] : a[i];
+          }
+          // test with blendv
+          auto vec_a = vec::loadu(a);
+          auto vec_b = vec::loadu(b);
+          auto vec_m = vec::loadu(mask);
+          auto expected = vec::loadu(expected_val);
+          auto actual = vec::blendv(vec_a, vec_b, vec_m);
+          auto mask_str = std::string("\nblendv mask: ");
+          for (int64_t i = 0; i < vec::size(); i++) {
+              mask_str += std::to_string(mask[i]) + " ";
+          }
+          if (AssertVectorized<vec>(std::string(NAME_INFO(test_blendv)) + mask_str, expected, actual).check()) {
+              return false;
+          }
+          return true;
+        } else {
+          // shuffle mask and do blendv test
+          VT m = mask[idx];
+          if (!test_blendv<vec, VT>(expected_val, a, b, mask, idx+1, N)) return false;
+          if (m != (VT)0) {
+            mask[idx] = (VT)0;
+          }
+          else {
+            uint64_t hex_mask = 0xFFFFFFFFFFFFFFFF;
+            std::memcpy(&mask[idx], &hex_mask, sizeof(VT));
+          }
+          if (!test_blendv<vec, VT>(expected_val, a, b, mask, idx+1, N)) return false;
+          mask[idx] = m;
+          return true;
+        }   
     }
-    template<typename vec, typename VT, int64_t idx, int64_t N>
-    std::enable_if_t<(!is_complex<VT>::value && idx == N), bool>
+    template<typename T>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    test_blendv(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], VT mask[vec::size()]) {
-        using bit_rep = BitType<VT>;
-        // generate expected_val
-        for (int64_t i = 0; i < vec::size(); i++) {
-            bit_rep hex_mask = 0;
-            hex_mask=c10::bit_cast<bit_rep>(mask[i]);
-            expected_val[i] = (hex_mask & 0x01) ? b[i] : a[i];
-        }
-        // test with blendv
-        auto vec_a = vec::loadu(a);
-        auto vec_b = vec::loadu(b);
-        auto vec_m = vec::loadu(mask);
-        auto expected = vec::loadu(expected_val);
-        auto actual = vec::blendv(vec_a, vec_b, vec_m);
-        auto mask_str = std::string("\nblendv mask: ");
-        for (int64_t i = 0; i < vec::size(); i++) {
-            mask_str += std::to_string(mask[i]) + " ";
-        }
-        if (AssertVectorized<vec>(std::string(NAME_INFO(test_blendv)) + mask_str, expected, actual).check()) {
-            return false;
-        }
-        return true;
-    }
-    template<typename vec, typename VT, int64_t idx, int64_t N>
-    std::enable_if_t<(!is_complex<VT>::value && idx != N), bool>
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    test_blendv(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], VT mask[vec::size()]) {
-        // shuffle mask and do blendv test
-        VT m = mask[idx];
-        if (!test_blendv<vec, VT, idx+1, N>(expected_val, a, b, mask)) return false;
-        if (m != (VT)0) {
-          mask[idx] = (VT)0;
-        }
-        else {
-          uint64_t hex_mask = 0xFFFFFFFFFFFFFFFF;
-          std::memcpy(&mask[idx], &hex_mask, sizeof(VT));
-        }
-        if (!test_blendv<vec, VT, idx+1, N>(expected_val, a, b, mask)) return false;
-        mask[idx] = m;
-        return true;
-    }
-    template<typename T, int N>
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    void blend_init(T(&a)[N], T(&b)[N]) {
+    void blend_init(T * a, T * b, int N) {
         a[0] = (T)1.0;
         b[0] = a[0] + (T)N;
         for (const auto i : c10::irange(1, N)) {
@@ -1107,8 +1099,8 @@ namespace {
         CACHE_ALIGN VT mask[vec::size()] = {0};
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT expected_val[vec::size()];
-        blend_init(a, b);
-        test_blendv<vec, VT, 0, vec::size()>(expected_val, a, b, mask);
+        blend_init(a, b, vec::size());
+        test_blendv<vec, VT>(expected_val, a, b, mask, 0, vec::size());
     }
     TYPED_TEST(BitwiseFloatsAdditional2, Blend) {
         using vec = TypeParam;
@@ -1119,9 +1111,9 @@ namespace {
         CACHE_ALIGN VT b[vec::size()];
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT expected_val[vec::size()];
-        blend_init(a, b);
-        constexpr int64_t power_sets = 1LL << (vec::size());
-        test_blend<vec, VT, power_sets - 1>(expected_val, a, b);
+        blend_init(a, b, vec::size());
+        const int64_t power_sets = 1LL << (vec::size());
+        test_blend<vec, VT>(expected_val, a, b, power_sets - 1);
     }
     template<typename vec, typename VT>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
@@ -1152,7 +1144,7 @@ namespace {
         CACHE_ALIGN VT b[vec::size()];
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT expected_val[vec::size()];
-        blend_init(a, b);
+        blend_init(a, b, vec::size());
         test_set<vec, VT>(expected_val, a, b, vec::size());
     }
     template<typename T>
@@ -1218,7 +1210,7 @@ namespace {
         // NOLINTNEXTLINE(bugprone-signed-char-misuse)
         constexpr int min_val = std::numeric_limits<underlying>::min();
         constexpr int max_val = std::numeric_limits<underlying>::max();
-        constexpr int el_count = vfloat::size();
+        const int el_count = vfloat::size();
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN float unit_float_vec[el_count];
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
@@ -1566,7 +1558,7 @@ namespace {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         constexpr auto R = 2LL; // residual
-        constexpr auto N = vec::size() + R;
+        const auto N = vec::size() + R;
         CACHE_ALIGN VT x1[N];
         CACHE_ALIGN VT x2[N];
         CACHE_ALIGN VT x3[N];
@@ -2213,13 +2205,13 @@ namespace {
     TYPED_TEST(VecMaskTests, MaskedLoad) {
       using vec = TypeParam;
       using src_t = ValueType<TypeParam>;
-      constexpr auto size = vec::size();
+      const auto size = vec::size();
 
     #define TEST_MASK_LOAD(dst_t, mask_t, mask_n)                           \
       do {                                                                  \
-        constexpr int dst_size = at::vec::Vectorized<dst_t>::size();        \
-        constexpr int dst_n = mask_n * size / dst_size;                     \
-        if constexpr(dst_n * dst_size >= mask_n * size) {                   \
+        int dst_size = at::vec::Vectorized<dst_t>::size();        \
+        int dst_n = mask_n * size / dst_size;                     \
+        if (dst_n * dst_size >= mask_n * size) {                   \
             CACHE_ALIGN dst_t x[mask_n * size];                             \
             CACHE_ALIGN dst_t y[mask_n * size];                             \
             CACHE_ALIGN dst_t ref[mask_n * size];                           \
@@ -2230,9 +2222,35 @@ namespace {
               x[i] = generator.get();                                       \
             }                                                               \
             auto vec_mask = generate_vec_mask<mask_t, mask_n>(seed);        \
-            constexpr int rnd_n = (mask_n * size + dst_size - 1) / dst_size;\
-            auto x_vec = vec_mask.template loadu<dst_t, rnd_n>(x);          \
-            x_vec.store(y);                                                 \
+            int rnd_n = (mask_n * size + dst_size - 1) / dst_size;\
+            switch (rnd_n) { \
+              case 1: \
+              { \
+                auto x_vec = vec_mask.template loadu<dst_t, 1>(x);          \
+                x_vec.store(y);                                                 \
+                break; \
+              } \
+              case 2: \
+              { \
+                auto x_vec = vec_mask.template loadu<dst_t, 2>(x);          \
+                x_vec.store(y);                                                 \
+                break; \
+              } \
+              case 3: \
+              { \
+                auto x_vec = vec_mask.template loadu<dst_t, 3>(x);          \
+                x_vec.store(y);                                                 \
+                break; \
+              } \
+              case 4: \
+              { \
+                auto x_vec = vec_mask.template loadu<dst_t, 4>(x);          \
+                x_vec.store(y);                                                 \
+                break; \
+              } \
+              default: \
+                throw std::out_of_range("Unexpected rnd_n call to vec_mask"); \
+            } \
             for (const auto i : c10::irange(mask_n * size)) {               \
                 if (vec_mask.is_masked(i)) {                                \
                     ref[i] = x[i];                                          \

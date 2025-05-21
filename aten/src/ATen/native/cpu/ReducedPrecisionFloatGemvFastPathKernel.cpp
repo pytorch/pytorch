@@ -22,8 +22,8 @@ inline namespace CPU_CAPABILITY {
 
 constexpr auto kF32RegisterPairsPerIteration = 4;
 constexpr auto kF32RegistersPerIteration = kF32RegisterPairsPerIteration * 2;
-constexpr auto kF32ElementsPerRegister = vec::Vectorized<float>::size();
-constexpr auto kF32ElementsPerIteration = kF32RegistersPerIteration * kF32ElementsPerRegister;
+const auto kF32ElementsPerRegister = vec::Vectorized<float>::size();
+const auto kF32ElementsPerIteration = kF32RegistersPerIteration * kF32ElementsPerRegister;
 
 namespace {
 template <typename T>

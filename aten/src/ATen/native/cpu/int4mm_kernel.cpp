@@ -625,7 +625,7 @@ void weight_to_int4pack_kernel(
   int K = weight.size(1);
 
   // 64 for avx512 and 32 for avx2/non-vectorized
-  constexpr int BLOCK_N = vec::Vectorized<float>::size() * 4;
+  const int BLOCK_N = vec::Vectorized<float>::size() * 4;
   const int NB =  (N + BLOCK_N - 1) / BLOCK_N;
 
   // parallel on NB blocks
@@ -713,7 +713,7 @@ void int4pack_mm_kernel_(
 
   constexpr int BLOCK_M = 4;
   // 64 for avx512 and 32 for avx2/non-vectorized
-  constexpr int BLOCK_N = vec::Vectorized<float>::size() * 4;
+  const int BLOCK_N = vec::Vectorized<float>::size() * 4;
   // 32, 64, 128, 256
   const int BLOCK_K = qGroupSize;
 

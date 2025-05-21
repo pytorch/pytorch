@@ -28,8 +28,8 @@ inline void _update(at::opmath_type<scalar_t>* out_ptr, int64_t e, int64_t c, co
   using opmath_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<scalar_t>;
   using aVec = VecType<scalar_t>;
-  constexpr int64_t kVecSize = Vec::size();
-  constexpr int64_t kVLEN = kVecSize * 4;
+  const int64_t kVecSize = Vec::size();
+  const int64_t kVLEN = kVecSize * 4;
 
   int64_t k = 0;
   aVec val_vec = aVec((opmath_t)val);
