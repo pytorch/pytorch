@@ -12930,6 +12930,8 @@ op_db: list[OpInfo] = [
                         # Tests don't account for complex's type promotion semantics
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out', device_type='mps'),
+                        DecorateInfo(
+                            unittest.skip("Skipped!"), 'TestCOW', 'test_cow_input_with_grad_not_mutated', device_type='mps'),
                         DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),)),
     BinaryUfuncInfo('copysign',
                     sample_inputs_func=sample_inputs_copysign,
