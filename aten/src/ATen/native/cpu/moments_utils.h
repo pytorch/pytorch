@@ -3,6 +3,7 @@
 #include <array>
 #include <cstring>
 #include <utility>
+#include <iostream>
 
 #include <ATen/Parallel.h>
 #include <ATen/OpMathType.h>
@@ -10,193 +11,353 @@
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
+#include <c10/util/llvmMathExtras.h>
 
 namespace at::native {
 inline namespace CPU_CAPABILITY {
 
 template<typename T> using opmath_t = at::opmath_type<T>;
 
+#ifdef __clang__
+    #define UNROLL_LOOP_FULL       _Pragma("clang loop unroll(full)")
+#elif defined(__GNUC__)
+    #define UNROLL_LOOP_FULL       _Pragma("GCC unroll 128")
+#elif defined(_MSC_VER)
+    #define UNROLL_LOOP_FULL       __pragma(loop(hint_unroll(128)))
+#elif defined(__INTEL_COMPILER) || defined(__ICC)
+    #define UNROLL_LOOP_FULL       _Pragma("unroll")
+#else
+    #define UNROLL_LOOP_FULL
+#endif
+
 constexpr int64_t kChunkSize = 16;
 
 template <typename T>
-void AddMoments(
-    int64_t m0_add,
-    const T& m1_add,
-    const T& m2_add,
-    int64_t& m0,
-    T& m1,
-    T& m2) {
-  const int64_t n = m0 + m0_add;
-  const T c = n == 0 ? static_cast<T>(0) : static_cast<T>(m0_add) / static_cast<T>(n);
-  const T delta = m1_add - m1;
-  m1 += c * delta;
-  m2 += m2_add + delta * delta * c * static_cast<T>(m0);
-  m0 = n;
-}
+using InVec = vec::Vectorized<T>;
 
 template <typename T>
-C10_ALWAYS_INLINE void AddMomentsVec(
-    int64_t m0_add,
-    const vec::Vectorized<T>& m1_add,
-    const vec::Vectorized<T>& m2_add,
-    int64_t& m0,
-    vec::Vectorized<T>& m1,
-    vec::Vectorized<T>& m2) {
-  using Vec = vec::Vectorized<T>;
-  const int64_t n = m0 + m0_add;
-  const T c = n == 0 ? static_cast<T>(0) : static_cast<T>(m0_add) / static_cast<T>(n);
-  const Vec c_vec(c);
-  const Vec delta = m1_add - m1;
-  m1 += c_vec * delta;
-  m2 += m2_add + delta * delta * c_vec * Vec(static_cast<T>(m0));
-  m0 = n;
-}
+using OpVec = vec::Vectorized<opmath_t<T>>;
 
-template <typename T>
-inline std::enable_if_t<std::is_same_v<T, opmath_t<T>>, void>
-UpdateMomentsVec(
-    int64_t m0,
-    const T* X_ptr,
-    const std::array<vec::Vectorized<opmath_t<T>>, kChunkSize>& c_vecs,
-    int64_t& m0_stk0,
-    vec::Vectorized<opmath_t<T>>& m1_stk0,
-    vec::Vectorized<opmath_t<T>>& m2_stk0) {
-  using Vec = vec::Vectorized<opmath_t<T>>;
-  Vec m1_vec(0);
-  Vec m2_vec(0);
-  for (const auto j : c10::irange(m0)) {
-    const Vec x_vec = Vec::loadu(X_ptr + j * Vec::size());
-    const Vec delta_vec = x_vec - m1_vec;
-    m1_vec += delta_vec * c_vecs[j];
-    m2_vec += delta_vec * (x_vec - m1_vec);
+template <typename T, int64_t kUnroll>
+C10_ALWAYS_INLINE void welfordUpdateInner(
+  const std::array<OpVec<T>, kUnroll> &x,
+  const OpVec<T> &rcp,
+  std::array<OpVec<T>, kUnroll> &m1,
+  std::array<OpVec<T>, kUnroll> &m2) {
+  std::array<OpVec<T>, kUnroll> delta;
+  std::array<OpVec<T>, kUnroll> delta2;
+  // If you write this function the normal way, with a single loop with many operations in it,
+  // then you will find that LLVM on aarch64 is unwilling to rearrange your instructions.
+  // It will just emit a sequence of 4 sequentially dependent instructions, followed by
+  // another independent sequence of 4 sequentially dependent instructions, and so on.
+  // This is suboptimal. So we have tried to provide the instructions in the order we would
+  // actually like them.
+  // This trouble accomplishes nothing on x64, because LLVM behaves more sensibly on x64.
+  UNROLL_LOOP_FULL
+  for (int i=0; i<kUnroll; i++) {
+    delta[i] = x[i] - m1[i];
   }
-  AddMomentsVec(m0, m1_vec, m2_vec, m0_stk0, m1_stk0, m2_stk0);
+  UNROLL_LOOP_FULL
+  for (int i=0; i<kUnroll; i++) {
+    m1[i] = vec::fmadd(delta[i], rcp, m1[i]);
+  }
+  UNROLL_LOOP_FULL
+  for (int i=0; i<kUnroll; i++) {
+    delta2[i] = x[i] - m1[i];
+  }
+  UNROLL_LOOP_FULL
+  for (int i=0; i<kUnroll; i++) {
+    m2[i] = vec::fmadd(delta[i], delta2[i], m2[i]);
+  }
 }
 
-// each bfloat16/half vector will be converted to two float vectors,
-// and accumulated successively on m1_stk0/m2_stk0.
-template <typename T>
-inline std::enable_if_t<!std::is_same_v<T, at::opmath_type<T>>, void>
-UpdateMomentsVec(
-    int64_t m0,
-    const T* X_ptr,
-    const std::array<vec::Vectorized<at::opmath_type<T>>, kChunkSize>& c_vecs,
-    int64_t& m0_stk0,
-    vec::Vectorized<at::opmath_type<T>>& m1_stk0,
-    vec::Vectorized<at::opmath_type<T>>& m2_stk0) {
-  using Vec = vec::Vectorized<T>;
-  using fVec = vec::Vectorized<at::opmath_type<T>>;
-  fVec m1_fvec0(0), m1_fvec1(0);
-  fVec m2_fvec0(0), m2_fvec1(0);
-  for (const auto j : c10::irange(m0)) {
-    const Vec x_bvec = Vec::loadu(X_ptr + j * Vec::size());
+template <typename T, int64_t kUnroll>
+C10_ALWAYS_INLINE std::enable_if_t<std::is_same_v<T, opmath_t<T>>, void>
+welfordUpdate(
+  const T* &X_ptr,
+  const OpVec<T> &rcp,
+  std::array<OpVec<T>, kUnroll> &m1,
+  std::array<OpVec<T>, kUnroll> &m2) {
+  std::array<OpVec<T>, kUnroll> x;
+  UNROLL_LOOP_FULL
+  for (int i=0; i<kUnroll; i++) {
+    x[i] = InVec<T>::loadu(X_ptr);
+    X_ptr += InVec<T>::size();
+  }
+  welfordUpdateInner<T, kUnroll>(x, rcp, m1, m2);
+}
+
+template <typename T, int64_t kUnroll>
+C10_ALWAYS_INLINE std::enable_if_t<!std::is_same_v<T, at::opmath_type<T>>, void>
+welfordUpdate(
+  const T* &X_ptr,
+  const OpVec<T> &rcp,
+  std::array<OpVec<T>, kUnroll> &m1,
+  std::array<OpVec<T>, kUnroll> &m2) {
+  std::array<OpVec<T>, kUnroll> x;
+  static_assert(kUnroll % 2 == 0);
+  UNROLL_LOOP_FULL
+  for (int i=0; i<kUnroll; i+=2) {
+    InVec<T> x_bvec = InVec<T>::loadu(X_ptr);
     auto [x_fvec0, x_fvec1] = convert_to_float<T>(x_bvec);
-    const fVec delta_fvec0 = x_fvec0 - m1_fvec0;
-    const fVec delta_fvec1 = x_fvec1 - m1_fvec1;
-    m1_fvec0 += delta_fvec0 * c_vecs[j];
-    m1_fvec1 += delta_fvec1 * c_vecs[j];
-    m2_fvec0 += delta_fvec0 * (x_fvec0 - m1_fvec0);
-    m2_fvec1 += delta_fvec1 * (x_fvec1 - m1_fvec1);
+    x[i] = x_fvec0;
+    x[i+1] = x_fvec1;
+    X_ptr += InVec<T>::size();
   }
-  AddMomentsVec(m0, m1_fvec0, m2_fvec0, m0_stk0, m1_stk0, m2_stk0);
-  AddMomentsVec(m0, m1_fvec1, m2_fvec1, m0_stk0, m1_stk0, m2_stk0);
+  welfordUpdateInner<T, kUnroll>(x, rcp, m1, m2);
+}
+
+template<typename T, int64_t kUnroll>
+C10_ALWAYS_INLINE void welfordMergeAccumulators(
+  OpVec<T> &half_count,
+  OpVec<T>* m1a,
+  OpVec<T>* m2a,
+  const std::array<OpVec<T>, kUnroll> &m1b,
+  const std::array<OpVec<T>, kUnroll> &m2b) {
+  std::array<OpVec<T>, kUnroll> delta;
+  std::array<OpVec<T>, kUnroll> delta2;
+  UNROLL_LOOP_FULL
+  for (int i=0; i<kUnroll; i++) {
+    delta[i] = m1b[i] - m1a[i];
+  }
+  UNROLL_LOOP_FULL
+  for (int i=0; i<kUnroll; i++) {
+    m2a[i] += m2b[i];
+  }
+  UNROLL_LOOP_FULL
+  for (int i=0; i<kUnroll; i++) {
+    delta2[i] = delta[i] * delta[i];
+  }
+  UNROLL_LOOP_FULL
+  for (int i=0; i<kUnroll; i++) {
+    m1a[i] = vec::fmadd(delta[i], OpVec<T>(0.5), m1a[i]);
+  }
+  UNROLL_LOOP_FULL
+  for (int i=0; i<kUnroll; i++) {
+    m2a[i] = vec::fmadd(delta2[i], half_count, m2a[i]);
+  }
+  half_count += half_count;
+}
+
+template <typename T, int64_t kUnroll, int64_t step>
+C10_ALWAYS_INLINE void welfordMergeLayerVec(
+  OpVec<T> &half_count,
+  std::array<OpVec<T>, kUnroll> &m1,
+  std::array<OpVec<T>, kUnroll> &m2) {
+  constexpr int64_t final_elements = kUnroll / (1<<step);
+  if constexpr (final_elements == 0) {
+    return;
+  }
+  std::array<OpVec<T>, final_elements> delta;
+  std::array<OpVec<T>, final_elements> delta2;
+  UNROLL_LOOP_FULL
+  for (int64_t i=0; i<final_elements; i++) {
+    delta[i] = m1[i+final_elements] - m1[i];
+  }
+  UNROLL_LOOP_FULL
+  for (int64_t i=0; i<final_elements; i++) {
+    m2[i] += m2[i+final_elements];
+  }
+  UNROLL_LOOP_FULL
+  for (int64_t i=0; i<final_elements; i++) {
+    delta2[i] = delta[i] * delta[i];
+  }
+  UNROLL_LOOP_FULL
+  for (int64_t i=0; i<final_elements; i++) {
+    m1[i] = vec::fmadd(delta[i], OpVec<T>(0.5), m1[i]);
+  }
+  UNROLL_LOOP_FULL
+  for (int64_t i=0; i<final_elements; i++) {
+    m2[i] = vec::fmadd(delta2[i], half_count, m2[i]);
+  }
+  half_count += half_count;
+}
+
+template <typename T, int64_t kOpVecSize, int64_t step>
+C10_ALWAYS_INLINE void welfordMergeLayer(
+  opmath_t<T> &half_count,
+  std::array<opmath_t<T>, kOpVecSize> &m1,
+  std::array<opmath_t<T>, kOpVecSize> &m2) {
+  constexpr int64_t final_elements = kOpVecSize / (1<<step);
+  if constexpr (final_elements == 0) {
+    return;
+  }
+  using math_t = opmath_t<T>;
+  std::array<math_t, final_elements> delta;
+  std::array<math_t, final_elements> delta2;
+  UNROLL_LOOP_FULL
+  for (int64_t i=0; i<final_elements; i++) {
+    delta[i] = m1[i+final_elements] - m1[i];
+  }
+  UNROLL_LOOP_FULL
+  for (int64_t i=0; i<final_elements; i++) {
+    m2[i] += m2[i+final_elements];
+  }
+  UNROLL_LOOP_FULL
+  for (int64_t i=0; i<final_elements; i++) {
+    delta2[i] = delta[i] * delta[i];
+  }
+  UNROLL_LOOP_FULL
+  for (int64_t i=0; i<final_elements; i++) {
+    m1[i] = std::fma(delta[i], 0.5, m1[i]);
+  }
+  UNROLL_LOOP_FULL
+  for (int64_t i=0; i<final_elements; i++) {
+    m2[i] = std::fma(delta2[i], half_count, m2[i]);
+  }
+  half_count += half_count;
+}
+
+template <typename T>
+C10_ALWAYS_INLINE void welfordMergeRemoveFakeZeros(
+  const opmath_t<T> na,
+  opmath_t<T> &m1,
+  opmath_t<T> &m2,
+  const opmath_t<T> nb,
+  const opmath_t<T> n) {
+  using math_t = opmath_t<T>;
+  const math_t c = n == 0 ? static_cast<math_t>(0) : static_cast<math_t>(na) / static_cast<math_t>(n);
+  const math_t delta2 = m1 * m1;
+  const math_t delta2_nb = delta2 * nb;
+  m1 *= c;
+  m2 = std::fma(delta2_nb, c, m2);
 }
 
 // Compute rowwise moments by Welford algorithm and cascade sum to improve
 // numerical stability.
 // https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
 // https://en.wikipedia.org/wiki/Pairwise_summation
-template <typename T, int64_t kMaxDepth>
-std::pair<opmath_t<T>, opmath_t<T>> RowwiseMomentsImpl(const T* X, int64_t N, int64_t ddof = 0) {
+template <typename T>
+std::pair<opmath_t<T>, opmath_t<T>> RowwiseMoments(const T* X, const int64_t N, int64_t ddof = 0) {
+  using InVec = vec::Vectorized<T>;
+  using OpVec = vec::Vectorized<opmath_t<T>>;
   using math_t = opmath_t<T>;
 
-  constexpr int64_t kVecSize = vec::Vectorized<T>::size();
-  constexpr int64_t kAccVecSize = vec::Vectorized<math_t>::size();
-  const int64_t n = N / kVecSize;
-  const int64_t m = divup(n, kChunkSize);
-  const int64_t depth = utils::CeilLog2(m);
+  // please run benchmarks, revisit unrolling choices VECTOR_WIDTH is bigger than 64.
+  static_assert(VECTOR_WIDTH <= 64);
 
-  using Vec = vec::Vectorized<math_t>;
-  const Vec kZeroVec(math_t(0));
-  c10::SmallVector<int64_t, kMaxDepth> m0_stk(depth, 0);
-  c10::SmallVector<Vec, kMaxDepth> m1_stk(depth, kZeroVec);
-  c10::SmallVector<Vec, kMaxDepth> m2_stk(depth, kZeroVec);
+  // the inner loop of incremental welford updates benefits from some
+  // unrolling because the update is most cheaply expressed as
+  // sub, fma, sub, fma, where each op depends on the previous op's result
+  // these instructions each have latency 3 or 4 and cpi 0.5, so let's unroll!
+  //
+  // aside: on some CPUs we are less likely to use, it's cheaper to mix in some
+  // updates that are expressed as sub, fma, mul, fma, with fewer dependencies
+  //
+  // empirically determined unroll factor
+  constexpr int64_t kInVecSize = InVec::size();
+  constexpr int64_t kOpVecSize = OpVec::size();
+  constexpr int64_t kUnroll = 128/VECTOR_WIDTH;
+  constexpr int64_t kMaxDepth = 32;
+  constexpr int64_t kLogChunkSize = llvm::countTrailingZeros(kChunkSize);
+  constexpr int64_t kNAccumulators = kUnroll * kOpVecSize;
+  constexpr int64_t kLogNAccumulators = llvm::countTrailingZeros(kNAccumulators);
+  static_assert(1 << kLogChunkSize == kChunkSize);
+  static_assert(1 << kLogNAccumulators == kNAccumulators);
+  //constexpr int64_t kRoundUpAddend = (1 << (kLogChunkSize + kLogNAccumulators)) - 1;
+  //constexpr int64_t kRoundUpMask = ~kRoundUpAddend;
+  const int64_t n_whole_chunks = N / (kChunkSize * kNAccumulators);
+  const int64_t leftover_n = N % (kChunkSize * kNAccumulators);
+  const int64_t very_leftover_n = N % (kNAccumulators);
 
-  for (const auto i : c10::irange(m)) {
-    const T* X_ptr = X + i * kChunkSize * kVecSize;
-    const int64_t m0 = std::min(kChunkSize, n - i * kChunkSize);
-    static std::array<Vec, kChunkSize> c_vecs = ([]() {
-      std::array<Vec, kChunkSize> result;
-      for (const auto i : c10::irange(kChunkSize)) {
-        result[i] = Vec(math_t(1) / static_cast<math_t>(i + 1));
+  std::array<std::array<OpVec, kUnroll>, kMaxDepth> m1_stk;
+  std::array<std::array<OpVec, kUnroll>, kMaxDepth> m2_stk;
+  std::array<OpVec, kUnroll> m1;
+  std::array<OpVec, kUnroll> m2;
+  const T* start_ptr = X;
+
+  static std::array<OpVec, kChunkSize> c_vecs = ([]() {
+    std::array<OpVec, kChunkSize> result;
+    for (const auto i : c10::irange(kChunkSize)) {
+      result[i] = OpVec(math_t(1) / static_cast<math_t>(i + 1));
+    }
+    return result;
+  })();
+
+  for (int64_t i = 0; i < n_whole_chunks; i++) {
+    if (i > 0) {
+      OpVec half_count{kChunkSize / 2};
+      const int64_t dest_slot = llvm::countTrailingZeros(i);
+      for (int64_t j=0; j < dest_slot; j++) {
+        welfordMergeAccumulators<T, kUnroll>(half_count, &m1[0], &m2[0], m1_stk[j], m2_stk[j]);
       }
-      return result;
-    })();
-    UpdateMomentsVec(m0, X_ptr, c_vecs, m0_stk[0], m1_stk[0], m2_stk[0]);
-
-    int64_t mask = i + 1;
-    for (int64_t j = 1; j < depth && (mask & 1) == 0; ++j) {
-      AddMomentsVec(
-          m0_stk[j - 1],
-          m1_stk[j - 1],
-          m2_stk[j - 1],
-          m0_stk[j],
-          m1_stk[j],
-          m2_stk[j]);
-      m0_stk[j - 1] = 0;
-      m1_stk[j - 1] = kZeroVec;
-      m2_stk[j - 1] = kZeroVec;
-      mask >>= 1;
+      m1_stk[dest_slot] = m1;
+      m2_stk[dest_slot] = m2;
+    }
+    m1 = std::array<OpVec, kUnroll>{};
+    m2 = std::array<OpVec, kUnroll>{};
+    for (int64_t j=0; j < kChunkSize; j++) {
+      welfordUpdate<T, kUnroll>(start_ptr, c_vecs[j], m1, m2);
     }
   }
-  for (const auto i : c10::irange(1, depth)) {
-    AddMomentsVec(
-        m0_stk[i], m1_stk[i], m2_stk[i], m0_stk[0], m1_stk[0], m2_stk[0]);
+  if (leftover_n > 0) {
+    if (n_whole_chunks > 0) {
+      const int64_t dest_slot = llvm::countTrailingZeros(n_whole_chunks);
+      OpVec half_count{kChunkSize / 2};
+      for (int64_t j=0; j < dest_slot; j++) {
+        welfordMergeAccumulators<T, kUnroll>(half_count, &m1[0], &m2[0], m1_stk[j], m2_stk[j]);
+      }
+      m1_stk[dest_slot] = m1;
+      m2_stk[dest_slot] = m2;
+    }
+    m1 = std::array<OpVec, kUnroll>{};
+    m2 = std::array<OpVec, kUnroll>{};
+    std::array<T, kInVecSize * kUnroll> fake_xs;
+    const int64_t n_leftover_iters = divup(leftover_n, kNAccumulators);
+    for (int64_t i = kChunkSize - n_leftover_iters; i < kChunkSize; i++) {
+      if ((i == kChunkSize - 1) && (very_leftover_n > 0)) {
+        std::memcpy(&fake_xs[0], start_ptr, very_leftover_n * sizeof(T));
+        start_ptr = &fake_xs[0];
+        std::memset(&fake_xs[very_leftover_n], 0, (kInVecSize * kUnroll - very_leftover_n) * sizeof(T));
+      }
+      welfordUpdate<T, kUnroll>(start_ptr, c_vecs[i], m1, m2);
+    }
   }
 
-  std::array<math_t, kAccVecSize> m1_arr{};
-  std::array<math_t, kAccVecSize> m2_arr{};
-  m1_stk[0].store(m1_arr.data());
-  m2_stk[0].store(m2_arr.data());
-
-  int64_t m0 = 0;
-  math_t m1 = 0;
-  math_t m2 = 0;
-  for (int64_t i = n * kVecSize; i < N; ++i) {
-    math_t x = static_cast<math_t>(X[i]);
-    const math_t delta = x - m1;
-    ++m0;
-    m1 += delta / static_cast<math_t>(m0);
-    m2 += delta * (x - m1);
-  }
-  // for BFloat16, each vector in m1_arr/m2_arr holds 2*n accumulated result
-  int64_t m0_add = n * kVecSize / kAccVecSize;
-  for (const auto i : c10::irange(kAccVecSize)) {
-    AddMoments(m0_add, m1_arr[i], m2_arr[i], m0, m1, m2);
+  OpVec half_count{kChunkSize / 2};
+  int64_t to_merge_mask = n_whole_chunks + (leftover_n > 0) - 1;
+  if (to_merge_mask > 0) {
+    int64_t depth = 64 - __builtin_clzll(to_merge_mask);
+    for (int64_t i=0; i < depth; i++) {
+      if (!(to_merge_mask & (1 << i))) {
+        m1_stk[i] = std::array<OpVec, kUnroll>{};
+        m2_stk[i] = std::array<OpVec, kUnroll>{};
+      }
+      welfordMergeAccumulators<T, kUnroll>(half_count, &m1[0], &m2[0], m1_stk[i], m2_stk[i]);
+    }
   }
 
-  return std::make_pair(m1, m2 / static_cast<math_t>(N - ddof));
+  welfordMergeLayerVec<T, kUnroll, 1>(half_count, m1, m2);
+  welfordMergeLayerVec<T, kUnroll, 2>(half_count, m1, m2);
+  welfordMergeLayerVec<T, kUnroll, 3>(half_count, m1, m2);
+  welfordMergeLayerVec<T, kUnroll, 4>(half_count, m1, m2);
+  // please add ^ vector reduction step(s) if kUnroll is larger than 16.
+  static_assert(kUnroll <= 16);
+  std::array<math_t, kOpVecSize> m1_arr;
+  std::array<math_t, kOpVecSize> m2_arr;
+  std::array<math_t, kOpVecSize> half_count_arr;
+  half_count.store(&half_count_arr[0], OpVec::size());
+  m1[0].store(&m1_arr[0], OpVec::size());
+  m2[0].store(&m2_arr[0], OpVec::size());
+  math_t half_count_scalar = half_count_arr[0];
+  welfordMergeLayer<T, kOpVecSize, 1>(half_count_scalar, m1_arr, m2_arr);
+  welfordMergeLayer<T, kOpVecSize, 2>(half_count_scalar, m1_arr, m2_arr);
+  welfordMergeLayer<T, kOpVecSize, 3>(half_count_scalar, m1_arr, m2_arr);
+  welfordMergeLayer<T, kOpVecSize, 4>(half_count_scalar, m1_arr, m2_arr);
+  // please add ^ scalar reduction step(s) if vectors hold more than 16 math_t.
+  static_assert(kOpVecSize <= 16);
+  const math_t count = half_count_scalar + half_count_scalar;
+  const int64_t int_count = static_cast<int64_t>(count);
+  if (int_count != N) {
+    // subtract out fake zeros
+    const math_t other_count = static_cast<math_t>(N-int_count);
+    welfordMergeRemoveFakeZeros<T>(count, m1_arr[0], m2_arr[0], other_count, static_cast<math_t>(N));
+  }
+
+  return std::make_pair(m1_arr[0], m2_arr[0] / static_cast<math_t>(N - ddof));
 }
 
-template <typename T>
-std::pair<opmath_t<T>, opmath_t<T>> RowwiseMoments(const T* X, int64_t N, int64_t ddof = 0) {
-  using Vec = vec::Vectorized<T>;
-  constexpr int64_t kVecSize = Vec::size();
-  const int64_t n = N / kVecSize;
-  const int64_t m = divup(n, kChunkSize);
-  const int64_t depth = utils::CeilLog2(m);
-  if (depth <= 4) {
-    return RowwiseMomentsImpl<T, 4>(X, N, ddof);
-  } else if (depth <= 8) {
-    return RowwiseMomentsImpl<T, 8>(X, N, ddof);
-  } else if (depth <= 16) {
-    return RowwiseMomentsImpl<T, 16>(X, N, ddof);
-  } else if (depth <= 32) {
-    return RowwiseMomentsImpl<T, 32>(X, N, ddof);
-  } else {
-    return RowwiseMomentsImpl<T, 64>(X, N, ddof);
-  }
-}
+#undef UNROLL_LOOP_FULL
 
 } // namespace CPU_CAPABILITY
 } // namespace at::native

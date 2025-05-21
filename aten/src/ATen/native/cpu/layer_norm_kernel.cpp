@@ -21,7 +21,7 @@
 
 namespace at::native {
 
-namespace {
+inline namespace CPU_CAPABILITY {
 
 template <typename T>
 void LayerNormSecondPass(
@@ -31,7 +31,7 @@ void LayerNormSecondPass(
     T* Y_ptr,
     int64_t N,
     T scale,
-    T bias) {
+    T scaled_mean) {
   using Vec = vec::Vectorized<T>;
   const bool gamma_null = gamma_data == nullptr;
   const bool beta_null = beta_data == nullptr;
@@ -39,12 +39,12 @@ void LayerNormSecondPass(
     for (const auto j : c10::irange(N)) {
       const T gamma_v = gamma_null ? T(1) : gamma_data[j];
       const T beta_v = beta_null ? T(0) : beta_data[j];
-      Y_ptr[j] = (X_ptr[j] + bias) * scale * gamma_v + beta_v;
+      Y_ptr[j] = (X_ptr[j] * scale - scaled_mean) * gamma_v + beta_v;
     }
   } else {
     vec::map3<T>(
-      [scale, bias](Vec x, Vec gamma, Vec beta) {
-        return (x + Vec(bias)) * Vec(scale) * gamma + beta;
+      [scale, scaled_mean](Vec x, Vec gamma, Vec beta) {
+        return vec::fmadd(vec::fmsub(x, Vec(scale), Vec(scaled_mean)), gamma, beta);
       },
       Y_ptr,
       X_ptr,
@@ -82,8 +82,8 @@ void LayerNormKernelImplInternal(
       auto [mean_val, rstd_val] = RowwiseMoments(X_ptr, N);
       rstd_val = T(1) / std::sqrt(rstd_val + eps);
       const T scale = rstd_val;
-      const T bias = - mean_val;
-      LayerNormSecondPass<T>(X_ptr, gamma_data, beta_data, Y_ptr, N, scale, bias);
+      const T scaled_mean = mean_val * rstd_val;
+      LayerNormSecondPass<T>(X_ptr, gamma_data, beta_data, Y_ptr, N, scale, scaled_mean);
       if (!mean_null) {
         mean_data[i] = mean_val;
       }
