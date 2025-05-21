@@ -1,0 +1,165 @@
+diff --git a/test/dynamo/cpython/3_13/test_generators.py b/test/dynamo/cpython/3_13/test_generators.py
+index a6c1dd62a23..8e1fc7c3308 100644
+--- a/test/dynamo/cpython/3_13/test_generators.py
++++ b/test/dynamo/cpython/3_13/test_generators.py
+@@ -1,3 +1,53 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++__TestCase = CPythonTestCase
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ import copy
+ import gc
+ import pickle
+@@ -22,7 +72,7 @@ except ImportError:
+ @unittest.skipUnless(_testcapi is not None and
+                      hasattr(_testcapi, "raise_SIGINT_then_send_None"),
+                      "needs _testcapi.raise_SIGINT_then_send_None")
+-class SignalAndYieldFromTest(unittest.TestCase):
++class SignalAndYieldFromTest(__TestCase):
+ 
+     def generator1(self):
+         return (yield from self.generator2())
+@@ -46,7 +96,7 @@ class SignalAndYieldFromTest(unittest.TestCase):
+         self.assertEqual(exc.value, "PASSED")
+ 
+ 
+-class FinalizationTest(unittest.TestCase):
++class FinalizationTest(__TestCase):
+ 
+     def test_frame_resurrect(self):
+         # A generator frame can be resurrected by a generator's finalization.
+@@ -113,7 +163,7 @@ class FinalizationTest(unittest.TestCase):
+             self.assertEqual(cm.exception.value, 2)
+ 
+ 
+-class GeneratorTest(unittest.TestCase):
++class GeneratorTest(__TestCase):
+ 
+     def test_name(self):
+         def func():
+@@ -246,6 +296,7 @@ class GeneratorTest(unittest.TestCase):
+         #This should not raise
+         loop()
+ 
++    @unittest.expectedFailure
+     def test_genexpr_only_calls_dunder_iter_once(self):
+ 
+         class Iterator:
+@@ -269,7 +320,7 @@ class GeneratorTest(unittest.TestCase):
+         self.assertEqual([1,2], list(i for i in C()))
+ 
+ 
+-class ModifyUnderlyingIterableTest(unittest.TestCase):
++class ModifyUnderlyingIterableTest(__TestCase):
+     iterables = [
+         range(0),
+         range(20),
+@@ -341,7 +392,7 @@ class ModifyUnderlyingIterableTest(unittest.TestCase):
+         self.process_tests(get_generator_genfunc)
+ 
+ 
+-class ExceptionTest(unittest.TestCase):
++class ExceptionTest(__TestCase):
+     # Tests for the issue #23353: check that the currently handled exception
+     # is correctly saved/restored in PyEval_EvalFrameEx().
+ 
+@@ -550,7 +601,7 @@ class ExceptionTest(unittest.TestCase):
+         self.assertEqual(cm.exception.value.value, 2)
+ 
+ 
+-class GeneratorCloseTest(unittest.TestCase):
++class GeneratorCloseTest(__TestCase):
+ 
+     def test_close_no_return_value(self):
+         def f():
+@@ -652,7 +703,7 @@ class GeneratorCloseTest(unittest.TestCase):
+         self.assertIsNone(f_wr())
+ 
+ 
+-class GeneratorThrowTest(unittest.TestCase):
++class GeneratorThrowTest(__TestCase):
+ 
+     def test_exception_context_with_yield(self):
+         def f():
+@@ -751,7 +802,7 @@ class GeneratorThrowTest(unittest.TestCase):
+             gen.throw(ValueError)
+ 
+ 
+-class GeneratorStackTraceTest(unittest.TestCase):
++class GeneratorStackTraceTest(__TestCase):
+ 
+     def check_stack_names(self, frame, expected):
+         names = []
+@@ -800,7 +851,7 @@ class GeneratorStackTraceTest(unittest.TestCase):
+         self.check_yield_from_example(call_throw)
+ 
+ 
+-class YieldFromTests(unittest.TestCase):
++class YieldFromTests(__TestCase):
+     def test_generator_gi_yieldfrom(self):
+         def a():
+             self.assertEqual(inspect.getgeneratorstate(gen_b), inspect.GEN_RUNNING)
+@@ -2703,9 +2754,15 @@ __test__ = {"tut":      tutorial_tests,
+             }
+ 
+ def load_tests(loader, tests, pattern):
+-    tests.addTest(doctest.DocTestSuite())
++    # ======= BEGIN Dynamo patch =======
++    suite = doctest.DocTestSuite()
++    for test in suite:
++        # Dynamically change base class
++        test.__class__ = type(test.__class__.__name__, (__TestCase, test.__class__), {})
++    tests.addTests(suite)
++    # ======= END DYNAMO PATCH =======
+     return tests
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()
