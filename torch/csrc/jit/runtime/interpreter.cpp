@@ -40,7 +40,6 @@ using torch::distributed::autograd::DistAutogradContainer;
 #include <mutex>
 #include <ostream>
 #include <stdexcept>
-#include <typeinfo>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -236,6 +235,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       (void)instX_;
       (void)initialSize_;
     }
+    ~StackSizeDidntChangeGuard() = default;
 
     void callAssert() const {
 #ifndef NDEBUG
