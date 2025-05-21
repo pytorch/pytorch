@@ -216,7 +216,7 @@ struct RNNDescriptorParams {
       cudnnDataType_t datatype,
       cudnnDataType_t input_datatype) {
 #endif
-      this->set_mode(mode);
+      this -> set_mode(mode);
 #ifdef USE_CUDNN_RNN_V8_API
   this->input_size = input_size;
   this->packed = packed;
