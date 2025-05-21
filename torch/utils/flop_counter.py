@@ -1,14 +1,13 @@
 # mypy: allow-untyped-defs
 import torch
 from .module_tracker import ModuleTracker
-from .counter_utils import shape_wrapper, get_suffix_str, convert_num_with_suffix, get_suffix_str, convert_to_percent_str, convert_num_with_suffix
+from .counter_utils import shape_wrapper, get_suffix_str, convert_to_percent_str, convert_num_with_suffix
 from typing import Any, Optional, Union, TypeVar, Callable
 from collections.abc import Iterator
 from typing_extensions import ParamSpec
 from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
 from math import prod
-from functools import wraps
 import warnings
 
 __all__ = ["FlopCounterMode", "register_flop_formula"]

@@ -8,17 +8,18 @@ import torch.nn.functional as F
 import torch.utils.memory_counter
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    PLATFORM_SUPPORTS_CUDNN_ATTENTION
 )
 from torch.testing._internal.common_utils import (
     run_tests,
+    skipIfRocm,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    skipIfRocm,
 )
+
 
 try:
     from torchvision import models as torchvision_models
@@ -419,7 +420,12 @@ class TestMemoryCounter(TestCase):
             run_uniform_memory(backend, with_backward=True)
             for backend in ["math", "flash", "mem_efficient", "cudnn"]
         ]
-        memory_fw_bw_math, memory_fw_bw_flash, memory_fw_bw_efficient, memory_fw_bw_cudnn = memory
+        (
+            memory_fw_bw_math,
+            memory_fw_bw_flash,
+            memory_fw_bw_efficient,
+            memory_fw_bw_cudnn,
+        ) = memory
         # TODO
         self.assertEqual(memory_fw_bw_math, 0)
         self.assertEqual(memory_fw_bw_flash, 0)
@@ -704,7 +710,9 @@ class TestMemoryCounter(TestCase):
                     False,
                 )
 
-        dense_x = torch.randn(4, 40, 4, 16, dtype=torch.bfloat16, device="cuda").transpose(1, 2)
+        dense_x = torch.randn(
+            4, 40, 4, 16, dtype=torch.bfloat16, device="cuda"
+        ).transpose(1, 2)
 
         with MemoryCounterMode() as real_memory_counter_mode:
             torch.ops.aten._flash_attention_forward(
@@ -720,8 +728,10 @@ class TestMemoryCounter(TestCase):
                 False,
             )
 
-        self.assertEqual(int(get_total_memory(fake_memory_counter_mode)), int(get_total_memory(real_memory_counter_mode)))
-
+        self.assertEqual(
+            int(get_total_memory(fake_memory_counter_mode)),
+            int(get_total_memory(real_memory_counter_mode)),
+        )
 
     def test_addmm_out(self):
         def f(x):
@@ -789,7 +799,10 @@ class TestMemoryCounter(TestCase):
             MemoryCounterMode(mod)
 
     def test_custom_op(self):
-        from torch.utils.memory_counter import MemoryCounterMode, register_memory_formula
+        from torch.utils.memory_counter import (
+            MemoryCounterMode,
+            register_memory_formula,
+        )
 
         @torch.library.custom_op("mylib::foo", mutates_args=())
         def foo(x: torch.Tensor) -> torch.Tensor:
@@ -797,7 +810,9 @@ class TestMemoryCounter(TestCase):
 
         called = 0
 
-        with self.assertRaisesRegex(ValueError, "expected each target to be OpOverloadPacket"):
+        with self.assertRaisesRegex(
+            ValueError, "expected each target to be OpOverloadPacket"
+        ):
             register_memory_formula(torch.ops.mylib.foo.default)(lambda x: x)
 
         @register_memory_formula(torch.ops.mylib.foo)
@@ -828,7 +843,9 @@ class TestMemoryCounter(TestCase):
         with torch.inference_mode():
             mode_inference = get_memory(resnet18)
 
-        self.assertEqual(get_total_memory(mode_standard), get_total_memory(mode_inference))
+        self.assertEqual(
+            get_total_memory(mode_standard), get_total_memory(mode_inference)
+        )
 
         layer1_conv_memory_standard = mode_standard.memory_counts["ResNet.layer1"][
             torch.ops.aten.convolution
@@ -844,6 +861,7 @@ class TestMemoryCounter(TestCase):
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
     def test_scaled_mm(self):
+        unittest.assertFalse(True, "Make sure this is running in CI")
         dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
         with MemoryCounterMode() as mode:
             torch._scaled_mm(
@@ -860,4 +878,3 @@ class TestMemoryCounter(TestCase):
 
 if __name__ == "__main__":
     run_tests()
-                    
