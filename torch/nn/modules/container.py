@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
@@ -29,6 +28,7 @@ __all__ = [
 ]
 
 T = TypeVar("T", bound=Module)
+_V = TypeVar("_V")
 
 
 # Copied from torch.nn.modules.module, required for a custom __repr__ for ModuleList
@@ -121,7 +121,7 @@ class Sequential(Module):
             for idx, module in enumerate(args):
                 self.add_module(str(idx), module)
 
-    def _get_item_by_idx(self, iterator, idx) -> T:  # type: ignore[misc, type-var]
+    def _get_item_by_idx(self, iterator: Iterable[_V], idx: int) -> _V:
         """Get the idx-th item of the iterator."""
         size = len(self)
         idx = operator.index(idx)
@@ -131,7 +131,7 @@ class Sequential(Module):
         return next(islice(iterator, idx, None))
 
     @_copy_to_script_wrapper
-    def __getitem__(self, idx: Union[slice, int]) -> Union[Sequential, T]:
+    def __getitem__(self, idx: Union[slice, int]) -> Union[Sequential, Module]:
         if isinstance(idx, slice):
             return self.__class__(OrderedDict(list(self._modules.items())[idx]))
         else:
@@ -227,7 +227,7 @@ class Sequential(Module):
             return self
 
     @_copy_to_script_wrapper
-    def __dir__(self):
+    def __dir__(self) -> list[str]:
         keys = super().__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
@@ -250,11 +250,42 @@ class Sequential(Module):
 
         Args:
             module (nn.Module): module to append
+
+        Example::
+
+            >>> import torch.nn as nn
+            >>> n = nn.Sequential(nn.Linear(1, 2), nn.Linear(2, 3))
+            >>> n.append(nn.Linear(3, 4))
+            Sequential(
+                (0): Linear(in_features=1, out_features=2, bias=True)
+                (1): Linear(in_features=2, out_features=3, bias=True)
+                (2): Linear(in_features=3, out_features=4, bias=True)
+            )
+
         """
         self.add_module(str(len(self)), module)
         return self
 
     def insert(self, index: int, module: Module) -> Self:
+        """
+        Inserts a module into the Sequential container at the specified index.
+
+        Args:
+            index (int): The index to insert the module.
+            module (Module): The module to be inserted.
+
+        Example::
+
+            >>> import torch.nn as nn
+            >>> n = nn.Sequential(nn.Linear(1, 2), nn.Linear(2, 3))
+            >>> n.insert(0, nn.Linear(3, 4))
+            Sequential(
+                (0): Linear(in_features=3, out_features=4, bias=True)
+                (1): Linear(in_features=1, out_features=2, bias=True)
+                (2): Linear(in_features=2, out_features=3, bias=True)
+            )
+
+        """
         if not isinstance(module, Module):
             raise AssertionError(f"module should be of type: {Module}")
         n = len(self._modules)
@@ -267,7 +298,27 @@ class Sequential(Module):
         self._modules[str(index)] = module
         return self
 
-    def extend(self, sequential) -> Self:
+    def extend(self, sequential: Iterable[Module]) -> Self:
+        """
+        Extends the current Sequential container with layers from another Sequential container.
+
+        Args:
+            sequential (Sequential): A Sequential container whose layers will be added to the current container.
+
+        Example::
+
+            >>> import torch.nn as nn
+            >>> n = nn.Sequential(nn.Linear(1, 2), nn.Linear(2, 3))
+            >>> other = nn.Sequential(nn.Linear(3, 4), nn.Linear(4, 5))
+            >>> n.extend(other) # or `n + other`
+            Sequential(
+                (0): Linear(in_features=1, out_features=2, bias=True)
+                (1): Linear(in_features=2, out_features=3, bias=True)
+                (2): Linear(in_features=3, out_features=4, bias=True)
+                (3): Linear(in_features=4, out_features=5, bias=True)
+            )
+
+        """
         for layer in sequential:
             self.append(layer)
         return self
@@ -359,7 +410,7 @@ class ModuleList(Module):
             combined.add_module(str(i), module)
         return combined
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Return a custom repr for ModuleList that compresses repeated module representations."""
         list_of_reprs = [repr(item) for item in self]
         if len(list_of_reprs) == 0:
@@ -392,7 +443,7 @@ class ModuleList(Module):
         return main_str
 
     @_copy_to_script_wrapper
-    def __dir__(self):
+    def __dir__(self) -> list[str]:
         keys = super().__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
@@ -529,17 +580,17 @@ class ModuleDict(Module):
         return v
 
     @_copy_to_script_wrapper
-    def keys(self) -> Iterable[str]:
+    def keys(self) -> container_abcs.KeysView[str]:
         r"""Return an iterable of the ModuleDict keys."""
         return self._modules.keys()
 
     @_copy_to_script_wrapper
-    def items(self) -> Iterable[tuple[str, Module]]:
+    def items(self) -> container_abcs.ItemsView[str, Module]:
         r"""Return an iterable of the ModuleDict key/value pairs."""
         return self._modules.items()
 
     @_copy_to_script_wrapper
-    def values(self) -> Iterable[Module]:
+    def values(self) -> container_abcs.ValuesView[Module]:
         r"""Return an iterable of the ModuleDict values."""
         return self._modules.values()
 
@@ -665,7 +716,7 @@ class ParameterList(Module):
     def __iadd__(self, parameters: Iterable[Any]) -> Self:
         return self.extend(parameters)
 
-    def __dir__(self):
+    def __dir__(self) -> list[str]:
         keys = super().__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
@@ -879,7 +930,7 @@ class ParameterDict(Module):
         """
         return ParameterDict((k, default) for k in keys)
 
-    def keys(self) -> Iterable[str]:
+    def keys(self) -> container_abcs.KeysView[str]:
         r"""Return an iterable of the ParameterDict keys."""
         return self._keys.keys()
 
