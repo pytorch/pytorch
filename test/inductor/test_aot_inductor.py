@@ -680,7 +680,6 @@ class AOTInductorTestsTemplate:
         runtime_input = torch.randn(100, 1, device=self.device)
         self.assertTrue(same(optimized(runtime_input), model(runtime_input)))
 
-    @disable_constant_renaming
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
             "normalization_pass": {},
@@ -694,6 +693,7 @@ class AOTInductorTestsTemplate:
         },
         post_grad_fusion_options={},
     )
+    @disable_constant_renaming
     def test_simple_split(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -4414,8 +4414,8 @@ class AOTInductorTestsTemplate:
                 FileCheck().check_not(f"before_launch - {kernel_name}").run(code)
                 FileCheck().check_not(f"after_launch - {kernel_name}").run(code)
 
-    @disable_constant_renaming
     @common_utils.parametrize("enable_kernel_profile", (True, False))
+    @disable_constant_renaming
     def test_aoti_profiler(self, enable_kernel_profile):
         # basic addmm model
         class Model(torch.nn.Module):
