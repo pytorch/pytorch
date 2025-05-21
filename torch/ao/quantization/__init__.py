@@ -38,7 +38,7 @@ warnings.warn(
     "2. Remove fx graph mode quantization (torch.ao.quantization.quantize_fx.prepare_fx, torch.ao.quantization.quantize_fx.convert_fx, please migrate to use torchao pt2e quantization API instead (prepare_pt2e, convert_pt2e) \n"
     "3. pt2e quantization has been migrated to torchao (https://github.com/pytorch/ao/tree/main/torchao/quantization/pt2e) \n"
     "see https://dev-discuss.pytorch.org/t/torch-ao-quantization-migration-plan/2810 for more details",
-    DeprecationWarning,
+    FutureWarning,
 )
 
 # ensure __module__ is set correctly for public APIs
