@@ -12757,8 +12757,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(forward, (a, b))
 
-    @xfail_if_mps_unimplemented
     def test_isin_tensor_scalar(self):
+        if self.device == "mps" and MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("isin is not implemented on MacOS-13")
+
         for invert in [True, False]:
             torch._dynamo.reset()
             elements = 1
