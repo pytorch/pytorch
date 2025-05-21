@@ -927,7 +927,11 @@ void Reducer::mark_variable_ready(size_t variable_index) {
       }
       // Check that all buckets were completed and had their work kicked off.
       TORCH_INTERNAL_ASSERT(next_bucket_ == buckets_.size());
-      if (static_graph_after_first_iteration() && should_rebuild_buckets()) {
+      if ((static_graph_after_first_iteration() ||
+           dynamic_graph_find_unused()) &&
+          should_rebuild_buckets()) {
+        LOG(INFO) << "rebuilting buckets for unused_parameters, size: "
+                  << unused_parameters_.size();
         for (const auto& unused_index : unused_parameters_) {
           push_rebuilt_params(unused_index);
         }
