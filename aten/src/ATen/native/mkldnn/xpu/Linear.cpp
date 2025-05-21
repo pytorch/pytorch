@@ -1,5 +1,7 @@
-#include <FusionUtils.h>
+#include <ATen/DeviceGuard.h>
 #include <torch/library.h>
+
+#include <FusionUtils.h>
 
 namespace at::native::xpu {
 
@@ -11,6 +13,7 @@ Tensor linear_pointwise(
     torch::List<std::optional<at::Scalar>> scalars,
     std::optional<std::string_view> algorithm) {
   onednn::Attr att;
+  const OptionalDeviceGuard device_guard(device_of(input_t));
   att = construct_unary_attr(attr, scalars, algorithm, att);
   auto input = input_t.contiguous();
 
@@ -51,6 +54,7 @@ Tensor linear_pointwise_binary(
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_opt,
     std::string_view binary_attr) {
+  const OptionalDeviceGuard device_guard(device_of(input_t));
   onednn::Attr attr;
   attr = construct_binary_attr<true>(binary_attr, /*alpha*/ 1.f, other_t, attr);
   auto input = input_t.contiguous();

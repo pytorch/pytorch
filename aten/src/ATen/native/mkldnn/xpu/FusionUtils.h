@@ -10,24 +10,24 @@
 
 namespace at::native::xpu {
 at::native::onednn::Attr unary_attr_with_arg(
-    c10::string_view unary,
+    std::string_view unary,
     torch::List<std::optional<at::Scalar>> scalars,
-    std::optional<c10::string_view> algorithm,
+    std::optional<std::string_view> algorithm,
     onednn::Attr attr);
 
 at::native::onednn::Attr string_to_unary_attr(
-    c10::string_view unary,
+    std::string_view unary,
     onednn::Attr attr);
 
 at::native::onednn::Attr construct_unary_attr(
-    c10::string_view unary,
+    std::string_view unary,
     torch::List<std::optional<at::Scalar>> scalars,
-    std::optional<c10::string_view> algorithm,
+    std::optional<std::string_view> algorithm,
     onednn::Attr attr);
 
 template <bool is_matmul = false>
 onednn::Attr construct_binary_attr(
-    c10::string_view binary,
+    std::string_view binary,
     std::optional<at::Scalar> alpha,
     const Tensor& other,
     onednn::Attr attr) {

@@ -8,7 +8,7 @@ onednn::Attr unary_attr_with_arg(
     std::string_view unary,
     torch::List<std::optional<at::Scalar>> scalars =
         torch::List<std::optional<at::Scalar>>(),
-    std::optional<std::string_view> algorithm = c10::nullopt,
+    std::optional<std::string_view> algorithm = std::nullopt,
     onednn::Attr attr = Attr()) {
   if (unary == "hardswish") {
     return attr.append_post_eltwise(
@@ -53,11 +53,11 @@ onednn::Attr string_to_unary_attr(std::string_view unary, onednn::Attr attr) {
     return unary_attr_with_arg(
         "hardswish",
         torch::List<std::optional<at::Scalar>>(),
-        c10::nullopt,
+        std::nullopt,
         attr);
   } else if (unary == "swish") {
     return unary_attr_with_arg(
-        "silu", torch::List<std::optional<at::Scalar>>(), c10::nullopt, attr);
+        "silu", torch::List<std::optional<at::Scalar>>(), std::nullopt, attr);
   }
   return attr;
 }
