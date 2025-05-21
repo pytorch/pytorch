@@ -2,6 +2,7 @@
 import torch
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
+from .counter_utils import shape_wrapper, normalize_tuple, get_suffix_str, convert_num_with_suffix, get_suffix_str, convert_to_percent_str, convert_num_with_suffix
 from typing import Any, Optional, Union, TypeVar, Callable
 from collections.abc import Iterator
 from typing_extensions import ParamSpec
@@ -18,19 +19,8 @@ _P = ParamSpec("_P")
 
 aten = torch.ops.aten
 
-def get_shape(i):
-    if isinstance(i, torch.Tensor):
-        return i.shape
-    return i
-
 memory_registry: dict[Any, Any] = {}
 
-def shape_wrapper(f):
-    @wraps(f)
-    def nf(*args, out_val=None, **kwargs):
-        args, kwargs, out_shape = tree_map(get_shape, (args, kwargs, out_val))
-        return f(*args, out_shape=out_shape, **kwargs)
-    return nf
 
 def register_memory_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     def register_fun(memory_formula: Callable[_P, _T]) -> Callable[_P, _T]:
@@ -57,25 +47,25 @@ def register_memory_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T
 @register_memory_formula(aten.mm)
 def mm_memory(a_shape, b_shape, *args, out_shape=None, **kwargs) -> int:
     """Count memory accesses for matmul."""
-    # TODO: Implement memory access counting for mm
+    # TODO
     return 0
 
 @register_memory_formula(aten.addmm)
 def addmm_memory(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
     """Count memory accesses for addmm."""
-    # TODO: Implement memory access counting for addmm
+    # TODO
     return 0
 
 @register_memory_formula(aten.bmm)
 def bmm_memory(a_shape, b_shape, out_shape=None, **kwargs) -> int:
     """Count memory accesses for the bmm operation."""
-    # TODO: Implement memory access counting for bmm
+    # TODO
     return 0
 
 @register_memory_formula(aten.baddbmm)
 def baddbmm_memory(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
     """Count memory accesses for the baddbmm operation."""
-    # TODO: Implement memory access counting for baddbmm
+    # TODO
     return 0
 
 @register_memory_formula(aten._scaled_mm)
@@ -92,7 +82,7 @@ def _scaled_mm_memory(
     **kwargs,
 ) -> int:
     """Count memory accesses for _scaled_mm."""
-    # TODO: Implement memory access counting for _scaled_mm
+    # TODO
     return 0
 
 def conv_memory_count(
@@ -111,13 +101,13 @@ def conv_memory_count(
     Returns:
         int: the number of memory accesses
     """
-    # TODO: Implement memory access counting for convolution
+    # TODO
     return 0
 
 @register_memory_formula([aten.convolution, aten._convolution])
 def conv_memory(x_shape, w_shape, _bias, _stride, _padding, _dilation, transposed, *args, out_shape=None, **kwargs) -> int:
     """Count memory accesses for convolution."""
-    # TODO: Implement memory access counting for convolution
+    # TODO
     return 0
 
 @register_memory_formula(aten.convolution_backward)
@@ -135,14 +125,14 @@ def conv_backward_memory(
         output_mask,
         out_shape) -> int:
     """Count memory accesses for convolution backward."""
-    # TODO: Implement memory access counting for convolution backward
+    # TODO
     return 0
 
 def sdpa_memory_count(query_shape, key_shape, value_shape):
     """
     Count memory accesses for self-attention.
     """
-    # TODO: Implement memory access counting for self-attention
+    # TODO
     return 0
 
 @register_memory_formula([aten._scaled_dot_product_efficient_attention,
@@ -150,7 +140,7 @@ def sdpa_memory_count(query_shape, key_shape, value_shape):
                         aten._scaled_dot_product_cudnn_attention])
 def sdpa_memory(query_shape, key_shape, value_shape, *args, out_shape=None, **kwargs) -> int:
     """Count memory accesses for self-attention."""
-    # TODO: Implement memory access counting for self-attention
+    # TODO
     return 0
 
 def _offsets_to_lengths(offsets, max_len):
@@ -270,7 +260,7 @@ def _flash_attention_forward_memory(
     **kwargs
 ) -> int:
     """Count memory accesses for self-attention."""
-    # TODO: Implement memory access counting for flash attention forward
+    # TODO
     sizes = _unpack_flash_attention_nested_shapes(
         query=query,
         key=key,
@@ -299,7 +289,7 @@ def _efficient_attention_forward_memory(
     **kwargs
 ) -> int:
     """Count memory accesses for self-attention."""
-    # TODO: Implement memory access counting for efficient attention forward
+    # TODO
     sizes = _unpack_efficient_attention_nested_shapes(
         query=query,
         key=key,
@@ -316,7 +306,7 @@ def _efficient_attention_forward_memory(
 
 def sdpa_backward_memory_count(grad_out_shape, query_shape, key_shape, value_shape):
     """Count memory accesses for self-attention backward."""
-    # TODO: Implement memory access counting for self-attention backward
+    # TODO
     return 0
 
 @register_memory_formula([aten._scaled_dot_product_efficient_attention_backward,
@@ -324,7 +314,7 @@ def sdpa_backward_memory_count(grad_out_shape, query_shape, key_shape, value_sha
                         aten._scaled_dot_product_cudnn_attention_backward])
 def sdpa_backward_memory(grad_out_shape, query_shape, key_shape, value_shape, *args, out_shape=None, **kwargs) -> int:
     """Count memory accesses for self-attention backward."""
-    # TODO: Implement memory access counting for self-attention backward
+    # TODO
     return 0
 
 @register_memory_formula(aten._flash_attention_backward, get_raw=True)
@@ -343,7 +333,7 @@ def _flash_attention_backward_memory(
     **kwargs,
 ) -> int:
     """Count memory accesses for flash attention backward."""
-    # TODO: Implement memory access counting for flash attention backward
+    # TODO
     shapes = _unpack_flash_attention_nested_shapes(
         query=query,
         key=key,
@@ -375,7 +365,7 @@ def _efficient_attention_backward_memory(
     **kwargs,
 ) -> int:
     """Count memory accesses for efficient attention backward."""
-    # TODO: Implement memory access counting for efficient attention backward
+    # TODO
     shapes = _unpack_efficient_attention_nested_shapes(
         query=query,
         key=key,
@@ -412,41 +402,7 @@ memory_registry = {
     aten._efficient_attention_backward: _efficient_attention_backward_memory,
 }
 
-def normalize_tuple(x):
-    if not isinstance(x, tuple):
-        return (x,)
-    return x
 
-# Define the suffixes for different orders of magnitude
-suffixes = ["", "K", "M", "B", "T"]
-# Thanks BingChat!
-def get_suffix_str(number):
-    # Find the index of the appropriate suffix based on the number of digits
-    # with some additional overflow.
-    # i.e. 1.01B should be displayed as 1001M, not 1.001B
-    index = max(0, min(len(suffixes) - 1, (len(str(number)) - 2) // 3))
-    return suffixes[index]
-
-def convert_num_with_suffix(number, suffix):
-    index = suffixes.index(suffix)
-    # Divide the number by 1000^index and format it to two decimal places
-    value = f"{number / 1000 ** index:.3f}"
-    # Return the value and the suffix as a string
-    return value + suffixes[index]
-
-def convert_to_percent_str(num, denom):
-    if denom == 0:
-        return "0%"
-    return f"{num / denom:.2%}"
-
-def _pytreeify_preserve_structure(f):
-    @wraps(f)
-    def nf(args):
-        flat_args, spec = tree_flatten(args)
-        out = f(*flat_args)
-        return tree_unflatten(out, spec)
-
-    return nf
 
 class MemoryCounterMode:
     """
