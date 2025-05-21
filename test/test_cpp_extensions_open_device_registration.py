@@ -67,8 +67,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             verbose=True,
         )
 
-        torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
-
     def test_base_device_registration(self):
         self.assertFalse(self.module.custom_add_called())
         # create a tensor using our custom device object

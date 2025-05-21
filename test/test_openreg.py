@@ -21,6 +21,8 @@ class TestPrivateUse1(TestCase):
 
     def test_backend_name(self):
         self.assertEqual(torch._C._get_privateuse1_backend_name(), "openreg")
+        # backend can be renamed to the same name multiple times
+        torch.utils.rename_privateuse1_backend("openreg")
         with self.assertRaisesRegex(RuntimeError, "has already been set"):  # type: ignore[misc]
             torch.utils.rename_privateuse1_backend("dev")
 
