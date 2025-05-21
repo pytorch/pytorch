@@ -354,9 +354,8 @@ extern "C"
   {{template.codegen_allocate_buffer("value_reorder_ptr", "scalar_t", "batchSize*num_head*kv_padding_size*headSize_v")}}
   {{template.codegen_allocate_buffer("transpose_buffer_ptr", "scalar_t", "num_thread*kvSplitSize*headSize")}}
   {{template.codegen_allocate_buffer("query_padding_ptr", "scalar_t", "num_thread*qSplitSize*eheadSize")}}
-
   if (need_pack) {
-    // Pack K, V 
+    // Pack K, V
     at::parallel_for(0, batchSize * num_head * kvSlice, 1, [&](int64_t begin, int64_t end) {
       int ompIdx = at::get_thread_num();
       int64_t i = 0, j = 0, l = 0, n = 0;
@@ -372,6 +371,9 @@ extern "C"
               k_data + i_kv * kStrideB + j_kv * kStrideH + n * kStrideN;
         auto v_addr =
               v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
+        // find -> paged index block [cur_kvSplitSize, headSize]
+        // paged k addr [cur_kvSplitSize, headSize]
+        // paged v addr [cur_kvSplitSize, headSize]
         // transpose [cur_kvSplitSize, headSize] -> [headSize, cur_kvSplitSize]
         at::native::utils::transpose<uint16_t>(
           cur_kvSplitSize,
@@ -481,11 +483,6 @@ extern "C"
         if (!need_pack) {
           auto k_addr =
               k_data + i_kv * kStrideB + j_kv * kStrideH + n * kStrideN;
-          if (use_kv_indice) {
-              k_addr =
-                  k_data + i_kv * kStrideB + j_kv * kStrideH +
-                  (*kv_logical_data * kvBlockSize + kv_block_offset) * kStrideN;
-          }
 
           {{kernel.kernel_name}}_kernel_micro_gemm_transpose_b<static_cast<bool>(false)>(
               q_data + i * qStrideB + j * qStrideH +
@@ -523,16 +520,12 @@ extern "C"
         // TODO: reduce the number of calls of q_idx and kv_idx initialization
         std::vector<int64_t> q_idx(cur_qSplitSize);
         for (int64_t i = 0; i < cur_qSplitSize; ++i) {
-            q_idx[i] = m + i;
+          q_idx[i] = m + i;
         }
 
         std::vector<int64_t> kv_idx(cur_kvSplitSize);
         for (int64_t i = 0; i < cur_kvSplitSize; ++i) {
-            if (use_kv_indice) {
-                kv_idx[i] = *kv_logical_data * kvBlockSize + i;
-            } else {
-                kv_idx[i] = n + i;
-            }
+          kv_idx[i] = n + i;
         }
 
         std::vector<int64_t> b_idx = {i};
@@ -551,8 +544,8 @@ extern "C"
             accum_t* out_ptr{{score_buf_idx}} = in_ptr0;
             {{ template.modification(score_mod, score_buf_name, score_buf_idx)|indent(12, false) }}
         }
-{%- if has_full_kv_block %}
-        if ((std::find(full_kv_ind_mask_list.begin(), full_kv_ind_mask_list.end(), cur_n) != full_kv_ind_mask_list.end()) ){
+
+        if ((std::find(kv_ind_mask_list.begin(), kv_ind_mask_list.end(), cur_n) != kv_ind_mask_list.end()) ){
           // Apply block mask, fill unused with -inf
           {
               {{ template.generate_other_buffer("mask_others", -1, "len_mask_other", kernel.args) }}
@@ -561,7 +554,6 @@ extern "C"
           }
         }
 
-{%- endif %}
 {%- endif %}
         // Update coefficients with Softmax
         accum_t tmp_max = 0, tmp_sum = 0, exp_tmp = 0;
@@ -610,11 +602,6 @@ extern "C"
         if (!need_pack) {
           auto v_addr =
               v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
-          if (use_kv_indice) {
-              v_addr =
-                  v_data + i_kv * vStrideB + j_kv * vStrideH +
-                  (*kv_logical_data * kvBlockSize + kv_block_offset) * vStrideN;
-          }
           // Fallback Half brgemm is slower than micro gemm
           if (!std::is_same_v<scalar_t, at::Half>) {
             at::native::cpublas::brgemm(
