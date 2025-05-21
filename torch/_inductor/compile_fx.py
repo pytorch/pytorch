@@ -1062,6 +1062,9 @@ class _InProcessFxCompile(FxCompile):
         inputs_to_check: Sequence[int],
         graph_kwargs: _CompileFxKwargs,
     ) -> OutputCode:
+        """
+        Generates the OutputCode from the GraphModule and example_inputs.
+        """
         # Sorry about the mess, we need graph_kwargs to continue to be able
         # to propagate it further on
         # TODO: _CompileFxKwargs actually has stronger types than in the
