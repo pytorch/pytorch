@@ -167,10 +167,10 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             for ph in subgraph.graph.find_nodes(op="placeholder")
         ]
         (
-            mutated_inp_idx,
             inp_inp_alias,
             inp_out_alias,
             out_out_alias,
+            mutated_inp_idx,
             output,
         ) = check_input_alias_and_mutation_return_ouputs(subgraph, fake_args)
 
@@ -187,6 +187,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
                 "Aliasing is not suppported for HOP subgraph.\n"
                 f"{subgraph.print_readable(print_output=False)}\n"
                 f"Alias info: inp-inp alias: {inp_inp_alias}, inp-out alias: {inp_out_alias}, out-out alias{out_out_alias}"
+                f"This may lead to silent incorrectness."
             )
         args = [
             HopArgumentInfoGen.from_example(
