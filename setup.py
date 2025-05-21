@@ -443,7 +443,7 @@ def check_submodules():
             ],
         )
     check_for_files(
-        os.path.join(third_party_path, "fbgemm", "third_party", "asmjit"),
+        os.path.join(third_party_path, "fbgemm", "external", "asmjit"),
         ["CMakeLists.txt"],
     )
 
@@ -1296,6 +1296,8 @@ def main():
         install_requires=install_requires,
         extras_require=extras_require,
         package_data=package_data,
+        # TODO fix later Manifest.IN file was previously ignored
+        include_package_data=False,  # defaults to True with pyproject.toml file
         url="https://pytorch.org/",
         download_url="https://github.com/pytorch/pytorch/tags",
         author="PyTorch Team",
