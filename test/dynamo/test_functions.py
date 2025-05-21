@@ -4821,7 +4821,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(res_tup.checked)
 
     def test_udf_tuple_construction(self):
-        class MyTuple(tuple):
+        class MyTuple(tuple):  # noqa: SLOT001
             pass
 
         def fn(x):
@@ -4840,7 +4840,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref_tup, res_tup)
 
     def test_udf_tuple_construction_custom_new(self):
-        class MyTuple(tuple):
+        class MyTuple(tuple):  # noqa: SLOT001
             def __new__(cls, *args, **kwargs):
                 return super().__new__(cls, [1, 2, 3])
 

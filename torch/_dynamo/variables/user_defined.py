@@ -1017,7 +1017,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if not object_has_getattribute(self.value) and (
             subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
             or (
-                inspect.ismemberdescriptor(subobj) and name in self.value.__slots__
+                inspect.ismemberdescriptor(subobj) and self.is_slot_attr(name)
             )  # handle memberdecriptor and slots
             or self._is_c_defined_property(subobj)
             or inspect.isgetsetdescriptor(
@@ -1036,6 +1036,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             raise AttributeError
 
         return subobj
+
+    def is_slot_attr(self, attr_name):
+        return attr_name in inspect.getattr_static(self.value, "__slots__", [])
+
+    def is_set_descriptor(self, attr_name):
+        attr = inspect.getattr_static(self.value, attr_name, NO_SUCH_SUBOBJ)
+        if attr is NO_SUCH_SUBOBJ:
+            return False
+        setter = inspect.getattr_static(attr, "__set__", NO_SUCH_SUBOBJ)
+        return setter is not NO_SUCH_SUBOBJ
 
     def has_key_in_generic_dict(self, tx: "InstructionTranslator", key):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
@@ -1649,7 +1659,10 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             assert self.source is None, (
                 "tuple_vt must be constructed by builder.py when source is present"
             )
-            # TODO this duplicates logic for `BuiltinVariable(tuple)`
+            # Emulate `tuple.__new__`
+            # https://github.com/python/cpython/blob/3.11/Objects/tupleobject.c#L697-L710
+            #
+            # TODO this duplicates the logic in `BuiltinVariable(tuple)`
             from torch._dynamo.symbolic_convert import InstructionTranslator
 
             tx = InstructionTranslator.current_tx()
@@ -1657,15 +1670,6 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             self._tuple_vt = variables.TupleVariable(
                 elems, mutation_type=ValueMutationNew()
             )
-
-    def set_underlying_tuple_vt(self, tuple_vt):
-        self._tuple_vt = tuple_vt
-
-    @staticmethod
-    def create(value, tuple_vt, **kwargs):
-        result = UserDefinedTupleVariable(value, **kwargs)
-        result.set_underlying_tuple_vt(tuple_vt)
-        return result
 
     def call_method(
         self,
