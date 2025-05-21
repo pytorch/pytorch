@@ -8,7 +8,7 @@ import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._guards import detect_fake_mode
-from torch._ops import OperatorBase
+from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
@@ -937,3 +937,66 @@ class FunctionalizeCtxWrapper:
                     *args, **kwargs
                 )
         return self.ctx.functionalize(self.subgraph)(*args, **kwargs)
+
+
+# A wrapper over HigherOrderOperator that also carries its schema
+class HopInstance:
+    def __init__(self, op: HigherOrderOperator, schema: torch.FunctionSchema):
+        assert isinstance(op, HigherOrderOperator), op
+        self._op = op
+        # Using "_" to be consistent with how we access _schema of OpOverload
+        self._schema = schema
+
+    def __call__(self, *args, **kwargs):
+        return self._op(*args, **kwargs)
+
+
+def call_op(op: Union[OpOverload, HopInstance], args, kwargs):
+    if isinstance(op, OpOverload):
+        return op(*args, **kwargs)
+
+    assert isinstance(op, HopInstance), op
+    schema = op._schema
+    bound_args = list(args)
+    bound_kwargs = {}
+    for arg in schema.arguments[len(bound_args) :]:
+        assert arg.name in kwargs, (arg.name, kwargs)
+        val = kwargs[arg.name]
+        if not arg.kwarg_only:
+            bound_args.append(val)
+        else:
+            bound_kwargs[arg.name] = val
+    return op(*bound_args, **bound_kwargs)
+
+
+def materialize_callable_in_args(op: HopInstance, args, kwargs):
+    schema = op._schema
+    hop = op._op
+    flat_args, flat_spec = pytree.tree_flatten((args, kwargs))
+
+    def wrapped_fn(*flat_args):
+        return call_op(op, args, kwargs)
+
+    # We need to trace the higher order op in order to materilaize the callable inputs that
+    # are a callable (e.g. after functionalization key)
+    gm = reenter_make_fx(wrapped_fn)(*flat_args)
+    hop_node = gm.graph.find_nodes(op="call_function", target=hop)[0]
+    arg_proxies = pytree.tree_leaves((hop_node.args, hop_node.kwargs))
+    assert isinstance(schema, torch._C.FunctionSchema) and len(arg_proxies) == len(
+        schema.arguments
+    )
+
+    # call_op preserves ordering of proxies via schema
+    materialized_args = []
+    for i, (proxy, arg) in enumerate(zip(arg_proxies, schema.arguments)):
+        if (
+            isinstance(proxy, torch.fx.Node)
+            and proxy.op == "get_attr"
+            and isinstance(getattr(gm, proxy.target), torch.fx.GraphModule)  # type: ignore[arg-type]
+        ):
+            assert callable(flat_args[i]), (schema, args, kwargs)
+            materialized_args.append(getattr(gm, proxy.target))  # type: ignore[arg-type]
+        else:
+            materialized_args.append(flat_args[i])
+
+    return pytree.tree_unflatten(materialized_args, flat_spec)
