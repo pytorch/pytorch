@@ -2568,15 +2568,6 @@ def _get_fake_tensor(vt):
     return fake_tensor
 
 
-def is_constant_nan(vt):
-    return (
-        vt.is_python_constant()
-        and (val := vt.as_python_constant())
-        and isinstance(val, float)
-        and math.isnan(val)
-    )
-
-
 def iter_contains(items, search, tx, check_tensor_identity=False):
     from .variables import (
         BuiltinVariable,
@@ -2586,17 +2577,6 @@ def iter_contains(items, search, tx, check_tensor_identity=False):
     )
 
     if search.is_python_constant():
-        # def check_nan(a, b):
-        #     return is_constant_nan(a) and is_constant_nan(b)
-        # found_const = any(
-        #     x.is_python_constant()
-        #     and (
-        #         x.as_python_constant() == search.as_python_constant()
-        #         or check_nan(x, search)
-        #     )
-        #     for x in items
-        # )
-
         found_const = any(
             x.is_python_constant()
             and x.as_python_constant() == search.as_python_constant()
