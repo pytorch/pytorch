@@ -2014,7 +2014,7 @@ _post_grad_graph_counter = itertools.count()
 
 class Scheduler:
     """
-    A Scheduler is a graph of BaseSchedulerNode's. It is responsible for
+    A Scheduler is a graph of BaseSchedulerNodes. It is responsible for
     optimizations such as fusion, reorder, and graph partition.
     """
 

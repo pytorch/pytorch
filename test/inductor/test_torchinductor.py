@@ -13068,6 +13068,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         foo()
 
     @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_mutation_real_name(self):
+        def f(x, y, z, other):
+            mul = x * y
+            diag = torch.diagonal(mul)
+            diag.copy_(other)
+            # force grah partition by device copy
+            u = diag.cpu().to(self.device)
+            return torch.mm(mul, z) + u + diag
+
+        inps = (
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, device=self.device),
+        )
+
+        eager_out = f(*inps)
+        compiled_f = torch.compile(f)
+        compiled_out = compiled_f(*inps)
+        torch.testing.assert_close(eager_out, compiled_out)
+
+    @torch._inductor.config.patch("graph_partition", True)
     def test_graph_partition_arange1(self):
         def fn(step, device):
             return torch.arange(512, -512, step, device=device)
