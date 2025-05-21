@@ -7244,7 +7244,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             def backward(ctx, grad_out):
                 return grad_out * torch.tensor(2) * grad_out.shape[0]
 
-
         def f(x):
             return Fn.apply(x)
 
