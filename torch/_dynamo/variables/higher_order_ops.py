@@ -2516,7 +2516,6 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         return _make_inlined(tx, pytree.tree_unflatten)(variable, treespec)
 
 
-# Copy paste of the above class, but enables an arbitrary callable
 class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
     def __init__(self, hop, source) -> None:
         super().__init__(hop, source)
@@ -2559,7 +2558,8 @@ class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
 
         # Alternatively, we could've stored only the function's fqn and
         # reconstructed, but that requires the function to be a global.
-        gmod.meta["_dynamo_bypassing_wrapper_fn"] = func
+        gmod_meta_key = "_dynamo_bypassing_wrapper_fn"
+        gmod.meta[gmod_meta_key] = func
 
         # Store the invocation as a call
         variable = wrap_fx_proxy(
@@ -2567,7 +2567,7 @@ class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
             proxy=tx.output.create_proxy(
                 "call_function",
                 self.value,
-                args=tuple(p_args),
+                args=(gmod_meta_key,) + tuple(p_args),
                 kwargs={},
             ),
             example_value=example_value,
