@@ -3178,7 +3178,7 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
 
         def my_hop_fn(fn, *args, k=1, **kwargs):
             return dynamo_bypassing_wrapper(
-                fn, functools.partial(my_hop_fn_impl, k=k), *args, **kwargs
+                functools.partial(my_hop_fn_impl, k=k), fn, *args, **kwargs
             )
 
         def my_hop_fn_2_impl(fn, *args, g=None):
@@ -3193,7 +3193,7 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
 
         def my_hop_fn_2(fn, *args, g=None, **kwargs):
             return dynamo_bypassing_wrapper(
-                fn, functools.partial(my_hop_fn_2_impl, g=g), *args, **kwargs
+                functools.partial(my_hop_fn_2_impl, g=g), fn, *args, **kwargs
             )
 
         def gn(x, h=1):
