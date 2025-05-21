@@ -3,6 +3,8 @@ if "%VC_YEAR%" == "2022" powershell windows/internal/vs2022_install.ps1
 
 set VC_VERSION_LOWER=17
 set VC_VERSION_UPPER=18
+:: Please don't delete VS2019 as an alternative, in case some Windows compiler issue.
+:: Reference: https://github.com/pytorch/pytorch/issues/145702#issuecomment-2858693930
 if "%VC_YEAR%" == "2019" (
     set VC_VERSION_LOWER=16
     set VC_VERSION_UPPER=17
