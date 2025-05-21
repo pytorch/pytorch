@@ -16,6 +16,11 @@ __all__ = ["Distribution"]
 class Distribution:
     r"""
     Distribution is the abstract base class for probability distributions.
+
+    Args:
+        batch_shape (torch.Size): The shape over which parameters are batched.
+        event_shape (torch.Size): The shape of a single sample (without batching).
+        validate_args (bool, optional): Whether to validate arguments. Default: None.
     """
 
     has_rsample = False

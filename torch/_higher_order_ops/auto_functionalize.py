@@ -403,23 +403,29 @@ def can_auto_functionalize(op: OperatorBase) -> bool:
     return True
 
 
-def get_mutable_args(op: OpOverload) -> tuple[list[str], list[torch.Type]]:
+def get_mutable_args_from_schema(
+    schema: torch.FunctionSchema,
+) -> tuple[list[str], list[torch.Type]]:
     """
     Returns the list of argument names that get mutated according to the
     schema and their types.
     """
     mutable_args_names = [
         arg.name
-        for arg in op._schema.arguments
+        for arg in schema.arguments
         if arg.alias_info is not None and arg.alias_info.is_write
     ]
 
     mutable_args_types = [
         arg.type
-        for arg in op._schema.arguments
+        for arg in schema.arguments
         if arg.alias_info is not None and arg.alias_info.is_write
     ]
-    return mutable_args_names, mutable_args_types
+    return mutable_args_names, mutable_args_types  # type: ignore[return-value]
+
+
+def get_mutable_args(op: OpOverload) -> tuple[list[str], list[torch.Type]]:
+    return get_mutable_args_from_schema(op._schema)
 
 
 def do_auto_functionalize(
@@ -735,14 +741,33 @@ def auto_functionalized_v2_dense(
     _only_clone_these_bases: Optional[tuple[int, ...]] = None,
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
-    all_bases: list[Tensor] = kwargs.pop("_all_bases", [])
-    mutable_args_names, mutable_args_types = get_mutable_args(_mutable_op)
+    _all_bases: list[Tensor] = kwargs.pop("_all_bases", [])
+    if _only_clone_these_bases is None:
+        _only_clone_these_bases = tuple(range(len(_all_bases)))
+
+    schema = _mutable_op._schema
+    op_kwargs_new, all_bases_new = _generate_new_op_kwargs_from_bases(
+        schema,
+        kwargs,
+        _all_bases,
+        _only_clone_these_bases,
+    )
+
+    out = _mutable_op(**op_kwargs_new)
+
+    if isinstance(out, tuple):
+        return (*out, *all_bases_new)  # type: ignore[return-value]
+    else:
+        return (out, *all_bases_new)  # type: ignore[return-value]
+
+
+def _generate_new_op_kwargs_from_bases(
+    schema, kwargs, all_bases, _only_clone_these_bases
+):
+    mutable_args_names, mutable_args_types = get_mutable_args_from_schema(schema)
     args_view_info = read_view_information_from_args(
         mutable_args_names, mutable_args_types, kwargs, all_bases
     )
-
-    if _only_clone_these_bases is None:
-        _only_clone_these_bases = tuple(range(len(all_bases)))
 
     def maybe_copy(i, t):
         if t is None:
@@ -776,12 +801,7 @@ def auto_functionalized_v2_dense(
                 all_bases_new
             )
 
-    out = _mutable_op(**new_kwargs)
-
-    if isinstance(out, tuple):
-        return (*out, *all_bases_new)  # type: ignore[return-value]
-    else:
-        return (out, *all_bases_new)  # type: ignore[return-value]
+    return new_kwargs, all_bases_new
 
 
 @auto_functionalized_v2.py_impl(FakeTensorMode)

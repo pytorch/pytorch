@@ -3731,7 +3731,11 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
     from torch._dynamo.exc import UserError, UserErrorType
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_or_true,
+        GuardOnDataDependentSymNode,
+    )
 
     # Creates a valid shape
     shape = utils.extract_shape_from_varargs(shape, validate=False)
@@ -3834,12 +3838,16 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
 
         accum = a_.shape[idx]
         end = idx
-        while guard_or_true(accum % length != 0):
-            deferred.append(lambda: bool(accum % length != 0))
+        while True:
+            try:
+                if accum % length == 0:
+                    break
+            except GuardOnDataDependentSymNode:
+                deferred.append(lambda: bool(accum % length == 0))
             if end == a_.ndim - 1:
                 maybe_throw_dde()
-            end = end + 1
-            accum = accum * a_.shape[end]
+            end += 1
+            accum *= a_.shape[end]
         if end != idx:
             # NOTE: in this case multiple dimensions must be flatten to create the desired dimension
             # This flattening is why reshape sometimes creates a copy -- because flattening

@@ -2620,6 +2620,10 @@ def sample_inputs_gather(op_info, device, dtype, requires_grad, **kwargs):
         gather_variable((S, S), 1, M, True, device=device))
     yield SampleInput(
         make_arg((M, S)),
+        0,
+        gather_variable((S, S), 1, M, True, device=device).to(torch.int32))
+    yield SampleInput(
+        make_arg((M, S)),
         1,
         gather_variable((M, S // 2), 0, S, True, device=device))
     # Empty index tensor case, see: https://github.com/pytorch/pytorch/pull/65006
@@ -2662,11 +2666,6 @@ def error_inputs_gather(op_info, device, **kwargs):
     bad_src = make_tensor((1, 1), device=device, dtype=torch.float32)
     yield ErrorInput(SampleInput(bad_src, args=(1, idx,)),
                      error_regex="Size does not match at dimension 0")
-
-    # Index must have long dtype
-    bad_idx = idx.to(torch.int32)
-    yield ErrorInput(SampleInput(src, args=(1, bad_idx)),
-                     error_regex="Expected dtype int64 for index")
 
     # TODO: FIXME
     # out.dtype must match src.dtype
@@ -2739,13 +2738,6 @@ def error_inputs_scatter_and_scatter_add(op_info, device, **kwargs):
     dst = torch.zeros((3, 5), device=device, dtype=torch.double)
     yield ErrorInput(SampleInput(dst, args=(0, idx, src)),
                      error_regex="Expected self.dtype to be equal to src.dtype")
-
-    # Index dtype must be long
-    src = make_tensor((2, 5), device=device, dtype=torch.float32)
-    idx = torch.tensor(((0, 1), (1, 2)), device=device, dtype=torch.int32)
-    dst = torch.zeros((3, 5), device=device, dtype=torch.float32)
-    yield ErrorInput(SampleInput(dst, args=(0, idx, src)),
-                     error_regex="Expected dtype int64 for index")
 
     # Index and destination must have the same number of dimensions
     src = make_tensor((2, 5), device=device, dtype=torch.float32)
@@ -6178,6 +6170,11 @@ def _generate_correlation_inputs(device, dtype, requires_grad, **kwargs):
 def sample_inputs_corrcoef(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(t) for t in _generate_correlation_inputs(device, dtype, requires_grad))
 
+def sample_inputs_copysign(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_elementwise_binary(op_info, device, dtype, requires_grad, **kwargs)
+    if dtype.is_floating_point:
+        yield SampleInput(make_tensor(5, dtype=dtype, device=device, requires_grad=requires_grad), -3.14)
+
 
 def sample_inputs_cov(op_info, device, dtype, requires_grad, **kwargs):
     for t in _generate_correlation_inputs(device, dtype, requires_grad):
@@ -7104,12 +7101,13 @@ def sample_inputs_tensordot(self, device, dtype, requires_grad, **kwargs):
     cases = (
         ((2, 2, 2), (2, 2, 2), (2)),
         ((2, 2, 1), (2, 1, 2), ([0, 1], [2, 0])),
+        ((1, 1, 1), (2, 1, 2), ([0, 1], [2, 0])),
     )
     for first_shape, second_shape, dims in cases:
         yield SampleInput(make_tensor(first_shape, dtype=dtype, device=device,
-                                      requires_grad=requires_grad),
+                                      requires_grad=requires_grad, low=-1, high=+2),
                           make_tensor(second_shape, dtype=dtype, device=device,
-                                      requires_grad=requires_grad),
+                                      requires_grad=requires_grad, low=-1, high=+2),
                           dims=dims)
 
 def sample_inputs_kron(op_info, device, dtype, requires_grad, **kwargs):
@@ -7139,6 +7137,7 @@ def sample_inputs_scatter(op_info, device, dtype, requires_grad, **kwargs):
     zero = torch.tensor(0, dtype=torch.long, device=device)
     test_cases = (
         (_tensor((M, S)), (0, _gather((S, S), 1, M), _tensor((S, S)))),
+        (_tensor((M, S)), (0, _gather((S, S), 1, M).to(torch.int32), _tensor((S, S)))),
         (_tensor((M, S)), (1, _gather((S, S), 0, S), _tensor((S, S)))),
         (_tensor((M, S)), (-1, _gather((S, S), 0, S), _tensor((S, S)))),
         (_tensor((M, S)), (0, _gather((M, S // 2), 1, M), _tensor((M, S // 2)))),
@@ -12933,6 +12932,7 @@ op_db: list[OpInfo] = [
                         DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out', device_type='mps'),
                         DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),)),
     BinaryUfuncInfo('copysign',
+                    sample_inputs_func=sample_inputs_copysign,
                     dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
                     promotes_int_to_float=True,
@@ -14130,6 +14130,9 @@ op_db: list[OpInfo] = [
            check_batched_forward_grad=False,
            supports_out=False,
            skips=(
+               # Compiler issue on ROCm. Regression started in ROCm 6.4.
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('masked_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -15574,6 +15577,9 @@ op_db: list[OpInfo] = [
                # NOTE: this failure may not reproduce consistently on different systems
                # false INTERNAL ASSERT FAILED at "...torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185
                DecorateInfo(unittest.skip("Internal assert failed!"), 'TestJit', 'test_variant_consistency_jit'),
+               # Compiler issue on ROCm. Regression started in ROCm 6.4.
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('nn.functional.interpolate',
            aten_name="interpolate",
@@ -18640,7 +18646,12 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_scatter,
-           error_inputs_func=error_inputs_scatter_and_scatter_add),
+           error_inputs_func=error_inputs_scatter_and_scatter_add,
+           skips=(
+               # Compiler issue on ROCm. Regression started in ROCm 6.4.
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
+           )),
     UnaryUfuncInfo(
         'bfloat16',
         op=lambda x, *args, **kwargs: x.bfloat16(*args, **kwargs),
@@ -19429,7 +19440,11 @@ op_db: list[OpInfo] = [
            error_inputs_func=error_inputs_scatter_and_scatter_add,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           ),
+           skips=(
+               # Compiler issue on ROCm. Regression started in ROCm 6.4.
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
+           )),
     OpInfo('stack',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_stack,
@@ -19440,8 +19455,7 @@ op_db: list[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/77046
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
-           ),
-           ),
+           )),
     OpInfo('_chunk_cat',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_chunk_cat,
@@ -20021,13 +20035,23 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            error_inputs_func=error_inputs_tril_triu,
-           sample_inputs_func=sample_inputs_tril_triu),
+           sample_inputs_func=sample_inputs_tril_triu,
+           skips=(
+               # Compiler issue on ROCm. Regression started in ROCm 6.4.
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
+           )),
     OpInfo('triu',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            error_inputs_func=error_inputs_tril_triu,
-           sample_inputs_func=sample_inputs_tril_triu),
+           sample_inputs_func=sample_inputs_tril_triu,
+           skips=(
+               # Compiler issue on ROCm. Regression started in ROCm 6.4.
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
+           )),
     OpInfo('triu_indices',
            dtypes=_dispatch_dtypes((torch.int32, torch.int64)),
            sample_inputs_func=sample_inputs_trilu_indices,
@@ -20421,6 +20445,9 @@ op_db: list[OpInfo] = [
             # ROCm generates -inf+infj instead of nan+infj for complex64 for some of the results
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                          dtypes=[torch.complex64], active_if=TEST_WITH_ROCM),
+            # Newer numpy generates -inf+infj instead of nan+infj for complex64 for some of the results
+            DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
+                         dtypes=[torch.complex64], device_type='cuda'),
             # Expected failure: torch.jiterator_unary is not a valid op
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
@@ -21605,6 +21632,11 @@ op_db: list[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_scatter_reduce,
+        skips=(
+            # Compiler issue on ROCm. Regression started in ROCm 6.4.
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
+                         dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
+        ),
     ),
     OpInfo(
         'scatter_reduce',

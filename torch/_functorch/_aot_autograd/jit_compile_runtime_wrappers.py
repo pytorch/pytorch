@@ -23,7 +23,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING
 import torch
 import torch.utils.dlpack
 from torch import Tensor
-from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
+from torch._dynamo.utils import detect_fake_mode, dynamo_timed, lazy_format_graph_code
 from torch._guards import CompileContext, TracingContext
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
@@ -55,7 +55,6 @@ from .runtime_wrappers import (
     AOTDispatchSubclassWrapper,
     AOTSyntheticBaseWrapper,
     AutogradLazyBackwardCompileInfo,
-    CachedAutogradLazyBackwardCompileInfo,
     CompilerWrapper,
     DebugAssertWrapper,
     EffectTokensWrapper,
@@ -186,7 +185,10 @@ def aot_dispatch_base(
     aot_forward_graph_str = None
     if aot_config.cache_info is not None:
         aot_forward_graph_str = fw_module.print_readable(
-            print_output=False, include_stride=True, include_device=True
+            print_output=False,
+            include_stride=True,
+            include_device=True,
+            fast_sympy_print=True,
         )
 
     fakified_out_wrapper = FakifiedOutWrapper()
@@ -276,7 +278,6 @@ def aot_dispatch_base(
                 backward_time_taken_ns=0,
                 sanitized_aot_config=sanitize_aot_config(aot_config),
                 guards_expr=guards_expr,
-                cached_lazy_backward_info=None,
             )
             AOTAutogradCache.save(
                 cache_info.cache_key, entry, remote=should_use_remote_autograd_cache()
@@ -529,86 +530,83 @@ def run_joint_graph_passes_on_hops(
 
     # Save the fw and bwd hop nodes. We will later in-place modify the graph
     # using these nodes.
-    found_backward_node = False
     fw_hop_nodes = []
     bw_hop_nodes = []
-
     for node in joint_gm.graph.nodes:
         if (
             node.op == "call_function"
             and node.target is invoke_subgraph
             and isinstance(node.args[1], str)
         ):
-            identifier = (
-                node.args[1].replace("___forward", "").replace("___backward", "")
-            )
-
-            # NB: This is done in a separate if else condition because we early
-            # return if the partitioning_done is True.
-            if node.args[1].startswith("___forward"):
+            if node.args[1].startswith("fw"):
                 fw_hop_nodes.append(node)
-            elif node.args[1].startswith("___backward"):
-                found_backward_node = True
+            elif node.args[1].startswith("bw"):
                 bw_hop_nodes.append(node)
 
-            # If partitioning already done for this identifier, skip. This saves
-            # redundant joint graph passes for same subgraphs.
-            if new_hop_graphs[identifier].partitioning_done:
-                continue
-
-            hop_gm = getattr(joint_gm, node.args[0].target)
-            assert isinstance(hop_gm, torch.fx.GraphModule)
-
-            if node.args[1].startswith("___forward"):
-                # Collect some information from the forward hop graph
-                new_hop_graphs[identifier].old_num_fw_inputs = num_inputs(hop_gm)
-                new_hop_graphs[identifier].old_num_fw_outputs = num_outputs(hop_gm)
-            elif node.args[1].startswith("___backward"):
-                num_fw_inputs = new_hop_graphs[identifier].old_num_fw_inputs
-                assert num_fw_inputs is not None
-                num_fw_outputs = new_hop_graphs[identifier].old_num_fw_outputs
-                assert num_fw_outputs is not None
-
-                # Step 1) - Get the `joint_hop_gm`. As mentioned earlier, the
-                # backward graph is the joint graph.
-                joint_hop_gm = hop_gm
-
-                # Prepare the graph for the partitioner
-                joint_hop_gm = prepare_for_partitioner(
-                    joint_hop_gm, num_fw_inputs, num_fw_outputs
-                )
-
-                # TODO: invoke_subgraph should track which of its inputs static indices
-                # so it can propagate them to the partitioner (and use in cudagraphs)
-                static_lifetime_input_indices: list[int] = []
-                # Step 2) and 3) - Run joint graph passes and partitioner
-                new_fw_hop_gm, new_bw_hop_gm = aot_config.partition_fn(
-                    joint_hop_gm,
-                    [],
-                    num_fwd_outputs=num_fw_outputs,
-                    static_lifetime_input_indices=static_lifetime_input_indices,
-                )
-
-                # Save the new forward and backward graph modules
-                new_hop_graphs[identifier].new_fw_hop_gm = new_fw_hop_gm
-                new_hop_graphs[identifier].new_bw_hop_gm = new_bw_hop_gm
-
-                # Save the number of symints and saved tensors
-                new_fw_out_nodes = new_fw_hop_gm.graph.find_nodes(op="output")[0].args[
-                    0
-                ]
-                extra_outputs = new_fw_out_nodes[num_fw_outputs:]
-                symint_outputs = [n for n in extra_outputs if is_sym_node(n)]
-
-                new_hop_graphs[identifier].new_num_sym_nodes = len(symint_outputs)
-                new_hop_graphs[identifier].new_num_saved_nodes = len(
-                    extra_outputs
-                ) - len(symint_outputs)
-
-                new_hop_graphs[identifier].partitioning_done = True
-
-    if not new_hop_graphs or not found_backward_node:
+    if not bw_hop_nodes:
         return joint_gm
+
+    assert len(fw_hop_nodes) == len(bw_hop_nodes)
+
+    # Create a bw to hop node mapping. This helps us in identifying the bw and
+    # fw subgraph pairs without relying on the identifier. This is important
+    # because we can have different subgraphs for bwd for same subgraph in the
+    # fwd because of differing strides in the backward.
+    bw_to_fw_hop_node = dict(zip(list(reversed(bw_hop_nodes)), fw_hop_nodes))
+
+    for node in bw_hop_nodes:
+        identifier = node.args[1].removeprefix("bw")
+
+        # If partitioning already done for this identifier, skip. This saves
+        # redundant joint graph passes for same subgraphs.
+        if new_hop_graphs[identifier].partitioning_done:
+            continue
+
+        # Collect some information from the forward hop graph
+        fw_hop_node = bw_to_fw_hop_node[node]
+        fw_hop_gm = getattr(joint_gm, fw_hop_node.args[0].target)
+        assert isinstance(fw_hop_gm, torch.fx.GraphModule)
+        num_fw_inputs = num_inputs(fw_hop_gm)
+        num_fw_outputs = num_outputs(fw_hop_gm)
+        new_hop_graphs[identifier].old_num_fw_inputs = num_fw_inputs
+        new_hop_graphs[identifier].old_num_fw_outputs = num_fw_outputs
+
+        # Step 1) - Get the `joint_hop_gm`. As mentioned earlier, the
+        # backward graph is the joint graph.
+        joint_hop_gm = getattr(joint_gm, node.args[0].target)
+        assert isinstance(joint_hop_gm, torch.fx.GraphModule)
+
+        # Prepare the graph for the partitioner
+        joint_hop_gm = prepare_for_partitioner(
+            joint_hop_gm, num_fw_inputs, num_fw_outputs
+        )
+
+        # TODO: invoke_subgraph should track which of its inputs static indices
+        # so it can propagate them to the partitioner (and use in cudagraphs)
+        static_lifetime_input_indices: list[int] = []
+        # Step 2) and 3) - Run joint graph passes and partitioner
+        new_fw_hop_gm, new_bw_hop_gm = aot_config.partition_fn(
+            joint_hop_gm,
+            [],
+            num_fwd_outputs=num_fw_outputs,
+            static_lifetime_input_indices=static_lifetime_input_indices,
+        )
+
+        # Save the new forward and backward graph modules
+        new_hop_graphs[identifier].new_fw_hop_gm = new_fw_hop_gm
+        new_hop_graphs[identifier].new_bw_hop_gm = new_bw_hop_gm
+
+        # Save the number of symints and saved tensors
+        new_fw_out_nodes = new_fw_hop_gm.graph.find_nodes(op="output")[0].args[0]
+        extra_outputs = new_fw_out_nodes[num_fw_outputs:]
+        symint_outputs = [n for n in extra_outputs if is_sym_node(n)]
+
+        new_hop_graphs[identifier].new_num_sym_nodes = len(symint_outputs)
+        new_hop_graphs[identifier].new_num_saved_nodes = len(extra_outputs) - len(
+            symint_outputs
+        )
+
+        new_hop_graphs[identifier].partitioning_done = True
 
     # Step 3) Restitch the new fw and bw graphs back into the main graph.
     #
@@ -649,15 +647,11 @@ def run_joint_graph_passes_on_hops(
     # hop1 order for the backward. This structure allows us to just use a stack
     # to collect all the information that we need to pass from the forward hop
     # node to the corresponding backward node.
-    old_fw_hop_nodes_stack = []
-    # Collect the saved tensor nodes that we need to pass as inputs to the
-    # backward hop.
-    fw_node_to_saved_tensors_map = {}
 
     already_added_new_hop_mods = set()
 
     def add_new_hop_gm(new_subgraph_mod, name):
-        new_subgraph_attr_name = f"{name}_post_graph"
+        new_subgraph_attr_name = f"partitioned_{name}"
         if new_subgraph_attr_name in already_added_new_hop_mods:
             return new_subgraph_attr_name
 
@@ -674,15 +668,19 @@ def run_joint_graph_passes_on_hops(
         out_example_vals = [n.meta["val"] if n else None for n in output.args[0]]
         new_call_function_node.meta["val"] = tuple(out_example_vals)
 
-    for fw_node in fw_hop_nodes:
+    for bw_node in reversed(bw_hop_nodes):
+        identifier = bw_node.args[1].removeprefix("bw")
+
+        # Make changes to the corresponding fw and bw node pair simultaneously.
+        # The removes the need of any bookkeeping.
+
+        # Fw node changes
         # Insert the new_fw_hop_gm. This is straightforward. Get the
         # new_fw_hop_gm, insert the hop_gm as a get_attr fw_node, and then
         # add a call_function fw_node. Additionally, also use getitem
         # call_functions to collect the saved_tensor nodes
 
-        identifier = (
-            fw_node.args[1].replace("___forward", "").replace("___backward", "")
-        )
+        fw_node = bw_to_fw_hop_node[bw_node]
         new_fw_hop_gm = new_hop_graphs[identifier].new_fw_hop_gm
         assert new_fw_hop_gm is not None
 
@@ -698,7 +696,7 @@ def run_joint_graph_passes_on_hops(
 
         # Insert the new_fw_hop_gm into the joint_gm
         with joint_gm.graph.inserting_after(fw_node):
-            new_fw_mod_attr_name = add_new_hop_gm(new_fw_hop_gm, fw_node.args[1])
+            new_fw_mod_attr_name = add_new_hop_gm(new_fw_hop_gm, f"fw{identifier}")
             new_fw_mod_attr = joint_gm.graph.get_attr(new_fw_mod_attr_name)
 
         # new_hop_fw_gm output signature is (*fw_outs, *saved_tensors)
@@ -708,7 +706,7 @@ def run_joint_graph_passes_on_hops(
                 args=(
                     new_fw_mod_attr,
                     new_fw_mod_attr_name,
-                    fw_node.args[2],
+                    *fw_node.args[2:],
                 ),
             )
             propagate_meta_info(new_fw_hop_gm, new_fw_node, fw_node)
@@ -727,46 +725,25 @@ def run_joint_graph_passes_on_hops(
         fw_node.replace_all_uses_with(new_fw_node)
         joint_gm.graph.erase_node(fw_node)
 
-        # Save the saved_tensors info for the fw_node. This will be used
-        # to form the inputs for the backward hop.
-        old_fw_hop_nodes_stack.append(fw_node)
-        fw_node_to_saved_tensors_map[fw_node] = (identifier, extra_fw_outputs)
-
-    for bw_node in bw_hop_nodes:
-        # Get the saved_tensors from the forward graph and find the new
-        # tangents, and replace the old bw hop with the new bw hop.
-        identifier = (
-            bw_node.args[1].replace("___forward", "").replace("___backward", "")
-        )
-        new_bw_hop_gm = new_hop_graphs[identifier].new_bw_hop_gm
-        assert new_bw_hop_gm is not None
-
+        # Bw node changes
         # Prepare the operands for the bwd graph
         # Old bw graph signature : (*primals, *tangents)
         # New signature will be : (*sym_nodes, *saved_tensors, *tangents)
         # We have already collected the saved_tensors in the forward hop processing.
 
-        assert len(old_fw_hop_nodes_stack)
-        fw_hop_node = old_fw_hop_nodes_stack.pop()
-        (
-            fw_hop_node_identifier,
-            extra_fw_outputs,
-        ) = fw_node_to_saved_tensors_map[fw_hop_node]
-        assert fw_hop_node_identifier == identifier
-
         # extra_fw_outputs are in the order (*saved_nodes, *sym_nodes).
         # Partitioner has this quirk where the backward wants sym_nodes
         # first. So extract the sym and saved nodes.
-        num_sym_nodes = new_hop_graphs[fw_hop_node_identifier].new_num_sym_nodes
-        num_saved_nodes = new_hop_graphs[fw_hop_node_identifier].new_num_saved_nodes
-        assert num_sym_nodes is not None
-        assert num_saved_nodes is not None
-        saved_tensor_nodes = extra_fw_outputs[:num_saved_nodes]
-        sym_nodes = extra_fw_outputs[num_saved_nodes:]
+
+        new_bw_hop_gm = new_hop_graphs[identifier].new_bw_hop_gm
+        assert new_bw_hop_gm is not None
+
+        saved_tensor_nodes = extra_fw_outputs[:new_num_saved_nodes]
+        sym_nodes = extra_fw_outputs[new_num_saved_nodes:]
 
         num_primals = new_hop_graphs[identifier].old_num_fw_inputs
         assert num_primals is not None
-        tangents = list(bw_node.args[2][num_primals:])
+        tangents = list(bw_node.args[2 + num_primals :])
         operands = sym_nodes + saved_tensor_nodes + tangents
 
         # Insert the new_bw_hop_gm into the joint_gm
@@ -780,7 +757,7 @@ def run_joint_graph_passes_on_hops(
                 args=(
                     new_bw_mod_attr,
                     new_bw_mod_attr_name,
-                    tuple(operands),
+                    *operands,
                 ),
             )
             propagate_meta_info(new_bw_hop_gm, new_bw_node, bw_node)
@@ -815,9 +792,10 @@ def aot_dispatch_autograd(
     )
 
     fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
-    fx_g, joint_inputs, maybe_subclass_meta = aot_dispatch_autograd_graph(
-        flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
-    )
+    with dynamo_timed("aot_trace_joint_graph", log_pt2_compile_event=True):
+        fx_g, joint_inputs, maybe_subclass_meta = aot_dispatch_autograd_graph(
+            flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
+        )
 
     # Copied from aot_dispatch_autograd_graph.
     disable_amp = torch._C._is_any_autocast_enabled()
@@ -1304,13 +1282,8 @@ def aot_dispatch_autograd(
         # close over aot_config.cache_info, since aot_config never changes.
         # But closing over random variables is confusing IMO, so I'm leaving it.
         def try_save_cache_entry(  # noqa: F811
-            compiled_bw_func, lazy_backward_info, _fw_metadata, aot_config
+            compiled_bw_func, _fw_metadata, aot_config
         ):
-            bw_module = lazy_backward_info.bw_module
-            bw_module.meta = {}
-            for node in bw_module.graph.nodes:
-                node.meta = {}
-
             fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
             fw_debug_lines = getattr(
                 compiled_fw_func, "_fx_graph_cache_debug_lines", []
@@ -1356,18 +1329,13 @@ def aot_dispatch_autograd(
                     backward_time_taken_ns,
                     sanitized_aot_config=sanitize_aot_config(aot_config),
                     guards_expr=guards_expr,
-                    cached_lazy_backward_info=CachedAutogradLazyBackwardCompileInfo(
-                        bw_module
-                    ),
                 )
                 remote = should_use_remote_autograd_cache()
                 AOTAutogradCache.save(cache_info.cache_key, entry, remote)
 
         if compiled_bw_func is not None:
             # If we already compiled it we can just run it right now without waiting
-            try_save_cache_entry(
-                compiled_bw_func, lazy_backward_info, fw_metadata, aot_config
-            )
+            try_save_cache_entry(compiled_bw_func, fw_metadata, aot_config)
             try_save_cache_entry = None
 
     compiled_fn = AOTDispatchAutograd.post_compile(
