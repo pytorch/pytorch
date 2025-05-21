@@ -583,6 +583,7 @@ def _(subgraph, identifier, *operands):
 def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
     # Check if we have already traced the subgraph.
     graph = None
+    assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
     invoke_subgraph_cache = get_invoke_subgraph_cache()
     if invoke_subgraph_cache:
         graph = invoke_subgraph_cache.get_proxy_dispatch_entry(identifier)
@@ -604,7 +605,6 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
         )
         graph.recompile()
 
-        assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
         assert isinstance(identifier, str) and not hasattr(
             proxy_mode.tracer.root, identifier
         )
