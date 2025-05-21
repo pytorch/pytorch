@@ -52,6 +52,7 @@ __all__ = [
     "FlatArgsAdapter",
     "UnflattenedModule",
     "AdditionalInputs",
+    "draft_export",
 ]
 
 # To make sure export specific custom ops are loaded
@@ -131,6 +132,10 @@ def export_for_training(
          to be different and the model will be serialized in the same way regardless of what value
          is passed here.
          WARNING: This option is experimental and use this at your own risk.
+
+        preserve_module_call_signature: A list of submodule paths for which the original
+         calling conventions are preserved as metadata. The metadata will be used when calling
+         torch.export.unflatten to preserve the original calling conventions of modules.
 
     Returns:
         An :class:`ExportedProgram` containing the traced callable.
@@ -246,6 +251,10 @@ def export(
          errors. Note that toggling this argument does not affect the resulting IR spec to be
          different and the model will be serialized in the same way regardless of what value
          is passed here.
+
+        preserve_module_call_signature: A list of submodule paths for which the original
+         calling conventions are preserved as metadata. The metadata will be used when calling
+         torch.export.unflatten to preserve the original calling conventions of modules.
 
     Returns:
         An :class:`ExportedProgram` containing the traced callable.
@@ -508,6 +517,32 @@ def load(
         ep = deserialize(artifact, expected_opset_version)
 
         return ep
+
+
+def draft_export(
+    mod: torch.nn.Module,
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]] = None,
+    *,
+    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    preserve_module_call_signature: tuple[str, ...] = (),
+    strict: bool = False,
+) -> ExportedProgram:
+    """
+    A version of torch.export.export which is designed to consistently produce
+    an ExportedProgram, even if there are potential soundness issues, and to
+    generate a report listing the issues found.
+    """
+    from ._draft_export import draft_export
+
+    return draft_export(
+        mod=mod,
+        args=args,
+        kwargs=kwargs,
+        dynamic_shapes=dynamic_shapes,
+        preserve_module_call_signature=preserve_module_call_signature,
+        strict=strict,
+    )
 
 
 def register_dataclass(

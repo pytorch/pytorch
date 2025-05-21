@@ -92,6 +92,8 @@ class Library:
     """
 
     def __init__(self, ns, kind, dispatch_key=""):
+        from torch.fx.operator_schemas import _SCHEMA_TO_SIGNATURE_CACHE
+
         if kind not in ("IMPL", "DEF", "FRAGMENT"):
             raise ValueError("Unsupported kind: ", kind)
 
@@ -128,6 +130,7 @@ class Library:
             self._op_defs,
             self._registration_handles,
             self.m,
+            _SCHEMA_TO_SIGNATURE_CACHE,
         )
 
     def __repr__(self):
@@ -149,6 +152,7 @@ class Library:
             name of the operator as inferred from the schema.
 
         Example::
+
             >>> my_lib = Library("mylib", "DEF")
             >>> my_lib.define("sum(Tensor self) -> Tensor")
         """
@@ -251,6 +255,7 @@ class Library:
                           the dispatch key that the library was created with.
 
         Example::
+
             >>> my_lib = Library("aten", "IMPL")
             >>> my_lib._impl_with_aoti_compile("div.Tensor", "CPU")
         """
@@ -313,6 +318,7 @@ class Library:
                          registered.
 
         Example::
+
             >>> my_lib = Library("aten", "IMPL")
             >>> def div_cpu(self, other):
             >>>     return self * (1 / other)
@@ -396,6 +402,7 @@ class Library:
                          to :attr:`fn` when calling. This should be used to create the appropriate keyset for redispatch calls.
 
         Example::
+
             >>> my_lib = Library("_", "IMPL")
             >>> def fallback_kernel(op, *args, **kwargs):
             >>>     # Handle all autocast ops generically
@@ -453,9 +460,8 @@ def _del_library(
     op_defs,
     registration_handles,
     m,
+    schema_to_signature_cache,
 ):
-    import torch.fx
-
     for op_def in op_defs:
         name = op_def
         overload_name = ""
@@ -464,10 +470,8 @@ def _del_library(
         if (
             name,
             overload_name,
-        ) in torch.fx.operator_schemas._SCHEMA_TO_SIGNATURE_CACHE:
-            del torch.fx.operator_schemas._SCHEMA_TO_SIGNATURE_CACHE[
-                (name, overload_name)
-            ]
+        ) in schema_to_signature_cache:
+            del schema_to_signature_cache[(name, overload_name)]
 
     captured_impls -= op_impls
     captured_defs -= op_defs

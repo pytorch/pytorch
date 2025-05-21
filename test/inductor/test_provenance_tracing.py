@@ -45,6 +45,16 @@ class Model2(torch.nn.Module):
         return a1, b1, c1
 
 
+class Model3(torch.nn.Module):
+    def __init__(self, n, k):
+        super().__init__()
+        self.weight = torch.randn(n, k, device="cuda")
+        self.bias = torch.randn(n, device="cuda")
+
+    def forward(self, a):
+        return torch.nn.functional.linear(a, self.weight, self.bias)
+
+
 @config.patch("trace.enabled", True)
 class TestProvenanceTracingArtifact(TestCase):
     """
@@ -167,16 +177,32 @@ class TestProvenanceTracingArtifact(TestCase):
                     else:
                         assert device == "cpu"
                         # check the inductor kernel to post grad nodes mapping is expected for cpu
-                        expected_data = {
-                            "cpp_fused_mul_0": ["mul"],
-                            "cpp_fused_gelu_1": [
-                                "mul_3",
-                                "mul_1",
-                                "add",
-                                "erf",
-                                "mul_2",
-                            ],
-                        }
+                        if backend == "aot_inductor":
+                            expected_data = {
+                                "cpp_fused_mul_0": ["mul"],
+                                "aoti_torch_cpu_addmm_out": ["addmm", "mul"],
+                                "cpp_fused_gelu_1": [
+                                    "mul_3",
+                                    "mul_1",
+                                    "add",
+                                    "erf",
+                                    "mul_2",
+                                ],
+                            }
+                        else:
+                            # backend == "inductor"
+                            expected_data = {
+                                "cpp_fused_mul_0": ["mul"],
+                                "aoti_torch_cpu_addmm_out": ["addmm", "mul"],
+                                "cpp_fused_gelu_1": [
+                                    "mul_3",
+                                    "mul_1",
+                                    "add",
+                                    "erf",
+                                    "mul_2",
+                                ],
+                                "extern_kernels.addmm": ["addmm", "mul"],
+                            }
                         self._check_provenance_tracing_artifact(filepath, expected_data)
 
             finally:
@@ -190,6 +216,56 @@ class TestProvenanceTracingArtifact(TestCase):
     @unittest.skipIf(HAS_GPU, "the test is only for cpu")
     def test_triton_kernel_to_post_grad_tracing_cpu(self):
         self._test_triton_kernel_to_post_grad_tracing(device="cpu")
+
+    @requires_cuda
+    def test_triton_kernel_to_post_grad_tracing_extern_kernel(self):
+        M = 8
+        N = 6
+        K = 16
+        model = Model3(N, K)
+        batch = 2
+        a = torch.randn(batch, M, K, device="cuda")
+        example_inputs = (a,)
+        filepath = None
+
+        for backend in ["aot_inductor", "inductor"]:
+            try:
+                with config.patch(
+                    {
+                        "trace.debug_dir": tempfile.mkdtemp(),
+                        "force_disable_caches": True,
+                    }
+                ):
+                    with self.assertLogs(
+                        logging.getLogger("torch._inductor.debug"),
+                        level=logging.WARNING,
+                    ) as cm:
+                        if backend == "aot_inductor":
+                            AOTIRunnerUtil.run(model, example_inputs)
+                        else:
+                            ep = torch.export._trace._export(model, example_inputs)
+                            compiled = torch.compile(ep.module(), backend=backend)
+                            compiled(*example_inputs)
+                    self.assertEqual(len(cm.output), 1)
+                    m = re.match(r"WARNING.* debug trace: (.*)", cm.output[0])
+                    self.assertTrue(m)
+                    filepath = Path(m.group(1))
+                    if backend == "inductor":
+                        expected_data = {
+                            "aoti_torch_cuda_addmm_out": ["addmm", "_tensor_constant1"],
+                            "triton_poi_fused_0": ["_tensor_constant1"],
+                            "extern_kernels.addmm": ["addmm"],
+                        }
+                    else:
+                        # backend = aot_inductor
+                        expected_data = {
+                            "aoti_torch_cuda_addmm_out": ["addmm", "_tensor_constant1"],
+                            "triton_poi_fused_0": ["_tensor_constant1"],
+                        }
+                    self._check_provenance_tracing_artifact(filepath, expected_data)
+            finally:
+                if filepath:
+                    shutil.rmtree(filepath)
 
     @requires_cuda
     def _test_pt_tracing_combo_kernel(self, backend):

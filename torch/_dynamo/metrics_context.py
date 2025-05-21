@@ -14,10 +14,14 @@ execution performance.
 """
 
 import heapq
+import logging
 import time
 from collections.abc import Iterator
 from typing import Any, Callable, Optional
 from typing_extensions import TypeAlias
+
+
+log = logging.getLogger(__name__)
 
 
 class TopN:
@@ -84,10 +88,13 @@ class MetricsContext:
         self._level -= 1
         assert self._level >= 0
         if self._level == 0:
-            end_time_ns = time.time_ns()
-            self._on_exit(
-                self._start_time_ns, end_time_ns, self._metrics, exc_type, exc_value
-            )
+            try:
+                end_time_ns = time.time_ns()
+                self._on_exit(
+                    self._start_time_ns, end_time_ns, self._metrics, exc_type, exc_value
+                )
+            except Exception:
+                log.exception("Unexpected exception logging compilation metrics")
 
     def in_progress(self) -> bool:
         """
@@ -189,7 +196,7 @@ class RuntimeMetricsContext:
         self._start_time_ns: int = 0
 
     def increment(
-        self, metric: str, value: int, extra: Optional[dict[str, Any]]
+        self, metric: str, value: int, extra: Optional[dict[str, Any]] = None
     ) -> None:
         """
         Increment a metric by a given amount.
@@ -211,6 +218,12 @@ class RuntimeMetricsContext:
         Call the on_exit function with the metrics gathered so far and reset.
         """
         if self._metrics:
-            end_time_ns = time.time_ns()
-            self._on_exit(self._start_time_ns, end_time_ns, self._metrics, None, None)
-            self._metrics = {}
+            try:
+                end_time_ns = time.time_ns()
+                self._on_exit(
+                    self._start_time_ns, end_time_ns, self._metrics, None, None
+                )
+            except Exception:
+                log.exception("Unexpected exception logging runtime metrics")
+            finally:
+                self._metrics = {}

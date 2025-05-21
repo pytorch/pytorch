@@ -338,6 +338,29 @@ class FlightRecorderE2ETest(TestCase):
             db.collectives[0].collective_name, "nccl:REDUCE_SCATTER_coalesced"
         )
         self.assertEqual(db.collectives[0].pass_check, True)
+        # Test case 6: empty coalesced call on rank 0 case.
+        details6 = copy.deepcopy(LOADED_FR_DETAIL_TEMPLATE)
+        # sequence ID should not increase for coalesced collectives
+        details6["dump_file_rank_0"]["entries"].append(
+            create_one_entry(0, "all_reduce", [[4, 4]], [[4, 4]])
+        )
+        details6["dump_file_rank_1"]["entries"].append(
+            create_one_entry(0, "all_reduce", [[4, 4]], [[4, 4]])
+        )
+        details6["dump_file_rank_1"]["entries"].append(
+            create_one_entry(1, "_reduce_oop", [[4, 4]], [[4, 4]])
+        )
+        details6["dump_file_rank_1"]["entries"].append(
+            create_one_entry(2, "_reduce_oop", [[4, 4]], [[4, 4]])
+        )
+        details6["dump_file_rank_1"]["entries"].append(
+            create_one_entry(3, "REDUCE_SCATTER_coalesced", [[]], [[]])
+        )
+        db = build_db(details6, args, version)
+        self.assertEqual(len(db.collectives), 2)
+        self.assertEqual(db.collectives[1].collective_name, "nccl:_reduce_oop")
+        self.assertEqual(db.collectives[1].record_id, 1)
+        self.assertEqual(db.collectives[1].pass_check, True)
 
 
 if __name__ == "__main__":
