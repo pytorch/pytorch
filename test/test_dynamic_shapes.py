@@ -1338,6 +1338,21 @@ class f(torch.nn.Module):
                 f(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
             )
 
+    def test_baddbmm_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+
+        B, M, K, N = [shape_env.create_unbacked_symint() for _ in range(4)]
+
+        with fake_mode:
+            A = torch.empty((B, M, K), device="meta")
+            Bmat = torch.empty((B, K, N), device="meta")
+            bias3 = torch.empty((B, M, N), device="meta")
+
+            _ = torch.baddbmm(bias3, A, Bmat)
+
 
 @skipIfTorchDynamo(
     "Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)"
@@ -1435,8 +1450,7 @@ class TestSymNumberMagicMethods(TestCase):
                 out = lambda_apply(sym_inp1)
             else:
                 out = lambda_apply(sym_inp1, inp2)
-            if fn not in sym_node.alternate_impl_if_hinted_methods:
-                self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
+            self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
 
@@ -1447,16 +1461,14 @@ class TestSymNumberMagicMethods(TestCase):
         sym_inp2 = get_sym_inp(inp2)
         with maybe_xfail(inp1, sym_inp2):
             out = lambda_apply(inp1, sym_inp2)
-            if fn not in sym_node.alternate_impl_if_hinted_methods:
-                self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
+            self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
 
         # Symified both args
         with maybe_xfail(sym_inp1, sym_inp2):
             out = lambda_apply(sym_inp1, sym_inp2)
-            if fn not in sym_node.alternate_impl_if_hinted_methods:
-                self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
+            self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
 
@@ -3024,6 +3036,34 @@ class TestGuardsExpressions(TestCase):
         self.assertTrue(has_free_symbols(sympy.sympify("a")))
         self.assertTrue(has_free_symbols(sympy.sympify("a*2")))
         self.assertTrue(has_free_symbols(sympy.sympify("a+b")))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_deferred_sym_eq_assert(self):
+        @torch.compile(fullgraph=True)
+        def func(a, b):
+            torch._check(b.item() == 5)
+            return a * 10
+
+        func(torch.tensor([5]), torch.tensor([5]))
+        with self.assertRaises(RuntimeError):
+            func(torch.tensor([100]), torch.tensor([1]))
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_deferred_with_unbacked_input(self):
+        @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
+        def func(a, b):
+            torch._check(a.size()[0] == b.size()[0])
+            return a * 10
+
+        a = torch.rand(1, 1)
+        b = torch.rand(1, 1)
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(b, 0)
+        func(a, b)
+
+        with self.assertRaises(RuntimeError):
+            func(a, torch.rand(2, 1))
 
 
 if __name__ == "__main__":

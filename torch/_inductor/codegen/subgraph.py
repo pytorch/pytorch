@@ -1,10 +1,18 @@
+import itertools
 import logging
 from typing import Any, Callable
 
 import torch
 from torch._inductor import ir
 from torch._inductor.codegen.common import KernelTemplate
-from torch._inductor.ir import Buffer, Layout
+from torch._inductor.ir import (
+    add_symbolic_shapes_for_inputs_to_subgraph,
+    Buffer,
+    get_free_symbols,
+    gm_original_output_strides,
+    ir_node_to_tensor,
+    Layout,
+)
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.virtualized import V
 
@@ -24,12 +32,21 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         input_nodes: list[Buffer],
         layout: Layout,
         description: str,
-        gm: torch.fx.GraphModule,
-        example_inputs: list[Any],
+        make_fx_graph: Callable[..., Any],
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
-        self.gm = gm
-        self.example_inputs = example_inputs
+
+        self.example_inputs = []
+        with V.fake_mode:
+            for inp in self.input_nodes:
+                # Here there will be no unbacked symbols, as SubgraphBuffer does not support them
+                assert len(get_free_symbols(inp.get_size(), unbacked_only=True)) == 0
+                assert len(get_free_symbols(inp.get_stride(), unbacked_only=True)) == 0
+
+                inp.data.freeze_layout()  # type: ignore[attr-defined]
+                self.example_inputs.append(ir_node_to_tensor(inp))
+
+        self.gm = make_fx_graph(*self.example_inputs)
 
     def __str__(self) -> str:
         return f"SubgraphCaller({self.name})"
@@ -41,6 +58,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         import torch._inductor.config as inductor_config
         from torch._inductor.graph import GraphLowering
 
+        gm_original_output_strides(self.gm)
         bm_graph_lowering = GraphLowering(
             gm=self.gm,
             example_inputs=self.example_inputs,
@@ -53,6 +71,36 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             name=f"benchmark_{self.name}",
         )
 
+        sym_inputs = add_symbolic_shapes_for_inputs_to_subgraph(
+            self.input_nodes, bm_graph_lowering
+        )
+
+        sym_inputs = [
+            int(V.graph.sizevars.shape_env.size_hint(sym_var)) for sym_var in sym_inputs
+        ]
+
+        if len(sym_inputs) == 0:
+            # Sanity check that args are same layout as example inputs
+            # Only do it if there are no symbolic inputs, otherwise
+            # the dynamic dim will be realized to the same size as args
+            for ar, example_inp in zip(args, self.example_inputs):
+                # Sanity check that args are same layout as example inputs
+                if isinstance(ar, torch.Tensor):
+                    assert isinstance(example_inp, torch.Tensor)
+                    assert ar.shape == example_inp.shape
+                    assert ar.stride() == example_inp.stride()
+
+        if len(sym_inputs) == 0:
+            # Sanity check that args are same layout as example inputs
+            # Only do it if there are no symbolic inputs, otherwise
+            # the dynamic dim will be realized to the same size as args
+            for ar, example_inp in zip(args, self.example_inputs):
+                # Sanity check that args are same layout as example inputs
+                if isinstance(ar, torch.Tensor):
+                    assert isinstance(example_inp, torch.Tensor)
+                    assert ar.shape == example_inp.shape
+                    assert ar.stride() == example_inp.stride()
+
         with V.set_graph_handler(bm_graph_lowering):
             # Don't bother autotuning on Triton here
             with inductor_config.patch(
@@ -63,9 +111,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 bm_graph_lowering.run(*self.example_inputs)
                 mod = bm_graph_lowering.compile_to_module()
                 bm_func = mod.call
-                bm_func([*args])
 
-        return benchmarker.benchmark_gpu(lambda: bm_func([*args]))
+                bm_func([*sym_inputs, *args])
+        return benchmarker.benchmark_gpu(lambda: bm_func([*sym_inputs, *args]))
 
     def hash_key(self) -> str:
         return "-".join(
@@ -73,6 +121,11 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 self.name,
                 *[
                     str(arg.shape)
+                    for arg in self.example_inputs
+                    if isinstance(arg, torch.Tensor)
+                ],
+                *[
+                    str(arg.stride())
                     for arg in self.example_inputs
                     if isinstance(arg, torch.Tensor)
                 ],
@@ -111,6 +164,8 @@ class SubgraphTemplate(KernelTemplate):
     optimal implementations for complex operations.
     """
 
+    index_counter = itertools.count()
+
     def __init__(
         self,
         name: str,
@@ -123,14 +178,13 @@ class SubgraphTemplate(KernelTemplate):
             name: The name of this template
             graph: The FX graph
         """
-        self.name = name
+        self.name = f"{name}_{next(SubgraphTemplate.index_counter)}"
         self.make_fx_graph = make_fx_graph
 
     def generate(  # type: ignore[override]
         self,
         input_nodes: list[Buffer],
         layout: Layout,
-        example_inputs: list[Any],
         **kwargs: Any,
     ) -> SubgraphChoiceCaller:
         """
@@ -145,13 +199,11 @@ class SubgraphTemplate(KernelTemplate):
         Returns:
             SubgraphChoiceCaller: A callable object that can be used for autotuning
         """
-        gm = self.make_fx_graph(*example_inputs)
 
         return SubgraphChoiceCaller(
             name=self.name,
             input_nodes=input_nodes,
             layout=layout,
             description="",
-            gm=gm,
-            example_inputs=example_inputs,
+            make_fx_graph=self.make_fx_graph,
         )

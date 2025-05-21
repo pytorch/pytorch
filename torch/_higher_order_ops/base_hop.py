@@ -136,10 +136,10 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             for ph in subgraph.graph.find_nodes(op="placeholder")
         ]
         (
-            mutated_inp_idx,
             inp_inp_alias,
             inp_out_alias,
             out_out_alias,
+            mutated_inp_idx,
             output,
         ) = check_input_alias_and_mutation_return_ouputs(subgraph, fake_args)
 
@@ -158,16 +158,19 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
                 # kwargs value are treated as default argument
                 arg_name, example_value = arg
                 default = example_value
+                kw_only = True
             else:
                 arg_name = f"arg{idx}"
                 example_value = arg
                 default = None
+                kw_only = False
             args.append(
                 HopArgumentInfoGen.from_example(
                     example_value=example_value,
                     name=arg_name,
                     default_value=default,
                     is_mutated=idx in mutated_inp_idx,
+                    kw_only=kw_only,
                 )
             )
 
