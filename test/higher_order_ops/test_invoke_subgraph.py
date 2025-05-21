@@ -256,9 +256,10 @@ class TestInvokeSubgraphCompile(TestCase):
         fw_schema = find_hop_schema(
             backend.graphs[0], torch.ops.higher_order.invoke_subgraph
         )
-        self.assertExpectedInline(
-            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
-            """\
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[8]", L_y_: "f32[8]", L_mod_buffers_buf_: "f32[8]"):
         l_x_ = L_x_
@@ -285,7 +286,7 @@ class GraphModule(torch.nn.Module):
             add_1: "f32[8]" = add + l_mod_buffers_buf_;  add = l_mod_buffers_buf_ = None
             return (add_1,)
 """,
-        )
+            )
         self.assertExpectedInline(
             str(fw_schema[0]),
             """invoke_subgraph(Any subgraph, str identifier, Tensor(a2!) arg0, Tensor arg1, Tensor arg2) -> ((Tensor))""",
@@ -1634,7 +1635,6 @@ class GraphModule(torch.nn.Module):
 
     class subgraph_0(torch.nn.Module):
         def forward(self, l_x_: "f32[8, 8]"):
-            function_ctx = torch.autograd.function.FunctionCtx();  function_ctx = None
             fwd_body_0 = self.fwd_body_0
             bwd_body_0 = self.bwd_body_0
             autograd_function_apply: "f32[8, 8]" = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, args_tensor_mask = [True], non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = None

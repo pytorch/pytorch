@@ -90,7 +90,7 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             n.meta["val"] if "val" in n.meta else n.meta["example_value"]
             for n in subgraph.graph.find_nodes(op="placeholder")
         ]
-        mutated_inputs, _, _, _, outputs = check_input_alias_and_mutation_return_ouputs(
+        _, _, _, mutated_inputs, outputs = check_input_alias_and_mutation_return_ouputs(
             subgraph, example_inputs
         )
         for idx, arg in enumerate(operands):
