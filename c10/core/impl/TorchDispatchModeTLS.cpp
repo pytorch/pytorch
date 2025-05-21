@@ -189,7 +189,7 @@ std::string to_string(TorchDispatchModeKey mode_key) {
     case TorchDispatchModeKey::FAKE:
       return "FakeTensorMode";
     case TorchDispatchModeKey::AC_TRACER:
-      return "TracerMode";
+      return "ACTracerMode";
     default:
       return "UNKNOWN_MODE";
   }
