@@ -966,13 +966,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
   constexpr int64_t MAX_BATCH_SIZE = (1LL << 16) - 1;
   int64_t batch_size = query.size(0);
 
-  auto ensure_batch_dim = [](Tensor tensor) -> Tensor {
-    if (tensor.dim() == 0) {
-      return tensor.unsqueeze(0);
-    }
-    return tensor;
-  };
-
+  if (batch_size > MAX_BATCH_SIZE) {
+    TORCH_CHECK(!compute_log_sumexp && (dropout_p == 0.0),
+                "Efficient attention cannot produce valid seed, logsumexp and offset outputs when "
+                "the batch size exceeds (", MAX_BATCH_SIZE, ").");
+  }
   auto process_chunk = [&](const Tensor& q_chunk,
                            const Tensor& k_chunk,
                            const Tensor& v_chunk,
@@ -1001,10 +999,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
             compute_log_sumexp,
             scale);
     attention = attention.transpose(1, 2);
-    // ensure auxiliary tensors have a batch dimension (if they were returned as scalars).
-    log_sumexp = ensure_batch_dim(log_sumexp);
-    seed = ensure_batch_dim(seed);
-    offset = ensure_batch_dim(offset);
 
     return std::make_tuple(std::move(attention),
                            std::move(log_sumexp),
@@ -1040,9 +1034,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
     }
 
     Tensor attention = at::cat(attention_chunks, 0);
-    Tensor log_sumexp = at::cat(log_sumexp_chunks, 0);
-    Tensor seed = at::cat(seed_chunks, 0);
-    Tensor offset = at::cat(offset_chunks, 0);
+    Tensor log_sumexp = log_sumexp_chunks[0];
+    Tensor seed = seed_chunks[0];
+    Tensor offset = offset_chunks[0];
     return std::make_tuple(std::move(attention),
               std::move(log_sumexp),
               std::move(seed),
