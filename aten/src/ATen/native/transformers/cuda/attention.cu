@@ -963,33 +963,95 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
     std::optional<double> scale) {
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.mem_efficient_attention");
-  // Query -> Query(Batch x Q_seq_len x Num_heads x Dim_per_head)
-  // Key   -> Key(Batch x KV_seq_len x Num_heads x Dim_per_head)
-  // Value -> Value(Batch x KV_seq_len x  Num_heads x Dim_per_head)
-  Tensor q_t = query.transpose(1, 2);
-  Tensor k_t = key.transpose(1, 2);
-  Tensor v_t = value.transpose(1, 2);
+  constexpr int64_t MAX_BATCH_SIZE = (1LL << 16) - 1;
+  int64_t batch_size = query.size(0);
 
-  sdp::CustomMaskType custom_mask_type = is_causal
-      ? sdp::CustomMaskType::CausalFromTopLeft
-      : sdp::CustomMaskType::NoCustomMask;
+  auto ensure_batch_dim = [](Tensor tensor) -> Tensor {
+    if (tensor.dim() == 0) {
+      return tensor.unsqueeze(0);
+    }
+    return tensor;
+  };
 
-  auto [attention, log_sumexp, seed, offset, max_seqlen_batch_q, max_seqlen_batch_kv] = at::_efficient_attention_forward(
-      q_t,
-      k_t,
-      v_t,
-      attn_bias,
-      std::nullopt,
-      std::nullopt,
-      std::nullopt,
-      std::nullopt,
-      dropout_p,
-      static_cast<int64_t>(custom_mask_type),
-      compute_log_sumexp,
-      scale);
+  auto process_chunk = [&](const Tensor& q_chunk,
+                           const Tensor& k_chunk,
+                           const Tensor& v_chunk,
+                           const std::optional<Tensor>& bias_chunk)
+      -> std::tuple<Tensor, Tensor, Tensor, Tensor> {
+    Tensor q_t = q_chunk.transpose(1, 2);
+    Tensor k_t = k_chunk.transpose(1, 2);
+    Tensor v_t = v_chunk.transpose(1, 2);
 
-  attention = attention.transpose(1, 2);
-  return std::make_tuple(std::move(attention), std::move(log_sumexp), std::move(seed), std::move(offset));
+    sdp::CustomMaskType custom_mask_type = is_causal
+        ? sdp::CustomMaskType::CausalFromTopLeft
+        : sdp::CustomMaskType::NoCustomMask;
+
+    auto [attention, log_sumexp, seed, offset, max_seqlen_batch_q, max_seqlen_batch_kv] =
+        at::_efficient_attention_forward(
+            q_t,
+            k_t,
+            v_t,
+            bias_chunk,
+            std::nullopt,
+            std::nullopt,
+            std::nullopt,
+            std::nullopt,
+            dropout_p,
+            static_cast<int64_t>(custom_mask_type),
+            compute_log_sumexp,
+            scale);
+    attention = attention.transpose(1, 2);
+    // ensure auxiliary tensors have a batch dimension (if they were returned as scalars).
+    log_sumexp = ensure_batch_dim(log_sumexp);
+    seed = ensure_batch_dim(seed);
+    offset = ensure_batch_dim(offset);
+
+    return std::make_tuple(std::move(attention),
+                           std::move(log_sumexp),
+                           std::move(seed),
+                           std::move(offset));
+  };
+
+  // when bs is larger than allowed maximum, process in chunks
+  if (batch_size > MAX_BATCH_SIZE) {
+    std::vector<Tensor> attention_chunks;
+    std::vector<Tensor> log_sumexp_chunks;
+    std::vector<Tensor> seed_chunks;
+    std::vector<Tensor> offset_chunks;
+
+    for (int64_t start = 0; start < batch_size; start += MAX_BATCH_SIZE) {
+      int64_t end = std::min(start + MAX_BATCH_SIZE, batch_size);
+      Tensor query_chunk = query.slice(0, start, end);
+      Tensor key_chunk   = key.slice(0, start, end);
+      Tensor value_chunk = value.slice(0, start, end);
+
+      std::optional<Tensor> bias_chunk;
+      if (attn_bias.has_value()) {
+        bias_chunk = attn_bias.value().slice(0, start, end);
+      }
+
+      auto [attn, log_sumexp, seed, offset] =
+          process_chunk(query_chunk, key_chunk, value_chunk, bias_chunk);
+
+      attention_chunks.push_back(attn);
+      log_sumexp_chunks.push_back(log_sumexp);
+      seed_chunks.push_back(seed);
+      offset_chunks.push_back(offset);
+    }
+
+    Tensor attention = at::cat(attention_chunks, 0);
+    Tensor log_sumexp = at::cat(log_sumexp_chunks, 0);
+    Tensor seed = at::cat(seed_chunks, 0);
+    Tensor offset = at::cat(offset_chunks, 0);
+    return std::make_tuple(std::move(attention),
+              std::move(log_sumexp),
+              std::move(seed),
+              std::move(offset));
+  }
+  // when bs is within the allowed size, no need to chunk it
+  else {
+    return process_chunk(query, key, value, attn_bias);
+  }
 }
 
 int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
