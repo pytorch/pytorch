@@ -4572,17 +4572,17 @@ class <lambda>(torch.nn.Module):
 
             body_graph_0 = self.body_graph_0
             map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = None
-            getitem: "f32[2, 2]" = map_impl[0];  map_impl = None
+            getitem_2: "f32[2, 2]" = map_impl[0];  map_impl = None
 
-            sum_1: "f32[]" = torch.ops.aten.sum.default(getitem);  getitem = None
+            sum_1: "f32[]" = torch.ops.aten.sum.default(getitem_2);  getitem_2 = None
 
             add: "f32[2, 2]" = torch.ops.aten.add.Tensor(cos, sum_1);  sum_1 = None
 
             body_graph_1 = self.body_graph_1
             map_impl_1 = torch.ops.higher_order.map_impl(body_graph_1, [cos], [arg1_1]);  body_graph_1 = cos = arg1_1 = None
-            getitem_1: "f32[2, 2]" = map_impl_1[0];  map_impl_1 = None
+            getitem_5: "f32[2, 2]" = map_impl_1[0];  map_impl_1 = None
 
-            sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_1);  getitem_1 = None
+            sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_5);  getitem_5 = None
 
             add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(add, sum_2);  add = sum_2 = None
             return (add_1,)
@@ -4635,9 +4635,9 @@ class <lambda>(torch.nn.Module):
 
         body_graph_0 = self.body_graph_0
         map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = arg1_1 = None
-        getitem: "f32[2, 2]" = map_impl[0];  map_impl = None
+        getitem_2: "f32[2, 2]" = map_impl[0];  map_impl = None
 
-        sum_1: "f32[]" = torch.ops.aten.sum.default(getitem);  getitem = None
+        sum_1: "f32[]" = torch.ops.aten.sum.default(getitem_2);  getitem_2 = None
         add: "f32[2, 2]" = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
         return (add,)
 
