@@ -1,5 +1,3 @@
-warning: Selection `RUF041` has no effect because preview is not enabled.
-warning: Selection `RUF048` has no effect because preview is not enabled.
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
@@ -1910,7 +1908,6 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
                 aten.view.dtype,
                 aten.cat.default,
                 aten.clone.default,
-                aten.reshape.default,
                 aten._scaled_mm.default,
             )
             or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
