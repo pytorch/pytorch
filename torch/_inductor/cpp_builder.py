@@ -32,8 +32,7 @@ from torch.torch_version import TorchVersion
 
 
 if config.is_fbcode():
-    from triton.fb import build_paths  # noqa: F401
-    from triton.fb.build import _run_build_command
+    from triton.fb.build import _run_build_command, build_paths
 
     from torch._inductor.fb.utils import (
         log_global_cache_errors,
