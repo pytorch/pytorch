@@ -1734,6 +1734,6 @@ init_command = [
     'pyrefly==0.16.1',
 ]
 include_patterns = [
-    "torch/**/*.py",
+   # Disabled
 ]
 is_formatter = false
