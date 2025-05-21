@@ -497,8 +497,7 @@ class Vectorized<float> {
       })} // Comparison using the _CMP_**_OQ predicate.
           //   `O`: get false if an operand is NaN
           //   `Q`: do not raise if an operand is NaN
-  Vectorized<float>
-  operator==(const Vectorized<float>& other) const {
+  Vectorized<float> operator==(const Vectorized<float>& other) const {
     svbool_t mask = svcmpeq_f32(ptrue, values, other);
     return svsel_f32(mask, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
   }

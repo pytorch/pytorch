@@ -13,8 +13,7 @@ inline namespace CPU_CAPABILITY {
 template <
     typename VecT,
     typename ValueT,
-    template <int, bool>
-    typename BlendRegs,
+    template <int, bool> typename BlendRegs,
     typename Derived>
 struct Vectorized16 {
  protected:
@@ -54,23 +53,23 @@ struct Vectorized16 {
   template <int64_t mask>
   static Derived blend(const Derived& a, const Derived& b) {
     Derived vec;
-    vec.values =
-        BlendRegs<0, (mask & 0x01) != 0>::impl(a.values, b.values, vec.values);
-    vec.values =
-        BlendRegs<1, (mask & 0x02) != 0>::impl(a.values, b.values, vec.values);
-    vec.values =
-        BlendRegs<2, (mask & 0x04) != 0>::impl(a.values, b.values, vec.values);
-    vec.values =
-        BlendRegs<3, (mask & 0x08) != 0>::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 0,
+    (mask & 0x01) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 1,
+    (mask & 0x02) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 2,
+    (mask & 0x04) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 3,
+    (mask & 0x08) != 0 > ::impl(a.values, b.values, vec.values);
 
-    vec.values =
-        BlendRegs<4, (mask & 0x10) != 0>::impl(a.values, b.values, vec.values);
-    vec.values =
-        BlendRegs<5, (mask & 0x20) != 0>::impl(a.values, b.values, vec.values);
-    vec.values =
-        BlendRegs<6, (mask & 0x40) != 0>::impl(a.values, b.values, vec.values);
-    vec.values =
-        BlendRegs<7, (mask & 0x80) != 0>::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 4,
+    (mask & 0x10) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 5,
+    (mask & 0x20) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 6,
+    (mask & 0x40) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 7,
+    (mask & 0x80) != 0 > ::impl(a.values, b.values, vec.values);
 
     return vec;
   }
