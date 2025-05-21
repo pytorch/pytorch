@@ -8080,6 +8080,11 @@ class TestLogical(TestCaseMPS):
             y = torch.tensor([1, 3], device="mps", dtype=torch.float16)
             self.assertEqual(torch.isin(x, y), torch.tensor([False, True, False, True], device="mps"))
 
+            # Tensor.Scalar variant (aliases to eq)
+            self.assertEqual(torch.isin(x, 2.0), torch.tensor([False, False, True, False], device="mps"))
+            self.assertEqual(torch.isin(x, 2.0, invert=True), torch.tensor([True, True, False, True], device="mps"))
+            self.assertEqual(torch.isin(2, x), torch.tensor(True, device="mps"))
+
     def test_isin_asserts(self):
         C = torch.randn(size=[1, 4], device='mps', dtype=torch.float32)
         D = torch.randn(size=[1, 4], device='cpu', dtype=torch.float32)
