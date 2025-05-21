@@ -303,6 +303,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             self.test_nan_assert_float8_e5m2.__wrapped__,
         ]
 
+        # Non-blocking comms currently break by exposing bugs in upstream nccl (2025-05-20)
+        os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "0"
+
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
