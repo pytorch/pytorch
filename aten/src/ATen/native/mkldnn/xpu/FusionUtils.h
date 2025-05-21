@@ -1,25 +1,34 @@
 #pragma once
 #include <detail/oneDNN.h>
 
+//
+// This header file provides utility functions for constructing and managing
+// oneDNN attributes used in fusion operations on XPU devices. These utilities
+// include functions for creating unary and binary post-operations attributes,
+// as well as mapping string representations of operations to oneDNN attributes.
+//
+
 namespace at::native::xpu {
 at::native::onednn::Attr unary_attr_with_arg(
     c10::string_view unary,
-    torch::List<c10::optional<at::Scalar>> scalars,
-    c10::optional<c10::string_view> algorithm,
+    torch::List<std::optional<at::Scalar>> scalars,
+    std::optional<c10::string_view> algorithm,
     onednn::Attr attr);
 
-at::native::onednn::Attr string_to_unary_attr(onednn::Attr attr);
+at::native::onednn::Attr string_to_unary_attr(
+    c10::string_view unary,
+    onednn::Attr attr);
 
 at::native::onednn::Attr construct_unary_attr(
     c10::string_view unary,
-    torch::List<c10::optional<at::Scalar>> scalars,
-    c10::optional<c10::string_view> algorithm,
+    torch::List<std::optional<at::Scalar>> scalars,
+    std::optional<c10::string_view> algorithm,
     onednn::Attr attr);
 
 template <bool is_matmul = false>
 onednn::Attr construct_binary_attr(
     c10::string_view binary,
-    c10::optional<at::Scalar> alpha,
+    std::optional<at::Scalar> alpha,
     const Tensor& other,
     onednn::Attr attr) {
   if (binary == "mul") {

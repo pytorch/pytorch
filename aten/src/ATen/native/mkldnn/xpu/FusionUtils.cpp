@@ -1,4 +1,3 @@
-
 #include <ATen/native/mkldnn/xpu/FusionUtils.h>
 
 using namespace at::native::onednn;
@@ -6,10 +5,10 @@ using namespace at::native::onednn;
 namespace at::native::xpu {
 
 onednn::Attr unary_attr_with_arg(
-    c10::string_view unary,
-    torch::List<c10::optional<at::Scalar>> scalars =
-        torch::List<c10::optional<at::Scalar>>(),
-    c10::optional<c10::string_view> algorithm = c10::nullopt,
+    std::string_view unary,
+    torch::List<std::optional<at::Scalar>> scalars =
+        torch::List<std::optional<at::Scalar>>(),
+    std::optional<std::string_view> algorithm = c10::nullopt,
     onednn::Attr attr = Attr()) {
   if (unary == "hardswish") {
     return attr.append_post_eltwise(
@@ -43,7 +42,7 @@ onednn::Attr unary_attr_with_arg(
   return attr;
 }
 
-onednn::Attr string_to_unary_attr(c10::string_view unary, onednn::Attr attr) {
+onednn::Attr string_to_unary_attr(std::string_view unary, onednn::Attr attr) {
   if (unary == "relu") {
     return attr.append_post_eltwise(1.0f, 0.0f, 0.0f, attr.kind_with_relu);
   } else if (unary == "sigmoid") {
@@ -53,45 +52,28 @@ onednn::Attr string_to_unary_attr(c10::string_view unary, onednn::Attr attr) {
   } else if (unary == "hardswish") {
     return unary_attr_with_arg(
         "hardswish",
-        torch::List<c10::optional<at::Scalar>>(),
+        torch::List<std::optional<at::Scalar>>(),
         c10::nullopt,
         attr);
   } else if (unary == "swish") {
     return unary_attr_with_arg(
-        "silu", torch::List<c10::optional<at::Scalar>>(), c10::nullopt, attr);
+        "silu", torch::List<std::optional<at::Scalar>>(), c10::nullopt, attr);
   }
   return attr;
 }
 
 onednn::Attr construct_unary_attr(
-    c10::string_view unary,
-    torch::List<c10::optional<at::Scalar>> scalars,
-    c10::optional<c10::string_view> algorithm,
+    std::string_view unary,
+    torch::List<std::optional<at::Scalar>> scalars,
+    std::optional<std::string_view> algorithm,
     Attr attr = Attr()) {
-  std::set<c10::string_view> simple_unary = {
+  std::set<std::string_view> simple_unary = {
       "relu", "sigmoid", "tanh", "hardswish", "swish"};
   if (simple_unary.find(unary) != simple_unary.end()) {
     return string_to_unary_attr(unary, attr);
   } else {
     return unary_attr_with_arg(unary, scalars, algorithm, attr);
   }
-}
-
-onednn::Attr construct_binary_attr(
-    c10::string_view binary,
-    c10::optional<at::Scalar> alpha,
-    const Tensor& other,
-    onednn::Attr attr = Attr()) {
-  if (binary == "mul") {
-    attr.append_post_binary(attr.kind_with_binary_mul, other);
-  } else if (binary == "sub") {
-    attr.append_post_binary(attr.kind_with_binary_sub, other);
-  } else if (binary == "div") {
-    attr.append_post_binary(attr.kind_with_binary_div, other);
-  } else if (binary == "add") {
-    attr.append_post_binary(attr.kind_with_binary_add, other);
-  }
-  return attr;
 }
 
 } // namespace at::native::xpu
