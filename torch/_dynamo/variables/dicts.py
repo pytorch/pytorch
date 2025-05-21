@@ -565,7 +565,6 @@ class ConstDictVariable(VariableTracker):
             return ConstantVariable.create(None)
         elif name == "__or__":
             assert len(args) == 1
-            # TODO(guilherme): self and args[0] should have the same type(?)
             if not isinstance(args[0], ConstDictVariable):
                 msg = (
                     f"unsupported operand type(s) for |: '{self.python_type().__name__}'"
