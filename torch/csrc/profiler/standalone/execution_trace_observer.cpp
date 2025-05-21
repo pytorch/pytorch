@@ -25,6 +25,7 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/stack.h>
 #include <ATen/record_function.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/profiler/util.h>
@@ -898,18 +899,18 @@ bool addExecutionTraceObserver(const std::string& output_file_path) {
 
     // check if the environment variable is set to force recording integer
     // tensors
-    auto env_variable =
-        getenv("ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_RANGE");
-    if (env_variable != nullptr) {
+    auto env_variable = c10::utils::get_env(
+        "ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_RANGE");
+    if (env_variable.has_value()) {
       ob.record_integral_tensor_range = true;
     }
 
     // check if the environment variable is set to force recording integer
     // tensors
-    env_variable =
-        getenv("ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_DATA");
-    if (env_variable != nullptr) {
-      std::istringstream stream(env_variable);
+    env_variable = c10::utils::get_env(
+        "ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_DATA");
+    if (env_variable.has_value()) {
+      std::istringstream stream(env_variable.value());
       std::string token;
       while (std::getline(stream, token, ',')) {
         ob.nodeListForSavingIntegerTensor.insert(token);

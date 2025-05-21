@@ -3788,6 +3788,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             om(*example_inputs)
             om(*example_inputs)
 
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @xfailIfACL
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_reproduce_121253_issue_addmm_fusion_check(self):

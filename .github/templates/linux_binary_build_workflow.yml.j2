@@ -29,6 +29,9 @@ on:
 {%- endfor %}
   workflow_dispatch:
 
+permissions:
+  id-token: write
+
 env:
   # Needed for conda builds
   {%- if "aarch64" in build_environment %}
@@ -148,12 +151,23 @@ jobs:
           name: !{{ config["build_name"] }}
           path: "${{ runner.temp }}/artifacts/"
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
+          docker-image-name: !{{ config["container_image"] }}
+          custom-tag-prefix: !{{ config["container_image_tag_prefix"] }}
+          docker-build-dir: .ci/docker
+          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: !{{ config["container_image"] }}
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
+        env:
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown XPU
         uses: ./.github/actions/teardown-xpu
     {%- else %}
@@ -172,12 +186,31 @@ jobs:
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: configure aws credentials
+        id: aws_creds
+        if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+          aws-region: us-east-1
+          role-duration-seconds: 18000
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
+          docker-image-name: !{{ config["container_image"] }}
+          custom-tag-prefix: !{{ config["container_image_tag_prefix"] }}
+          docker-build-dir: .ci/docker
+          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: !{{ config["container_image"] }}
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
+        env:
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
     {%- endif %}

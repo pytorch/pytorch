@@ -571,7 +571,7 @@ class CondTests(TestCase):
                 return torch.cond(p, true_fn, false_fn, [a, b])
 
         # AssertionError: Output aliasing is currently not supported...
-        with self.assertRaises(torch._dynamo.exc.BackendCompilerFailed):
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
             torch.compile(Model())(
                 torch.tensor(True),
                 torch.randn(10, 20),
@@ -1908,11 +1908,9 @@ class MapTests(TestCase):
         result = model(torch._higher_order_ops.map, *cloned_inputs)
         result_exp = model(_fake_map, *cloned_inputs)
         result_compiled = compiled_model(torch._higher_order_ops.map, *cloned_inputs)
-        result_compiled_exp = compiled_model(_fake_map, *cloned_inputs)
 
         self.assertEqual(result, result_exp)
-        self.assertEqual(result_exp, result_compiled)
-        self.assertEqual(result_compiled, result_compiled_exp)
+        self.assertEqual(result, result_compiled)
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
@@ -1946,9 +1944,9 @@ class MapTests(TestCase):
         self._run_test(
             model=MapModels.PytreeInOut(),
             inputs=(
-                torch.randn(3, 4),
-                torch.randn(3, 4),
-                torch.randn(3, 5),
+                torch.randn(2, 5, 3),
+                torch.randn(2, 5, 3),
+                torch.randn(2, 4, 3),
             ),
             device=device,
             dynamic=dynamic,

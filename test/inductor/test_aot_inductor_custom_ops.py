@@ -20,6 +20,8 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
+    skipIfRocm,
+    skipIfXpu,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.triton_utils import HAS_CUDA
@@ -355,6 +357,37 @@ class AOTInductorTestsTemplate:
 
         self.assertEqual(len(inps), 0)
         self.assertTrue(sentinel_seen)
+
+    @skipIfXpu
+    @skipIfRocm
+    def test_custom_op_square(self) -> None:
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aoti_custom_ops.fn_square(x)
+
+        m = Model().to(device=self.device)
+        args = (torch.randn(2, 3, device=self.device),)
+        with config.patch(
+            "aot_inductor.custom_ops_to_c_shims",
+            {
+                torch.ops.aoti_custom_ops.fn_square.default: [
+                    """
+                AOTITorchError
+                aoti_torch_cpu_fn_square(
+                    AtenTensorHandle input,
+                    AtenTensorHandle* ret)""",
+                    """
+                AOTITorchError
+                aoti_torch_cuda_fn_square(
+                    AtenTensorHandle input,
+                    AtenTensorHandle* ret)""",
+                ],
+            },
+        ), config.patch(
+            "aot_inductor.custom_op_libs",
+            ["aoti_custom_ops"],
+        ):
+            self.check_model(m, args)
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
