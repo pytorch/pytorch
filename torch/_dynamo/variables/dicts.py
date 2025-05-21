@@ -202,9 +202,9 @@ class ConstDictVariable(VariableTracker):
 
         def __eq__(self, other: "ConstDictVariable._HashableTracker") -> bool:
             Hashable = ConstDictVariable._HashableTracker
-            assert isinstance(other, Hashable) or ConstantVariable.is_literal(
-                other
-            ), type(other)
+            assert isinstance(other, Hashable) or ConstantVariable.is_literal(other), (
+                type(other)
+            )
             if isinstance(other, Hashable):
                 return Hashable._eq_impl(self.underlying_value, other.underlying_value)
 
@@ -628,7 +628,7 @@ class MappingProxyVariable(VariableTracker):
         # load types.MappingProxyType
         if self.source:
             msg = (
-                f"Preexisting MappingProxyVariable (source: {self.source}) cannot be reconstructed"
+                f"Preexisting MappingProxyVariable (source: {self.source}) cannot be reconstructed "
                 "because the connection to the original dict will be lost."
             )
             unimplemented_v2(
@@ -659,12 +659,12 @@ class MappingProxyVariable(VariableTracker):
     ) -> "VariableTracker":
         if self.source and tx.output.side_effects.has_existing_dict_mutation():
             msg = """A dict has been modified while we have an existing mappingproxy object.
-                    A mapping proxy object, as the name suggest, proxies a mapping
-                    object (usually a dict). If the original dict object mutates, it
-                    is reflected in the proxy object as well. For an existing proxy
-                    object, we do not know the original dict it points to. Therefore,
-                    for correctness we graph break when there is dict mutation and we
-                    are trying to access a proxy object."""
+            A mapping proxy object, as the name suggest, proxies a mapping
+            object (usually a dict). If the original dict object mutates, it
+            is reflected in the proxy object as well. For an existing proxy
+            object, we do not know the original dict it points to. Therefore,
+            for correctness we graph break when there is dict mutation and we
+            are trying to access a proxy object."""
 
             unimplemented_v2(
                 gb_type="mapping proxy affected by dictionary mutation",
