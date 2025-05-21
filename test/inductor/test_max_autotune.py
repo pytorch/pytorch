@@ -1,6 +1,8 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import functools
 import json
+import logging
 import math
 import os
 import random
@@ -21,9 +23,6 @@ from torch._inductor.autotune_process import (
     TuningProcess,
     TuningProcessPool,
 )
-import functools
-from torch.testing._internal.logging_utils import multiple_logs_to_string
-import logging
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
@@ -38,6 +37,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TEST_WITH_ROCM,
 )
+from torch.testing._internal.logging_utils import multiple_logs_to_string
 from torch.utils._triton import has_triton_tma_device
 
 
@@ -995,7 +995,6 @@ class TestMaxAutotune(TestCase):
     @config.patch("trace.enabled", True)
     @config.patch({"test_configs.force_extern_kernel_in_multi_template": True})
     def test_mutation_rename(self):
-
         torch._logging.set_logs(ir_post_fusion=True)
 
         def f(x, y, z, other):
@@ -1009,14 +1008,13 @@ class TestMaxAutotune(TestCase):
         t = functools.partial(torch.randn, device="cuda")
         inps = (t(3, 3), t(3, 3), t(3, 3), t(3))
         fn = torch.compile(f, mode="max-autotune-no-cudagraphs")
-        (pre_fusion_tream, post_fusion_stream,), ctx = multiple_logs_to_string(
+        (
+            pre_fusion_tream,
+            post_fusion_stream,
+        ), ctx = multiple_logs_to_string(
             "torch._inductor.debug", "ir_pre_fusion", "ir_post_fusion"
         )
 
-        # TODO(aakhundov): make this work with fresh_inductor_cache
-        # instead of force_disable_caches. currently, with the latter
-        # enabled, we get `inductor [('fxgraph_cache_hit', 1)]` in
-        # the counters: so the cache is actually hit and the test fails.
         with config.patch({"trace.debug_dir": tempfile.mkdtemp()}):
             with self.assertLogs(
                 logging.getLogger("torch._inductor.debug"), level=logging.INFO
@@ -1028,10 +1026,14 @@ class TestMaxAutotune(TestCase):
         pre_fusion_stream = cm.output[0]
         post_fusion_stream = cm.output[1]
 
-        # before and after finalizing multi template buffer, deps should have the same normalization 
+        # before and after finalizing multi template buffer, deps should have the same normalization
         # wrt writes
-        FileCheck().check("MultiTemplateBuffer").check("unmet").check_same("buf1").run(pre_fusion_stream)
-        FileCheck().check("ExternKernelSchedulerNode").check("unmet").check_same("buf1").run(post_fusion_stream)
+        FileCheck().check("MultiTemplateBuffer").check("unmet").check_same("buf1").run(
+            pre_fusion_stream
+        )
+        FileCheck().check("ExternKernelSchedulerNode").check("unmet").check_same(
+            "buf1"
+        ).run(post_fusion_stream)
 
         torch._logging.set_logs()
 
