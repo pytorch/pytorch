@@ -75,14 +75,14 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
 
         # Set the device on each process before DeviceMesh constructor,
         # and device to be different than the default world rank
-        torch.cuda.set_device((self.rank + 2) % self.world_size)
+        torch.accelerator.set_device_index((self.rank + 2) % self.world_size)
         _set_env_var(world_size=self.world_size, rank=self.rank)
         DeviceMesh(self.device_type, mesh_tensor)
         self.assertTrue(is_initialized())
 
         # check that the device is set to the correct device
         # and respect the previous set_device calls
-        self.assertEqual(torch.cuda.current_device(), (self.rank + 2) % self.world_size)
+        self.assertEqual(torch.accelerator.current_device_index(), (self.rank + 2) % self.world_size)
         self.destroy_pg()
 
     @skip_if_lt_x_gpu(4)
@@ -103,7 +103,7 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
 
         # check that the device is set to the correct device
         # and respect the LOCAL_RANK env var
-        self.assertEqual(torch.cuda.current_device(), local_rank)
+        self.assertEqual(torch.accelerator.current_device_index(), local_rank)
         self.destroy_pg()
 
     @skip_if_lt_x_gpu(4)
@@ -122,7 +122,7 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
         self.assertTrue(is_initialized())
 
         # check that the device is set to the correct device
-        self.assertEqual(torch.cuda.current_device(), self.rank)
+        self.assertEqual(torch.accelerator.current_device_index(), self.rank)
         self.destroy_pg()
 
 
