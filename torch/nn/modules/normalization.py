@@ -123,8 +123,7 @@ class LayerNorm(Module):
 
     Args:
         {layernorm_args}
-        {device}
-        {dtype}
+        {common_args}
 
 
     Attributes:
@@ -161,8 +160,7 @@ class LayerNorm(Module):
 
     """.format(
         layernorm_args=layernorm_args.__doc__,
-        device=common_args.__doc__.split("device:")[1].split("dtype:")[0],
-        dtype=common_args.__doc__.split("dtype:")[1]
+        common_args=common_args.__doc__
     )
 
     __constants__ = ["normalized_shape", "eps", "elementwise_affine"]
