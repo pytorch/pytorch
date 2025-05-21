@@ -67,6 +67,7 @@ def make_cpp_wrapper_test(orig_test, **extra_args):
     return fn
 
 
+@unittest.skipIf(not HAS_GPU, "No GPU available")
 @config.patch(
     {
         "triton.multi_kernel": int(os.environ.get("TORCHINDUCTOR_MULTI_KERNEL", "1")),
