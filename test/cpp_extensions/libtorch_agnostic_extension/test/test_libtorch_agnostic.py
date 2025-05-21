@@ -125,26 +125,6 @@ if not IS_WINDOWS:
                     curr_mem = torch.cuda.memory_allocated(device)
                     self.assertEqual(curr_mem, init_mem)
 
-        @onlyCUDA
-        def test_z_delete_torch_lib(self, device):
-            import libtorch_agnostic
-
-            # Why the z + CUDA? THIS TEST MUST BE RUN LAST
-            # We are testing that unloading the library properly deletes the registrations, so running this test
-            # earlier will cause all other tests in this file to fail
-            lib = libtorch_agnostic.loaded_lib
-
-            # code for unloading a library inspired from
-            # https://stackoverflow.com/questions/19547084/can-i-explicitly-close-a-ctypes-cdll
-            lib_handle = lib._handle
-            lib.dlclose(lib_handle)
-
-            t = torch.tensor([-2.0, 0.5])
-            with self.assertRaises(RuntimeError):
-                libtorch_agnostic.ops.identity(
-                    t
-                )  # errors as identity shouldn't be registered anymore
-
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":

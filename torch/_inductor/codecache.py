@@ -43,7 +43,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Self
+from typing_extensions import override, Self
 
 import torch
 import torch.distributed as dist
@@ -90,7 +90,11 @@ from torch._subclasses.fake_tensor import (
 )
 from torch._utils_internal import log_cache_bypass
 from torch.compiler import config as cconfig
-from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
+from torch.compiler._cache import (
+    CacheArtifact,
+    CacheArtifactFactory,
+    CacheArtifactManager,
+)
 from torch.export.pt2_archive.constants import CUSTOM_OBJ_FILENAME_PREFIX
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 from torch.utils._ordered_set import OrderedSet
@@ -160,6 +164,15 @@ def use_re_build() -> bool:
 
 def get_cpp_wrapper_cubin_path_name() -> str:
     return "cubin_path" if torch.version.hip is None else "hsaco_path"
+
+
+def get_kernel_bin_format(device: str) -> str:
+    if device == "cuda":
+        return "cubin" if torch.version.hip is None else "hsaco"
+    elif device == "xpu":
+        return "spv"
+    else:
+        return ""
 
 
 @functools.lru_cache(None)
@@ -1059,6 +1072,18 @@ class GuardedCache(Generic[T]):
         return ctx.fake_mode.shape_env
 
 
+@CacheArtifactFactory.register
+class InductorCacheArtifact(CacheArtifact):
+    @override
+    def populate_cache(self) -> None:
+        FxGraphCache._write_to_local_cache(self.key, self.content)
+
+    @override
+    @staticmethod
+    def type() -> str:
+        return "inductor"
+
+
 class FxGraphCache(GuardedCache[CompiledFxGraph]):
     """
     Supports caching and reusing compiled Fx graphs.
@@ -1226,7 +1251,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
         if pickled_content is not None:
             CacheArtifactManager.record_artifact(
-                CacheArtifactType.INDUCTOR, key, pickled_content
+                InductorCacheArtifact.type(), key, pickled_content
             )
 
         # Now re-evaluate with the symints to add any guards to the current env.
@@ -1294,7 +1319,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
         try:
             CacheArtifactManager.record_artifact(
-                CacheArtifactType.INDUCTOR, key, content
+                InductorCacheArtifact.type(), key, content
             )
             if local:
                 FxGraphCache._write_to_local_cache(key, content)
@@ -1527,6 +1552,17 @@ class CudaKernelParamCache:
                 config.aot_inductor.output_path
             )[0],
         )
+        if config.aot_inductor.package_cpp_only:
+            assert config.triton.unique_kernel_names, (
+                "package_cpp_only requires triton kernel names to be unique"
+            )
+            dir_name = os.path.dirname(path)
+            _, ext = os.path.splitext(path)
+            # Construct the new full path
+            new_path = os.path.join(dir_name, params["mangled_name"] + ext)
+            os.rename(path, new_path)
+            path = new_path
+
         params[get_cpp_wrapper_cubin_path_name()] = path
 
         cls.cache[key] = params
