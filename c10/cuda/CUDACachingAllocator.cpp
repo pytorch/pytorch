@@ -3792,9 +3792,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     device_allocator[device]->ensureExistsAndIncrefPool(std::move(mempool_id));
   }
 
-  void setUseOnOOM(
-      c10::DeviceIndex device,
-      MempoolId_t mempool_id) override {
+  void setUseOnOOM(c10::DeviceIndex device, MempoolId_t mempool_id) override {
     assertValidDevice(device);
     device_allocator[device]->setUseOnOOM(std::move(mempool_id));
   }
