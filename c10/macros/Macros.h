@@ -286,7 +286,7 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_MIN_BLOCKS_PER_SM(threads_per_block, blocks_per_sm)        \
   ((((threads_per_block) * (blocks_per_sm) <= CUDA_MAX_THREADS_PER_SM) \
         ? (blocks_per_sm)                                              \
-        : ((CUDA_MAX_THREADS_PER_SM + (threads_per_block)-1) /         \
+        : ((CUDA_MAX_THREADS_PER_SM + (threads_per_block) - 1) /       \
            (threads_per_block))))
 // C10_LAUNCH_BOUNDS is analogous to __launch_bounds__
 #define C10_LAUNCH_BOUNDS_0 \
