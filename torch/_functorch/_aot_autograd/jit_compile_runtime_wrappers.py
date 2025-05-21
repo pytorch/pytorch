@@ -1211,9 +1211,15 @@ def aot_dispatch_autograd(
             if num_symints_saved_for_bw > 0:
                 try:
                     # See Note: [Backward graph lazy lowering]
+                    with torch._subclasses.fake_tensor.unset_fake_temporarily():
+                        # If bw_module contains lifted constants, they will be real tensors stored as
+                        # GraphModule. Deepcopying tensors under fake mode is not supported and will
+                        # raise when attempting to set storage.
+                        bw_module_copy = copy.deepcopy(bw_module)
                     compiled_bw_func = aot_config.bw_compiler(
-                        copy.deepcopy(bw_module), placeholder_list
+                        bw_module_copy, placeholder_list
                     )
+                    del bw_module_copy
                 except Exception as e:
                     exc = e
                     trace_structured(
