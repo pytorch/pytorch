@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 
 from ..ir import GraphPartitionSignature
 from ..virtualized import V
