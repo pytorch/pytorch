@@ -100,7 +100,7 @@ class BlockPatternMatcher:
         # only FloorDiv or ModularIndexing expressions.
         if num_dims >= 5:
             stride = sympy.symbols("stride", cls=wild_signed_int)
-            denom, other = sympy.symbols("denominator other", wild_unsigned_int)
+            denom, other = sympy.symbols("denominator other", cls=wild_unsigned_int)
             mod_div_pattern = stride * ModularIndexing(index_var, denom, other)
             floor_div_pattern = stride * FloorDiv(index_var, denom)
             first_dim_floor_div_matched = False

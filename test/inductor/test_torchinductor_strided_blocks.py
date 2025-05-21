@@ -1154,7 +1154,9 @@ class CommonTemplate:
         def model(data, *args):
             return torch.nn.functional.unfold(data, *args)
 
-        data = torch.zeros([2, 3, 5, 5], dtype=torch.float16, requires_grad=True)
+        data = torch.zeros(
+            [2, 3, 5, 5], dtype=torch.float16, requires_grad=True, device=self.device
+        )
         args = [2, 1, 0, 1]
         run_and_compare(
             self,
