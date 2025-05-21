@@ -128,7 +128,7 @@ jobs:
   linux-focal-cuda12_8-py3_10-gcc9-inductor-smoke-test:
     name: cuda12.8-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cuda12_8-py3_10-gcc9-inductor-somke-build
+    needs: linux-focal-cuda12_8-py3_10-gcc9-inductor-smoke-build
     with:
       build-environment: linux-focal-cuda12.8-py3.10-gcc9-sm80
       docker-image: ${{ needs.linux-focal-cuda12_8-py3_10-gcc9-inductor-smoke-build.outputs.docker-image }}
