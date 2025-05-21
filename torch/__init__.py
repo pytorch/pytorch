@@ -59,6 +59,7 @@ from torch._utils_internal import (
     USE_RTLD_GLOBAL_WITH_LIBTORCH,
 )
 
+
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
 if _running_with_deploy():
     __version__ = "torch-deploy-1.8"
