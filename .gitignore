@@ -47,6 +47,7 @@ docs/source/generated/
 docs/source/compile/generated/
 log
 usage_log.txt
+usage_log*
 test-reports/
 test/*.bak
 test/**/*.bak
@@ -211,15 +212,6 @@ docs/source/scripts/lr_scheduler_images/
 
 # Compiled MATLAB
 *.mex*
-
-# IPython notebook checkpoints
-.ipynb_checkpoints
-
-# Editor temporaries
-*.swn
-*.swo
-*.swp
-*~
 
 # NFS handle files
 **/.nfs*

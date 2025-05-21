@@ -7,7 +7,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   BASE_URL="https://repo.anaconda.com/miniconda"
   CONDA_FILE="Miniconda3-latest-Linux-x86_64.sh"
   if [[ $(uname -m) == "aarch64" ]] || [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
-    BASE_URL="https://github.com/conda-forge/miniforge/releases/latest/download"
+    BASE_URL="https://github.com/conda-forge/miniforge/releases/latest/download"  # @lint-ignore
     CONDA_FILE="Miniforge3-Linux-$(uname -m).sh"
   fi
 
@@ -74,14 +74,6 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
   # and libpython-static for torch deploy
   conda_install llvmdev=8.0.0 "libpython-static=${ANACONDA_PYTHON_VERSION}"
-
-  # Use conda cmake in some cases. Conda cmake will be newer than our supported
-  # min version (3.5 for xenial and 3.10 for bionic), so we only do it in those
-  # following builds that we know should use conda. Specifically, Ubuntu bionic
-  # and focal cannot find conda mkl with stock cmake, so we need a cmake from conda
-  if [ -n "${CONDA_CMAKE}" ]; then
-    conda_install cmake
-  fi
 
   # Magma package names are concatenation of CUDA major and minor ignoring revision
   # I.e. magma-cuda102 package corresponds to CUDA_VERSION=10.2 and CUDA_VERSION=10.2.89
