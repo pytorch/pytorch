@@ -1,7 +1,6 @@
 #ifndef AOTI_TORCH_SHIM_MPS
 #define AOTI_TORCH_SHIM_MPS
 
-#include <ATen/native/mps/MetalShaderLibrary.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 #ifdef __cplusplus
