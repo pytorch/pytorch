@@ -93,7 +93,7 @@ ColumnwiseMoments(
     int64_t C,
     int64_t D) {
   using Vec = vec::Vectorized<T>;
-  constexpr int64_t K = Vec::size();
+  const int64_t K = Vec::size();
   const int64_t inner_size = D / K * K;
   Vec acc0_vec{0}, acc1_vec{0};
   for (const auto m : c10::irange(HxW)) {
@@ -668,20 +668,20 @@ void GroupNormInputBackward(
   const opmath_t s = opmath_t(1) / static_cast<opmath_t>(D * HxW);
   const bool gamma_null = (gamma == nullptr);
   at::parallel_for(0, N * G, 1, [=](int64_t start, int64_t end) {
-    constexpr int64_t K = vec::Vectorized<PT>::size();
+    const int64_t K = vec::Vectorized<PT>::size();
     const int64_t d = D / K * K;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<opmath_t, at::vec::Vectorized<opmath_t>::size()> ds_arr;
+    opmath_t ds_arr[at::vec::Vectorized<opmath_t>::size()];
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<opmath_t, at::vec::Vectorized<opmath_t>::size()> db_arr;
+    opmath_t db_arr[at::vec::Vectorized<opmath_t>::size()];
     for (const auto i : c10::irange(start, end)) {
       const int64_t g = i % G;
       const opmath_t* ds_ptr = ds + i * D;
       const opmath_t* db_ptr = db + i * D;
       const PT* gamma_ptr = gamma_null ? nullptr : (gamma + g * D);
-      CalcDsDb(ds_ptr, db_ptr, gamma_ptr, d, K, ds_arr.data(), db_arr.data());
-      opmath_t ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), opmath_t(0));
-      opmath_t db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), opmath_t(0));
+      CalcDsDb(ds_ptr, db_ptr, gamma_ptr, d, K, ds_arr, db_arr);
+      opmath_t ds_val = std::accumulate(&ds_arr[0], &ds_arr[at::vec::Vectorized<opmath_t>::size()], opmath_t(0));
+      opmath_t db_val = std::accumulate(&db_arr[0], &db_arr[at::vec::Vectorized<opmath_t>::size()], opmath_t(0));
       for (const auto j : c10::irange(d, D)) {
         const opmath_t gamma_v = gamma_null ? opmath_t(1) : opmath_t(gamma[g * D + j]);
         ds_val += ds_ptr[j] * gamma_v;
@@ -718,7 +718,7 @@ GammaBackward(
     PT* dgamma) {
   const int64_t G = group;
   const int64_t D = C / G;
-  constexpr int64_t K = at::vec::Vectorized<PT>::size();
+  const int64_t K = at::vec::Vectorized<PT>::size();
   using Vec = at::vec::Vectorized<PT>;
   const int64_t inner_size = D / K * K;
   for (const auto g : c10::irange(G)) {
@@ -818,7 +818,7 @@ template <typename PT, typename opmath_t>
 std::enable_if_t<std::is_same_v<PT, opmath_t>, void>
 BetaBackward(int64_t N, int64_t C, const opmath_t* db, PT* dbeta) {
   using Vec = at::vec::Vectorized<PT>;
-  constexpr int64_t K = Vec::size();
+  const int64_t K = Vec::size();
   Vec acc_vec{0}, zero{0};
   const int64_t inner_size = C / K * K;
   int64_t i = 0;
@@ -943,7 +943,7 @@ DsDbRowwiseMomentsChannelsLast(
   opmath_t* db_ptr,
   int64_t C) {
   using Vec = vec::Vectorized<T>;
-  constexpr int64_t K = vec::Vectorized<T>::size();
+  const int64_t K = vec::Vectorized<T>::size();
   const int64_t inner_size = C / K * K;
   int64_t d = 0;
   for (; d < inner_size; d += K) {
@@ -1247,7 +1247,7 @@ inline typename std::
     int64_t D) {
   using Vec = vec::Vectorized<T>;
   const bool gamma_null = (gamma_ptr == nullptr);
-  constexpr int64_t K = Vec::size();
+  const int64_t K = Vec::size();
   const int64_t inner_size = D / K * K;
   int64_t d = 0;
   opmath_t ds_gamma{0}, db_gamma{0};

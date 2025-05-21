@@ -21,11 +21,11 @@ Vectorized<acc_t> load_reduce_vec(const scalar_t* data, F reduce, acc_t ident) {
   using vacc_t = Vectorized<acc_t>;
   static_assert(vacc_t::size() <= vec_t::size());
   const auto val = vec_t::loadu(data);
-  alignas(64) std::array<scalar_t, vec_t::size()> values;
-  val.store(values.data());
+  alignas(64) scalar_t values[vec_t::size()];
+  val.store(values);
 
   constexpr int vstride = vec_t::size() / vacc_t::size();
-  alignas(64) std::array<acc_t, vacc_t::size()> acc;
+  alignas(64) acc_t acc[vacc_t::size()];
   acc.fill(ident);
   for (const auto k : c10::irange(vstride)) {
     for (const auto i : c10::irange(vacc_t::size())) {
@@ -33,7 +33,7 @@ Vectorized<acc_t> load_reduce_vec(const scalar_t* data, F reduce, acc_t ident) {
     }
   }
 
-  return vacc_t::loadu(acc.data());
+  return vacc_t::loadu(acc);
 }
 
 template <typename scalar_t>
@@ -138,7 +138,7 @@ struct OuterSumCastLoadPolicy <vec_t, vacc_t,
   using scalar_t = vechold_type<vec_t>;
   using acc_t = vechold_type<vacc_t>;
 
-  static constexpr int64_t memsize() {
+  static int64_t memsize() {
     return sizeof(scalar_t) * vacc_t::size();
   }
 
@@ -161,7 +161,7 @@ template <typename vec_t, typename vacc_t>
 struct OuterSumCastLoadPolicy <vec_t, vacc_t, std::enable_if_t<is_reduced_floating_point_v<vechold_type<vec_t>>>> {
   using scalar_t = vechold_type<vec_t>;
 
-  static constexpr int64_t memsize() {
+  static int64_t memsize() {
     return sizeof(scalar_t) * vacc_t::size();
   }
 
@@ -198,7 +198,7 @@ template <typename scalar_t>
 struct NanSumLoadPolicy<Vectorized<scalar_t>> {
   using vec_t = Vectorized<scalar_t>;
 
-  static constexpr int64_t memsize() {
+  static int64_t memsize() {
     return LoadPolicy<vec_t>::memsize();
   }
 
@@ -267,7 +267,7 @@ struct InnerNanSumCastLoadPolicy <vec_t, vacc_t, std::enable_if_t<is_reduced_flo
 
 template <typename vec_t, typename vacc_t>
 struct OuterNanSumCastLoadPolicy {
-  static constexpr int64_t memsize() {
+  static int64_t memsize() {
     return OuterSumCastLoadPolicy<vec_t, vacc_t>::memsize();
   }
 
@@ -302,11 +302,21 @@ static void store(char * C10_RESTRICT data, int64_t stride, int64_t index,
 
 template <typename StorePolicy, typename scalar_t>
 static void store(char * C10_RESTRICT data, int64_t stride, int64_t index,
+                  const scalar_t *values, size_t numel) {
+  auto *base_ptr = data + stride * index;
+  for (const auto k : c10::irange(numel)) {
+    auto val = values[k];
+    StorePolicy::store(base_ptr, stride, k, val);
+  }
+}
+
+template <typename StorePolicy, typename scalar_t>
+static void store(char * C10_RESTRICT data, int64_t stride, int64_t index,
                   const Vectorized<scalar_t> &values) {
   using vec_t = Vectorized<scalar_t>;
-  alignas(64) std::array<scalar_t, vec_t::size()> array_values{};
-  values.store(array_values.data());
-  store<StorePolicy>(data, stride, index, array_values);
+  alignas(64) scalar_t array_values[vec_t::size()] = {};
+  values.store(array_values);
+  store<StorePolicy, scalar_t>(data, stride, index, array_values, vec_t::size());
 }
 
 /** Simultaneously sum over n rows at once
@@ -436,9 +446,9 @@ void vectorized_inner_sum(
     char * C10_RESTRICT data[2], int64_t outer_stride, int64_t out_stride,
     int64_t size0, int64_t size1) {
   using vacc_t = Vectorized<acc_t>;
-  constexpr int64_t vec_stride = VecLoadPolicy::memsize();
-  constexpr int64_t scalar_stride = ScalarLoadPolicy::memsize();
-  constexpr int64_t vec_numel = vec_stride / scalar_stride;
+  const int64_t vec_stride = VecLoadPolicy::memsize();
+  const int64_t scalar_stride = ScalarLoadPolicy::memsize();
+  const int64_t vec_numel = vec_stride / scalar_stride;
   const int64_t vec_size = size0 / vec_numel;
 
   // Input is contiguous over the first (reduced) dimension
@@ -451,9 +461,9 @@ void vectorized_inner_sum(
       final_acc += ScalarLoadPolicy::load(row_in, scalar_stride, k);
     }
 
-    alignas(64) std::array<acc_t, vacc_t::size()> partials{};
-    vec_acc.store(partials.data());
-    for (const auto k : c10::irange(partials.size())) {
+    alignas(64) acc_t partials[vacc_t::size()] = {};
+    vec_acc.store(partials);
+    for (const auto k : c10::irange(vacc_t::size())) {
       final_acc += partials[k];
     }
     store<StorePolicy>(data[0], out_stride, j, final_acc);
@@ -479,7 +489,7 @@ void vectorized_outer_sum(
     int64_t size0, int64_t size1) {
   using vacc_t = Vectorized<acc_t>;
   constexpr int64_t scalar_stride = ScalarLoadPolicy::memsize();
-  constexpr int64_t vec_stride = VecLoadPolicy::memsize();
+  const int64_t vec_stride = VecLoadPolicy::memsize();
   constexpr int64_t nrows = 4;
 
   // Input is contiguous over the second (non-reduced) dimension

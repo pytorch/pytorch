@@ -109,8 +109,8 @@ template <typename T, int64_t kMaxDepth>
 std::pair<opmath_t<T>, opmath_t<T>> RowwiseMomentsImpl(const T* X, int64_t N, int64_t ddof = 0) {
   using math_t = opmath_t<T>;
 
-  constexpr int64_t kVecSize = vec::Vectorized<T>::size();
-  constexpr int64_t kAccVecSize = vec::Vectorized<math_t>::size();
+  const int64_t kVecSize = vec::Vectorized<T>::size();
+  const int64_t kAccVecSize = vec::Vectorized<math_t>::size();
   const int64_t n = N / kVecSize;
   const int64_t m = divup(n, kChunkSize);
   const int64_t depth = utils::CeilLog2(m);
@@ -155,10 +155,10 @@ std::pair<opmath_t<T>, opmath_t<T>> RowwiseMomentsImpl(const T* X, int64_t N, in
         m0_stk[i], m1_stk[i], m2_stk[i], m0_stk[0], m1_stk[0], m2_stk[0]);
   }
 
-  std::array<math_t, kAccVecSize> m1_arr{};
-  std::array<math_t, kAccVecSize> m2_arr{};
-  m1_stk[0].store(m1_arr.data());
-  m2_stk[0].store(m2_arr.data());
+  math_t m1_arr[kAccVecSize] = {};
+  math_t m2_arr[kAccVecSize] = {};
+  m1_stk[0].store(m1_arr);
+  m2_stk[0].store(m2_arr);
 
   int64_t m0 = 0;
   math_t m1 = 0;
@@ -182,7 +182,7 @@ std::pair<opmath_t<T>, opmath_t<T>> RowwiseMomentsImpl(const T* X, int64_t N, in
 template <typename T>
 std::pair<opmath_t<T>, opmath_t<T>> RowwiseMoments(const T* X, int64_t N, int64_t ddof = 0) {
   using Vec = vec::Vectorized<T>;
-  constexpr int64_t kVecSize = Vec::size();
+  const int64_t kVecSize = Vec::size();
   const int64_t n = N / kVecSize;
   const int64_t m = divup(n, kChunkSize);
   const int64_t depth = utils::CeilLog2(m);

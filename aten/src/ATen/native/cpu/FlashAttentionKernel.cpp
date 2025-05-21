@@ -11,6 +11,7 @@
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <c10/util/irange.h>
+#include <variant>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -44,13 +45,23 @@ inline void _scale_attn_mask_fusion_kernel(
 #endif
   const auto vec_size1 = at::vec::Vectorized<T1>::size();
   const auto vec_size2 = at::vec::Vectorized<T2>::size();
-  constexpr int64_t T1_n =
+  const int64_t T1_n =
       (vec_size2 == vec_size1 * 2 && is_reduced_floating_point_v<T2>) ? 2 : 1;
   constexpr int64_t T2_n = 1;
-  auto vec_scale = at::vec::VectorizedN<T1, T1_n>(val);
+  std::variant<at::vec::VectorizedN<T1, 2>, at::vec::VectorizedN<T1, 1>> vec_scale;
+  if (T1_n == 2)
+    vec_scale = at::vec::VectorizedN<T1, 2>(val);
+  else if (T1_n == 1)
+    vec_scale = at::vec::VectorizedN<T1, 1>(val);
+
   int64_t i = 0;
   for (; i < size - (size % vec_size2); i += vec_size2) {
-    auto a_n = at::vec::VectorizedN<T1, T1_n>::loadu(a + i);
+    std::variant<at::vec::VectorizedN<T1, 2>, at::vec::VectorizedN<T1, 1>> a_n;
+    if (T1_n == 2)
+      a_n = at::vec::VectorizedN<T1, 2>::loadu(a + i);
+    else if (T1_n == 1)
+      a_n = at::vec::VectorizedN<T1, 1>::loadu(a + i);
+    
     at::vec::VectorizedN<T2, T2_n> b_n;
 #if __GNUC__ == 11 && defined(__ARM_FEATURE_SVE)
     if (is_b_stride_zero) {
@@ -61,9 +72,16 @@ inline void _scale_attn_mask_fusion_kernel(
     } else {
       b_n = at::vec::VectorizedN<T2, T2_n>::loadu(b + i);
     }
-    auto b_n_convert = at::vec::convert<T1, T1_n, T2, T2_n, true>(b_n);
-    auto res = a_n * vec_scale + b_n_convert;
-    res.store(out + i);
+    std::variant<at::vec::VectorizedN<T1, 2>, at::vec::VectorizedN<T1, 1>> b_n_convert;
+    if (T1_n == 2) {
+      auto b_n_convert = at::vec::convert<T1, 2, T2, T2_n, true>(b_n);
+      auto res = std::get<at::vec::VectorizedN<T1, 2>>(a_n) * std::get<at::vec::VectorizedN<T1, 2>>(vec_scale) + b_n_convert;
+      res.store(out + i);
+    } else if(T1_n == 1) {
+      auto b_n_convert = at::vec::convert<T1, 1, T2, T2_n, true>(b_n);
+      auto res = std::get<at::vec::VectorizedN<T1, 1>>(a_n) * std::get<at::vec::VectorizedN<T1, 1>>(vec_scale) + b_n_convert;
+      res.store(out + i);
+    }
   }
   for (; i < size; i++) {
     auto tmp0 = a[i];

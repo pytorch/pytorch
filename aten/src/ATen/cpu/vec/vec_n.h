@@ -28,7 +28,7 @@ class VectorizedN {
   using size_type = int;
 
   static constexpr size_type size_T = sizeof(T);
-  static constexpr size_type size() {
+  static size_type size() {
     return Vectorized<T>::size() * N;
   }
 

@@ -210,8 +210,7 @@ struct Vectorized {
   auto as_bytes() const -> const char* {
     return reinterpret_cast<const char*>(values);
   }
-  template <int64_t mask_>
-  static Vectorized<T> blend(const Vectorized<T>& a, const Vectorized<T>& b) {
+  static Vectorized<T> blend(const Vectorized<T>& a, const Vectorized<T>& b, const int64_t mask_) {
     int64_t mask = mask_;
     Vectorized vector;
     for (const auto i : c10::irange(size())) {
@@ -1312,7 +1311,7 @@ std::
         T const* base_addr,
         const Vectorized<int_same_size_t<T>>& vindex,
         Vectorized<T>& mask) {
-  static constexpr int size = Vectorized<T>::size();
+  static const int size = Vectorized<T>::size();
   T src_arr[size];
   int_same_size_t<T> mask_arr[size]; // use int type so we can logical and
   int_same_size_t<T> index_arr[size];
@@ -1404,9 +1403,7 @@ inline Vectorized<T> convert_to_fp_of_same_size(
 //                                      Vectorized<float>   = {b0, b1, b2, b3, b4, b5, b6, b7}
 // clang-format on
 template <typename T>
-inline std::enable_if_t<
-    Vectorized<T>::size() % 2 == 0,
-    std::pair<Vectorized<T>, Vectorized<T>>>
+inline std::enable_if_t<true, std::pair<Vectorized<T>, Vectorized<T>>>
 deinterleave2(const Vectorized<T>& a, const Vectorized<T>& b) {
   static constexpr int size = Vectorized<T>::size();
   static constexpr int half_size = size / 2;
@@ -1426,6 +1423,26 @@ deinterleave2(const Vectorized<T>& a, const Vectorized<T>& b) {
       Vectorized<T>::loadu(static_cast<void*>(buffer1)),
       Vectorized<T>::loadu(static_cast<void*>(buffer2)));
 }
+// template <typename T>
+// inline std::enable_if_t<Vectorized<T>::size() % 2 == 0, std::pair<Vectorized<T>, Vectorized<T>>>
+// deinterleave2(const Vectorized<T>& a, const Vectorized<T>& b) {
+//   static constexpr int size = Vectorized<T>::size();
+//   static constexpr int half_size = size / 2;
+//   T a_arr[size];
+//   T b_arr[size];
+//   T buffer1[size];
+//   T buffer2[size];
+//   a.store(static_cast<void*>(a_arr));
+//   b.store(static_cast<void*>(b_arr));
+//   for (const auto i : c10::irange(half_size)) {
+//     buffer1[i] = a_arr[i * 2];
+//     buffer1[half_size + i] = b_arr[i * 2];
+//     buffer2[i] = a_arr[i * 2 + 1];
+//     buffer2[half_size + i] = b_arr[i * 2 + 1];
+//   }
+//   return std::make_pair(Vectorized<T>::loadu(static_cast<void*>(buffer1)),
+//                         Vectorized<T>::loadu(static_cast<void*>(buffer2)));
+// }
 
 VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(deinterleave2)
 
@@ -1443,9 +1460,7 @@ VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(deinterleave2)
 //                           Vectorized<float>   = {a4, b4, a5, b5, a6, b6, a7, b7}
 // clang-format on
 template <typename T>
-inline std::enable_if_t<
-    Vectorized<T>::size() % 2 == 0,
-    std::pair<Vectorized<T>, Vectorized<T>>>
+inline std::enable_if_t<true, std::pair<Vectorized<T>, Vectorized<T>>>
 interleave2(const Vectorized<T>& a, const Vectorized<T>& b) {
   static constexpr int size = Vectorized<T>::size();
   static constexpr int half_size = size / 2;
@@ -1471,12 +1486,11 @@ VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(interleave2)
 #undef VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC
 #undef VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP
 #undef VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC
-
-template <typename src_T, typename dst_T>
-inline void convert(const src_T* src, dst_T* dst, int64_t n) {
-#ifndef _MSC_VER
-#pragma unroll
-#endif
+// template <typename T>
+// inline std::enable_if_t<Vectorized<T>::size() % 2 == 0, std::pair<Vectorized<T>, Vectorized<T>>>
+// interleave2(const Vectorized<T>& a, const Vectorized<T>& b) {
+//   static constexpr int size = Vectorized<T>::size();
+//   static constexpr int half_size = size / 2;
   for ([[maybe_unused]] const auto i : c10::irange(n)) {
     *dst = c10::convert<dst_T>(c10::load(src));
     src++;
@@ -1486,7 +1500,7 @@ inline void convert(const src_T* src, dst_T* dst, int64_t n) {
 
 template <typename T>
 inline Vectorized<T> flip(const Vectorized<T>& data) {
-  static constexpr int size = Vectorized<T>::size();
+  static const int size = Vectorized<T>::size();
   T output[size];
   T buffer[size];
   data.store(static_cast<void*>(buffer));

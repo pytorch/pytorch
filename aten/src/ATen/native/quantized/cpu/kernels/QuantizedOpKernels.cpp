@@ -170,7 +170,7 @@ Tensor qcat_nhwc_kernel(
           }
 
           // Vectorized loop for channel between 8 and 32 (avx2)
-          constexpr auto kVLEN = Vectorized<float>::size();
+          const auto kVLEN = Vectorized<float>::size();
           int64_t elem_size = curr_C - c;
           if ((VLEN == 4 * kVLEN) && elem_size >= kVLEN) {
             auto curr_scale_vec = Vectorized<float>(curr_scale);
@@ -2449,7 +2449,7 @@ void q_batch_norm_kernel(
         reinterpret_cast<scalar_t::underlying*>(input.data_ptr());
     scalar_t::underlying* Y = reinterpret_cast<scalar_t::underlying*>(output.data_ptr());
 
-    constexpr int kVLen = Vectorized<float>::size();
+    const int kVLen = Vectorized<float>::size();
     const int64_t outer_size = N * HxW;
     using Vec = Vectorized<scalar_t>;
     // Hoisted variables
@@ -2975,7 +2975,7 @@ void quantized_normalize_kernel(
     float y_scale = Y->q_scale();
     float y_inv_scale = 1.0f / y_scale;
 
-    constexpr int kFloatVLen = fVec::size();
+    const int kFloatVLen = fVec::size();
     int64_t kIntVLen = kFloatVLen * qVec::float_num_vecs();
     int64_t kNumIntVecInLayer = N / kIntVLen;
     int64_t kNonVecRemInLayer = N % kIntVLen;
@@ -3263,7 +3263,7 @@ void quantized_groupnorm_nhwc_kernel(
     float y_scale = Y->q_scale();
     float y_inv_scale = 1.0f / y_scale;
 
-    constexpr int kFloatVLen = fVec::size();
+    const int kFloatVLen = fVec::size();
     int64_t kIntVLen = kFloatVLen * qVec::float_num_vecs();
     int64_t channels_per_group = C / G;
     int64_t HxW = N / channels_per_group;

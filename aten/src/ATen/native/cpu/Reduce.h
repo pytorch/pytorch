@@ -80,7 +80,7 @@ inline void UNARY_OUTER_LOOP(char* data[2], const int64_t strides[2], int64_t n,
 template <typename func_t, typename vec_func_t>
 inline void vectorized_inner_reduction(char** data, int64_t n, func_t op, vec_func_t vop) {
   VEC_LOOP_HEADER(func_t, data)
-  constexpr int64_t vector_stride = 4 * Vec::size() * sizeof(scalar_t);
+  const int64_t vector_stride = 4 * Vec::size() * sizeof(scalar_t);
   int64_t count = n / (4 * Vec::size());
   if (count > 0) {
     vectorized_reduction(data, count, vector_stride, op, vop, /*reduce=*/true);
@@ -96,7 +96,7 @@ inline void vectorized_outer_reduction(char** data, int64_t inner_stride, int64_
   VEC_LOOP_HEADER(func_t, data)
 
   // reduce down each column of 4 * Vec::size() elements.
-  constexpr int64_t vector_stride = 4 * Vec::size() * sizeof(scalar_t);
+  const int64_t vector_stride = 4 * Vec::size() * sizeof(scalar_t);
   int64_t outer_stride[2] = { vector_stride, vector_stride };
   UNARY_OUTER_LOOP(data, outer_stride, size1 / (4 * Vec::size()), [&] {
     vectorized_reduction(data, size0, inner_stride, op, vop, /*reduce=*/false);
