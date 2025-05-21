@@ -121,16 +121,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config.pattern_matcher:
         lazy_init()
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "before_recompile_post_grad",
-                "encoding": "string",
-            },
-            payload_fn=lambda: gm.print_readable(
-                print_output=False, include_stride=True, include_device=True
-            ),
-        )
         GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
             functools.partial(group_batch_fusion_passes, pre_grad=False)
         )
@@ -212,16 +202,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     )
 
     gm.recompile()
-    trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "after_recompile_post_grad",
-            "encoding": "string",
-        },
-        payload_fn=lambda: gm.print_readable(
-            print_output=False, include_stride=True, include_device=True
-        ),
-    )
     gm.graph.lint()
 
 

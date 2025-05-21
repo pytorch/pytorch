@@ -1065,12 +1065,31 @@ void Engine::evaluate_function(
     Node* func,
     InputBuffer& inputs,
     const std::shared_ptr<ReadyQueue>& cpu_ready_queue) {
-  // The InputBuffer::adds that supplied incoming grads took pains to
-  // ensure they're safe to consume in the context of the present
-  // func's stream (if applicable). So we guard onto that stream
-  // before working with the grads in any capacity.
+  // Locally set the current stream to func's associated stream
   auto opt_parent_stream = (*func).stream();
   c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
+
+  // Ensure that the incoming gradients are ready
+  for (size_t pos = 0; pos < inputs.ready_events.size(); ++pos) {
+    if (!inputs.buffer[pos].defined()) {
+      continue;
+    }
+    const auto device = inputs.buffer[pos].device();
+    // TODO: Use at::accelerator::isAccelerator(device->type()) instead
+    bool is_accelerator =
+        device.is_cuda() || device.is_mtia() || device.is_privateuseone();
+    if (!is_accelerator) {
+      continue;
+    }
+    TORCH_INTERNAL_ASSERT(inputs.ready_events[pos].has_value());
+    TORCH_INTERNAL_ASSERT(inputs.ready_streams[pos].has_value());
+    TORCH_INTERNAL_ASSERT(opt_parent_stream.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    if (opt_parent_stream.value() != inputs.ready_streams[pos].value()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      opt_parent_stream->wait(inputs.ready_events[pos].value());
+    }
+  }
 
   // If exec_info_ is not empty, we have to instrument the execution
   auto& exec_info_ = graph_task->exec_info_;
