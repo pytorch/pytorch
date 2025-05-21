@@ -1426,17 +1426,6 @@ class FakeTensorMode(TorchDispatchMode):
         Lookup a cache entry for the given arguments. If none exists, dispatch
         and cache the result (if the result is eligible for caching).
         """
-        if not torch._library.utils.is_builtin(func):
-            # If this func is not a builtin then we can't safely cache
-            # it - for either positive or negative caching. It's not
-            # even safe to attempt to compare the funcs because they
-            # might not define an __eq__.
-            #
-            # TODO: Maybe consider having a base class to allow ops to "opt-in"
-            # to the caching behavior by making some guarantees.
-            FakeTensorMode.cache_bypasses["non-builtin"] += 1
-            return self._dispatch_impl(func, types, args, kwargs)
-
         state = None
         key = None
         try:
@@ -1603,6 +1592,9 @@ class FakeTensorMode(TorchDispatchMode):
 
         if func.name() == "inductor::resize_storage_bytes_":
             raise _BypassDispatchCache("inductor::resize_storage_bytes_")
+
+        if not torch._library.utils.is_builtin(func):
+            raise _BypassDispatchCache("non-builtin")
 
         # In order to handle storage aliasing, we need to establish the alias
         # for any view op on a cache hit. But CompositeImplicitAutograd ops may
@@ -3123,6 +3115,9 @@ _DISPATCH_HANDLE_DIRECTLY = ordered_set(
     torch.ops.aten.is_coalesced.default,
     torch.ops.aten.dense_dim.default,
     torch.ops.aten.sparse_dim.default,
+    # _RecordFunction doesn't support __eq__ so make sure not to attempt to
+    # cache it.
+    torch.ops.profiler._record_function_exit._RecordFunction
 )
 
 from torch._subclasses.fake_impls import (  # noqa: F401
