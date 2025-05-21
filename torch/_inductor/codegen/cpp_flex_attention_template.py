@@ -271,15 +271,12 @@ extern "C"
 
   int64_t full_num_kviStrideB = {{kernel.stride(full_kv_num_blocks, 0)}};
   int64_t full_num_kviStrideH = {{kernel.stride(full_kv_num_blocks, 1)}};
+  auto full_kv_indices_data = full_kv_indices;
+  auto full_kv_num_blocks_data = full_kv_num_blocks;
 {%- endif %}
 
   auto kv_num_blocks_data = kv_num_blocks;
   auto kv_indices_data = kv_indices;
-  auto full_kv_indices_data = full_kv_indices;
-  auto full_kv_num_blocks_data = full_kv_num_blocks;
-  int64_t kv_row_num = {{kernel.size(kv_num_blocks, 2)}};
-  int64_t full_kv_row_num = {{kernel.size(full_kv_indices, 2)}};
-
 
   // Strides
   int64_t qStrideB = {{kernel.stride(query, 0)}};
@@ -469,10 +466,16 @@ extern "C"
 {%- endif %}
       for (int64_t n = 0; n < kvSize; n += kvSplitSize) {
         auto cur_n = n/kvSplitSize;
+{%- if has_full_kv_block %}
         if ( (std::find(kv_ind_mask_list.begin(), kv_ind_mask_list.end(), cur_n) == kv_ind_mask_list.end())
              and (std::find(full_kv_ind_mask_list.begin(), full_kv_ind_mask_list.end(), cur_n) == full_kv_ind_mask_list.end()) ){
             continue;
         }
+{%- else %}
+        if ( std::find(kv_ind_mask_list.begin(), kv_ind_mask_list.end(), cur_n) == kv_ind_mask_list.end() ){
+            continue;
+        }
+{%- endif %}
         int64_t cur_kvSplitSize = std::min(kvSplitSize, kvSize - n);
         int64_t cur_ekvSplitSize = (need_pack && cur_kvSplitSize % 2 != 0) ? cur_kvSplitSize + 1 : cur_kvSplitSize;
 
