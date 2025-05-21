@@ -103,6 +103,10 @@ struct tanh_functor {
   }
 };
 
+// Bool specialization is need to workaround compiler crashes on MacOS-13
+// Otherwise attempts to invoke will fail to create state object with error
+// Error Domain=AGXMetal13_3 Code=3 "Compiler encountered an internal error"
+
 struct log_functor {
   template <typename T>
   inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
@@ -119,6 +123,9 @@ struct log_functor {
     auto real = ::precise::log(magnitude);
     auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
     return T(real, imag);
+  }
+  inline float operator()(const bool x) {
+    return x ? 0 : -INFINITY;
   }
 };
 
@@ -139,6 +146,9 @@ struct log10_functor {
     auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
     return complex_div(T(real, imag), T(::precise::log(10), 0));
   }
+  inline float operator()(const bool x) {
+    return x ? 0 : -INFINITY;
+  }
 };
 
 struct log2_functor {
@@ -157,6 +167,9 @@ struct log2_functor {
     auto real = ::precise::log(magnitude);
     auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
     return complex_div(T(real, imag), T(::precise::log(2), 0));
+  }
+  inline float operator()(const bool x) {
+    return x ? 0 : -INFINITY;
   }
 };
 
