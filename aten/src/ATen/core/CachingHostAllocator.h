@@ -471,7 +471,7 @@ struct CachingHostAllocatorImpl {
   virtual B* get_free_block(size_t size) {
     auto index = size_index(size);
     std::lock_guard<std::mutex> g(free_list_[index].mutex_);
-    if (free_list_[index].list_.size() > 0) {
+    if (!free_list_[index].list_.empty()) {
       B* block = free_list_[index].list_.back();
       free_list_[index].list_.pop_back();
       block->allocated_ = true;

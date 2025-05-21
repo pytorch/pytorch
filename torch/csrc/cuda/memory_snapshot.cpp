@@ -15,6 +15,38 @@ using torch::jit::Pickler;
 using c10::cuda::CUDACachingAllocator::SegmentInfo;
 
 namespace {
+
+class CallbackManager {
+ public:
+  // Constructor
+  CallbackManager() = default;
+  // Destructor
+  ~CallbackManager() = default;
+  // Methods to get and set the callback handles
+  at::CallbackHandle getAnnotationHandle() const {
+    return annotationHandle_;
+  }
+  void setAnnotationHandle(at::CallbackHandle handle) {
+    annotationHandle_ = handle;
+  }
+  at::CallbackHandle getCompileContextHandle() const {
+    return compileContextHandle_;
+  }
+  void setCompileContextHandle(at::CallbackHandle handle) {
+    compileContextHandle_ = handle;
+  }
+  std::unique_lock<std::mutex> lockCallbackMutex() const {
+    return std::unique_lock<std::mutex>(callbackMutex_);
+  }
+
+ private:
+  mutable std::mutex callbackMutex_;
+  at::CallbackHandle annotationHandle_{0};
+  at::CallbackHandle compileContextHandle_{0};
+};
+
+CallbackManager callbackManager;
+
 std::string write_pickle(const IValue& v) {
   std::vector<char> result;
   {
@@ -97,53 +129,66 @@ CapturedTraceback* getFromContext(
       "attempting to gather stack context from the wrong StackContext type.");
 }
 
-void _initRecordAnnotations() {
-  static auto init_placeholder [[maybe_unused]] = [&] {
-    // Save user annotations to CCA memory snapshot tool
-    at::addThreadLocalCallback(
-        at::RecordFunctionCallback(
-            [](const at::RecordFunction& fn)
-                -> std::unique_ptr<at::ObserverContext> {
-              c10::cuda::CUDACachingAllocator::recordAnnotation(
-                  {{"name", fn.name()}, {"stage", "START"}});
-              return nullptr;
-            },
-            [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
-              c10::cuda::CUDACachingAllocator::recordAnnotation(
-                  {{"name", fn.name()}, {"stage", "END"}});
-            })
-            .scopes({at::RecordScope::USER_SCOPE}));
-    return true;
-  }();
+at::CallbackHandle _initRecordAnnotations() {
+  return at::addGlobalCallback(
+      at::RecordFunctionCallback(
+          [](const at::RecordFunction& fn)
+              -> std::unique_ptr<at::ObserverContext> {
+            c10::cuda::CUDACachingAllocator::recordAnnotation(
+                {{"name", fn.name()}, {"stage", "START"}});
+            return nullptr;
+          },
+          [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
+            c10::cuda::CUDACachingAllocator::recordAnnotation(
+                {{"name", fn.name()}, {"stage", "END"}});
+          })
+          .scopes({at::RecordScope::USER_SCOPE}));
 }
 
-void _initCompileContexts() {
-  static auto init_placeholder [[maybe_unused]] = [&] {
-    // Save PT2 Compile Contexts to CCA memory snapshot tool
-    at::addGlobalCallback(
-        at::RecordFunctionCallback(
-            [](const at::RecordFunction& fn)
-                -> std::unique_ptr<at::ObserverContext> {
-              std::string functionName = fn.name();
-              const std::string functionNamePrefix = "Torch-Compiled Region";
-              if (functionName.compare(
-                      0, functionNamePrefix.size(), functionNamePrefix) == 0) {
-                c10::cuda::CUDACachingAllocator::pushCompileContext(
-                    functionName);
-              }
-              return nullptr;
-            },
-            [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
-              std::string functionName = fn.name();
-              const std::string functionNamePrefix = "Torch-Compiled Region";
-              if (functionName.compare(
-                      0, functionNamePrefix.size(), functionNamePrefix) == 0) {
-                c10::cuda::CUDACachingAllocator::popCompileContext();
-              }
-            })
-            .scopes({at::RecordScope::FUNCTION}));
-    return true;
-  }();
+at::CallbackHandle _initCompileContexts() {
+  return at::addGlobalCallback(
+      at::RecordFunctionCallback(
+          [](const at::RecordFunction& fn)
+              -> std::unique_ptr<at::ObserverContext> {
+            std::string functionName = fn.name();
+            const std::string functionNamePrefix = "Torch-Compiled Region";
+            if (functionName.compare(
+                    0, functionNamePrefix.size(), functionNamePrefix) == 0) {
+              c10::cuda::CUDACachingAllocator::pushCompileContext(functionName);
+            }
+            return nullptr;
+          },
+          [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
+            std::string functionName = fn.name();
+            const std::string functionNamePrefix = "Torch-Compiled Region";
+            if (functionName.compare(
+                    0, functionNamePrefix.size(), functionNamePrefix) == 0) {
+              c10::cuda::CUDACachingAllocator::popCompileContext();
+            }
+          })
+          .scopes({at::RecordScope::FUNCTION}));
+}
+
+void setRecordFunctionCallbacks(bool enabled, bool compileContext) {
+  // Handle Callbacks under mutex
+  auto lock = callbackManager.lockCallbackMutex();
+  if (enabled) {
+    if (callbackManager.getAnnotationHandle() == 0) {
+      callbackManager.setAnnotationHandle(_initRecordAnnotations());
+    }
+    if (compileContext && callbackManager.getCompileContextHandle() == 0) {
+      callbackManager.setCompileContextHandle(_initCompileContexts());
+    }
+  } else {
+    if (callbackManager.getAnnotationHandle() != 0) {
+      at::removeCallback(callbackManager.getAnnotationHandle());
+      callbackManager.setAnnotationHandle(0);
+    }
+    if (compileContext && callbackManager.getCompileContextHandle() != 0) {
+      at::removeCallback(callbackManager.getCompileContextHandle());
+      callbackManager.setCompileContextHandle(0);
+    }
+  }
 }
 
 } // namespace
@@ -170,10 +215,8 @@ void _record_memory_history(
     when = c10::cuda::CUDACachingAllocator::RecordContext::STATE;
   }
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
-  _initRecordAnnotations();
-  if (compileContext) {
-    _initCompileContexts();
-  }
+
+  setRecordFunctionCallbacks(enabled, compileContext);
   c10::cuda::CUDACachingAllocator::recordHistory(
       enabled, recorder, trace_alloc_max_entries, when, clearHistory);
 }
@@ -226,10 +269,7 @@ void _record_memory_history(
     }
   }
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
-  _initRecordAnnotations();
-  if (compileContext) {
-    _initCompileContexts();
-  }
+  setRecordFunctionCallbacks(enabled.has_value(), compileContext);
   c10::cuda::CUDACachingAllocator::recordHistory(
       enabled.has_value(), recorder, max_entries, when, clearHistory);
 }

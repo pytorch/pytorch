@@ -775,7 +775,7 @@ class MetalKernel(SIMDKernel):
         """Called at the end to generate a final kernel string"""
         self.codegen_body()
         code = IndentedBuffer()
-        code.writeline('compile_mps_shader("""')
+        code.writeline("compile_mps_shader('''")
         idx_vars = self.active_range_trees()
         with code.indent():
             for header in self.headers:
@@ -833,7 +833,7 @@ class MetalKernel(SIMDKernel):
                 code.splice(self.indexing_code)
                 code.splice(self.body)
             code.writeline("}")
-        code.writeline('""")')
+        code.writeline("''')")
 
         return code.getvalue()
 

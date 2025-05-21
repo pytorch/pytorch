@@ -145,7 +145,7 @@ class TORCH_API Reducer {
   // buckets once after the first iteration and never rebuild them if
   // find_unused_parameters_.
   inline bool should_rebuild_buckets() const {
-    return (static_graph_ || !find_unused_parameters_) && !has_rebuilt_bucket_;
+    return !has_rebuilt_bucket_;
   }
 
   // Pushes all parameters to be rebuilt.
