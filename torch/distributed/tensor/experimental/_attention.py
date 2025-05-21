@@ -1561,7 +1561,7 @@ def context_parallel(
             :class:`_FlexAttentionSharder` object to this argument.
 
     .. warning::
-        `torch.distributed._tensor.experimental.attention.context_parallel` is a
+        `torch.distributed.tensor.experimental.context_parallel` is a
         prototype feature in PyTorch. The API is subject to change.
     """
     buffers = [] if buffers is None else buffers
@@ -1622,6 +1622,36 @@ def context_parallel_unshard(
         )
 
     return [sharder.unshard(b, mesh, dim) for b, dim in zip(buffers, seq_dims)]
+
+
+def _set_dispatch_mode(mode: str) -> None:
+    """
+    Choose the Context Parallel dispatch mode and assign it to the global variable
+    ``_dispatch_mode``. Currently we only support "monkey_patch" and "torch_function"
+    for SDPA and only "torch_dispatch" for flex_attention.
+
+    Args:
+        mode (str): the dispatch mode to use. Available options are "monkey_patch",
+        "torch_function", and "torch_dispatch".
+
+    Returns:
+        None
+
+    Note:
+        This API is experimental and subject to change.
+    """
+
+    global _dispatch_mode
+    if mode == "monkey_patch":
+        _dispatch_mode = _DispatchMode.MONKEY_PATCH
+    elif mode == "torch_function":
+        _dispatch_mode = _DispatchMode.TORCH_FUNCTION
+    elif mode == "torch_dispatch":
+        _dispatch_mode = _DispatchMode.TORCH_DISPATCH
+    else:
+        raise NotImplementedError(
+            f"Context Parallel dispatch mode '{mode}' is not supported yet."
+        )
 
 
 def set_rotate_method(rotate_method: str) -> None:

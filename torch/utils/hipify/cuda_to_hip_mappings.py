@@ -793,6 +793,10 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ("hipErrorSetOnActiveProcess", CONV_TYPE, API_RUNTIME, HIP_UNSUPPORTED),
         ),
         (
+            "cudaErrorContextIsDestroyed",
+            ("hipErrorContextIsDestroyed", CONV_TYPE, API_RUNTIME),
+        ),
+        (
             "cudaErrorInvalidSurface",
             ("hipErrorInvalidSurface", CONV_TYPE, API_RUNTIME, HIP_UNSUPPORTED),
         ),
@@ -2920,6 +2924,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             "cuFuncSetBlockShape",
             ("hipFuncSetBlockShape", CONV_MODULE, API_DRIVER, HIP_UNSUPPORTED),
         ),
+        ("cudaLaunchKernel", ("hipLaunchKernel", CONV_MODULE, API_DRIVER)),
         (
             "cuFuncSetSharedSize",
             ("hipFuncSetSharedSize", CONV_MODULE, API_DRIVER, HIP_UNSUPPORTED),
@@ -8585,6 +8590,7 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
             ("gloo/hip_allreduce_halving_doubling_pipelined.h", API_PYTORCH),
         ),
         ("gloo/cuda_allreduce_ring.h", ("gloo/hip_allreduce_ring.h", API_PYTORCH)),
+        ("gloo/cuda_allreduce_ring_chunked.h", ("gloo/hip_allreduce_ring_chunked.h", API_PYTORCH)),
         (
             "gloo/cuda_broadcast_one_to_all.h",
             ("gloo/hip_broadcast_one_to_all.h", API_PYTORCH),
@@ -8592,6 +8598,10 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
         (
             "gloo::CudaAllreduceHalvingDoublingPipelined",
             ("gloo::HipAllreduceHalvingDoublingPipelined", API_PYTORCH),
+        ),
+        (
+            "gloo::CudaAllreduceRingChunked",
+            ("gloo::HipAllreduceRingChunked", API_PYTORCH),
         ),
         ("gloo::CudaBroadcastOneToAll", ("gloo::HipBroadcastOneToAll", API_PYTORCH)),
         ("gloo::CudaHostWorkspace", ("gloo::HipHostWorkspace", API_PYTORCH)),
@@ -8749,6 +8759,7 @@ C10_MAPPINGS = collections.OrderedDict(
         ("CUDAAllocator", ("HIPAllocator", API_C10)),
         ("C10_CUDA_KERNEL_LAUNCH_CHECK", ("C10_HIP_KERNEL_LAUNCH_CHECK", API_C10)),
         ("CUDAKernelLaunchRegistry", ("HIPKernelLaunchRegistry", API_C10)),
+        ("c10::cuda::get_cuda_check_suffix", ("c10::hip::get_hip_check_suffix", API_C10)),
     ]
 )
 

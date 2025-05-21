@@ -415,10 +415,14 @@ class UsageLogger:
 
             self._num_of_cpus = psutil.cpu_count(logical=True)
             # update summary info
-            self._metadata.gpu_type = self._gpu_lib_detected
             self._metadata.gpu_count = len(self._gpu_handles)
             self._metadata.cpu_count = self._num_of_cpus
 
+            if self._has_pynvml or self._has_amdsmi:
+                if len(self._gpu_handles) == 0:
+                    self._metadata.gpu_type = ""
+                else:
+                    self._metadata.gpu_type = self._gpu_lib_detected
         except Exception as e:
             self._metadata.error = str(e)
 

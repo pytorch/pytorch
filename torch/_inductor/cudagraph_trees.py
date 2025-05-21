@@ -482,7 +482,7 @@ class StorageWeakRefWrapper:
 
     @classmethod
     def from_weakref_and_data_ptr(
-        cls: type[S],
+        cls: type[StorageWeakRefWrapper],
         cdata: Any,
         data_ptr: int,
         extra_ref_check: Optional[Callable[[], bool]] = None,
