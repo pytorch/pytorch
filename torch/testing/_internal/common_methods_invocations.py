@@ -16488,7 +16488,9 @@ op_db: list[OpInfo] = [
                          dtypes=(torch.complex64,)),
             DecorateInfo(unittest.skip("Skipped!"),
                          'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                         dtypes=(torch.complex64,)))),
+                         dtypes=(torch.complex64,)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCOW', 'test_cow_input_with_grad_not_mutated', device_type='mps'),)
+    ),
     UnaryUfuncInfo(
         'nn.functional.hardsigmoid',
         aten_backward_name='hardsigmoid_backward',

@@ -166,8 +166,8 @@ static void binaryOpTensor(const Tensor& self,
                                      /*mpsShape*/ nil,
                                      /*gatherTensorData=*/true,
                                      getMPSScalarType(otherDataType),
-                                    /*useMPSStridedAPI=*/true,
-                                    /*isConst=*/true);
+                                     /*useMPSStridedAPI=*/true,
+                                     /*isConst=*/true);
       feeds[otherPlaceholder.getMPSGraphTensor()] = otherPlaceholder.getMPSGraphTensorData();
     }
 
