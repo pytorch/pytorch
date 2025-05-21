@@ -5,7 +5,7 @@ from typing import Optional, Union
 import torch
 from torch import Size, Tensor
 from torch.nn import functional as F, init
-from torch.nn.modules._nn_docs import common_args
+from torch.nn.modules._nn_docs import layernorm_args, common_args
 from torch._C import _add_docstr as add_docstr
 from torch.nn.parameter import Parameter
 
