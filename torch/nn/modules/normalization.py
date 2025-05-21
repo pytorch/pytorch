@@ -159,7 +159,11 @@ class LayerNorm(Module):
     .. image:: ../_static/img/nn/layer_norm.jpg
         :scale: 50 %
 
-    """
+    """.format(
+        layernorm_args=layernorm_args.__doc__,
+        device=common_args.__doc__.split("device:")[1].split("dtype:")[0],
+        dtype=common_args.__doc__.split("dtype:")[1]
+    )
 
     __constants__ = ["normalized_shape", "eps", "elementwise_affine"]
     normalized_shape: tuple[int, ...]
@@ -216,8 +220,6 @@ class LayerNorm(Module):
             "elementwise_affine={elementwise_affine}".format(**self.__dict__)
         )
 
-docstring = layernorm_args.__doc__ + common_args.__doc__
-add_docstr(LayerNorm, docstring)
 
 class GroupNorm(Module):
     r"""Applies Group Normalization over a mini-batch of inputs.
