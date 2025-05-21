@@ -917,8 +917,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return WrapWithSetGradEnabledHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "wrap_with_autocast":
             return WrapWithAutocastHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "wrap_generic":
-            return WrapGenericHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "dynamo_bypassing_wrapper":
+            return DynamoBypassingWrapperHigherOrderVariable(value, source, **kwargs)
         elif (
             value.__name__ == "auto_functionalized"
             or value.__name__ == "auto_functionalized_v2"
@@ -2517,7 +2517,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
 
 
 # Copy paste of the above class, but enables an arbitrary callable
-class WrapGenericHigherOrderVariable(WrapHigherOrderVariable):
+class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
     def __init__(self, hop, source) -> None:
         super().__init__(hop, source)
 
@@ -2529,7 +2529,7 @@ class WrapGenericHigherOrderVariable(WrapHigherOrderVariable):
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 
-        func_var = kwargs["wrapper_fn"]
+        func_var = args[1]
 
         if isinstance(func_var, torch._dynamo.variables.UserFunctionVariable):
             func = func_var.fn
@@ -2539,11 +2539,8 @@ class WrapGenericHigherOrderVariable(WrapHigherOrderVariable):
             func = func_var.as_python_constant()
         else:
             raise RuntimeError(
-                f"WrapGenericHigherOrderVariable: Unsupported function {type(func_var)}"
+                f"DynamoBypassingWrapperHigherOrderVariable: Unsupported function {type(func_var)}"
             )
-        gmod_kwargs = {
-            name: kwargs[name] for name in kwargs.keys() if name != "wrapper_fn"
-        }
         (
             p_args,
             _,
@@ -2555,14 +2552,14 @@ class WrapGenericHigherOrderVariable(WrapHigherOrderVariable):
         ) = self.create_wrapped_node(
             tx,
             args[0],
-            args[1:],
-            gmod_kwargs,
+            args[2:],
+            kwargs,
             str(func),
         )
 
         # Alternatively, we could've stored only the function's fqn and
         # reconstructed, but that requires the function to be a global.
-        gmod.meta["_wrap_generic_wrapper_fn"] = func
+        gmod.meta["_dynamo_bypassing_wrapper_fn"] = func
 
         # Store the invocation as a call
         variable = wrap_fx_proxy(
