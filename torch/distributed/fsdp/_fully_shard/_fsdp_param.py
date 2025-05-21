@@ -311,9 +311,9 @@ class FSDPParam:
                     f"FSDP only supports 1D TP, not {self._tp_spec.placements}"
                 )
             split_factor = self._tp_spec.num_shards_map[shard_dim]
-            assert 2 <= self._spmd_mesh.ndim <= 3, (
-                f"_spmd_mesh.ndim can only be 2 or 3 but got {self._spmd_mesh.ndim}."
-            )
+            assert (
+                2 <= self._spmd_mesh.ndim <= 3
+            ), f"_spmd_mesh.ndim can only be 2 or 3 but got {self._spmd_mesh.ndim}."
             self._spmd_placements: tuple[Placement, ...]
             dp_shard_tp_placement = (
                 (
@@ -391,6 +391,7 @@ class FSDPParam:
             dim=shard_dim, start=0, length=length
         )
         assert sharded_param.is_contiguous(), f"{self.fsdp_placement=}"
+        # param_dtype = self.mp_policy.param_dtype
         self.sharded_param = nn.Parameter(self.to_sharded_dtensor(sharded_param))
         self.sharded_param.requires_grad_(param.requires_grad)
         # Let `param_data` be freed normally when its ref count reaches 0 when
@@ -796,9 +797,9 @@ class FSDPParam:
             assert isinstance(grad, DTensor), f"{type(grad)}"
             placements = self._tp_spec.placements
             if placements != grad.placements:
-                assert len(self._tp_spec.placements) == len(grad.placements), (
-                    f"{self._tp_spec=} {grad.placements=}"
-                )
+                assert len(self._tp_spec.placements) == len(
+                    grad.placements
+                ), f"{self._tp_spec=} {grad.placements=}"
                 grad = grad.redistribute(placements=placements)
             grad = grad._local_tensor
         return grad
@@ -857,9 +858,9 @@ class FSDPParam:
         shard_dim = self.fsdp_placement.dim
         length = local_tensor.size(shard_dim) if local_tensor.numel() > 0 else 0
         if local_tensor.size() != padded_sharded_size:
-            assert shard_dim == 0, (
-                f"Shard({shard_dim}) requires even sharding: {local_tensor.size()=}"
-            )
+            assert (
+                shard_dim == 0
+            ), f"Shard({shard_dim}) requires even sharding: {local_tensor.size()=}"
             padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
             padded_local_tensor.narrow(dim=shard_dim, start=0, length=length).copy_(
                 local_tensor

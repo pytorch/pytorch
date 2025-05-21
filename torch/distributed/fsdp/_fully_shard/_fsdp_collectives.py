@@ -212,7 +212,6 @@ def _get_param_all_gather_inputs(
     foreach_copy_indices: list[int] = []
     foreach_copy_inputs: list[torch.Tensor] = []
     foreach_copy_input_numels: list[int] = []
-
     # 1st pass: for foreach-copy parameters, get inputs and metadata for the
     # foreach copy, and for the others, actually get their all-gather inputs
     for i, fsdp_param in enumerate(fsdp_params):
@@ -225,6 +224,17 @@ def _get_param_all_gather_inputs(
             )
             foreach_copy_inputs.append(all_gather_input)
             foreach_copy_input_numels.append(all_gather_input.numel())
+            param_dtype = fsdp_param.param_dtype
+            if hasattr(fsdp_param, "sharded_param"):
+                fsdp_param.sharded_param = fsdp_param.sharded_param.to(param_dtype)
+                fsdp_param.sharded_param.requires_grad_(True)
+            if hasattr(fsdp_param, "sharded_param_fully_shard"):
+                torch.distributed.breakpoint()
+                fsdp_param.sharded_param_fully_shard = (
+                    fsdp_param.sharded_param_fully_shard.to(param_dtype)
+                )
+                buff_grad = torch.empty_like(fsdp_param.sharded_param_fully_shard)
+                fsdp_param.sharded_param_fully_shard.grad = buff_grad
         else:
             param_all_gather_inputs[i] = fsdp_param.all_gather_inputs
 
@@ -388,9 +398,9 @@ def foreach_reduce(
     for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
         if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
             continue
-        assert unsharded_grad.size(shard_dim) % world_size == 0, (
-            f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
-        )
+        assert (
+            unsharded_grad.size(shard_dim) % world_size == 0
+        ), f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
         chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
         unsharded_grads[i] = torch.cat(chunks, dim=0)
     padded_unsharded_sizes = tuple(
