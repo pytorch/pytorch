@@ -1426,14 +1426,33 @@ class FakeTensorMode(TorchDispatchMode):
         Lookup a cache entry for the given arguments. If none exists, dispatch
         and cache the result (if the result is eligible for caching).
         """
+        if not torch._library.utils.is_builtin(func):
+            # If this func is not a builtin then we can't safely cache
+            # it - for either positive or negative caching. It's not
+            # even safe to attempt to compare the funcs because they
+            # might not define an __eq__.
+            #
+            # TODO: Maybe consider having a base class to allow ops to "opt-in"
+            # to the caching behavior by making some guarantees.
+            FakeTensorMode.cache_bypasses["non-builtin"] += 1
+            return self._dispatch_impl(func, types, args, kwargs)
+
+        state = None
+        key = None
         try:
             state = _CacheKeyState(self.shape_env)
             key = self._cache_key(state, func, args, kwargs)
         except _BypassDispatchCache as e:
             # We couldn't create the cache key at all
             FakeTensorMode.cache_bypasses[e.reason] += 1
+
+        if key is None:
+            # Do this dispatch outside the above except handler so if it
+            # generates its own exception there won't be a __context__ caused by
+            # the caching mechanism.
             return self._dispatch_impl(func, types, args, kwargs)
 
+        assert state is not None
         if state.cache_on_shape_env():
             assert state.shape_env is not None
             cache = state.shape_env.fake_tensor_cache
@@ -1584,9 +1603,6 @@ class FakeTensorMode(TorchDispatchMode):
 
         if func.name() == "inductor::resize_storage_bytes_":
             raise _BypassDispatchCache("inductor::resize_storage_bytes_")
-
-        if not torch._library.utils.is_builtin(func):
-            raise _BypassDispatchCache("non-builtin")
 
         # In order to handle storage aliasing, we need to establish the alias
         # for any view op on a cache hit. But CompositeImplicitAutograd ops may
