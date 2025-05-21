@@ -4086,14 +4086,12 @@ class Scheduler:
         def read_write_non_gpu_data(node: BaseSchedulerNode) -> bool:
             for dep in node.read_writes.reads | node.read_writes.writes:
                 name = dep.name
-                if (
-                    inp := V.graph.graph_inputs.get(name, None)
-                ) and is_non_gpu_tensor_box(inp):
-                    return True
-                elif (
-                    buf := self.name_to_buf.get(name, None)
-                ) and is_non_gpu_tensor_box(buf):
-                    return True
+                if inp := V.graph.graph_inputs.get(name, None):
+                    if is_non_gpu_tensor_box(inp):
+                        return True
+                elif buf := self.name_to_buf.get(name, None):
+                    if is_non_gpu_tensor_box(buf):
+                        return True
                 else:
                     raise RuntimeError(
                         f"scheduler node should only depend on graph inputs and buffers but found {node}"
