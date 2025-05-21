@@ -5,7 +5,6 @@
 #include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/native/mps/operations/UnaryKernel.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -31,10 +30,7 @@
 #include <ATen/ops/expm1_native.h>
 #include <ATen/ops/frac_native.h>
 #include <ATen/ops/imag.h>
-#include <ATen/ops/log10_native.h>
 #include <ATen/ops/log1p_native.h>
-#include <ATen/ops/log2_native.h>
-#include <ATen/ops/log_native.h>
 #include <ATen/ops/logical_not_native.h>
 #include <ATen/ops/logit_backward_native.h>
 #include <ATen/ops/logit_native.h>
@@ -151,10 +147,6 @@ static MPSGraphTensor* lengthOfComplexAsReal(MPSGraph* mpsGraph, MPSGraphTensor*
   return [mpsGraph squareRootWithTensor:sumSquares name:nil];
 }
 
-static void unary_kernel_call(const std::string func_name, const Tensor& self, const Tensor& output) {
-  mps::unary_op_kernel(func_name, self, output);
-}
-
 } // namespace mps
 
 TORCH_IMPL_FUNC(signbit_out_mps)(const Tensor& self, const Tensor& output) {
@@ -206,22 +198,7 @@ REGISTER_MPS_UNARY_STUB(trunc, truncate);
     });                                                                                                          \
   }
 
-#define CREATE_MPS_FALLBACK_UNARY_TORCH_IMPL_FUNC(func_out, func_stub, func_name)                                  \
-  TORCH_IMPL_FUNC(func_out)(const Tensor& self, const Tensor& output) {                                            \
-    static const bool is_macOS_14_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS);            \
-    if (is_macOS_14_0_or_newer) {                                                                                  \
-      mps::unary_kernel_call(func_name, self, output);                                                             \
-    } else {                                                                                                       \
-      mps::unary_op(self, output, #func_out, ^MPSGraphTensor*(MPSGraph * mpsGraph, MPSGraphTensor * inputTensor) { \
-        return [mpsGraph func_stub##WithTensor:inputTensor name:nil];                                              \
-      });                                                                                                          \
-    }                                                                                                              \
-  }
-
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(reciprocal_out_mps, reciprocal)
-CREATE_MPS_FALLBACK_UNARY_TORCH_IMPL_FUNC(log_out_mps, logarithm, "log")
-CREATE_MPS_FALLBACK_UNARY_TORCH_IMPL_FUNC(log10_out_mps, logarithmBase10, "log10")
-CREATE_MPS_FALLBACK_UNARY_TORCH_IMPL_FUNC(log2_out_mps, logarithmBase2, "log2")
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(erf_out_mps, erf)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(asin_out_mps, asin)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acos_out_mps, acos)
