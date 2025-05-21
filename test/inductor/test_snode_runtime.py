@@ -237,6 +237,7 @@ class TestCommAnalysis(TestCase):
         )
         try:
             metrics.reset()
+            torch._logging.set_logs(inductor_metrics=True)
             torch.compile(fn)(*inps)
             found_collective = False
             for snode, runtime in metrics.node_runtimes:
@@ -253,6 +254,7 @@ class TestCommAnalysis(TestCase):
                 self.assertNotZero(runtime)
             # Make sure a collective kernel is found in graph
             self.assertTrue(found_collective)
+            torch._logging.set_logs()
         finally:
             dist.destroy_process_group()
 
