@@ -1382,6 +1382,7 @@ class TestChdir(__TestCase):
             self.assertEqual(os.getcwd(), target)
         self.assertEqual(os.getcwd(), old_cwd)
 
+    @unittest.skip("Missing archivetestdata")
     def test_reentrant(self):
         old_cwd = os.getcwd()
         target1 = self.make_relative_path('data')

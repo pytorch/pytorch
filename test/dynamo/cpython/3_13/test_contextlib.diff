@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_contextlib.py b/test/dynamo/cpython/3_13/test_contextlib.py
-index cf651959803..3ed233dd01a 100644
+index cf651959803..6a17bc719eb 100644
 --- a/test/dynamo/cpython/3_13/test_contextlib.py
 +++ b/test/dynamo/cpython/3_13/test_contextlib.py
 @@ -1,3 +1,54 @@
@@ -179,7 +179,15 @@ index cf651959803..3ed233dd01a 100644
      def make_relative_path(self, *parts):
          return os.path.join(
              os.path.dirname(os.path.realpath(__file__)),
-@@ -1363,4 +1414,4 @@ class TestChdir(unittest.TestCase):
+@@ -1331,6 +1382,7 @@ class TestChdir(unittest.TestCase):
+             self.assertEqual(os.getcwd(), target)
+         self.assertEqual(os.getcwd(), old_cwd)
+ 
++    @unittest.skip("Missing archivetestdata")
+     def test_reentrant(self):
+         old_cwd = os.getcwd()
+         target1 = self.make_relative_path('data')
+@@ -1363,4 +1415,4 @@ class TestChdir(unittest.TestCase):
  
  
  if __name__ == "__main__":
