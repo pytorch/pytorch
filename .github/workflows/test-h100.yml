@@ -5,6 +5,8 @@ on:
     paths:
       - .github/workflows/test-h100.yml
   workflow_dispatch:
+  schedule:
+    - cron: 0 4,10,16,22 * * *  # every 6 hours
   push:
     tags:
       - ciflow/h100/*
