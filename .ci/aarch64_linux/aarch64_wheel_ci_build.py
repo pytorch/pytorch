@@ -54,6 +54,14 @@ def build_ArmComputeLibrary() -> None:
     for d in ["arm_compute", "include", "utils", "support", "src"]:
         shutil.copytree(f"{acl_checkout_dir}/{d}", f"{acl_install_dir}/{d}")
 
+def replace_tag(filename):
+   with open(filename, 'r') as f:
+     lines = f.read().split("\\n")
+   for i,line in enumerate(lines):
+       if not line.startswith("Tag: "):
+           continue
+       lines[i] = line.replace("-linux_", "-manylinux_2_28_")
+       print(f'Updated tag from {line} to {lines[i]}')
 
 def update_wheel(wheel_path, desired_cuda) -> None:
     """
@@ -96,13 +104,7 @@ def update_wheel(wheel_path, desired_cuda) -> None:
             "/usr/local/lib/libnvpl_lapack_core.so.0",
             "/usr/local/lib/libnvpl_blas_core.so.0",
         ]
-        if "126" in desired_cuda:
-            libs_to_copy += [
-                "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.6",
-                "/usr/local/cuda/lib64/libcufile.so.0",
-                "/usr/local/cuda/lib64/libcufile_rdma.so.1",
-            ]
-        elif "128" in desired_cuda:
+        if "128" in desired_cuda:
             libs_to_copy += [
                 "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.8",
                 "/usr/local/cuda/lib64/libcufile.so.0",
@@ -120,6 +122,11 @@ def update_wheel(wheel_path, desired_cuda) -> None:
             f"cd {folder}/tmp/torch/lib/; "
             f"patchelf --set-rpath '$ORIGIN' --force-rpath {folder}/tmp/torch/lib/{lib_name}"
         )
+    # Make sure the wheel is tagged with manylinux_2_28
+    for f in os.scandir(f"{folder}/tmp/"):
+         if f.is_dir() and f.name.endswith(".dist-info"):
+            replace_tag(f"{f.path}/WHEEL")
+
     os.mkdir(f"{folder}/cuda_wheel")
     os.system(f"cd {folder}/tmp/; zip -r {folder}/cuda_wheel/{wheelname} *")
     shutil.move(
