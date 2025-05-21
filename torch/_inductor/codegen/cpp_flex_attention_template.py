@@ -1,3 +1,5 @@
+warning: Selection `RUF041` has no effect because preview is not enabled.
+warning: Selection `RUF048` has no effect because preview is not enabled.
 # mypy: allow-untyped-defs
 import contextlib
 import logging
@@ -298,7 +300,7 @@ extern "C"
   int64_t kvSize = {{kernel.size(key, 1)}};
 
   // Split size heuristics tuned for q/k len
-  int64_t qSplitSize = kvBlockSize;
+  int64_t qSplitSize = qBlockSize;
   int64_t kvSplitSize = kvBlockSize;
 
 
