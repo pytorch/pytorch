@@ -320,11 +320,18 @@ std::tuple<Tensor, Tensor> rms_norm_cpu(
   );
 }
 
-Tensor rms_norm_mps(
+
+Tensor rms_norm_symint(
     const Tensor& input,
-    IntArrayRef normalized_shape,
+    c10::SymIntArrayRef normalized_shape,
     const std::optional<Tensor>& weight_opt /* optional */,
-    std::optional<double> eps){
+    const std::optional<double> eps) {
+  // See [Note: hacky wrapper removal for optional tensor]
+
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  _check_rms_norm_inputs_symint(input, normalized_shape, weight);
+
 #ifdef USE_MPS
   if (input.device().type() == DeviceType::MPS && weight_opt.has_value()) {
     const Tensor weight = weight_opt.value();
@@ -339,19 +346,6 @@ Tensor rms_norm_mps(
     }
   }
 #endif
-  return std::get<0>(rms_norm_cpu(input, normalized_shape, weight_opt, eps));
-}
-
-Tensor rms_norm_symint(
-    const Tensor& input,
-    c10::SymIntArrayRef normalized_shape,
-    const std::optional<Tensor>& weight_opt /* optional */,
-    const std::optional<double> eps) {
-  // See [Note: hacky wrapper removal for optional tensor]
-
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  _check_rms_norm_inputs_symint(input, normalized_shape, weight);
 
   return std::get<0>(at::native_rms_norm(input, IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
 }
