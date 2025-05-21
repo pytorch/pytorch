@@ -7,6 +7,7 @@ import sympy
 
 import torch
 from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
+from torch._inductor.utils import sympy_product
 from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
@@ -288,3 +289,17 @@ def check_supported_striding(mat_a: TensorBox, mat_b: TensorBox) -> None:
         is_col_major(mat_b.get_stride()) or has_zero_dim(mat_b.get_size()),
         lambda: f"mat_b must be col_major, got stride {mat_b.get_stride()}",
     )
+
+
+def is_batch_stride_largest(mat1, mat2, layout) -> bool:
+    """
+    Checking if the batch stride is the largest in the stride.
+    """
+    sizes = [mat1.get_size(), mat2.get_size(), layout.size]
+    strides = [mat1.get_stride(), mat2.get_stride(), layout.stride]
+    for size, stride in zip(sizes, strides):
+        assert len(size) == len(stride) == 3, "Expect 3D tensors"
+        if stride[0] != sympy_product(size[1:]):
+            return False
+
+    return True

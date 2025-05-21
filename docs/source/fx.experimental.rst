@@ -38,8 +38,6 @@ torch.fx.experimental.symbolic_shapes
     is_concrete_float
     has_free_symbols
     has_free_unbacked_symbols
-    definitely_true
-    definitely_false
     guard_or_true
     guard_or_false
     guard_size_oblivious
@@ -50,6 +48,7 @@ torch.fx.experimental.symbolic_shapes
     constrain_unify
     canonicalize_bool_expr
     statically_known_true
+    has_static_value
     lru_cache
     check_consistent
     compute_unbacked_bindings

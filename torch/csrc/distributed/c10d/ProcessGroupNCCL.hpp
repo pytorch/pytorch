@@ -760,6 +760,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       int srcRank,
       int tag) override;
 
+  int64_t getCommPtr();
+
   void groupStart();
 
   void groupEnd();
@@ -856,6 +858,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   bool verifyWorkTimeoutForTest(
       const c10::intrusive_ptr<Work>& work,
       const std::chrono::milliseconds& timeout);
+
+  void setEnableNanCheck(bool enableNanCheck);
 
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store

@@ -64,6 +64,16 @@ CACHE_ALIGN #define
 #undef CHECK_WITH_FMA
 #endif
 
+template <typename scalar_t>
+struct OpMathType {
+  using type = scalar_t;
+};
+template <>
+struct OpMathType<c10::Half> {
+  using type = float;
+};
+
+
 template<typename T>
 using Complex = typename c10::complex<T>;
 
@@ -1317,15 +1327,17 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Compl
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, T> local_fmadd(T a, T b, T c) {
     PreventFma noFma;
-    T ab = a * b;
-    return noFma.add(ab, c);
+    using op_math_t = typename OpMathType<T>::type;
+    auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
+    return static_cast<T>(noFma.add(ab, op_math_t(c)));
 }
 
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, T> local_fmsub(T a, T b, T c) {
     PreventFma noFma;
-    T ab = a * b;
-    return noFma.sub(ab, c);
+    using op_math_t = typename OpMathType<T>::type;
+    auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
+    return static_cast<T>(noFma.sub(ab, op_math_t(c)));
 }
 
 template <typename T>

@@ -355,7 +355,10 @@ aten::_functional_sym_constrain_range
 aten::_functional_sym_constrain_range_for_size
 aten::_fused_adagrad
 aten::_fused_adagrad.out
+aten::_fused_adagrad.tensor_lr
+aten::_fused_adagrad.tensor_lr_out
 aten::_fused_adagrad_
+aten::_fused_adagrad_.tensor_lr
 aten::_fused_adam
 aten::_fused_adam.out
 aten::_fused_adam.tensor_lr
@@ -723,6 +726,8 @@ aten::blackman_window.out
 aten::blackman_window.periodic
 aten::blackman_window.periodic_out
 aten::bmm
+aten::bmm.dtype
+aten::bmm.dtype_out
 aten::bmm.out
 aten::ccol_indices
 aten::ccol_indices_copy
@@ -995,6 +1000,8 @@ aten::mkldnn_rnn_layer.out
 aten::mkldnn_rnn_layer_backward
 aten::mkldnn_rnn_layer_backward.out
 aten::mm
+aten::mm.dtype
+aten::mm.dtype_out
 aten::mm.out
 aten::mode
 aten::mode.values
