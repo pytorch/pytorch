@@ -105,7 +105,7 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
     }
   }
 
-  id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
+  id<MTLBuffer> sourceBuffer = ConstMTLBufferTensor(src).mtl_buffer_unsafe();
   size_t dst_tensor_nbytes = dst.nbytes();
 
   @autoreleasepool {
