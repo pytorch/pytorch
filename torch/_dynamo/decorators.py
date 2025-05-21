@@ -779,8 +779,12 @@ _allowed_config_patches = (
     "dont_skip_tracing",
 )
 
+from . import config
+
+
 for name in _allowed_config_patches:
-    assert hasattr(torch._dynamo.config, name), "nonexistent config"
+    assert hasattr(config, name), "nonexistent config"
+del config
 
 
 def _patch_dynamo_config_check(changes: dict[str, Any]):

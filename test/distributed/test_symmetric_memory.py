@@ -2,6 +2,7 @@
 
 import itertools
 import os
+from contextlib import nullcontext
 from unittest import skipIf
 
 import torch
@@ -15,7 +16,7 @@ from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
     _fused_all_gather_scaled_matmul_fallback,
     _fused_matmul_reduce_scatter_fallback,
-    _fused_scaled_matmul_reduce_scatter_fallback,
+    _test_mode,
     enable_symm_mem_for_group,
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
@@ -39,6 +40,9 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+
+
+test_contexts = [nullcontext, _test_mode]
 
 
 def requires_cuda_p2p_access():
@@ -619,29 +623,28 @@ class SymmetricMemoryTest(MultiProcessTestCase):
             A_scale = torch.tensor(0.1, device="cuda")
             B_scale = torch.tensor(0.1, device="cuda")
 
-        output_0 = _fused_scaled_matmul_reduce_scatter_fallback(
-            A,
-            B,
-            A_scale,
-            B_scale,
-            "avg",
-            scatter_dim,
-            group.group_name,
-            out_dtype=torch.bfloat16,
-        )
-        output_1 = torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter(
-            A,
-            B,
-            A_scale,
-            B_scale,
-            "avg",
-            scatter_dim,
-            group.group_name,
-            out_dtype=torch.bfloat16,
-        )
+        output_shape = [*A.shape[:-1], B.shape[1]]
 
-        assert torch.allclose(output_0, output_1)
-        assert output_0.stride() == output_1.stride()
+        outputs = []
+        for context in test_contexts:
+            with context():
+                outputs.append(
+                    torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter(
+                        A,
+                        B,
+                        A_scale,
+                        B_scale,
+                        "avg",
+                        scatter_dim,
+                        scatter_dim,
+                        group.group_name,
+                        output_shape,
+                        out_dtype=torch.bfloat16,
+                    )
+                )
+
+        assert outputs[0].stride() == outputs[1].stride()
+        assert torch.allclose(outputs[0], outputs[1]), (outputs[0], outputs[1])
 
         dist.destroy_process_group()
 
