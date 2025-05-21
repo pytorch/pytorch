@@ -793,6 +793,10 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ("hipErrorSetOnActiveProcess", CONV_TYPE, API_RUNTIME, HIP_UNSUPPORTED),
         ),
         (
+            "cudaErrorContextIsDestroyed",
+            ("hipErrorContextIsDestroyed", CONV_TYPE, API_RUNTIME),
+        ),
+        (
             "cudaErrorInvalidSurface",
             ("hipErrorInvalidSurface", CONV_TYPE, API_RUNTIME, HIP_UNSUPPORTED),
         ),
@@ -2920,6 +2924,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             "cuFuncSetBlockShape",
             ("hipFuncSetBlockShape", CONV_MODULE, API_DRIVER, HIP_UNSUPPORTED),
         ),
+        ("cudaLaunchKernel", ("hipLaunchKernel", CONV_MODULE, API_DRIVER)),
         (
             "cuFuncSetSharedSize",
             ("hipFuncSetSharedSize", CONV_MODULE, API_DRIVER, HIP_UNSUPPORTED),
@@ -8166,11 +8171,15 @@ CUDA_SPECIAL_MAP = collections.OrderedDict(
         ("cusparseSpGEMMDescr_t", ("hipsparseSpGEMMDescr_t", CONV_TYPE, API_SPECIAL)),
         ("CUSPARSE_INDEX_32I", ("HIPSPARSE_INDEX_32I", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_INDEX_64I", ("HIPSPARSE_INDEX_64I", CONV_NUMERIC_LITERAL, API_SPECIAL)),
-        ("CUSPARSE_ORDER_COL", ("HIPSPARSE_ORDER_COLUMN", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSE_ORDER_COL", ("HIPSPARSE_ORDER_COL", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSE_ORDER_ROW", ("HIPSPARSE_ORDER_ROW", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_MV_ALG_DEFAULT", ("HIPSPARSE_MV_ALG_DEFAULT", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_MM_ALG_DEFAULT", ("HIPSPARSE_MM_ALG_DEFAULT", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_SPMM_COO_ALG1", ("HIPSPARSE_SPMM_COO_ALG1", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_SPMM_COO_ALG2", ("HIPSPARSE_SPMM_COO_ALG2", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSE_SPMM_CSR_ALG1", ("HIPSPARSE_SPMM_CSR_ALG1", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSE_SPMM_CSR_ALG2", ("HIPSPARSE_SPMM_CSR_ALG2", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSE_SPMM_CSR_ALG3", ("HIPSPARSE_SPMM_CSR_ALG3", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_COOMV_ALG", ("HIPSPARSE_COOMV_ALG", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_SPMM_CSR_ALG1", ("HIPSPARSE_CSRMM_ALG1", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_SPGEMM_DEFAULT", ("HIPSPARSE_SPGEMM_DEFAULT", CONV_NUMERIC_LITERAL, API_SPECIAL)),
@@ -8585,6 +8594,7 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
             ("gloo/hip_allreduce_halving_doubling_pipelined.h", API_PYTORCH),
         ),
         ("gloo/cuda_allreduce_ring.h", ("gloo/hip_allreduce_ring.h", API_PYTORCH)),
+        ("gloo/cuda_allreduce_ring_chunked.h", ("gloo/hip_allreduce_ring_chunked.h", API_PYTORCH)),
         (
             "gloo/cuda_broadcast_one_to_all.h",
             ("gloo/hip_broadcast_one_to_all.h", API_PYTORCH),
@@ -8592,6 +8602,10 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
         (
             "gloo::CudaAllreduceHalvingDoublingPipelined",
             ("gloo::HipAllreduceHalvingDoublingPipelined", API_PYTORCH),
+        ),
+        (
+            "gloo::CudaAllreduceRingChunked",
+            ("gloo::HipAllreduceRingChunked", API_PYTORCH),
         ),
         ("gloo::CudaBroadcastOneToAll", ("gloo::HipBroadcastOneToAll", API_PYTORCH)),
         ("gloo::CudaHostWorkspace", ("gloo::HipHostWorkspace", API_PYTORCH)),
