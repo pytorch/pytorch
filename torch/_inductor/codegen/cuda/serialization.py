@@ -20,6 +20,7 @@ class CUTLASSOperationSerializer:
         "TileDescription",
         "TensorDescription",
         "DataType",
+        "EpilogueFunctor",
         "EpilogueFunctor3x",
         "SwizzlingFunctor",
         "KernelScheduleType",
@@ -101,6 +102,7 @@ class CUTLASSOperationSerializer:
             "ScaleFactorNVecSize",
             "ScaleFactorKVecSize",
             "ScaleFactorVectorSize",
+            "is_3x",
         ]
 
         for attr in optional_attrs:
@@ -131,6 +133,7 @@ class CUTLASSOperationSerializer:
         from cutlass_library import DataType
         from cutlass_library.gemm_operation import GemmKind, GemmOperation
         from cutlass_library.library import (
+            EpilogueFunctor,
             EpilogueFunctor3x,
             EpilogueScheduleType,
             KernelScheduleType,
@@ -150,7 +153,8 @@ class CUTLASSOperationSerializer:
 
         # Get optional parameters with defaults
         epilogue_functor = cls._json_to_enum(
-            json_dict.get("epilogue_functor"), EpilogueFunctor3x
+            json_dict.get("epilogue_functor"),
+            EpilogueFunctor3x if json_dict.get("is_3x") else EpilogueFunctor,
         )
         swizzling_functor = cls._json_to_enum(
             json_dict.get("swizzling_functor"), SwizzlingFunctor
@@ -333,12 +337,9 @@ class CUTLASSOperationSerializer:
                 "element_scale_factor" in mi_dict
                 and mi_dict["element_scale_factor"] is not None
             ):
-                element_scale = (
-                    DataType[mi_dict["element_scale_factor"]]
-                    if isinstance(mi_dict["element_scale_factor"], str)
-                    else mi_dict["element_scale_factor"]
+                math_instruction_obj.element_scale_factor = cls._json_to_enum(
+                    mi_dict["element_scale_factor"], DataType
                 )
-                math_instruction_obj.element_scale_factor = element_scale
 
         # Get compute capability values, checking both naming conventions
         min_compute = json_dict.get(
