@@ -41,6 +41,12 @@ onednn::Attr construct_binary_attr(
     attr.append_post_binary<is_matmul>(attr.kind_with_binary_add, other);
   } else if (binary == "sum") {
     attr.append_post_sum(1.f, 1.f, 0);
+  }else{
+    TORCH_CHECK(
+        binary == "none",
+        "Binary attr ",
+        binary,
+        "is not supported for conv/linear post binary fusion");
   }
   return attr;
 }
