@@ -56,18 +56,18 @@ class TestMemoryCounter(TestCase):
             torch.einsum("ab,bc->ac", T(6, 7), T(7, 8))
             mod(T(8, 9))
 
-        # Since our memory counting functions are placeholders returning 0, we expect 0
+        # TODO
         self.assertExpectedInline(get_total_memory(mode), """0""")
 
     def test_op(self):
         with MemoryCounterMode() as mode:
             torch.mm(T(4, 5), T(5, 6))
-        # Placeholder function returns 0
+        # TODO
         self.assertExpectedInline(get_total_memory(mode), """0""")
 
         with mode:
             torch.bmm(T(3, 4, 5), T(3, 5, 6))
-        # Placeholder function returns 0
+        # TODO
         self.assertExpectedInline(get_total_memory(mode), """0""")
 
         with mode:
@@ -75,25 +75,25 @@ class TestMemoryCounter(TestCase):
             torch.addmm(T(4, 1), T(4, 5), T(5, 6))
             torch.addmm(T(6), T(4, 5), T(5, 6))
 
-        # Placeholder function returns 0
+        # TODO
         self.assertExpectedInline(get_total_memory(mode), """0""")
 
         with mode:
             torch.baddbmm(T(3, 4, 6), T(3, 4, 5), T(3, 5, 6))
 
-        # Placeholder function returns 0
+        # TODO
         self.assertExpectedInline(get_total_memory(mode), """0""")
 
         with mode:
             torch.conv2d(T(2, 3, 6, 6), T(6, 3, 4, 4), padding=1)
 
-        # Placeholder function returns 0
+        # TODO
         self.assertExpectedInline(get_total_memory(mode), """0""")
 
         with mode:
             torch.conv1d(T(2, 3, 6), T(6, 3, 4), padding=1)
 
-        # Placeholder function returns 0
+        # TODO
         self.assertExpectedInline(get_total_memory(mode), """0""")
 
     def test_backward(self):
@@ -104,7 +104,7 @@ class TestMemoryCounter(TestCase):
             a = torch.bmm(a, T(7, 6, 7))
             a.sum().backward()
 
-        # Placeholder function returns 0
+        # TODO
         self.assertExpectedInline(get_total_memory(mode), """0""")
 
     def test_backward_reset(self):
@@ -113,7 +113,7 @@ class TestMemoryCounter(TestCase):
             a.mm(a.t()).sum().backward()
             a.mm(a.t()).sum().backward()
 
-        # Placeholder function returns 0
+        # TODO
         self.assertExpectedInline(get_total_memory(mode), """0""")
 
     def test_torchscript(self):
@@ -145,7 +145,7 @@ class TestMemoryCounter(TestCase):
             a = _CustomOp.apply(a)
             a.sum().backward()
 
-        # Placeholder function returns 0
+        # TODO
         self.assertExpectedInline(get_total_memory(mode), """0""")
 
     def test_conv_backwards_as_decomposition(self):
@@ -209,7 +209,7 @@ class TestMemoryCounter(TestCase):
                 torch.ops.aten.convolution_backward
             ]
 
-            # Since our memory counting functions are placeholders returning 0, we expect 0
+            # TODO
             self.assertEqual(conv_forward_memory, 0)
             self.assertEqual(conv_backward_memory, 0)
             if expected_forward is not None:
@@ -248,7 +248,7 @@ class TestMemoryCounter(TestCase):
             a = T(1, 3, 224, 224, requires_grad=True)
             resnet18(a).sum().backward()
 
-        # Placeholder function returns 0
+        # TODO
         self.assertExpectedInline(get_total_memory(mode), """0""")
         layer1_conv_memory = mode.memory_counts["ResNet.layer1"][
             torch.ops.aten.convolution
@@ -256,7 +256,7 @@ class TestMemoryCounter(TestCase):
         layer1_conv_back_memory = mode.memory_counts["ResNet.layer1"][
             torch.ops.aten.convolution_backward
         ]
-        # Placeholder function returns 0
+        # TODO
         self.assertExpectedInline(str(layer1_conv_memory), """0""")
         self.assertExpectedInline(str(layer1_conv_back_memory), """0""")
 
@@ -268,7 +268,7 @@ class TestMemoryCounter(TestCase):
             for i in range(50):
                 out = model(x)
                 out.sum().backward()
-        # Placeholder function returns 0
+        # TODO
         self.assertExpectedInline(str(mode.get_total_memory()), """0""")
 
     def test_custom(self):
@@ -409,7 +409,7 @@ class TestMemoryCounter(TestCase):
             for backend in ["math", "flash", "mem_efficient", "cudnn"]
         ]
         memory_fw_math, memory_fw_flash, memory_fw_efficient, memory_fw_cudnn = memory
-        # Placeholder function returns 0
+        # TODO
         self.assertEqual(memory_fw_math, 0)
         self.assertEqual(memory_fw_flash, 0)
         self.assertEqual(memory_fw_efficient, 0)
@@ -420,7 +420,7 @@ class TestMemoryCounter(TestCase):
             for backend in ["math", "flash", "mem_efficient", "cudnn"]
         ]
         memory_fw_bw_math, memory_fw_bw_flash, memory_fw_bw_efficient, memory_fw_bw_cudnn = memory
-        # Placeholder function returns 0
+        # TODO
         self.assertEqual(memory_fw_bw_math, 0)
         self.assertEqual(memory_fw_bw_flash, 0)
         self.assertEqual(memory_fw_bw_efficient, 0)
@@ -443,7 +443,7 @@ class TestMemoryCounter(TestCase):
             for backend in non_uniform_backends
         ]
         memory_fw_math, memory_fw_efficient = memory
-        # Placeholder function returns 0
+        # TODO
         self.assertEqual(memory_fw_math, 0)
         self.assertEqual(memory_fw_efficient, 0)
 
@@ -452,7 +452,7 @@ class TestMemoryCounter(TestCase):
             for backend in non_uniform_backends
         ]
         memory_fw_bw_math, memory_fw_bw_efficient = memory
-        # Placeholder function returns 0
+        # TODO
         self.assertEqual(memory_fw_bw_math, 0)
         self.assertEqual(memory_fw_bw_efficient, 0)
 
@@ -731,7 +731,7 @@ class TestMemoryCounter(TestCase):
         with MemoryCounterMode() as mode:
             f(torch.randn(10, 10))
 
-        # Placeholder function returns 0
+        # TODO
         self.assertExpectedInline(get_total_memory(mode), """0""")
 
     def test_hook_registration(self):
@@ -766,7 +766,7 @@ class TestMemoryCounter(TestCase):
             mod({"a": torch.randn(10, 10, requires_grad=True).clone()})[
                 "a"
             ].sum().backward()
-        # Placeholder function returns 0
+        # TODO
         self.assertExpectedInline(
             (mode.memory_counts["Mod"][torch.ops.aten.mm]), """0"""
         )
@@ -854,7 +854,7 @@ class TestMemoryCounter(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
-        # Placeholder function returns 0
+        # TODO
         self.assertExpectedInline(get_total_memory(mode), """0""")
 
 
