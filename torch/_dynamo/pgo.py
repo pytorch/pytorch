@@ -23,7 +23,7 @@ import re
 import zlib
 from collections import defaultdict
 from typing import Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import Self
+from typing_extensions import override, Self
 
 import torch._dynamo.config
 import torch._utils_internal
@@ -37,6 +37,11 @@ from torch._dynamo.utils import (
 )
 from torch._environment import is_fbcode
 from torch._logging._internal import trace_structured_artifact
+from torch.compiler._cache import (
+    CacheArtifact,
+    CacheArtifactFactory,
+    CacheArtifactManager,
+)
 
 
 if TYPE_CHECKING:
@@ -536,20 +541,6 @@ def get_cache_key() -> Optional[str]:
     return None
 
 
-def rewrite_cache_key_for_mega_cache(original_key: str) -> str:
-    """
-    The PGO cache artifact key for a MAST job contains the job name and the version.
-    When we want to use the cache artifact on a different MAST job, we need to
-    update the key to use the new MAST job's name and version.
-    """
-    if not original_key.startswith("mast:"):
-        # if original_key is overriden, then dont change it
-        return original_key
-    if (new_key := get_cache_key()) is not None:
-        return new_key
-    return original_key
-
-
 # This solely controls local PGO
 def code_state_path(cache_key: str) -> Optional[str]:
     if not torch._dynamo.config.automatic_dynamic_local_pgo:
@@ -609,6 +600,35 @@ def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
     )
 
 
+@CacheArtifactFactory.register
+class PGOCacheArtifact(CacheArtifact):
+    @override
+    def populate_cache(self) -> None:
+        meta = write_local_impl(
+            self._rewrite_cache_key_for_mega_cache(self.key), self.content
+        )
+        assert meta is not None
+
+    @override
+    @staticmethod
+    def type() -> str:
+        return "pgo"
+
+    @staticmethod
+    def _rewrite_cache_key_for_mega_cache(original_key: str) -> str:
+        """
+        The PGO cache artifact key for a MAST job contains the job name and the version.
+        When we want to use the cache artifact on a different MAST job, we need to
+        update the key to use the new MAST job's name and version.
+        """
+        if not original_key.startswith("mast:"):
+            # if original_key is overriden, then dont change it
+            return original_key
+        if (new_key := get_cache_key()) is not None:
+            return new_key
+        return original_key
+
+
 def get_code_state() -> defaultdict[CodeId, CodeState]:
     global _CODE_STATE, _INIT_CODE_STATE
     if _CODE_STATE is not None:
@@ -634,8 +654,6 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
         _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
         return _CODE_STATE
 
-    from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
-
     # Attempt local
     path = code_state_path(cache_key)
     if path is not None and os.path.exists(path):
@@ -656,7 +674,7 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
                     )
                 else:
                     CacheArtifactManager.record_artifact(
-                        CacheArtifactType.PGO, cache_key, content
+                        PGOCacheArtifact.type(), cache_key, content
                     )
                     return hit("local")
 
@@ -695,7 +713,7 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
                         )
                     else:
                         CacheArtifactManager.record_artifact(
-                            CacheArtifactType.PGO, cache_key, payload
+                            PGOCacheArtifact.type(), cache_key, payload
                         )
                         return hit("remote")
                 else:
@@ -757,10 +775,8 @@ def put_local_code_state(cache_key: str) -> None:
 
         pickled_code = pickle.dumps(_CODE_STATE)
 
-        from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
-
         CacheArtifactManager.record_artifact(
-            CacheArtifactType.PGO, cache_key, pickled_code
+            PGOCacheArtifact.type(), cache_key, pickled_code
         )
 
         meta = write_local_impl(cache_key, pickled_code)

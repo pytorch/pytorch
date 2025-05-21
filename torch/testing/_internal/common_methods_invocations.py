@@ -18817,6 +18817,7 @@ op_db: list[OpInfo] = [
             # RuntimeError: attribute lookup is not defined on builtin
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCOW', 'test_cow_input_with_grad_not_mutated', device_type='mps'),
         )),
     UnaryUfuncInfo(
         'chalf',
@@ -18844,6 +18845,7 @@ op_db: list[OpInfo] = [
             # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
             # RuntimeError: "neg_conj_cuda" not implemented for 'ComplexHalf'
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCOW', 'test_cow_input_with_grad_not_mutated', device_type='mps'),
         )
     ),
     OpInfo('empty_like',
