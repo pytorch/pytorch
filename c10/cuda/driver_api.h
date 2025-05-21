@@ -45,12 +45,13 @@
 #define C10_LIBCUDA_DRIVER_API_12030(_)
 #endif
 
-#define C10_NVML_DRIVER_API(_)           \
-  _(nvmlInit_v2)                         \
-  _(nvmlDeviceGetHandleByPciBusId_v2)    \
-  _(nvmlDeviceGetNvLinkRemoteDeviceType) \
-  _(nvmlDeviceGetNvLinkRemotePciInfo_v2) \
-  _(nvmlDeviceGetComputeRunningProcesses)
+#define C10_NVML_DRIVER_API(_)            \
+  _(nvmlInit_v2)                          \
+  _(nvmlDeviceGetHandleByPciBusId_v2)     \
+  _(nvmlDeviceGetNvLinkRemoteDeviceType)  \
+  _(nvmlDeviceGetNvLinkRemotePciInfo_v2)  \
+  _(nvmlDeviceGetComputeRunningProcesses) \
+  _(nvmlSystemGetCudaDriverVersion_v2)
 
 namespace c10::cuda {
 
