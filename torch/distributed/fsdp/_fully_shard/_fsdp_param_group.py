@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Any, Callable, cast, NamedTuple, Optional, Union
+from typing import Any, Callable, cast, NamedTuple, Optional
 
 import torch
 import torch.distributed as dist
@@ -127,6 +127,7 @@ class FSDPParamGroup:
     ):
         self.modules = modules  # permit ref cycle because 1:1 lifetime
         param_module_infos = _get_param_module_infos(params, modules)
+
         self.fsdp_params = [
             FSDPParam(
                 param,
@@ -248,7 +249,7 @@ class FSDPParamGroup:
         self._register_state_dict_hooks()
 
     # Runtime #
-    def unshard(self, async_op: bool = False, dim: Union[bool, int] = False):
+    def unshard(self, async_op: bool = False):
         if self._all_gather_result is not None:  # already called, pending wait
             return
         if self.is_unsharded:
@@ -426,9 +427,9 @@ class FSDPParamGroup:
             if all_reduce_pg is None and self._all_reduce_hook_stream is not None:
                 # this means the native HSDP is not enabled,
                 # but user may want to have a custom HSDP setup
-                assert self._all_reduce_hook is not None, (
-                    "all reduce hook stream is specified but hook itself is missing."
-                )
+                assert (
+                    self._all_reduce_hook is not None
+                ), "all reduce hook stream is specified but hook itself is missing."
                 all_reduce_stream = self._all_reduce_hook_stream
             else:
                 all_reduce_stream = self.comm_ctx.all_reduce_stream
@@ -599,9 +600,9 @@ class FSDPParamGroup:
     def _register_state_dict_hooks(self) -> None:
         num_pre_save_hooks = len(self._module_to_pre_save_state_dict_hook_handle)
         num_pre_load_hooks = len(self._module_to_pre_load_state_dict_hook_handle)
-        assert num_pre_save_hooks == num_pre_load_hooks, (
-            f"Pre-save: {num_pre_save_hooks} pre-load: {num_pre_load_hooks}"
-        )
+        assert (
+            num_pre_save_hooks == num_pre_load_hooks
+        ), f"Pre-save: {num_pre_save_hooks} pre-load: {num_pre_load_hooks}"
         if num_pre_save_hooks > 0:
             return  # already registered
         modules_with_fsdp_params: set[nn.Module] = {

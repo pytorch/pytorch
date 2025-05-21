@@ -272,9 +272,7 @@ class FSDPModule:
         if fsdp_param_group := state._fsdp_param_group:
             fsdp_param_group.reshard()
 
-    def unshard(
-        self, async_op: bool = False, dim: Union[bool, int] = False
-    ) -> Optional[UnshardHandle]:
+    def unshard(self, async_op: bool = False) -> Optional[UnshardHandle]:
         """
         Unshards the module's parameters by allocating memory and all-gathering
         the parameters. This method is *not* recursive. The unshard follows the
@@ -296,7 +294,7 @@ class FSDPModule:
         fsdp_param_group = state._fsdp_param_group
         if fsdp_param_group is not None:
             fsdp_param_group.lazy_init()
-            fsdp_param_group.unshard(async_op=async_op, dim=dim)
+            fsdp_param_group.unshard(async_op=async_op)
         handle = _UnshardHandleImpl(fsdp_param_group)
         if async_op:
             return handle

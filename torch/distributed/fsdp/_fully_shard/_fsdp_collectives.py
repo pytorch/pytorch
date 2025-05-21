@@ -151,7 +151,7 @@ def foreach_all_gather(
         param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
         (
             param_all_gather_input_dtypes,
-            param_all_gather_input_numels,  # does not take the replicated dim
+            param_all_gather_input_numels,
             dtype,
         ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
         if dtype == torch.uint8:
@@ -280,7 +280,6 @@ def foreach_all_gather_copy_out(
             device,
             force_recreate=force_recreate,
         )
-        # torch.distributed.breakpoint()  # fsdp_param.all_gather_outputs
         if not force_recreate:
             fsdp_param.alloc_all_gather_outputs()
         param_all_gather_outputs = fsdp_param.all_gather_outputs
@@ -298,6 +297,7 @@ def foreach_all_gather_copy_out(
         out = [t.view(world_size, -1).view(torch.uint8) for t in split_with_sizes_out]
     else:
         out = [t.view(world_size, -1) for t in split_with_sizes_out]
+
     # only avoid VC bump if we are not in inference mode
     if torch._dynamo.is_compiling():
         # For torch.compile, we turn off inference_mode for fake tensor
@@ -388,9 +388,9 @@ def foreach_reduce(
     for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
         if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
             continue
-        assert unsharded_grad.size(shard_dim) % world_size == 0, (
-            f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
-        )
+        assert (
+            unsharded_grad.size(shard_dim) % world_size == 0
+        ), f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
         chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
         unsharded_grads[i] = torch.cat(chunks, dim=0)
     padded_unsharded_sizes = tuple(
@@ -468,7 +468,6 @@ def foreach_reduce(
                 )
                 all_reduce_current_stream = device_handle.current_stream()
                 all_reduce_stream.wait_stream(all_reduce_current_stream)
-                # reduce_output = reduce_scatter_input.new_empty((all_reduce_output_numel,))
                 reduce_output_buff = reduce_output.new_empty((all_reduce_output_numel,))
                 _div_if_needed(reduce_output_buff, predivide_factor)
                 dist.reduce_scatter_tensor(

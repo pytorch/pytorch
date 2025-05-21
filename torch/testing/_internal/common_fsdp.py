@@ -897,7 +897,6 @@ class MLP(nn.Module):
             self.buffer = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # torch.distributed.breakpoint()
         z = self.in_proj(x)
         z = F.relu(z)
         z = self.out_proj(z)
@@ -976,7 +975,7 @@ class DoubleLinear(nn.Module):
     ) -> Union[tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
         if self.use_second_linear:
             return self.relu(self.lin1(x)), self.relu(self.lin2(x))
-        return self.lin2(self.lin1(x))
+        return self.relu(self.lin1(x))
 
 
 # NOTE: For these patch methods, if we want safety under multi-threading (e.g.
