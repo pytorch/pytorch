@@ -10,9 +10,8 @@ import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
-    TEST_WITH_TORCHDYNAMO,
+    slowTest,
     run_tests,
-    xfailIfTorchDynamo,
     skipIfTorchDynamo,
 )
 
@@ -1129,6 +1128,7 @@ class MathTests(__TestCase):
         with self.assertRaises(ValueError):
             math.dist([1, 2], [3, 4, 5])
 
+    @slowTest
     def testIsqrt(self):
         # Test a variety of inputs, large and small.
         test_values = (
