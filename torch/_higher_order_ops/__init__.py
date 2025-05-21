@@ -33,6 +33,7 @@ from torch._higher_order_ops.wrap import (
     wrap_activation_checkpoint,
     wrap_with_autocast,
     wrap_with_set_grad_enabled,
+    dynamo_bypassing_wrapper,
 )
 
 
