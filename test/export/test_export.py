@@ -3797,8 +3797,10 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 y = torch.empty(1, u0 + u1, 512).permute(0, 2, 1)
                 return self.conv(y)
 
-        ep = export(Conv1d(), (torch.tensor([5, 6]),))
-        print(ep)
+        mod = Conv1d()
+        x = torch.tensor([5, 6])
+        ep = export(mod, (x,))
+        self.assertTrue(torch.allclose(mod(x), ep.module()(x)))
 
     def test_derived_dim_out_of_order_simplified_repeat_non_derived(self):
         class Foo(torch.nn.Module):
