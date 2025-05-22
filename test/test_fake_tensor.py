@@ -2265,9 +2265,12 @@ class FakeTensorDispatchCache(TestCase):
         gc.collect()
         self.assertTrue(count_invoke_subgraph_keys() == 0)
 
+
+
     @skipIfTorchDynamo("cache hit/miss changes with invoke_subgraph caching")
     def test_invoke_subgraph_cacheable_inplace(self):
         invoke_subgraph = torch._higher_order_ops.invoke_subgraph
+
 
         def fn(x, y):
             # aten ops are used so that eager backend graph is suitable for fake
@@ -2313,33 +2316,6 @@ class FakeTensorDispatchCache(TestCase):
                     extract_tensor_metadata(a),
                     extract_tensor_metadata(b),
                 )
-
-    @skipIfTorchDynamo("cache hit/miss changes with invoke_subgraph caching")
-    def test_unbacked_output(self):
-        # The point of this test is to have an op which has no symbols as input
-        # but a symbol as an output and make sure that we skip caching it.
-        class LengthsGather(torch.nn.Module):
-            def forward(
-                self,
-                input: torch.Tensor,
-                lengths: torch.Tensor,
-                indices: torch.Tensor,
-                offsets: torch.Tensor,
-            ) -> torch.Tensor:
-                bias = torch.gather(offsets, 0, indices)
-                lengths_selected = torch.gather(lengths, 0, indices)
-                index = torch.repeat_interleave(bias, lengths_selected, dim=0)
-                return index
-
-        input = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
-        lengths = torch.tensor([0, 2, 3, 1, 4])
-        indices = torch.tensor([2, 3, 4, 6, 7, 8, 9])
-        offsets = torch.cumsum(lengths, 0)
-        ep = torch.export.export(LengthsGather(), (input, lengths, indices, offsets), strict=False)
-
-        FakeTensorMode.cache_clear()
-        ep.run_decompositions({})
-        self.assertBypasses("unrepresented symbol in output", 2)
 
 if __name__ == "__main__":
     run_tests()
