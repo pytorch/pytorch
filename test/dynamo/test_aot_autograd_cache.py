@@ -288,10 +288,18 @@ class AOTAutogradCacheTests(InductorTestCase):
         self._clear_dynamo_and_codecache()
         torch._inductor.codecache.FxGraphCache.clear()
         self.assertEqual(fn(a, b), compiled_fn(a, b))
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
-        # We save again into the cache
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+
+        if functorch_config.bundled_autograd_cache:
+            # Bundled AutogradCache doesn't care if FxGraphCache is cleared
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        else:
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            # We save again into the cache
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -1090,6 +1098,11 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+
+@functorch_config.patch({"bundled_autograd_cache": True})
+class AOTAutogradCacheBundledTests(AOTAutogradCacheTests):
+    pass
 
 
 @inductor_config.patch("fx_graph_cache", True)
