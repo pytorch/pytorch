@@ -1303,11 +1303,6 @@ auto Engine::execute(
   CompiledAutogradThreadingDebugCheck _thread_check;
   auto compiled_autograd = the_compiled_autograd.load();
   TORCH_INTERNAL_ASSERT(compiled_autograd != COMPILED_AUTOGRAD_POISON);
-  if (compiled_autograd != nullptr && create_graph) {
-    TORCH_WARN_ONCE(
-        "Compiled Autograd does not support create_graph, falling back to autograd engine");
-    compiled_autograd = nullptr;
-  }
 
   // accumulate_grad is true if and only if the frontend call was to
   // backward(), not grad(). grad() returns the sum of the gradients
