@@ -75,11 +75,6 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: print path
-        shell: cmd
-        run: |
-          echo "PATH: %PATH%"
-      
       - name: configure aws credentials
         id: aws_creds
         uses: aws-actions/configure-aws-credentials@v4
