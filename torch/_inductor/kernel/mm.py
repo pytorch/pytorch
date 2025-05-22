@@ -1186,6 +1186,14 @@ def tuned_scaled_mm(
                 epilogue_fn=scale_mm_epilogue(),
             )
 
+    if is_nonzero and use_cutlass_template(layout, m, n, k):
+        if use_fast_accum:
+            log.warning(
+                "use_fast_accum=True is not supported by cutlass template, skipping cutlass choices"
+            )
+        else:
+            CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, input_nodes)  # type: ignore[arg-type]
+
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, input_nodes)
 
