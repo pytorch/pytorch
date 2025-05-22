@@ -1,5 +1,5 @@
 # Owner(s): ["module: dynamo"]
-# flake8: noqa
+# flake8: noqa: B950
 
 import functools
 import itertools
@@ -13,7 +13,6 @@ from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd
 from torch._dynamo._trace_wrapped_higher_order_op import trace_wrapped
 from torch._dynamo.testing import normalize_gm
-from torch._dynamo.utils import counters
 from torch.fx.experimental.proxy_tensor import make_fx
 
 
