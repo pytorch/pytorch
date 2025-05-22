@@ -1366,8 +1366,8 @@ void cuComputeGradGammaBeta(
     }
 }
 
-template<typename T, typename T_ACC, bool rms_norm> __global__
 void cuComputeGradInput(
+template<typename T, typename T_ACC, bool rms_norm> __global__
     const T* __restrict__ dout,
     const T* __restrict__ input,
     const int64_t M,
@@ -1540,8 +1540,8 @@ void LayerNormBackwardKernelImplInternal(
       int nshared =
               threads1.y > 1 ?
               threads1.y*threads1.x*sizeof(T_ACC) :
+              cuComputeGradInput<T, T_ACC, rms_norm><<<blocks1, threads1, nshared, cuda_stream>>>(
               0;
-      cuComputeGradInput<T, T_ACC, rms_norm><<<blocks1, threads1, nshared, cuda_stream>>>(
               dY_data,
               X_data,
               M, N,
