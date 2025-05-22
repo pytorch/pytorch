@@ -144,7 +144,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
             "layout": previous_tensor.layout,
             "requires_grad": requires_grad,
         }
-        tensor = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+        tensor = torch.Tensor._make_wrapper_subclass(cls=cls, size=shape, **kwargs)
 
         tensor.packed = packed
         tensor.meta = meta

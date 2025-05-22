@@ -1246,7 +1246,7 @@ def gen_pyi(
                         "cls: type[S]",
                         "size: Sequence[_int | SymInt]",
                         "strides: Sequence[_int | SymInt] | None = None",
-                        "storage_offset: SymInt | None = None",
+                        "storage_offset: SymInt | int | None = None",
                         "memory_format: torch.memory_format | None = None",
                         "dtype: _dtype | None = None",
                         "layout: _layout = strided",
