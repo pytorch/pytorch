@@ -623,6 +623,71 @@ def huggingface_main():
     warnings.filterwarnings("ignore")
     main(HuggingfaceRunner())
 
+def mymain():
+    import os
+    new_configs = os.environ["TORCHINDUCTOR_NEW_CONFIGS"] == "1"
+    if new_configs:
+        print("running with new configs")
+    else:
+        print("running with old configs")
+    import json
+    from collections import defaultdict
+    from torch._inductor.select_algorithm import TritonTemplateCaller, add_feedback_saver
+    import os
+    print(f"Current Process ID: {os.getpid()}")
+
+    samples = defaultdict(list)
+    header = ["M", "N", "K", "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps", "GROUP_M", "timing"]
+    collated_samples = []
+    def post_fn(timings, name, input_nodes, choices):
+        if name not in ["mm", "bmm", "addmm"]:
+            breakpoint()
+        if name == "mm":
+            M, N = input_nodes[0].layout.size
+            K = input_nodes[1].layout.size[1]
+        elif name == "bmm":
+            B, M, N = input_nodes[0].layout.size
+            K = input_nodes[1].layout.size[2]
+        elif name == "addmm":
+            M, N = input_nodes[1].layout.size
+            K = input_nodes[2].layout.size[1]
+
+        for choice in choices:
+            if not isinstance(choice, TritonTemplateCaller):
+                continue
+            # Parse a string that looks like '(16, 16, 16)' and get the 3 numbers
+            BLOCK_M, BLOCK_N, BLOCK_K = tuple(map(int, choice.log_info['tile_shape'].strip('()').split(',')))
+
+            sample = f"{[BLOCK_M, BLOCK_N, BLOCK_K, choice.log_info['num_stages'], choice.log_info['num_warps'], choice.log_info['GROUP_M'], timings[choice]]}"
+
+            samples[f"{(M, N, K)}"].append(sample)
+
+        local_sample = []
+        for choice in choices:
+            if not isinstance(choice, TritonTemplateCaller):
+                continue
+            # Parse a string that looks like '(16, 16, 16)' and get the 3 numbers
+            BLOCK_M, BLOCK_N, BLOCK_K = tuple(map(int, choice.log_info['tile_shape'].strip('()').split(',')))
+
+
+            local_sample.append(f"{[M, N, K, BLOCK_M, BLOCK_N, BLOCK_K, choice.log_info['num_stages'], choice.log_info['num_warps'], choice.log_info['GROUP_M'], timings[choice]]}")
+
+            collated_samples.append(local_sample)
+    add_feedback_saver(post_fn)
+
+    # run the names
+    huggingface_main()
+
+    results = {
+        "header": header,
+        "collated_samples": collated_samples,
+        "samples": dict(samples),
+    } 
+    import sys
+    fn = f"/home/gabeferns/logs/mm/new_{sys.argv[-1]}.json" if new_configs else f"/home/gabeferns/logs/mm/old_{sys.argv[-1]}.json"
+    print("writing to ", fn)
+    with open(fn, "w") as file:
+        json.dump(results, file, indent=2)
 
 if __name__ == "__main__":
-    huggingface_main()
+    mymain()

@@ -1,0 +1,8 @@
+TORCHINDUCTOR_MAX_AUTOTUNE=1 TORCHINDUCTOR_NEW_CONFIGS=1 python benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 --backend inductor --device cuda --output ~/logs/new_configs_inference_hf.csv
+TORCHINDUCTOR_MAX_AUTOTUNE=1 TORCHINDUCTOR_NEW_CONFIGS=0 python benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 --backend inductor --device cuda --output ~/logs/old_configs_inference_hf.csv
+TORCHINDUCTOR_MAX_AUTOTUNE=1 TORCHINDUCTOR_NEW_CONFIGS=1 python benchmarks/dynamo/huggingface.py --performance --training --bfloat16 --backend inductor --device cuda --output ~/logs/new_configs_training_hf.csv
+TORCHINDUCTOR_MAX_AUTOTUNE=1 TORCHINDUCTOR_NEW_CONFIGS=0 python benchmarks/dynamo/huggingface.py --performance --training --bfloat16 --backend inductor --device cuda --output ~/logs/old_configs_training_hf.csv
+TORCHINDUCTOR_MAX_AUTOTUNE=1 TORCHINDUCTOR_NEW_CONFIGS=1 python benchmarks/dynamo/torchbench.py --performance --inference --bfloat16 --backend inductor --device cuda --output ~/logs/new_configs_inference_tb.csv
+TORCHINDUCTOR_MAX_AUTOTUNE=1 TORCHINDUCTOR_NEW_CONFIGS=0 python benchmarks/dynamo/torchbench.py --performance --inference --bfloat16 --backend inductor --device cuda --output ~/logs/old_configs_inference_tb.csv
+TORCHINDUCTOR_MAX_AUTOTUNE=1 TORCHINDUCTOR_NEW_CONFIGS=1 python benchmarks/dynamo/torchbench.py --performance --training --bfloat16 --backend inductor --device cuda --output ~/logs/new_configs_training_tb.csv
+TORCHINDUCTOR_MAX_AUTOTUNE=1 TORCHINDUCTOR_NEW_CONFIGS=0 python benchmarks/dynamo/torchbench.py --performance --training --bfloat16 --backend inductor --device cuda --output ~/logs/old_configs_training_tb.csv
