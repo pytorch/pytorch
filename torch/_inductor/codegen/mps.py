@@ -142,7 +142,9 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_FloorToInt(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
         x = self.doprint(expr.args[0])
-        return f"static_cast<int>(metal::floor({x}))"
+        return f"static_cast<int>(metal::floor(static_cast<float>({x})))"
+
+    _print_floor = _print_FloorToInt
 
     def _print_TruncToInt(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
@@ -773,17 +775,11 @@ class MetalKernel(SIMDKernel):
         """Called at the end to generate a final kernel string"""
         self.codegen_body()
         code = IndentedBuffer()
-
-        if V.graph.cpp_wrapper:
-            code.writeline('(R"MTL(')
-        else:
-            code.writeline("compile_mps_shader('''")
-
+        code.writeline("compile_mps_shader('''")
         idx_vars = self.active_range_trees()
         with code.indent():
-            if not V.graph.cpp_wrapper:
-                for header in self.headers:
-                    code.writeline(f"#include <c10/metal/{header}.h>")
+            for header in self.headers:
+                code.writeline(f"#include <c10/metal/{header}.h>")
             if self.inside_reduction:
                 total_reduction_size = math.prod(
                     t.numel for t in self.range_trees if t.is_reduction
@@ -837,11 +833,7 @@ class MetalKernel(SIMDKernel):
                 code.splice(self.indexing_code)
                 code.splice(self.body)
             code.writeline("}")
-
-        if V.graph.cpp_wrapper:
-            code.writeline(')MTL");')
-        else:
-            code.writeline("''')")
+        code.writeline("''')")
 
         return code.getvalue()
 
@@ -866,15 +858,7 @@ class MetalKernel(SIMDKernel):
                 )
                 for v in self.active_range_trees()
             ]
-
-            if V.graph.cpp_wrapper:
-                args += [f"{', '.join(threads)}"]
-            else:
-                args += [f"threads=[{', '.join(threads)}]"]
-        else:
-            if V.graph.cpp_wrapper:
-                raise RuntimeError("We should always have threads?")
-
+            args += [f"threads=[{', '.join(threads)}]"]
         if self.inside_reduction:
             threads = [
                 self.pexpr(sympy.Min(v.numel, self.max_threadgroup_size))  # type: ignore[misc]
@@ -882,15 +866,7 @@ class MetalKernel(SIMDKernel):
                 else "1"
                 for v in self.active_range_trees()
             ]
-            if V.graph.cpp_wrapper:
-                args += [f"{{{', '.join(threads)}}}"]
-            else:
-                args += [f"group_size=[{', '.join(threads)}]"]
-        else:
-            if V.graph.cpp_wrapper:
-                # Add a None so that we always have a group_size in the
-                # arguments. We won't use it if the value is None.
-                args += [None]  # type: ignore[list-item]
+            args += [f"group_size=[{', '.join(threads)}]"]
 
         wrapper.generate_kernel_call(
             name,
@@ -924,10 +900,9 @@ class MetalScheduling(SIMDScheduling):
         super().__init__(scheduler)
         wrapper = V.graph.wrapper_code
         if wrapper is not None:
-            if not V.graph.cpp_wrapper:
-                wrapper.header.splice(
-                    "from torch._inductor.runtime.runtime_utils import compile_mps_shader"
-                )
+            wrapper.header.splice(
+                "from torch._inductor.runtime.runtime_utils import compile_mps_shader"
+            )
 
     def define_kernel(
         self, src_code: str, node_schedule: list[SchedulerNode], kernel: MetalKernel
@@ -939,19 +914,10 @@ class MetalScheduling(SIMDScheduling):
             # TODO: Merge multiple kernels into a single library
             # Either using MultiKernel concept or overriding SIMDScheduling.codegen_node_scheduling
             mps_lib_name = f"mps_lib_{wrapper.next_kernel_suffix()}"
-
-            if V.graph.cpp_wrapper:
-                src_code = (
-                    f"at::native::mps::DynamicMetalShaderLibrary {mps_lib_name}"
-                    + src_code
-                )
-                kernel_name = f"{mps_lib_name}_func"
-            else:
-                kernel_name = f"{mps_lib_name}.generated_kernel"
-
+            kernel_name = f"{mps_lib_name}.generated_kernel"
             wrapper.src_to_kernel[src_code] = kernel_name
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
             metadata_comment = f"{origins}\n{detailed_origins}"
-            wrapper.define_kernel(mps_lib_name, src_code, metadata_comment, gpu=False)
+            wrapper.define_kernel(mps_lib_name, src_code, metadata_comment)
 
         return kernel_name
