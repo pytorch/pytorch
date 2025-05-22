@@ -54,7 +54,7 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._dynamo.variables import builder
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
@@ -1519,6 +1519,35 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(opt_fn3({"a": v1, "b": v2})[0], 300)
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 9)
+
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    def test_user_code_statically_known(self):
+        from torch.fx.experimental.symbolic_shapes import (
+            has_static_value,
+            statically_known_true,
+        )
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x):
+            # At this point, this isn't statically known, only the hint says so.
+            if statically_known_true(x.shape[0] > 9):
+                raise Exception()
+            torch._check(x.shape[0] >= 10)
+            # But now it is.
+            return statically_known_true(x.shape[0] > 9), has_static_value(x.shape[0])
+
+        x = torch.zeros(10)
+        torch._dynamo.mark_dynamic(x, 0)
+        self.assertEqual(f(x), (True, False))
+
+        @torch.compile(fullgraph=True, dynamic=True, backend="eager")
+        def g(x, y):
+            n = x.item()
+            torch._check(n == 3)
+            return has_static_value(4.0), has_static_value(n)
+
+        out = g(torch.tensor([3]), torch.zeros(1))
+        self.assertEqual(out, (True, True))
 
     def test_dictcomp(self):
         def fn1(inputs):
@@ -5796,11 +5825,15 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         error_message = ""
         if torch._dynamo.config.inline_inbuilt_nn_modules:
-            error_message = r"HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)"
+            error_message = (
+                "map doesn't work unless it is captured completely with torch.compile"
+            )
         else:
             error_message = "Can't inplace modify module params/buffers"
 
-        with self.assertRaisesRegex(Unsupported, error_message):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError, error_message
+        ):
             opt_fn = torch.compile(mod, backend="eager", fullgraph=True)
             opt_fn(torch.randn(3, 2))
 
@@ -5898,7 +5931,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         from functorch.experimental.control_flow import cond
 
         def true_fn(x):
-            return x
+            return x.clone()
 
         def false_fn(x):
             return x.sin()
@@ -7604,6 +7637,15 @@ utils_device.CURRENT_DEVICE == None""".split(
             torch.compile(dyn_fn, backend="eager")(y)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_empty_tensor(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            n = x.item()
+            return torch.empty((n - 1) // 2)
+
+        self.assertEqual(fn(torch.tensor([4])).size(0), 1)
+        self.assertEqual(fn(torch.tensor([1])).size(0), 0)
+
     def test_unbacked_2d_expand(self):
         @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
         def func(a, b):
@@ -7611,16 +7653,16 @@ utils_device.CURRENT_DEVICE == None""".split(
             return a * 10
 
         a = torch.rand(1, 1)
-        b = torch.rand(2, 2)
+        b = torch.rand(1, 1)
 
         torch._dynamo.decorators.mark_unbacked(a, 0)
         torch._dynamo.decorators.mark_unbacked(a, 1)
         torch._dynamo.decorators.mark_unbacked(b, 0)
         torch._dynamo.decorators.mark_unbacked(b, 1)
-        # TODO(laithsakka): update inductor runtime asserts to properly raise
         func(a, b)
         func(torch.rand(4, 5), torch.rand(4, 5))
-        func(torch.rand(1, 1), torch.rand(2, 1))
+        with self.assertRaises(RuntimeError):
+            func(torch.rand(1, 1), torch.rand(2, 1))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_sym_constrain_range_on_replaced_unbacked_symbol(self):
@@ -7823,6 +7865,31 @@ utils_device.CURRENT_DEVICE == None""".split(
         model(torch.randn(1, 3211), 3)
         model = M(3212, 30)
         model(torch.randn(1, 3212), 4)
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(dynamic_sources="L['self']._modules['inner'].x")
+    def test_dynamic_sources_precedence_over_int_specialization(self):
+        builder._DYNAMIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        class Model(torch.nn.Module):
+            def __init__(self, x) -> None:
+                super().__init__()
+                self.inner = torch.nn.Linear(10, 10)
+                # attach attribute to builtin nn module.
+                self.inner.x = x
+
+            @torch.compile(fullgraph=True, backend=counter)
+            def forward(self, a):
+                return a * self.inner.x
+
+        m1 = Model(50)
+        m2 = Model(60)
+        with fresh_inductor_cache():
+            m1(torch.rand(1, 2, 3))
+            m2(torch.rand(1, 2, 3))
 
         self.assertEqual(counter.frame_count, 1)
 
@@ -10921,7 +10988,7 @@ fn
         torch._dynamo.decorators.mark_unbacked(x, 1, strict=True)
         y = torch.randn(5, 5)
 
-        with self.assertRaisesRegex(RuntimeError, "RelaxedUnspecConstraint"):
+        with self.assertRaisesRegex(RuntimeError, "specialized"):
             fn(x, y)
 
     def test_sym_max_unbacked_sizelike_simplification(self):
@@ -12438,6 +12505,16 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             )
 
         f(torch.tensor([30, 30], device=device), torch.tensor([68, 32], device=device))
+
+    def test_scalar_isin_decomposition(self):
+        def f():
+            x = torch.tensor(0)
+            return torch.isin(x, x)
+
+        opt_f = torch.compile(f, backend="inductor", fullgraph=True)
+        ref = f()
+        res = opt_f()
+        self.assertEqual(ref, res)
 
 
 devices = ("cuda", "hpu")

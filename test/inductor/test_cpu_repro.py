@@ -1070,6 +1070,27 @@ class CPUReproTests(TestCase):
         x = torch.randn(1, 3, 64, 64)
         self.common(Model(), (x,))
 
+    @unittest.skipIf(
+        os.getenv("ATEN_CPU_CAPABILITY") == "default",
+        "Failing in periodic nogpu_NO_AVX2 after added in #152542",
+    )
+    @config.patch("cpp.use_decompose_tanh", "1")
+    def test_tanh_atan2_use_decompose_tanh(self):
+        # https://github.com/pytorch/pytorch/issues/148241
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.shrink = nn.Tanhshrink()
+
+            def forward(self, x):
+                x = self.shrink(x)
+                x = torch.atan2(x, x)
+                return x
+
+        x = torch.randn(1, 3, 64, 64)
+        with self.assertRaises(AssertionError):
+            self.common(Model(), (x,))
+
     def test_index_propagation_issue_102065(self):
         def fn(x):
             x = torch.arange(x.numel())
@@ -5296,6 +5317,15 @@ class CPUReproTests(TestCase):
             return torch.max(x, 1, False)
 
         self.common(fn, (x,))
+
+    def test_vector_norm_compile(self):
+        x = torch.randn([16, 32], dtype=torch.float)
+        ref = torch.linalg.vector_norm(x, ord=2, dim=[], keepdim=False, dtype=None)
+        compiled_vector_norm = torch.compile(
+            torch.linalg.vector_norm, backend="inductor"
+        )
+        res = compiled_vector_norm(x, ord=2, dim=[], keepdim=False, dtype=None)
+        self.assertEqual(ref, res)
 
 
 if __name__ == "__main__":

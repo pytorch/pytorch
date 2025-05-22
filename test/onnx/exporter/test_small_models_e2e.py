@@ -155,12 +155,13 @@ class DynamoExporterTest(common_utils.TestCase):
         onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([-1, -2]),))
 
     def test_empty(self):
-        def func(x):
-            return torch.empty(x.size(), dtype=torch.int64)
+        class EmptyModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.empty(x.size(), dtype=torch.int64)
 
         # Since `torch.empty` returns tensor with uninitialized data, we cannot
         # test this under `test_fx_to_onnx_with_onnxruntime.py` with result comparison.
-        _ = self.export(func, (torch.randn(1, 2),))
+        _ = self.export(EmptyModel(), (torch.randn(1, 2),))
 
     def test_multiple_outputs_op_with_evaluator(self):
         class TopKModel(torch.nn.Module):
@@ -215,7 +216,19 @@ class DynamoExporterTest(common_utils.TestCase):
                 input = input.to(float8_type)
                 return input
 
-        _ = self.export(Float8Module(), (torch.randn(1, 2),))
+        onnx_program = self.export(Float8Module(), (torch.randn(1, 2),))
+        self.assertEqual(onnx_program.model.graph.outputs[0].dtype, onnx_type)
+
+    def test_float4_support(self):
+        class Float4Module(torch.nn.Module):
+            def forward(self):
+                return torch.empty([1], dtype=torch.float4_e2m1fn_x2)
+
+        onnx_program = self.export(Float4Module())
+        output = onnx_program.model.graph.outputs[0]
+        self.assertEqual(output.dtype, ir.DataType.FLOAT4E2M1)
+        # The shape is [*shape, 2] because ONNX stores the shape of the unpacked tensor
+        self.assertEqual(output.shape.dims, [1, 2])
 
     def test_bfloat16_support(self):
         class BfloatModel(torch.nn.Module):
@@ -541,6 +554,80 @@ class DynamoExporterTest(common_utils.TestCase):
         onnx_testing.assert_onnx_program(onnx_program, args=inputs)
         # make sre the naming is working
         self.assertEqual(onnx_program.model.graph.inputs[0].shape[0], "dx")
+
+    def test_export_sym_max(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.sym_max(*x.shape)
+
+        inputs = (torch.zeros((2, 3)),)
+        dynamic_shapes = ({0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},)
+        onnx_program = self.export(Model(), inputs, dynamic_shapes=dynamic_shapes)
+        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+        self.assertIn(
+            "Max",
+            [node.op_type for node in onnx_program.model.graph],
+        )
+
+    def test_export_sym_min(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.sym_min(*x.shape)
+
+        inputs = (torch.zeros((2, 3)),)
+        dynamic_shapes = ({0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},)
+        onnx_program = self.export(Model(), inputs, dynamic_shapes=dynamic_shapes)
+        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+        self.assertIn(
+            "Min",
+            [node.op_type for node in onnx_program.model.graph],
+        )
+
+    def test_export_sym_not(self):
+        class SymNotModel(torch.nn.Module):
+            def forward(self, x):
+                comparison = x.shape[0] == x.shape[1]
+                return torch.sym_not(comparison)
+
+        inputs = (torch.zeros((2, 2)),)
+        dynamic_shapes = ({0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},)
+        onnx_program = self.export(SymNotModel(), inputs, dynamic_shapes=dynamic_shapes)
+        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+        self.assertIn(
+            "Not",
+            [node.op_type for node in onnx_program.model.graph],
+        )
+
+    def test_export_sym_float(self):
+        class SymFloatModel(torch.nn.Module):
+            def forward(self, x):
+                a = x.shape[0]
+                return torch.sym_float(a)
+
+        inputs = (torch.zeros((2, 2)),)
+        dynamic_shapes = ({0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},)
+        onnx_program = self.export(
+            SymFloatModel(), inputs, dynamic_shapes=dynamic_shapes
+        )
+        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+        self.assertIn(
+            "Cast",
+            [node.op_type for node in onnx_program.model.graph],
+        )
+
+    def test_group_norm_opset_21(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.group_norm(x, 4)
+
+        x = torch.randn(1, 4, 4, 4, dtype=torch.float32)
+        onnx_program = self.export(Model(), (x,), opset_version=21)
+        # TODO(after ort support): As of ONNX Runtime 1.22, the operator is not implemented yet.
+        # call assert_onnx_program after ort support
+        self.assertIn(
+            "GroupNormalization",
+            [node.op_type for node in onnx_program.model.graph],
+        )
 
 
 if __name__ == "__main__":

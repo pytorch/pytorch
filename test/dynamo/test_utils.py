@@ -230,8 +230,12 @@ class TestDynamoTimed(TestCase):
  '_recursive_joint_graph_passes': [0.0],
  '_recursive_post_grad_passes': [0.0, 0.0],
  '_recursive_pre_grad_passes': [0.0],
+ 'additional_fake_tensor_prop': [0.0, 0.0],
+ 'aot_collect_metadata': [0.0],
+ 'aot_trace_joint_graph': [0.0],
  'async_compile.wait': [0.0, 0.0],
  'backward._backward_impl': [0.0],
+ 'build_guards': [0.0],
  'bytecode_tracing': [0.0],
  'compile_attempt_0': [0.0],
  'compile_file': [0.0, 0.0],
@@ -239,7 +243,9 @@ class TestDynamoTimed(TestCase):
  'compile_fx.<locals>.fw_compiler_base': [0.0],
  'compile_fx_inner': [0.0, 0.0],
  'create_aot_dispatcher_function': [0.0],
- 'gc': [0.0]}""",  # noqa: B950
+ 'fx_codegen_and_compile': [0.0, 0.0],
+ 'gc': [0.0],
+ 'min_cut_rematerialization_partition': [0.0]}""",  # noqa: B950
         )
 
         # Now validate utils.calculate_time_spent(). Formatting the return
@@ -305,7 +311,6 @@ class TestDynamoTimed(TestCase):
  'compliant_custom_ops': set(),
  'config_inline_inbuilt_nn_modules': False,
  'config_suppress_errors': False,
- 'cuda_synchronize_time_us': None,
  'cuda_version': None,
  'cudagraph_skip_reason': None,
  'distributed_ephemeral_timeout_us': None,
@@ -397,7 +402,6 @@ class TestDynamoTimed(TestCase):
  'compliant_custom_ops': None,
  'config_inline_inbuilt_nn_modules': None,
  'config_suppress_errors': None,
- 'cuda_synchronize_time_us': None,
  'cuda_version': None,
  'cudagraph_skip_reason': None,
  'distributed_ephemeral_timeout_us': None,
@@ -501,6 +505,43 @@ class TestDynamoTimed(TestCase):
             torch.compile(test2)(torch.randn(10, 10))
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].ir_count, second)
+
+    @dynamo_config.patch({"log_compilation_metrics": True})
+    @inductor_config.patch({"force_disable_caches": True})
+    def test_dynamic_shape_feature_use(self):
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+
+            @torch.compile()
+            def f(x):
+                return x * x
+
+            f(torch.randn(4))
+            f(torch.randn(3))
+            compilation_events = [
+                arg[0][0].feature_usage for arg in log_event.call_args_list
+            ]
+        self.assertIn(
+            ("dynamo.automatic_dynamic_shapes", True), compilation_events[1].items()
+        )
+
+        compilation_events = []
+        with dynamo_config.patch({"automatic_dynamic_shapes": False}), mock.patch(
+            "torch._dynamo.utils.log_compilation_event"
+        ) as log_event:
+
+            @torch.compile()
+            def f(x):
+                return x * x
+
+            f(torch.randn(4))
+            f(torch.randn(3))
+            compilation_events = [
+                arg[0][0].feature_usage for arg in log_event.call_args_list
+            ]
+        self.assertIn(
+            ("dynamo.automatic_dynamic_shapes", False), compilation_events[1].items()
+        )
 
     @dynamo_config.patch({"log_compilation_metrics": True})
     def test_num_params(self):

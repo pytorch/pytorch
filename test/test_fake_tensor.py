@@ -2158,6 +2158,31 @@ class FakeTensorDispatchCache(TestCase):
                     extract_tensor_metadata(b),
                 )
 
+
+    def test_cache_aten_index(self):
+        with FakeTensorMode():
+            x = torch.randn(4, 4, 4)
+            idx_tensor1 = torch.tensor([0, 2, 3])
+            idx_tensor2 = torch.tensor([0, 1, 2])
+
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+
+            ref = torch.ops.aten.index(x, [None, idx_tensor1, idx_tensor2])
+            self.assertHitsMisses(0, 3)
+
+            res = torch.ops.aten.index(x, [None, idx_tensor1, idx_tensor2])
+            self.assertHitsMisses(1, 3)
+            self.assertEqual(extract_tensor_metadata(ref), extract_tensor_metadata(res))
+
+        with FakeTensorMode():
+            x = torch.randn(4, 4, 4)
+            idx_tensor1 = torch.tensor([True, True, False, True])
+            self.assertRaises(DynamicOutputShapeException, lambda: torch.ops.aten.index(x, [None, idx_tensor1]))
+
+            idx_tensor1 = torch.tensor([1, -2, 3, -4], dtype=torch.int8)
+            self.assertRaises(DynamicOutputShapeException, lambda: torch.ops.aten.index(x, [None, idx_tensor1]))
+
     @skipIfTorchDynamo("cache hit/miss changes with invoke_subgraph caching")
     def test_invoke_subgraph(self):
         """
@@ -2177,16 +2202,16 @@ class FakeTensorDispatchCache(TestCase):
                 FakeTensorMode.cache_clear()
                 self.assertHitsMisses(0, 0)
 
-                ref = invoke_subgraph(fn, "subgraph", (x, y))
+                ref = invoke_subgraph(fn, "subgraph", x, y)
                 self.assertHitsMisses(0, 2)
                 self.assertBypasses("function argument", 1)
 
-                res = invoke_subgraph(fn, "subgraph", (x, y))
+                res = invoke_subgraph(fn, "subgraph", x, y)
                 # The hits are from the ops inside fn
                 self.assertHitsMisses(2, 2)
                 self.assertBypasses("function argument", 2)
 
-                res = invoke_subgraph(fn, "subgraph", (x, y))
+                res = invoke_subgraph(fn, "subgraph", x, y)
                 # The hits are from the ops inside fn
                 self.assertHitsMisses(4, 2)
                 self.assertBypasses("function argument", 3)
@@ -2207,14 +2232,14 @@ class FakeTensorDispatchCache(TestCase):
                 FakeTensorMode.cache_clear()
                 self.assertHitsMisses(0, 0)
 
-                ref = invoke_subgraph(mod, "subgraph", (x, y))
+                ref = invoke_subgraph(mod, "subgraph", x, y)
                 self.assertHitsMisses(0, 3)
 
-                res = invoke_subgraph(mod, "subgraph", (x, y))
+                res = invoke_subgraph(mod, "subgraph", x, y)
                 # The hits are from re-running the subgraph
                 self.assertHitsMisses(1, 3)
 
-                res = invoke_subgraph(mod, "subgraph", (x, y))
+                res = invoke_subgraph(mod, "subgraph", x, y)
                 # The hits are from re-running the subgraph
                 self.assertHitsMisses(2, 3)
 
@@ -2243,7 +2268,7 @@ class FakeTensorDispatchCache(TestCase):
 
 
     @skipIfTorchDynamo("cache hit/miss changes with invoke_subgraph caching")
-    def test_invoke_subgraph_non_cacheable(self):
+    def test_invoke_subgraph_cacheable_inplace(self):
         invoke_subgraph = torch._higher_order_ops.invoke_subgraph
 
 
@@ -2257,28 +2282,6 @@ class FakeTensorDispatchCache(TestCase):
             mul = torch.ops.aten.mul.Tensor(t, y)
             return (mul,)
 
-        # Ensure there is no caching for non-Fx graph module inputs
-        with FakeTensorMode():
-            x = torch.randn(4, 4)
-            y = torch.randn(4, 4)
-
-            FakeTensorMode.cache_clear()
-            self.assertHitsMisses(0, 0)
-
-            ref = invoke_subgraph(fn, "subgraph", (x, y))
-            self.assertHitsMisses(0, 2)
-            self.assertBypasses("inplace view", 1)
-
-            res = invoke_subgraph(fn, "subgraph", (x, y))
-            # The hits are from the ops inside fn
-            self.assertHitsMisses(2, 2)
-            self.assertBypasses("inplace view", 2)
-
-            res = invoke_subgraph(fn, "subgraph", (x, y))
-            # The hits are from the ops inside fn
-            self.assertHitsMisses(4, 2)
-            self.assertBypasses("inplace view", 3)
-
         # Get the mod as if its going through torch.compile
         backend = torch._dynamo.testing.AotEagerAndRecordGraphs()
         x = torch.randn(4, 4)
@@ -2287,7 +2290,7 @@ class FakeTensorDispatchCache(TestCase):
         self.assertEqual(len(backend.graphs), 1)
         mod = backend.graphs[0]
 
-        # Ensure that invoke_subgraph result is not cached
+        # Ensure that invoke_subgraph result is still cached
         with FakeTensorMode():
             x = torch.randn(4, 4)
             y = torch.randn(4, 4)
@@ -2295,19 +2298,16 @@ class FakeTensorDispatchCache(TestCase):
             FakeTensorMode.cache_clear()
             self.assertHitsMisses(0, 0)
 
-            ref = invoke_subgraph(mod, "subgraph", (x, y))
-            self.assertHitsMisses(0, 2)
-            self.assertBypasses("hop invoke_subgraph failed because of inplace view", 1)
+            ref = invoke_subgraph(mod, "subgraph", x, y)
+            self.assertHitsMisses(0, 3)
 
-            res = invoke_subgraph(mod, "subgraph", (x, y))
+            res = invoke_subgraph(mod, "subgraph", x, y)
             # The hits are from the ops inside fn and not the subgraph
-            self.assertHitsMisses(2, 2)
-            self.assertBypasses("hop invoke_subgraph failed because of inplace view", 2)
+            self.assertHitsMisses(1, 3)
 
-            res = invoke_subgraph(mod, "subgraph", (x, y))
+            res = invoke_subgraph(mod, "subgraph", x, y)
             # The hits are from the ops inside fn and not the subgraph
-            self.assertHitsMisses(4, 2)
-            self.assertBypasses("hop invoke_subgraph failed because of inplace view", 3)
+            self.assertHitsMisses(2, 3)
 
             self.assertEqual(len(ref), len(res))
             self.assertEqual(len(ref), len(res))
@@ -2316,9 +2316,6 @@ class FakeTensorDispatchCache(TestCase):
                     extract_tensor_metadata(a),
                     extract_tensor_metadata(b),
                 )
-
-
-
 
 if __name__ == "__main__":
     run_tests()
