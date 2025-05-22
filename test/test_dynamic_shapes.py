@@ -3068,6 +3068,8 @@ class TestGuardsExpressions(TestCase):
         with self.assertRaises(RuntimeError):
             func(a, torch.rand(2, 1))
 
+
+class TestUbackedOps(TestCase):
     @fresh_inductor_cache()
     @skipIfTorchDynamo("not allowed to trace mark_unbacked")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -3181,16 +3183,13 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
 
         # This reshape requires a clone when the input is not contiguous and we cant compute strides.
         # reshape (u2, u3) -> (u0, u1)
-        def func(x, y, with_view=False):
+        def func(x, y):
             u0, u1 = y.tolist()
             torch._check_is_size(u0)
             torch._check_is_size(u1)
 
             result1 = torch.reshape(x, (u0, u1))
-            result2 = None
-            if with_view:
-                result2 = x.view(x, (u0, u1)) * 10
-            return result1 * 10, result2
+            return result1 * 10
 
         compiled_func = torch.compile(fullgraph=True, backend=cnt, dynamic=True)(func)
 
@@ -3279,6 +3278,32 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         eager_result = func(x, torch.tensor([2]))
         self.assertEqual(compiled_result, eager_result)
 
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_invalid_view_unbacked_view(self):
+        cnt = CompileCounterWithBackend("inductor")
+
+        # This view (u2, u3) -> (u0, u1) cant happen in general unless we know that input is contigous or we have hints to 
+        # to compute strides.
+        # reshape 
+        def func(x, y):
+            u0, u1 = y.tolist()
+            torch._check_is_size(u0)
+            torch._check_is_size(u1)
+
+            result2 = x.view(u0, u1) * 10
+            return result2
+
+        compiled_func = torch.compile(fullgraph=True, backend=cnt, dynamic=True)(func)
+
+        x = torch.randn(10, 10)
+        # make x not contiguous.
+        x = x.t_()
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        with self.assertRaises(torch._dynamo.exc.UserError):
+            # throws a data dependent error.
+            compiled_func(x, torch.tensor([5, 20]))
 
 if __name__ == "__main__":
     run_tests()
