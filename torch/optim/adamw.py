@@ -106,7 +106,9 @@ AdamW.__doc__ = (
             running averages of gradient and its square (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
-        weight_decay (float, optional): weight decay coefficient (default: 1e-2)
+        weight_decay (float, optional): weight decay coefficient. This value is
+            scaled with the (potentially scheduled) learning rate at each step
+            (default: 1e-2)
         amsgrad (bool, optional): whether to use the AMSGrad variant of this
             algorithm from the paper `On the Convergence of Adam and Beyond`_
             (default: False)
