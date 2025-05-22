@@ -3015,8 +3015,9 @@ def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
 
 class TestUnbacked(TestCase):
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_deferred_neq_assert(self):
-        @torch.compile(fullgraph=True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_deferred_neq_assert(self, backend):
+        @torch.compile(fullgraph=True, backend=backend)
         def func(a):
             torch._check(a.item() != 5)
             return a.item() * 10
@@ -3029,8 +3030,9 @@ class TestUnbacked(TestCase):
     # Test a situation where we generate a runtime assert i.e: u1==s1, then we spcialize s1
     # later on to a constant.
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_post_specialize_runtime_assert1(self):
-        @torch.compile(dynamic=True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_post_specialize_runtime_assert1(self, backend):
+        @torch.compile(dynamic=True, backend=backend)
         def func(x, y):
             u0 = y.item()
             s0 = x.size()[0]
@@ -3045,8 +3047,9 @@ class TestUnbacked(TestCase):
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @torch._inductor.config.patch(post_grad_custom_pre_pass=custom_pass)
-    def test_post_specialize_runtime_assert2(self):
-        @torch.compile(dynamic=True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_post_specialize_runtime_assert2(self, backend):
+        @torch.compile(dynamic=True, backend=backend)
         def func(x, y):
             u0 = y.item()
             s0 = x.size()[0]
@@ -3059,8 +3062,9 @@ class TestUnbacked(TestCase):
             func(torch.rand(2, 50), torch.tensor([51]))
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_deferred_sym_or_assert(self):
-        @torch.compile(fullgraph=True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_deferred_sym_or_assert(self, backend):
+        @torch.compile(fullgraph=True, backend=backend)
         def func(a, b):
             torch._check(operator.or_(a.item() == 5, b.item() == 5))
             return a.item() * 10
@@ -3079,8 +3083,9 @@ class TestUnbacked(TestCase):
         self.assertTrue(has_free_symbols(sympy.sympify("a+b")))
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_deferred_sym_eq_assert(self):
-        @torch.compile(fullgraph=True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_deferred_sym_eq_assert(self, backend):
+        @torch.compile(fullgraph=True, backend=backend)
         def func(a, b):
             torch._check(b.item() == 5)
             return a * 10
@@ -3089,10 +3094,11 @@ class TestUnbacked(TestCase):
         with self.assertRaises(RuntimeError):
             func(torch.tensor([100]), torch.tensor([1]))
 
-    @skipIfTorchDynamo("mark_unbacked is not traceable")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_deferred_with_unbacked_input(self):
-        @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
+    @parametrize("backend", ["inductor", "eager"])
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_deferred_with_unbacked_input(self, backend):
+        @torch.compile(fullgraph=True, dynamic=True, backend=backend)
         def func(a, b):
             torch._check(a.size()[0] == b.size()[0])
             return a * 10
@@ -3105,6 +3111,9 @@ class TestUnbacked(TestCase):
 
         with self.assertRaises(RuntimeError):
             func(a, torch.rand(2, 1))
+
+
+instantiate_parametrized_tests(TestUnbacked)
 
 
 if __name__ == "__main__":

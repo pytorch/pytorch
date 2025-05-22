@@ -1076,7 +1076,6 @@ class GraphLowering(torch.fx.Interpreter):
             else:
                 expr = example.node._expr
 
-            print(f"detected {expr} original is {example.node._expr}")
             self.graph_inputs[target] = expr
             self.graph_input_names.append(target)
             return expr
