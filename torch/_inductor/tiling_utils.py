@@ -56,6 +56,7 @@ def find_coalesced_var(
         try:
             new_val = sympy_subs(index, variables)
         except ZeroDivisionError:
+            loop_tiling_log.info("zero division error %s %s", index, variables)
             continue
         if new_val - zero_index == 1:
             return v
@@ -231,6 +232,7 @@ else:
         """
         if len(it1) != len(it2):
             raise ValueError(f"Lengths differ: {len(it1)} != {len(it2)}")
+        return zip(it1, it2)
 
 
 def apply_var_mapping(
