@@ -19,10 +19,15 @@ inline namespace CPU_CAPABILITY {
 static inline void cvtfp8e4m3_fp32(const __m128i& a, __m512& o) {
   // Zero Extend
   __m512i x = _mm512_cvtepu8_epi32(a);
-  __m512i val = _mm512_and_epi32(_mm512_slli_epi32(x, 24), _mm512_set1_epi32(0x7FFFFFFF)); // nonsign_val
-  __m512i mant = _mm512_and_si512(x, _mm512_set1_epi32(0x07));        // mantissa = x & 0x07
-  __m512i exp  = _mm512_and_si512(_mm512_srli_epi32(x, 3), _mm512_set1_epi32(0x0F)); // exp = (x >> 3) & 0x0F
-  __m512i sign = _mm512_and_si512(x, _mm512_set1_epi32(0x80));        // sign = x & 0x80
+  __m512i val = _mm512_and_epi32(
+      _mm512_slli_epi32(x, 24), _mm512_set1_epi32(0x7FFFFFFF)); // nonsign_val
+  __m512i mant =
+      _mm512_and_si512(x, _mm512_set1_epi32(0x07)); // mantissa = x & 0x07
+  __m512i exp = _mm512_and_si512(
+      _mm512_srli_epi32(x, 3),
+      _mm512_set1_epi32(0x0F)); // exp = (x >> 3) & 0x0F
+  __m512i sign =
+      _mm512_and_si512(x, _mm512_set1_epi32(0x80)); // sign = x & 0x80
   __m512i _zeros = _mm512_setzero_si512();
 
   // --- Step 1: Calculate the renorm_shift
@@ -31,11 +36,12 @@ static inline void cvtfp8e4m3_fp32(const __m128i& a, __m512& o) {
   __mmask16 denormal_mask = _mm512_cmpeq_epi32_mask(exp, _zeros) &
       _mm512_cmpneq_epi32_mask(mant, _zeros);
   if (denormal_mask) {
-    // An alternative solution is as what scalar did in pytorch/c10/util/Float8_e4m3fn.h
-    // To count the num of leading zeros, since here we know the unsigned denorm value has
-    // zero sign and exp which is 5 leading zeros, we need to count the leading zero of mant (3bit)
-    // which may done through table lookup for example:
-    // const uint8_t lz_table[8] = {3, 2, 1, 1, 0, 0, 0, 0}; num_leading_zero = lz_table[mant] + 5;
+    // An alternative solution is as what scalar did in
+    // pytorch/c10/util/Float8_e4m3fn.h To count the num of leading zeros, since
+    // here we know the unsigned denorm value has zero sign and exp which is 5
+    // leading zeros, we need to count the leading zero of mant (3bit) which may
+    // done through table lookup for example: const uint8_t lz_table[8] = {3, 2,
+    // 1, 1, 0, 0, 0, 0}; num_leading_zero = lz_table[mant] + 5;
 
     __m512i _ones = _mm512_set1_epi32(1);
     __m512i _twos = _mm512_set1_epi32(2);
@@ -45,23 +51,26 @@ static inline void cvtfp8e4m3_fp32(const __m128i& a, __m512& o) {
     __m512i denorm_renorm_shift = _ones;
     // For mant 001, leading zero number is 3 = 7 -4
     __mmask16 leading_Zero_mask = _mm512_cmpeq_epi32_mask(mant, _ones);
-    denorm_renorm_shift = _mm512_mask_mov_epi32(denorm_renorm_shift, leading_Zero_mask, _threes);
+    denorm_renorm_shift =
+        _mm512_mask_mov_epi32(denorm_renorm_shift, leading_Zero_mask, _threes);
     // For mant 010 and 011, leading zero number is 2 = 6 -4
     leading_Zero_mask = _mm512_cmpeq_epi32_mask(mant, _twos);
-    denorm_renorm_shift = _mm512_mask_mov_epi32(denorm_renorm_shift, leading_Zero_mask, _twos);
+    denorm_renorm_shift =
+        _mm512_mask_mov_epi32(denorm_renorm_shift, leading_Zero_mask, _twos);
     leading_Zero_mask = _mm512_cmpeq_epi32_mask(mant, _threes);
-    denorm_renorm_shift = _mm512_mask_mov_epi32(denorm_renorm_shift, leading_Zero_mask, _twos);
+    denorm_renorm_shift =
+        _mm512_mask_mov_epi32(denorm_renorm_shift, leading_Zero_mask, _twos);
 
-    renorm_shift = _mm512_mask_mov_epi32(renorm_shift, denormal_mask, denorm_renorm_shift);
+    renorm_shift =
+        _mm512_mask_mov_epi32(renorm_shift, denormal_mask, denorm_renorm_shift);
   }
 
   // --- Step 2: calculate norm and denorm ---
-  __m512i norm_shifted = _mm512_srli_epi32(_mm512_sllv_epi32(val, renorm_shift), 4);
+  __m512i norm_shifted =
+      _mm512_srli_epi32(_mm512_sllv_epi32(val, renorm_shift), 4);
   // exponent bias adjustment: (0x78 - renorm_shift) << 23
   __m512i exp_bias = _mm512_slli_epi32(
-      _mm512_sub_epi32(_mm512_set1_epi32(0x78), renorm_shift),
-      23
-  );
+      _mm512_sub_epi32(_mm512_set1_epi32(0x78), renorm_shift), 23);
   val = _mm512_add_epi32(norm_shifted, exp_bias);
 
   // --- Step 3: Nan case (exp == 0xF && mant == 0x07) ---
@@ -87,12 +96,12 @@ static inline void cvtfp8e4m3_fp32(const __m128i& a, __m512& o) {
 
 static inline __m128i cvtfp32_fp8e4m3(const __m512& src) {
   // cvt 16x32 from fp32 to fp8 e4m3
-  const __m512i sign_mask      = _mm512_set1_epi32(0x80000000);
-  const __m512i fp8_max        = _mm512_set1_epi32(UINT32_C(1087) << 20);
-  const __m512i denorm_thresh   = _mm512_set1_epi32(UINT32_C(121) << 23);
-  const __m512i denorm_mask    = _mm512_set1_epi32(UINT32_C(141) << 23);
-  const __m512i bias_part1     = _mm512_set1_epi32((uint32_t)(7 - 127) << 23);
-  const __m512i rounding_bias  = _mm512_set1_epi32(0x7FFFF);
+  const __m512i sign_mask = _mm512_set1_epi32(0x80000000);
+  const __m512i fp8_max = _mm512_set1_epi32(UINT32_C(1087) << 20);
+  const __m512i denorm_thresh = _mm512_set1_epi32(UINT32_C(121) << 23);
+  const __m512i denorm_mask = _mm512_set1_epi32(UINT32_C(141) << 23);
+  const __m512i bias_part1 = _mm512_set1_epi32((uint32_t)(7 - 127) << 23);
+  const __m512i rounding_bias = _mm512_set1_epi32(0x7FFFF);
   __m512i f_bits = _mm512_castps_si512(src);
   // Extract and save sign
   __m512i sign = _mm512_and_epi32(f_bits, sign_mask);
@@ -114,7 +123,8 @@ static inline __m128i cvtfp32_fp8e4m3(const __m512& src) {
 
   if (denorm_thresh_mask) {
     __m512 small_input = _mm512_castsi512_ps(f_bits);
-    __m512 small_denorm = _mm512_add_ps(small_input, _mm512_castsi512_ps(denorm_mask));
+    __m512 small_denorm =
+        _mm512_add_ps(small_input, _mm512_castsi512_ps(denorm_mask));
     __m512i small_denorm_bits = _mm512_castps_si512(small_denorm);
     __m512i small_result = _mm512_sub_epi32(small_denorm_bits, denorm_mask);
     result = _mm512_mask_mov_epi32(result, denorm_thresh_mask, small_result);
@@ -125,7 +135,8 @@ static inline __m128i cvtfp32_fp8e4m3(const __m512& src) {
 
   if (normal_mask) {
     // mant_odd = (f_bits >> 20) & 1
-    __m512i mant_odd = _mm512_and_epi32(_mm512_srli_epi32(f_bits, 20), _mm512_set1_epi32(1));
+    __m512i mant_odd =
+        _mm512_and_epi32(_mm512_srli_epi32(f_bits, 20), _mm512_set1_epi32(1));
     // f_bits += bias_part1 + rounding_bias
     __m512i rounded = _mm512_add_epi32(f_bits, bias_part1);
     rounded = _mm512_add_epi32(rounded, rounding_bias);
@@ -163,12 +174,13 @@ static inline uint8_t fp32_to_fp8e4m3_scalar(float val) {
 
 template <typename T>
 class Vectorizedf8 {
-static_assert(
-  std::integral_constant<bool, std::is_same_v<T, at::Float8_e4m3fn>>::value,
-  "Support only float8 e4m3.");
-private:
+  static_assert(
+      std::integral_constant<bool, std::is_same_v<T, at::Float8_e4m3fn>>::value,
+      "Support only float8 e4m3.");
+
+ private:
   __m512i values;
-  template<typename Op, typename VectorizedType>
+  template <typename Op, typename VectorizedType>
   Vectorized<T> inline binary_compare(const VectorizedType& b, Op op) const {
     __m512 a0, a1, a2, a3;
     __m512 b0, b1, b2, b3;
@@ -200,7 +212,8 @@ private:
 
     return result;
   }
-public:
+
+ public:
   using value_type = uint8_t;
   using size_type = int;
   static constexpr size_type size() {
@@ -216,13 +229,14 @@ public:
     return values;
   }
   T& operator[](int idx) = delete;
-  const T& operator[](int idx) const  = delete;
+  const T& operator[](int idx) const = delete;
   static Vectorized<T> loadu(const void* ptr, int16_t count = size()) {
     if (count == size()) {
       return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
     } else if (count == 16) {
       // Fast path if only load element number of 16
-      __m128i input_128 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(ptr));
+      __m128i input_128 =
+          _mm_loadu_si128(reinterpret_cast<const __m128i*>(ptr));
       return _mm512_castsi128_si512(input_128);
     } else {
       __mmask64 mask = (1ULL << count) - 1;
@@ -236,8 +250,7 @@ public:
       if (count == 16) {
         // Fast path if only store element number of 16
         _mm_storeu_si128(
-          reinterpret_cast<__m128i*>(ptr),
-          _mm512_castsi512_si128(values));
+            reinterpret_cast<__m128i*>(ptr), _mm512_castsi512_si128(values));
       } else {
         __mmask64 mask = (1ULL << count) - 1;
         _mm512_mask_storeu_epi8(ptr, mask, values);
@@ -253,7 +266,8 @@ public:
     return binary_compare(other, [](__m512 x, __m512 y) {
       auto zero_vec = _mm512_set1_epi32(0);
       auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_EQ_OQ);
-      return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
+      return _mm512_castsi512_ps(
+          _mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
     });
   }
 
@@ -261,7 +275,8 @@ public:
     return binary_compare(other, [](__m512 x, __m512 y) {
       auto zero_vec = _mm512_set1_epi32(0);
       auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_NEQ_UQ);
-      return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
+      return _mm512_castsi512_ps(
+          _mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
     });
   }
 
@@ -269,7 +284,8 @@ public:
     return binary_compare(other, [](__m512 x, __m512 y) {
       auto zero_vec = _mm512_set1_epi32(0);
       auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_GT_OQ);
-      return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
+      return _mm512_castsi512_ps(
+          _mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
     });
   }
 
@@ -277,7 +293,8 @@ public:
     return binary_compare(other, [](__m512 x, __m512 y) {
       auto zero_vec = _mm512_set1_epi32(0);
       auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_GE_OQ);
-      return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
+      return _mm512_castsi512_ps(
+          _mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
     });
   }
 
@@ -285,7 +302,8 @@ public:
     return binary_compare(other, [](__m512 x, __m512 y) {
       auto zero_vec = _mm512_set1_epi32(0);
       auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_LT_OQ);
-      return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
+      return _mm512_castsi512_ps(
+          _mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
     });
   }
 
@@ -293,16 +311,15 @@ public:
     return binary_compare(other, [](__m512 x, __m512 y) {
       auto zero_vec = _mm512_set1_epi32(0);
       auto cmp = _mm512_cmp_ps_mask(x, y, _CMP_LE_OQ);
-      return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
+      return _mm512_castsi512_ps(
+          _mm512_mask_set1_epi32(zero_vec, cmp, 0xFFFFFFFF));
     });
   }
-
 };
 
-
 template <>
-class Vectorized<Float8_e4m3fn>: public Vectorizedf8<Float8_e4m3fn> {
-public:
+class Vectorized<Float8_e4m3fn> : public Vectorizedf8<Float8_e4m3fn> {
+ public:
   using Vectorizedf8::Vectorizedf8;
 
   using value_type = Float8_e4m3fn;
@@ -315,8 +332,11 @@ public:
   Vectorized<Float8_e4m3fn> le(const Vectorized<Float8_e4m3fn>& other) const;
 };
 
-template<typename T, typename Op>
-static inline Vectorized<T> binary_fp8_op_as_fp32(const Vectorized<T>& a, const Vectorized<T>& b, Op op) {
+template <typename T, typename Op>
+static inline Vectorized<T> binary_fp8_op_as_fp32(
+    const Vectorized<T>& a,
+    const Vectorized<T>& b,
+    Op op) {
   __m512 a0, a1, a2, a3;
   __m512 b0, b1, b2, b3;
   __m512 o0, o1, o2, o3;
@@ -348,52 +368,79 @@ static inline Vectorized<T> binary_fp8_op_as_fp32(const Vectorized<T>& a, const 
   return result;
 }
 
-// Refer to https://github.com/pytorch/pytorch/pull/153364#discussion_r2086509353
-// FP8 +, -, *, /, planed to be deleted in the future and here is just to make compiler happy
-Vectorized<Float8_e4m3fn> inline operator+(const Vectorized<Float8_e4m3fn>& a, const Vectorized<Float8_e4m3fn>& b) {
-  return binary_fp8_op_as_fp32(a, b, [](const __m512& x, const __m512& y) { return _mm512_add_ps(x, y); });
+// Refer to
+// https://github.com/pytorch/pytorch/pull/153364#discussion_r2086509353 FP8 +,
+// -, *, /, planed to be deleted in the future and here is just to make compiler
+// happy
+Vectorized<Float8_e4m3fn> inline operator+(
+    const Vectorized<Float8_e4m3fn>& a,
+    const Vectorized<Float8_e4m3fn>& b) {
+  return binary_fp8_op_as_fp32(a, b, [](const __m512& x, const __m512& y) {
+    return _mm512_add_ps(x, y);
+  });
 }
 
-Vectorized<Float8_e4m3fn> inline operator-(const Vectorized<Float8_e4m3fn>& a, const Vectorized<Float8_e4m3fn>& b) {
-  return binary_fp8_op_as_fp32(a, b, [](const __m512& x, const __m512& y) { return _mm512_sub_ps(x, y); });
+Vectorized<Float8_e4m3fn> inline operator-(
+    const Vectorized<Float8_e4m3fn>& a,
+    const Vectorized<Float8_e4m3fn>& b) {
+  return binary_fp8_op_as_fp32(a, b, [](const __m512& x, const __m512& y) {
+    return _mm512_sub_ps(x, y);
+  });
 }
 
-Vectorized<Float8_e4m3fn> inline operator*(const Vectorized<Float8_e4m3fn>& a, const Vectorized<Float8_e4m3fn>& b) {
-  return binary_fp8_op_as_fp32(a, b, [](const __m512& x, const __m512& y) { return _mm512_mul_ps(x, y); });
+Vectorized<Float8_e4m3fn> inline operator*(
+    const Vectorized<Float8_e4m3fn>& a,
+    const Vectorized<Float8_e4m3fn>& b) {
+  return binary_fp8_op_as_fp32(a, b, [](const __m512& x, const __m512& y) {
+    return _mm512_mul_ps(x, y);
+  });
 }
 
-Vectorized<Float8_e4m3fn> inline operator/(const Vectorized<Float8_e4m3fn>& a, const Vectorized<Float8_e4m3fn>& b) {
-  return binary_fp8_op_as_fp32(a, b, [](const __m512& x, const __m512& y) { return _mm512_div_ps(x, y); });
+Vectorized<Float8_e4m3fn> inline operator/(
+    const Vectorized<Float8_e4m3fn>& a,
+    const Vectorized<Float8_e4m3fn>& b) {
+  return binary_fp8_op_as_fp32(a, b, [](const __m512& x, const __m512& y) {
+    return _mm512_div_ps(x, y);
+  });
 }
 
-Vectorized<Float8_e4m3fn> inline operator&(const Vectorized<Float8_e4m3fn>& a, const Vectorized<Float8_e4m3fn>& b) {
+Vectorized<Float8_e4m3fn> inline operator&(
+    const Vectorized<Float8_e4m3fn>& a,
+    const Vectorized<Float8_e4m3fn>& b) {
   return _mm512_and_si512(a, b);
 }
 
-inline Vectorized<Float8_e4m3fn> Vectorized<Float8_e4m3fn>::eq(const Vectorized<Float8_e4m3fn>& other) const {
+inline Vectorized<Float8_e4m3fn> Vectorized<Float8_e4m3fn>::eq(
+    const Vectorized<Float8_e4m3fn>& other) const {
   return (*this == other) & Vectorized<Float8_e4m3fn>(1.0f);
 }
 
-inline Vectorized<Float8_e4m3fn> Vectorized<Float8_e4m3fn>::ne(const Vectorized<Float8_e4m3fn>& other) const {
+inline Vectorized<Float8_e4m3fn> Vectorized<Float8_e4m3fn>::ne(
+    const Vectorized<Float8_e4m3fn>& other) const {
   return (*this == other) & Vectorized<Float8_e4m3fn>(1.0f);
 }
 
-inline Vectorized<Float8_e4m3fn> Vectorized<Float8_e4m3fn>::gt(const Vectorized<Float8_e4m3fn>& other) const {
+inline Vectorized<Float8_e4m3fn> Vectorized<Float8_e4m3fn>::gt(
+    const Vectorized<Float8_e4m3fn>& other) const {
   return (*this > other) & Vectorized<Float8_e4m3fn>(1.0f);
 }
 
-inline Vectorized<Float8_e4m3fn> Vectorized<Float8_e4m3fn>::ge(const Vectorized<Float8_e4m3fn>& other) const {
+inline Vectorized<Float8_e4m3fn> Vectorized<Float8_e4m3fn>::ge(
+    const Vectorized<Float8_e4m3fn>& other) const {
   return (*this >= other) & Vectorized<Float8_e4m3fn>(1.0f);
 }
 
-inline Vectorized<Float8_e4m3fn> Vectorized<Float8_e4m3fn>::lt(const Vectorized<Float8_e4m3fn>& other) const {
+inline Vectorized<Float8_e4m3fn> Vectorized<Float8_e4m3fn>::lt(
+    const Vectorized<Float8_e4m3fn>& other) const {
   return (*this < other) & Vectorized<Float8_e4m3fn>(1.0f);
 }
 
-inline Vectorized<Float8_e4m3fn> Vectorized<Float8_e4m3fn>::le(const Vectorized<Float8_e4m3fn>& other) const {
+inline Vectorized<Float8_e4m3fn> Vectorized<Float8_e4m3fn>::le(
+    const Vectorized<Float8_e4m3fn>& other) const {
   return (*this <= other) & Vectorized<Float8_e4m3fn>(1.0f);
 }
 
 #endif
 
-}}
+} // namespace CPU_CAPABILITY
+} // namespace at::vec
