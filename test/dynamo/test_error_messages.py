@@ -432,7 +432,8 @@ from user code:
         )
 
     @unittest.skipIf(not python_pytree._cxx_pytree_exists, "missing optree package")
-    def test_optree_graph_break_message(self):
+    @make_logging_test(graph_breaks=True)
+    def test_optree_graph_break_message(self, records):
         import optree
 
         @torch.compile(backend="eager")
@@ -443,15 +444,25 @@ from user code:
 
         fn(torch.randn(4))
         self.assertEqual(len(counters["graph_break"]), 1)
-        first_graph_break = next(iter(counters["graph_break"].keys()))
+        first_graph_break = munge_exc(records[0].getMessage(), skip=0)
+        first_graph_break = re.sub(
+            r"/.*?(site-packages/.*?\.py:N)", r"\1", first_graph_break
+        )
         self.assertExpectedInline(
             first_graph_break,
             """\
-Attempted to call function marked as skipped
+Graph break in user code at site-packages/optree/ops.py:N
+Graph Break Reason: Attempted to call function marked as skipped
   Explanation: Dynamo cannot trace optree C/C++ function optree._C.PyCapsule.flatten.
   Hint: Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py
 
   Developer debug context: module: optree._C, qualname: PyCapsule.flatten, skip reason: <missing reason>
+
+User code traceback:
+  File "test_error_messages.py", line N, in test_optree_graph_break_message
+    fn(torch.randn(4))
+  File "test_error_messages.py", line N, in fn
+    optree.tree_flatten(d)
 """,
         )
 
