@@ -193,7 +193,7 @@ class FusedNormalizedReadsWrites:
 
 @overload
 def get_pw_red_splits(
-    n: SchedulerNode,
+    n: "SchedulerNode",
     pointwise_numel: sympy.Expr,
     red_numel: sympy.Expr,
     none_if_not_divisible: Literal[True],
@@ -202,7 +202,7 @@ def get_pw_red_splits(
 
 @overload
 def get_pw_red_splits(
-    n: SchedulerNode,
+    n: "SchedulerNode",
     pointwise_numel: sympy.Expr,
     red_numel: sympy.Expr,
     none_if_not_divisible: Literal[False] = False,
@@ -279,6 +279,7 @@ class NodeSplitGetter:
             )
             if maybe_splits is None:
                 self.all_node_sizes.add(n._body.sizes)
+                continue
 
             (_, n_pw_splits), (_, n_red_splits) = maybe_splits
 
@@ -462,12 +463,12 @@ def extract_normalized_read_writes(
         if not V.graph.scheduler.can_buffer_be_removed_through_fusion(buf, op_names)
     )
     inputs = OrderedSet(dep.name for dep in node.read_writes.reads)
+    pointwise_numel: sympy.Expr = node.group[1][0]
+    red_numel: sympy.Expr = node.group[1][1]
 
     # TODO - a few dynamic shapes issues to resolve
-    for buf_name in itertools.chain(inputs, outputs):
-        if buf := V.graph.try_get_buffer(buf_name):
-            if buf.get_free_symbol_uses():
-                return None
+    if any((isinstance(var, sympy.Expr) and not var.is_constant()) for var in (pointwise_numel, red_numel)):
+        return None
 
     pw_splits, red_splits = NodeSplitGetter(node).get_node_splits()
 
@@ -476,8 +477,6 @@ def extract_normalized_read_writes(
         pw_splits, red_splits, prefix="n"
     )
     node = node
-    pointwise_numel: sympy.Expr = node.group[1][0]
-    red_numel: sympy.Expr = node.group[1][1]
 
     for n in list(node.get_nodes()):
         if not isinstance(n, torch._inductor.scheduler.SchedulerNode):

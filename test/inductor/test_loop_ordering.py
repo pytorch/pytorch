@@ -521,7 +521,9 @@ class LoopOrderingTest(TestCase):
 @inductor_config.patch(
     {
         "triton.unique_kernel_names": True,
+        "loop_ordering_after_fusion": True,
         "triton.max_tiles": 3,
+        "test_configs.global_tiling_analysis": True,
     }
 )
 @instantiate_parametrized_tests
@@ -865,8 +867,6 @@ class MemoryCoalescingTest(MockSchedulerTest):
 
             coalesce_analysis = tiling_utils.analyze_memory_coalescing(nodes[0])
             self.assertEqual(coalesce_analysis.suggested_split.tiling_factor, 64)
-            return nodes
-
             return nodes
 
         with torch._inductor.config.patch(_post_fusion_custom_pass=fn), torch.no_grad():
