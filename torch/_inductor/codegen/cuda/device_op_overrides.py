@@ -88,6 +88,21 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                 return func;
             }
 
+            static inline CUfunction loadKernel(const void* start, const std::string &funcName, uint32_t sharedMemBytes) {
+                CUmodule mod;
+                CUfunction func;
+                CUDA_DRIVER_CHECK(cuModuleLoadData(&mod, start));
+                CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
+                if (sharedMemBytes > 0) {
+                    CUDA_DRIVER_CHECK(cuFuncSetAttribute(
+                        func,
+                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                        sharedMemBytes
+                    ))
+                }
+                return func;
+            }
+
             static inline void launchKernel(
                     CUfunction func,
                     uint32_t gridX,
