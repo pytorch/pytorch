@@ -29,11 +29,11 @@ from torch._higher_order_ops.strict_mode import strict_mode
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._higher_order_ops.while_loop import while_loop
 from torch._higher_order_ops.wrap import (
+    dynamo_bypassing_wrapper,
     tag_activation_checkpoint,
     wrap_activation_checkpoint,
     wrap_with_autocast,
     wrap_with_set_grad_enabled,
-    dynamo_bypassing_wrapper,
 )
 
 
