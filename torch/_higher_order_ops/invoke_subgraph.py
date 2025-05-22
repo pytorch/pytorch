@@ -624,9 +624,9 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
             # To materialize, we create a new proxy_tracer to trace the invocation of invoke_subgraph so when we
             # hit the next invocation of invoke_subgraph that share the same identifier, the graph module might not exist
             # as a submodule in the new tracer's root. Therefore we register it as a submodule below.
-            if not hasattr(proxy_mode.tracer.root, identifier):
-                proxy_mode.tracer.root.register_module(identifier, graph)
-        return proxy_mode.tracer.unwrap_proxy(arg)
+            if not hasattr(proxy_mode.tracer.root, identifier):  # type: ignore[union-attr]
+                proxy_mode.tracer.root.register_module(identifier, graph)  # type: ignore[union-attr]
+        return proxy_mode.tracer.unwrap_proxy(arg)  # type: ignore[union-attr]
 
     proxy_args = pytree.tree_map(_unwrap_proxy, node_args)  # type: ignore[union-attr]
     assert (
