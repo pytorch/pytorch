@@ -83,8 +83,12 @@ struct FusedSgdMathFunctor {
     }
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+
+    const opmath_t weight_decay_opmath = static_cast<opmath_t>(weight_decay);
+    const opmath_t momentum_opmath = static_cast<opmath_t>(momentum);
     const opmath_t lr_opmath =
         lr_ptr ? static_cast<opmath_t>(*lr_ptr) : static_cast<opmath_t>(lr);
+    const opmath_t dampening_opmath = static_cast<opmath_t>(dampening);
 
     scalar_t* args[depth];
     scalar_t r_args[depth][kILP];
@@ -105,10 +109,10 @@ struct FusedSgdMathFunctor {
         }
         sgd_math<scalar_t, opmath_t, depth>(
             r_args,
-            static_cast<opmath_t>(weight_decay),
-            static_cast<opmath_t>(momentum),
+            weight_decay_opmath,
+            momentum_opmath,
             lr_opmath,
-            static_cast<opmath_t>(dampening),
+            dampening_opmath,
             nesterov,
             maximize,
             is_first_step,
@@ -127,10 +131,10 @@ struct FusedSgdMathFunctor {
         load_args<depth>(r_args, args, i_start, chunk_size, n);
         sgd_math<scalar_t, opmath_t, depth>(
             r_args,
-            static_cast<opmath_t>(weight_decay),
-            static_cast<opmath_t>(momentum),
+            weight_decay_opmath,
+            momentum_opmath,
             lr_opmath,
-            static_cast<opmath_t>(dampening),
+            dampening_opmath,
             nesterov,
             maximize,
             is_first_step,
@@ -161,8 +165,9 @@ void _fused_sgd_with_momentum_kernel_cuda_(
     const std::optional<at::Tensor>& grad_scale,
     const std::optional<at::Tensor>& found_inf) {
   TORCH_CHECK_GT(momentum, 0);
-  TORCH_CHECK(at::native::check_fast_path_restrictions(
-      {params, grads, momentum_buffer_list}));
+  TORCH_CHECK(
+      at::native::check_fast_path_restrictions(
+          {params, grads, momentum_buffer_list}));
   float* grad_scale_ptr =
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
   float* found_inf_ptr =
@@ -223,8 +228,9 @@ void _fused_sgd_with_momentum_kernel_cuda_(
     return;
   }
   TORCH_CHECK_GT(momentum, 0);
-  TORCH_CHECK(at::native::check_fast_path_restrictions(
-      {params, grads, momentum_buffer_list}));
+  TORCH_CHECK(
+      at::native::check_fast_path_restrictions(
+          {params, grads, momentum_buffer_list}));
   if (grad_scale.has_value()) {
     TORCH_CHECK(
         grad_scale->device() == params[0].device(),

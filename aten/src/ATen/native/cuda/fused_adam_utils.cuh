@@ -127,8 +127,13 @@ struct FusedAdamMathFunctor {
       const float* found_inf_ptr) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+
     const opmath_t lr_opmath =
         lr_ptr ? static_cast<opmath_t>(*lr_ptr) : static_cast<opmath_t>(lr);
+    const opmath_t beta1_opmath = static_cast<opmath_t>(beta1);
+    const opmath_t beta2_opmath = static_cast<opmath_t>(beta2);
+    const opmath_t weight_decay_opmath = static_cast<opmath_t>(weight_decay);
+    const opmath_t eps_opmath = static_cast<opmath_t>(eps);
 
     if (found_inf_ptr && *found_inf_ptr == 1) {
       return;
@@ -140,10 +145,10 @@ struct FusedAdamMathFunctor {
               tl.state_steps_addresses[tensor_loc]));
 
       const opmath_t bias_correction1 =
-          1 - at::native::pow_(static_cast<opmath_t>(beta1), step_count);
+          1 - at::native::pow_(beta1_opmath, step_count);
 
       const opmath_t bias_correction2 =
-          1 - at::native::pow_(static_cast<opmath_t>(beta2), step_count);
+          1 - at::native::pow_(beta2_opmath, step_count);
       const opmath_t bias_correction2_sqrt = std::sqrt(bias_correction2);
 
       return {bias_correction1, bias_correction2_sqrt};
@@ -167,10 +172,10 @@ struct FusedAdamMathFunctor {
         adam_math<scalar_type, opmath_t, depth, adam_mode, amsgrad>(
             r_args,
             lr_opmath,
-            static_cast<opmath_t>(beta1),
-            static_cast<opmath_t>(beta2),
-            static_cast<opmath_t>(weight_decay),
-            static_cast<opmath_t>(eps),
+            beta1_opmath,
+            beta2_opmath,
+            weight_decay_opmath,
+            eps_opmath,
             maximize,
             grad_scale_ptr,
             found_inf_ptr,
@@ -190,10 +195,10 @@ struct FusedAdamMathFunctor {
         adam_math<scalar_type, opmath_t, depth, adam_mode, amsgrad>(
             r_args,
             lr_opmath,
-            beta1,
-            beta2,
-            weight_decay,
-            eps,
+            beta1_opmath,
+            beta2_opmath,
+            weight_decay_opmath,
+            eps_opmath,
             maximize,
             grad_scale_ptr,
             found_inf_ptr,
