@@ -57,7 +57,6 @@ as_jenkins git checkout ${TRITON_PINNED_COMMIT}
 as_jenkins git submodule update --init --recursive
 cd ${SETUP_PY_FOLDER}
 pip_install pybind11==2.13.6
-pip_install "cmake>=3.20,<4.0"
 
 if [ -z "${XPU_VERSION}" ]; then
   # TODO: remove patch setup.py once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
