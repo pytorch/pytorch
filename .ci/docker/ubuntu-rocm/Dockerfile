@@ -63,8 +63,10 @@ ARG ROCM_VERSION
 COPY ./common/install_rocm.sh install_rocm.sh
 RUN bash ./install_rocm.sh
 RUN rm install_rocm.sh
+
+ARG MAGMA_PAT
 COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
-RUN bash ./install_rocm_magma.sh
+RUN bash ./install_rocm_magma.sh ${MAGMA_PAT}
 RUN rm install_rocm_magma.sh
 ADD ./common/install_miopen.sh install_miopen.sh
 RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh

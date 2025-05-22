@@ -8,10 +8,17 @@ set -ex
 
 image="$1"
 shift
+token="$1"
+shift
 
 if [ -z "${image}" ]; then
   echo "Usage: $0 IMAGE"
   exit 1
+fi
+
+if [ -z "${token}" ]; then
+  echo "Token not set"
+  token="no-value"
 fi
 
 function extract_version_from_image_name() {
@@ -515,6 +522,7 @@ docker build \
        --build-arg "ACL=${ACL:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
+       --build-arg "MAGMA_PAT=${token}"  \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \
