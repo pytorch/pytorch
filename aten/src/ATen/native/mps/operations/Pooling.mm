@@ -694,8 +694,8 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_out_mps(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode,
-    const Tensor& output,
-    const Tensor& indices) {
+    Tensor& output,
+    Tensor& indices) {
   mps::Pooling4dOpBlock pooling_op_block = ^Pooling4dOpFn(cachedGraph, desc) {
     MPSGraph* mpsGraph = cachedGraph.graph();
     NSArray<MPSGraphTensor*>* poolOutputs = [mpsGraph maxPooling4DReturnIndicesWithSourceTensor:cachedGraph.inputTensor
