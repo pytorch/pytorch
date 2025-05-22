@@ -529,6 +529,9 @@ def get_cache_key() -> Optional[str]:
             )
         return f"{r}:{rank}:{tag}"
 
+    if (r := torch.compiler.sticky_pgo_key) is not None:
+        return f"sticky:{r}:{tag}"
+
     if (name_version := torch._utils_internal.get_mast_job_name_version()) is not None:
         mast_job_name, mast_job_version = name_version
         return f"mast:{mast_job_name}:{mast_job_version}:{rank}:{tag}"
