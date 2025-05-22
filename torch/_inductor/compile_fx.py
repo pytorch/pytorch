@@ -219,7 +219,13 @@ def get_static_input_idxs(num_fixed: int) -> list[int]:
 def record_original_output_strides(gm: GraphModule) -> None:
     output_node = gm.graph.find_nodes(op="output")[0]
     output_strides = []
-    for output in output_node.args[0]:
+
+    if not isinstance(output_node.args[0], torch.fx.Node):
+        output_node_args = output_node.args[0]
+    else:
+        output_node_args = output_node.args
+
+    for output in output_node_args:
         if (
             isinstance(output, torch.fx.Node)
             and (val := output.meta.get("val")) is not None

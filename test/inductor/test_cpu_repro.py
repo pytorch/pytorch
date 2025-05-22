@@ -5318,6 +5318,15 @@ class CPUReproTests(TestCase):
 
         self.common(fn, (x,))
 
+    def test_vector_norm_compile(self):
+        x = torch.randn([16, 32], dtype=torch.float)
+        ref = torch.linalg.vector_norm(x, ord=2, dim=[], keepdim=False, dtype=None)
+        compiled_vector_norm = torch.compile(
+            torch.linalg.vector_norm, backend="inductor"
+        )
+        res = compiled_vector_norm(x, ord=2, dim=[], keepdim=False, dtype=None)
+        self.assertEqual(ref, res)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
