@@ -47,11 +47,11 @@ class MyModule3(torch.nn.Module):
         return output
 
 
-# @requires_gpu
-# @skipIfXpu(
-#     msg="Intel GPU has not enabled decompose_mem_bound_mm PASS in "
-#     "torch/_inductor/fx_passes/decompose_mem_bound_mm.py"
-# )
+@requires_gpu
+@skipIfXpu(
+    msg="Intel GPU has not enabled decompose_mem_bound_mm PASS in "
+    "torch/_inductor/fx_passes/decompose_mem_bound_mm.py"
+)
 @torch._inductor.config.patch(
     post_grad_fusion_options={
         "decompose_mm_pass": {},
