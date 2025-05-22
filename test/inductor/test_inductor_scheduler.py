@@ -1,9 +1,10 @@
 # Owner(s): ["module: inductor"]
 
+from unittest import skipIf
+
 import torch
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
-from torch._inductor.ir import FixedLayout
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
@@ -12,6 +13,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
 )
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
 
 def FlopCounterMode(*args, **kwargs):
@@ -58,16 +60,9 @@ class TestScheduler(TestCase):
             },
         ],
     )
+    @skipIf(not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune")
     def test_flop_counter_op(self, device, dtype, options):
         if device == "cpu":
-            return
-        if (
-            options["max_autotune_gemm_backends"] == "TRITON"
-            and torch.cuda.is_available()
-            and not torch._inductor.utils.use_triton_template(
-                FixedLayout(torch.device("cuda"), torch.float16, [400, 800])
-            )
-        ):
             return
         T = cT(device, dtype)
 

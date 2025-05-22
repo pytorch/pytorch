@@ -923,6 +923,13 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             return tuple(map(fn, value))
         return fn(value)
 
+    def estimate_flops(self) -> Optional[int]:
+        flops = [
+            node.estimate_flops()
+            for node in NodeScheduleMarker.only_nodes(self.features.node_schedule)
+        ]
+        return sum(filter(None, flops))
+
     def estimate_kernel_num_bytes(self):
         """
         Try the best to estimate the total size (in bytes) of the
@@ -1554,7 +1561,9 @@ class SIMDScheduling(BaseScheduling):
                             kernel.cse.invalidate(OrderedSet())
 
         if not isinstance(partial_code, str):
-            partial_code.finalize_hook("<DEF_KERNEL>")
+            # This is used to calculate flops in TritonTemplateKernels
+            with ir.IRNode.current_origins(template_node.node.origins):
+                partial_code.finalize_hook("<DEF_KERNEL>")
             partial_code.finalize_hook("<ARGDEFS>", strict=False)
         # finalize must be called after adding epilogue above
 

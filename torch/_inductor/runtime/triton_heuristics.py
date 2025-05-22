@@ -784,14 +784,29 @@ class CachingAutotuner(KernelInterface):
             # reset to zero before evaluating any config
             self.reset_to_zero_args(*args, **kwargs)
             args_with_constexprs = self._get_args_with_constexprs(cloned_args, launcher)
-            launcher(
-                *args_with_constexprs,
-                **cloned_kwargs,
-                stream=stream,
-            )
+            if autograd_profiler._is_profiler_enabled:
+                profiler_kwargs = self.get_profiler_kwargs(stream, launcher)
+                with torch._C._profiler._RecordFunctionFast(
+                    self.inductor_meta.get("kernel_name", "triton kernel"),
+                    args_with_constexprs,
+                    profiler_kwargs,
+                ):
+                    launcher(
+                        *args_with_constexprs,
+                        **cloned_kwargs,
+                        stream=stream,
+                    )
+
+            else:
+                launcher(
+                    *args_with_constexprs,
+                    **cloned_kwargs,
+                    stream=stream,
+                )
             self.restore_args_from_cpu(cpu_copies)
 
-        if with_profiler:
+        # only use profiler when not already in a profiler instance
+        if with_profiler and not autograd_profiler._is_profiler_enabled:
             from torch._inductor.utils import do_bench_using_profiling
 
             return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
@@ -1082,6 +1097,23 @@ class CachingAutotuner(KernelInterface):
             ).make_launcher()
         return config2launcher[best_config]
 
+    def get_profiler_kwargs(self, stream, launcher):
+        kernel_kwargs_str = ",".join(
+            f"{k}={v}" for (k, v) in launcher.config.kwargs.items()
+        )
+
+        return {
+            "kernel_file": (self.filename or ""),
+            "kernel_hash": self.kernel_hash,
+            "kernel_backend": "triton",
+            "stream": stream,
+            "num_warps": launcher.config.num_warps,
+            "num_stages": launcher.config.num_stages,
+            "kernel_kwargs": kernel_kwargs_str,
+            "kernel_num_gb": self.inductor_meta.get("kernel_num_gb", None),
+            "kernel_flop": self.inductor_meta.get("kernel_flop", None),
+        }
+
     def run(
         self,
         *args,
@@ -1125,19 +1157,7 @@ class CachingAutotuner(KernelInterface):
         # it is faster than entering and exiting a context manager, even if the context
         # manager is a nullcontext.
         if autograd_profiler._is_profiler_enabled:
-            kernel_kwargs_str = ",".join(
-                f"{k}={v}" for (k, v) in launcher.config.kwargs.items()
-            )
-
-            profiler_kwargs = {
-                "kernel_file": (self.filename or ""),
-                "kernel_hash": self.kernel_hash,
-                "kernel_backend": "triton",
-                "stream": stream,
-                "num_warps": launcher.config.num_warps,
-                "num_stages": launcher.config.num_stages,
-                "kernel_kwargs": kernel_kwargs_str,
-            }
+            profiler_kwargs = self.get_profiler_kwargs(stream, launcher)
 
             with torch._C._profiler._RecordFunctionFast(
                 self.inductor_meta.get("kernel_name", "triton kernel"),
