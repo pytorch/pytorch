@@ -719,7 +719,7 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_out_mps(
                        pooling_op_block,
                        "max_pool3d_indices");
 
-  return std::tuple<Tensor, Tensor>(output, indices);
+  return {output, indices};
 }
 
 std::tuple<Tensor, Tensor> max_pool3d_with_indices_mps(
