@@ -56,6 +56,10 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
 
 
+OPTIMUS_EXCLUDE_POST_GRAD = [
+    "activation_quantization_aten_pass",
+]
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence, ValuesView
 
@@ -2471,7 +2475,7 @@ def is_gpu(device: Optional[str]) -> bool:
 
 
 def device_need_guard(device: str) -> bool:
-    return is_gpu(device)
+    return device != "mps" and is_gpu(device)  # TODO: MPS does not expose streams now
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
