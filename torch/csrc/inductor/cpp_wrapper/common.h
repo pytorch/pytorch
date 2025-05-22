@@ -11,7 +11,6 @@
 
 // Include some often-used cpp_wrapper headers, for precompiling.
 #include <c10/util/BFloat16.h>
-#include <c10/util/Float8_e4m3fn.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
