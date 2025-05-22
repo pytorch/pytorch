@@ -383,7 +383,7 @@ inline void* getBaseAllocation(void* ptr, size_t* size) {
 }
 
 inline void recordStream(const DataPtr& dataPtr, CUDAStream stream) {
-  return get()->recordStream(dataPtr, stream);
+  return get()->recordStream(dataPtr, stream.unwrap());
 }
 
 inline c10::CachingDeviceAllocator::DeviceStats getDeviceStats(

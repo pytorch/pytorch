@@ -3,8 +3,7 @@
 #include <c10/core/Allocator.h>
 #include <c10/core/Stream.h>
 
-namespace c10 {
-namespace CachingDeviceAllocator {
+namespace c10::CachingDeviceAllocator {
 
 using namespace c10::CachingAllocator;
 
@@ -60,7 +59,9 @@ struct DeviceStats {
   int64_t max_split_size = 0;
 };
 
-} // namespace CachingDeviceAllocator
+} // namespace c10::CachingDeviceAllocator
+
+namespace c10 {
 
 struct C10_API DeviceAllocator : public c10::Allocator {
   virtual void emptyCache() = 0;
