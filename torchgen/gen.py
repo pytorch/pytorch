@@ -2977,6 +2977,7 @@ def main() -> None:
         DispatchKey.CompositeExplicitAutograd,
         DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.Meta,
+        DispatchKey.MTIA,
     }
 
     aoti_backends = {
@@ -2986,6 +2987,7 @@ def main() -> None:
 
     if options.mps:
         functions_keys.add(DispatchKey.MPS)
+        aoti_backends.add(DispatchKey.MPS)
 
     if options.xpu:
         functions_keys.add(DispatchKey.XPU)

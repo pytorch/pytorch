@@ -1155,7 +1155,9 @@ def _should_save_eager_input_vals(
         or target is torch.ops.higher_order.auto_functionalized_v2
     ):
         args = args_kwargs[0]
-        assert isinstance(args[0], torch._ops.OpOverload)
+        assert isinstance(
+            args[0], (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+        )
         return _should_save_eager_input_vals(args[0], None)
     if target is torch.ops.higher_order.with_effects:
         # TODO: inductor lowering for with_effects needs to be updated to propagate
