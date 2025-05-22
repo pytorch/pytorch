@@ -3787,6 +3787,21 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
     return (add, add_1)""",
         )
 
+    @requires_gpu
+    def test_unbacked_sdpa_can_use_flash(self):
+        class SDPA(torch.nn.Module):
+            def forward(self, x):
+                u0 = x.item()
+                q = torch.empty(1, 16, u0, 64).cuda()
+                k = torch.empty_like(q)
+                v = torch.empty_like(q)
+                return F.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=0.0, is_causal=False)
+
+        mod = SDPA()
+        x = torch.tensor([5])
+        ep = export(SDPA(), (x,))
+        self.assertEqual(mod(x).shape, ep.module()(x).shape)
+
     def test_derived_dim_out_of_order_simplified_repeat_non_derived(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y, y1, z):

@@ -12,6 +12,7 @@
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 
+#include <c10/core/SymBool.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymFloat.h>
 #include <cmath>
@@ -475,15 +476,17 @@ inline bool check_batch_size_nested(sdp_params const& params, bool debug) {
 inline bool check_nonzero_sequence_lengths_dense(sdp_params const& params, bool debug) {
   // In some cases people will pass in 0 sized tensors, this will
   // cause the fused path to error with unaligned mask
-  bool zero_seq_len_q = params.query.sym_size(-2) == 0;
-  bool zero_seq_len_k = params.key.sym_size(-2) == 0;
-  if (zero_seq_len_q || zero_seq_len_k) {
+  c10::SymBool zero_seq_len_q = params.query.sym_size(-2).sym_eq(0);
+  c10::SymBool zero_seq_len_k = params.key.sym_size(-2).sym_eq(0);
+  if (TORCH_GUARD_OR_FALSE(zero_seq_len_q) || TORCH_GUARD_OR_FALSE(zero_seq_len_k)) {
     if (debug) {
       TORCH_WARN(
           "All fused kernels do not support zero seq_len_q or seq_len_kv.");
     }
     return false;
   }
+  TORCH_SYM_CHECK(params.query.sym_size(-2).sym_gt(0), "seq_len_q must be non-zero");
+  TORCH_SYM_CHECK(params.key.sym_size(-2).sym_gt(0), "seq_len_kv must be non-zero");
   return true;
 }
 
