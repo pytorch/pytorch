@@ -19,8 +19,6 @@
 #include <ATen/ops/max_pool3d_with_indices_native.h>
 #endif
 
-#include <iostream>
-
 namespace at::native {
 namespace mps {
 
