@@ -119,3 +119,4 @@ def _create_module():
 # Set all the appropriate state on PyTorch
 torch.utils.rename_privateuse1_backend("openreg")
 torch._register_device_module("openreg", _create_module())
+torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
