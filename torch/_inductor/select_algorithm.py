@@ -2184,7 +2184,7 @@ class AlgorithmSelectorCache(PersistentCache):
             # Initialize the suprocess pool so it will warmup early.
             torch._inductor.autotune_process.get_tuning_process_pool()
 
-        def do_autotuning(choices, precompile_fn):
+        def do_autotuning(precompile_fn):
             precompile_start_ts = time.time()
             with dynamo_timed(
                 f"{name}_template_precompiling",
@@ -2195,19 +2195,6 @@ class AlgorithmSelectorCache(PersistentCache):
             precompile_elapse = time.time() - precompile_start_ts
             log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
 
-            candidates = self.prescreen_choices(choices)
-            if candidates:
-                prescreening_start_ts = time.time()
-                timings = self.lookup(
-                    candidates,
-                    name,
-                    inputs_key,
-                    autotune,
-                )
-                choices = self.prune_choices_postscreen(choices, timings)
-                prescreening_elapse = time.time() - prescreening_start_ts
-                log.debug("Prescreening elapsed time: %.02fs", prescreening_elapse)
-
             autotune_start_ts = time.time()
             timings = self.lookup(
                 choices,
@@ -2215,7 +2202,6 @@ class AlgorithmSelectorCache(PersistentCache):
                 inputs_key,
                 autotune,
             )
-
             autotune_elapse = time.time() - autotune_start_ts
             log.debug("Autotuning elapsed time: %.02fs", autotune_elapse)
 
@@ -2251,7 +2237,7 @@ class AlgorithmSelectorCache(PersistentCache):
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
 
             def get_timings():
-                timings = do_autotuning(choices, precompile_fn)
+                timings = do_autotuning(precompile_fn)
                 min_extern_choice = float("inf")
                 for choice, timing in timings.items():
                     if isinstance(choice, ExternKernelCaller):
@@ -2286,7 +2272,8 @@ class AlgorithmSelectorCache(PersistentCache):
                 )
             )
 
-        timings = do_autotuning(choices, precompile_fn)
+        # TODO - dont want to precompile if we have a cache hit
+        timings = do_autotuning(precompile_fn)
         if timings == {} or choices[0] not in timings:
             return choices[0].output_node()
 
@@ -2663,78 +2650,6 @@ class AlgorithmSelectorCache(PersistentCache):
                 layout=layout,
                 input_gen_fns=input_gen_fns,
             )
-
-    @staticmethod
-    def prescreen_choices(
-        choices: list[ChoiceCaller],
-    ) -> list[ChoiceCaller]:
-        """
-        Add prescreening phase. Motivation is to reduce the number of autotuning needed,
-        for example, when there are runtime params.
-        """
-        # prescreen cutlass
-        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
-
-        candidates = []
-        if (
-            config.cuda.cutlass_prescreening
-            and len(config.cuda.cutlass_max_profiling_swizzle_options) > 1
-        ):
-            candidates.extend(
-                [
-                    c
-                    for c in choices
-                    if isinstance(c, CUDATemplateCaller)
-                    # hardcoded to only look at swizzle=2
-                    if c.info_dict().get("swizzle") == "2"
-                ]
-            )
-
-        # skip prescreening if the number of candidates is too small
-        if len(candidates) < 10:
-            return []
-
-        return candidates  # type: ignore[return-value]
-
-    @staticmethod
-    def prune_choices_postscreen(
-        choices: list[ChoiceCaller],
-        candidate_timings: dict[ChoiceCaller, float],
-    ) -> list[ChoiceCaller]:
-        """
-        Prune the choices after prescreening.
-        """
-        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
-
-        if len(candidate_timings) < 10:
-            return []
-
-        log.debug("Before pruning using prescreening timings, %d choices", len(choices))
-        sorted_choices = sorted(
-            candidate_timings.keys(), key=lambda choice: candidate_timings[choice]
-        )
-        num_to_keep = max(int(math.sqrt(len(choices)) / 4), 8)
-
-        # prune choices based on prescreening timings
-        candidates_to_prune = OrderedSet(
-            candidate.bmreq.hash_key  # type: ignore[attr-defined]
-            for candidate in sorted_choices[num_to_keep:]
-        )
-        for candidate in sorted_choices[:num_to_keep]:
-            if candidate_timings[candidate] == float("inf"):
-                candidates_to_prune.add(candidate.bmreq.hash_key)  # type: ignore[attr-defined]
-            else:
-                if isinstance(candidate, CUDATemplateCaller):
-                    candidate.bmreq.ensure_dll_loaded()
-
-        choices = [
-            choice
-            for choice in choices
-            if choice.bmreq.hash_key not in candidates_to_prune  # type: ignore[attr-defined]
-        ]
-
-        log.debug("After pruning using prescreening timings, %d choices", len(choices))
-        return choices
 
     @staticmethod
     def log_results(
