@@ -444,9 +444,9 @@ class LoopOrderingTest(TestCase):
         M, K = 4096, 4096
 
         input_tensor = torch.randn(
-            M, K, device="cuda", dtype=ref_dtype, requires_grad=False
+            M, K, device=GPU_TYPE, dtype=ref_dtype, requires_grad=False
         )
-        scale = torch.Tensor([10.0]).to("cuda")
+        scale = torch.Tensor([10.0]).to(GPU_TYPE)
 
         E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
 
@@ -638,7 +638,10 @@ class MemoryCoalescingTest(MockSchedulerTest):
             def foo(x, y):
                 return x + y
 
-            foo(torch.rand([4, 4], device="cuda"), torch.rand([4, 4], device="cuda").T)
+            foo(
+                torch.rand([4, 4], device=GPU_TYPE),
+                torch.rand([4, 4], device=GPU_TYPE).T,
+            )
 
     def test_remapped_reads_split(self):
         from torch._inductor import tiling_utils
@@ -677,7 +680,10 @@ class MemoryCoalescingTest(MockSchedulerTest):
                     (y.T + 1).flatten()
                 )
 
-            foo(torch.rand([6, 6], device="cuda"), torch.rand([6, 6], device="cuda").T)
+            foo(
+                torch.rand([6, 6], device=GPU_TYPE),
+                torch.rand([6, 6], device=GPU_TYPE).T,
+            )
 
     def test_reduction_pointwise(self):
         # test one pw var, one red var
@@ -718,7 +724,8 @@ class MemoryCoalescingTest(MockSchedulerTest):
                 return out.sum(dim=1)
 
             foo(
-                torch.rand(256, 256, device="cuda"), torch.rand(256, 256, device="cuda")
+                torch.rand(256, 256, device=GPU_TYPE),
+                torch.rand(256, 256, device=GPU_TYPE),
             )
 
     def test_reduction_no_pointwise(self):
@@ -741,7 +748,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
             def foo(x):
                 return x.sum()
 
-            foo(torch.rand(1024, device="cuda"))
+            foo(torch.rand(1024, device=GPU_TYPE))
 
     def test_coalescing(self):
         from torch._inductor import tiling_utils
@@ -806,8 +813,8 @@ class MemoryCoalescingTest(MockSchedulerTest):
 
             y_dtype = torch.float if not downcast_transposed_v else torch.float64
             foo(
-                torch.rand(256, 256, device="cuda"),
-                torch.rand(256, 256, device="cuda", dtype=y_dtype).T,
+                torch.rand(256, 256, device=GPU_TYPE),
+                torch.rand(256, 256, device=GPU_TYPE, dtype=y_dtype).T,
             )
 
     def test_solve_for_zero(self):
@@ -882,7 +889,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
             XDIM = 2048
             YDIM = 4096
 
-            arg0_1 = torch.randn([XDIM, YDIM], device="cuda", dtype=torch.bfloat16)
+            arg0_1 = torch.randn([XDIM, YDIM], device=GPU_TYPE, dtype=torch.bfloat16)
             permute = torch.ops.aten.permute.default(arg0_1, [1, 0])
 
             out, code = run_and_get_code(torch.compile(forward), (permute))
