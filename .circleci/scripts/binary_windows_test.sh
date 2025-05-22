@@ -4,10 +4,11 @@ set -eux -o pipefail
 source "${BINARY_ENV_FILE:-/c/w/env}"
 
 export CUDA_VERSION="${DESIRED_CUDA/cu/}"
-export VC_YEAR=2022
+export VC_YEAR=2019
 
 if [[ "$DESIRED_CUDA" == 'xpu' ]]; then
-    export XPU_VERSION=2025.0
+    export VC_YEAR=2022
+    export XPU_VERSION=2025.1
 fi
 
 pushd "$PYTORCH_ROOT/.ci/pytorch/"

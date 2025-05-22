@@ -234,6 +234,17 @@ jobs:
         run: |
           cat test/**/*_toprint.log || true
 
+      - name: Run OP benchmark
+        shell: bash
+        if: ${{ contains(steps.get-job-id.outputs.job-name, 'mps') }}
+        run: |
+          if [[ -n "$CONDA_ENV" ]]; then
+            # Use binaries under conda environment
+            export PATH="$CONDA_ENV/bin":$PATH
+          fi
+          ${CONDA_RUN} python3 test/bench_mps_ops.py
+
+
       - name: Stop monitoring script
         if: ${{ always() && steps.monitor-script.outputs.monitor-script-pid }}
         continue-on-error: true
