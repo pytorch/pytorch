@@ -446,7 +446,13 @@ from user code:
         first_graph_break = next(iter(counters["graph_break"].keys()))
         self.assertExpectedInline(
             first_graph_break,
-            "Attempted to call function marked as skipped",
+            """\
+Attempted to call function marked as skipped
+  Explanation: Dynamo cannot trace optree C/C++ function optree._C.PyCapsule.flatten.
+  Hint: Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py
+
+  Developer debug context: module: optree._C, qualname: PyCapsule.flatten, skip reason: <missing reason>
+""",
         )
 
     @scoped_load_inline
@@ -483,9 +489,16 @@ from user code:
 
         first_graph_break = re.sub(r"mylib(_v\d+)?", "mylib", first_graph_break)
 
-        self.assertEqual(
+        self.assertExpectedInline(
             first_graph_break,
-            "Attempted to call function marked as skipped",
+            """\
+Attempted to call function marked as skipped
+  Explanation: Dynamo does not know how to trace the builtin `mylib.PyCapsule.foobar.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+  Hint: If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+  Hint: If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+
+  Developer debug context: module: mylib, qualname: PyCapsule.foobar, skip reason: <missing reason>
+""",
         )
 
         cpp_source = """
@@ -988,7 +1001,7 @@ Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especiall
         msg = re.sub(
             r"""(?s)Traceback \(most recent call last\):.*
   File "exc.py", line N, in unimplemented_v2
-    raise Unsupported\(msg, counter_category=gb_type\)""",
+    raise Unsupported\(msg\)""",
             "<Internal traceback>\n",
             msg,
         )
