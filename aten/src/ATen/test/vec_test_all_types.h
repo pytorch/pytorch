@@ -1090,6 +1090,38 @@ void test_binary(
     }
 }
 
+template<typename Op1, typename Op2>
+void test_binary_fp8_e4m3(
+    Op1 ScalarFunction,
+    Op2 VecFunction,
+    bool is_bit_wise = false) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+    for (const auto i : c10::irange(10)) {
+        float f_val0 = static_cast<float>(i + 0.2);
+        float f_val1 = static_cast<float>(i + 0.3);
+        c10::Float8_e4m3fn f8_e4m3_0(f_val0);
+        c10::Float8_e4m3fn f8_e4m3_1(f_val1);
+        at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_vec_0(f8_e4m3_0);
+        at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_vec_1(f8_e4m3_1);
+
+        float ref_res_scalar = ScalarFunction(f8_e4m3_0, f8_e4m3_1);
+        __m512 res_fp32_512;
+        at::vec::Vectorized<c10::Float8_e4m3fn> res = VecFunction(f8_e4m3_vec_0, f8_e4m3_vec_1);
+        at::vec::cvtfp8e4m3_fp32(_mm512_castsi512_si128(res), res_fp32_512);
+        float res_scalar = _mm512_cvtss_f32(res_fp32_512);
+        if (is_bit_wise) {
+            EXPECT_EQ(static_cast<bool>(ref_res_scalar), static_cast<bool>(res_scalar))
+                << "Test failed for input0: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_e4m3_0.x)
+                << " input1: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_e4m3_1.x) << "\n";
+        } else {
+            EXPECT_EQ(ref_res_scalar, res_scalar)
+                << "Test failed for input0: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_e4m3_0.x)
+                << " input1: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_e4m3_1.x) << "\n";
+        }
+      }
+    #endif
+}
+
 template< typename T, typename Op1, typename Op2, typename Filter = std::nullptr_t>
 void test_ternary(
     std::string testNameInfo,
