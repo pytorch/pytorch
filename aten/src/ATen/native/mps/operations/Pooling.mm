@@ -34,7 +34,8 @@ typedef MPSGraphTensor* (^PoolingOpBlock)(PoolingCachedGraph&, MPSGraphPooling2D
 #define PoolingOpFn(graph, desc) MPSGraphTensor*(mps::PoolingCachedGraph & graph, MPSGraphPooling2DOpDescriptor * desc)
 
 typedef MPSGraphTensor* (^Pooling4dOpBlock)(PoolingCachedGraph&, MPSGraphPooling4DOpDescriptor*);
-#define Pooling4dOpFn(graph, desc) MPSGraphTensor*(mps::PoolingCachedGraph & graph, MPSGraphPooling4DOpDescriptor * desc)
+#define Pooling4dOpFn(graph, desc) \
+  MPSGraphTensor*(mps::PoolingCachedGraph & graph, MPSGraphPooling4DOpDescriptor * desc)
 
 // Pooling ops (1D/2D forward and backward Max and Average pooling)
 static void pool2d_template(const Tensor& input,
@@ -282,7 +283,6 @@ static void pool3d_template(const Tensor& input,
   TORCH_CHECK((ndims == 4 || ndims == 5), "non-empty 4D or 5D (batch mode) tensor expected for input");
   TORCH_CHECK(memory_format == at::MemoryFormat::Contiguous, "MPS pool3d supports only Contiguous memory format");
 
-
   int padD = safe_downcast<int, int64_t>(padding[0]);
   int padH = padding.size() == 1 ? padD : safe_downcast<int, int64_t>(padding[1]);
   int padW = padding.size() == 1 ? padD : safe_downcast<int, int64_t>(padding[2]);
@@ -308,16 +308,27 @@ static void pool3d_template(const Tensor& input,
   const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
   const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
 
-  pool3d_shape_check(
-    input,
-    nInputPlane,
-    kD, kH, kW,
-    dD, dH, dW,
-    padD, padH, padW,
-    dilationD, dilationH, dilationW,
-    inputDepth, inputHeight, inputWidth,
-    outputDepth, outputHeight, outputWidth,
-    "pool3d");
+  pool3d_shape_check(input,
+                     nInputPlane,
+                     kD,
+                     kH,
+                     kW,
+                     dD,
+                     dH,
+                     dW,
+                     padD,
+                     padH,
+                     padW,
+                     dilationD,
+                     dilationH,
+                     dilationW,
+                     inputDepth,
+                     inputHeight,
+                     inputWidth,
+                     outputDepth,
+                     outputHeight,
+                     outputWidth,
+                     "pool3d");
 
   std::vector<int64_t> outputSizes{nInputPlane, outputDepth, outputHeight, outputWidth};
   if (ndims == 5) {
@@ -685,15 +696,14 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_backward_out_mps)
                        "max_pool2d_indices_backward");
 }
 
-std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_mps(
-    const Tensor& input,
-    IntArrayRef kernel_size,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    IntArrayRef dilation,
-    bool ceil_mode,
-    Tensor& output,
-    Tensor& indices) {
+std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_mps(const Tensor& input,
+                                                             IntArrayRef kernel_size,
+                                                             IntArrayRef stride,
+                                                             IntArrayRef padding,
+                                                             IntArrayRef dilation,
+                                                             bool ceil_mode,
+                                                             Tensor& output,
+                                                             Tensor& indices) {
   mps::Pooling4dOpBlock pooling_op_block = ^Pooling4dOpFn(cachedGraph, desc) {
     MPSGraph* mpsGraph = cachedGraph.graph();
     NSArray<MPSGraphTensor*>* poolOutputs = [mpsGraph maxPooling4DReturnIndicesWithSourceTensor:cachedGraph.inputTensor
@@ -720,24 +730,15 @@ std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_mps(
   return {output, indices};
 }
 
-std::tuple<Tensor, Tensor> max_pool3d_with_indices_mps(
-    const Tensor& input,
-    IntArrayRef kernel_size,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    IntArrayRef dilation,
-    bool ceil_mode) {
+std::tuple<Tensor, Tensor> max_pool3d_with_indices_mps(const Tensor& input,
+                                                       IntArrayRef kernel_size,
+                                                       IntArrayRef stride,
+                                                       IntArrayRef padding,
+                                                       IntArrayRef dilation,
+                                                       bool ceil_mode) {
   Tensor output = at::empty({0}, input.options());
   Tensor indices = at::empty({0}, input.options().dtype(kLong));
-  max_pool3d_with_indices_out_mps(
-    input,
-    kernel_size,
-    stride,
-    padding,
-    dilation,
-    ceil_mode,
-    output,
-    indices);
+  max_pool3d_with_indices_out_mps(input, kernel_size, stride, padding, dilation, ceil_mode, output, indices);
 
   return {output, indices};
 }
