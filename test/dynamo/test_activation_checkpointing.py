@@ -17,10 +17,6 @@ from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_CUDNN_ATTENTION,
-    SM90OrLater,
-)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfHpu, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -1380,7 +1376,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                     op=op,
                 )
             )
-        except AssertionError as e:
+        except AssertionError:
             op = torch.ops.aten._scaled_dot_product_cudnn_attention.default
             self.assertTrue(
                 count_ops(
@@ -1404,7 +1400,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                     op=op,
                 )
             )
-        except AssertionError as e:
+        except AssertionError:
             op = torch.ops.aten._scaled_dot_product_cudnn_attention.default
             self.assertTrue(
                 count_ops(
@@ -1414,7 +1410,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                     op=op,
                 )
             )
-
 
     @requires_distributed()
     @requires_cuda
