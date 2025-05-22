@@ -1687,13 +1687,6 @@ class OutputGraph(OutputGraphGuardsState):
 
         assert self.should_exit
 
-        # # Preserve all symbols that appears in original expressions of a deferred_runtime_asserts.
-        # # as place holders.
-        # ras_symbols : set[sympy.Symbol] = set()
-        # for assertion_list in self.shape_env.deferred_runtime_asserts.values():
-        #     for assertion in assertion_list:
-        #         ras_symbols |= free_symbols(assertion.expr)
-
         # Miniature DCE pass, but only for obviously trivial operations
         def is_static_true(b_node: fx.node.Argument):
             if b_node is True:

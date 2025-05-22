@@ -35,6 +35,7 @@ from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
+    get_placeholder_expr,
     has_free_symbols,
     resolve_unbacked_bindings,
     RuntimeAssert,
@@ -1061,21 +1062,7 @@ class GraphLowering(torch.fx.Interpreter):
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         target = self.qualify_name(target)
         if isinstance(example, SymTypes):
-            # if an input node represents a runtime assertion, use the original symbol and do not
-            # apply replacement on it if it was used in rutime assertions(TODO update the PR to add that part).
-            # skip unbacked to ubacked replacements (why)? idk just skip them lol
-            shape_env = example.node.shape_env
-            # execlude unbacked to unbacked replacement.
-            if (
-                isinstance(example.node._expr, sympy.Symbol)
-                and shape_env.is_unbacked_symint(example.node._expr)
-                and isinstance(example.node.expr, sympy.Symbol)
-                and shape_env.is_unbacked_symint(example.node.expr)
-            ):
-                expr = example.node.expr
-            else:
-                expr = example.node._expr
-
+            expr = get_placeholder_expr(example.node)
             self.graph_inputs[target] = expr
             self.graph_input_names.append(target)
             return expr
