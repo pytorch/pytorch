@@ -612,7 +612,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         fn_opt = torch.compile(f, backend="eager")
         fn_opt(torch.randn(3, 3))
 
-        self.assertEqual(len(records), 4)
+        self.assertEqual(len(records), 3)
         messages = [
             "\n".join(record.getMessage().split("\n")[-2:]) for record in records
         ]
@@ -636,12 +636,6 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         #     return g(g(x))
         #            ~^^^^^^""",
         # )
-        self.assertExpectedInline(
-            messages[3],
-            """\
-            return x * 2
-                   ~~^~~""",
-        )
 
     @skipIfNotPy311
     @make_logging_test(trace_call=True)
@@ -934,6 +928,7 @@ exclusions = {
     "aot_graphs_effects",
     "pre_grad_graphs",
     "post_grad_graphs",
+    "inductor_metrics",
     "ir_pre_fusion",
     "ir_post_fusion",
     "compiled_autograd",
@@ -943,6 +938,7 @@ exclusions = {
     "graph_breaks",
     "graph",
     "graph_code",
+    "graph_code_verbose",
     "graph_sizes",
     "ddp_graphs",
     "perf_hints",

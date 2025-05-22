@@ -351,11 +351,15 @@ class AsyncCompile:
             # process pool is running, so pass them to the subprocess to reset.
             env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
             extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
+            extra_config = {
+                "use_static_cuda_launcher": torch._inductor.config.use_static_cuda_launcher
+            }
 
             task = self.process_pool().submit(
                 _worker_compile_triton,
                 load_kernel,
                 extra_env,
+                extra_config,
             )
 
             def get_result() -> CachingAutotuner:
@@ -387,6 +391,7 @@ class AsyncCompile:
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="triton_compile_time_us",
                 log_waitcounter=True,
+                waitcounter_name_override="compile_triton",
             ):
                 start_ns = time_ns()
                 _set_triton_ptxas_path()
@@ -475,6 +480,7 @@ class AsyncCompile:
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="triton_compile_time_us",
                 log_waitcounter=True,
+                waitcounter_name_override="compile_triton",
             ):
                 self._wait_futures(scope)
 

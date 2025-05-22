@@ -3,10 +3,10 @@
 #include <c10/core/Device.h>
 #include <c10/util/Logging.h>
 
+#include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/TensorOptions.h>
-#include "c10/core/Layout.h"
 #include <c10/util/ArrayRef.h>
 
 #include <torch/csrc/utils/generated_serialization_types.h>
