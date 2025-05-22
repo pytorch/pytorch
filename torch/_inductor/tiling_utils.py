@@ -43,7 +43,7 @@ def solve_for_zero(expr: sympy.Expr) -> Optional[sympy.Expr]:
     elif isinstance(expr, FloorDiv):
         return None
 
-    assert len(expr.free_symbols) <= 1
+    assert len(expr.free_symbols) == 1
     free_symbol = next(iter(expr.free_symbols))
     if isinstance(expr, ModularIndexing):
         out = try_solve(sympy.Eq(expr.args[0], expr.args[2]), free_symbol)
@@ -168,6 +168,7 @@ def find_coalesced_var(
         try:
             new_val = sympy_subs(index, variables)
         except ZeroDivisionError:
+            loop_tiling_log.info("zero division error %s %s", index, variables)
             continue
         if new_val - zero_index == 1:
             return v
@@ -343,6 +344,7 @@ else:
         """
         if len(it1) != len(it2):
             raise ValueError(f"Lengths differ: {len(it1)} != {len(it2)}")
+        return zip(it1, it2)
 
 
 def apply_var_mapping(
