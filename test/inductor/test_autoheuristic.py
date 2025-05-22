@@ -4,22 +4,17 @@ import unittest
 
 import torch
 import torch._inductor.config as inductor_config
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristic, LocalFeedback
 from torch._inductor.autoheuristic.autoheuristic_utils import AHContext
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_gpu_shared_memory
-from torch.testing._internal.common_utils import TEST_XPU
-from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
-    HAS_CUDA,
-    HAS_GPU,
-    IS_A100,
-    IS_H100,
-)
+from torch.testing._internal.common_utils import skipIfXpu
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_A100, IS_H100
 
 
-@unittest.skipIf(TEST_XPU, "AutoHeuristic doesn't currently work on the XPU stack")
+@skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
 class AutoHeuristicTest(TestCase):
     def count_lines_in_file(self, file_path):
         with open(file_path) as file:
@@ -107,9 +102,7 @@ class AutoHeuristicTest(TestCase):
         self.assertEqual(num_lines, 5)
 
         shared_memory = get_gpu_shared_memory()
-
-        self.assertTrue(HAS_CUDA)
-        (fst, snd) = torch.cuda.get_device_capability()
+        (fst, snd) = get_interface_for_device(GPU_TYPE).get_device_capability()
 
         with open(path) as file:
             lines = file.readlines()
@@ -158,7 +151,6 @@ class AutoHeuristicTest(TestCase):
         fx_graph_cache=False,
         fx_graph_remote_cache=False,
     )
-    @unittest.skipIf(not IS_A100, "heuristic only run on A100")
     def test_global_feedback(self):
         self.run_mixed_mm()
         path = self.get_path_to_autoheuristic_log("mixed_mm")
