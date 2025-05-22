@@ -11563,6 +11563,16 @@ def reference_searchsorted(sorted_sequence, boundary, out_int32=False, right=Fal
         split_ret = [i.astype(np.int32) for i in split_ret] if out_int32 else split_ret
         return np.stack(split_ret).reshape(orig_shape)
 
+
+def reference_xor_sum(tensor, dim=(), keepdim=False):
+    if dim == ():
+        return np.bitwise_xor.reduce(tensor.flatten(), keepdims=keepdim)
+    else:
+        if isinstance(dim, list):
+            dim = tuple(dim)
+        return np.bitwise_xor.reduce(tensor, axis=dim, keepdims=keepdim)
+
+
 def loss_reference_reduction_wrapper(fn):
     def wrapper(input, target, *, size_average=None, reduce=None, reduction="mean", **other_kwargs):
         if size_average is not None or reduce is not None:
@@ -21341,6 +21351,17 @@ op_db: list[OpInfo] = [
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-3, rtol=4e-2)}),
                          "TestConsistency", "test_output_match", device_type="mps"),
         ),
+    ),
+    ReductionOpInfo(
+        'xor_sum',
+        supports_autograd=False,
+        dtypes=integral_types_and(torch.bool),
+        ref=reference_xor_sum,
+        skips=(
+            # xor_sum reduces all dimensions when dim=[] (as do sum, prod etc.)
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+        )
     ),
     OpInfo(
         "nn.functional.ctc_loss",

@@ -5852,6 +5852,15 @@
     CPU, CUDA: nansum_out
     MPS: nansum_out_mps
 
+- func: xor_sum(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
+  variants: function, method
+  structured_delegate: xor_sum.out
+
+- func: xor_sum.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  dispatch:
+    CPU, CUDA: xor_sum_out
+
 - func: sum_to_size(Tensor self, SymInt[] size) -> Tensor
   variants: method
   device_check: NoCheck

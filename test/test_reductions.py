@@ -102,7 +102,8 @@ class TestReductions(TestCase):
     def _test_dim_keepdim(self, op: ReductionOpInfo, device, *, ndim, **dim_keepdim):
         """Tests output shape for input with ndim and dim and keepdim kwargs"""
         shape = torch.randint(2, 5, (ndim,)).tolist()
-        t = make_tensor(shape, dtype=torch.float, device=device)
+        dtype = torch.float if torch.float in op.dtypes else torch.long
+        t = make_tensor(shape, dtype=dtype, device=device)
         args, kwargs = next(op.generate_args_kwargs(t, **dim_keepdim))
         result = op(t, *args, **dim_keepdim, **kwargs)
         expected_shape = _reduced_shape(shape, **dim_keepdim)
