@@ -1,3 +1,5 @@
+warning: Selection `RUF041` has no effect because preview is not enabled.
+warning: Selection `RUF048` has no effect because preview is not enabled.
 # Owner(s): ["oncall: jit"]
 # ruff: noqa: F841
 import contextlib
@@ -2852,6 +2854,7 @@ class TestGuardsExpressions(TestCase):
         self.assertEqual(func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10]))
         self.assertEqual(func(torch.tensor([2]), torch.tensor([1])), torch.tensor([20]))
 
+        # compile with unbacked.
         unbacked_func = torch.compile(func, dynamic=True, fullgraph=True)
         a = torch.tensor([1])
         b = torch.tensor([1])
@@ -2917,6 +2920,7 @@ class TestGuardsExpressions(TestCase):
         self.assertEqual(func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10]))
         self.assertEqual(func(torch.tensor([2]), torch.tensor([1])), torch.tensor([20]))
 
+        # compile with unbacked.
         unbacked_func = torch.compile(func, dynamic=True, fullgraph=True)
         a = torch.tensor([1])
         b = torch.tensor([1])

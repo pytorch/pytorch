@@ -6916,7 +6916,7 @@ class ShapeEnv:
     ) -> sympy.Basic:
         """
         Given an expression, evaluates it, adding guards if necessary
-        When fallback_value is not None the function return fallback_value instead of failing with data dependent errror
+        When fallback_value is not None the function return fallback_value instead of failing with data dependent error.
         """
 
         # Add extra state that evaluate_expr() depends on.
