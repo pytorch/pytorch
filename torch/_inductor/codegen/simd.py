@@ -2081,7 +2081,7 @@ class SIMDScheduling(BaseScheduling):
             prev_var_coalesced_score = 0
 
             # iterate from non-dense to dense
-            for v, v_range in zip(reversed(splitting_vars), reversed(ranges)):
+            for v, v_range in zip(splitting_vars, ranges):
                 if v not in vars_to_use:
                     prod *= v_range
                     prev_var_coalesced_score = coalesce_analysis.coalesced_by_var.get(
@@ -2112,9 +2112,6 @@ class SIMDScheduling(BaseScheduling):
             if prod != 1:
                 splits.append(prod)
                 split_scores.append(prev_var_coalesced_score)
-
-            splits.reverse()
-            split_scores.reverse()
 
             scored_sub_split[key] = (splits, split_scores)
             return (splits, split_scores)
@@ -2170,7 +2167,7 @@ class SIMDScheduling(BaseScheduling):
 
         default_tiling = cls.create_tiling([pointwise_numel], [reduction_numel])
 
-        for cand, tiling_score in sorted(tilings, key=lambda t: -t[0].score):
+        for cand, tiling_score in sorted(tilings, key=lambda t: (-t[0].score, -len(t[0].tiling))):
             if cls.tiling_is_compatible(
                 node_schedule, pointwise_numel, reduction_numel, cand.tiling
             ):
