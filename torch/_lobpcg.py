@@ -783,11 +783,10 @@ class LOBPCG:
         A_norm = self.fvars["A_norm"]
         B_norm = self.fvars["B_norm"]
         E, X, R = self.E, self.X, self.R
-        rerr = (
-            torch.norm(R, 2, (0,))
-            * (torch.norm(X, 2, (0,)) * (A_norm + E[: X.shape[-1]] * B_norm)) ** -1
+        rerr = torch.norm(R, 2, (0,)) / (
+            torch.norm(X, 2, (0,)) * (A_norm + torch.abs(E[: X.shape[-1]]) * B_norm)
         )
-        converged = rerr.real < tol  # this is a norm so imag is 0.0
+        converged = rerr < tol
         count = 0
         for b in converged:
             if not b:
