@@ -35,7 +35,9 @@ from .stubs import *  # noqa: F403
 warnings.warn(
     "torch.ao.quantization is deprecated. Plan is to: \n"
     "1. Remove eager mode quantization (torch.ao.quantization.quantize, torch.ao.quantization.quantize_dynamic), please migrate to use torchao eager mode quantize_ API instead \n"
-    "2. Remove fx graph mode quantization (torch.ao.quantization.quantize_fx.prepare_fx, torch.ao.quantization.quantize_fx.convert_fx, please migrate to use torchao pt2e quantization API instead (prepare_pt2e, convert_pt2e) \n"
+    "2. Remove fx graph mode quantization (torch.ao.quantization.quantize_fx.prepare_fx,"
+    "torch.ao.quantization.quantize_fx.convert_fx, please migrate to use torchao pt2e quantization "
+    "API instead (prepare_pt2e, convert_pt2e) \n"
     "3. pt2e quantization has been migrated to torchao (https://github.com/pytorch/ao/tree/main/torchao/quantization/pt2e) \n"
     "see https://dev-discuss.pytorch.org/t/torch-ao-quantization-migration-plan/2810 for more details",
     FutureWarning,

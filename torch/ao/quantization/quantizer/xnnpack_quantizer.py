@@ -239,7 +239,8 @@ def _get_not_module_type_or_name_filter(
 
 @compatibility(is_backward_compatible=False)
 @typing_extensions.deprecated(
-    "XNNPACKQuantizer is deprecated! Please use xnnpack quantizer in ExecuTorch (https://github.com/pytorch/executorch/tree/main/backends/xnnpack/quantizer) instead."
+    "XNNPACKQuantizer is deprecated! Please use xnnpack quantizer in "
+    "ExecuTorch (https://github.com/pytorch/executorch/tree/main/backends/xnnpack/quantizer) instead."
 )
 class XNNPACKQuantizer(Quantizer):
     """
