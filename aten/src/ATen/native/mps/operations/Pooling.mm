@@ -687,7 +687,7 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_backward_out_mps)
                        "max_pool2d_indices_backward");
 }
 
-std::tuple<Tensor, Tensor> max_pool3d_with_indices_out_mps(
+std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_mps(
     const Tensor& input,
     IntArrayRef kernel_size,
     IntArrayRef stride,
