@@ -57,12 +57,15 @@ def build_ArmComputeLibrary() -> None:
 
 def replace_tag(filename) -> None:
     with open(filename) as f:
-        lines = f.read().split("\\n")
-        for i, line in enumerate(lines):
-            if line.startswith("Tag:"):
-                lines[i] = line.replace("-linux_", "-manylinux_2_28_")
-                print(f"Updated tag from {line} to {lines[i]}")
-                break
+        lines = f.readlines()
+    for i, line in enumerate(lines):
+        if line.startswith("Tag:"):
+            lines[i] = line.replace("-linux_", "-manylinux_2_28_")
+            print(f"Updated tag from {line} to {lines[i]}")
+            break
+
+    with open(filename, "w") as f:
+        f.writelines(lines)
 
 
 def package_cuda_wheel(wheel_path, desired_cuda) -> None:
@@ -124,6 +127,7 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
     for f in os.scandir(f"{folder}/tmp/"):
         if f.is_dir() and f.name.endswith(".dist-info"):
             replace_tag(f"{f.path}/WHEEL")
+            break
 
     os.mkdir(f"{folder}/cuda_wheel")
     os.system(f"cd {folder}/tmp/; zip -r {folder}/cuda_wheel/{wheelname} *")
