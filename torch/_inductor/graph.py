@@ -34,8 +34,8 @@ from torch._utils_internal import full_aoti_runtime_assert
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
-    free_unbacked_symbols,
     _get_placeholder_expr,
+    free_unbacked_symbols,
     has_free_symbols,
     resolve_unbacked_bindings,
     RuntimeAssert,

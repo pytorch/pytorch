@@ -95,13 +95,13 @@ def insert_deferred_runtime_asserts(
 
     from torch._export.passes._node_metadata_hook import _set_node_metadata_hook
     from torch.fx.experimental.symbolic_shapes import (
+        _get_placeholder_expr,
         _has_uninterpretable_sympy_function,
         CallMethodKey,
         cast_symbool_to_symint_guardless,
         ConvertIntKey,
         DivideByKey,
         free_symbols,
-        _get_placeholder_expr,
         InnerTensorKey,
         resolve_unbacked_bindings,
     )
