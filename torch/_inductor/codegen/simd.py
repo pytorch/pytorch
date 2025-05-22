@@ -719,7 +719,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         "Fill in the reduction numel of lengths if missing"
         sizevars = V.graph.sizevars
         if len(lengths[1]) == 0 and (
-            not sizevars.is_expr_static_and_true(reduction_numel == sympy.S.One)
+            not sizevars.statically_known_equals(reduction_numel, sympy.S.One)
             and sizevars.statically_known_equals(
                 sympy_product(groups),
                 sympy_product(lengths[0]) * reduction_numel,
