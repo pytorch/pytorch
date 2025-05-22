@@ -38,6 +38,8 @@ def _extract_tensor_metadata(
     """
     Extract a TensorMetadata NamedTuple describing `result`.
     """
+    from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
+
     shape = result.shape
     dtype = result.dtype
     requires_grad = result.requires_grad
@@ -52,9 +54,12 @@ def _extract_tensor_metadata(
             torch.channels_last_3d,
         }
         for query_format in memory_formats:
-            if result.is_contiguous(memory_format=query_format):
-                memory_format = query_format
-                break
+            try:
+                if result.is_contiguous(memory_format=query_format):
+                    memory_format = query_format
+                    break
+            except GuardOnDataDependentSymNode:
+                continue
 
     is_quantized = result.is_quantized
     qparams: dict[str, Any] = {}

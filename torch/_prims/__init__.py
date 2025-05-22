@@ -1257,7 +1257,7 @@ as_strided = _make_prim(
 def _broadcast_in_dim_meta(
     a: TensorLikeType, shape: ShapeType, broadcast_dimensions: Sequence[int]
 ):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_or
 
     # Type checks
     assert isinstance(a, TensorLike)
@@ -1284,11 +1284,13 @@ def _broadcast_in_dim_meta(
 
     # shape must be broadcastable to
     for idx, new_idx in enumerate(broadcast_dimensions):
-        if not guard_size_oblivious(a.shape[idx] == 1):
-            torch._check(
-                a.shape[idx] == shape[new_idx],
-                lambda: f"{a.shape[idx]} must be broadcastable to {shape[new_idx]}",
-            )
+        torch._check(
+            sym_or(
+                a.shape[idx] == 1,
+                a.shape[idx] == shape[new_idx]
+            ),
+            lambda: f"{a.shape[idx]} must be broadcastable to {shape[new_idx]}",
+        )
 
     new_strides = []
     original_idx = 0
