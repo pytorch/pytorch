@@ -63,12 +63,12 @@ struct DeviceStats {
 } // namespace CachingDeviceAllocator
 
 struct C10_API DeviceAllocator : public c10::Allocator {
-  virtual void empty_cache() = 0;
-  virtual void record_stream(const DataPtr&, c10::Stream stream) = 0;
-  virtual CachingDeviceAllocator::DeviceStats get_device_stats(
+  virtual void emptyCache() = 0;
+  virtual void recordStream(const DataPtr&, c10::Stream stream) = 0;
+  virtual CachingDeviceAllocator::DeviceStats getDeviceStats(
       c10::DeviceIndex device) = 0;
-  virtual void reset_accumulated_stats(c10::DeviceIndex device) = 0;
-  virtual void reset_peak_stats(c10::DeviceIndex device) = 0;
+  virtual void resetAccumulatedStats(c10::DeviceIndex device) = 0;
+  virtual void resetPeakStats(c10::DeviceIndex device) = 0;
 };
 
 // This function is used to get the DeviceAllocator for a specific device type
