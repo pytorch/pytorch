@@ -19,6 +19,8 @@
 #include <ATen/ops/max_pool3d_with_indices_native.h>
 #endif
 
+#include <iostream>
+
 namespace at::native {
 namespace mps {
 
@@ -320,16 +322,15 @@ static void pool3d_template(const Tensor& input,
     outputDepth, outputHeight, outputWidth,
     "pool3d");
 
+  std::vector<int64_t> outputSizes{nInputPlane, outputDepth, outputHeight, outputWidth};
+  if (ndims == 5) {
+    outputSizes.insert(outputSizes.begin(), nbatch);
+  }
+  output.resize_(outputSizes);
+  indices.resize_(outputSizes);
+
   if (input.numel() == 0) {
     return;
-  }
-
-  if (output.numel() == 0) {
-    std::vector<int64_t> outputSizes{nInputPlane, outputDepth, outputHeight, outputWidth};
-    if (ndims == 5) {
-      outputSizes.insert(outputSizes.begin(), nbatch);
-    }
-    output.resize_(outputSizes);
   }
 
   if (output.numel() == 0 || (is_backward_pass && grad_output.numel() == 0)) {

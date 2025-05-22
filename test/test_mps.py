@@ -1469,34 +1469,20 @@ class TestMPS(TestCaseMPS):
                 cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
-            pool = torch.nn.MaxPool2d(kernel_size=ks, padding=padding, dilation=dilation,
+            pool = torch.nn.MaxPool3d(kernel_size=ks, padding=padding, dilation=dilation,
                                       ceil_mode=ceil_mode, return_indices=return_indices)
 
             if (return_indices is False):
                 y = pool(x)
                 ref_y = pool(cpu_x)
 
-                # cpu_grad = torch.ones_like(ref_y)
-                # grad = cpu_grad.to('mps')
-
-                # y.backward(gradient=grad)
-                # ref_y.backward(gradient=cpu_grad)
-
                 self.assertEqual(y, ref_y)
-                # self.assertEqual(x.grad, cpu_x.grad)
             else:
                 y, idx = pool(x)
                 ref_y, ref_idx = pool(cpu_x)
 
-                # cpu_grad = torch.ones_like(ref_y)
-                # grad = cpu_grad.to('mps')
-
-                # y.backward(gradient=grad)
-                # ref_y.backward(gradient=cpu_grad)
-
                 self.assertEqual(y, ref_y)
                 self.assertEqual(idx, ref_idx)
-                # self.assertEqual(x.grad, cpu_x.grad)
 
         # Test with no batch dimension
         helper((8, 4, 4, 4), ks=2)
@@ -1513,6 +1499,8 @@ class TestMPS(TestCaseMPS):
         for test_ties in [False, True]:
             # Test with no batch dimension
             helper((8, 4, 4, 4), ks=2, return_indices=True, test_ties=test_ties)
+            # Test with empty input
+            helper((0, 8, 4, 4, 4), ks=2, return_indices=True, test_ties=test_ties)
             helper((2, 8, 4, 4, 4), ks=2, return_indices=True, test_ties=test_ties)
             helper((1, 10, 32, 32, 32), ks=4, return_indices=True, test_ties=test_ties)
             # Test padding
