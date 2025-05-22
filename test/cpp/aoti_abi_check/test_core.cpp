@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <torch/standalone/header_only/core/DeviceType.h>
+#include <torch/standalone/core/DeviceType.h>
 
 namespace torch {
 namespace standalone {

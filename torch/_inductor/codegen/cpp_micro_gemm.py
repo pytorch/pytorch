@@ -4,8 +4,6 @@ import sys
 from enum import Enum
 from typing import Callable, Optional
 
-import sympy
-
 import torch
 
 from .. import cpp_builder, ir
@@ -55,7 +53,7 @@ class CppMicroGemm:
 
     # TODO(jgong5): support constant shapes and lds as template args.
     DECLARE_KERNEL = r"""
-template <bool accum>
+template <bool accum, bool prefetch=false>
 inline void {{kernel_name}}(
 {%- if kernel_extra_args_declare %}
     {{kernel_extra_args_declare}}
@@ -138,6 +136,7 @@ inline void {{kernel_name}}(
         B: ir.Buffer,
         C: ir.Buffer,
         accum: bool,
+        prefetch: bool = False,
         **kwargs_for_extra_args,
     ) -> str:
         """
@@ -154,7 +153,9 @@ inline void {{kernel_name}}(
         ldb = kernel.stride(B, 0)
         ldc = kernel.stride(C, 0)
         res = IndentedBuffer()
-        res.writeline(f"{self.name}<{value_to_cpp(accum, 'bool')}>(")
+        res.writeline(
+            f"{self.name}<{value_to_cpp(accum, 'bool')}, {value_to_cpp(prefetch, 'bool')}>("
+        )
         with res.indent():
             kwargs_for_extra_args.update({"kernel": kernel})
             extra_args = self.get_kernel_extra_args(**kwargs_for_extra_args)
@@ -317,6 +318,26 @@ class CppMicroGemmRef(CppMicroGemm):
         return KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(options)
 
 
+def is_int8_woq_gemm_small_m_dim_corner_case(config, m, n, k):
+    return (
+        k % config.register_blocking.block_k == 0
+        and n % config.register_blocking.block_n == 0
+        and m < 16
+    )
+
+
+# extra check for small M dimension for int8 WoQ case
+def check_int8_woq_small_m_dim(config, m, n, k, alpha, num_threads, **kwargs):
+    return is_int8_woq_gemm_small_m_dim_corner_case(config, m, n, k) and not kwargs.get(
+        "dynamic_M", False
+    )
+
+
+# For int8 WoQ GEMM with small M, we use different blockings that shouldn't be used otherwise
+def do_not_use_with_small_m_for_int8_woq(config, m, n, k, alpha, num_threads, **kwargs):
+    return not check_int8_woq_small_m_dim(config, m, n, k, alpha, num_threads, **kwargs)
+
+
 @register_micro_gemm(
     *generate_gemm_config(
         VecAVX512,
@@ -342,6 +363,19 @@ class CppMicroGemmRef(CppMicroGemm):
         input2_dtype=torch.int8,
         output_dtype=torch.float,
         compute_dtype=torch.float,
+        extra_check=do_not_use_with_small_m_for_int8_woq,
+    ),
+    *generate_gemm_config(
+        VecAVX512,
+        [
+            (4, 32, 64),
+            (8, 32, 64),
+        ],
+        input_dtype=torch.bfloat16,
+        input2_dtype=torch.int8,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+        extra_check=check_int8_woq_small_m_dim,
     ),
     *generate_gemm_config(
         VecAVX2,
@@ -367,6 +401,19 @@ class CppMicroGemmRef(CppMicroGemm):
         input2_dtype=torch.int8,
         output_dtype=torch.float,
         compute_dtype=torch.float,
+        extra_check=do_not_use_with_small_m_for_int8_woq,
+    ),
+    *generate_gemm_config(
+        VecAVX2,
+        [
+            (2, 16, 64),
+            (4, 16, 64),
+        ],
+        input_dtype=torch.bfloat16,
+        input2_dtype=torch.int8,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+        extra_check=check_int8_woq_small_m_dim,
     ),
     *generate_gemm_config(
         VecNEON,
@@ -397,7 +444,7 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
 {{declare_kernel}} {
     using Vectorized = at::vec::Vectorized<{{compute_t}}>;
     constexpr auto VLEN = Vectorized::size();
-    {{kernel.assert_function}}({{block_n}} % VLEN == 0, "{{block_n}} dimension must be multiple of Vector size");
+    {{kernel.assert_function}}({{block_n}} % VLEN == 0, "block_n dimension must be multiple of Vector size");
     {{kernel.assert_function}}(K % {{block_k}} == 0, "K dimension must be multiple of {{block_k}}");
     // TODO(jgong5): loop unroll for M and N
     for (int64_t m = 0; m < M; m += {{block_m}}) {
@@ -406,9 +453,9 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
             int64_t block_n = std::min<int64_t>(N - n, {{block_n}});
             if (block_m == {{block_m}} && block_n == {{block_n}}) {
 {%- if not trans_b %}
-                {{kernel_name}}_kernel<{{block_m}}, {{block_n}}, accum>(
+                {{kernel_name}}_kernel<{{block_m}}, {{block_n}}, accum, prefetch>(
 {%- else %}
-                {{kernel_name}}_transpose_b_kernel<{{block_m}}, {{block_n}}, accum>(
+                {{kernel_name}}_transpose_b_kernel<{{block_m}}, {{block_n}}, accum, prefetch>(
 {%- endif %}
                     A + m * lda,
 {%- if not trans_b %}
@@ -431,9 +478,9 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
 {%- for b in range(block_m - 1, 0, -1) %}
                 case {{b}}:
     {%- if not trans_b %}
-                    {{kernel_name}}_kernel<{{b}}, {{block_n}}, accum>(
+                    {{kernel_name}}_kernel<{{b}}, {{block_n}}, accum, prefetch>(
     {%- else %}
-                    {{kernel_name}}_transpose_b_kernel<{{b}}, {{block_n}}, accum>(
+                    {{kernel_name}}_transpose_b_kernel<{{b}}, {{block_n}}, accum, prefetch>(
     {%- endif %}
                         A + m * lda,
     {%- if not trans_b %}
@@ -459,9 +506,9 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
     {%- for b in range(block_m, 0, -1) %}
                 case {{b}}:
         {%- if not trans_b %}
-                    {{kernel_name}}_ntail_kernel<{{b}}, {{block_n}}, accum>(
+                    {{kernel_name}}_ntail_kernel<{{b}}, {{block_n}}, accum, prefetch>(
         {%- else %}
-                    {{kernel_name}}_ntail_transpose_b_kernel<{{b}}, {{block_n}}, accum>(
+                    {{kernel_name}}_ntail_transpose_b_kernel<{{b}}, {{block_n}}, accum, prefetch>(
         {%- endif %}
                         A + m * lda,
         {%- if not trans_b %}
@@ -492,7 +539,7 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
 
     TEMPLATE_KERNEL = r"""
 
-template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum>
+template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum, bool prefetch=false>
 {%- if not trans_b %}
     {%- if tail_n %}
 inline void {{kernel_name}}_ntail_kernel(
@@ -592,6 +639,9 @@ inline void {{kernel_name}}_transpose_b_kernel(
         {%- elif input2_dtype == torch.int8 %}
             // Convert VLEN int8 elements to int32, and then fp32
             auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN);
+            if constexpr (prefetch) {
+              _mm_prefetch(B + (k + {{block_k}}) * ldb + col * VLEN, _MM_HINT_T0);
+            }
             vb[col] = at::vec::convert<float>(b32);
         {%- else %}
             vb[col] = Vectorized::loadu(B + k * ldb + col * VLEN);
@@ -1065,7 +1115,7 @@ class CppMicroGemmAMX(CppMicroGemm):
 
     TEMPLATE_KERNEL = r"""
 
-template <bool accum>
+template <bool accum, bool prefetch=false>
 inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     AMXState& amx_state,
     const {{input_t}}* {{restrict_keyword}} A,
@@ -1855,6 +1905,11 @@ def create_micro_gemm(
     use_ref=True,
     q_group_size=None,
 ) -> Optional[CppMicroGemm]:
+    """
+    Based on the provided info, try to find the config of the micro-kernel that would
+    deliver the best performance in terms of lower latency for this case.
+    """
+
     def create_from_config(cls, config: CppMicroGemmConfig):
         return cls(
             name,
@@ -1868,8 +1923,11 @@ def create_micro_gemm(
 
     assert isinstance(n, int) or n.is_number, n
     assert isinstance(k, int) or k.is_number, k
-    m = V.graph.sizevars.size_hint(m, fallback=1) if isinstance(m, sympy.Expr) else m
-    assert isinstance(m, int), m
+    from ..utils import has_free_symbols
+
+    dynamic_M = has_free_symbols((m,))
+    m = V.graph.sizevars.size_hint(m, fallback=1) if dynamic_M else m
+    assert isinstance(m, int) or m.is_number, m
     if output_dtype is None:
         output_dtype = input_dtype
     if compute_dtype is None:
@@ -1894,17 +1952,26 @@ def create_micro_gemm(
                 # subject to change in the future.
             ):
                 if config.extra_check is not None and not config.extra_check(
-                    config, m, n, k, alpha, num_threads, q_group_size=q_group_size
+                    config,
+                    m,
+                    n,
+                    k,
+                    alpha,
+                    num_threads,
+                    dynamic_M=dynamic_M,
+                    q_group_size=q_group_size,
                 ):
                     continue
                 block_m, block_n, block_k = config.register_blocking
                 if (
                     config.vec_isa_cls == VecAMX
                     and m < block_m
+                    and not dynamic_M
                     and input_dtype == torch.bfloat16
                     and input2_dtype in [torch.int8, torch.uint8]
                 ):
-                    # For WoQ GEMM, AMX micro-kernel may not perform well if m < block_m
+                    # For WoQ GEMM, AMX micro-kernel may not perform well if m < block_m.
+                    # Exception: for dynamic shapes, we consider using the AMX micro-kernel.
                     continue
                 # Criteria on the ranking of configurations
                 # 1. ISA: AMX > VEC

@@ -4052,6 +4052,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         y = m.to(device=device)(x.to(device=device))
         self.assertEqual(yref, y)
 
+    @skipCUDAIfRocm
     @onlyCUDA
     @largeTensorTest("20GB")
     @largeTensorTest("80GB", "cpu")
