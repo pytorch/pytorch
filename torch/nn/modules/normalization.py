@@ -4,9 +4,9 @@ from typing import Optional, Union
 
 import torch
 from torch import Size, Tensor
-from torch.nn import functional as F, init
-from torch.nn.modules._nn_docs import layernorm_args, common_args
 from torch._C import _add_docstr as add_docstr
+from torch.nn import functional as F, init
+from torch.nn.modules._nn_docs import common_args, layernorm_args
 from torch.nn.parameter import Parameter
 
 from ._functions import CrossMapLRN2d as _cross_map_lrn2d
@@ -125,13 +125,12 @@ class LayerNorm(Module):
         {layernorm_args}
         {common_args}
 
-
     Attributes:
         weight: the learnable weights of the module of shape
-            :math:`\text{{normalized\_shape}}` when :attr:`elementwise_affine` is set to ``True``.
+            :math:`\\text{{normalized\\_shape}}` when :attr:`elementwise_affine` is set to ``True``.
             The values are initialized to 1.
         bias:   the learnable bias of the module of shape
-                :math:`\text{{normalized\_shape}}` when :attr:`elementwise_affine` is set to ``True``.
+                :math:`\\text{{normalized\\_shape}}` when :attr:`elementwise_affine` is set to ``True``.
                 The values are initialized to 0.
 
     Shape:
@@ -159,8 +158,7 @@ class LayerNorm(Module):
         :scale: 50 %
 
     """.format(
-        layernorm_args=layernorm_args.__doc__,
-        common_args=common_args.__doc__
+        layernorm_args=layernorm_args.__doc__, common_args=common_args.__doc__
     )
 
     __constants__ = ["normalized_shape", "eps", "elementwise_affine"]
