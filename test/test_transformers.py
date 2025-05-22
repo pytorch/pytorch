@@ -226,11 +226,12 @@ def _get_ck_dropout_mask(batch_size, q_len, kv_len, p, device) -> torch.Tensor:
     TODO_ANDY: Write full doc
     """
     mask = torch.empty((batch_size, 1, q_len, kv_len), device=device)
+#    blah = torch.ops.xformers._andy_lugo(p)
     #rand_uniform is an int8 tensor
-    rand_uniform = torch.ops.aten._ck_rand_uniform(p, mask)
+    rand_uniform = torch.ops.xformers._ck_rand_uniform(p, mask)
 
-    mask = (rand_uniform <=int((1.0 -p) * 255.0)).to(torch.float32)
-    mask = mask.reshape(batch_size, q_len, kv_len)
+#    mask = (rand_uniform <=int((1.0 -p) * 255.0)).to(torch.float32)
+#    mask = mask.reshape(batch_size, q_len, kv_len)
 
     return mask
 
@@ -3623,7 +3624,7 @@ class TestSDPACudaOnly(NNTestCase):
         value = torch.rand(batch_size, num_heads_kv, seq_len_k, head_dim,
                            device=device, dtype=dtype, requires_grad=True)
         
-        ck_dropout = _get_ck_dropout_mask(batch_size, seq_len_q, seq_len_k
+        ck_dropout = _get_ck_dropout_mask(batch_size, seq_len_q, seq_len_k, dropout_p, device)
         print("q size: ", query.size())
         print("k size: ", key.size())
         print("v size: ", value.size())
