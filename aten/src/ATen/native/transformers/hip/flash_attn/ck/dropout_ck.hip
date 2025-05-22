@@ -6,18 +6,19 @@
  * LICENSE file in the root directory of this source tree.
  */
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAGeneratorImpl.h>
+#include <ATen/hip/HIPGeneratorImpl.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/hip/HIPStream.h>
 #include <torch/library.h>
 #include <torch/types.h>
-#include <ATen/cuda/PhiloxUtils.cuh>
+#include <ATen/hip/PhiloxUtils.cuh>
 
 #include <ck_tile/core.hpp>
 #include <ck_tile/host/kernel_launch.hpp>
 
 #include <dropout_ck.h>
-a;sdlkfjas;ldkfjas;dlfkj
+
+#include <iostream>
 namespace {
 
 /**
@@ -28,6 +29,10 @@ at::Tensor rand_uniform_int(
     double dropout_prob,
     const at::Tensor& out_pattern) // [Batches, num_head, query_len, key_len]
 {
+  std::cout << "ANDY LUGO: " << dropout_prob << std::endl;
+    
+  return out_pattern;
+  /*
   int B = out_pattern.size(0);
   int num_heads = out_pattern.size(1);
   int M = out_pattern.size(2);
@@ -86,12 +91,27 @@ at::Tensor rand_uniform_int(
   (void)hipStreamSynchronize(stream);
 
   return randvals;
-} // namespace
+  */
+}
+
+/*
+double andy_lugo(double in) {
+  std::cout << "ANDY LUGO: " << in << std::endl;
+  return -1.0;
+}
+*/
+
 
 } // namespace
 
-TORCH_LIBRARY_IMPL(xformers, CUDA, m) {
-  m.impl(
-      TORCH_SELECTIVE_NAME("xformers::_ck_rand_uniform"),
-      TORCH_FN(rand_uniform_int));
+
+TORCH_LIBRARY_FRAGMENT(aten, m) {
+  m.def(TORCH_SELECTIVE_SCHEMA("aten::_ck_rand_uniform(float p, Tensor out) -> Tensor"));
+//  m.def(TORCH_SELECTIVE_SCHEMA("aten::_andy_lugo(float in) -> float"));
+}
+
+
+TORCH_LIBRARY_IMPL(aten, CUDA, m) {
+  m.impl(TORCH_SELECTIVE_NAME("aten::_ck_rand_uniform"), TORCH_FN(rand_uniform_int));
+//  m.impl(TORCH_SELECTIVE_NAME("aten::_andy_lugo"),TORCH_FN(andy_lugo));
 }

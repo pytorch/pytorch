@@ -220,6 +220,22 @@ PLATFORM_SPECIFIC_SDPA = get_platform_specific_sdpa()
 # 2. head dimsion larger than 64
 MEM_EFF_CAPABILITY_MATCHES_SM80 = SM80OrLater or TEST_WITH_ROCM
 
+
+def _get_ck_dropout_mask(batch_size, q_len, kv_len, p, device) -> torch.Tensor:
+    """
+    TODO_ANDY: Write full doc
+    """
+    mask = torch.empty((batch_size, 1, q_len, kv_len), device=device)
+    #rand_uniform is an int8 tensor
+    rand_uniform = torch.ops.aten._ck_rand_uniform(p, mask)
+
+    mask = (rand_uniform <=int((1.0 -p) * 255.0)).to(torch.float32)
+    mask = mask.reshape(batch_size, q_len, kv_len)
+
+    return mask
+
+
+
 def rand_sdpa_tensor(shape: SdpaShape, device: str, dtype: torch.dtype, type: str,
                      requires_grad: bool = False, packed: bool = False) -> torch.Tensor:
     """Creates rand dense or nested tensor with given shape and type.
@@ -3606,7 +3622,8 @@ class TestSDPACudaOnly(NNTestCase):
                          dtype=dtype, requires_grad=True)
         value = torch.rand(batch_size, num_heads_kv, seq_len_k, head_dim,
                            device=device, dtype=dtype, requires_grad=True)
-
+        
+        ck_dropout = _get_ck_dropout_mask(batch_size, seq_len_q, seq_len_k
         print("q size: ", query.size())
         print("k size: ", key.size())
         print("v size: ", value.size())

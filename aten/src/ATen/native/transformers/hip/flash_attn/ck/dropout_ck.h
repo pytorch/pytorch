@@ -8,7 +8,7 @@
 #include <ck_tile/ops/fmha/block/block_dropout.hpp>
 #include <ck_tile/ops/gemm/block/block_gemm_areg_bsmem_creg_v2.hpp>
 #include <ck_tile/ops/gemm/block/block_gemm_problem.hpp>
-headerbweebingtonmkdido
+
 template <typename RandValOutputDataType, bool kIsGroupMode>
 struct FmhaRandUniformKernel {
   using BlockTile = ck_tile::sequence<128, 64, 32>;
