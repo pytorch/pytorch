@@ -229,7 +229,7 @@ def _get_param_all_gather_inputs(
                 fsdp_param.sharded_param = fsdp_param.sharded_param.to(param_dtype)
                 fsdp_param.sharded_param.requires_grad_(True)
             if hasattr(fsdp_param, "sharded_param_fully_shard"):
-                torch.distributed.breakpoint()
+                # torch.distributed.breakpoint()
                 fsdp_param.sharded_param_fully_shard = (
                     fsdp_param.sharded_param_fully_shard.to(param_dtype)
                 )
@@ -319,6 +319,7 @@ def foreach_all_gather_copy_out(
 
     if len(non_inference_outs) > 0:
         with torch.autograd._unsafe_preserve_version_counter(tuple(non_inference_outs)):
+            all_gather_output = all_gather_output.to(out[0].dtype)
             torch.ops.fsdp.split_with_sizes_copy(
                 all_gather_output, all_gather_input_split_sizes, dim=1, out=out
             )
@@ -549,7 +550,11 @@ def foreach_reduce(
                 new_sharded_dtensor_grad = _from_local_no_grad(
                     new_sharded_grad, fsdp_param._sharding_spec
                 )
-                fsdp_param.sharded_param_fully_shard.grad = new_sharded_dtensor_grad
+                # torch.distributed.breakpoint()
+                # fsdp_param.sharded_param_fully_shard.grad = new_sharded_dtensor_grad
+                fsdp_param.sharded_param_fully_shard.grad = new_sharded_dtensor_grad.to(
+                    fsdp_param.sharded_param_fully_shard.dtype
+                )
                 fsdp_param._setattr_on_modules(fsdp_param.sharded_param_fully_shard)
             if not compiled_autograd_enabled():
                 for hook in (

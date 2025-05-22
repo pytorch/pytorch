@@ -460,7 +460,7 @@ class FSDPParamGroup:
             self.comm_ctx.reduce_scatter_state = ReduceScatterState(
                 reduce_scatter_input, reduce_scatter_event
             )
-            torch.distributed.breakpoint()
+
             if all_reduce_input is not None:
                 if self.device.type != "cpu":
                     assert all_reduce_event is not None
