@@ -3734,7 +3734,7 @@ def forward(self, x):
         class Unsqueeze(torch.nn.Module):
             def forward(self, xs):
                 u0, u1 = xs.tolist()
-                x = torch.empty(1, u0 + u1).contiguous()
+                x = torch.zeros(1, u0 + u1).contiguous()
                 return x.unsqueeze(-1)
 
         mod = Unsqueeze()
