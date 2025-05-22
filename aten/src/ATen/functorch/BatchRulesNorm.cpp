@@ -649,7 +649,6 @@ static std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_p
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
-
 template <typename F, F Func>
 struct NativeBatchNormBatchRuleHelper {
   static std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>> apply(

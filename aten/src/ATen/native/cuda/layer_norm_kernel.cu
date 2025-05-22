@@ -1367,8 +1367,8 @@ void cuComputeGradGammaBeta(
     }
 }
 
-template<typename T, typename T_ACC, bool rms_norm> __global__
 void cuComputeGradInput(
+template<typename T, typename T_ACC, bool rms_norm> __global__
     const T* __restrict__ dout,
     const T* __restrict__ input,
     const int64_t M,
@@ -1419,7 +1419,9 @@ void cuComputeGradInput(
     }
     // intra-warp reductions
     for (int mask = blockDim.x/2;  mask > 0;  mask /= 2) {
-      sum_loss1 += WARP_SHFL_XOR(sum_loss1, mask);
+      if(!rms_norm){
+        sum_loss1 += WARP_SHFL_XOR(sum_loss1, mask);
+      }
       sum_loss2 += WARP_SHFL_XOR(sum_loss2, mask);
     }
     // inter-warp reductions
@@ -1430,25 +1432,33 @@ void cuComputeGradInput(
         // upper half of warps write to shared
         if (threadIdx.y >= offset && threadIdx.y < 2*offset) {
           const int wrt_i = (threadIdx.y - offset) * blockDim.x + threadIdx.x;
-          buf[2*wrt_i] = sum_loss1;
+          if(!rms_norm){
+            buf[2*wrt_i] = sum_loss1;
+          }
           buf[2*wrt_i+1] = sum_loss2;
         }
         __syncthreads();
         // lower half merges
         if (threadIdx.y < offset) {
           const int read_i = threadIdx.y * blockDim.x + threadIdx.x;
-          sum_loss1 += buf[2*read_i];
+          if(!rms_norm){
+            sum_loss1 += buf[2*read_i];
+          }
           sum_loss2 += buf[2*read_i+1];
         }
         __syncthreads();
       }
       if (threadIdx.y == 0) {
-        buf[2*threadIdx.x] = sum_loss1;
+        if(!rms_norm){
+          buf[2*threadIdx.x] = sum_loss1;
+        }
         buf[2*threadIdx.x+1] = sum_loss2;
       }
       __syncthreads();
       if (threadIdx.y !=0) {
-        sum_loss1 = buf[2*threadIdx.x];
+        if(!rms_norm){
+          sum_loss1 = buf[2*threadIdx.x];
+        }
         sum_loss2 = buf[2*threadIdx.x+1];
       }
     }
@@ -1531,8 +1541,8 @@ void LayerNormBackwardKernelImplInternal(
       int nshared =
               threads1.y > 1 ?
               threads1.y*threads1.x*sizeof(T_ACC) :
+              cuComputeGradInput<T, T_ACC, rms_norm><<<blocks1, threads1, nshared, cuda_stream>>>(
               0;
-      cuComputeGradInput<T, T_ACC, rms_norm><<<blocks1, threads1, nshared, cuda_stream>>>(
               dY_data,
               X_data,
               M, N,
