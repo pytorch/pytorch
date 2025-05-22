@@ -122,7 +122,7 @@ def call_func_at_runtime_with_args(
 
     context = torch._C._DisableAutocast if disable_amp else nullcontext
     with context():
-        if hasattr(f, "_boxed_call"):
+        if getattr(f, "_boxed_call", False):
             out = normalize_as_list(f(args))
         else:
             # TODO: Please remove soon
@@ -489,3 +489,14 @@ def contain_metadata_mutation_ops(module: torch.fx.GraphModule) -> bool:
         ):
             return True
     return False
+
+
+def get_cuda_generator_meta_val(device_idx: int):
+    """
+    Get a generator value to use as a meta val
+
+    newly cloned generator will not contain tensors. it is only Generators that are
+    registered to a CUDAGraph that contain tensors. since this does not contain Tensor
+    it is fine to use in the meta.
+    """
+    return torch.cuda.default_generators[device_idx].clone_state()

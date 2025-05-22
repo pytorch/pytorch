@@ -313,9 +313,9 @@ def postprocess_forward_derivatives(
         formula = defn.formula
         required_inputs_tangent = find_required_inputs(formula, "_t")
         if formula == "auto_element_wise":
-            assert (
-                f.func.kind() != SchemaKind.inplace
-            ), f"Cannot use auto_element_wise with {f.func.name} because it is an in-place variant"
+            assert f.func.kind() != SchemaKind.inplace, (
+                f"Cannot use auto_element_wise with {f.func.name} because it is an in-place variant"
+            )
             if (
                 (not len(args_with_derivatives) == 1)
                 or len(forward_derivatives) > 1
@@ -986,7 +986,7 @@ def saved_variables(
 
 
 def _create_op_prefix(name: str) -> str:
-    """Takes a native function name converts to a op prefix name.
+    r"""Takes a native function name converts to an op prefix name.
 
     Note that the "name" parameter must be the native function name
     without the optional variant suffix, so "add" instead of
@@ -995,8 +995,9 @@ def _create_op_prefix(name: str) -> str:
     OP names correspond to classes, hence the change to title case.
 
     Example::
-    >>> _create_op_prefix("add")
-    'AddBackward'
+
+        >>> _create_op_prefix("add")
+        'AddBackward'
     """
     camel_case = "".join([p.title() for p in name.split("_")])
     return (camel_case + "Backward").replace("ForwardBackward", "Backward")

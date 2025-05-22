@@ -139,7 +139,14 @@ class BlockPatternMatcher:
 
         # Sanity check that we can recover the index from the matched subexpressions.
         matched_index = sympy_dot(strides, block_index_exprs)
-        assert sizevars.statically_known_equals(matched_index, index), textwrap.dedent(
+        assert sizevars.statically_known_equals(
+            # New precomputed replacements may be generated when the `get_match` function
+            # above is called, but the `index` that is being matched has not been updated.
+            # So remove them when checking for equivalence e.g. if ps0=3*s0 and
+            # index=3*s0*expr, matched_index=ps0*expr, then index == matched_index
+            sizevars.remove_precomputed_replacements(matched_index),
+            sizevars.remove_precomputed_replacements(index),
+        ), textwrap.dedent(
             f"""
             Invalid match!
             Index: {index}

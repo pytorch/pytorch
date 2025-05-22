@@ -102,7 +102,7 @@ except ImportError:
     has_pytest = False
 
 
-MI300_ARCH = ("gfx940", "gfx941", "gfx942")
+MI300_ARCH = ("gfx942",)
 
 
 def freeze_rng_state(*args, **kwargs):
@@ -235,6 +235,7 @@ IS_SANDCASTLE: bool = TestEnvironment.def_flag(
     implied_by_fn=lambda: os.getenv("TW_JOB_USER") == "sandcastle",
     include_in_repro=False,
 )
+IN_RE_WORKER: bool = os.environ.get("INSIDE_RE_WORKER") is not None
 
 _is_fbcode_default = (
     hasattr(torch._utils_internal, "IS_FBSOURCE") and
@@ -1230,7 +1231,7 @@ def run_tests(argv=UNITTEST_ARGS):
         if RERUN_DISABLED_TESTS:
             other_args.append("--rerun-disabled-tests")
         if TEST_SAVE_XML:
-            other_args += ['--save-xml', args.save_xml]
+            other_args += ['--save-xml', TEST_SAVE_XML]
 
         test_cases = (
             get_pytest_test_cases(argv) if USE_PYTEST else
@@ -1293,15 +1294,10 @@ def run_tests(argv=UNITTEST_ARGS):
         if TEST_SAVE_XML:
             sanitize_pytest_xml(test_report_path)
 
-        if not RERUN_DISABLED_TESTS:
-            # exitcode of 5 means no tests were found, which happens since some test configs don't
-            # run tests from certain files
-            sys.exit(0 if exit_code == 5 else exit_code)
-        else:
-            # Only record the test report and always return a success code when running under rerun
-            # disabled tests mode
-            sys.exit(0)
-    elif TEST_SAVE_XML is not None:
+        # exitcode of 5 means no tests were found, which happens since some test configs don't
+        # run tests from certain files
+        sys.exit(0 if exit_code == 5 else exit_code)
+    elif TEST_SAVE_XML:
         # import here so that non-CI doesn't need xmlrunner installed
         import xmlrunner  # type: ignore[import]
         from xmlrunner.result import _XMLTestResult  # type: ignore[import]
@@ -1441,11 +1437,7 @@ NOTEST_CPU = "cpu" in split_if_not_empty(os.getenv('PYTORCH_TESTING_DEVICE_EXCEP
 skipIfNoDill = unittest.skipIf(not TEST_DILL, "no dill")
 
 
-# Python 2.7 doesn't have spawn
-NO_MULTIPROCESSING_SPAWN: bool = TestEnvironment.def_flag(
-    "NO_MULTIPROCESSING_SPAWN",
-    env_var="NO_MULTIPROCESSING_SPAWN",
-)
+NO_MULTIPROCESSING_SPAWN: bool = False
 TEST_WITH_ASAN: bool = TestEnvironment.def_flag(
     "TEST_WITH_ASAN",
     env_var="PYTORCH_TEST_WITH_ASAN",
@@ -1502,17 +1494,11 @@ TEST_SKIP_CUDAGRAPH: bool = TestEnvironment.def_flag(
     env_var="PYTORCH_TEST_SKIP_CUDAGRAPH",
 )
 TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (
-    (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 11) or
+    torch.version.cuda or
     (torch.version.hip and float(".".join(torch.version.hip.split(".")[0:2])) >= 5.3)
 )
 
 TEST_CUDA_CUDSS = TEST_CUDA and (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 12)
-TEST_CUDA_GRAPH_CONDITIONAL_NODES = TEST_CUDA_GRAPH and (
-    torch.version.cuda and (
-        (int(torch.version.cuda.split(".")[0]) >= 12 and int(torch.version.cuda.split(".")[1]) >= 4) or
-        (int(torch.version.cuda.split(".")[0]) >= 13)
-    )
-)
 
 def allocator_option_enabled_fn(allocator_config, _, option):
     if allocator_config is None:
@@ -1746,22 +1732,25 @@ def make_dynamo_test(
     def standard_test(
         self: Any,
         fn: Callable[..., Any],
+        kwargs,
     ) -> None:
-        def dummy(fn: Callable[..., Any]) -> None:
-            fn(self)
+        def dummy() -> None:
+            fn(self, **kwargs)
 
         actual = CompileCounter()
 
-        dummy(fn)
+        dummy()
         reset()
         opt_fn = optimize_assert(actual)(dummy)
-        opt_fn(fn)
+        opt_fn()
         reset()
 
-    def test_fn(self: Any) -> None:
+    @functools.wraps(fn)
+    def test_fn(self: Any, **kwargs) -> None:
         return standard_test(
             self,
             fn=fn,
+            kwargs=kwargs,
         )
 
     return test_fn
@@ -1772,19 +1761,6 @@ TEST_WITH_TV = os.getenv('PYTORCH_TEST_WITH_TV') == '1'
 
 if TEST_WITH_TV:
     torch.fx.experimental._config.translation_validation = True
-
-# Some tests take too long when dynamic_shapes is combined with
-# translation_validation. Whenever that happens, we solve that by
-# disabling translation_validation.
-def disable_translation_validation_if_dynamic_shapes(fn):
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        if torch._dynamo.config.dynamic_shapes:
-            # Turning TV off due to high latency on dynamic shapes.
-            torch.fx.experimental._config.translation_validation = False
-        return fn(*args, **kwargs)
-    return wrapper
-
 
 # Determine whether to enable cuda memory leak check.
 # CUDA mem leak check is expensive and thus we don't want to execute it on every
@@ -2045,20 +2021,24 @@ class DeterministicGuard:
         self.warn_only = warn_only
         self.fill_uninitialized_memory = fill_uninitialized_memory
 
-    def __enter__(self):
-        self.deterministic_restore = torch.are_deterministic_algorithms_enabled()
-        self.warn_only_restore = torch.is_deterministic_algorithms_warn_only_enabled()
-        self.fill_uninitialized_memory_restore = torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
-        torch.use_deterministic_algorithms(
-            self.deterministic,
-            warn_only=self.warn_only)
+    @classmethod
+    def _current_state(cls):
+        return cls(
+            torch.are_deterministic_algorithms_enabled(),
+            warn_only=torch.is_deterministic_algorithms_warn_only_enabled(),
+            fill_uninitialized_memory=torch.utils.deterministic.fill_uninitialized_memory,  # type: ignore[attr-defined]
+        )
+
+    def _update(self):
+        torch.use_deterministic_algorithms(self.deterministic, warn_only=self.warn_only)
         torch.utils.deterministic.fill_uninitialized_memory = self.fill_uninitialized_memory  # type: ignore[attr-defined]
 
+    def __enter__(self):
+        self._restore = self._current_state()
+        self._update()
+
     def __exit__(self, exception_type, exception_value, traceback):
-        torch.use_deterministic_algorithms(
-            self.deterministic_restore,
-            warn_only=self.warn_only_restore)
-        torch.utils.deterministic.fill_uninitialized_memory = self.fill_uninitialized_memory_restore  # type: ignore[attr-defined]
+        self._restore._update()
 
 class AlwaysWarnTypedStorageRemoval:
     def __init__(self, always_warn):
@@ -2140,21 +2120,16 @@ def wrapDeterministicFlagAPITest(fn):
                 cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
 
                 def __enter__(self):
-                    self.is_cuda10_2_or_higher = (
-                        (torch.version.cuda is not None)
-                        and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
-                    if self.is_cuda10_2_or_higher:
-                        self.cublas_config_restore = os.environ.get(self.cublas_var_name)
-                        os.environ[self.cublas_var_name] = ':4096:8'
+                    self.cublas_config_restore = os.environ.get(self.cublas_var_name)
+                    os.environ[self.cublas_var_name] = ':4096:8'
 
                 def __exit__(self, exception_type, exception_value, traceback):
-                    if self.is_cuda10_2_or_higher:
-                        cur_cublas_config = os.environ.get(self.cublas_var_name)
-                        if self.cublas_config_restore is None:
-                            if cur_cublas_config is not None:
-                                del os.environ[self.cublas_var_name]
-                        else:
-                            os.environ[self.cublas_var_name] = self.cublas_config_restore
+                    cur_cublas_config = os.environ.get(self.cublas_var_name)
+                    if self.cublas_config_restore is None:
+                        if cur_cublas_config is not None:
+                            del os.environ[self.cublas_var_name]
+                    else:
+                        os.environ[self.cublas_var_name] = self.cublas_config_restore
             with CuBLASConfigGuard():
                 fn(*args, **kwargs)
     return wrapper
@@ -2311,7 +2286,7 @@ def to_gpu(obj, type_map=None):
         assert obj.is_leaf
         t = type_map.get(obj.dtype, obj.dtype)
         with torch.no_grad():
-            res = obj.clone().to(dtype=t, device="cuda")
+            res = obj.to(dtype=t, device="cuda", copy=True)
             res.requires_grad = obj.requires_grad
         return res
     elif torch.is_storage(obj):
@@ -2711,6 +2686,7 @@ def check_if_enable(test: unittest.TestCase):
             raise unittest.SkipTest(skip_msg)
 
         if not should_skip and RERUN_DISABLED_TESTS:
+            # Probably test has disable issue but not for this platform
             skip_msg = "Test is enabled but --rerun-disabled-tests verification mode is set, so only" \
                 " disabled tests are run"
             raise unittest.SkipTest(skip_msg)
@@ -2824,7 +2800,10 @@ class RelaxedNumberPair(NumberPair):
         elif isinstance(number_like, Enum):
             return int(number_like)  # type: ignore[call-overload]
         else:
-            return super()._to_number(number_like, id=id)
+            number = super()._to_number(number_like, id=id)
+            if type(number) not in self._TYPE_TO_DTYPE.keys():
+                self._inputs_not_supported()
+            return number
 
 
 class TensorOrArrayPair(TensorLikePair):
@@ -3044,9 +3023,7 @@ class TestCase(expecttest.TestCase):
                         # The path isn't strictly correct but it's arguably better than nothing.
                         return os.path.split(abs_test_path)[1]
 
-                    # NB: In Python 3.8, the getfile() call will return a path relative
-                    # to the working directory, so convert that to absolute.
-                    abs_test_path = os.path.abspath(inspect.getfile(type(self)))
+                    abs_test_path = inspect.getfile(type(self))
                     test_filename = _get_rel_test_path(abs_test_path)
                     class_name = type(self).__name__
                     test_run_cmd = f"python {test_filename} {class_name}.{method_name}"
@@ -3108,13 +3085,16 @@ class TestCase(expecttest.TestCase):
 
     # Munges exceptions that internally contain stack traces, using munge_exc
     def assertExpectedInlineMunged(
-        self, exc_type, callable, expect, *, suppress_suffix=True
+        self, exc_type, callable, expect, *, skip=0, suppress_suffix=True, post_munge=None,
     ):
         try:
             callable()
         except exc_type as e:
+            munged = munge_exc(e, suppress_suffix=suppress_suffix, skip=skip + 1)
+            if post_munge:
+                munged = post_munge(munged)
             self.assertExpectedInline(
-                munge_exc(e, suppress_suffix=suppress_suffix, skip=1), expect, skip=1
+                munged, expect, skip=skip + 1
             )
             return
         self.fail(msg="Did not raise when expected to")
@@ -3163,6 +3143,13 @@ class TestCase(expecttest.TestCase):
 
     def wrap_with_cuda_memory_check(self, method):
         return self.wrap_method_with_policy(method, self.assertLeaksNoCudaTensors)
+
+    def _dynamo_test_key(self):
+        return f"{self.__class__.__name__}.{self._testMethodName}"
+
+    def compile_fn(self, fn, backend, nopython):
+        # Allows subclasses to control compilation
+        return torch._dynamo.optimize(backend, nopython=nopython)(fn)
 
     def _run_custom(self, result=None):
         using_unittest = isinstance(result, unittest.TestResult)
@@ -3239,16 +3226,16 @@ class TestCase(expecttest.TestCase):
 
         with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors), maybe_disable_size_asserts:
             if TEST_WITH_AOT_EAGER:
-                super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
+                super_run = self.compile_fn(super_run, "aot_eager_decomp_partition", nopython)
             elif TEST_WITH_TORCHDYNAMO or TEST_WITH_TORCHINDUCTOR:
                 if TEST_WITH_TORCHINDUCTOR:
-                    super_run = torch._dynamo.optimize("inductor")(super_run)
+                    super_run = self.compile_fn(super_run, "inductor", nopython)
                 else:
                     # Assume eager-generated GraphModules will not error out.
                     # If we do, this is probably a Dynamo bug!
-                    super_run = torch._dynamo.optimize("eager_noexcept", nopython=nopython)(super_run)
+                    super_run = self.compile_fn(super_run, "eager_noexcept", nopython)
 
-                key = f"{self.__class__.__name__}.{self._testMethodName}"
+                key = self._dynamo_test_key()
 
                 def expect_failure(f, file_name):
                     @wraps(f)
@@ -5230,23 +5217,6 @@ def dtype_name(dtype):
     return str(dtype).split('.')[1]
 
 
-dtype_abbrs = {
-    torch.bfloat16: 'bf16',
-    torch.float64: 'f64',
-    torch.float32: 'f32',
-    torch.float16: 'f16',
-    torch.complex32: 'c32',
-    torch.complex64: 'c64',
-    torch.complex128: 'c128',
-    torch.int8: 'i8',
-    torch.int16: 'i16',
-    torch.int32: 'i32',
-    torch.int64: 'i64',
-    torch.bool: 'b8',
-    torch.uint8: 'u8',
-}
-
-
 @functools.lru_cache
 def get_cycles_per_ms() -> float:
     """Measure and return approximate number of cycles per millisecond for torch.cuda._sleep
@@ -5571,6 +5541,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     if suppress_suffix:
         s = re.sub(r"\n*Set TORCH_LOGS.+", "", s, flags=re.DOTALL)
         s = re.sub(r"\n*You can suppress this exception.+", "", s, flags=re.DOTALL)
+        s = re.sub(r"\n*Set TORCHDYNAMO_VERBOSE=1.+", "", s, flags=re.DOTALL)
     if suppress_prefix:
         s = re.sub(r"Cannot export model.+\n\n", "", s)
     s = re.sub(r" +$", "", s, flags=re.MULTILINE)
@@ -5607,7 +5578,7 @@ def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
                 f"{num_garbage_objs} tensors were found in the garbage. Did you introduce a reference cycle?"
             )
             try:
-                import objgraph  # type: ignore[import-not-found]
+                import objgraph  # type: ignore[import-not-found,import-untyped]
                 warnings.warn(
                     f"Dumping first {limit} objgraphs of leaked {matched_type}s rendered to png"
                 )
@@ -5632,6 +5603,36 @@ def remove_cpp_extensions_build_root():
             subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE)
         else:
             shutil.rmtree(default_build_root, ignore_errors=True)
+
+
+def install_cpp_extension(extension_root):
+    # Wipe the build / install dirs if they exist
+    build_dir = os.path.join(extension_root, "build")
+    install_dir = os.path.join(extension_root, "install")
+    for d in (build_dir, install_dir):
+        if os.path.exists(d):
+            shutil.rmtree(d)
+
+    # Build the extension
+    setup_py_path = os.path.join(extension_root, "setup.py")
+    cmd = [sys.executable, setup_py_path, "install", "--root", install_dir]
+    return_code = shell(cmd, cwd=extension_root, env=os.environ)
+    if return_code != 0:
+        raise RuntimeError(f"build failed for cpp extension at {extension_root}")
+
+    mod_install_dir = None
+    # install directory is the one that is named site-packages
+    for root, directories, _ in os.walk(install_dir):
+        for directory in directories:
+            if "-packages" in directory:
+                mod_install_dir = os.path.join(root, directory)
+
+    if mod_install_dir is None:
+        raise RuntimeError(f"installation failed for cpp extension at {extension_root}")
+
+    if mod_install_dir not in sys.path:
+        sys.path.insert(0, mod_install_dir)
+
 
 # Decorator to provide a helper to load inline extensions to a temp directory
 def scoped_load_inline(func):

@@ -57,7 +57,7 @@ static void hoistConvPackedParams(
 
   // create the new name
 
-  std::string suffix = "";
+  std::string suffix;
   for (const auto& attrName : rootToConvPath) {
     suffix += attrName + ".";
   }

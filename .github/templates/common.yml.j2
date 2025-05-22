@@ -4,6 +4,7 @@
 {%- set download_artifact_action = "actions/download-artifact@v4.1.7" -%}
 
 {%- set timeout_minutes = 240 -%}
+{%- set timeout_minutes_windows_binary = 300 -%}
 
 {%- macro concurrency(build_environment) -%}
 concurrency:

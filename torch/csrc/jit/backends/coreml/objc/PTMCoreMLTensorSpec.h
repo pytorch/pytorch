@@ -6,7 +6,7 @@
 namespace torch::jit::mobile::coreml {
 
 struct TensorSpec {
-  std::string name = "";
+  std::string name;
   c10::ScalarType dtype = c10::ScalarType::Float;
 };
 

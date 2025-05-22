@@ -26,36 +26,63 @@
 namespace at::cuda::tunable {
 
 template <typename T>
-constexpr hipblasDatatype_t HipDataTypeFor();
+constexpr hipDataType HipDataTypeFor();
 
 template <>
-constexpr hipblasDatatype_t HipDataTypeFor<float>() {
+constexpr hipDataType HipDataTypeFor<float>() {
   return HIP_R_32F;
 }
 
 template <>
-constexpr hipblasDatatype_t HipDataTypeFor<Half>() {
+constexpr hipDataType HipDataTypeFor<Half>() {
   return HIP_R_16F;
 }
 
 template <>
-constexpr hipblasDatatype_t HipDataTypeFor<BFloat16>() {
+constexpr hipDataType HipDataTypeFor<BFloat16>() {
   return HIP_R_16BF;
 }
 
 template <>
-constexpr hipblasDatatype_t HipDataTypeFor<double>() {
+constexpr hipDataType HipDataTypeFor<double>() {
   return HIP_R_64F;
 }
 
 template <>
-constexpr hipblasDatatype_t HipDataTypeFor<c10::Float8_e4m3fnuz>() {
+constexpr hipDataType HipDataTypeFor<c10::Float8_e4m3fnuz>() {
   return HIP_R_8F_E4M3_FNUZ;
 }
 
 template <>
-constexpr hipblasDatatype_t HipDataTypeFor<c10::Float8_e5m2fnuz>() {
+constexpr hipDataType HipDataTypeFor<c10::Float8_e5m2fnuz>() {
   return HIP_R_8F_E5M2_FNUZ;
+}
+
+// This code is instantiated regardless of ROCm version.
+// Prior to ROCm 6.3, we hard-code the known enum values.
+template <>
+constexpr hipDataType HipDataTypeFor<c10::Float8_e4m3fn>() {
+#if ROCM_VERSION >= 60300
+  return HIP_R_8F_E4M3;
+#else
+  return static_cast<hipDataType>(28);
+#endif
+}
+
+template <>
+constexpr hipDataType HipDataTypeFor<c10::Float8_e5m2>() {
+#if ROCM_VERSION >= 60300
+  return HIP_R_8F_E5M2;
+#else
+  return static_cast<hipDataType>(29);
+#endif
+}
+
+// This type is not intended for matrix types but rather a scale factor.
+// Return a dummy value to satisfy linker.
+template <>
+constexpr hipDataType HipDataTypeFor<c10::Float8_e8m0fnu>() {
+  return static_cast<hipDataType>(500);
 }
 
 template <typename T>
@@ -355,7 +382,7 @@ static hipblasOperation_t MapLayoutToHipBlasLt(BlasOp layout) {
 }
 
 static size_t GetHipblasltWorkspaceSize() {
-  static const char * env = getenv("HIPBLASLT_WORKSPACE_SIZE");
+  static const auto env = c10::utils::get_env("HIPBLASLT_WORKSPACE_SIZE");
   // 256MB is max workspace size allowed for hipblaslt
   // hipblaslt-bench uses 32MB
   // recommendation from hipblaslt author was 76MB
@@ -364,7 +391,7 @@ static size_t GetHipblasltWorkspaceSize() {
   size_t workspace_size = 76*1024;
   if (env) {
     try {
-      workspace_size = std::stoi(env);
+      workspace_size = std::stoi(env.value());
     } catch(std::invalid_argument const& e) {
       TORCH_WARN("invalid HIPBLASLT_WORKSPACE_SIZE,",
                  " using default workspace size of ", workspace_size, " KiB.");
@@ -471,7 +498,11 @@ class HipblasltGemmOp : public Callable<ParamsT> {
             mat_c, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &stride_c, sizeof(stride_c)));
       }
 
-      HipBlasLtMatmulDescriptor matmul(HIPBLAS_COMPUTE_32F, HIP_R_32F);
+      hipblasComputeType_t computeType = HIPBLAS_COMPUTE_32F;
+      if (at::globalContext().allowTF32CuBLAS()) {
+        computeType = HIPBLAS_COMPUTE_32F_FAST_TF32;
+      }
+      HipBlasLtMatmulDescriptor matmul(computeType, HIP_R_32F);
       matmul.setAttribute(HIPBLASLT_MATMUL_DESC_TRANSA, opa);
       matmul.setAttribute(HIPBLASLT_MATMUL_DESC_TRANSB, opb);
 
@@ -482,9 +513,8 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       if (mat1_scale_ptr && mat2_scale_ptr) {
 #ifdef HIPBLASLT_VEC_EXT
         if (GetUseRowwiseFromParams<CT>(params)) {
-          // swapped
-          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
-          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
         }
         else
 #endif
@@ -583,6 +613,19 @@ auto GetHipBlasLtTypeStringAndOps() {
   auto b_datatype = HipDataTypeFor<BT>();
   auto in_out_datatype = HipDataTypeFor<CT>();
   std::vector<hipblasLtMatmulHeuristicResult_t> heuristic_result;
+#if ROCM_VERSION == 60400
+  // hipblaslt TT fp32 regression on ROCm 6.4, cannot use
+  if ((a_datatype == HIP_R_32F || b_datatype == HIP_R_32F || in_out_datatype == HIP_R_32F)
+          && (transa_outer == HIPBLAS_OP_T && transb_outer == HIPBLAS_OP_T)) {
+    std::vector<std::pair<std::string, std::unique_ptr<Callable<ParamsT>>>> ignore;
+    return ignore;
+  }
+#endif
+
+  hipblasComputeType_t computeType = HIPBLAS_COMPUTE_32F;
+  if (at::globalContext().allowTF32CuBLAS()) {
+    computeType = HIPBLAS_COMPUTE_32F_FAST_TF32;
+  }
 
   hipblasLtHandle_t handle;
   TORCH_HIPBLASLT_CHECK(hipblasLtCreate(&handle));
@@ -594,7 +637,7 @@ auto GetHipBlasLtTypeStringAndOps() {
         b_datatype,
         in_out_datatype,
         in_out_datatype,
-        HIPBLAS_COMPUTE_32F,
+        computeType,
         heuristic_result));
   TORCH_HIPBLASLT_CHECK(hipblasLtDestroy(handle));
 
@@ -604,7 +647,7 @@ auto GetHipBlasLtTypeStringAndOps() {
     auto algo = heuristic_result[i].algo;
     int algo_index = hipblaslt_ext::getIndexFromAlgo(algo);
     auto callable = std::make_unique<HipblasltGemmOp<AT, BT, CT, ALayout, BLayout, ParamsT>>(algo);
-    std::string type_string = fmt::sprintf("Gemm_Hipblaslt_%c%c_%d", _charFromhipblasOp(transa_outer), _charFromhipblasOp(transb_outer), algo_index);
+    std::string type_string = fmt::sprintf("Gemm_Hipblaslt_%d", algo_index);
     ret.emplace_back(type_string, std::move(callable));
   }
 

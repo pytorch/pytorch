@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
@@ -19,7 +20,6 @@
 #include <ATen/ops/asinh_native.h>
 #include <ATen/ops/atan_native.h>
 #include <ATen/ops/atanh_native.h>
-#include <ATen/ops/ceil_native.h>
 #include <ATen/ops/conj_physical_native.h>
 #include <ATen/ops/cos_native.h>
 #include <ATen/ops/cosh_native.h>
@@ -28,13 +28,9 @@
 #include <ATen/ops/erf_native.h>
 #include <ATen/ops/exp2_native.h>
 #include <ATen/ops/expm1_native.h>
-#include <ATen/ops/floor_native.h>
 #include <ATen/ops/frac_native.h>
 #include <ATen/ops/imag.h>
-#include <ATen/ops/log10_native.h>
 #include <ATen/ops/log1p_native.h>
-#include <ATen/ops/log2_native.h>
-#include <ATen/ops/log_native.h>
 #include <ATen/ops/logical_not_native.h>
 #include <ATen/ops/logit_backward_native.h>
 #include <ATen/ops/logit_native.h>
@@ -43,7 +39,6 @@
 #include <ATen/ops/real.h>
 #include <ATen/ops/reciprocal_native.h>
 #include <ATen/ops/reshape.h>
-#include <ATen/ops/round_native.h>
 #include <ATen/ops/rsqrt_native.h>
 #include <ATen/ops/sgn_native.h>
 #include <ATen/ops/sigmoid_native.h>
@@ -54,7 +49,6 @@
 #include <ATen/ops/sinh_native.h>
 #include <ATen/ops/sqrt_native.h>
 #include <ATen/ops/tan_native.h>
-#include <ATen/ops/trunc_native.h>
 #include <ATen/ops/view_as_real.h>
 #endif
 
@@ -85,7 +79,7 @@ static void unary_op_noresize(const Tensor& self, const Tensor& output_, std::st
   }
 
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self, output});
+    std::string key = op_name + getTensorsStringKey({self, output});
     auto cachedGraph = LookUpOrCreateCachedGraph<MPSUnaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, self);
       MPSGraphTensor* castTensor = newCachedGraph->inputTensor_;
@@ -141,18 +135,6 @@ static void unary_op(const Tensor& self,
   unary_op_noresize(self, output_, op_name, unaryBlock);
 }
 
-MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-  // Rounding is a no-op for integral types, and also a reasonable workaround
-  // For MPSGraph bug on Apple Silicon, that throws `Function floorOp_i64 was not found in the library`
-  // See https://github.com/pytorch/pytorch/issues/84995
-  bool isFloatInput = ([inputTensor dataType] & MPSDataTypeFloatBit) != 0;
-  if (!isFloatInput) {
-    return inputTensor;
-  }
-
-  return [mpsGraph truncateWithTensor:inputTensor name:nil];
-}
-
 MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
   MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0 dataType:inputTensor.dataType];
   MPSGraphTensor* addedTensor = [mpsGraph additionWithPrimaryTensor:inputTensor secondaryTensor:oneTensor name:nil];
@@ -166,12 +148,6 @@ static MPSGraphTensor* lengthOfComplexAsReal(MPSGraph* mpsGraph, MPSGraphTensor*
 }
 
 } // namespace mps
-
-TORCH_IMPL_FUNC(trunc_out_mps)(const Tensor& self, const Tensor& output) {
-  mps::unary_op(self, output, "trunc_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-    return mps::trunc_tensor(mpsGraph, inputTensor);
-  });
-}
 
 TORCH_IMPL_FUNC(signbit_out_mps)(const Tensor& self, const Tensor& output) {
   mps::unary_op(self, output, "signbit_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
@@ -201,20 +177,19 @@ TORCH_IMPL_FUNC(sign_out_mps)(const Tensor& self, const Tensor& output) {
   });
 }
 
-#define CREATE_MPS_STRUCTURED_UNARY_ROUNDING_TORCH_IMPL_FUNC(func_out, func_stub)                         \
-  TORCH_IMPL_FUNC(func_out)(const Tensor& self, const Tensor& output) {                                   \
-    mps::unary_op(                                                                                        \
-        self,                                                                                             \
-        output,                                                                                           \
-        #func_out,                                                                                        \
-        ^MPSGraphTensor*(MPSGraph * mpsGraph, MPSGraphTensor * inputTensor) {                             \
-          return [mpsGraph func_stub##WithTensor:inputTensor name:nil];                                   \
-        },                                                                                                \
-        [](const Tensor& t) -> bool { return t.numel() == 0 || isIntegralType(t.scalar_type(), true); }); \
-  }
-CREATE_MPS_STRUCTURED_UNARY_ROUNDING_TORCH_IMPL_FUNC(ceil_out_mps, ceil)
-CREATE_MPS_STRUCTURED_UNARY_ROUNDING_TORCH_IMPL_FUNC(floor_out_mps, floor)
-CREATE_MPS_STRUCTURED_UNARY_ROUNDING_TORCH_IMPL_FUNC(round_out_mps, round)
+#define REGISTER_MPS_UNARY_STUB(func, mps_func)                                                                        \
+  static void mps_##func##_kernel(TensorIteratorBase& iter) {                                                          \
+    mps::unary_op(                                                                                                     \
+        iter.input(0), iter.output(0), __func__, ^MPSGraphTensor*(MPSGraph * mpsGraph, MPSGraphTensor * inputTensor) { \
+          return [mpsGraph mps_func##WithTensor:inputTensor name:nil];                                                 \
+        });                                                                                                            \
+  }                                                                                                                    \
+  REGISTER_DISPATCH(func##_stub, mps_##func##_kernel)
+
+REGISTER_MPS_UNARY_STUB(ceil, ceil);
+REGISTER_MPS_UNARY_STUB(floor, floor);
+REGISTER_MPS_UNARY_STUB(round, round);
+REGISTER_MPS_UNARY_STUB(trunc, truncate);
 
 #define CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(func_out, func_stub)                                         \
   TORCH_IMPL_FUNC(func_out)(const Tensor& self, const Tensor& output) {                                          \
@@ -223,17 +198,8 @@ CREATE_MPS_STRUCTURED_UNARY_ROUNDING_TORCH_IMPL_FUNC(round_out_mps, round)
     });                                                                                                          \
   }
 
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(exp2_out_mps, exponentBase2)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(reciprocal_out_mps, reciprocal)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(sqrt_out_mps, squareRoot)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(neg_out_mps, negative)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(log_out_mps, logarithm)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(log10_out_mps, logarithmBase10)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(log2_out_mps, logarithmBase2)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(erf_out_mps, erf)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(sin_out_mps, sin)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(cos_out_mps, cos)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(tan_out_mps, tan)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(asin_out_mps, asin)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acos_out_mps, acos)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atan_out_mps, atan)
@@ -242,19 +208,6 @@ CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(cosh_out_mps, cosh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(asinh_out_mps, asinh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acosh_out_mps, acosh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atanh_out_mps, atanh)
-
-TORCH_IMPL_FUNC(rsqrt_out_mps)(const Tensor& self, const Tensor& output) {
-  mps::unary_op(self, output, "rsqrt_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-#ifdef __MAC_15_0
-    if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
-      return [mpsGraph reciprocalSquareRootWithTensor:inputTensor name:nil];
-    }
-#endif // __MAC_15_0
-    C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
-    return [mpsGraph reverseSquareRootWithTensor:inputTensor name:nil];
-    C10_DIAGNOSTIC_POP()
-  });
-}
 
 Tensor& abs_out_mps(const Tensor& self, Tensor& output) {
   using namespace mps;
@@ -295,7 +248,6 @@ Tensor& logical_not_out_mps(const Tensor& self, Tensor& output) {
 }
 
 Tensor& angle_out_mps(const Tensor& self, Tensor& output) {
-  TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS does not support angle op with int64 input");
   if (mps::supportsComplex()) {
     mps::unary_op(self, output, "angle_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
       auto realPart = [mpsGraph realPartOfTensor:inputTensor name:nil];
@@ -304,7 +256,7 @@ Tensor& angle_out_mps(const Tensor& self, Tensor& output) {
     });
     return output;
   } else {
-    TORCH_CHECK(!self.is_complex(), "MPS does not support angle with complex imput on macOS13")
+    TORCH_CHECK(!self.is_complex(), "MPS does not support angle with complex input on macOS13")
     mps::unary_op(self, output, "angle_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
       // On macOS 13 with non-complex input, realPartOfTensor and imaginaryPartOfTensor are
       // not available, and NaN is not propagated correctly:
@@ -329,14 +281,12 @@ Tensor angle_mps(const Tensor& self) {
 }
 
 TORCH_IMPL_FUNC(sigmoid_out_mps)(const Tensor& self, const Tensor& output) {
-  TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS does not support sigmoid op with int64 input");
   mps::unary_op(self, output, "sigmoid_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
     return [mpsGraph sigmoidWithTensor:inputTensor name:nil];
   });
 }
 
 TORCH_IMPL_FUNC(log1p_out_mps)(const Tensor& self, const Tensor& output) {
-  TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS does not support log1p op with int64 input");
   mps::unary_op(self, output, "log1p_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
     return mps::log1p(mpsGraph, inputTensor);
   });
@@ -363,7 +313,7 @@ TORCH_IMPL_FUNC(expm1_out_mps)(const Tensor& self, const Tensor& output) {
   });
 }
 
-static void logit_mps_impl(const Tensor& self, std::optional<double> eps, Tensor& output, const std::string op_name) {
+static void logit_mps_impl(const Tensor& self, std::optional<double> eps, Tensor& output, const std::string& op_name) {
   std::string key = op_name + ":[" + (eps.has_value() ? std::to_string(eps.value()) : "NULL") + "]";
 
   mps::unary_op(self, output, key, ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
@@ -397,7 +347,11 @@ Tensor& logit_out_mps(const Tensor& self, std::optional<double> eps, Tensor& res
 }
 
 Tensor logit_mps(const Tensor& self, std::optional<double> eps) {
-  Tensor result = at::empty(self.sizes(), ScalarType::Float, std::nullopt, kMPS, std::nullopt, std::nullopt);
+  auto out_dtype = self.scalar_type();
+  if (c10::isIntegralType(out_dtype, /*includeBool*/ true)) {
+    out_dtype = kFloat;
+  }
+  Tensor result = at::empty(self.sizes(), out_dtype, std::nullopt, kMPS, std::nullopt, std::nullopt);
   logit_mps_impl(self, eps, result, "logit_mps");
   return result;
 }

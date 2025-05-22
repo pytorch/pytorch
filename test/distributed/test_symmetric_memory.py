@@ -1,6 +1,8 @@
 # Owner(s): ["module: c10d"]
 
+import itertools
 import os
+from contextlib import nullcontext
 from unittest import skipIf
 
 import torch
@@ -14,12 +16,13 @@ from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
     _fused_all_gather_scaled_matmul_fallback,
     _fused_matmul_reduce_scatter_fallback,
-    _fused_scaled_matmul_reduce_scatter_fallback,
+    _test_mode,
     enable_symm_mem_for_group,
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
 )
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrLater
+from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_multicast_support,
@@ -27,13 +30,19 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    MI300_ARCH,
     parametrize,
     requires_cuda,
     run_tests,
+    runOnRocmArch,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
+    TEST_WITH_ROCM,
     TestCase,
 )
+
+
+test_contexts = [nullcontext, _test_mode]
 
 
 def requires_cuda_p2p_access():
@@ -101,7 +110,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         for row in connectivity.matrix:
             self.assertEqual(len(row), torch.cuda.device_count())
 
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     def test_large_alloc(self) -> None:
         t = symm_mem.empty(2 * 1024**3, dtype=torch.uint8, device="cuda")
         self.assertEqual(t.numel() * t.element_size(), 2 * 1024**3)
@@ -141,7 +150,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         symm_mem_hdl.barrier()
 
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(2)
     @parametrize("set_device", [True, False])
     def test_empty_strided_p2p(self, set_device: bool) -> None:
@@ -160,7 +169,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         self._verify_symmetric_memory(symm_mem_hdl)
         dist.destroy_process_group()
 
-    @skipIfRocm
+    @skipIfRocm  # started failing during ROCm 6.4 CI upgrade
     @skip_if_lt_x_gpu(2)
     @parametrize("set_device", [True, False])
     def test_empty_strided_p2p_persistent(self, set_device: bool) -> None:
@@ -188,7 +197,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         self._verify_symmetric_memory(symm_mem_hdl)
         dist.destroy_process_group()
 
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(2)
     def test_get_signal_pad(self) -> None:
         self._init_process()
@@ -231,6 +240,11 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
+    # These timeout tests are skipped on ROCm because timeout calls trap(), which
+    # is handled differently inside hip runtime. It collects gpu coredump and causes
+    # the linux kernel to create a core dump of the host application. The funcitonality
+    # is there, meaning timeout is happening correctly. However, there isn't a nice way
+    # to test it as the current executing thread will coredump and exit.
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
     def test_barrier_timeout(self) -> None:
@@ -252,6 +266,11 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         # impossible to terminate the process in this state.
         os._exit(0)
 
+    # These timeout tests are skipped on ROCm because timeout calls trap(), which
+    # is handled differently inside hip runtime. It collects gpu coredump and causes
+    # the linux kernel to create a core dump of the host application. The funcitonality
+    # is there, meaning timeout is happening correctly. However, there isn't a nice way
+    # to test it as the current executing thread will coredump and exit.
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
     def test_put_signal_timeout(self) -> None:
@@ -276,6 +295,11 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         # impossible to terminate the process in this state.
         os._exit(0)
 
+    # These timeout tests are skipped on ROCm because timeout calls trap(), which
+    # is handled differently inside hip runtime. It collects gpu coredump and causes
+    # the linux kernel to create a core dump of the host application. The funcitonality
+    # is there, meaning timeout is happening correctly. However, there isn't a nice way
+    # to test it as the current executing thread will coredump and exit.
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
     def test_wait_signal_timeout(self) -> None:
@@ -297,7 +321,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         # impossible to terminate the process in this state.
         os._exit(0)
 
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     @requires_cuda
     def test_allow_overlapping_devices(self) -> None:
         os.environ["TORCH_SYMM_MEM_ALLOW_OVERLAPPING_DEVICES"] = "1"
@@ -323,7 +347,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(2)
     @parametrize("gather_dim", [0, 1])
     def test_fused_all_gather_matmul(self, gather_dim: int) -> None:
@@ -355,7 +379,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
-    @skipIfRocm
+    @skipIfRocm  # this requires async_input_mm support
     @skipIf(
         not SM90OrLater,
         "_fused_all_gather_matmul_native currently only supports sm>=90",
@@ -415,7 +439,6 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
-    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @requires_multicast_support()
     def test_multimem_all_gather_matmul(self) -> None:
@@ -456,7 +479,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(2)
     @parametrize("gather_dim", [0, 1])
     @parametrize(
@@ -482,10 +505,9 @@ class SymmetricMemoryTest(MultiProcessTestCase):
             raise AssertionError("Invalid scale_mode: {scale_mode}")
 
         torch.manual_seed(42 + rank)
-        A_shard = torch.rand(*leading_dims, K, device="cuda").to(torch.float8_e4m3fn)
-        Bs = [
-            torch.rand(N, K, device="cuda").to(torch.float8_e4m3fn).T for _ in range(3)
-        ]
+
+        A_shard = torch.rand(*leading_dims, K, device="cuda").to(e4m3_type)
+        Bs = [torch.rand(N, K, device="cuda").to(e4m3_type).T for _ in range(3)]
 
         if scale_mode == "tensor-wise":
             A_scale = torch.tensor(0.1, device="cuda")
@@ -545,7 +567,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(2)
     @parametrize("scatter_dim", [0, 1])
     def test_fused_matmul_reduce_scatter(self, scatter_dim: int) -> None:
@@ -574,7 +596,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
-    @skipIfRocm
+    @skipIfRocm  # AsyncTP support changed _fused_scaled_matmul_reduce_scatter_fallback API, need more changes
     @skip_if_lt_x_gpu(2)
     @parametrize("scatter_dim", [0, 1])
     @parametrize("rowwise", [True, False])
@@ -591,8 +613,8 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         rank = self.rank
 
         torch.manual_seed(42 + rank)
-        A = torch.rand(BATCH, M, K, device="cuda").to(torch.float8_e4m3fn)
-        B = torch.rand(N, K, device="cuda").to(torch.float8_e4m3fn).T
+        A = torch.rand(BATCH, M, K, device="cuda").to(e4m3_type)
+        B = torch.rand(N, K, device="cuda").to(e4m3_type).T
 
         if rowwise:
             A_scale = torch.full((BATCH, M, 1), 0.1, device="cuda")
@@ -601,33 +623,32 @@ class SymmetricMemoryTest(MultiProcessTestCase):
             A_scale = torch.tensor(0.1, device="cuda")
             B_scale = torch.tensor(0.1, device="cuda")
 
-        output_0 = _fused_scaled_matmul_reduce_scatter_fallback(
-            A,
-            B,
-            A_scale,
-            B_scale,
-            "avg",
-            scatter_dim,
-            group.group_name,
-            out_dtype=torch.bfloat16,
-        )
-        output_1 = torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter(
-            A,
-            B,
-            A_scale,
-            B_scale,
-            "avg",
-            scatter_dim,
-            group.group_name,
-            out_dtype=torch.bfloat16,
-        )
+        output_shape = [*A.shape[:-1], B.shape[1]]
 
-        assert torch.allclose(output_0, output_1)
-        assert output_0.stride() == output_1.stride()
+        outputs = []
+        for context in test_contexts:
+            with context():
+                outputs.append(
+                    torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter(
+                        A,
+                        B,
+                        A_scale,
+                        B_scale,
+                        "avg",
+                        scatter_dim,
+                        scatter_dim,
+                        group.group_name,
+                        output_shape,
+                        out_dtype=torch.bfloat16,
+                    )
+                )
+
+        assert outputs[0].stride() == outputs[1].stride()
+        assert torch.allclose(outputs[0], outputs[1]), (outputs[0], outputs[1])
 
         dist.destroy_process_group()
 
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     @parametrize("dim", [0, 1, 2])
     def test_optimal_layout(self, dim: int) -> None:
         t = torch.rand(8, 64, 32, 16)
@@ -640,7 +661,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         self.assertTrue(x.movedim(dim, 0).is_contiguous())
         self.assertTrue(torch.allclose(x, t))
 
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(2)
     @parametrize("symm_mem_input", [True, False])
     def test_low_contention_all_gather(self, symm_mem_input: bool) -> None:
@@ -667,7 +688,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(2)
     @parametrize("reduce_op", ["sum", "avg"])
     @parametrize("symm_mem_input", [True, False])
@@ -732,7 +753,7 @@ class SubgroupTest(MultiProcessTestCase):
         )
         torch.manual_seed(42 + self.rank)
 
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_subgroup(self) -> None:
         self._init_process()
@@ -770,7 +791,6 @@ class SubgroupTest(MultiProcessTestCase):
             self.assertTrue(buf.eq(peer_rank + world.size() // 2).all())
 
 
-@skipIfRocm
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmMemCollectiveTest(MultiProcessTestCase):
@@ -858,57 +878,71 @@ class SymmMemCollectiveTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(4)
-    @parametrize("dtype", [torch.float, torch.bfloat16])
-    @parametrize("align_bytes", [4, 8, 16])
-    @parametrize("size_bytes", [4, 8192, 8196])
-    def test_one_shot_all_reduce(
-        self, dtype: torch.dtype, size_bytes: int, align_bytes: int
-    ) -> None:
+    def test_one_shot_all_reduce(self) -> None:
         self._init_process()
         group_name = dist.group.WORLD.group_name
 
-        inp = symm_mem.empty(
-            size_bytes // dtype.itemsize, dtype=dtype, device=self.device
-        ).normal_()
-        symm_mem.rendezvous(inp, group=group_name)
-
-        res = torch.ops.symm_mem.one_shot_all_reduce(inp, "sum", group_name)
-        self._verify_all_reduce_result(inp, res)
+        for dtype, size_bytes, align_bytes, copy, offset in itertools.product(
+            [torch.float, torch.bfloat16],
+            [4, 8192, 8196],
+            [4, 8, 16],
+            [True, False],
+            [0, 16],
+        ):
+            inp = symm_mem.empty(
+                size_bytes // dtype.itemsize + offset, dtype=dtype, device=self.device
+            )
+            symm_mem.rendezvous(inp, group=group_name)
+            if not copy:
+                inp.normal_()
+                res = torch.ops.symm_mem.one_shot_all_reduce(
+                    inp[offset:], "sum", group_name
+                )
+            if copy:
+                local_inp = torch.randn_like(inp[offset:])
+                res = torch.ops.symm_mem.one_shot_all_reduce_copy(
+                    inp[offset:], local_inp, "sum", group_name
+                )
+            self._verify_all_reduce_result(local_inp if copy else inp[offset:], res)
 
         dist.destroy_process_group()
 
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(4)
-    @parametrize("dtype", [torch.float, torch.bfloat16])
-    @parametrize("align_bytes", [4, 8, 16])
-    @parametrize("size_bytes", [4, 8192, 8196])
-    def test_two_shot_all_reduce(
-        self, dtype: torch.dtype, size_bytes: int, align_bytes: int
-    ) -> None:
+    def test_two_shot_all_reduce(self) -> None:
         self._init_process()
         group_name = dist.group.WORLD.group_name
 
-        t = symm_mem.empty(16384, dtype=dtype, device=self.device).fill_(0)
-        symm_mem.rendezvous(t, group=group_name)
+        for dtype, size_bytes, align_bytes, inplace in itertools.product(
+            [torch.float, torch.bfloat16],
+            [4, 8192, 8196],
+            [4, 8, 16],
+            [True, False],
+        ):
+            t = symm_mem.empty(16384, dtype=dtype, device=self.device).fill_(0)
+            symm_mem.rendezvous(t, group=group_name)
 
-        self.assertTrue(t.data_ptr() % 16 == 0)
-        self.assertTrue(align_bytes % t.element_size() == 0)
-        self.assertTrue(size_bytes % t.element_size() == 0)
+            self.assertTrue(t.data_ptr() % 16 == 0)
+            self.assertTrue(align_bytes % t.element_size() == 0)
+            self.assertTrue(size_bytes % t.element_size() == 0)
 
-        shift = align_bytes // t.element_size()
-        numel = size_bytes // t.element_size()
-        res = t[shift : shift + numel]
-        res.normal_()
-        inp = res.clone()
+            shift = align_bytes // t.element_size()
+            numel = size_bytes // t.element_size()
+            res = t[shift : shift + numel]
+            res.normal_()
+            inp = res.clone()
+            if not inplace:
+                out = torch.empty_like(inp)
+                torch.ops.symm_mem.two_shot_all_reduce_out(res, "sum", group_name, out)
+            else:
+                torch.ops.symm_mem.two_shot_all_reduce_(res, "sum", group_name)
 
-        torch.ops.symm_mem.two_shot_all_reduce_(res, "sum", group_name)
-
-        # Head and tail should not be written
-        self.assertTrue(t[:shift].eq(0).all().item())
-        self.assertTrue(t[shift + numel :].eq(0).all().item())
-        self._verify_all_reduce_result(inp, res)
+            # Head and tail should not be written
+            self.assertTrue(t[:shift].eq(0).all().item())
+            self.assertTrue(t[shift + numel :].eq(0).all().item())
+            self._verify_all_reduce_result(inp, res if inplace else out)
 
         dist.destroy_process_group()
 
@@ -925,7 +959,80 @@ class SymmMemCollectiveTest(MultiProcessTestCase):
             gathered_inps.sum(dim=0), res, rtol=1e-01, atol=1e-01
         )
 
+    @runOnRocmArch(MI300_ARCH)
     @skip_if_lt_x_gpu(4)
+    def test_reduce_scatter(self) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        for dtype, size_bytes, align_bytes, split_last_dim in itertools.product(
+            [torch.float, torch.bfloat16],
+            [128, 8192, 36 * 1024 * 16],
+            [4, 8, 16],
+            [True, False],
+        ):
+            t = symm_mem.empty(36 * 1024 * 16, dtype=dtype, device=self.device).fill_(0)
+            symm_mem.rendezvous(t, group=group_name)
+
+            self.assertTrue(t.data_ptr() % 16 == 0)
+            self.assertTrue(align_bytes % t.element_size() == 0)
+            self.assertTrue(size_bytes % t.element_size() == 0)
+
+            shift = align_bytes // t.element_size()
+            numel = size_bytes // t.element_size()
+            res = t[shift : shift + numel].normal_()
+            if split_last_dim:
+                res = res.view(-1, 128 // t.element_size())
+            inp = res.clone()
+            out_size = list(inp.shape)
+            out_size[-1] = inp.shape[-1] // self.world_size
+            out = torch.empty(out_size, dtype=dtype, device=self.device)
+            torch.ops.symm_mem.reduce_scatter_out(res, group_name, split_last_dim, out)
+
+            # Head and tail should not be written
+            self.assertTrue(t[:shift].eq(0).all().item())
+            self.assertTrue(t[shift + numel :].eq(0).all().item())
+            self._verify_reduce_scatter_result(inp, out)
+
+        dist.destroy_process_group()
+
+    @runOnRocmArch(MI300_ARCH)
+    @skip_if_lt_x_gpu(4)
+    def test_reduce_scatter_corner_cases(self) -> None:
+        dtype = torch.bfloat16
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        t = symm_mem.empty(16384, dtype=dtype, device=self.device).fill_(0)
+        symm_mem.rendezvous(t, group=group_name)
+        res = t[:0]
+        out_size = res.shape[0] // self.world_size
+        out = torch.empty(out_size, dtype=dtype, device=self.device)
+        torch.ops.symm_mem.reduce_scatter_out(res, group_name, False, out)
+        res = t[:48]
+        out_size = res.shape[0] // self.world_size
+        out = torch.empty(out_size, dtype=dtype, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "divisible"):
+            torch.ops.symm_mem.reduce_scatter_out(res, group_name, False, out)
+        res = t[: 2 * 48].view(2, 48)
+        out = torch.empty(2, 48 // self.world_size, dtype=dtype, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "divisible"):
+            torch.ops.symm_mem.reduce_scatter_out(res, group_name, True, out)
+
+    def _verify_reduce_scatter_result(self, inp, res):
+        gathered_res = all_gather_tensor(res, 0, "0").view(self.world_size, *res.shape)
+        gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, *inp.shape)
+        sum_inps = gathered_inps.sum(0)
+        slice_width = sum_inps.shape[-1] // self.world_size
+        for i in range(self.world_size):
+            torch.testing.assert_close(
+                gathered_res[i],
+                sum_inps[..., i * slice_width : (i + 1) * slice_width],
+                rtol=1e-01,
+                atol=1e-01,
+            )
+
+    @skip_if_lt_x_gpu(4)
+    @requires_multicast_support()
     @parametrize("align_bytes", [4, 8, 16])
     def test_multimem_all_gather(self, align_bytes: int) -> None:
         self._init_process()
@@ -1037,12 +1144,16 @@ class LoweringTest(MultiProcessTestCase):
 
 
 class SymmMemSingleProcTest(TestCase):
-    @skipIfRocm
     @requires_cuda
     @skipIf(
-        _get_torch_cuda_version() < (12, 0),
+        not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 0),
         "stream_write_value32 currently only supports cuda version>=12.0",
     )
+    @skipIf(
+        _get_torch_cuda_version() == (12, 6),
+        "https://github.com/pytorch/pytorch/issues/154073",
+    )
+    @runOnRocmArch(MI300_ARCH)
     def test_stream_write_value32(self):
         tensor = torch.zeros(4, dtype=torch.uint32, device="cuda")
         expect = torch.tril(torch.ones(4, 4, device="cuda")).to(torch.uint32)
@@ -1057,8 +1168,8 @@ class SymmMemSingleProcTest(TestCase):
         with self.assertRaises(RuntimeError):
             _SymmetricMemory.stream_write_value32(tensor, offset=0, val=4294967296)
 
-    @skipIfRocm
     @requires_cuda
+    @runOnRocmArch(MI300_ARCH)
     def test_memset32(self):
         t = _SymmetricMemory.empty_strided_p2p(
             (64,),

@@ -6,7 +6,7 @@ from typing import Callable, Union
 
 import torch
 from torch._ops import OpOverload
-from torch.distributed.tensor import DeviceMesh, DTensor
+from torch.distributed.tensor import DTensor
 from torch.distributed.tensor._op_schema import (
     _is_inplace_op,
     OpSchema,
@@ -71,7 +71,6 @@ def register_sharding(op: Union[OpOverload, list[OpOverload]]):
         custom_sharding_fn: Callable[
             ..., Sequence[tuple[PlacementList, PlacementList]]
         ],
-        mesh: DeviceMesh,
         op_schema: OpSchema,
     ) -> StrategyType:
         def strategy_to_spec(strategy: object) -> object:
@@ -82,6 +81,8 @@ def register_sharding(op: Union[OpOverload, list[OpOverload]]):
                 return tuple(strategy_to_spec(s) for s in strategy.childs)
             else:
                 return strategy
+
+        mesh = op_schema.get_mesh_from_args()
 
         args_schema = tuple(strategy_to_spec(i) for i in op_schema.args_schema)
         kwargs_schema = {

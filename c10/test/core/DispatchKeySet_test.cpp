@@ -313,7 +313,9 @@ TEST(DispatchKeySet, IteratorBasicOps) {
   ASSERT_TRUE(full_set.begin() != full_set.end());
 
   // Increment Ops
+  // NOLINTNEXTLINE(bugprone-inc-dec-in-conditions)
   ASSERT_TRUE(full_set.begin() == full_set.begin()++);
+  // NOLINTNEXTLINE(bugprone-inc-dec-in-conditions)
   ASSERT_TRUE(full_set.begin() != ++full_set.begin());
 }
 
@@ -430,10 +432,24 @@ TEST(DispatchKeySet, TestFunctionalityDispatchKeyToString) {
         k == DispatchKey::StartOfAutogradFunctionalityBackends)
       continue;
     auto res = std::string(toString(k));
-    ASSERT_TRUE(res.find("Unknown") == std::string::npos)
-        << i << " (before is " << toString(static_cast<DispatchKey>(i - 1))
-        << ")";
+    if (i > 0) {
+      ASSERT_TRUE(res.find("Unknown") == std::string::npos)
+          << i << " (before is " << toString(static_cast<DispatchKey>(i - 1))
+          << ")";
+    } else {
+      ASSERT_TRUE(res.find("Unknown") == std::string::npos) << i;
+    }
     ASSERT_TRUE(seen_strings.count(res) == 0);
     seen_strings.insert(res);
+  }
+}
+
+TEST(DispatchKeySet, TestGetRuntimeDispatchKeySet) {
+  // Check if getRuntimeDispatchKeySet and runtimeDispatchKeySetHas agree.
+  for (auto dk1 : DispatchKeySet(DispatchKeySet::FULL)) {
+    auto dks = getRuntimeDispatchKeySet(dk1);
+    for (auto dk2 : DispatchKeySet(DispatchKeySet::FULL)) {
+      ASSERT_EQ(dks.has(dk2), runtimeDispatchKeySetHas(dk1, dk2));
+    }
   }
 }

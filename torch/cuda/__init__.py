@@ -13,11 +13,12 @@ It is lazily initialized, so you can always import it, and use
 
 import importlib
 import os
+import sys
 import threading
 import traceback
 import warnings
 from functools import lru_cache
-from typing import Any, Callable, cast, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, Optional, Union
 
 import torch
 import torch._C
@@ -79,18 +80,23 @@ try:
             # already loaded version of amdsmi, or any version in the processes
             # rpath/LD_LIBRARY_PATH first, so that we only load a single copy
             # of the .so.
-            class amdsmi_cdll_hook:
+            class _amdsmi_cdll_hook:
                 def __init__(self) -> None:
                     self.original_CDLL = ctypes.CDLL  # type: ignore[misc,assignment]
+                    paths = ["libamd_smi.so"]
+                    if rocm_home := os.getenv("ROCM_HOME", os.getenv("ROCM_PATH")):
+                        paths = [os.path.join(rocm_home, "lib/libamd_smi.so")] + paths
+                    self.paths: list[str] = paths
 
                 def hooked_CDLL(
                     self, name: Union[str, Path, None], *args: Any, **kwargs: Any
                 ) -> ctypes.CDLL:
                     if name and Path(name).name == "libamd_smi.so":
-                        try:
-                            return self.original_CDLL("libamd_smi.so", *args, **kwargs)
-                        except OSError:
-                            pass
+                        for path in self.paths:
+                            try:
+                                return self.original_CDLL(path, *args, **kwargs)
+                            except OSError:
+                                pass
                     return self.original_CDLL(name, *args, **kwargs)  # type: ignore[arg-type]
 
                 def __enter__(self) -> None:
@@ -99,7 +105,7 @@ try:
                 def __exit__(self, type: Any, value: Any, traceback: Any) -> None:
                     ctypes.CDLL = self.original_CDLL  # type: ignore[misc]
 
-            with amdsmi_cdll_hook():
+            with _amdsmi_cdll_hook():
                 import amdsmi  # type: ignore[import]
 
         _HAS_PYNVML = True
@@ -154,7 +160,13 @@ def _nvml_based_avail() -> bool:
 
 
 def is_available() -> bool:
-    r"""Return a bool indicating if CUDA is currently available."""
+    r"""
+    Return a bool indicating if CUDA is currently available.
+
+    .. note:: This function will NOT poison fork if the environment variable
+        ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` is set. For more details, see
+        :ref:`multiprocessing-poison-fork-note`.
+    """
     if not _is_compiled():
         return False
     if _nvml_based_avail():
@@ -185,11 +197,7 @@ def is_bf16_supported(including_emulation: bool = True):
     # Check for CUDA version and device compute capability.
     # This is a fast way to check for it.
     cuda_version = torch.version.cuda
-    if (
-        cuda_version is not None
-        and int(cuda_version.split(".")[0]) >= 11
-        and torch.cuda.get_device_properties(device).major >= 8
-    ):
+    if cuda_version is not None and torch.cuda.get_device_properties(device).major >= 8:
         return True
 
     if not including_emulation:
@@ -210,9 +218,12 @@ def _check_bf16_tensor_supported(device: _device_t):
 
 def is_tf32_supported() -> bool:
     r"""Return a bool indicating if the current CUDA/ROCm device supports dtype tf32."""
-    # Check for ROCm.  If true, return false, since PyTorch does not currently support
-    # tf32 on ROCm.
     if torch.version.hip:
+        prop_name = torch.cuda.get_device_properties().gcnArchName
+        archs = ("gfx94", "gfx95")
+        for arch in archs:
+            if arch in prop_name:
+                return True
         return False
 
     # Otherwise, tf32 is supported on CUDA platforms that natively (i.e. no emulation)
@@ -227,8 +238,7 @@ def _sleep(cycles):
 def _extract_arch_version(arch_string: str):
     """Extracts the architecture string from a CUDA version"""
     base = arch_string.split("_")[1]
-    if base.endswith("a"):
-        base = base[:-1]
+    base = base.removesuffix("a")
     return int(base)
 
 
@@ -603,6 +613,7 @@ class StreamContext:
             ``None``.
     .. note:: Streams are per-device.
     """
+
     cur_stream: Optional["torch.cuda.Stream"]
 
     def __init__(self, stream: Optional["torch.cuda.Stream"]):
@@ -979,7 +990,12 @@ _cached_device_count: Optional[int] = None
 
 
 def device_count() -> int:
-    r"""Return the number of GPUs available."""
+    r"""
+    Return the number of GPUs available.
+
+    .. note:: This API will NOT posion fork if NVML discovery succeeds.
+        See :ref:`multiprocessing-poison-fork-note` for more details.
+    """
     global _cached_device_count
     if not _is_compiled():
         return 0
@@ -1026,7 +1042,7 @@ def current_device() -> int:
     return torch._C._cuda_getDevice()
 
 
-def synchronize(device: _device_t = None) -> None:
+def synchronize(device: Optional[_device_t] = None) -> None:
     r"""Wait for all kernels in all streams on a CUDA device to complete.
 
     Args:
@@ -1209,8 +1225,7 @@ def _get_amdsmi_device_index(device: Optional[Union[int, Device]]) -> int:
 
 
 def _get_amdsmi_device_memory_used(device: Optional[Union[Device, int]] = None) -> int:
-    handle = _get_amdsmi_handler()
-    device = _get_amdsmi_device_index(device)
+    handle = _get_amdsmi_handler(device)
     # amdsmi_get_gpu_vram_usage returns mem usage in megabytes
     mem_mega_bytes = amdsmi.amdsmi_get_gpu_vram_usage(handle)["vram_used"]
     mem_bytes = mem_mega_bytes * 1024 * 1024
@@ -1218,16 +1233,12 @@ def _get_amdsmi_device_memory_used(device: Optional[Union[Device, int]] = None) 
 
 
 def _get_amdsmi_memory_usage(device: Optional[Union[Device, int]] = None) -> int:
-    handle = _get_amdsmi_handler()
-    device = _get_amdsmi_device_index(device)
-    handle = amdsmi.amdsmi_get_processor_handles()[device]
+    handle = _get_amdsmi_handler(device)
     return amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
 
 
 def _get_amdsmi_utilization(device: Optional[Union[Device, int]] = None) -> int:
-    handle = _get_amdsmi_handler()
-    device = _get_amdsmi_device_index(device)
-    handle = amdsmi.amdsmi_get_processor_handles()[device]
+    handle = _get_amdsmi_handler(device)
     return amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"]
 
 
@@ -1246,16 +1257,24 @@ def _get_amdsmi_power_draw(device: Optional[Union[Device, int]] = None) -> int:
     if socket_power != "N/A":
         return socket_power
     else:
-        return amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
+        socket_power = amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
+        if socket_power != "N/A":
+            return socket_power
+        else:
+            return 0
 
 
 def _get_amdsmi_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler(device)
     clock_info = amdsmi.amdsmi_get_clock_info(handle, amdsmi.AmdSmiClkType.GFX)
     if "cur_clk" in clock_info:  # ROCm 6.2 deprecation
-        return clock_info["cur_clk"]
+        clock_rate = clock_info["cur_clk"]
     else:
-        return clock_info["clk"]
+        clock_rate = clock_info["clk"]
+    if clock_rate != "N/A":
+        return clock_rate
+    else:
+        return 0
 
 
 def device_memory_used(device: Optional[Union[Device, int]] = None) -> int:
@@ -1359,7 +1378,7 @@ def power_draw(device: Optional[Union[Device, int]] = None) -> int:
 
 
 def clock_rate(device: Optional[Union[Device, int]] = None) -> int:
-    r"""Return the clock speed of the GPU SM in Hz Hertz over the past sample period as given by `nvidia-smi`.
+    r"""Return the clock speed of the GPU SM in MHz (megahertz) over the past sample period as given by `nvidia-smi`.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
@@ -1686,6 +1705,75 @@ def _register_triton_kernels():
 _lazy_call(_register_triton_kernels)
 
 
+def _compile_kernel(
+    kernel_source: str,
+    kernel_name: str,
+    compute_capability: Optional[str] = None,
+    header_code: str = "",
+    cuda_include_dirs: Optional[list] = None,
+    nvcc_options: Optional[list] = None,
+):
+    """
+    Compiles a CUDA kernel using NVRTC and returns a callable function.
+
+    This function is a wrapper for NVRTC that enables runtime compilation of CUDA kernels.
+    Note that this returns a raw CUDA kernel that operates on raw memory pointers.
+    To use this kernel as a proper PyTorch operator, you should wrap it following the guide at:
+    pytorch.org/tutorials/advanced/python_custom_ops.html
+
+    Args:
+        kernel_source (str): The CUDA kernel source code as a string
+        kernel_name (str): The name of the kernel function to compile
+        compute_capability (str, optional): The compute capability to target (e.g., "86").
+                                           If None, will detect from current device.
+        header_code (str, optional): Additional header code to prepend to the kernel source
+        cuda_include_dirs (list, optional): List of directories containing CUDA headers
+        nvcc_options (list, optional): Additional options to pass to NVRTC
+
+    Returns:
+        callable: A Python function that can be called with PyTorch tensor arguments to execute the kernel
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> kernel_code = '''
+        extern "C"
+        __global__ void add_tensors(const float* a, const float* b, float* c, int n) {
+            int i = threadIdx.x + blockIdx.x * blockDim.x;
+            if (i < n)
+                c[i] = a[i] + b[i];
+        }
+        '''
+        >>> add_kernel = torch.cuda.compile_kernel(kernel_code, "add_tensors")
+        >>> a = torch.randn(1024, device="cuda")
+        >>> b = torch.randn(1024, device="cuda")
+        >>> c = torch.empty_like(a)
+        >>> add_kernel(grid=(4,1,1), block=(256,1,1), args=[a, b, c, a.numel()])
+    """
+    import ctypes
+
+    from torch.cuda._utils import _cuda_load_module, _nvrtc_compile
+
+    # Compile the kernel to PTX
+    ptx = _nvrtc_compile(
+        kernel_source,
+        kernel_name,
+        compute_capability,
+        header_code,
+        cuda_include_dirs,
+        nvcc_options,
+    )
+
+    # Load the module and get the kernel
+    result = _cuda_load_module(ptx, [kernel_name])
+
+    if isinstance(result, dict):
+        return result[kernel_name]
+    else:
+        # This branch shouldn't be executed if kernel_names is provided,
+        # but MyPy needs this to understand type narrowing
+        return getattr(result, kernel_name)
+
+
 from . import amp, jiterator, nvtx, profiler, sparse, tunable
 
 
@@ -1756,6 +1844,8 @@ __all__ = [
     "graphs",
     "has_half",
     "has_magma",
+    "host_memory_stats",
+    "host_memory_stats_as_nested_dict",
     "init",
     "initial_seed",
     "ipc_collect",
@@ -1792,9 +1882,11 @@ __all__ = [
     "nvtx",
     "profiler",
     "random",
+    "reset_accumulated_host_memory_stats",
     "reset_accumulated_memory_stats",
     "reset_max_memory_allocated",
     "reset_max_memory_cached",
+    "reset_peak_host_memory_stats",
     "reset_peak_memory_stats",
     "seed",
     "seed_all",

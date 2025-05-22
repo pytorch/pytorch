@@ -48,26 +48,14 @@ import traceback
 import warnings
 import weakref
 from collections import defaultdict
+from contextlib import AbstractContextManager
 from enum import auto, Enum
-from typing import (
-    Any,
-    Callable,
-    cast,
-    ContextManager,
-    Optional,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torch.fx
 from torch import Tensor
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.utils import counters, dynamo_timed, preserve_rng_state
-from torch._higher_order_ops.cudagraph_conditional_nodes import (
-    ControlFlowOpWarmupDispatchMode,
-    CUDAGraphCaptureControlFlowOpDispatchMode,
-)
 from torch._inductor.compile_fx import (
     align_inputs_from_check_idxs,
     copy_misaligned_inputs,
@@ -99,6 +87,7 @@ from torch.utils.weak import TensorWeakRef
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterator, Sequence
 
+    from torch._guards import CompileId
     from torch._inductor.utils import InputType
     from torch.types import _bool
 
@@ -131,6 +120,7 @@ from . import config
 @dataclasses.dataclass(frozen=True)
 class GraphID:
     "Unique counter of a cuda graph recording"
+
     id: int
 
 
@@ -183,7 +173,7 @@ def enable_history_recording() -> Generator[None, None, None]:
             torch.cuda.memory._record_memory_history(None)
 
 
-def get_history_recording() -> ContextManager[None]:
+def get_history_recording() -> AbstractContextManager[None]:
     # TODO - remove, prevents cleanup
     if not config.triton.cudagraph_trees_history_recording:
         return contextlib.nullcontext()
@@ -403,6 +393,28 @@ def cudagraphify_impl(
     return deferred_cudagraphify
 
 
+@contextlib.contextmanager
+def dynamo_timed_cudagraph(
+    name: str,
+    compile_id: Optional[CompileId],
+    mode: Optional[CompilationMode],
+) -> Generator[Any, None, None]:
+    """
+    Makes usages of dynamo_timed in this file less verbose. NOTE: This CM sums
+    all durations into a single column in the dynamo_compile table. Use only if
+    you consider the timed region to be part of the runtime overhead associated
+    with the compiler.
+    """
+    with dynamo_timed(
+        name,
+        log_pt2_compile_event=True,
+        compile_id=compile_id,
+        is_backward=mode == CompilationMode.BACKWARD,
+        dynamo_compile_column_us="runtime_cudagraphify_time_us",
+    ):
+        yield
+
+
 def cudagraphify(
     model: ModelType,
     inputs: list[InputType],
@@ -415,14 +427,17 @@ def cudagraphify(
     constants: tuple[torch.Tensor, ...] = (),
     placeholders: tuple[PlaceholderInfo, ...] = (),
     mutated_input_idxs: tuple[int, ...] = (),
+    compile_id: Optional[CompileId] = None,
 ) -> tuple[ModelType, OutputType]:
-    manager = get_container(device_index).get_tree_manager()
     assert not (is_backward and is_inference)
     mode = (
         CompilationMode.BACKWARD
         if is_backward
         else (CompilationMode.INFERENCE if is_inference else CompilationMode.FORWARD)
     )
+
+    with dynamo_timed_cudagraph("cudagraphify.get_container", compile_id, mode):
+        manager = get_container(device_index).get_tree_manager()
 
     return manager.add_function(
         model,
@@ -433,6 +448,7 @@ def cudagraphify(
         constants,
         placeholders,
         mutated_input_idxs,
+        compile_id,
     )
 
 
@@ -466,7 +482,7 @@ class StorageWeakRefWrapper:
 
     @classmethod
     def from_weakref_and_data_ptr(
-        cls: type[S],
+        cls: type[StorageWeakRefWrapper],
         cdata: Any,
         data_ptr: int,
         extra_ref_check: Optional[Callable[[], bool]] = None,
@@ -539,11 +555,14 @@ def _use_cuda_memory_pool_manager(
     stream.wait_stream(torch.cuda.current_stream())
 
     with torch.cuda.stream(stream), torch.device(device):
-        torch._C._cuda_beginAllocateCurrentStreamToPool(device, mem_pool)
+        # Begin allocate to mem pool for all memory allocation on the current thread.
+        # This is thread safe since a thread can only warmup or record 1 cudagraph
+        # at the same time.
+        torch._C._cuda_beginAllocateCurrentThreadToPool(device, mem_pool)
         try:
             yield
         finally:
-            torch._C._cuda_endAllocateCurrentStreamToPool(device, mem_pool)
+            torch._C._cuda_endAllocateToPool(device, mem_pool)
             torch._C._cuda_releasePool(device, mem_pool)
 
     torch.cuda.current_stream().wait_stream(stream)
@@ -634,11 +653,15 @@ class CUDAWarmupNode:
             refs = list(self.path_live_weakrefs())
             check_memory_pool(self.device_index, self.cuda_graphs_pool, refs)
 
-        with torch.cuda.device(
-            self.device_index
-        ), disable_conv_cache_emptying(), clear_cublas_manager(), _use_cuda_memory_pool_manager(
-            self.device_index, self.cuda_graphs_pool, self.stream
-        ), ControlFlowOpWarmupDispatchMode(), get_history_recording():
+        with (
+            torch.cuda.device(self.device_index),
+            disable_conv_cache_emptying(),
+            clear_cublas_manager(),
+            _use_cuda_memory_pool_manager(
+                self.device_index, self.cuda_graphs_pool, self.stream
+            ),
+            get_history_recording(),
+        ):
             out = self.wrapped_function.model(new_inputs)
 
         # We need to know which outputs are allocated within the cudagraph pool
@@ -725,6 +748,7 @@ UnaliasedStorage = _UnaliasedStorage()
 
 class AliasesPriorGraphOutput(OutputAliasInfo):
     "Marks that the graph output aliases an output of a prior graph"
+
     __slots__ = ["index"]
 
     index: PathOutputIndex
@@ -777,6 +801,8 @@ class CUDAGraphNode:
         device_index: int,
         stack_traces: Optional[StackTraces],
         stream: torch.cuda.Stream,
+        mode: Optional[CompilationMode],
+        compile_id: Optional[CompileId],
     ) -> None:
         assert isinstance(inputs, (list, tuple))
 
@@ -920,6 +946,7 @@ class CUDAGraphNode:
             self.recorded_liveness_before_graph = curr_liveness
             self.expected_dead_indices_before_graph = different_indices
 
+        rng_states = [inp for inp in inputs if isinstance(inp, torch.Generator)]
         recording_inputs = self._allocate_and_copy_recording_inputs(inputs)
         # recording inputs will copy over memory, so we can free non recording inputs
         inputs.clear()
@@ -927,6 +954,11 @@ class CUDAGraphNode:
 
         # graph used for recording model invocation
         self.graph: Optional[torch.cuda.CUDAGraph] = torch.cuda.CUDAGraph()
+
+        # TODO: register_generator_state should potentially take explicit device
+        with torch.cuda.device(self.device):
+            for rng_state in rng_states:
+                self.graph.register_generator_state(rng_state)
 
         # we allocate non-static inputs within the same memory pool as the CUDAGraph
         # which we will record the model with. For memory efficiency, it is important
@@ -980,9 +1012,10 @@ class CUDAGraphNode:
         self.static_output_tensors: OutputList[Optional[Tensor]] = []
 
         # Cleared after recording
-        self.recording_outputs: Optional[OutputType] = self._record(
-            wrapped_function.model, recording_inputs
-        )
+        with dynamo_timed_cudagraph("CUDAGraphNode.record", compile_id, mode):
+            self.recording_outputs: Optional[OutputType] = self._record(
+                wrapped_function.model, recording_inputs
+            )
         self.outputs_metadata: OutputList[Union[dict[str, Any], int, None]] = []
 
         # As with inputs, we do not want to keep the outputs permanently alive because that would prevent
@@ -1206,14 +1239,18 @@ class CUDAGraphNode:
             ]
             check_memory_pool(self.device, self.cuda_graphs_pool, memory)
 
-        with preserve_rng_state(), torch.cuda.device(
-            self.device
-        ), clear_cublas_manager(), torch.cuda.graph(
-            self.graph,
-            stream=self.stream,
-            pool=self.cuda_graphs_pool,
-            capture_error_mode="thread_local",
-        ), CUDAGraphCaptureControlFlowOpDispatchMode(), get_history_recording():
+        with (
+            preserve_rng_state(),
+            torch.cuda.device(self.device),
+            clear_cublas_manager(),
+            torch.cuda.graph(
+                self.graph,
+                stream=self.stream,
+                pool=self.cuda_graphs_pool,
+                capture_error_mode="thread_local",
+            ),
+            get_history_recording(),
+        ):
             static_outputs = model(inputs)
 
         # running model should reclaim memory
@@ -1253,11 +1290,13 @@ class CUDAGraphNode:
                 self.output_storage_alias.append(UnaliasedStorage)
                 continue
 
-            torch._check(
-                o.is_cuda or o.untyped_storage().data_ptr() == 0,
-                lambda: (
-                    "Expected all cuda outputs in cuda graph recording. Non cuda output "
-                    f"from {self.stack_traces[i] if self.stack_traces else '(unknown)'}"
+            (
+                torch._check(
+                    o.is_cuda or o.untyped_storage().data_ptr() == 0,
+                    lambda: (
+                        "Expected all cuda outputs in cuda graph recording. Non cuda output "
+                        f"from {self.stack_traces[i] if self.stack_traces else '(unknown)'}"
+                    ),
                 ),
             )
 
@@ -1297,9 +1336,9 @@ class CUDAGraphNode:
         if self.stack_traces is None:
             self.stack_traces = [None for _ in range(len(outputs))]
         else:
-            assert len(self.stack_traces) == len(
-                outputs
-            ), "Wrong number of stack traces passed in"
+            assert len(self.stack_traces) == len(outputs), (
+                "Wrong number of stack traces passed in"
+            )
 
         assert not self.outputs_weakrefs
         for out, static_output_tensor in zip(outputs, self.static_output_tensors):
@@ -1605,16 +1644,18 @@ class CUDAGraphNode:
         self.stream.wait_stream(torch.cuda.current_stream())
         recording_inputs: list[InputType] = []
 
-        with warnings.catch_warnings(record=True), torch.cuda.device(
-            self.device
-        ), _use_cuda_memory_pool_manager(
-            self.device,
-            mem_pool=self.cuda_graphs_pool,
-            stream=self.stream,
+        with (
+            warnings.catch_warnings(record=True),
+            torch.cuda.device(self.device),
+            _use_cuda_memory_pool_manager(
+                self.device,
+                mem_pool=self.cuda_graphs_pool,
+                stream=self.stream,
+            ),
         ):
             for i, inp in enumerate(inputs):
                 if not isinstance(inp, torch.Tensor):
-                    assert isinstance(inp, int)
+                    assert isinstance(inp, (int, torch.Generator))
                     recording_inputs.append(inp)
                 elif i not in self.static_input_idxs:
                     # static_input does an allocation!
@@ -1742,12 +1783,8 @@ def check_memory_pool(
     pool_id: tuple[int, int],
     live_storages_ptrs: list[StorageWeakRefWrapper],
 ) -> None:
-    assert all(
-        isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs
-    )  # noqa: C419
-    unique_storages = {
-        stor.data_ptr() for stor in live_storages_ptrs if stor()
-    }  # noqa: set_linter
+    assert all(isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs)  # noqa: C419
+    unique_storages = {stor.data_ptr() for stor in live_storages_ptrs if stor()}  # noqa: set_linter
 
     # check if there is a divergence first, then do the expensive snapshot call after
     # we know it will error
@@ -1757,6 +1794,7 @@ def check_memory_pool(
     # at this point we are past the fast-path. we have seen rare cases where a dead tensor is dead,
     # but hasn't been gc'd yet, and gives false positive for allocated_not_in_live_storages
     gc.collect()
+    torch.cuda.synchronize()
 
     segments = get_cudagraph_segments(pool_id)
 
@@ -1870,11 +1908,14 @@ class CUDAGraphTreeManager:
             self.graph: Optional[torch.cuda.CUDAGraph] = torch.cuda.CUDAGraph()
             self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
 
-            with warnings.catch_warnings(record=True), torch.cuda.graph(
-                self.graph,
-                pool=self.cuda_graphs_thread_pool,
-                stream=self.stream,
-                capture_error_mode="thread_local",
+            with (
+                warnings.catch_warnings(record=True),
+                torch.cuda.graph(
+                    self.graph,
+                    pool=self.cuda_graphs_thread_pool,
+                    stream=self.stream,
+                    capture_error_mode="thread_local",
+                ),
             ):
                 pass
 
@@ -1917,6 +1958,7 @@ class CUDAGraphTreeManager:
         self.debug_checkpointing_counter = 0
 
         self.id_to_mode: dict[FunctionID, CompilationMode] = {}
+        self.id_to_compile_id: dict[FunctionID, Optional[CompileId]] = {}
 
         # Note: [Backward Generation Handling]
         # We generally perform a sequence of forward executions followed by backward executions.
@@ -1946,6 +1988,7 @@ class CUDAGraphTreeManager:
     def run(self, new_inputs: list[InputType], function_id: FunctionID) -> OutputType:
         assert self.graph is not None, "Running CUDAGraph after shutdown"
         self.mode = self.id_to_mode[function_id]
+        self.compile_id = self.id_to_compile_id[function_id]
         out = self._run(new_inputs, function_id)
 
         # The forwards are only pending following invocation, not before
@@ -2050,13 +2093,7 @@ class CUDAGraphTreeManager:
             if self.path_state == ExecutionState.EXECUTION:
                 self.apply_checkpoint_execution_state_in_allocator()
 
-            with dynamo_timed(
-                "CUDAGraphTreeManager.run_eager",
-                log_pt2_compile_event=True,
-            ):
-                out = self.run_eager(new_inputs, function_id)
-
-            return out
+            return self.run_eager(new_inputs, function_id)
 
         assert not isinstance(self.current_node, CUDAWarmupNode)
         child_nodes = (
@@ -2122,13 +2159,7 @@ class CUDAGraphTreeManager:
                 self.apply_checkpoint_execution_state_in_allocator()
 
         # now, we are in a recording state !
-        with dynamo_timed(
-            "CUDAGraphTreeManager.record_function",
-            log_pt2_compile_event=True,
-        ):
-            out = self.record_function(new_inputs, function_id)
-
-        return out
+        return self.record_function(new_inputs, function_id)
 
     def shutdown(self) -> None:
         """
@@ -2171,6 +2202,8 @@ class CUDAGraphTreeManager:
             self.device_index,
             self.ids_to_stack_traces[function_id],
             self.stream,
+            self.mode,
+            self.compile_id,
         )
         if self.current_node is None:
             self.roots[function_id].append(node)
@@ -2236,7 +2269,11 @@ class CUDAGraphTreeManager:
         constants: tuple[torch.Tensor, ...],
         placeholders: tuple[PlaceholderInfo, ...],
         mutated_input_idxs: tuple[int, ...],
-    ) -> tuple[ModelType, OutputType,]:
+        compile_id: Optional[CompileId],
+    ) -> tuple[
+        ModelType,
+        OutputType,
+    ]:
         id = self.new_func_id()
         self.ids_to_stack_traces[id] = stack_traces
         self.ids_to_funcs[id] = WrappedFunction(
@@ -2248,6 +2285,7 @@ class CUDAGraphTreeManager:
             mutated_input_idxs,
         )
         self.id_to_mode[id] = mode
+        self.id_to_compile_id[id] = compile_id
         fn = functools.partial(self.run, function_id=id)
 
         # container needs to set clean up when fn dies

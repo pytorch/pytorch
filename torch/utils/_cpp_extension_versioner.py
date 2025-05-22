@@ -40,6 +40,7 @@ class ExtensionVersioner:
                                 build_arguments,
                                 build_directory,
                                 with_cuda,
+                                with_sycl,
                                 is_python_module,
                                 is_standalone):
         hash_value = 0
@@ -47,6 +48,7 @@ class ExtensionVersioner:
         hash_value = hash_build_arguments(hash_value, build_arguments)
         hash_value = update_hash(hash_value, build_directory)
         hash_value = update_hash(hash_value, with_cuda)
+        hash_value = update_hash(hash_value, with_sycl)
         hash_value = update_hash(hash_value, is_python_module)
         hash_value = update_hash(hash_value, is_standalone)
 

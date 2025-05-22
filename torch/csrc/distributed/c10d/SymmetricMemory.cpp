@@ -6,6 +6,7 @@ using namespace c10d::symmetric_memory;
 
 static bool is_finalizing_ = false;
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class AllocatorMap {
  public:
   AllocatorMap(const AllocatorMap&) = delete;
@@ -212,9 +213,21 @@ namespace {
 
 at::Tensor one_shot_all_reduce_meta(
     const at::Tensor& input,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string reduce_op,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string group_name) {
   return at::empty_like(input);
+}
+
+at::Tensor one_shot_all_reduce_copy_meta(
+    const at::Tensor& symm_buffer,
+    const at::Tensor& local_input,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    std::string reduce_op,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    std::string group_name) {
+  return at::empty_like(local_input);
 }
 
 TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
@@ -231,7 +244,20 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
       "one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)");
   m.def(
+      "one_shot_all_reduce_copy(Tensor symm_buffer, Tensor local_input, str reduce_op, str group_name) -> Tensor");
+  m.def(
+      "one_shot_all_reduce_copy_out(Tensor symm_buffer, Tensor local_input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)");
+
+  m.def(
       "two_shot_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)");
+
+  // note this implementation also modified the input tensor
+  m.def(
+      "two_shot_all_reduce_out(Tensor(a!) input, str reduce_op, str group_name, Tensor(b!) output) -> Tensor(b!)");
+
+  // note this implementation also modified the input tensor
+  m.def(
+      "reduce_scatter_out(Tensor(a!) input, str group_name, bool split_last_dim, Tensor(b!) output) -> Tensor(b!)");
 
   // An mm that supports consuming asynchronous input. It guarantees the
   // following rasterization order, and that the corresponding signal arrives
@@ -248,10 +274,17 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "stream_write_value32_(Tensor(a!) input, int offset, int val) -> Tensor(a!)");
   m.def(
       "memset32_(Tensor(a!) input, int offset, int val, int count) -> Tensor(a!)");
+
+  m.def("nvshmem_broadcast(Tensor(a!) input, str group_name) -> Tensor(a!)");
+  m.def(
+      "nvshmem_all_to_all(Tensor input, Tensor(a!) out, str group_name) -> Tensor(a!)");
+  m.def(
+      "nvshmem_all_to_all_vdev(Tensor input, Tensor(a!) out, Tensor(a!) in_out_splits, str group_name) -> Tensor(a!)");
 }
 
 TORCH_LIBRARY_IMPL(symm_mem, Meta, m) {
   m.impl("one_shot_all_reduce", one_shot_all_reduce_meta);
+  m.impl("one_shot_all_reduce_copy", one_shot_all_reduce_copy_meta);
 }
 
 } // namespace

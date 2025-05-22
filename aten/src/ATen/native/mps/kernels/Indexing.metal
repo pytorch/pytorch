@@ -1,7 +1,9 @@
-#include <metal_atomic>
+#include <c10/metal/atomic.h>
+#include <c10/metal/indexing.h>
 #include <metal_stdlib>
 
 using namespace metal;
+using namespace c10::metal;
 
 struct IndexAB {
   constant int64_t* indexArray;
@@ -199,8 +201,8 @@ kernel_index_offsets<packed_uint3, ulong3>(
     constant uint& num_dimensions [[buffer(3)]],
     uint thread_index [[thread_position_in_grid]]);
 
-template <typename T, typename E, typename OffsetsT>
-kernel void index_put_accumulate_native_dtypes(
+template <typename T, typename OffsetsT>
+kernel void index_put_accumulate(
     constant IndexAB* indexAB [[buffer(0)]],
     constant void* indexSizes [[buffer(1)]],
     constant void* indexStrides [[buffer(2)]],
@@ -211,7 +213,7 @@ kernel void index_put_accumulate_native_dtypes(
     uint thread_index [[thread_position_in_grid]]) {
   constant int64_t* index_sizes = (constant int64_t*)indexSizes;
   constant int64_t* index_strides = (constant int64_t*)indexStrides;
-  int64_t offset = 0;
+  int64_t offset = offsets[thread_index].x;
   for (uint32_t i = 0; i < num_indices; i++) {
     constant int64_t* indexArray = indexAB[i].indexArray;
     int64_t index = indexArray[offsets[thread_index].z / sizeof(int64_t)];
@@ -220,98 +222,98 @@ kernel void index_put_accumulate_native_dtypes(
     }
     offset += index * index_strides[i];
   }
-  device T* out =
-      (device T*)((device char*)outputData + offsets[thread_index].x + offset);
-  constant E* in =
-      (constant E*)((constant char*)inputData + offsets[thread_index].y);
-  atomic_fetch_add_explicit(out, *in, memory_order_relaxed);
+  const auto in =
+      *(constant T*)((constant char*)inputData + offsets[thread_index].y);
+  AtomicType<T>::atomic_add(
+      reinterpret_cast<device AtomicType_t<T>*>(outputData),
+      offset / sizeof(T),
+      in);
+}
+
+#define REGISTER_INDEX_PUT_ACCUMULATE(DTS, DTYPE, IDXS, IDX_DTYPE) \
+  template [[host_name("index_put_accumulate_" #DTS "_" #DTYPE     \
+                       "_" #IDXS)]] kernel void                    \
+  index_put_accumulate<DTYPE, IDX_DTYPE>(                          \
+      constant IndexAB * indexAB [[buffer(0)]],                    \
+      constant void* indexSizes [[buffer(1)]],                     \
+      constant void* indexStrides [[buffer(2)]],                   \
+      constant IDX_DTYPE* offsets [[buffer(3)]],                   \
+      constant void* inputData [[buffer(4)]],                      \
+      device void* outputData [[buffer(5)]],                       \
+      constant uint32_t& num_indices [[buffer(6)]],                \
+      uint thread_index [[thread_position_in_grid]])
+
+REGISTER_INDEX_PUT_ACCUMULATE(32bit, float, idx32, uint3);
+REGISTER_INDEX_PUT_ACCUMULATE(32bit, float, idx64, ulong3);
+REGISTER_INDEX_PUT_ACCUMULATE(32bit, int, idx32, uint3);
+REGISTER_INDEX_PUT_ACCUMULATE(32bit, int, idx64, ulong3);
+REGISTER_INDEX_PUT_ACCUMULATE(16bit, half, idx32, uint3);
+REGISTER_INDEX_PUT_ACCUMULATE(16bit, half, idx64, ulong3);
+
+#if __METAL_VERSION__ >= 310
+REGISTER_INDEX_PUT_ACCUMULATE(16bit, bfloat, idx32, uint3);
+REGISTER_INDEX_PUT_ACCUMULATE(16bit, bfloat, idx64, ulong3);
+#endif
+
+template <typename T>
+kernel void masked_fill_scalar_dense(
+    device T* input,
+    constant bool* mask,
+    constant T& val,
+    uint thread_index [[thread_position_in_grid]]) {
+  if (mask[thread_index]) {
+    input[thread_index] = val;
+  }
 }
 
 template <typename T>
-__attribute__((__always_inline__)) void atomic_fetch_add_relaxed(
-    device void* addr,
-    T value) {
-  device atomic_uint* uintAddr = (device atomic_uint*)addr;
-  uint expected = atomic_load_explicit(uintAddr, memory_order_relaxed);
-  T updated = as_type<T>(expected) + value;
-  while (!atomic_compare_exchange_weak_explicit(
-      uintAddr,
-      &expected,
-      as_type<uint>(updated),
-      memory_order_relaxed,
-      memory_order_relaxed)) {
-    updated = as_type<T>(expected) + value;
-  }
-}
-
-template <typename T, typename OffsetsT>
-kernel void atomic_index_put_accumulate(
-    constant IndexAB* indexAB [[buffer(0)]],
-    constant void* indexSizes [[buffer(1)]],
-    constant void* indexStrides [[buffer(2)]],
-    constant OffsetsT* offsets [[buffer(3)]],
-    constant void* inputData [[buffer(4)]],
-    device void* outputData [[buffer(5)]],
-    constant uint32_t& num_indices [[buffer(6)]],
+kernel void masked_fill_scalar_broadcast(
+    device T* input,
+    constant bool* mask,
+    constant T& val,
+    constant uint& mask_numel,
     uint thread_index [[thread_position_in_grid]]) {
-  constant int64_t* index_sizes = (constant int64_t*)indexSizes;
-  constant int64_t* index_strides = (constant int64_t*)indexStrides;
-  int64_t offset = 0;
-  for (uint32_t i = 0; i < num_indices; i++) {
-    constant int64_t* indexArray = indexAB[i].indexArray;
-    int64_t index = indexArray[offsets[thread_index].z / sizeof(int64_t)];
-    if (index < 0) {
-      index += index_sizes[i];
-    }
-    offset += index * index_strides[i];
+  if (mask[thread_index % mask_numel]) {
+    input[thread_index] = val;
   }
-  device void* out = (device void*)((device char*)outputData +
-                                    offsets[thread_index].x + offset);
-  constant T* in =
-      (constant T*)((constant char*)inputData + offsets[thread_index].y);
-  atomic_fetch_add_relaxed<T>(out, *in);
 }
 
-template [[host_name("index_put_accumulate_32bit_float_idx32")]] kernel void
-atomic_index_put_accumulate<float, uint3>(
-    constant IndexAB* indexAB [[buffer(0)]],
-    constant void* indexSizes [[buffer(1)]],
-    constant void* indexStrides [[buffer(2)]],
-    constant uint3* offsets [[buffer(3)]],
-    constant void* inputData [[buffer(4)]],
-    device void* outputData [[buffer(5)]],
-    constant uint32_t& num_indices [[buffer(6)]],
-    uint thread_index [[thread_position_in_grid]]);
+template <typename T>
+kernel void masked_fill_scalar_strided(
+    device T* input,
+    constant bool* mask,
+    constant T& val,
+    constant long* sizes,
+    constant long* input_strides,
+    constant long* mask_strides,
+    device uint& ndim,
+    uint thread_index [[thread_position_in_grid]]) {
+  int pos[max_ndim];
+  pos_from_thread_index(int(thread_index), pos, sizes, ndim);
+  if (mask[offset_from_coord(pos, mask_strides, ndim)]) {
+    input[offset_from_coord(pos, input_strides, ndim)] = val;
+  }
+}
 
-template [[host_name("index_put_accumulate_32bit_float_idx64")]] kernel void
-atomic_index_put_accumulate<float, ulong3>(
-    constant IndexAB* indexAB [[buffer(0)]],
-    constant void* indexSizes [[buffer(1)]],
-    constant void* indexStrides [[buffer(2)]],
-    constant ulong3* offsets [[buffer(3)]],
-    constant void* inputData [[buffer(4)]],
-    device void* outputData [[buffer(5)]],
-    constant uint32_t& num_indices [[buffer(6)]],
-    uint thread_index [[thread_position_in_grid]]);
+#define REGISTER_MASKED_FILL_SCALAR(SIZE, DTYPE)                            \
+  template [[host_name("masked_fill_scalar_strided_" #SIZE)]] kernel void   \
+  masked_fill_scalar_strided<DTYPE>(                                        \
+      device DTYPE*,                                                        \
+      constant bool*,                                                       \
+      constant DTYPE&,                                                      \
+      constant long*,                                                       \
+      constant long*,                                                       \
+      constant long*,                                                       \
+      device uint&,                                                         \
+      uint);                                                                \
+  template [[host_name("masked_fill_scalar_dense_" #SIZE)]] kernel void     \
+  masked_fill_scalar_dense<DTYPE>(                                          \
+      device DTYPE*, constant bool*, constant DTYPE&, uint);                \
+  template [[host_name("masked_fill_scalar_broadcast_" #SIZE)]] kernel void \
+  masked_fill_scalar_broadcast<DTYPE>(                                      \
+      device DTYPE*, constant bool*, constant DTYPE&, constant uint&, uint)
 
-template [[host_name("index_put_accumulate_32bit_int_idx32")]] kernel void
-index_put_accumulate_native_dtypes<atomic_int, int, uint3>(
-    constant IndexAB* indexAB [[buffer(0)]],
-    constant void* indexSizes [[buffer(1)]],
-    constant void* indexStrides [[buffer(2)]],
-    constant uint3* offsets [[buffer(3)]],
-    constant void* inputData [[buffer(4)]],
-    device void* outputData [[buffer(5)]],
-    constant uint32_t& num_indices [[buffer(6)]],
-    uint thread_index [[thread_position_in_grid]]);
-
-template [[host_name("index_put_accumulate_32bit_int_idx64")]] kernel void
-index_put_accumulate_native_dtypes<atomic_int, int, ulong3>(
-    constant IndexAB* indexAB [[buffer(0)]],
-    constant void* indexSizes [[buffer(1)]],
-    constant void* indexStrides [[buffer(2)]],
-    constant ulong3* offsets [[buffer(3)]],
-    constant void* inputData [[buffer(4)]],
-    device void* outputData [[buffer(5)]],
-    constant uint32_t& num_indices [[buffer(6)]],
-    uint thread_index [[thread_position_in_grid]]);
+REGISTER_MASKED_FILL_SCALAR(64bit, long);
+REGISTER_MASKED_FILL_SCALAR(32bit, int);
+REGISTER_MASKED_FILL_SCALAR(16bit, short);
+REGISTER_MASKED_FILL_SCALAR(8bit, char);

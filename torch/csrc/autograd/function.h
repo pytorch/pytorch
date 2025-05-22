@@ -545,8 +545,8 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return tensor_pre_hooks_;
   }
 
-  virtual std::unique_ptr<PostAccumulateGradHook>&
-  tensor_post_acc_grad_hooks() noexcept {
+  virtual std::unique_ptr<PostAccumulateGradHook>& tensor_post_acc_grad_hooks()
+      const noexcept {
     static std::unique_ptr<PostAccumulateGradHook> empty = nullptr;
     return empty;
   }
@@ -593,7 +593,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   //   2) Collect node information for specialization and caching
   // Implementations in subclasses should call args.collect() with all node
   // attrs. These functions are only called durring backward.
-  virtual void compiled_args(CompiledNodeArgs& args) {
+  virtual void compiled_args(CompiledNodeArgs& args) const {
     throw std::runtime_error(
         std::string("compiled_args not implemented: ") + name());
   }

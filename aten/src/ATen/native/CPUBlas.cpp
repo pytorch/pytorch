@@ -15,7 +15,7 @@
 #if AT_BUILD_WITH_BLAS()
 #if C10_IOS
 #include <Accelerate/Accelerate.h>
-#else
+#elif !defined(_ARMPL_H)
 extern "C" void dgemm_(char *transa, char *transb, int *m, int *n, int *k, double *alpha, const double *a, int *lda, const double *b, int *ldb, double *beta, double *c, int *ldc);
 extern "C" void sgemm_(char *transa, char *transb, int *m, int *n, int *k, float *alpha, const float *a, int *lda, const float *b, int *ldb, float *beta, float *c, int *ldc);
 extern "C" void cgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc);
@@ -179,6 +179,18 @@ void gemm(
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
+#ifndef armpl_doublecomplex_t
+#define COMPLEX_DBL(a) a
+#define COMPLEX_DBL_CONST(a) a
+#define COMPLEX_FLOAT(a) a
+#define COMPLEX_FLOAT_CONST(a) a
+#else
+#define COMPLEX_DBL(a) ((armpl_doublecomplex_t*)a)
+#define COMPLEX_DBL_CONST(a) ((const armpl_doublecomplex_t*)a)
+#define COMPLEX_FLOAT(a) ((armpl_singlecomplex_t*)a)
+#define COMPLEX_FLOAT_CONST(a) ((const armpl_singlecomplex_t*)a)
+#endif
+
 void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
@@ -256,11 +268,11 @@ void gemm(
     zgemm_(
         &transa_, &transb_,
         &m_, &n_, &k_,
-        &alpha_,
-        a, &lda_,
-        b, &ldb_,
-        &beta_,
-        c, &ldc_);
+        COMPLEX_DBL_CONST(&alpha_),
+        COMPLEX_DBL_CONST(a), &lda_,
+        COMPLEX_DBL_CONST(b), &ldb_,
+        COMPLEX_DBL_CONST(&beta_),
+        COMPLEX_DBL(c), &ldc_);
     #endif
     return;
   }
@@ -299,11 +311,11 @@ void gemm(
     cgemm_(
         &transa_, &transb_,
         &m_, &n_, &k_,
-        &alpha_,
-        a, &lda_,
-        b, &ldb_,
-        &beta_,
-        c, &ldc_);
+        COMPLEX_FLOAT_CONST(&alpha_),
+        COMPLEX_FLOAT_CONST(a), &lda_,
+        COMPLEX_FLOAT_CONST(b), &ldb_,
+        COMPLEX_FLOAT_CONST(&beta_),
+        COMPLEX_FLOAT(c), &ldc_);
     #endif
     return;
   }
@@ -322,6 +334,24 @@ void gemm(
    const float beta,
    at::BFloat16 *c, int64_t ldc) {
    internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+#if AT_MKLDNN_ENABLED()
+#ifdef __aarch64__
+   // MKLDNN also supports ARM for bf16, and the bypass is only
+   // currently intended for x86/x86_64.
+   const bool use_bf16_gemv_trans = false;
+#elif defined(__powerpc__)
+   const bool use_bf16_gemv_trans = false;
+#else
+   const bool bf16_gemv_trans_would_be_faster = cpuinfo_initialize() &&
+     !cpuinfo_has_x86_avx512bf16();
+   const bool use_bf16_gemv_trans = bf16_gemv_trans_would_be_faster &&
+     transa == TransposeType::Transpose &&
+     transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
+#endif
+   if (!use_bf16_gemv_trans && mkldnn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+     return;
+   }
+#endif
 #if AT_BUILD_WITH_BLAS() && defined(BLAS_HAS_SBGEMM)
    if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
@@ -343,22 +373,6 @@ void gemm(
       return;
    }
 #endif
-#if AT_MKLDNN_ENABLED()
-#ifdef __aarch64__
-   // MKLDNN also supports ARM for bf16, and the bypass is only
-   // currently intended for x86/x86_64.
-   const bool use_bf16_gemv_trans = false;
-#else
-   const bool bf16_gemv_trans_would_be_faster = cpuinfo_initialize() &&
-     !cpuinfo_has_x86_avx512bf16();
-   const bool use_bf16_gemv_trans = bf16_gemv_trans_would_be_faster &&
-     transa == TransposeType::Transpose &&
-     transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
-#endif
-   if (!use_bf16_gemv_trans && mkldnn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
-     return;
-   }
-#endif
    gemm_stub(
       at::kCPU, at::kBFloat16,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
@@ -378,8 +392,12 @@ void gemm(
    // we should not bother checking for !cpuinfo_has_x86_avx512fp16() here,
    // because "onednn (mkldnn) won't use avx512fp16 to compute gemms by default
    // because the avx512fp16 fma would incur accuracy loss".
+#if defined(__powerpc__)
+   const bool fp16_gemv_trans_would_be_faster = false;
+#else
    const bool fp16_gemv_trans_would_be_faster = cpuinfo_initialize() &&
      cpuinfo_has_x86_f16c();
+#endif
    const bool use_fp16_gemv_trans = fp16_gemv_trans_would_be_faster &&
      transa == TransposeType::Transpose &&
      transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
@@ -417,6 +435,13 @@ void gemm(
       return;
    }
 #endif
+#if AT_MKLDNN_ACL_ENABLED()
+// add heuristic based on shape to dispatch to sbgemm_ vs MKLDNN
+   if (mkldnn_bf16f32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+     return;
+   }
+#endif //AT_MKLDNN_ACL_ENABLED
+
 #ifdef MKL_HAS_SBGEMM
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
     int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
@@ -548,7 +573,7 @@ using is_blas_library_type = std::integral_constant<bool,
     std::is_same_v<scalar_t, c10::complex<float>>>;
 
 template <typename scalar_t>
-void gemm_batched_generic(
+static void gemm_batched_generic(
     TransposeType transa, TransposeType transb,
     int64_t batch_size, int64_t m, int64_t n, int64_t k,
     scalar_t alpha,
@@ -562,7 +587,7 @@ void gemm_batched_generic(
 }
 
 template <typename scalar_t>
-void gemm_batched(
+static void gemm_batched(
     TransposeType transa, TransposeType transb,
     int64_t batch_size, int64_t m, int64_t n, int64_t k,
     scalar_t alpha,
@@ -590,7 +615,7 @@ void gemm_batched(
 }
 
 template <typename scalar_t>
-void gemm_batched_with_stride_generic(
+static void gemm_batched_with_stride_generic(
     TransposeType transa, TransposeType transb,
     int64_t batch_size, int64_t m, int64_t n, int64_t k,
     scalar_t alpha,
@@ -733,7 +758,7 @@ void axpy(int64_t n, c10::complex<double> a, const c10::complex<double> *x, int6
     #if C10_IOS
     cblas_zaxpy(i_n, &a, x, i_incx, y, i_incy);
     #else
-    zaxpy_(&i_n, &a, x, &i_incx, y, &i_incy);
+    zaxpy_(&i_n, COMPLEX_DBL(&a), COMPLEX_DBL_CONST(x), &i_incx, COMPLEX_DBL(y), &i_incy);
     #endif
     return;
   }
@@ -758,7 +783,7 @@ void axpy(int64_t n, c10::complex<float> a, const c10::complex<float> *x, int64_
     #if C10_IOS
     cblas_caxpy(i_n, &a, x, i_incx, y, i_incy);
     #else
-    caxpy_(&i_n, &a, x, &i_incx, y, &i_incy);
+    caxpy_(&i_n, COMPLEX_FLOAT(&a), COMPLEX_FLOAT_CONST(x), &i_incx, COMPLEX_FLOAT(y), &i_incy);
     #endif
     return;
   }
@@ -832,7 +857,7 @@ void copy(int64_t n, const c10::complex<double> *x, int64_t incx, c10::complex<d
     #if C10_IOS
     cblas_zcopy(i_n, x, i_incx, y, i_incy);
     #else
-    zcopy_(&i_n, x, &i_incx, y, &i_incy);
+    zcopy_(&i_n, COMPLEX_DBL_CONST(x), &i_incx, COMPLEX_DBL(y), &i_incy);
     #endif
     return;
   }
@@ -856,7 +881,7 @@ void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<fl
     #if C10_IOS
     cblas_ccopy(i_n, &x, i_incx, y, i_incy);
     #else
-    ccopy_(&i_n, x, &i_incx, y, &i_incy);
+    ccopy_(&i_n, COMPLEX_FLOAT(x), &i_incx, COMPLEX_FLOAT(y), &i_incy);
     #endif
     return;
   }
@@ -939,7 +964,7 @@ struct PackKey {
   }
 };
 
-inline dnnl::memory::data_type get_dnnl_dtype(ScalarType dtype) {
+static inline dnnl::memory::data_type get_dnnl_dtype(ScalarType dtype) {
   if (dtype == ScalarType::Float) {
     return dnnl::memory::data_type::f32;
   } else if (dtype == ScalarType::BFloat16) {

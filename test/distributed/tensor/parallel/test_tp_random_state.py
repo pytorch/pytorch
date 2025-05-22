@@ -2,7 +2,8 @@
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._random as random
-from torch.distributed._tensor import init_device_mesh, Replicate
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import Replicate
 from torch.distributed.tensor.parallel.api import parallelize_module
 from torch.distributed.tensor.parallel.style import ColwiseParallel
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -49,7 +50,7 @@ class TensorParallelRandomStateTests(DTensorTestBase):
         self.assertEqual(dp_rank, self.rank // tp_size)
         self.assertEqual(tp_rank, self.rank % tp_size)
 
-        for enable_distribute_flag in [False, True]:
+        for enable_distribute_flag in [True, False]:
             # a local model on meta device
             model = MLPModule(device="meta")
             # the col-wise parallel style shards the weight over tensor dim 0
@@ -68,7 +69,9 @@ class TensorParallelRandomStateTests(DTensorTestBase):
             torch.cuda.manual_seed(dp_rank)
 
             # disable/enable parallel RNG feature
-            random._rng_tracker.distribute_region_enabled = enable_distribute_flag
+            if random._rng_tracker:
+                random._rng_tracker.distribute_region_enabled = enable_distribute_flag
+
             self.assertTrue(model_tp.net1.weight.is_meta)
             # initialize the model's local shard
             model_tp.to_empty(device=self.device_type)

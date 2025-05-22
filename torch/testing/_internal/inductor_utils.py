@@ -15,8 +15,11 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.compile_fx import shape_env_from_inputs
 from torch._inductor.codecache import CppCodeCache
 from torch._inductor.utils import get_gpu_shared_memory, is_big_gpu
-from torch._inductor.utils import GPU_TYPES, get_gpu_type
+from torch._inductor.utils import GPU_TYPES, get_gpu_type, is_gpu
 from torch.utils._triton import has_triton
+from torch.testing._internal.common_device_type import (
+    get_desired_device_type_test_bases,
+)
 from torch.testing._internal.common_utils import (
     LazyVal,
     IS_FBCODE,
@@ -65,6 +68,17 @@ GPU_TYPE = get_gpu_type()
 HAS_MULTIGPU = any(
     getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
     for gpu in GPU_TYPES
+)
+
+_desired_test_bases = get_desired_device_type_test_bases(allow_xpu=True)
+RUN_GPU = (
+    HAS_GPU
+    and any(is_gpu(getattr(x, "device_type", "")) for x in _desired_test_bases)
+)
+
+RUN_CPU = (
+    HAS_CPU
+    and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
 )
 
 def _check_has_dynamic_shape(
@@ -195,3 +209,84 @@ def maybe_skip_size_asserts(op):
         return torch._inductor.config.patch(size_asserts=False)
     else:
         return contextlib.nullcontext()
+
+def get_func_call() -> str:
+    return "void inductor_entry_impl(" if torch._inductor.config.cpp_wrapper else "def call("
+
+def get_kernel_launch() -> str:
+    return "call_triton_" if torch._inductor.config.cpp_wrapper else ".run("
+
+def clone_preserve_strides_offset(x, device=None):
+    if not isinstance(x, torch.Tensor):
+        return x
+    buffer = torch.as_strided(
+        x, (x.untyped_storage().size() // x.element_size(),), (1,), 0
+    )
+    if not device:
+        buffer = buffer.clone()
+    else:
+        buffer = buffer.to(device, copy=True)
+    out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
+    return out
+
+# define the e4m3/e5m2 constants
+E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
+E5M2_MAX_POS = torch.finfo(torch.float8_e5m2).max
+E4M3FNUZ_MAX_POS = torch.finfo(torch.float8_e4m3fnuz).max
+E5M2FNUZ_MAX_POS = torch.finfo(torch.float8_e5m2fnuz).max
+
+FP16_MAX_POS: float = torch.finfo(torch.float16).max
+EPS: float = 1e-12
+
+Tensor = torch.Tensor
+
+def _to_fp8_saturated(x: Tensor, float8_dtype: torch.dtype) -> Tensor:
+    # The default behavior in PyTorch for casting to `float8_e4m3fn`
+    # and `e5m2` is to not saturate. In this context, we should saturate.
+    # A common case where we want to saturate is when the history of a
+    # tensor has a maximum value of `amax1`, and the current amax value
+    # is `amax2`, where `amax1 < amax2`. This is common when using delayed
+    # scaling.
+    if float8_dtype == torch.float8_e4m3fn:
+        x = x.clamp(min=-1 * E4M3_MAX_POS, max=E4M3_MAX_POS)
+    elif float8_dtype == torch.float8_e5m2:
+        x = x.clamp(min=-1 * E5M2_MAX_POS, max=E5M2_MAX_POS)
+    elif float8_dtype == torch.float8_e4m3fnuz:
+        x = x.clamp(min=-1 * E4M3FNUZ_MAX_POS, max=E4M3FNUZ_MAX_POS)
+    elif float8_dtype == torch.float8_e5m2fnuz:
+        x = x.clamp(min=-1 * E5M2FNUZ_MAX_POS, max=E5M2FNUZ_MAX_POS)
+    else:
+        raise TypeError(f"Unsupported float8_dtype: {float8_dtype}")
+    return x.to(float8_dtype)
+
+@torch.no_grad()
+def _amax_to_scale(
+    amax: torch.Tensor, float8_dtype: torch.dtype, orig_dtype: torch.dtype
+) -> torch.Tensor:
+    # To make scale dtype to be fp32 for accuracy
+    amax = amax.float()
+    if float8_dtype == torch.float8_e4m3fn:
+        res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
+    else:  # e5m2
+        res = E5M2_MAX_POS / torch.clamp(amax, min=EPS)
+
+    # Ensure that the scale is representable in float16,
+    # this helps when amax is small. We are assuming that we don't need
+    # to care about this for float32/bfloat16.
+    if orig_dtype is torch.float16:
+        res = torch.clamp(res, max=FP16_MAX_POS)
+    return res
+
+def _quantize_tensorwise(x: Tensor, float8_dtype: torch.dtype):
+    amax = torch.max(torch.abs(x))
+    scale = _amax_to_scale(amax, float8_dtype, x.dtype)
+    x_fp8 = _to_fp8_saturated(x * scale, float8_dtype)
+    inverse_scale = scale.reciprocal()
+    return x_fp8, inverse_scale
+
+def _quantize_rowwise(x: Tensor, float8_dtype: torch.dtype):
+    amax = torch.max(torch.abs(x), dim=1, keepdim=True).values
+    scale = _amax_to_scale(amax, float8_dtype, x.dtype)
+    x_fp8 = _to_fp8_saturated(x * scale, float8_dtype)
+    inverse_scale = scale.reciprocal()
+    return x_fp8, inverse_scale

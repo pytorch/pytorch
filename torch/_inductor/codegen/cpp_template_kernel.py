@@ -118,9 +118,7 @@ class CppTemplateKernel(CppKernel):
     def call_kernel(self, name: str, node: ir.CppTemplateBuffer):
         wrapper = V.graph.wrapper_code
         _, call_args, arg_types = self.args.cpp_argdefs()
-        wrapper.generate_kernel_call(
-            name, call_args, triton=False, gpu=False, arg_types=arg_types
-        )
+        wrapper.generate_kernel_call(name, call_args, triton=False, arg_types=arg_types)
 
     def dtype(self, node: ir.Buffer) -> str:
         return DTYPE_TO_CPP[node.get_dtype()]
@@ -209,6 +207,19 @@ class CppTemplateKernel(CppKernel):
         ctype = f"{DTYPE_TO_CPP[dtype]}"
         numel = f"{cexpr_index(buf.get_numel())}"
         return f"auto _{name} = std::make_unique<{ctype}[]>({numel}); auto {name} = _{name}.get();"
+
+    def define_stack_allocated_buffer(
+        self, name, sizes: list[Any], dtype=torch.float
+    ) -> str:
+        """Define stack-allocated buffer"""
+        sizes = parse_expr_with_index_symbols(sizes)
+        buf = ir.Buffer(
+            name=name, layout=ir.FixedLayout(torch.device("cpu"), dtype, sizes)
+        )
+        self.local_buffers[name] = buf
+        ctype = f"{DTYPE_TO_CPP[dtype]}"
+        numel = f"{cexpr_index(buf.get_numel())}"
+        return f"alignas(64) {ctype} _{name}[{numel}]; {ctype}* {name} = _{name};"
 
     def reinit_buffer_if_null(self, name):
         """Reinit the previously defined local buffer if it is null"""
@@ -377,7 +388,10 @@ class CppTemplateKernel(CppKernel):
                     )
                     epilogue_nodes = scope.localize_nodes(epilogue_nodes)
                 return self.store_pointwise_nodes(
-                    dst, epilogue_nodes, offsets, reindexers  # type: ignore[arg-type]
+                    dst,
+                    epilogue_nodes,  # type: ignore[arg-type]
+                    offsets,
+                    reindexers,
                 )
         else:
             if dst.get_name() != src.get_name():
@@ -502,6 +516,10 @@ class CppTemplateKernel(CppKernel):
                 )
                 return ""
 
+    def check_bounds(self, expr, size, lower, upper):
+        # CppTemplateKernel does not need codegen related operations
+        return
+
 
 class CppTemplateCaller(ir.ChoiceCaller):
     """
@@ -548,7 +566,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(*args, output_tensor=out)
+        return self.bmreq.benchmark(*args, out=out)
 
     def hash_key(self) -> str:
         return "-".join(

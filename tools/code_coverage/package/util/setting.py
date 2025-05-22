@@ -22,8 +22,8 @@ LOG_DIR = os.path.join(PROFILE_DIR, "log")
 
 # test type, DO NOT change the name, it should be consistent with [buck query --output-attribute] result
 class TestType(Enum):
-    CPP: str = "cxx_test"
-    PY: str = "python_test"
+    CPP = "cxx_test"
+    PY = "python_test"
 
 
 class Test:
@@ -57,11 +57,11 @@ class Option:
 
 # test platform
 class TestPlatform(Enum):
-    FBCODE: str = "fbcode"
-    OSS: str = "oss"
+    FBCODE = "fbcode"
+    OSS = "oss"
 
 
 # compiler type
 class CompilerType(Enum):
-    CLANG: str = "clang"
-    GCC: str = "gcc"
+    CLANG = "clang"
+    GCC = "gcc"

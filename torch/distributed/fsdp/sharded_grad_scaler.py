@@ -112,20 +112,16 @@ class ShardedGradScaler(GradScaler):
             self._per_optimizer_states = defaultdict(_refresh_per_optimizer_state)
 
     @overload
-    def scale(self, outputs: torch.Tensor) -> torch.Tensor:
-        ...
+    def scale(self, outputs: torch.Tensor) -> torch.Tensor: ...
 
     @overload
-    def scale(self, outputs: list[torch.Tensor]) -> list[torch.Tensor]:
-        ...
+    def scale(self, outputs: list[torch.Tensor]) -> list[torch.Tensor]: ...
 
     @overload
-    def scale(self, outputs: tuple[torch.Tensor, ...]) -> tuple[torch.Tensor, ...]:
-        ...
+    def scale(self, outputs: tuple[torch.Tensor, ...]) -> tuple[torch.Tensor, ...]: ...
 
     @overload
-    def scale(self, outputs: Iterable[torch.Tensor]) -> Iterable[torch.Tensor]:
-        ...
+    def scale(self, outputs: Iterable[torch.Tensor]) -> Iterable[torch.Tensor]: ...
 
     def scale(
         self, outputs: Union[torch.Tensor, Iterable[torch.Tensor]]
@@ -323,8 +319,10 @@ class ShardedGradScaler(GradScaler):
             if isinstance(new_scale, float):
                 self._scale.fill_(new_scale)  # type: ignore[union-attr]
             else:
-                reason = "new_scale should be a float or a 1-element torch.cuda.FloatTensor or \
+                reason = (
+                    "new_scale should be a float or a 1-element torch.cuda.FloatTensor or \
                     torch.FloatTensor with requires_grad=False."
+                )
                 assert new_scale.device.type == self._device, reason
                 assert new_scale.numel() == 1, reason
                 assert new_scale.requires_grad is False, reason

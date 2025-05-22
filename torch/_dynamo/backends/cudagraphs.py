@@ -166,7 +166,7 @@ def cudagraphs(dynamo_model, dynamo_inputs):
             range(fixed),
             device_index=boxed_device_index.value,
             is_backward=False,
-            is_inference=is_inference,
+            is_inference=False,
             stack_traces=get_stack_traces(aot_model),
             placeholders=get_placeholder_info(aot_model.graph),
             mutated_input_idxs=find_input_mutations(aot_model.graph),

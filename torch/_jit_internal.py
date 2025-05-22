@@ -31,8 +31,10 @@ from typing import (  # noqa: UP035, F401  # (Dict, List, Tuple) imported by tor
     List,
     Optional,
     Tuple,
+    TypeVar,
     Union,
 )
+from typing_extensions import ParamSpec
 
 import torch
 
@@ -47,7 +49,9 @@ from torch._sources import fake_range, get_source_lines_and_file, parse_def
 from torch.futures import Future
 
 
-IS_PY39_PLUS: Final[bool] = sys.version_info >= (3, 9)
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
 IS_PY310_PLUS: Final[bool] = sys.version_info >= (3, 10)
 
 BuiltinUnionType: Union[type, tuple[type, ...]]
@@ -255,9 +259,9 @@ def createResolutionCallbackFromEnv(lookup_base):
     def parseExpr(expr, module):
         try:
             value, len_parsed = parseNestedExpr(expr, module)
-            assert len_parsed == len(
-                expr
-            ), "whole expression was not parsed, falling back to c++ parser"
+            assert len_parsed == len(expr), (
+                "whole expression was not parsed, falling back to c++ parser"
+            )
             return value
         except Exception:
             """
@@ -466,7 +470,7 @@ def get_annotation_str(annotation):
         return ".".join([get_annotation_str(annotation.value), annotation.attr])
     elif isinstance(annotation, ast.Subscript):
         # In Python3.9+ subscript indicies are not wrapped in ast.Index
-        subscript_slice = annotation.slice if IS_PY39_PLUS else annotation.slice.value  # type: ignore[attr-defined]
+        subscript_slice = annotation.slice
         return f"{get_annotation_str(annotation.value)}[{get_annotation_str(subscript_slice)}]"
     elif isinstance(annotation, ast.Tuple):
         return ",".join([get_annotation_str(elt) for elt in annotation.elts])
@@ -666,7 +670,7 @@ class FunctionModifiers:
     _DROP = "_drop (function is fully ignored, declaration can be unscriptable)"
 
 
-def export(fn):
+def export(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     This decorator indicates that a method on an ``nn.Module`` is used as an entry point into a
     :class:`ScriptModule` and should be compiled.
@@ -708,11 +712,11 @@ def export(fn):
         # any compiled methods and wasn't decorated with `@torch.jit.export`
         m = torch.jit.script(MyModule())
     """
-    fn._torchscript_modifier = FunctionModifiers.EXPORT
+    fn._torchscript_modifier = FunctionModifiers.EXPORT  # type:ignore[attr-defined]
     return fn
 
 
-def unused(fn):
+def unused(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     This decorator indicates to the compiler that a function or method should
     be ignored and replaced with the raising of an exception. This allows you
@@ -765,7 +769,7 @@ def unused(fn):
 
         return prop
 
-    fn._torchscript_modifier = FunctionModifiers.UNUSED
+    fn._torchscript_modifier = FunctionModifiers.UNUSED  # type: ignore[attr-defined]
     return fn
 
 
@@ -853,8 +857,7 @@ def ignore(drop=False, **kwargs):
 
     if not isinstance(drop, bool):
         raise RuntimeError(
-            "Argument to @torch.jit.ignore must be a bool or "
-            f"a function but got {drop}"
+            f"Argument to @torch.jit.ignore must be a bool or a function but got {drop}"
         )
 
     # for backwards compat
@@ -884,13 +887,13 @@ def ignore(drop=False, **kwargs):
     return decorator
 
 
-def _drop(fn):
-    fn._torchscript_modifier = FunctionModifiers._DROP
+def _drop(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+    fn._torchscript_modifier = FunctionModifiers._DROP  # type: ignore[attr-defined]
     return fn
 
 
-def _copy_to_script_wrapper(fn):
-    fn._torchscript_modifier = FunctionModifiers.COPY_TO_SCRIPT_WRAPPER
+def _copy_to_script_wrapper(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+    fn._torchscript_modifier = FunctionModifiers.COPY_TO_SCRIPT_WRAPPER  # type: ignore[attr-defined]
     return fn
 
 
@@ -1354,11 +1357,11 @@ def _is_exception(obj) -> bool:
 
 
 def raise_error_container_parameter_missing(target_type) -> None:
-    if target_type == "Dict":
+    if target_type.endswith("ict"):
         raise RuntimeError(
-            "Attempted to use Dict without "
+            f"Attempted to use {target_type} without "
             "contained types. Please add contained type, e.g. "
-            "Dict[int, int]"
+            f"{target_type}[int, int]"
         )
     raise RuntimeError(
         f"Attempted to use {target_type} without a "
@@ -1367,15 +1370,20 @@ def raise_error_container_parameter_missing(target_type) -> None:
     )
 
 
+_RAW_TYPE_NAME_MAPPING = {
+    dict: "dict",
+    list: "list",
+    tuple: "tuple",
+    typing.Dict: "Dict",  # noqa: UP006
+    typing.List: "List",  # noqa: UP006
+    typing.Optional: "Optional",
+    typing.Tuple: "Tuple",  # noqa: UP006
+}
+
+
 def check_args_exist(target_type) -> None:
-    if target_type is typing.List or target_type is list:  # noqa: UP006
-        raise_error_container_parameter_missing("List")
-    elif target_type is typing.Tuple or target_type is tuple:  # noqa: UP006
-        raise_error_container_parameter_missing("Tuple")
-    elif target_type is typing.Dict or target_type is dict:  # noqa: UP006
-        raise_error_container_parameter_missing("Dict")
-    elif target_type is None or target_type is Optional:
-        raise_error_container_parameter_missing("Optional")
+    if name := _RAW_TYPE_NAME_MAPPING.get(target_type):
+        raise_error_container_parameter_missing(name)
 
 
 def check_empty_containers(obj) -> None:
@@ -1537,7 +1545,7 @@ def _get_model_id(obj) -> Optional[str]:
 # In Python-3.11+ typed enums (i.e. IntEnum for example) retain number of base class methods in subclass
 # that were previously dropped. To preserve the behavior, explicitly drop them there
 
-if sys.version_info > (3, 10):
+if sys.version_info >= (3, 11):
     _drop(enum.Enum.__new__)
     _drop(enum.Enum.__format__)
     _drop(enum.Enum.__repr__)

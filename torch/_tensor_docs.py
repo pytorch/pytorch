@@ -6,7 +6,7 @@ from torch._C import _add_docstr as add_docstr
 from torch._torch_docs import parse_kwargs, reproducibility_notes
 
 
-def add_docstr_all(method, docstr):
+def add_docstr_all(method: str, docstr: str) -> None:
     add_docstr(getattr(torch._C.TensorBase, method), docstr)
 
 
@@ -2474,6 +2474,7 @@ Args:
     value (float): the value to fill with
 
 Example::
+
     >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=torch.float)
     >>> index = torch.tensor([0, 2])
     >>> x.index_fill_(1, index, -1)
@@ -3163,7 +3164,10 @@ Args:
 Example:
 
     >>> self = torch.tensor([[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]])
-    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]], dtype=torch.bool)
+    >>> mask = torch.tensor(
+    ...     [[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]],
+    ...     dtype=torch.bool,
+    ... )
     >>> source = torch.tensor([[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]])
     >>> self.masked_scatter_(mask, source)
     tensor([[0, 0, 0, 0, 1],
@@ -3645,7 +3649,7 @@ Example:
     # Example 1: Padding
     >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
     >>> static_size = 4
-    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
     tensor([[  0,   0],
             [  1,   0],
             [  1,   1],
@@ -3654,20 +3658,20 @@ Example:
     # Example 2: Truncating
     >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
     >>> static_size = 2
-    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
     tensor([[  0,   0],
             [  1,   0]], dtype=torch.int64)
 
     # Example 3: 0 size
     >>> input_tensor = torch.tensor([10])
     >>> static_size = 0
-    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
     tensor([], size=(0, 1), dtype=torch.int64)
 
     # Example 4: 0 rank input
     >>> input_tensor = torch.tensor(10)
     >>> static_size = 2
-    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
     tensor([], size=(2, 0), dtype=torch.int64)
 """,
 )
@@ -4163,9 +4167,9 @@ Unlike :meth:`~Tensor.expand`, this function copies the tensor's data.
 .. warning::
 
     :meth:`~Tensor.repeat` behaves differently from
-    `numpy.repeat <https://docs.scipy.org/doc/numpy/reference/generated/numpy.repeat.html>`_,
+    `numpy.repeat <https://numpy.org/doc/stable/reference/generated/numpy.repeat.html>`_,
     but is more similar to
-    `numpy.tile <https://docs.scipy.org/doc/numpy/reference/generated/numpy.tile.html>`_.
+    `numpy.tile <https://numpy.org/doc/stable/reference/generated/numpy.tile.html>`_.
     For the operator similar to `numpy.repeat`, see :func:`torch.repeat_interleave`.
 
 Args:
@@ -5197,6 +5201,13 @@ inferred from the arguments of ``self.to(*args, **kwargs)``.
     Otherwise, the returned tensor is a copy of ``self`` with the desired
     :class:`torch.dtype` and :class:`torch.device`.
 
+.. note::
+
+    If ``self`` requires gradients (``requires_grad=True``) but the target
+    ``dtype`` specified is an integer type, the returned tensor will implicitly
+    set ``requires_grad=False``. This is because only tensors with
+    floating-point or complex dtypes can require gradients.
+
 Here are the ways to call ``to``:
 
 .. method:: to(dtype, non_blocking=False, copy=False, memory_format=torch.preserve_format) -> Tensor
@@ -5212,9 +5223,11 @@ Here are the ways to call ``to``:
 
     Returns a Tensor with the specified :attr:`device` and (optional)
     :attr:`dtype`. If :attr:`dtype` is ``None`` it is inferred to be ``self.dtype``.
-    When :attr:`non_blocking`, tries to convert asynchronously with respect to
-    the host if possible, e.g., converting a CPU Tensor with pinned memory to a
-    CUDA Tensor.
+    When :attr:`non_blocking` is set to ``True``, the function attempts to perform
+    the conversion asynchronously with respect to the host, if possible. This
+    asynchronous behavior applies to both pinned and pageable memory. However,
+    caution is advised when using this feature. For more information, refer to the
+    `tutorial on good usage of non_blocking and pin_memory <https://pytorch.org/tutorials/intermediate/pinmem_nonblock.html>`__.
     When :attr:`copy` is set, a new Tensor is created even when the Tensor
     already matches the desired conversion.
 
@@ -5225,9 +5238,12 @@ Here are the ways to call ``to``:
    :noindex:
 
     Returns a Tensor with same :class:`torch.dtype` and :class:`torch.device` as
-    the Tensor :attr:`other`. When :attr:`non_blocking`, tries to convert
-    asynchronously with respect to the host if possible, e.g., converting a CPU
-    Tensor with pinned memory to a CUDA Tensor.
+    the Tensor :attr:`other`.
+    When :attr:`non_blocking` is set to ``True``, the function attempts to perform
+    the conversion asynchronously with respect to the host, if possible. This
+    asynchronous behavior applies to both pinned and pageable memory. However,
+    caution is advised when using this feature. For more information, refer to the
+    `tutorial on good usage of non_blocking and pin_memory <https://pytorch.org/tutorials/intermediate/pinmem_nonblock.html>`__.
     When :attr:`copy` is set, a new Tensor is created even when the Tensor
     already matches the desired conversion.
 
@@ -6549,7 +6565,10 @@ Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
 Example:
 
     >>> self = torch.tensor([0, 0, 0, 0, 0])
-    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]], dtype=torch.bool)
+    >>> mask = torch.tensor(
+    ...     [[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]],
+    ...     dtype=torch.bool,
+    ... )
     >>> source = torch.tensor([[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]])
     >>> self.masked_scatter(mask, source)
     tensor([[0, 0, 0, 0, 1],
@@ -6853,6 +6872,7 @@ The returned tensor and :attr:`self` share the same underlying storage.
 Returns :attr:`self` if :attr:`self` is a real-valued tensor tensor.
 
 Example::
+
     >>> x=torch.randn(4, dtype=torch.cfloat)
     >>> x
     tensor([(0.3100+0.3553j), (-0.5445-0.7896j), (-1.6492-0.0633j), (-0.0638-0.8119j)])
@@ -6872,6 +6892,7 @@ The returned tensor and :attr:`self` share the same underlying storage.
     :func:`imag` is only supported for tensors with complex dtypes.
 
 Example::
+
     >>> x=torch.randn(4, dtype=torch.cfloat)
     >>> x
     tensor([(0.3100+0.3553j), (-0.5445-0.7896j), (-1.6492-0.0633j), (-0.0638-0.8119j)])
@@ -6905,6 +6926,7 @@ matrix multiplication, it is necessary to use ``int32`` indexing in order
 to avoid downcasting and potentially losing information.
 
 Example::
+
     >>> csr = torch.eye(5,5).to_sparse_csr()
     >>> csr.crow_indices()
     tensor([0, 1, 2, 3, 4, 5], dtype=torch.int32)
@@ -6925,6 +6947,7 @@ matrix multiplication, it is necessary to use ``int32`` indexing in order
 to avoid downcasting and potentially losing information.
 
 Example::
+
     >>> csr = torch.eye(5,5).to_sparse_csr()
     >>> csr.col_indices()
     tensor([0, 1, 2, 3, 4], dtype=torch.int32)

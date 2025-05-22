@@ -12,6 +12,7 @@ import torch._guards
 import torch.utils._pytree as pytree
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
+from torch._inductor.utils import get_gpu_type
 from torch.fx.experimental.symbolic_shapes import (
     _guard_sizes_oblivious,
     statically_known_true,
@@ -21,6 +22,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..pattern_matcher import (
+    Arg,
     CallFunction,
     init_once_fakemode,
     KeywordArg,
@@ -30,6 +32,7 @@ from ..pattern_matcher import (
     register_graph_pattern,
     stable_topological_sort,
 )
+from .decompose_mem_bound_mm import check_device
 from .replace_random import replace_random_passes
 
 
@@ -447,7 +450,7 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
     """
 
 
-    torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'quant_invoke_0_0', (arg0_1, arg1_1));
+    torch.ops.higher_order.invoke_quant_packed(repeated_subgraph0, 'quant_invoke_0_0', (arg0_1, arg1_1));
     ->
     torch.ops.higher_order.invoke_quant(repeated_subgraph0, arg0_1, arg1_1, scheme = 'nf4');
     """
@@ -468,7 +471,7 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
         else:
             quant_options = torch._higher_order_ops.InvokeQuant()
 
-        subgraph, args = invoke_quant.args
+        subgraph, *args = invoke_quant.args
         with gm.graph.inserting_before(invoke_quant):
             invoke_quant_replacement = graph.call_function(
                 torch._higher_order_ops.invoke_quant,
@@ -708,6 +711,28 @@ def pointless_permute_pair(match: Match, arg, perm1, perm2):
     node = match.output_node()
     node.replace_all_uses_with(arg)
     match.erase_nodes()
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.bmm,
+        Arg(),
+        Arg(),
+    ),
+    pass_dict=patterns,
+)
+def bmm_to_mm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
+    """Convert bmm to mm when batch size is 1"""
+
+    def repl(a, b):
+        return torch.mm(a.squeeze(0), b.squeeze(0)).unsqueeze(0)
+
+    if (
+        check_device(mat1.meta["val"], mat2.meta["val"], get_gpu_type())
+        and statically_known_true(mat1.meta["val"].shape[0] == 1)
+        and statically_known_true(mat2.meta["val"].shape[0] == 1)
+    ):
+        match.replace_by_example(repl, [mat1, mat2])
 
 
 # When softmax is used with temperature or other scaling, we get the pattern

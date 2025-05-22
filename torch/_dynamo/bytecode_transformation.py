@@ -89,6 +89,10 @@ class Instruction:
     def short_inst_repr(self) -> str:
         return f"Instruction(opname={self.opname}, offset={self.offset})"
 
+    def copy_positions(self, other: "Instruction") -> None:
+        self.starts_line = other.starts_line
+        self.positions = other.positions
+
 
 if sys.version_info >= (3, 13):
 
@@ -234,8 +238,6 @@ def create_rot_n(n) -> list[Instruction]:
         return [create_instruction("SWAP", arg=i) for i in range(n, 1, -1)]
 
     # ensure desired rotate function exists
-    if sys.version_info < (3, 8) and n >= 4:
-        raise AttributeError(f"rotate {n} not supported for Python < 3.8")
     if sys.version_info < (3, 10) and n >= 5:
         raise AttributeError(f"rotate {n} not supported for Python < 3.10")
 
@@ -1370,6 +1372,7 @@ def clear_instruction_args(instructions):
             inst.arg = None
 
 
+@functools.lru_cache
 def get_code_keys() -> list[str]:
     # Python 3.11 changes to code keys are not fully documented.
     # See https://github.com/python/cpython/blob/3.11/Objects/clinic/codeobject.c.h#L24

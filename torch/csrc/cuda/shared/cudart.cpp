@@ -92,20 +92,6 @@ void initCudartBindings(PyObject* module) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         return C10_CUDA_ERROR_HANDLED(cudaStreamCreate((cudaStream_t*)ptr));
       });
-  cudart.attr(
-      "cuda"
-      "StreamDefault") = cudaStreamDefault;
-  cudart.attr(
-      "cuda"
-      "StreamNonBlocking") = cudaStreamNonBlocking;
-  cudart.def(
-      "cuda"
-      "StreamCreateWithFlags",
-      [](uintptr_t ptr, unsigned int flags) -> cudaError_t {
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        return C10_CUDA_ERROR_HANDLED(
-            cudaStreamCreateWithFlags((cudaStream_t*)ptr, flags));
-      });
   cudart.def(
       "cuda"
       "StreamDestroy",
@@ -133,22 +119,6 @@ void initCudartBindings(PyObject* module) {
         py::gil_scoped_release no_gil;
         C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
         return {device_free, device_total};
-      });
-
-  py::enum_<cudaStreamCaptureMode>(
-      cudart,
-      "cuda"
-      "StreamCaptureMode")
-      .value("Global", cudaStreamCaptureModeGlobal)
-      .value("ThreadLocal", cudaStreamCaptureModeThreadLocal)
-      .value("Relaxed", cudaStreamCaptureModeRelaxed);
-
-  cudart.def(
-      "cuda"
-      "ThreadExchangeStreamCaptureMode",
-      [](cudaStreamCaptureMode mode) -> cudaStreamCaptureMode {
-        C10_CUDA_CHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-        return mode;
       });
 }
 

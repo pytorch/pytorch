@@ -8,10 +8,7 @@
 #include <memory>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace xnnpack {
-namespace delegate {
+namespace torch::jit::xnnpack::delegate {
 
 class XNNCompiler {
  public:
@@ -24,7 +21,4 @@ class XNNCompiler {
       XNNExecutor* executor);
 };
 
-} // namespace delegate
-} // namespace xnnpack
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::xnnpack::delegate

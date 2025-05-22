@@ -114,7 +114,7 @@ hf_Reformer,pass,23
 
 
 
-hf_Roberta_base,fail_accuracy,6
+hf_Roberta_base,pass,6
 
 
 
@@ -250,7 +250,7 @@ stable_diffusion_unet,pass_due_to_skip,0
 
 
 
-timm_efficientnet,pass,7
+timm_efficientnet,fail_accuracy,7
 
 
 

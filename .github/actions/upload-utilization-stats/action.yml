@@ -1,0 +1,71 @@
+name: upload-utilization-stats
+
+description: Upload utilization stats to artifacts.
+
+inputs:
+    workflow_run_id:
+      type: string
+      description: 'workflow (run) id of the workflow the test is running'
+      required: True
+    workflow_attempt:
+      type: string
+      description: 'the workflow (run) attempt'
+      required: True
+    workflow_name:
+      description: 'name of the workflow'
+      type: string
+      required: True
+    job_id:
+      type: string
+      description: 'the job (run) id for the test'
+      required: True
+    job_name:
+      type: string
+      description: 'the job name of the test'
+      required: True
+    local_path:
+      type: string
+      description: 'the local path to the utilization stats file'
+      required: False
+      default: ''
+    artifact_prefix:
+      type: string
+      description: |
+          'the prefix of the raw utilization data, for data stored in zip file, this is the prefix of the parent zip file'
+      default: ""
+      required: False
+
+runs:
+  using: composite
+  steps:
+    - name: Print Inputs
+      shell: bash
+      run: |
+        echo "workflow_id: ${{inputs.workflow_run_id}}"
+        echo "workflow_attempt: ${{inputs.workflow_attempt}}"
+        echo "workflow_Name: ${{inputs.workflow_name}}"
+        echo "job_id: ${{inputs.job_id}}"
+        echo "job_name:  ${{inputs.job_name}}"
+        echo "artifact_prefix: ${{inputs.artifact_prefix}}"
+        python3 --version
+    - uses: nick-fields/retry@v3.0.0
+      name: Setup dependencies
+      with:
+        shell: bash
+        timeout_minutes: 5
+        max_attempts: 5
+        retry_wait_seconds: 30
+        command: |
+          set -eu
+          python3 -m pip install python-dateutil==2.8.2 boto3==1.35.42 pandas==2.1.3 dataclasses_json==0.6.7
+    - name: Upload utilizatoin stats to s3
+      shell: bash
+      run: |
+        python3 -m tools.stats.upload_utilization_stats.upload_utilization_stats \
+          --workflow-run-id "${{inputs.workflow_run_id}}" \
+          --workflow-name "${{inputs.workflow_name}}" \
+          --workflow-run-attempt "${{inputs.workflow_attempt}}" \
+          --job-id "${{inputs.job_id}}" \
+          --job-name "${{inputs.job_name}}" \
+          --local-path "${{inputs.local_path}}" \
+          --artifact-prefix "${{inputs.artifact_prefix}}"

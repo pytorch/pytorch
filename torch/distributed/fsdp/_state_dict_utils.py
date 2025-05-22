@@ -323,8 +323,7 @@ def _full_post_state_dict_hook(
         # Strip prefix out of key if needed as buffer names and param names
         # do not have prefix considered as they are not computed in `state_dict`
         # call.
-        if clean_key.startswith(clean_prefix):
-            clean_key = clean_key[len(clean_prefix) :]
+        clean_key = clean_key.removeprefix(clean_prefix)
 
         # Clone parameters before exiting the `_unshard_fsdp_state_params()` context.
         if not getattr(state_dict[fqn], "_has_been_cloned", False):
@@ -467,9 +466,9 @@ def _local_pre_load_state_dict_hook(
         )
         return
     load_tensor = state_dict[fqn]
-    assert isinstance(
-        load_tensor, ShardedTensor
-    ), "Tensors in local_state_dict should be ShardedTensor."
+    assert isinstance(load_tensor, ShardedTensor), (
+        "Tensors in local_state_dict should be ShardedTensor."
+    )
 
     # Convert the ShardedTensor to a Tensor.
     flat_param = _module_handle(fsdp_state, module).flat_param
@@ -700,7 +699,7 @@ def _post_state_dict_hook(
     if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
         context = _replace_with_full_state_dict_type(fsdp_state)
         warnings.warn(
-            "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
+            "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will "
             "be returned."
         )
     else:
@@ -762,7 +761,7 @@ def _pre_state_dict_hook(
     if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
         context = _replace_with_full_state_dict_type(fsdp_state)
         warnings.warn(
-            "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
+            "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will "
             "be returned."
         )
     else:

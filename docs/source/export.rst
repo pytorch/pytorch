@@ -11,8 +11,7 @@ torch.export
 Overview
 --------
 
-:func:`torch.export.export` takes an arbitrary Python callable (a
-:class:`torch.nn.Module`, a function or a method) and produces a traced graph
+:func:`torch.export.export` takes a :class:`torch.nn.Module` and produces a traced graph
 representing only the Tensor computation of the function in an Ahead-of-Time
 (AOT) fashion, which can subsequently be executed with different outputs or
 serialized.
@@ -370,68 +369,6 @@ To show some examples:
                 batch_norm: "f32[1, 3, 3, 3]" = torch.ops.aten.batch_norm.default(conv2d, p_bn_weight, p_bn_bias, b_bn_running_mean, b_bn_running_var, True, 0.1, 1e-05, True)
                 return (batch_norm,)
 
-    Graph signature:
-        ExportGraphSignature(
-            input_specs=[
-                InputSpec(
-                    kind=<InputKind.PARAMETER: 2>,
-                    arg=TensorArgument(name='p_conv_weight'),
-                    target='conv.weight',
-                    persistent=None
-                ),
-                InputSpec(
-                    kind=<InputKind.PARAMETER: 2>,
-                    arg=TensorArgument(name='p_conv_bias'),
-                    target='conv.bias',
-                    persistent=None
-                ),
-                InputSpec(
-                    kind=<InputKind.PARAMETER: 2>,
-                    arg=TensorArgument(name='p_bn_weight'),
-                    target='bn.weight',
-                    persistent=None
-                ),
-                InputSpec(
-                    kind=<InputKind.PARAMETER: 2>,
-                    arg=TensorArgument(name='p_bn_bias'),
-                    target='bn.bias',
-                    persistent=None
-                ),
-                InputSpec(
-                    kind=<InputKind.BUFFER: 3>,
-                    arg=TensorArgument(name='b_bn_running_mean'),
-                    target='bn.running_mean',
-                    persistent=True
-                ),
-                InputSpec(
-                    kind=<InputKind.BUFFER: 3>,
-                    arg=TensorArgument(name='b_bn_running_var'),
-                    target='bn.running_var',
-                    persistent=True
-                ),
-                InputSpec(
-                    kind=<InputKind.BUFFER: 3>,
-                    arg=TensorArgument(name='b_bn_num_batches_tracked'),
-                    target='bn.num_batches_tracked',
-                    persistent=True
-                ),
-                InputSpec(
-                    kind=<InputKind.USER_INPUT: 1>,
-                    arg=TensorArgument(name='x'),
-                    target=None,
-                    persistent=None
-                )
-            ],
-            output_specs=[
-                OutputSpec(
-                    kind=<OutputKind.USER_OUTPUT: 1>,
-                    arg=TensorArgument(name='batch_norm'),
-                    target=None
-                )
-            ]
-        )
-    Range constraints: {}
-
 
 From the above output, you can see that :func:`export_for_training` produces pretty much the same ExportedProgram
 as :func:`export` except for the operators in the graph. You can see that we captured batch_norm in the most general
@@ -460,83 +397,6 @@ You can also go from this IR to an inference IR via :func:`run_decompositions` w
                 getitem_3: "f32[3]" = _native_batch_norm_legit_functional[3]
                 getitem_4: "f32[3]" = _native_batch_norm_legit_functional[4]
                 return (getitem_3, getitem_4, add, getitem)
-
-    Graph signature:
-        ExportGraphSignature(
-            input_specs=[
-                InputSpec(
-                    kind=<InputKind.PARAMETER: 2>,
-                    arg=TensorArgument(name='p_conv_weight'),
-                    target='conv.weight',
-                    persistent=None
-                ),
-                InputSpec(
-                    kind=<InputKind.PARAMETER: 2>,
-                    arg=TensorArgument(name='p_conv_bias'),
-                    target='conv.bias',
-                    persistent=None
-                ),
-                InputSpec(
-                    kind=<InputKind.PARAMETER: 2>,
-                    arg=TensorArgument(name='p_bn_weight'),
-                    target='bn.weight',
-                    persistent=None
-                ),
-                InputSpec(
-                    kind=<InputKind.PARAMETER: 2>,
-                    arg=TensorArgument(name='p_bn_bias'),
-                    target='bn.bias',
-                    persistent=None
-                ),
-                InputSpec(
-                    kind=<InputKind.BUFFER: 3>,
-                    arg=TensorArgument(name='b_bn_running_mean'),
-                    target='bn.running_mean',
-                    persistent=True
-                ),
-                InputSpec(
-                    kind=<InputKind.BUFFER: 3>,
-                    arg=TensorArgument(name='b_bn_running_var'),
-                    target='bn.running_var',
-                    persistent=True
-                ),
-                InputSpec(
-                    kind=<InputKind.BUFFER: 3>,
-                    arg=TensorArgument(name='b_bn_num_batches_tracked'),
-                    target='bn.num_batches_tracked',
-                    persistent=True
-                ),
-                InputSpec(
-                    kind=<InputKind.USER_INPUT: 1>,
-                    arg=TensorArgument(name='x'),
-                    target=None,
-                    persistent=None
-                )
-            ],
-            output_specs=[
-                OutputSpec(
-                    kind=<OutputKind.BUFFER_MUTATION: 3>,
-                    arg=TensorArgument(name='getitem_3'),
-                    target='bn.running_mean'
-                ),
-                OutputSpec(
-                    kind=<OutputKind.BUFFER_MUTATION: 3>,
-                    arg=TensorArgument(name='getitem_4'),
-                    target='bn.running_var'
-                ),
-                OutputSpec(
-                    kind=<OutputKind.BUFFER_MUTATION: 3>,
-                    arg=TensorArgument(name='add'),
-                    target='bn.num_batches_tracked'
-                ),
-                OutputSpec(
-                    kind=<OutputKind.USER_OUTPUT: 1>,
-                    arg=TensorArgument(name='getitem'),
-                    target=None
-                )
-            ]
-        )
-    Range constraints: {}
 
 Here you can see that we kept ``conv2d`` op in the IR while decomposing the rest. Now the IR is a functional IR
 containing core aten operators except for ``conv2d``.
@@ -571,83 +431,6 @@ You can do even more customizations by directly registering custom decomp behavi
                 getitem_3: "f32[3]" = _native_batch_norm_legit_functional[3]
                 getitem_4: "f32[3]" = _native_batch_norm_legit_functional[4];
                 return (getitem_3, getitem_4, add, getitem)
-
-    Graph signature:
-        ExportGraphSignature(
-            input_specs=[
-                InputSpec(
-                    kind=<InputKind.PARAMETER: 2>,
-                    arg=TensorArgument(name='p_conv_weight'),
-                    target='conv.weight',
-                    persistent=None
-                ),
-                InputSpec(
-                    kind=<InputKind.PARAMETER: 2>,
-                    arg=TensorArgument(name='p_conv_bias'),
-                    target='conv.bias',
-                    persistent=None
-                ),
-                InputSpec(
-                    kind=<InputKind.PARAMETER: 2>,
-                    arg=TensorArgument(name='p_bn_weight'),
-                    target='bn.weight',
-                    persistent=None
-                ),
-                InputSpec(
-                    kind=<InputKind.PARAMETER: 2>,
-                    arg=TensorArgument(name='p_bn_bias'),
-                    target='bn.bias',
-                    persistent=None
-                ),
-                InputSpec(
-                    kind=<InputKind.BUFFER: 3>,
-                    arg=TensorArgument(name='b_bn_running_mean'),
-                    target='bn.running_mean',
-                    persistent=True
-                ),
-                InputSpec(
-                    kind=<InputKind.BUFFER: 3>,
-                    arg=TensorArgument(name='b_bn_running_var'),
-                    target='bn.running_var',
-                    persistent=True
-                ),
-                InputSpec(
-                    kind=<InputKind.BUFFER: 3>,
-                    arg=TensorArgument(name='b_bn_num_batches_tracked'),
-                    target='bn.num_batches_tracked',
-                    persistent=True
-                ),
-                InputSpec(
-                    kind=<InputKind.USER_INPUT: 1>,
-                    arg=TensorArgument(name='x'),
-                    target=None,
-                    persistent=None
-                )
-            ],
-            output_specs=[
-                OutputSpec(
-                    kind=<OutputKind.BUFFER_MUTATION: 3>,
-                    arg=TensorArgument(name='getitem_3'),
-                    target='bn.running_mean'
-                ),
-                OutputSpec(
-                    kind=<OutputKind.BUFFER_MUTATION: 3>,
-                    arg=TensorArgument(name='getitem_4'),
-                    target='bn.running_var'
-                ),
-                OutputSpec(
-                    kind=<OutputKind.BUFFER_MUTATION: 3>,
-                    arg=TensorArgument(name='add'),
-                    target='bn.num_batches_tracked'
-                ),
-                OutputSpec(
-                    kind=<OutputKind.USER_OUTPUT: 1>,
-                    arg=TensorArgument(name='getitem'),
-                    target=None
-                )
-            ]
-    )
-    Range constraints: {}
 
 
 Expressing Dynamism
@@ -712,65 +495,6 @@ run. Such dimensions must be specified by using the
             add: "f32[s0, 32]" = torch.ops.aten.add.Tensor(relu, c_buffer)
             return (add, relu_1)
 
-    Graph signature:
-        ExportGraphSignature(
-            input_specs=[
-                InputSpec(
-                    kind=<InputKind.PARAMETER: 2>,
-                    arg=TensorArgument(name='p_branch1_0_weight'),
-                    target='branch1.0.weight',
-                    persistent=None
-                ),
-                InputSpec(
-                    kind=<InputKind.PARAMETER: 2>,
-                    arg=TensorArgument(name='p_branch1_0_bias'),
-                    target='branch1.0.bias',
-                    persistent=None
-                ),
-                InputSpec(
-                    kind=<InputKind.PARAMETER: 2>,
-                    arg=TensorArgument(name='p_branch2_0_weight'),
-                    target='branch2.0.weight',
-                    persistent=None
-                ),
-                InputSpec(
-                    kind=<InputKind.PARAMETER: 2>,
-                    arg=TensorArgument(name='p_branch2_0_bias'),
-                    target='branch2.0.bias',
-                    persistent=None
-                ),
-                InputSpec(
-                    kind=<InputKind.CONSTANT_TENSOR: 4>,
-                    arg=TensorArgument(name='c_buffer'),
-                    target='buffer',
-                    persistent=True
-                ),
-                InputSpec(
-                    kind=<InputKind.USER_INPUT: 1>,
-                    arg=TensorArgument(name='x1'),
-                    target=None,
-                    persistent=None
-                ),
-                InputSpec(
-                    kind=<InputKind.USER_INPUT: 1>,
-                    arg=TensorArgument(name='x2'),
-                    target=None,
-                    persistent=None
-                )
-            ],
-            output_specs=[
-                OutputSpec(
-                    kind=<OutputKind.USER_OUTPUT: 1>,
-                    arg=TensorArgument(name='add'),
-                    target=None
-                ),
-                OutputSpec(
-                    kind=<OutputKind.USER_OUTPUT: 1>,
-                    arg=TensorArgument(name='relu_1'),
-                    target=None
-                )
-            ]
-        )
     Range constraints: {s0: VR[0, int_oo]}
 
 Some additional things to note:
@@ -820,30 +544,6 @@ another, or a shape is even. An example:
             add: "f32[s0]" = torch.ops.aten.add.Tensor(x, slice_1)
             return (add,)
 
-    Graph signature:
-        ExportGraphSignature(
-            input_specs=[
-                InputSpec(
-                    kind=<InputKind.USER_INPUT: 1>,
-                    arg=TensorArgument(name='x'),
-                    target=None,
-                    persistent=None
-                ),
-                InputSpec(
-                    kind=<InputKind.USER_INPUT: 1>,
-                    arg=TensorArgument(name='y'),
-                    target=None,
-                    persistent=None
-                )
-            ],
-            output_specs=[
-                OutputSpec(
-                    kind=<OutputKind.USER_OUTPUT: 1>,
-                    arg=TensorArgument(name='add'),
-                    target=None
-                )
-            ]
-        )
     Range constraints: {s0: VR[3, 6], s0 + 1: VR[4, 7]}
 
 Some things to note:
@@ -1067,6 +767,7 @@ Read More
 
    export.programming_model
    export.ir_spec
+   draft_export
    torch.compiler_transformations
    torch.compiler_ir
    generated/exportdb/index
@@ -1089,31 +790,35 @@ API Reference
 .. autofunction:: export
 .. autofunction:: save
 .. autofunction:: load
+.. autofunction:: draft_export
 .. autofunction:: register_dataclass
-.. autofunction:: torch.export.dynamic_shapes.Dim
-.. autofunction:: torch.export.exported_program.default_decompositions
-.. autofunction:: dims
+.. autoclass:: torch.export.dynamic_shapes.Dim
 .. autoclass:: torch.export.dynamic_shapes.ShapesCollection
 
     .. automethod:: dynamic_shapes
 
+.. autoclass:: torch.export.dynamic_shapes.AdditionalInputs
+
+    .. automethod:: add
+    .. automethod:: dynamic_shapes
+    .. automethod:: verify
+
 .. autofunction:: torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes
-.. autoclass:: Constraint
 .. autoclass:: ExportedProgram
 
+    .. attribute:: graph
+    .. attribute:: graph_signature
+    .. attribute:: state_dict
+    .. attribute:: constants
+    .. attribute:: range_constraints
+    .. attribute:: module_call_graph
+    .. attribute:: example_inputs
     .. automethod:: module
-    .. automethod:: buffers
-    .. automethod:: named_buffers
-    .. automethod:: parameters
-    .. automethod:: named_parameters
     .. automethod:: run_decompositions
 
-.. autoclass:: ExportBackwardSignature
 .. autoclass:: ExportGraphSignature
 .. autoclass:: ModuleCallSignature
 .. autoclass:: ModuleCallEntry
-
-
 .. automodule:: torch.export.decomp_utils
 .. autoclass:: CustomDecompTable
 
@@ -1123,9 +828,16 @@ API Reference
     .. automethod:: materialize
     .. automethod:: pop
     .. automethod:: update
+.. autofunction:: torch.export.exported_program.default_decompositions
 
 .. automodule:: torch.export.exported_program
 .. automodule:: torch.export.graph_signature
+.. autoclass:: ExportGraphSignature
+
+    .. automethod:: replace_all_uses
+    .. automethod:: get_replace_hook
+
+.. autoclass:: ExportBackwardSignature
 .. autoclass:: InputKind
 .. autoclass:: InputSpec
 .. autoclass:: OutputKind
@@ -1133,12 +845,8 @@ API Reference
 .. autoclass:: SymIntArgument
 .. autoclass:: SymBoolArgument
 .. autoclass:: SymFloatArgument
-.. autoclass:: ExportGraphSignature
 
-    .. automethod:: replace_all_uses
-    .. automethod:: get_replace_hook
-
-.. autoclass:: torch.export.graph_signature.CustomObjArgument
+.. autoclass:: CustomObjArgument
 
 .. py:module:: torch.export.dynamic_shapes
 .. py:module:: torch.export.custom_ops
@@ -1151,3 +859,5 @@ API Reference
 .. automodule:: torch.export.experimental
 .. automodule:: torch.export.passes
 .. autofunction:: torch.export.passes.move_to_device_pass
+.. automodule:: torch.export.pt2_archive
+.. automodule:: torch.export.pt2_archive.constants

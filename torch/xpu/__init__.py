@@ -9,7 +9,7 @@ This package is lazily initialized, so you can always import it, and use
 import threading
 import traceback
 from functools import lru_cache
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch._C
@@ -66,9 +66,14 @@ def is_available() -> bool:
     return device_count() > 0
 
 
-def is_bf16_supported():
+def is_bf16_supported(including_emulation: bool = True) -> bool:
     r"""Return a bool indicating if the current XPU device supports dtype bfloat16."""
-    return True
+    if not is_available():
+        return False
+    return (
+        including_emulation
+        or torch.xpu.get_device_properties().has_bfloat16_conversions
+    )
 
 
 def is_initialized():
@@ -420,7 +425,7 @@ def synchronize(device: _device_t = None) -> None:
 
 def get_arch_list() -> list[str]:
     r"""Return list XPU architectures this library was compiled for."""
-    if not is_available():
+    if not _is_compiled():
         return []
     arch_flags = torch._C._xpu_getArchFlags()
     if arch_flags is None:

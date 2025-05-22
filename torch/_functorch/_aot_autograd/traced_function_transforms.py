@@ -29,7 +29,7 @@ from torch.fx.experimental.proxy_tensor import (
     maybe_enable_thunkify,
 )
 from torch.fx.experimental.symbolic_shapes import (
-    definitely_false,
+    guard_or_true,
     PropagateUnbackedSymInts,
     sym_eq,
 )
@@ -38,6 +38,9 @@ from torch.nn.utils import stateless
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
 from .functional_utils import (
+    _check_if_mutation_can_be_in_graph,
+    are_all_mutations_hidden_from_autograd,
+    are_all_mutations_under_no_grad_or_inference_mode,
     from_fun,
     has_data_mutation,
     has_metadata_mutation,
@@ -218,12 +221,15 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
                 # A bit sketchy, but fixes e.g. test_aot_autograd_exhaustive_matmul_cpu_float32
                 # The issue is that we are sensitive to decomps that don't accurately maintain
                 # their output's _base.shape compared to eager mode, and this helps mitigate a bit.
-                # The not definitely_false is also sketchy; if unbacked
+                # The guard_or_true also sketchy; if unbacked
                 # symints are involved, we're just going to assume that the
                 # decomps setup the base shape correctly
+
+                # Return out if the result of out.shape==tangent.shape is unknown or known to be true.
+                # otherwise if its a known false return out.view(tangent.shape).
                 needed_outs.append(
                     out
-                    if not definitely_false(sym_eq(out.shape, tangent.shape))
+                    if guard_or_true(sym_eq(out.shape, tangent.shape))
                     else out.view(tangent.shape)
                 )
                 needed_tangents.append(tangent)
@@ -479,9 +485,30 @@ def create_functionalized_fn(
                 ):
                     assert not has_metadata_mutation(
                         f_inpt, before, check_only_storage_mutation=False
-                    ) and not has_data_mutation(
-                        f_inpt
-                    ), "Found an input to the backward that was mutated during the backward pass. This is not supported"
+                    ), "Found an input to the backward that had metadata mutated during the backward pass. This is not supported"
+                    if has_data_mutation(f_inpt):
+                        can_be_in_graph = _check_if_mutation_can_be_in_graph(
+                            keep_input_mutations=True,
+                            mutates_data=True,
+                            mutates_metadata=False,
+                            mutations_hidden_from_autograd=are_all_mutations_hidden_from_autograd(
+                                f_inpt
+                            ),
+                            mutations_under_no_grad_or_inference_mode=are_all_mutations_under_no_grad_or_inference_mode(
+                                f_inpt
+                            ),
+                            mutates_storage_metadata=False,
+                            mutation_inductor_storage_resize=was_inductor_storage_resized(
+                                f_inpt
+                            ),
+                            requires_grad=f_inpt.requires_grad,
+                        )
+                        assert (
+                            can_be_in_graph
+                        ), "a backward input that had data mutated in an autograd-aware way. This is not supported"
+                        # Perform the input mutation
+                        with torch.fx.traceback.preserve_node_meta():
+                            before.copy_(after)
 
             if aot_config.keep_inference_input_mutations:
                 # Note: This is a bit annoying. There's a layering issue here, where:

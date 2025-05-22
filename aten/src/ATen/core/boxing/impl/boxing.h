@@ -117,38 +117,29 @@ static inline constexpr size_t boxed_size() {
   return BoxedSize<Args...>::value;
 }
 
-using IValueAlignedStorage =
-    std::aligned_storage_t<sizeof(IValue), alignof(IValue)>;
-
 template <typename T>
-C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(
-    IValueAlignedStorage* dest,
-    T& arg,
-    int& lastIdx) {
-  new (&dest[lastIdx]) IValue(arg);
-  lastIdx++;
+C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(IValue*& dest, T& arg) {
+  new (dest++) IValue(arg);
 }
 
 C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(
-    IValueAlignedStorage* dest,
-    c10::TensorOptions options,
-    int& lastIdx) {
-  new (&dest[lastIdx++]) IValue(c10::typeMetaToScalarType(options.dtype()));
-  new (&dest[lastIdx++]) IValue(options.layout());
-  new (&dest[lastIdx++]) IValue(options.device());
-  new (&dest[lastIdx++]) IValue(options.pinned_memory());
+    IValue*& dest,
+    c10::TensorOptions options) {
+  new (dest++) IValue(c10::typeMetaToScalarType(options.dtype()));
+  new (dest++) IValue(options.layout());
+  new (dest++) IValue(options.device());
+  new (dest++) IValue(options.pinned_memory());
 }
 
-inline void boxArgsToStack(IValueAlignedStorage*, int&) {}
+inline void boxArgsToStack(IValue*&) {}
 
 template <typename T, typename... Args>
 C10_ALWAYS_INLINE_UNLESS_MOBILE void boxArgsToStack(
-    IValueAlignedStorage* dest,
-    int& lastIdx,
+    IValue*& dest,
     T& arg,
     Args&... args) {
-  boxToStack(dest, arg, lastIdx);
-  boxArgsToStack(dest, lastIdx, args...);
+  boxToStack(dest, arg);
+  boxArgsToStack(dest, args...);
 }
 
 //
