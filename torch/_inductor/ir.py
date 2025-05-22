@@ -7037,10 +7037,8 @@ class FallbackKernel(ExternKernelAlloc):
                 kernel not in config.aot_inductor.custom_ops_to_c_shims
             )
 
-        def do_runtime_dispatch() -> None:
-            args = None
+        def do_runtime_dispatch(args: list[Any]) -> None:
             exported_args = self.export_extern_kernel_node()
-
             wrapper.generate_fallback_kernel_with_runtime_lookup(
                 self.get_name(),
                 self.python_kernel_name,
@@ -7059,29 +7057,26 @@ class FallbackKernel(ExternKernelAlloc):
             )
 
         self.codegen_comment(wrapper)
-        if self.use_runtime_dispatch:
-            do_runtime_dispatch()
+        args = [*self.codegen_args(), *self.codegen_kwargs()]
+        if self.use_runtime_dispatch or (
+            # Handle the special case where a complex number is input to a
+            # cpp_wrapper C-shim kernel.  If the corresponding argument is a number,
+            # the torchgen-created shim API will use type "double", which cannot be
+            # converted to from a c10::complex.  In these cases, fallback to runtime
+            # dispatch.
+            V.graph.cpp_wrapper
+            and isinstance(kernel, torch._ops.OpOverload)
+            and any(
+                "c10::complex" in arg_str and is_number(op_arg.real_type)
+                for arg_str, op_arg in zip(args, kernel._schema.arguments)
+            )
+        ):
+            do_runtime_dispatch(args)
         else:
-            args = [*self.codegen_args(), *self.codegen_kwargs()]
-            if (
-                V.graph.cpp_wrapper
-                and isinstance(kernel, torch._ops.OpOverload)
-                and any(
-                    "c10::complex" in arg_str and is_number(op_arg.real_type)
-                    for arg_str, op_arg in zip(args, kernel._schema.arguments)
-                )
-            ):
-                # Handle the special case where a complex number is input to a
-                # cpp_wrapper C-shim kernel.  If the corresponding argument is a number,
-                # the torchgen-created shim API will use type "double", which cannot be
-                # converted to from a c10::complex.  In these cases, fallback to runtime
-                # dispatch.
-                do_runtime_dispatch()
-            else:
-                wrapper.generate_fallback_kernel(self)
-                if isinstance(self.layout, Layout):
-                    self.codegen_size_asserts(wrapper)
-                    self.codegen_alignment_asserts(wrapper)
+            wrapper.generate_fallback_kernel(self)
+            if isinstance(self.layout, Layout):
+                self.codegen_size_asserts(wrapper)
+                self.codegen_alignment_asserts(wrapper)
 
         self.codegen_unbacked_symbol_defs(wrapper)
 

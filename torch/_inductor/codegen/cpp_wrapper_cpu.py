@@ -2253,6 +2253,138 @@ if (!custom_op_wrapper) {
         output_args: Optional[list[Optional[str]]] = None,
         raw_outputs: Optional[list[ir.Buffer]] = None,
     ):
+        """Generate fallback kernel calls with runtime (non-AOT) dispatch.  This can
+        only be called in cpp_wrapper mode, and assumes that the input is a non-None
+        OpOverload."""
+        # We assume this is an OpOverload when accessing _schema below.
+        assert isinstance(op_overload, torch._ops.OpOverload), type(op_overload)
+        assert output_args is not None
+
+        if raw_outputs:
+            declarations_before_scope = [
+                f"RAIIAtenTensorHandle {output_arg};"
+                for output_arg, raw_output_arg in zip(output_args, raw_outputs)  # type: ignore[arg-type]
+                if output_arg is not None
+                and not isinstance(raw_output_arg, ir.MutationOutput)
+            ]
+        else:
+            declarations_before_scope = [
+                f"RAIIAtenTensorHandle {output_arg};"
+                for output_arg in output_args  # type: ignore[arg-type]
+                if output_arg is not None
+            ]
+
+        def op_supports_StableIValue(op_overload: torch._ops.OpOverload) -> bool:
+            """Returns true if op_overload._schema is compatible with StableIValue."""
+            supported_types = (
+                torch.BoolType,
+                torch.DeviceObjType,
+                torch.FloatType,
+                # ScalarTypeType, LayoutType, and MemoryFormatType are seen as IntType
+                # when queried via torch.JitType.type.
+                torch.IntType,
+                torch.TensorType,
+            )
+
+            def type_supported(t: torch.JitType) -> bool:
+                if isinstance(t, torch.OptionalType):
+                    return type_supported(t.getElementType())
+                return isinstance(t, supported_types)
+
+            return all(
+                type_supported(a.type)
+                for a in chain(
+                    op_overload._schema.arguments, op_overload._schema.returns
+                )
+            )
+
+        if isinstance(op_overload, torch._ops.OpOverload) and op_supports_StableIValue(
+            op_overload
+        ):
+            dispatch_lines = IndentedBuffer()
+            dispatch_lines.writelines(declarations_before_scope)
+            dispatch_lines.writeline("{")
+
+            with dispatch_lines.indent():
+                tmp_var_number = count()
+
+                def parse_arg(arg_type: torch.JitType, codegen_arg: str) -> str:
+                    # Strip off any temporary references; we're in an indented context,
+                    # so any saved-off variables will be auto-destroyed.
+                    new_codegen_arg = codegen_arg.removeprefix("&temporary_reference(")
+                    if new_codegen_arg != codegen_arg:
+                        # If we removed temporary_reference, there's a good chance the
+                        # variable ends with get() (which would get an ATenTensorHandle
+                        # from a temporary RAII handle).  Strip that off too, since
+                        # we're going to save this in a temporary RAII handle.
+                        if codegen_arg.endswith(".get())"):
+                            codegen_arg = new_codegen_arg.removesuffix(".get())")
+                        else:
+                            codegen_arg = new_codegen_arg.removesuffix(")")
+
+                    if isinstance(arg_type, torch.OptionalType):
+                        # If we have a pointer to a variable, strip it off and let
+                        # from<std::optional> handle any internal pointers.
+                        codegen_arg = codegen_arg.removeprefix("&")
+
+                        if codegen_arg == "nullptr":
+                            return "from(std::nullopt)"
+
+                        var_name = f"tmp_var_{next(tmp_var_number)}"
+                        dispatch_lines.writeline(
+                            f"std::optional {var_name}{{{parse_arg(arg_type.getElementType(), codegen_arg)}}};"
+                        )
+                        return f"from({var_name})"
+
+                    raii_var = self.create_tmp_raii_handle_var_if_needed(
+                        codegen_arg, dispatch_lines
+                    )
+                    temp_handle = raii_var != codegen_arg
+
+                    if isinstance(arg_type, torch.TensorType):
+                        if not temp_handle:
+                            var_name = f"tmp_var_{next(tmp_var_number)}"
+                            dispatch_lines.writeline(f"AtenTensorHandle {var_name};")
+                            dispatch_lines.writeline(
+                                f"aoti_torch_new_tensor_handle({raii_var}, &{var_name});"
+                            )
+                            return f"from({var_name})"
+                        return f"from({raii_var}.release())"
+                    return f"from({codegen_arg})"
+
+                ivalue_args = (
+                    parse_arg(a.type, c)
+                    for a, c in zip(op_overload._schema.arguments, codegen_args)
+                )
+                array_len = max(len(codegen_args), len(output_args))
+                dispatch_lines.writeline(
+                    f"std::array<StableIValue, {array_len}> dispatch_vars{{{', '.join(ivalue_args)}}};"
+                )
+                dispatch_lines.writeline("AOTI_TORCH_ERROR_CODE_CHECK(")
+                with dispatch_lines.indent():
+                    dispatch_lines.writeline(
+                        f'aoti_torch_call_dispatcher("{op_overload._schema.name}", "{op_overload._schema.overload_name}", dispatch_vars.data())'  # noqa: B950
+                    )
+                dispatch_lines.writeline(");")
+
+                if len(output_args) == 1 and (output := output_args[0]) is not None:
+                    # result is a single tensor
+                    dispatch_lines.writeline(
+                        f"{output} = to<AtenTensorHandle>(dispatch_vars[0]);"
+                    )
+                else:
+                    # result is a tuple of tensors
+                    for idx, output_arg in enumerate(output_args):
+                        if output_arg is None:
+                            continue
+                        dispatch_lines.writeline(
+                            f"{output_arg} = to<AtenTensorHandle>(dispatch_vars[{idx}]);"
+                        )
+
+            dispatch_lines.writeline("}")
+            self.writelines(dispatch_lines.getvalue().splitlines())
+            return
+
         # In the JIT mode, because of the ABI-compatible requirement, we can't directly call
         # c10::Dispatcher to find the custom op and call it. Instead, we go back to Python
         # to invoke this custom op.
@@ -2304,19 +2436,6 @@ if (!custom_op_wrapper) {
                     continue
                 lines += f"{output_arg} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL));\n"  # noqa: B950
 
-        if raw_outputs:
-            declarations_before_scope = [
-                f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg, raw_output_arg in zip(output_args, raw_outputs)  # type: ignore[arg-type]
-                if output_arg is not None
-                and not isinstance(raw_output_arg, ir.MutationOutput)
-            ]
-        else:
-            declarations_before_scope = [
-                f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg in output_args  # type: ignore[arg-type]
-                if output_arg is not None
-            ]
         scope_gil_acquire = self.generate_scoped_gil_acquire(
             declarations_before_scope, lines
         )
@@ -2372,7 +2491,7 @@ if (!custom_op_wrapper) {
             return "int64_t"
         elif isinstance(
             type_, (torch.BoolType, torch.SymBoolType, torch.EnumType)
-        ) or repr(type_) in ("ScalarType", "Layout"):
+        ) or repr(type_) in ("Layout", "MemoryFormat", "ScalarType"):
             return "int32_t"
         elif isinstance(type_, torch.FloatType):
             return "double"
