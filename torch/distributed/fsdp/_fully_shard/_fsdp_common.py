@@ -34,6 +34,7 @@ else:
 
         _compiled_autograd_enabled = (
             ca.compiled_autograd_enabled
+            or ca.compiled_autograd_enabled_force_eager
             or ca.in_compiled_autograd_region
         )
 
