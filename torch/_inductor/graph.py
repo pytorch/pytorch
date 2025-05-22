@@ -35,7 +35,7 @@ from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
-    get_placeholder_expr,
+    _get_placeholder_expr,
     has_free_symbols,
     resolve_unbacked_bindings,
     RuntimeAssert,
@@ -1062,7 +1062,7 @@ class GraphLowering(torch.fx.Interpreter):
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         target = self.qualify_name(target)
         if isinstance(example, SymTypes):
-            expr = get_placeholder_expr(example.node)
+            expr = _get_placeholder_expr(example.node)
             self.graph_inputs[target] = expr
             self.graph_input_names.append(target)
             return expr

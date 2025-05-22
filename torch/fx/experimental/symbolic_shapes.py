@@ -7582,7 +7582,7 @@ def _remove_effect_token_unbacked_bindings(
 # When accessing expressions representing input placeholders, we do not apply replacements
 # since those inputs should be seen for assertions that use them to be inserted. The only replacement
 # that we apply is unbacked renaming.
-def get_placeholder_expr(sym_node: SymNode) -> sympy.Expr:
+def _get_placeholder_expr(sym_node: SymNode) -> sympy.Expr:
     shape_env = sym_node.shape_env
     result = sym_node._expr
     if result in shape_env.unbacked_renamings:

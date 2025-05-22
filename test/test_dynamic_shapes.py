@@ -3027,7 +3027,7 @@ class TestUnbacked(TestCase):
         with self.assertRaises(RuntimeError):
             func(torch.tensor([5]))
 
-    # Test a situation where we generate a runtime assert i.e: u1==s1, then we spcialize s1
+    # Test a situation where we generate a runtime assert i.e: u1==s1, then we specialize s1
     # later on to a constant.
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @parametrize("backend", ["inductor", "eager"])

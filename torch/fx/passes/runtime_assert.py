@@ -101,7 +101,7 @@ def insert_deferred_runtime_asserts(
         ConvertIntKey,
         DivideByKey,
         free_symbols,
-        get_placeholder_expr,
+        _get_placeholder_expr,
         InnerTensorKey,
         resolve_unbacked_bindings,
     )
@@ -293,7 +293,7 @@ def insert_deferred_runtime_asserts(
                         isinstance(symint, torch.SymInt)
                         and isinstance(symint.node, SymNode)
                         and isinstance(
-                            s := get_placeholder_expr(symint.node), sympy.Symbol
+                            s := _get_placeholder_expr(symint.node), sympy.Symbol
                         )
                         and s not in expr_to_proxy
                     ):
