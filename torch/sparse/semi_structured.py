@@ -138,13 +138,14 @@ class SparseSemiStructuredTensor(torch.Tensor):
         else:
             raise ValueError("At least one of packed or packed_t must be provided")
 
-        kwargs = {
-            "device": previous_tensor.device,
-            "dtype": previous_tensor.dtype,
-            "layout": previous_tensor.layout,
-            "requires_grad": requires_grad,
-        }
-        tensor = torch.Tensor._make_wrapper_subclass(cls=cls, size=shape, **kwargs)
+        tensor = torch.Tensor._make_wrapper_subclass(
+            cls,
+            shape,
+            device=previous_tensor.device,
+            dtype=previous_tensor.dtype,
+            layout=previous_tensor.layout,
+            requires_grad=requires_grad,
+        )
 
         tensor.packed = packed
         tensor.meta = meta
