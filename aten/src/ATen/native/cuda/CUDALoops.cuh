@@ -227,7 +227,10 @@ static inline void launch_vectorized_kernel(
   auto stream = at::cuda::getCurrentCUDAStream();
 #ifdef USE_ROCM
   int vec_size = memory::can_vectorize_up_to<func_t>(data);
-<<<<<<< HEAD
+  // Similar check in vectorized_elementwise_kernel() as well. Both should be in sync.
+  c10::DeviceIndex curDevice = -1;
+  AT_CUDA_CHECK(c10::cuda::GetDevice(&curDevice));
+  int tws = at::detail::getCUDAHooks().isGPUArch(curDevice, {"gfx942"}) ? ((io_size >= 2) ? 8 : 16) : elems_per_thread<io_size>();
 #else
   using cpp_type = typename function_traits<func_t>::result_type;
   const uint16_t max_vec_size = memory::can_vectorize_up_to<func_t>(data);
@@ -239,19 +242,10 @@ static inline void launch_vectorized_kernel(
   if constexpr (sizeof(cpp_type) < 2) {
     vec_size = std::min<uint16_t>(vec_size, 4);
   }
-#endif
-=======
-#ifdef USE_ROCM
-  // Similar check in vectorized_elementwise_kernel() as well. Both should be in sync.
-  c10::DeviceIndex curDevice = -1;
-  AT_CUDA_CHECK(c10::cuda::GetDevice(&curDevice));
-  int tws = at::detail::getCUDAHooks().isGPUArch(curDevice, {"gfx942"}) ? ((io_size >= 2) ? 8 : 16) : elems_per_thread<io_size>();
-#else
   int tws = elems_per_thread<io_size>();
 #endif
   int bws = tws * num_threads();
   int64_t grid = (N + bws - 1) / bws;
->>>>>>> 2a63495dac ([ROCm] Improve vectorized elementwise kernel performance in MI300X (#2185))
   switch (vec_size) {
 #ifdef USE_ROCM
     case 16:
