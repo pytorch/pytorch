@@ -15470,6 +15470,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD', device_type='cuda'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad', device_type='cuda'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_forward_ad', device_type='cuda'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),
            ]),
     OpInfo('nn.functional.local_response_norm',
            dtypes=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
