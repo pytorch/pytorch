@@ -1064,7 +1064,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 op = self.swap_XW(op)
                 should_swap_xw = True
 
-        if epilogue_nodes or len(self.input_nodes) == 4:
+        is_scaled_mm = len(self.input_nodes) == 4
+        if epilogue_nodes or is_scaled_mm:
             if epilogue_nodes:
                 (
                     evt_read_names,
