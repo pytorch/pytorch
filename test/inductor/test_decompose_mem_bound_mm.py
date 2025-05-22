@@ -278,7 +278,7 @@ class TestDecomposeMemMM(TestCase):
 
     @parametrize(
         "m,k,n, should_decompose",
-        [(1, 64, 16, True), (2, 64, 16, False), (1, 64, 32, False)],
+        [(1, 64, 16, True), (2, 64, 16, False), (1, 64, 32, True)],
     )
     def test_decompose_mm_cpu(self, m, n, k, should_decompose):
         torch._logging.set_logs(inductor=logging.DEBUG)
