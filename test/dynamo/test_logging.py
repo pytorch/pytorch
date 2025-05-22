@@ -25,7 +25,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     xfailIfS390X,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_GPU, HAS_CUDA
 from torch.testing._internal.logging_utils import (
     LoggingTestCase,
     make_logging_test,
@@ -33,11 +33,13 @@ from torch.testing._internal.logging_utils import (
 )
 
 
+requires_gpu = unittest.skipUnless(HAS_GPU, "requires gpu")
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )
 
+device_type = torch.accelerator.current_accelerator().type
 
 def munge_shape_guards(s: str) -> str:
     SHAPE_GUARD = (
@@ -87,7 +89,7 @@ def inductor_error_fn(a):
 
 
 def inductor_schedule_fn(a):
-    output = a.add(torch.ones(1000, 1000, device="cuda"))
+    output = a.add(torch.ones(1000, 1000, device=device_type))
     return output
 
 
@@ -124,19 +126,19 @@ class LoggingTests(LoggingTestCase):
     test_output_code = multi_record_test(3, output_code=True)
     test_aot_graphs = multi_record_test(3, aot_graphs=True)
 
-    @requires_cuda
+    @requires_gpu
     @make_logging_test(schedule=True)
     def test_schedule(self, records):
         fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
-        fn_opt(torch.ones(1000, 1000, device="cuda"))
+        fn_opt(torch.ones(1000, 1000, device=device_type))
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 5)
 
-    @requires_cuda
+    @requires_gpu
     @make_logging_test(fusion=True)
     def test_fusion(self, records):
         fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
-        fn_opt(torch.ones(1000, 1000, device="cuda"))
+        fn_opt(torch.ones(1000, 1000, device=device_type))
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 8)
 
@@ -144,7 +146,7 @@ class LoggingTests(LoggingTestCase):
     @make_logging_test(cudagraphs=True)
     def test_cudagraphs(self, records):
         fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
-        fn_opt(torch.ones(1000, 1000, device="cuda"))
+        fn_opt(torch.ones(1000, 1000, device=device_type))
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 8)
 
@@ -255,10 +257,10 @@ LoweringException: AssertionError:
         os.environ["MASTER_PORT"] = str(find_free_port())
         dist.init_process_group("gloo", rank=0, world_size=1)
 
-        model = DDP(ToyModel().to("cuda:0"), device_ids=[0], bucket_cap_mb=4)
+        model = DDP(ToyModel().to(f"{device_type}:0"), device_ids=[0], bucket_cap_mb=4)
         ddp_model = torch.compile(model, backend="inductor")
 
-        ddp_model(torch.randn(1024, 1024, device="cuda:0"))
+        ddp_model(torch.randn(1024, 1024, device=f"{device_type}:0"))
 
         dist.destroy_process_group()
         self.assertEqual(len([r for r in records if "__ddp_graphs" in r.name]), 4)
@@ -764,9 +766,9 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertLess(len(records), 4)
 
     @make_logging_test(perf_hints=True)
-    @requires_cuda
+    @requires_gpu
     def test_optimizer_non_static_param(self, records):
-        params = [torch.randn(10, 10, device="cuda") for _ in range(2)]
+        params = [torch.randn(10, 10, device=device_type) for _ in range(2)]
         for param in params:
             param.grad = torch.zeros_like(param)
         opt = torch.optim.Adam(params)
@@ -776,7 +778,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertLess(len(records), 3)
 
     @make_logging_test(autotuning=True)
-    @requires_cuda
+    @requires_gpu
     @unittest.skipIf(not SM90OrLater, "requires H100+ GPU")
     def test_autotuning(self, records):
         with torch._inductor.utils.fresh_inductor_cache():
@@ -785,7 +787,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
                 return torch.mm(a, b)
 
             f = torch.compile(f, mode="max-autotune-no-cudagraphs")
-            f(torch.randn(10, 10, device="cuda"), torch.randn(10, 10, device="cuda"))
+            f(torch.randn(10, 10, device=device_type), torch.randn(10, 10, device=device_type))
             self.assertGreater(len(records), 0)
             self.assertLess(len(records), 40)
 

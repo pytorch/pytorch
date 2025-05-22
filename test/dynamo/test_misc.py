@@ -90,6 +90,7 @@ from torch.testing._internal.common_utils import (
     skipIfNNModuleInlined,
     skipIfWindows,
     TEST_HPU,
+    TEST_XPU,
     wrapDeterministicFlagAPITest,
 )
 from torch.testing._internal.jit_utils import JitTestCase
@@ -110,6 +111,7 @@ TPFLAGS_MAPPING = 1 << 6
 
 GLOBAL_INT = 1
 
+device_type = torch.accelerator.current_accelerator().type
 
 # Specializes a test to run only if translation validation is set.
 def onlyIfTranslationValidation(fn: typing.Callable) -> typing.Callable:
@@ -6870,7 +6872,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(guard_failure is not None)
         self.assertIn("""tensor 'rank' size mismatch at index 0""", guard_failure[0])
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @unittest.skipIf(not torch.cuda.is_available() and not torch.xpu.is_available(), "Test requires CUDA or XPU.")
     def test_symint_as_device_kwarg_non_strict_export(self):
         class Mod(torch.nn.Module):
             def forward(self, x):
@@ -12367,7 +12369,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
 
     def test_torch_device_is_available(self, device):
         def fn(x):
-            if TEST_HPU or TEST_CUDA:
+            if TEST_HPU or TEST_CUDA or TEST_XPU:
                 return x + 1
             else:
                 return x - 1
@@ -12378,7 +12380,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires cuda or xpu")
     @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
     def test_torch_cudnn_is_acceptable(self, device):
         def fn(x):
@@ -12446,14 +12448,14 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
     def test_cuda_set_device(self, device):
         def fn():
             a = torch.ones(2, device=device)
-            torch.cuda.set_device(1)
+            torch.accelerator.set_device_idx(1)
             return a + 1
 
         with torch.cuda.device(0):
             counter = CompileCounter()
             opt_fn = torch.compile(fn, backend=counter)
             res = opt_fn()
-            self.assertEqual(res.device.type, "cuda")
+            self.assertEqual(res.device.type, device_type)
             self.assertEqual(res.device.index, 0)
             self.assertEqual(counter.frame_count, 2)
 
@@ -12462,8 +12464,9 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             ("cpu", "cpu", None),
             ("cuda:0", "cuda", 0),
             ("hpu:0", "hpu", 0),
+            ("xpu:0", "xpu", 0),
         ]:
-            if (device == "cuda:0" and not TEST_CUDA) or (
+            if (device == "cuda:0" and not TEST_CUDA) or (device == "xpu:0" and not TEST_XPU) or (
                 device == "hpu:0" and not TEST_HPU
             ):
                 continue
@@ -12517,8 +12520,8 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         self.assertEqual(ref, res)
 
 
-devices = ("cuda", "hpu")
-instantiate_device_type_tests(MiscTestsDevice, globals(), only_for=devices)
+devices = ("cuda", "hpu", "xpu")
+instantiate_device_type_tests(MiscTestsDevice, globals(), only_for=devices, allow_xpu=True)
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

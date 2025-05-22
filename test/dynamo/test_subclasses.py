@@ -31,7 +31,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     subtest,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_XPU
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
@@ -144,7 +144,7 @@ VIEW_TEST_CASES = {k: v for v, k in get_view_test_cases()}
 
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
-
+requires_gpu = unittest.skipUnless(HAS_CUDA or HAS_XPU, "requires cuda or xpu")
 compile_full_eager = torch.compile(backend="eager", fullgraph=True)
 
 
@@ -3401,7 +3401,7 @@ class GraphModule(torch.nn.Module):
     def test_basic_autograd(self):
         self._test_autograd("aot_eager")
 
-    @requires_cuda
+    @requires_gpu
     def test_basic_autograd_inductor(self):
         self._test_autograd("inductor")
 
