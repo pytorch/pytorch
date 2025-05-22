@@ -867,7 +867,8 @@ class SplitCatSimplifier:
                 elif isinstance(user_input, tuple):  # Split being simplified
                     # Verify equal split
                     subset_split_sections = split_sections[  # type: ignore[index]
-                        user_input[0] : user_input[1] + 1  # type: ignore[index]
+                        user_input[0] : user_input[1]
+                        + 1  # type: ignore[index]
                     ]
                     # All sections should be equal
                     if len(OrderedSet(subset_split_sections)) != 1:  # type: ignore[arg-type]

@@ -2,8 +2,8 @@
 
 import hashlib
 from itertools import chain
-from typing import Any, Optional, TYPE_CHECKING
 from types import ModuleType
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -16,6 +16,7 @@ from torch.fx.passes.shape_prop import TensorMetadata
 
 if TYPE_CHECKING:
     import pydot
+
     HAS_PYDOT = True
 else:
     pydot: Optional[ModuleType]
