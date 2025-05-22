@@ -2261,9 +2261,15 @@ class SIMDScheduling(BaseScheduling):
             torch._inductor.config.test_configs.global_tiling_analysis
             and coalesce_analysis
         ):
-            return cls.compute_tiling_strategy(
+            out = cls.compute_tiling_strategy(
                 node_schedule, numel, reduction_numel, coalesce_analysis
             )
+            out2 = cls.get_tiling_and_scores(
+                node_schedule, numel, reduction_numel, None
+            )
+            assert out[0] == out2[0]
+            return out
+                
         if (
             not is_pointwise and not config.triton.tile_reductions
         ) or config.triton.max_tiles <= 1:
