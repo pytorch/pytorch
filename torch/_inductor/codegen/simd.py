@@ -2167,7 +2167,8 @@ class SIMDScheduling(BaseScheduling):
 
         default_tiling = cls.create_tiling([pointwise_numel], [reduction_numel])
 
-        for cand, tiling_score in sorted(tilings, key=lambda t: (-t[0].score, -len(t[0].tiling))):
+        # apply penalty for longer tilings that dont increase score much
+        for cand, tiling_score in sorted(tilings, key=lambda t: (-t[0].score / (1.01 ** len(t[0].tiling) - 1))):
             if cls.tiling_is_compatible(
                 node_schedule, pointwise_numel, reduction_numel, cand.tiling
             ):
