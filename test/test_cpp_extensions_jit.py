@@ -1222,7 +1222,7 @@ class TestCppExtensionJIT(common.TestCase):
         success = False
         try:
             # try to build the module
-            module = torch.utils.cpp_extension.load(
+            torch.utils.cpp_extension.load(
                 name="nccl_allocator",
                 sources=src_path,
                 verbose=True,
