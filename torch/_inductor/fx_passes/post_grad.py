@@ -121,16 +121,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config.pattern_matcher:
         lazy_init()
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "before_recompile_post_grad",
-                "encoding": "string",
-            },
-            payload_fn=lambda: gm.print_readable(
-                print_output=False, include_stride=True, include_device=True
-            ),
-        )
         GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
             functools.partial(group_batch_fusion_passes, pre_grad=False)
         )
@@ -212,16 +202,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     )
 
     gm.recompile()
-    trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "after_recompile_post_grad",
-            "encoding": "string",
-        },
-        payload_fn=lambda: gm.print_readable(
-            print_output=False, include_stride=True, include_device=True
-        ),
-    )
     gm.graph.lint()
 
 
@@ -1099,6 +1079,22 @@ def decompose_auto_functionalized(graph):
 
         flat_args, spec = pytree.tree_flatten((args, kwargs))
 
+        def _maybe_resolve_constant_get_attr(node):
+            # Resolve getattr node to its value because they don't always have meta["val"]
+            if (
+                isinstance(node, torch.fx.Node)
+                and node.op == "get_attr"
+                and "val" not in node.meta
+            ):
+                const_attr = getattr(graph.owning_module, node.target)  # type: ignore[arg-type]
+                assert isinstance(
+                    const_attr, (torch.fx.GraphModule, pytree.TreeSpec)
+                ), (type(const_attr), const_attr)
+                return const_attr
+            return node
+
+        flat_args = [_maybe_resolve_constant_get_attr(arg) for arg in flat_args]
+
         # NB: we combine (args, kwargs) into flat args for replacing.
         # This is replace_by_example uses make_fx which does not support
         # tracing a function with kwargs.
@@ -1113,6 +1109,21 @@ def decompose_auto_functionalized(graph):
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
     graph_pass.apply(graph)
+
+    # We need to remove the get_attr registered for _constant_schema and the
+    # auto_functioanlized's graph module (it's replaced with original ) when auto_functionalize a hop.
+    _to_remove = []
+    for node in graph.nodes:
+        if node.op == "get_attr" and len(node.users) == 0:
+            _to_remove.append(node)
+            if hasattr(graph.owning_module, node.target) and isinstance(
+                getattr(graph.owning_module, node.target), torch.fx.GraphModule
+            ):
+                delattr(graph.owning_module, node.target)
+    for node in _to_remove:
+        graph.erase_node(node)
+
+    graph.lint()
 
     for _ in graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.auto_functionalized
