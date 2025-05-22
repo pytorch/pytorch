@@ -708,10 +708,10 @@ def _allow_in_graph_einops():
     if mod is None:
         return
     else:
-        # version > 0.7.0 does allow_in_graph out of tree
+        # version > 0.8.1 does allow_in_graph out of tree
         # for BC we need to keep this in fbcode
         # internal xref https://fb.workplace.com/groups/1026248852325474/permalink/1107135774236781/
-        if Version(mod.__version__) < Version("0.7.0") or is_fbcode():
+        if Version(mod.__version__) <= Version("0.8.1") or is_fbcode():
             import einops
 
             try:
