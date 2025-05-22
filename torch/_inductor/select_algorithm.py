@@ -2940,6 +2940,9 @@ def autotune_select_algorithm(*args, **kwargs):
             torch._inductor.config.benchmark_epilogue_fusion
         )
 
+    if "precompilation_timeout_seconds" not in kwargs:
+        kwargs["precompilation_timeout_seconds"] = config.precompilation_timeout_seconds
+
     return _ALGORITHM_SELECTOR_CACHE(*args, **kwargs)
 
 
