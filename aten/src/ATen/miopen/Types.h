@@ -2,10 +2,11 @@
 
 #include <ATen/miopen/miopen-wrapper.h>
 #include <ATen/Tensor.h>
+#include <c10/macros/Export.h>
 
 namespace at { namespace native {
 
-miopenDataType_t getMiopenDataType(const at::Tensor& tensor);
+TORCH_CUDA_CPP_API miopenDataType_t getMiopenDataType(const at::Tensor& tensor);
 
 int64_t miopen_version();
 
