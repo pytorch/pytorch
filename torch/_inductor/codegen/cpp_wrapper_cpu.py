@@ -6,7 +6,7 @@ import math
 import os
 import sys
 import textwrap
-from itertools import chain, count
+from itertools import count
 from typing import Callable, Optional, Protocol, TYPE_CHECKING, Union
 
 import sympy
@@ -237,22 +237,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if V.graph.is_const_graph:
             # We do not write prefix for constant graph, it will be written by main module.
             return
-        if config.aot_inductor.custom_ops_to_c_shims:
-            # custom_ops_to_c_shims contains declaration of custom ops with C shim.
-            # TODO: this could be auto-generated from a passed-in custom op schema
-            custom_c_shims = list(
-                chain(*config.aot_inductor.custom_ops_to_c_shims.values())
-            )
-            declarations = "\n".join(
-                [f"export {textwrap.dedent(shim)};" for shim in custom_c_shims]
-            )
-            self.prefix.splice(
-                f"""
-                extern "C" {{
-                    {declarations}
-                }}
-                """
-            )
         if V.graph.aot_mode:
             self.prefix.writeline("namespace torch::aot_inductor {")
 
@@ -690,6 +674,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 self.prefix.writeline(
                     f"    extern const unsigned char __{name}_start[];"
                 )
+                if torch.xpu.is_available():
+                    self.prefix.writeline(
+                        f"    extern const unsigned char __{name}_end[];"
+                    )
             self.prefix.writeline("}")
 
     def codegen_model_constructor(self):
@@ -1377,7 +1365,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.kernel_numel_expr.add((arg.inner, graph))
             self.writeline(f"int64_t {arg.inner} = {cexpr(arg.inner_expr)};")
         else:
-            self.writeline(f"{cexpr(arg.inner_expr)};")
+            self.writeline(f"{arg.inner} = {cexpr(arg.inner_expr)};")
 
     def codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
