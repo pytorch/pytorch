@@ -23,7 +23,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING
 import torch
 import torch.utils.dlpack
 from torch import Tensor
-from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
+from torch._dynamo.utils import detect_fake_mode, dynamo_timed, lazy_format_graph_code
 from torch._guards import CompileContext, TracingContext
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
@@ -37,13 +37,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torchgen.utils import dataclass_repr
 
 from .. import config
-from .autograd_cache import (
-    AOTAutogradCache,
-    AOTAutogradCacheEntry,
-    CompiledBackward,
-    CompiledForward,
-    should_use_remote_autograd_cache,
-)
+from .autograd_cache import AOTAutogradCache, should_use_remote_autograd_cache
 from .dispatch_and_compile_graph import (
     aot_dispatch_autograd_graph,
     aot_dispatch_base_graph,
@@ -259,13 +253,12 @@ def aot_dispatch_base(
     )
     cache_info = aot_config.cache_info
     if cache_info is not None:
-        if fw_key := getattr(compiled_fw, "_fx_graph_cache_key", None):
-            debug_lines = getattr(compiled_fw, "_fx_graph_cache_debug_lines", [])
+        if hasattr(compiled_fw, "_fx_graph_cache_key"):
             time_taken_ns = time.time_ns() - cache_info.start_time_ns
             guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
-            entry = AOTAutogradCacheEntry(
-                compiled_fw=CompiledForward((fw_key, debug_lines), getattr(compiled_fw, "guards_expr", None)),  # type: ignore[arg-type]
-                compiled_bw=None,
+            entry = AOTAutogradCache.make_entry(
+                compiled_fw_func=compiled_fw,  # type: ignore[arg-type]
+                compiled_bw_func=None,
                 aot_joint_graph_str=None,
                 aot_forward_graph_str=aot_forward_graph_str,
                 aot_backward_graph_str=None,
@@ -278,6 +271,8 @@ def aot_dispatch_base(
                 backward_time_taken_ns=0,
                 sanitized_aot_config=sanitize_aot_config(aot_config),
                 guards_expr=guards_expr,
+                backward_state_indices=None,
+                num_symints_saved_for_bw=None,
             )
             AOTAutogradCache.save(
                 cache_info.cache_key, entry, remote=should_use_remote_autograd_cache()
@@ -792,9 +787,10 @@ def aot_dispatch_autograd(
     )
 
     fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
-    fx_g, joint_inputs, maybe_subclass_meta = aot_dispatch_autograd_graph(
-        flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
-    )
+    with dynamo_timed("aot_trace_joint_graph", log_pt2_compile_event=True):
+        fx_g, joint_inputs, maybe_subclass_meta = aot_dispatch_autograd_graph(
+            flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
+        )
 
     # Copied from aot_dispatch_autograd_graph.
     disable_amp = torch._C._is_any_autocast_enabled()
@@ -1215,9 +1211,15 @@ def aot_dispatch_autograd(
             if num_symints_saved_for_bw > 0:
                 try:
                     # See Note: [Backward graph lazy lowering]
+                    with torch._subclasses.fake_tensor.unset_fake_temporarily():
+                        # If bw_module contains lifted constants, they will be real tensors stored as
+                        # GraphModule. Deepcopying tensors under fake mode is not supported and will
+                        # raise when attempting to set storage.
+                        bw_module_copy = copy.deepcopy(bw_module)
                     compiled_bw_func = aot_config.bw_compiler(
-                        copy.deepcopy(bw_module), placeholder_list
+                        bw_module_copy, placeholder_list
                     )
+                    del bw_module_copy
                 except Exception as e:
                     exc = e
                     trace_structured(
@@ -1284,15 +1286,7 @@ def aot_dispatch_autograd(
             compiled_bw_func, _fw_metadata, aot_config
         ):
             fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
-            fw_debug_lines = getattr(
-                compiled_fw_func, "_fx_graph_cache_debug_lines", []
-            )
             bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
-            bw_debug_lines = getattr(
-                compiled_bw_func, "_fx_graph_cache_debug_lines", []
-            )
-            fw_info = (fw_key, fw_debug_lines)
-            bw_info = (bw_key, bw_debug_lines)
             cache_info = aot_config.cache_info
             if cache_info is not None and fw_key and bw_key:
                 assert forward_time_taken_ns is not None
@@ -1308,14 +1302,10 @@ def aot_dispatch_autograd(
                 aot_backward_graph_str: Optional[str] = bw_module_str
                 aot_joint_graph_str: Optional[str] = joint_graph_str
                 guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
-                entry = AOTAutogradCacheEntry(
-                    CompiledForward(fw_info, getattr(compiled_fw_func, "guards_expr", None)),  # type: ignore[arg-type]
-                    CompiledBackward(
-                        bw_info,  # type: ignore[arg-type]
-                        getattr(compiled_bw_func, "guards_expr", None),
-                        backward_state_indices,
-                        num_symints_saved_for_bw,
-                    ),
+
+                entry = AOTAutogradCache.make_entry(
+                    compiled_fw_func,  # type: ignore[arg-type]
+                    compiled_bw_func,
                     aot_joint_graph_str,
                     aot_forward_graph_str,
                     aot_backward_graph_str,
@@ -1328,6 +1318,8 @@ def aot_dispatch_autograd(
                     backward_time_taken_ns,
                     sanitized_aot_config=sanitize_aot_config(aot_config),
                     guards_expr=guards_expr,
+                    backward_state_indices=backward_state_indices,
+                    num_symints_saved_for_bw=num_symints_saved_for_bw,
                 )
                 remote = should_use_remote_autograd_cache()
                 AOTAutogradCache.save(cache_info.cache_key, entry, remote)
