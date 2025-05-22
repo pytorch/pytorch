@@ -1837,6 +1837,15 @@ class TestLRScheduler(TestCase):
         )
         self._test(scheduler, targets, epochs)
 
+    def test_multiplicative_lr_with_lr_lambda(self):
+        lr_lambda = 0.95
+        with self.assertRaisesRegex(TypeError, "lr_lambda should be a function"):
+            MultiplicativeLR(self.opt, lr_lambda)
+
+        lr_lambda2 = 0.95
+        with self.assertRaisesRegex(TypeError, "lr_lambda should be a function"):
+            MultiplicativeLR(self.opt, [lr_lambda, lr_lambda2])
+
     @parametrize("T_mult", [1, 2, 4])
     def test_CosineAnnealingWarmRestarts_lr1(self, T_mult):
         iters = 100
@@ -1923,6 +1932,14 @@ class TestLRScheduler(TestCase):
             self._test_interleaved_CosineAnnealingWarmRestarts(
                 scheduler, targets, epochs
             )
+
+    def test_CosineAnnealingWarmRestarts_T_cur_reset(self):
+        sch = CosineAnnealingWarmRestarts(self.opt, T_0=4)
+        for epoch in [7, 8, 9]:
+            sch.T_cur = epoch
+            sch.step()
+            expect_T_cur = (epoch + 1) % sch.T_0
+            self.assertEqual(sch.T_cur, expect_T_cur)
 
     def test_swalr_no_anneal(self):
         epochs, swa_start, swa_lr = 10, 5, 0.01

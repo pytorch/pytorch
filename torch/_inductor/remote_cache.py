@@ -244,8 +244,7 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
     def __init__(self, cache_id: str) -> None:
         super().__init__()
         if not redis:
-            # We had trouble importing redis - just skip init.
-            return
+            raise RuntimeError("redis not available but required for remote cache")
 
         if "TORCHINDUCTOR_REDIS_URL" in os.environ:
             self._redis = redis.Redis.from_url(os.environ["TORCHINDUCTOR_REDIS_URL"])

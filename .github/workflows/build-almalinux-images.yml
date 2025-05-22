@@ -36,13 +36,13 @@ jobs:
     runs-on: linux.9xlarge.ephemeral
     strategy:
       matrix:
-        cuda_version: ["11.8", "12.4", "12.6", "cpu"]
+        tag: ["cuda11.8", "cuda12.6", "cuda12.8", "rocm6.3", "rocm6.4", "cpu"]
     steps:
       - name: Build docker image
         uses: pytorch/pytorch/.github/actions/binary-docker-build@main
         with:
           docker-image-name: almalinux-builder
-          custom-tag-prefix: ${{ matrix.cuda_version != 'cpu' && 'cuda' || '' }}${{matrix.cuda_version}}
+          custom-tag-prefix: ${{matrix.tag}}
           docker-build-dir: almalinux
           DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
           DOCKER_ID: ${{ secrets.DOCKER_ID }}

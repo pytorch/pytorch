@@ -30,7 +30,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db, skipOps
 from torch.testing._internal.common_utils import (
-    dtype_abbrs,
     IS_MACOS,
     IS_X86,
     skipCUDAMemoryLeakCheckIf,
@@ -49,6 +48,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_XPU,
     maybe_skip_size_asserts,
 )
+from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 

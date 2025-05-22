@@ -44,6 +44,7 @@ import pytorch_sphinx_theme2
 html_theme = "pytorch_sphinx_theme2"
 html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 
+
 # -- General configuration ------------------------------------------------
 
 # Add any Sphinx extension module names here, as strings. They can be
@@ -64,11 +65,7 @@ extensions = [
     "myst_parser",
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
-    "sphinxext.opengraph",
 ]
-
-ogp_site_url = "http://pytorch.org/"
-ogp_image = "https://pytorch.org/assets/images/social-share.jpg"
 
 myst_enable_extensions = [
     "colon_fence",
@@ -125,7 +122,7 @@ html_theme_options = {
     "analytics_id": "GTM-T8XT4PS",
     "canonical_url": "https://pytorch.org/docs/stable/",
     "switcher": {
-        "json_url": "https://pytorch.org/docs/pytorch-versions.json",
+        "json_url": "https://docs.pytorch.org/docs/pytorch-versions.json",
         "version_match": switcher_version,
     },
     "navigation_with_keys": False,
@@ -162,32 +159,13 @@ html_theme_options = {
     "navbar_start": ["version-switcher", "navbar-logo"],
     "navbar_center": ["navbar-nav"],
     "navbar_end": ["search-field-custom", "theme-switcher", "navbar-icon-links"],
-    "header_links_before_dropdown": 4,
+    "header_links_before_dropdown": 6,
     "navbar_persistent": [],
     "use_edit_page_button": True,
     "pytorch_project": "docs",
 }
 
 theme_variables = pytorch_sphinx_theme2.get_theme_variables()
-# For these links to appear in the right nav, there is an override in
-# the theme:
-# pytorch_sphinx_theme2/templates/sections/sidebar-secondary.html#L17
-community_links = [
-    {"url": "/community/index", "name": "PyTorch Governance"},
-    {"url": "/community/design", "name": "PyTorch Design Philosophy"},
-    {
-        "url": "https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions",
-        "name": "The Ultimate Guide to PyTorch Contributions",
-    },
-]
-# For these links to appear in the right nav, there is an override in
-# /pytorch_sphinx_theme2/templates/sections/sidebar-secondary.html
-language_bindings_links = [
-    {"url": "/cpp_index", "name": "C++"},
-    {"url": "https://pytorch.org/javadoc/", "name": "Javadoc"},
-    {"url": "https://github.com/pytorch/multipy", "name": "torch.multiply"},
-]
-
 html_context = {
     "theme_variables": theme_variables,
     "github_url": "https://github.com",
@@ -201,8 +179,6 @@ html_context = {
     # library links are defined in
     # pytorch_sphinx_theme2/pytorch_sphinx_theme2/links.json
     "library_links": theme_variables.get("library_links", []),
-    "community_links": community_links,
-    "language_bindings_links": language_bindings_links,
     "version": version,
     "date_info": {
         "paths_to_skip": ["generated/", "index"],
@@ -1957,8 +1933,6 @@ coverage_ignore_functions = [
     # torch.utils.backend_registration
     "generate_methods_for_privateuse1_backend",
     "rename_privateuse1_backend",
-    # torch.utils.benchmark.examples.blas_compare_setup
-    "conda_run",
     # torch.utils.benchmark.examples.op_benchmark
     "assert_dicts_equal",
     # torch.utils.benchmark.op_fuzzers.spectral
@@ -3301,8 +3275,6 @@ coverage_ignore_classes = [
     "TorchVersion",
     # torch.types
     "SymInt",
-    # torch.utils.benchmark.examples.blas_compare_setup
-    "SubEnvSpec",
     # torch.utils.benchmark.examples.compare
     "FauxTorch",
     # torch.utils.benchmark.examples.spectral_ops_fuzz_test
@@ -3708,7 +3680,6 @@ def process_docstring(app, what_, name, obj, options, lines):
         lines (List[str]): the lines of the docstring, see above
 
     References:
-        https://www.sphinx-doc.org/en/1.5.1/_modules/sphinx/ext/autodoc.html
         https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html
     """
     import re
@@ -3787,24 +3758,32 @@ htmlhelp_basename = "PyTorchdoc"
 
 # -- Options for LaTeX output ---------------------------------------------
 
+latex_engine = "lualatex"
+latex_show_urls = "footnote"
+
 latex_elements = {
-    # The paper size ('letterpaper' or 'a4paper').
-    #
-    # 'papersize': 'letterpaper',
-    # The font size ('10pt', '11pt' or '12pt').
-    #
-    # 'pointsize': '10pt',
-    # Additional stuff for the LaTeX preamble.
-    #
-    # 'preamble': '',
-    # Latex figure (float) alignment
-    #
-    # 'figure_align': 'htbp',
+    "papersize": "letterpaper",
+    "pointsize": "10pt",
+    "tableofcontents": r"\pdfbookmark[0]{Contents}{toc}\tableofcontents",
+    "preamble": r"""
+       \usepackage{tocloft}
+       \setcounter{tocdepth}{3}
+       \setcounter{secnumdepth}{3}
+       % Fix table column widths
+       \renewenvironment{tabulary}{\begin{longtable}{p{0.3\linewidth}p{0.7\linewidth}}}{\end{longtable}}
+
+       % Ensure tables don't overflow
+       \AtBeginEnvironment{tabular}{\sloppy}
+    """,
+    "fncychap": r"\usepackage[Bjornstrup]{fncychap}",
+    "extraclassoptions": "oneside",
 }
 
 # Grouping the document tree into LaTeX files. List of tuples
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
+
+
 latex_documents = [
     (
         master_doc,
@@ -3814,6 +3793,7 @@ latex_documents = [
         "manual",
     ),
 ]
+latex_use_xindy = False
 
 
 # -- Options for manual page output ---------------------------------------

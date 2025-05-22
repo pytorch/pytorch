@@ -181,8 +181,8 @@ THIRD_PARTY_LIBS = {
     "pyyaml": ["//third-party/pypi/pyyaml:pyyaml", "//third_party:pyyaml"],
     "rt": ["//xplat/third-party/linker_lib:rt", "//third_party:rt"],
     "ruy": ["//third-party/ruy:ruy_xplat_lib", "//third_party:ruy_lib"],
+    "nlohmann-json": ["fbsource//third-party/nlohmann-json:nlohmann-json", "//third_party:nlohmann-json"],
     "sleef_arm": ["//third-party/sleef:sleef_arm", "//third_party:sleef_arm"],
-    "typing-extensions": ["//third-party/typing-extensions:typing-extensions", "//third_party:typing-extensions"],
 }
 
 def third_party(name):
@@ -297,7 +297,7 @@ def get_pt_preprocessor_flags():
         PT_PREPROCESSOR_FLAGS.append("-DENABLE_PYTORCH_NON_PRODUCTION_BUILDS")
     return PT_PREPROCESSOR_FLAGS
 
-# This needs to be kept in sync with https://github.com/pytorch/pytorch/blob/release/1.9/torchgen/gen.py#L892
+# This needs to be kept in sync with https://github.com/pytorch/pytorch/blob/release/1.9/torchgen/gen.py#L892  @lint-ignore
 PT_BACKEND_HEADERS = [
     "CPU",
     "CUDA",
@@ -1736,6 +1736,7 @@ def define_buck_targets(
         deps = [
             third_party("glog"),
             third_party("kineto"),
+            third_party("nlohmann-json"),
         ],
         exported_deps = [
             ":aten_cpu",

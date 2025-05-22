@@ -286,7 +286,7 @@ allow_unspec_int_on_nn_module = False
 
 # Specify how to optimize a compiled DDP module. The flag accepts a boolean
 # value or a string. There are 3 modes.
-# 1. "ddp_optimizer" (or True): with "ddp_ptimizer", Dynamo will automatically
+# 1. "ddp_optimizer" (or True): with "ddp_optimizer", Dynamo will automatically
 # split model graph into pieces to match DDP bucket sizes to allow DDP
 # comm/compute overlap.
 # 2. "python_reducer" (experimental): this optimization requires the usage
@@ -415,6 +415,11 @@ inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
     default=True,
     justknob="pytorch/compiler:inline_inbuilt_nn_modules",
 )
+
+# Install "free" tensor variables (globals, non-locals, nn module attributes)
+# as graph attributes.  This is useful for export, as it
+# produces a consitent number of inputs to the graph.
+install_free_tensors = False
 
 # Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals) (deprecated: always True)
 enable_cpp_framelocals_guard_eval = True
