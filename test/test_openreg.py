@@ -56,6 +56,7 @@ class TestPrivateUse1(TestCase):
             torch.utils.backend_registration._get_custom_mod_func("device_count")() == 2  # type: ignore[misc]
         )
 
+    @skipIfTorchDynamo()
     def test_backend_operator_registration(self):
         self.assertTrue(
             torch._C._dispatch_has_kernel_for_dispatch_key(
