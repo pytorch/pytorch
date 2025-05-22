@@ -4507,14 +4507,7 @@ if torch.distributed.is_available() and HAS_CUDA:
         test_dtensor.TestDTensorCompile
     )
 
-xfail_hops = {
-    # AssertionError: Tensor-likes are not close!
-    "auto_functionalize",
-    # BypassAOTAutogradCache: Cannot cache a graph with compiled autograd enabled
-    "invoke_subgraph",
-    # AssertionError: assert type(args[1].realize()) is TensorVariable
-    "map",
-}
+xfail_hops = {}
 
 
 class TestCompiledAutogradOpInfo(TestCase):
@@ -4561,7 +4554,7 @@ class TestCompiledAutogradOpInfo(TestCase):
             # 1. Run eager
             torch.manual_seed(123)
             dummy = torch.randn(2, 2, dtype=dtype, device=device, requires_grad=True)
-            fn, op_out_ref = create_bwd_fn_closure(compiled_args, compiled_kwargs)
+            fn, op_out_ref = create_bwd_fn_closure(eager_args, eager_kwargs)
             fn(dummy).backward()
             self.assertEqual(len(op_out_ref), 1)
             expected = op_out_ref[0]
@@ -4578,7 +4571,7 @@ class TestCompiledAutogradOpInfo(TestCase):
             self.assertEqual(expected, actual)
 
 
-instantiate_device_type_tests(TestCompiledAutogradOpInfo, globals(), only_for=("cpu",))
+instantiate_device_type_tests(TestCompiledAutogradOpInfo, globals())
 instantiate_parametrized_tests(TestCompiledAutograd)
 
 if __name__ == "__main__":
