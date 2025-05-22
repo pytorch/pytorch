@@ -18,8 +18,6 @@ from torch._C._functorch import (
 from torch._dispatch.python import suspend_functionalization
 from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
-    _has_potential_branch_input_alias,
-    _has_potential_branch_input_mutation,
     _maybe_reenter_make_fx,
     _maybe_run_with_interpreter,
     _set_compilation_env,
@@ -27,7 +25,6 @@ from torch._higher_order_ops.utils import (
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
     unique_graph_id,
-    UnsupportedAliasMutationException,
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
@@ -457,7 +454,10 @@ def check_tensor_meta_match(
 def _merge_tensors(
     a: Optional[torch.Tensor], b: Optional[torch.Tensor], mode: FakeTensorMode
 ):
-    from torch.fx.experimental.symbolic_shapes import SymIntEqByExpr
+    from torch.fx.experimental.symbolic_shapes import (
+        has_free_unbacked_symbols,
+        SymIntEqByExpr,
+    )
 
     if a is None or b is None:
         assert a is None and b is None, (a, b)
@@ -500,8 +500,21 @@ def _merge_tensors(
         u3 has range [5, 7]
     """
     merged_size: list[Union[int, torch.SymInt]] = []
+
+    def _has_unbacked_symbols(s: Union[int, torch.SymInt]) -> bool:
+        if isinstance(s, int):
+            return False
+        else:
+            return has_free_unbacked_symbols(s.node.expr)
+
     for s0, s1 in zip(a.size(), b.size()):
-        if SymIntEqByExpr(s0) == SymIntEqByExpr(s1):
+        # If there are unbacked symbols leaked out of true_branch or false_branch
+        # we need to merge them with a new unbacked symbol and track in parent graph.
+        if (
+            not _has_unbacked_symbols(s0)
+            and not _has_unbacked_symbols(s1)
+            and SymIntEqByExpr(s0) == SymIntEqByExpr(s1)
+        ):
             merged_size.append(s0)
         else:
 
@@ -668,29 +681,18 @@ def _merge_tensors(
 
 @cond_op.py_functionalize_impl
 def cond_func(ctx, pred, true_fn, false_fn, inputs):
+    from torch._higher_order_ops.utils import _check_alias_and_mutation
+
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_pred = ctx.unwrap_tensors(pred)
     with ctx.redispatch_to_next():
         functional_true = ctx.functionalize(_maybe_run_with_interpreter(true_fn))
         functional_false = ctx.functionalize(_maybe_run_with_interpreter(false_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        for branch in [true_fn, false_fn]:
-            if _has_potential_branch_input_mutation(
-                branch, unwrapped_inputs, pre_dispatch=pre_dispatch
-            ):
-                raise UnsupportedAliasMutationException(
-                    "One of torch.cond branch might be modifying the input! "
-                    "Consider cloning the input before modifying it. "
-                )
-        for branch in [true_fn, false_fn]:
-            if _has_potential_branch_input_alias(
-                branch, unwrapped_inputs, pre_dispatch=pre_dispatch
-            ):
-                raise UnsupportedAliasMutationException(
-                    "One of torch.cond branch might be aliasing the input! "
-                    "If you are returning a view of the input, please make sure "
-                    "to clone it. "
-                )
+        for branch, branch_name in [(true_fn, "cond_true"), (false_fn, "cond_false")]:
+            _check_alias_and_mutation(
+                branch, unwrapped_inputs, branch_name, pre_dispatch
+            )
 
         cond_return = cond_op(
             unwrapped_pred, functional_true, functional_false, unwrapped_inputs

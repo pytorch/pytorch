@@ -638,7 +638,7 @@ def meta__cslt_sparse_mm(
     transpose_result: bool = False,
     alg_id: int = 0,
     split_k: int = 1,
-    split_k_one_kernel: bool = False,
+    split_k_mode: int = -1,
 ):
     assert dense_B.dtype in {
         torch.float32,
@@ -7131,6 +7131,18 @@ def _check_for_unsupported_isin_dtype(dtype):
         dtype not in (torch.bool, torch.complex128, torch.complex64),
         lambda: f"Unsupported input type encountered for isin(): {dtype}",
     )
+
+
+@register_meta(aten.embedding_dense_backward)
+def meta_embedding_dense_backward(
+    grad_output,
+    indices,
+    num_weights,
+    padding_idx,
+    scale_grad_by_freq,
+):
+    grad_weight = grad_output.new_empty((num_weights, grad_output.size(-1)))
+    return grad_weight
 
 
 @register_meta(aten._embedding_bag_backward)
