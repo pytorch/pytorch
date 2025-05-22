@@ -785,7 +785,11 @@ class CudaReproTests(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(False)
         snapshot = str(torch.cuda.memory._snapshot())
-        self.assertTrue("called_inside_compile" in snapshot)
+
+        if torch._inductor.config.graph_partition:
+            self.assertTrue("partition_0" in snapshot)
+        else:
+            self.assertTrue("called_inside_compile" in snapshot)
 
     def test_negative_arange_dynamic_shapes(self):
         # Repro from alibi relative encodings
