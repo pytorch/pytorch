@@ -490,6 +490,37 @@ def try_match_insignificant_strides(
     return TensorBox(ReinterpretView(data=storage, layout=new_layout))
 
 
+def gm_original_output_strides(gm: torch.fx.GraphModule) -> None:
+    output_node = gm.graph.find_nodes(op="output")[0]
+    output_node.meta["user_visible_output_idxs"] = [
+        idx for idx, _ in enumerate(output_node.args)
+    ]
+    from torch._inductor.compile_fx import record_original_output_strides
+
+    record_original_output_strides(gm)
+
+
+def add_symbolic_shapes_for_inputs_to_subgraph(
+    inputs: list[Buffer], subgraph: GraphLowering
+) -> list[Expr]:
+    sym_vars: OrderedSet[Expr] = OrderedSet()
+    for inp in inputs:
+        sym_vars |= get_free_symbols(inp.get_size(), unbacked_only=False)
+        sym_vars |= get_free_symbols(inp.get_stride(), unbacked_only=False)
+
+    sym_inputs = []
+    for sym_var in sym_vars:
+        assert sym_var in V.graph.graph_inputs.values()
+
+        for graph_inp in V.graph.graph_inputs:
+            if V.graph.graph_inputs[graph_inp] == sym_var:
+                subgraph.graph_inputs[graph_inp] = sym_var
+                subgraph.graph_input_names.append(graph_inp)
+                sym_inputs.append(sym_var)
+
+    return sym_inputs
+
+
 class IRNode:
     _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
 
@@ -656,6 +687,12 @@ class IRNode:
             return self.get_name()
         except NotImplementedError:
             return None
+
+    def is_input_buffer(self) -> bool:
+        try:
+            return self.get_name() in V.graph.graph_inputs
+        except NotImplementedError:
+            return False
 
     def has_large_inner_fn(self, threshold: Optional[int] = None) -> bool:
         return False
@@ -4766,14 +4803,20 @@ class CUDATemplateBuffer(TemplateBuffer):
         make_kernel_render,
         workspace_size: int,
         template: CUDATemplate,
+        supports_epilogue_fusion: bool,
     ) -> None:
         super().__init__(layout, inputs, make_kernel_render)
         # Global memory (in bytes) needed for this template.
         self.workspace_size = workspace_size
         self.template = template
+        self.supports_epilogue_fusion = supports_epilogue_fusion
 
     def get_workspace_size(self):  # type: ignore[no-untyped-def]
         return self.workspace_size if self.workspace_size is not None else 0
+
+    def emulate_store_fn(self) -> None:
+        for output in self.get_outputs():
+            ops.store(output.get_name(), None, None)
 
 
 class CppTemplateBuffer(TemplateBuffer):
@@ -6062,9 +6105,14 @@ class SubgraphBuffer(ExternKernel):
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
-        self.subgraph = V.graph.make_subgraph(
-            self.gm, self.example_inputs, subgraph_name
+        gm_original_output_strides(self.gm)
+        self.subgraph = V.graph.make_subgraph(self.gm, example_inputs, subgraph_name)
+
+        sym_inputs = add_symbolic_shapes_for_inputs_to_subgraph(
+            self.inputs, self.subgraph
         )
+        self.sym_inputs = [sym_var.name for sym_var in sym_inputs]
+
         import torch._inductor.config as inductor_config
 
         with V.set_graph_handler(self.subgraph):
@@ -6083,10 +6131,9 @@ class SubgraphBuffer(ExternKernel):
                 self.name = graph.name
 
         outer_inputs = [t.codegen_reference() for t in self.inputs]
-
         wrapper.codegen_subgraph_with_flattened_outputs(
             CodegenGraph(self.subgraph),
-            outer_inputs,
+            [*self.sym_inputs, *outer_inputs],
             [self.name],
         )
 
@@ -6651,7 +6698,7 @@ class AssertScalar(ExternKernel):
         # "u0 == 0" in the runtime asserts, if you subsequently try to
         # simplify(u0 == 0), you will get True (because we've already runtime assert'ed
         # that it's true).  But we're code generating the actual runtime assert here!!
-        symbol = next(iter(self.get_free_symbol_uses(unbacked_only=True)))
+        symbol = next(iter(self.get_free_symbol_uses(unbacked_only=False)))
         if V.graph.cpp_wrapper:
             symbol_str = f"std::to_string({symbol})"
             sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
@@ -6985,7 +7032,10 @@ class FallbackKernel(ExternKernelAlloc):
             assert isinstance(kernel, torch._ops.OpOverload)
         elif V.graph.cpp_wrapper:
             # For non-aten OpOverload, i.e. custom ops
-            self.use_runtime_dispatch = True
+            # If the op is in custom_ops_to_c_shims, generate direct function call
+            self.use_runtime_dispatch = (
+                kernel not in config.aot_inductor.custom_ops_to_c_shims
+            )
 
         def do_runtime_dispatch() -> None:
             args = None
@@ -7257,6 +7307,9 @@ class MutableBox(IRNode):
     def unwrap_view(self) -> IRNode:
         return self.data.unwrap_view()
 
+    def is_input_buffer(self) -> bool:
+        return self.data.is_input_buffer()
+
     def freeze_layout(self) -> None:
         return self.data.freeze_layout()
 
@@ -7376,7 +7429,7 @@ class TensorBox(MutableBox):
 
 
 class StorageBox(MutableBox):
-    def is_input_buffer(self):  # type: ignore[no-untyped-def]
+    def is_input_buffer(self) -> bool:
         if isinstance(self.data, (InputBuffer, ReinterpretView)):
             return self.data.get_name() in V.graph.graph_inputs
         return False
@@ -7883,7 +7936,7 @@ class WhileLoop(ExternKernel):
         # Handling input mutations
         mutated_idxs = check_input_alias_and_mutation(
             body_fn.graph.module, fake_all_inputs
-        )[0]
+        )[3]
         mutated_idx_set = OrderedSet(mutated_idxs)
         mutated_inputs = [all_inputs[idx] for idx in mutated_idx_set]
         real_outputs = {

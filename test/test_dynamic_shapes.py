@@ -1338,6 +1338,21 @@ class f(torch.nn.Module):
                 f(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
             )
 
+    def test_baddbmm_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+
+        B, M, K, N = [shape_env.create_unbacked_symint() for _ in range(4)]
+
+        with fake_mode:
+            A = torch.empty((B, M, K), device="meta")
+            Bmat = torch.empty((B, K, N), device="meta")
+            bias3 = torch.empty((B, M, N), device="meta")
+
+            _ = torch.baddbmm(bias3, A, Bmat)
+
 
 @skipIfTorchDynamo(
     "Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)"
