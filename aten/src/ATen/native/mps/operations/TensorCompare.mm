@@ -283,7 +283,6 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
   if (elements.numel() == 0) {
     return;
   }
-  at::native::resize_output(out, elements.sizes());
 
   if (test_elements.numel() == 0) {
     if (invert) {
@@ -397,6 +396,7 @@ TORCH_IMPL_FUNC(isin_Tensor_Tensor_out_mps)
 }
 TORCH_IMPL_FUNC(isin_Scalar_Tensor_out_mps)
 (const Scalar& elements, const Tensor& test_elements, bool assume_unique, bool invert, const Tensor& out) {
+  at::native::resize_output(out, {});
   mps::isin_Tensor_Tensor_out_mps(
       mps::wrapped_scalar_tensor_mps(elements, kMPS), test_elements, assume_unique, invert, out, __func__);
 }
