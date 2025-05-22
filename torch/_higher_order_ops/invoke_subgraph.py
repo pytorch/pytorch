@@ -17,6 +17,7 @@ from torch._higher_order_ops.utils import (
     clone_outputs_aliasing_inputs,
     FunctionalizeCtxWrapper,
     get_dummy_aot_autograd_config,
+    HopInstance,
     prepare_fw_with_masks,
     reenter_make_fx,
     register_fake,
@@ -81,17 +82,24 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import (
             check_input_alias_and_mutation_return_ouputs,
+            materialize_as_graph,
+        )
+
+        gm: torch.fx.GraphModule = (
+            subgraph
+            if isinstance(subgraph, torch.fx.GraphModule)
+            else materialize_as_graph(subgraph, operands)
         )
 
         schema_gen = HopSchemaGenerator(self)
-        schema_gen.add_arg("subgraph", subgraph)
+        schema_gen.add_arg("subgraph", gm)
         schema_gen.add_arg("identifier", identifier)
         example_inputs = [
             n.meta["val"] if "val" in n.meta else n.meta["example_value"]
-            for n in subgraph.graph.find_nodes(op="placeholder")
+            for n in gm.graph.find_nodes(op="placeholder")
         ]
         _, _, _, mutated_inputs, outputs = check_input_alias_and_mutation_return_ouputs(
-            subgraph, example_inputs
+            gm, example_inputs
         )
         for idx, arg in enumerate(operands):
             schema_gen.add_arg(f"arg{idx}", arg, is_mutated=idx in mutated_inputs)
@@ -529,7 +537,30 @@ def _(subgraph, identifier, *operands):
 
 @invoke_subgraph.py_functionalize_impl
 def _(ctx, subgraph, identifier, *operands):
+    from torch._higher_order_ops.auto_functionalize import (
+        can_auto_functionalize,
+        do_auto_functionalize_v2,
+    )
+
     unwrapped_operands = ctx.unwrap_tensors(operands)
+    hop_schema = invoke_subgraph.gen_schema(subgraph, identifier, *operands)
+    if can_auto_functionalize(HopInstance(invoke_subgraph, hop_schema)):
+        # NOTE: [auto_functionalize x invoke_subgraph caching]
+        # We call auto_functionalized_v2 to support input mutation of invoke_subgraph.
+        # See NOTE [Support input mutation of hops] for the overall design.
+        #
+        # invoke_subgraph is special because of its identifier based caching machanism.
+        # In invoke_subgraph's functionalization key implementation, we create a new
+        # identifer because the subgraph is replaced by FunctionWithNoFreeVars in a
+        # functional + epilogue form.
+        assert isinstance(identifier, str), identifier
+        return do_auto_functionalize_v2(
+            ctx.mode,
+            invoke_subgraph,
+            (subgraph, "auto_functionalized_" + identifier, *operands),
+            {},
+        )
+
     with ctx.redispatch_to_next():
         # NB: There is an assumption that subgraph does not mutate inputs and
         # there is no aliasing. Its Dynamo responsibility to prevent formation
@@ -581,9 +612,27 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
         if invoke_subgraph_cache:
             invoke_subgraph_cache.add_proxy_dispatch_entry(identifier, graph)
 
-    assert hasattr(proxy_mode.tracer.root, identifier)
     node_args = (graph, identifier, *operands)
-    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)  # type: ignore[union-attr]
+
+    def _unwrap_proxy(arg):
+        if isinstance(arg, torch.fx.GraphModule):
+            # After functionalization key, auto_functionalized_v2 takes over all the keys beblow
+            # functionalization e.g. proxy, fake. In the proxy mode implementation of the auto_functionalized_v2,
+            # we need to materialize the FunctionWithNoFreeVars as graph module. We re-trace the
+            # invoke_subgraph hop in order to materialize it. See NOTE [materialize callable inputs as graph].
+            #
+            # To materialize, we create a new proxy_tracer to trace the invocation of invoke_subgraph so when we
+            # hit the next invocation of invoke_subgraph that share the same identifier, the graph module might not exist
+            # as a submodule in the new tracer's root. Therefore we register it as a submodule below.
+            if not hasattr(proxy_mode.tracer.root, identifier):  # type: ignore[union-attr]
+                proxy_mode.tracer.root.register_module(identifier, graph)  # type: ignore[union-attr]
+        return proxy_mode.tracer.unwrap_proxy(arg)  # type: ignore[union-attr]
+
+    proxy_args = pytree.tree_map(_unwrap_proxy, node_args)  # type: ignore[union-attr]
+    assert (
+        hasattr(proxy_mode.tracer.root, identifier)
+        and getattr(proxy_mode.tracer.root, identifier) is graph
+    )
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", invoke_subgraph, proxy_args, {}
     )

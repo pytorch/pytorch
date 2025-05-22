@@ -298,6 +298,154 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(res, ref)
         self.assertEqual(mod.buf, mod_ref.buf)
 
+    def test_auto_functionalize(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c = 5
+                self.register_buffer("buf", torch.ones(8, requires_grad=False))
+
+            @mark_compile_region
+            def forward(self, x, y):
+                self.buf.add_(1)
+                return torch.mul(x, y).sin() + self.c + self.buf
+
+        mod_ref = Mod()
+        mod = Mod()
+
+        def fn(mod, x, y):
+            return mod(x, y) + mod(x, y)
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        ref = fn(mod_ref, x, y)
+
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
+        backend = AotEagerAndRecordGraphs()
+        with mock.patch(
+            "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
+            True,
+        ):
+            res = torch.compile(fn, backend=backend, fullgraph=True)(
+                mod, x_clone, y_clone
+            )
+            res.sum().backward()
+        self.assertEqual(len(backend.fw_graphs), 1)
+        self.assertEqual(len(backend.bw_graphs), 1)
+        self.assertEqual(ref, res)
+        self.assertExpectedInline(
+            normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[8]", primals_2: "f32[8]", primals_3: "f32[8]"):
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.invoke_subgraph, subgraph = auto_functionalized_subgraph_0, identifier = 'auto_functionalized_fw_subgraph_0', arg1 = primals_1, arg2 = primals_2, _arg0_base_index = 0, _all_bases = [primals_3], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = _tree_spec_constant0 = None
+        getitem: "f32[8]" = auto_functionalized_v2[0]
+        getitem_1: "f32[8]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_0
+        _tree_spec_constant1 = self._tree_spec_constant1
+        auto_functionalized_v2_1 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.invoke_subgraph, subgraph = auto_functionalized_subgraph_1, identifier = 'auto_functionalized_fw_subgraph_0', arg1 = primals_1, arg2 = primals_2, _arg0_base_index = 0, _all_bases = [getitem_1], _op_schema = _tree_spec_constant1);  auto_functionalized_subgraph_1 = getitem_1 = _tree_spec_constant1 = None
+        getitem_2: "f32[8]" = auto_functionalized_v2_1[0]
+        getitem_3: "f32[8]" = auto_functionalized_v2_1[1];  auto_functionalized_v2_1 = None
+
+        add: "f32[8]" = torch.ops.aten.add.Tensor(getitem, getitem_2);  getitem = getitem_2 = None
+        return (add, primals_1, primals_2, primals_3, getitem_3)
+
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[8]", arg1_1: "f32[8]", arg2_1: "f32[8]"):
+            add: "f32[8]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+            mul: "f32[8]" = torch.ops.aten.mul.Tensor(arg1_1, arg2_1);  arg1_1 = arg2_1 = None
+            sin: "f32[8]" = torch.ops.aten.sin.default(mul);  mul = None
+            add_1: "f32[8]" = torch.ops.aten.add.Tensor(sin, 5);  sin = None
+            add_2: "f32[8]" = torch.ops.aten.add.Tensor(add_1, add);  add_1 = None
+            copy_: "f32[8]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
+            return (add_2,)
+""",
+        )
+        self.assertExpectedInline(
+            normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[8]", primals_2: "f32[8]", primals_3: "f32[8]", getitem_3: "f32[8]", tangents_1: "f32[8]"):
+        auto_functionalized_subgraph_2 = self.auto_functionalized_subgraph_2
+        _tree_spec_constant2 = self._tree_spec_constant2
+        auto_functionalized_v2_2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.invoke_subgraph, subgraph = auto_functionalized_subgraph_2, identifier = 'auto_functionalized_bw_subgraph_0_0', arg1 = primals_1, arg2 = primals_2, arg3 = tangents_1, _arg0_base_index = 0, _all_bases = [getitem_3], _op_schema = _tree_spec_constant2);  auto_functionalized_subgraph_2 = getitem_3 = _tree_spec_constant2 = None
+        getitem_5: "f32[8]" = auto_functionalized_v2_2[1]
+        getitem_6: "f32[8]" = auto_functionalized_v2_2[2]
+        getitem_8: "f32[8]" = auto_functionalized_v2_2[4];  auto_functionalized_v2_2 = None
+        auto_functionalized_subgraph_3 = self.auto_functionalized_subgraph_2
+        _tree_spec_constant2_1 = self._tree_spec_constant2
+        auto_functionalized_v2_3 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.invoke_subgraph, subgraph = auto_functionalized_subgraph_3, identifier = 'auto_functionalized_bw_subgraph_0_0', arg1 = primals_1, arg2 = primals_2, arg3 = tangents_1, _arg0_base_index = 0, _all_bases = [getitem_8], _op_schema = _tree_spec_constant2_1);  auto_functionalized_subgraph_3 = primals_1 = primals_2 = tangents_1 = getitem_8 = _tree_spec_constant2_1 = None
+        getitem_10: "f32[8]" = auto_functionalized_v2_3[1]
+        getitem_11: "f32[8]" = auto_functionalized_v2_3[2]
+        getitem_13: "f32[8]" = auto_functionalized_v2_3[4];  auto_functionalized_v2_3 = None
+
+        add_1: "f32[8]" = torch.ops.aten.add.Tensor(getitem_5, getitem_10);  getitem_5 = getitem_10 = None
+        add_2: "f32[8]" = torch.ops.aten.add.Tensor(getitem_6, getitem_11);  getitem_6 = getitem_11 = None
+
+        copy_: "f32[8]" = torch.ops.aten.copy_.default(primals_3, getitem_13);  primals_3 = getitem_13 = copy_ = None
+        return (add_1, add_2, None)
+
+    class auto_functionalized_subgraph_2(torch.nn.Module):
+        def forward(self, arg0_1: "f32[8]", arg1_1: "f32[8]", arg2_1: "f32[8]", arg3_1: "f32[8]"):
+            add: "f32[8]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+            mul: "f32[8]" = torch.ops.aten.mul.Tensor(arg1_1, arg2_1)
+            sin: "f32[8]" = torch.ops.aten.sin.default(mul)
+            add_1: "f32[8]" = torch.ops.aten.add.Tensor(sin, 5);  sin = None
+            add_2: "f32[8]" = torch.ops.aten.add.Tensor(add_1, add);  add_1 = None
+            cos: "f32[8]" = torch.ops.aten.cos.default(mul);  mul = None
+            mul_1: "f32[8]" = torch.ops.aten.mul.Tensor(arg3_1, cos);  arg3_1 = cos = None
+            mul_2: "f32[8]" = torch.ops.aten.mul.Tensor(mul_1, arg1_1);  arg1_1 = None
+            mul_3: "f32[8]" = torch.ops.aten.mul.Tensor(mul_1, arg2_1);  mul_1 = arg2_1 = None
+            copy_: "f32[8]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
+            return (None, mul_3, mul_2, add_2)
+""",
+        )
+
+    # TODO: support input mutation in inductor
+    @unittest.expectedFailure
+    def test_buffer_mutation(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c = 5
+                self.register_buffer("buf", torch.ones(8, requires_grad=False))
+
+            @mark_compile_region
+            def forward(self, x, y):
+                self.buf.add_(1)
+                return torch.mul(x, y).sin() + self.c + self.buf
+
+        mod_ref = Mod()
+        mod = Mod()
+
+        def fn(mod, x, y):
+            return mod(x, y) + mod(x, y)
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        ref = fn(mod_ref, x, y)
+
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
+        with mock.patch(
+            "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
+            True,
+        ):
+            res = torch.compile(fn, backend="inductor", fullgraph=True)(
+                mod, x_clone, y_clone
+            )
+        self.assertEqual(ref, res)
+        # The error is buffer mutation is not applied to original module.
+        # My guess is that this is due to bad interaction between
+        # decomposing auto_functionalized and top-level graph's input mutation handling
+        # logic, where top-level thinks the there's no input mutation in the graph (because auto_functionalized
+        # is functional) but after decomposing, we re-introduce the mutation
+        # to input, this should propagate back recursively to top-level.
+        self.assertEqual(mod_ref.buf, mod.buf)
+
     def test_list(self):
         @mark_compile_region
         def gn(x, y):
