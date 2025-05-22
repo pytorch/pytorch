@@ -3283,9 +3283,8 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
     def test_invalid_view_unbacked_view(self):
         cnt = CompileCounterWithBackend("inductor")
 
-        # This view (u2, u3) -> (u0, u1) cant happen in general unless we know that input is contigous or we have hints to 
-        # to compute strides.
-        # reshape 
+        # This view (u2, u3) -> (u0, u1) cant happen in general unless we know that input is contigous or we have
+        # hints to to compute strides.
         def func(x, y):
             u0, u1 = y.tolist()
             torch._check_is_size(u0)
@@ -3304,6 +3303,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         with self.assertRaises(torch._dynamo.exc.UserError):
             # throws a data dependent error.
             compiled_func(x, torch.tensor([5, 20]))
+
 
 if __name__ == "__main__":
     run_tests()
