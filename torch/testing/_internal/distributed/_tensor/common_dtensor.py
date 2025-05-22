@@ -14,8 +14,13 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch._utils import _get_device_module
-from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
-from torch.distributed._tensor.placement_types import Placement
+from torch.distributed.tensor import (
+    DeviceMesh,
+    distribute_tensor,
+    Placement,
+    Replicate,
+    Shard,
+)
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -53,7 +58,7 @@ else:
 NUM_DEVICES = 4
 
 # We use this as a proxy for "multiple GPUs exist"
-if (TEST_CUDA or TEST_XPU) and DEVICE_COUNT > 1:
+if (TEST_CUDA or TEST_XPU or TEST_HPU) and DEVICE_COUNT > 1:
     # when we actually have multiple GPUs, relax the requirement to smaller counts.
     NUM_DEVICES = min(NUM_DEVICES, DEVICE_COUNT)
 
@@ -334,11 +339,8 @@ class DTensorTestBase(MultiProcessTestCase):
 
     @property
     def device_type(self) -> str:
-        # if enough GPU we can use GPU, otherwise we fallback to CPU
-        if (
-            not (TEST_CUDA or TEST_XPU)
-            or torch.accelerator.device_count() < self.world_size
-        ):
+        # if enough GPU/XPU/HPU we can use those devices, otherwise we fallback to CPU
+        if not (TEST_CUDA or TEST_XPU or TEST_HPU) or DEVICE_COUNT < self.world_size:
             return "cpu"
         else:
             return DEVICE_TYPE
