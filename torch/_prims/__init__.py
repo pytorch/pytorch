@@ -1285,10 +1285,10 @@ def _broadcast_in_dim_meta(
     # shape must be broadcastable to
     for idx, new_idx in enumerate(broadcast_dimensions):
         torch._check(
-            sym_or(
-                guard_size_oblivious(a.shape[idx] == 1),
+            guard_size_oblivious(sym_or(
+                a.shape[idx] == 1,
                 a.shape[idx] == shape[new_idx]
-            ),
+            )),
             lambda: f"{a.shape[idx]} must be broadcastable to {shape[new_idx]}",
         )
 
