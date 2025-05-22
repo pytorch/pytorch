@@ -1462,8 +1462,7 @@ class TestMPS(TestCaseMPS):
     def test_max_pool3d(self):
         def helper(shape, ks, padding=0, dilation=1, ceil_mode=False, return_indices=False, test_ties=False):
 
-            cpu_x = None
-            if (test_ties):
+            if test_ties:
                 cpu_x = torch.ones(shape, device='cpu', dtype=torch.float, requires_grad=True)
             else:
                 cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
@@ -1472,7 +1471,7 @@ class TestMPS(TestCaseMPS):
             pool = torch.nn.MaxPool3d(kernel_size=ks, padding=padding, dilation=dilation,
                                       ceil_mode=ceil_mode, return_indices=return_indices)
 
-            if (return_indices is False):
+            if not return_indices:
                 y = pool(x)
                 ref_y = pool(cpu_x)
 
