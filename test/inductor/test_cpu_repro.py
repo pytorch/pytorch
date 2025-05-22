@@ -1800,8 +1800,8 @@ class CPUReproTests(TestCase):
         )
         if input_dtype != torch.float32:
             x = x.to(dtype=input_dtype)
-        scales = torch.ones((3,))
-        zero_points = torch.zeros((3,))
+        scales = torch.randn((3,))
+        zero_points = torch.randint(0, 100, (3,))
         axis = 1
         with config.patch({"cpp.simdlen": None}):
             torch._dynamo.reset()
@@ -1845,7 +1845,11 @@ class CPUReproTests(TestCase):
             return input
 
         use_tensor_overload_list = [True, False]
-        for use_tensor_overload in use_tensor_overload_list:
+        zero_point_list = [0, 1]
+
+        for use_tensor_overload, zero_point in itertools.product(
+            use_tensor_overload_list, zero_point_list
+        ):
             assert dtype in [torch.float8_e4m3fn, torch.float8_e5m2]
             quant_min = int(torch.finfo(dtype).min)
             quant_max = int(torch.finfo(dtype).max)
@@ -1854,7 +1858,6 @@ class CPUReproTests(TestCase):
                 quant_min,
                 quant_max,
             )
-            zero_point = 0
             scale = 0.01
             if use_tensor_overload:
                 zero_point = torch.tensor(zero_point)

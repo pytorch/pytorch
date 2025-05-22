@@ -1530,13 +1530,15 @@ class TestQuantizedTensor(TestCase):
         X_ = torch.randn(5, 10)
         qdtypes = [torch.float8_e4m3fn, torch.float8_e5m2]
         dtypes = [torch.float, torch.float16, torch.bfloat16]
-        for qdtype, dtype in itertools.product(qdtypes, dtypes):
+        scales = [1., 2.]
+        zero_points = [0, 1]
+        for scale, zero_point, qdtype, dtype in itertools.product(scales, zero_points, qdtypes, dtypes):
             X = X_.to(dtype)
-            scale = torch.tensor(1)
+            scale = torch.tensor(scale)
+            zero_point = torch.tensor(zero_point)
             quant_min = torch.finfo(qdtype).min
             quant_max = torch.finfo(qdtype).max
-            quantized_X = torch.clamp((X / scale), quant_min, quant_max).to(qdtype)
-            zero_point = torch.tensor(0)
+            quantized_X = torch.clamp((X.float() / scale) + zero_point, quant_min, quant_max).to(qdtype)
             quantized_decomposed_X = \
                 torch.ops.quantized_decomposed.quantize_per_tensor(
                     X, scale, zero_point, int(quant_min), int(quant_max), qdtype)
@@ -1592,13 +1594,13 @@ class TestQuantizedTensor(TestCase):
         qdtypes = [torch.float8_e4m3fn, torch.float8_e5m2]
         dtypes = [torch.float, torch.float16, torch.bfloat16]
         scales = torch.randn(5,)
-        zero_points = torch.zeros((5,), dtype=torch.int32)
+        zero_points = torch.randint(0, 100, (5,))
         axis = 0
 
         for qdtype, dtype in itertools.product(qdtypes, dtypes):
             X = X_.to(dtype)
             quant_min, quant_max = torch.finfo(qdtype).min, torch.finfo(qdtype).max
-            quantized_X = torch.clamp((X / scales.view(-1, 1)), quant_min, quant_max).to(qdtype)
+            quantized_X = torch.clamp((X.float() / scales.view(-1, 1)) + zero_points.view(-1, 1), quant_min, quant_max).to(qdtype)
             quantized_decomposed_X = \
                 torch.ops.quantized_decomposed.quantize_per_channel(
                     X, scales, zero_points, axis, int(quant_min), int(quant_max), qdtype)
