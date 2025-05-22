@@ -230,6 +230,7 @@ mm_template = TritonTemplate(
 """
     ),
     cache_codegen_enabled_for_template=True,
+    prologue_loads_all_inputs=True,
 )
 
 persistent_tma_mm_template = TritonTemplate(
