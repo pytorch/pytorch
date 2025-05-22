@@ -201,6 +201,7 @@ post_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "post_grad_gra
 static_inputs_log = torch._logging.getArtifactLogger(
     __name__, "cudagraph_static_inputs"
 )
+inductor_metrics_log = torch._logging.getArtifactLogger(__name__, "inductor_metrics")
 
 
 def get_static_input_idxs(num_fixed: int) -> list[int]:
@@ -1061,6 +1062,9 @@ class _InProcessFxCompile(FxCompile):
         inputs_to_check: Sequence[int],
         graph_kwargs: _CompileFxKwargs,
     ) -> OutputCode:
+        """
+        Generates the OutputCode from the GraphModule and example_inputs.
+        """
         # Sorry about the mess, we need graph_kwargs to continue to be able
         # to propagate it further on
         # TODO: _CompileFxKwargs actually has stronger types than in the
@@ -1399,10 +1403,19 @@ class _InProcessFxCompile(FxCompile):
                                 compiled_module, "runner", None
                             )
 
-                    num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
-                    metrics.num_bytes_accessed += num_bytes
-                    metrics.node_runtimes += node_runtimes
-                    metrics.nodes_num_elem += nodes_num_elem
+                    if inductor_metrics_log.isEnabledFor(logging.INFO):
+                        num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
+                        metrics.num_bytes_accessed += num_bytes
+                        metrics.node_runtimes += node_runtimes
+                        metrics.nodes_num_elem += nodes_num_elem
+                        inductor_metrics_log.info(
+                            "Graph Metrics:\n%s",
+                            {
+                                "num_bytes_accessed": num_bytes,
+                                "nodes_num_elem": nodes_num_elem,
+                                "node_runtimes": node_runtimes,
+                            },
+                        )
 
                     if (
                         cudagraphs
