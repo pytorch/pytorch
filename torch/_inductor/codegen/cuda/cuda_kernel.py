@@ -608,7 +608,6 @@ class CUDATemplateCaller(ChoiceCaller):
             [
                 self.category,
                 self.bmreq.hash_key,
-                self.info_dict()["swizzle"],  # type: ignore[list-item]
             ]
         )
 
@@ -629,7 +628,6 @@ class CUDATemplateCaller(ChoiceCaller):
                 "instruction_shape": str(
                     op.tile_description.math_instruction.instruction_shape
                 ),
-                "swizzle": str(self.info_kwargs["swizzle"]),
             }
         else:
             return {"backend": "CUDA", "op_type": "unknown"}
