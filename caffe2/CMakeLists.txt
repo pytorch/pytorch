@@ -1733,6 +1733,10 @@ if(USE_ROCM)
     endforeach()
   endif()
 
+  if(WIN32)
+    list(APPEND HIP_CXX_FLAGS "-fms-extensions")
+  endif()
+
   # Call again since Caffe2_HIP_INCLUDE is extended with ATen include dirs.
   hip_include_directories(${Caffe2_HIP_INCLUDE})
 
