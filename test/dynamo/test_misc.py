@@ -8392,7 +8392,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(same(ref, res))
 
     def test_recursion_depth_guards(self):
-
         @torch.compile(dynamic=True)
         def foo(*args, **kwargs):
             if sum(args) == 0:
