@@ -202,9 +202,9 @@ class ConstDictVariable(VariableTracker):
 
         def __eq__(self, other: "ConstDictVariable._HashableTracker") -> bool:
             Hashable = ConstDictVariable._HashableTracker
-            assert isinstance(other, Hashable) or ConstantVariable.is_literal(other), (
-                type(other)
-            )
+            assert isinstance(other, Hashable) or ConstantVariable.is_literal(
+                other
+            ), type(other)
             if isinstance(other, Hashable):
                 return Hashable._eq_impl(self.underlying_value, other.underlying_value)
 
@@ -606,7 +606,10 @@ class ConstDictVariable(VariableTracker):
             gb_type="unsupported hasattr operation",
             context=f"Class {self.user_cls}",
             explanation=msg,
-            hints=["Consider using a regular dictionary instead"],
+            hints=[
+                "Consider using a regular dictionary instead",
+                *graph_break_hints.SUPPORTABLE,
+            ],
         )
 
     def clone(self, **kwargs):
@@ -636,7 +639,8 @@ class MappingProxyVariable(VariableTracker):
                 context=f"Source: {self.source}",
                 explanation=msg,
                 hints=[
-                    "Use a mapping proxy constructed in the same `torch.compile` region."
+                    "Use a mapping proxy constructed in the same `torch.compile` region.",
+                    *graph_break_hints.SUPPORTABLE,
                 ],
             )
         codegen.add_push_null(
@@ -673,7 +677,8 @@ class MappingProxyVariable(VariableTracker):
                 context=f"Source: {self.source}, Dict mutation detected",
                 explanation=msg,
                 hints=[
-                    "Avoid modifying dictionaries that might be referenced by mapping proxy objects"
+                    "Avoid modifying dictionaries that might be referenced by mapping proxy objects",
+                    "Or avoid using the mapping proxy objects after modifying its underlying dictionary",
                 ],
             )
         return self.dv_dict.call_method(tx, name, args, kwargs)
