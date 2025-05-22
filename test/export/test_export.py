@@ -3787,6 +3787,19 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
     return (add, add_1)""",
         )
 
+    def test_unbacked_conv1d(self):
+        class Conv1d(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv1d(512, 512, kernel_size=7, padding=(3,), groups=512)
+            def forward(self, xs):
+                u0, u1 = xs.tolist()
+                y = torch.empty(1, u0 + u1, 512).permute(0, 2, 1)
+                return self.conv(y)
+
+        ep = export(Conv1d(), (torch.tensor([5, 6]),))
+        print(ep)
+
     def test_derived_dim_out_of_order_simplified_repeat_non_derived(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y, y1, z):
