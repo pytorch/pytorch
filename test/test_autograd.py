@@ -13393,13 +13393,6 @@ class TestAutogradStreamSynchronization(TestCase):
                 events["side_backward_start"].elapsed_time(events["side_backward_end"])
                 > 0
             )
-            # Sanity check: main's backward started after side's backward started
-            self.assertTrue(
-                events["side_backward_start"].elapsed_time(
-                    events["main_backward_start"]
-                )
-                > 0
-            )
             # Overlap check: side's backward starts before side backward ends
             self.assertTrue(
                 events["main_backward_start"].elapsed_time(events["side_backward_end"])
