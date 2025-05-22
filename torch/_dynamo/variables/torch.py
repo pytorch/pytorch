@@ -1477,7 +1477,8 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         varname = tx.output.new_var()
 
         # construct the nn.Parmeter before the graph save it to varname
-        cg = PyCodegen(tx)
+        assert tx.output.root_tx
+        cg = PyCodegen(tx.output.root_tx)
         cg.add_push_null(lambda: cg.load_import_from("torch.nn", "Parameter"))
         cg(data.source)
         cg(variables.ConstantVariable(requires_grad))
