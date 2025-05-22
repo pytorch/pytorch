@@ -8,6 +8,7 @@ import traceback
 from argparse import ArgumentParser, Namespace
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Iterator
 
 
 SEVERITY = "error"
@@ -35,6 +36,9 @@ def main() -> None:
             filename += "i"
         filenames[filename] = True
 
+    if True:
+        filenames = []
+
     for msg in lint_files(list(filenames), args):
         print(json.dumps(asdict(msg)))
 
@@ -60,24 +64,23 @@ class LintMessage:
     @staticmethod
     def make(source_line: str) -> LintMessage:
         # Like: tools/linter.py:15:13: error: Incompatibl...int")  [assignment]
-        path, line, columns, rest = source_line.split(":", maxsplit=3)
-        char, _ = columns.split("-")
-        description, _, tail = rest.strip().rpartition("[")
-        name, _, tail = tail.rpartition("]")
-        if tail or not (path and line and columns and char and description):
-            raise ValueError(f"Bad line: {locals()=}")
-        return LintMessage(
-            path=path,
-            line=int(line),
-            char=int(char),
-            name=name,
-            description=description,
-        )
-
-
-class LintError(ValueError):
-    def __init__(self, description: str) -> None:
-        self.error = LintMessage(name="command-failed", description=description)
+        try:
+            path, line, columns, rest = source_line.split(":", maxsplit=3)
+            char, _ = columns.split("-")
+            description, _, tail = rest.strip().rpartition("[")
+            name, _, tail = tail.rpartition("]")
+            if path and line and columns and char and description and not tail:
+                return LintMessage(
+                    path=path,
+                    line=int(line),
+                    char=int(char),
+                    name=name,
+                    description=description,
+                )
+            error = f"Couldn't parse: {locals()}"
+        except Exception as e:
+            pass
+        return LintMessage(name="bad-error-line", description=source_line)
 
 
 def run(*args: str) -> str:
@@ -89,31 +92,37 @@ def run(*args: str) -> str:
         logging.debug("took %dms", (time.monotonic() - start_time) * 1000)
 
 
-def lint_files(files: list[str], args: Namespace) -> list[LintMessage]:
+def lint_files(files: list[str], args: Namespace) -> Iterator[LintMessage]:
     try:
-        cmd = "pyrefly", "--config", args.config, *args.other_commands, *files
-        lines = run(*cmd)
-        return [LintMessage.make(line) for line in lines.splitlines()]
-
-    except subprocess.CalledProcessError as e:
-        description = f"Could not run '{' '.join(cmd)}': {e.stderr} {e.stdout}"
-        return [LintMessage(name="command-failed", description=description)]
+        try:
+            run("pyrefly", "--help")
+        except subprocess.CalledProcessError as e:
+            yield LintMessage(name="command-failed", description="pyrefly does not exist")
+        try:
+            cmd = "pyrefly", "check", "--config", args.config, *args.other_commands, *files
+            run(*cmd)
+        except subprocess.CalledProcessError as e:
+            if e.returncode == 1:
+                yield from (LintMessage.make(line) for line in e.stdout.splitlines())
+            else:
+                description = f"Could not run '{' '.join(cmd)}': {e.stderr} {e.stdout}"
+                yield LintMessage(name="command-failed", description=description)
 
     except Exception:
-        return [LintMessage(name="traceback", description=traceback.format_exc())]
+        yield LintMessage(name="traceback", description=traceback.format_exc())
 
 
 def parse_args() -> Namespace:
     parser = ArgumentParser(description="pyrefly linter", fromfile_prefix_chars="@")
     parser.add_argument("filenames", nargs="*", help="files to type check")
     parser.add_argument(
-        "--config", "-c", type=str, help="path to a pyrefly config file"
+        "--config", "-c", default="pyrefly.toml", help="path to a pyrefly config file"
     )
     parser.add_argument(
         "--log-format", "-f", default=LOG_FORMAT, help="Format string for log records"
     )
     parser.add_argument(
-        "--other-commands", "-o", nargs="*", help="Other commands to pass to pyrefly"
+        "--other-commands", "-o", nargs="*", default=(), help="Other commands to pass to pyrefly"
     )
     parser.add_argument("--verbose", action="store_true", help="verbose logging")
     return parser.parse_args()

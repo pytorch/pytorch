@@ -1746,13 +1746,14 @@ command = [
 ]
 include_patterns = [
     'torch/header_only_apis.txt',
+]
 
 [[linter]]
 code = 'PYREFLY'
 command = [
     'python3',
     'tools/linter/adapters/pyrefly_linter.py',
-    '--config=pyrefly',
+    '--config=pyrefly.toml',
     '@{{PATHSFILE}}'
 ]
 init_command = [
@@ -1762,6 +1763,6 @@ init_command = [
     'pyrefly==0.16.1',
 ]
 include_patterns = [
-   # Disabled
+   'torch/**/*.py'
 ]
 is_formatter = false
