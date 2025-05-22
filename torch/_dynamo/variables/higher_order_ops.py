@@ -917,6 +917,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return WrapWithSetGradEnabledHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "wrap_with_autocast":
             return WrapWithAutocastHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "dynamo_bypassing_wrapper":
+            return DynamoBypassingWrapperHigherOrderVariable(value, source, **kwargs)
         elif (
             value.__name__ == "auto_functionalized"
             or value.__name__ == "auto_functionalized_v2"
@@ -2500,6 +2502,73 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
                 self.value,
                 args=tuple(p_args),
                 kwargs=checkpoint_kwargs,
+            ),
+            example_value=example_value,
+        )
+
+        if treespec is None:
+            return variable
+
+        # Transform variable back into a list (previously made into a tuple by
+        # speculate_subgraph function) so as to respect the pytree API typing.
+        variable = BuiltinVariable(list).call_function(tx, [variable], {})
+
+        return _make_inlined(tx, pytree.tree_unflatten)(variable, treespec)
+
+
+class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
+    def __init__(self, hop, source) -> None:
+        super().__init__(hop, source)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
+        func_var = args[0]
+
+        if isinstance(func_var, torch._dynamo.variables.UserFunctionVariable):
+            func = func_var.fn
+        elif isinstance(
+            func_var, torch._dynamo.variables.functions.FunctoolsPartialVariable
+        ):
+            func = func_var.as_python_constant()
+        else:
+            raise RuntimeError(
+                f"DynamoBypassingWrapperHigherOrderVariable: Unsupported function {type(func_var)}"
+            )
+        (
+            p_args,
+            _,
+            example_value,
+            _body_r,
+            treespec,
+            gmod,
+            _,
+        ) = self.create_wrapped_node(
+            tx,
+            args[1],
+            args[2:],
+            kwargs,
+            str(func),
+        )
+
+        # Alternatively, we could've stored only the function's fqn and
+        # reconstructed, but that requires the function to be a global.
+        gmod_meta_key = "_dynamo_bypassing_wrapper_fn"
+        gmod.meta[gmod_meta_key] = func
+
+        # Store the invocation as a call
+        variable = wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=(gmod_meta_key,) + tuple(p_args),
+                kwargs={},
             ),
             example_value=example_value,
         )
