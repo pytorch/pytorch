@@ -8073,19 +8073,19 @@ class TestLogical(TestCaseMPS):
 
         [helper(dtype) for dtype in dtypes]
 
-        x = torch.arange(4.0, device="mps")
         # Mixed dtypes (see https://github.com/pytorch/pytorch/issues/151443 )
         # torch.isin is broken in MacOS-13.2 even for the same dtype
         if MACOS_VERSION >= 14.0:
+            x = torch.arange(4.0, device="mps")
             y = torch.tensor([1, 3], device="mps", dtype=torch.float16)
             self.assertEqual(torch.isin(x, y), torch.tensor([False, True, False, True], device="mps"))
 
-        # Tensor.Scalar variant (aliases to eq), not covered by OpInfo
-        self.assertEqual(torch.isin(x, 2.0), torch.tensor([False, False, True, False], device="mps"))
-        self.assertEqual(torch.isin(x, 1.0, invert=True), torch.tensor([True, False, True, True], device="mps"))
-        self.assertEqual(torch.isin(x, 8.0), torch.tensor([False, False, False, False], device="mps"))
-        # Scalar.Tensor varaiant(alaises to Scalar.Scalar), not covered by OpInfo
-        self.assertEqual(torch.isin(2.0, x), torch.tensor(True, device="mps"))
+            # Tensor.Scalar variant (aliases to eq), not covered by OpInfo
+            self.assertEqual(torch.isin(x, 2.0), torch.tensor([False, False, True, False], device="mps"))
+            self.assertEqual(torch.isin(x, 1.0, invert=True), torch.tensor([True, False, True, True], device="mps"))
+            self.assertEqual(torch.isin(x, 8.0), torch.tensor([False, False, False, False], device="mps"))
+            # Scalar.Tensor varaiant(alaises to Scalar.Scalar), not covered by OpInfo
+            self.assertEqual(torch.isin(2.0, x), torch.tensor(True, device="mps"))
 
     def test_isin_asserts(self):
         C = torch.randn(size=[1, 4], device='mps', dtype=torch.float32)
