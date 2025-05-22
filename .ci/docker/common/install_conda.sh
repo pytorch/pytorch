@@ -7,7 +7,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   BASE_URL="https://repo.anaconda.com/miniconda"
   CONDA_FILE="Miniconda3-latest-Linux-x86_64.sh"
   if [[ $(uname -m) == "aarch64" ]] || [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
-    BASE_URL="https://github.com/conda-forge/miniforge/releases/latest/download"
+    BASE_URL="https://github.com/conda-forge/miniforge/releases/latest/download"  # @lint-ignore
     CONDA_FILE="Miniforge3-Linux-$(uname -m).sh"
   fi
 
