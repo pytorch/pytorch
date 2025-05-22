@@ -28,8 +28,6 @@ using namespace dnnl;
 
 namespace at::native::onednn {
 
-
-
 class primitive_ext : public primitive {
   static constexpr int max_args = 12;
 
