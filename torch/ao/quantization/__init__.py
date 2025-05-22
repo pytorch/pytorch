@@ -42,7 +42,7 @@ warnings.warn(
     "API instead (prepare_pt2e, convert_pt2e) \n"
     "3. pt2e quantization has been migrated to torchao (https://github.com/pytorch/ao/tree/main/torchao/quantization/pt2e) \n"
     "see https://dev-discuss.pytorch.org/t/torch-ao-quantization-migration-plan/2810 for more details",
-    FutureWarning,
+    DeprecationWarning,
 )
 
 # ensure __module__ is set correctly for public APIs
