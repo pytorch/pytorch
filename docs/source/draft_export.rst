@@ -105,8 +105,7 @@ To call ``draft-export``, we can replace the ``torch.export`` line with the foll
 
 ::
 
-    from torch.export._draft_export import draft_export
-    ep = draft_export(M(), inp)
+    ep = torch.export.draft_export(M(), inp)
 
 ``ep`` is a valid ExportedProgram which can now be passed through further environments!
 
