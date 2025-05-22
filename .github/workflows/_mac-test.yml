@@ -278,6 +278,7 @@ jobs:
           workflow_name: ${{ github.workflow }}
           workflow_run_id: ${{github.run_id}}
           workflow_attempt: ${{github.run_attempt}}
+          local_path: usage_log.txt
 
       - name: Clean up disk space
         if: always()

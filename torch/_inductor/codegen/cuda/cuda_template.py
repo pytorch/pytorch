@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 else:
     BaseSchedulerNode = Any
 
+GemmOperation = Any
 
 autotuning_log = getArtifactLogger(__name__, "autotuning")
 
@@ -63,6 +64,10 @@ class CUDATemplate(KernelTemplate):
         self.output_node: Buffer = Buffer(name="buf_out", layout=layout)
         self.input_reorder = input_reorder
         self.layout = layout
+
+    @staticmethod
+    def supports_epilogue_fusion(op: GemmOperation) -> bool:
+        return False
 
     def generate(  # type: ignore[override]
         self,
@@ -127,10 +132,21 @@ class CUDATemplate(KernelTemplate):
             source_code=code,
         )
 
+        # kwargs has "op" argument in case of CUTLASSGemmTemplate
+        op = kwargs["op"]
+        if not op:
+            supports_epilogue_fusion = False
+        else:
+            # epilogue fusion is only supported for TMA kernels
+            supports_epilogue_fusion = self.supports_epilogue_fusion(op)
+
         def make_kernel_render(
             template_node: CUDATemplateBuffer,
             epilogue_nodes: Optional[list[BaseSchedulerNode]] = None,
         ) -> tuple[CUDATemplateKernel, functools.partial[str]]:
+            assert supports_epilogue_fusion or not epilogue_nodes, (
+                "epilogue fusion is not supported for this kernel"
+            )
             kernel = CUDATemplateKernel(
                 kernel_name=str(Placeholder.KERNEL_NAME),
                 runtime_arg_info=self.get_runtime_arg_info(),
@@ -147,11 +163,12 @@ class CUDATemplate(KernelTemplate):
 
         return CUDATemplateCaller(
             kernel_name,
-            self.name,
+            "cutlass_gemm",
             self.input_nodes,
             self.output_node.get_layout(),
             make_kernel_render,
             bmreq,
+            supports_epilogue_fusion,
             self,
             kwargs,
             description,

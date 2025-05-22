@@ -196,11 +196,12 @@ flex_decoding_template = TritonTemplate(
 
     acc, l_i, m_i = forward_inner(
         {{gen_argdefs()}},
-        q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+        q, K_block_ptr, V_block_ptr, None, None, Q_LEN, KV_LEN,
         # accumulatd values
         acc, l_i, m_i,
         #offsets
         off_z, offs_hq[:, None], offs_m[:, None], offs_n[None, :],
+        None,
         #block sparse data
         kv_indices, kv_num_blocks,
         block_n_start, block_n_end if block_n_end <= block_n_last_valid else block_n_last_valid,
@@ -245,11 +246,12 @@ flex_decoding_template = TritonTemplate(
 
         acc, l_i, m_i = forward_inner(
             {{gen_argdefs()}},
-            q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+            q, K_block_ptr, V_block_ptr, None, None, Q_LEN, KV_LEN,
             # accumulatd values
             acc, l_i, m_i,
             #offsets
             off_z, offs_hq[:, None], offs_m[:, None], offs_n[None, :],
+            None,
             #block sparse data
             kv_indices, kv_num_blocks,
             block_n_start, block_n_end if block_n_end <= block_n_last_valid else block_n_last_valid,
@@ -550,6 +552,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
             cur_kernel_options.setdefault(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
+
+        # Set default to False
+        cur_kernel_options.setdefault("USE_TMA", False)
 
         flex_decoding_template.maybe_append_choice(
             choices=choices,
