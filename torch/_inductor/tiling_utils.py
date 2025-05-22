@@ -45,7 +45,7 @@ def solve_for_zero(expr: sympy.Expr) -> Optional[sympy.Expr]:
     elif isinstance(expr, FloorDiv):
         return None
 
-    assert len(expr.free_symbols) <= 1
+    assert len(expr.free_symbols) == 1
     free_symbol = next(iter(expr.free_symbols))
     if isinstance(expr, ModularIndexing):
         out = try_solve(sympy.Eq(expr.args[0], expr.args[2]), free_symbol)
@@ -170,6 +170,7 @@ def find_coalesced_var(
         try:
             new_val = sympy_subs(index, variables)
         except ZeroDivisionError:
+            loop_tiling_log.info("zero division error %s %s", index, variables)
             continue
         if new_val - zero_index == 1:
             return v
@@ -193,7 +194,7 @@ class FusedNormalizedReadsWrites:
 
 @overload
 def get_pw_red_splits(
-    n: SchedulerNode,
+    n: "SchedulerNode",
     pointwise_numel: sympy.Expr,
     red_numel: sympy.Expr,
     none_if_not_divisible: Literal[True],
@@ -202,7 +203,7 @@ def get_pw_red_splits(
 
 @overload
 def get_pw_red_splits(
-    n: SchedulerNode,
+    n: "SchedulerNode",
     pointwise_numel: sympy.Expr,
     red_numel: sympy.Expr,
     none_if_not_divisible: Literal[False] = False,
@@ -247,7 +248,6 @@ def get_pw_red_splits(
         )
 
 
-
 class NodeSplitGetter:
     """
     Finds a Pointwise, Reduction Split that compatible with all nodes in a SchedulerNode.
@@ -279,6 +279,7 @@ class NodeSplitGetter:
             )
             if maybe_splits is None:
                 self.all_node_sizes.add(n._body.sizes)
+                continue
 
             (_, n_pw_splits), (_, n_red_splits) = maybe_splits
 
@@ -378,6 +379,7 @@ else:
         """
         if len(it1) != len(it2):
             raise ValueError(f"Lengths differ: {len(it1)} != {len(it2)}")
+        return zip(it1, it2)
 
 
 def apply_var_mapping(
@@ -462,12 +464,15 @@ def extract_normalized_read_writes(
         if not V.graph.scheduler.can_buffer_be_removed_through_fusion(buf, op_names)
     )
     inputs = OrderedSet(dep.name for dep in node.read_writes.reads)
+    pointwise_numel: sympy.Expr = node.group[1][0]
+    red_numel: sympy.Expr = node.group[1][1]
 
     # TODO - a few dynamic shapes issues to resolve
-    for buf_name in itertools.chain(inputs, outputs):
-        if buf := V.graph.try_get_buffer(buf_name):
-            if buf.get_free_symbol_uses():
-                return None
+    if any(
+        (isinstance(var, sympy.Expr) and not var.is_constant())
+        for var in (pointwise_numel, red_numel)
+    ):
+        return None
 
     pw_splits, red_splits = NodeSplitGetter(node).get_node_splits()
 
@@ -476,8 +481,6 @@ def extract_normalized_read_writes(
         pw_splits, red_splits, prefix="n"
     )
     node = node
-    pointwise_numel: sympy.Expr = node.group[1][0]
-    red_numel: sympy.Expr = node.group[1][1]
 
     for n in list(node.get_nodes()):
         if not isinstance(n, torch._inductor.scheduler.SchedulerNode):

@@ -2368,7 +2368,7 @@ def match_target_block_product(
     if total_score == 0:
         # just assume even score with no minimum block size
         min_block_size = 1
-        tiling_scores = {k: target_block_product for k in tiling_scores.keys()}
+        tiling_scores = dict.fromkeys(tiling_scores.keys(), target_block_product)
 
     # First, give each coalescing dimension at least min_block_size
     block_sizes = {}
