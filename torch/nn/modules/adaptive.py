@@ -172,9 +172,9 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
     def reset_parameters(self) -> None:
         self.head.reset_parameters()
-        for i2h, h2o in self.tail:
-            i2h.reset_parameters()
-            h2o.reset_parameters()
+        for i2h, h2o in self.tail:  # type: ignore[misc]
+            i2h.reset_parameters()  # type: ignore[has-type]
+            h2o.reset_parameters()  # type: ignore[has-type]
 
     def forward(self, input_: Tensor, target_: Tensor) -> _ASMoutput:
         targ_dim = target_.dim()
