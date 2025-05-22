@@ -82,8 +82,8 @@ body:
     description: |
       Are you requesting feature Inclusion in the release blogs?
     options:
-      - Yes
-      - No
+      - "Yes"
+      - "No"
   validations:
     required: true
 - type: textarea
