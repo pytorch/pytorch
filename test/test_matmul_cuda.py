@@ -169,6 +169,27 @@ class TestMatmulCuda(TestCase):
 
     @onlyCUDA
     @skipIfRocmVersionLessThan((5, 2))
+    @dtypes(torch.float16)
+    # m == 4 chooses OUTPUT_TYPE reduction on H200
+    # m == 8 chooses OUTPUT_TYPE reduction on A100
+    @parametrize("small_size", [4, 8])
+    @parametrize("size", [32768])
+    @parametrize("backend", ["cublaslt", "cublas"])
+    def test_cublas_addmm_no_reduced_precision(self, small_size: int, size: int, dtype: torch.dtype, backend):
+        with blas_library_context(backend):
+            torch.backends.cuda.preferred_blas_library(backend)
+            orig_precision = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+            m1 = torch.full((small_size, size), 65504.0, dtype=dtype, device='cuda')
+            m2 = torch.ones((size, small_size), dtype=dtype, device='cuda')
+            m2[size // 2:, :] = -1.0
+            b = torch.zeros((small_size,), dtype=dtype, device='cuda')
+            out = torch.addmm(b, m1, m2, beta=1.0)
+            self.assertEqual(out.sum().item(), 0.0)
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_precision
+
+    @onlyCUDA
+    @skipIfRocmVersionLessThan((5, 2))
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
                         torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})

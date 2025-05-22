@@ -71,6 +71,10 @@ register_artifact(
 )
 register_artifact("graph_code", "Like `graph`, but gives you the Python code instead.")
 register_artifact(
+    "graph_code_verbose",
+    "Verbose FX pass logs, e.g. from tensorify_python_scalars and runtime_assert.",
+)
+register_artifact(
     "graph_sizes", "Prints the sizes of all FX nodes in the dynamo graph."
 )
 register_artifact(
