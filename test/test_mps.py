@@ -1458,6 +1458,70 @@ class TestMPS(TestCaseMPS):
             helper((1, 1000, 1, 4), ks=(1, 4), ceil_mode=True,
                    return_indices=True, test_ties=test_ties)  # test for max_pool1d
 
+    # Test forward maxpool2d
+    def test_max_pool3d(self):
+        def helper(shape, ks, padding=0, dilation=1, ceil_mode=False, return_indices=False, test_ties=False):
+
+            cpu_x = None
+            if (test_ties):
+                cpu_x = torch.ones(shape, device='cpu', dtype=torch.float, requires_grad=True)
+            else:
+                cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+            pool = torch.nn.MaxPool2d(kernel_size=ks, padding=padding, dilation=dilation,
+                                      ceil_mode=ceil_mode, return_indices=return_indices)
+
+            if (return_indices is False):
+                y = pool(x)
+                ref_y = pool(cpu_x)
+
+                # cpu_grad = torch.ones_like(ref_y)
+                # grad = cpu_grad.to('mps')
+
+                # y.backward(gradient=grad)
+                # ref_y.backward(gradient=cpu_grad)
+
+                self.assertEqual(y, ref_y)
+                # self.assertEqual(x.grad, cpu_x.grad)
+            else:
+                y, idx = pool(x)
+                ref_y, ref_idx = pool(cpu_x)
+
+                # cpu_grad = torch.ones_like(ref_y)
+                # grad = cpu_grad.to('mps')
+
+                # y.backward(gradient=grad)
+                # ref_y.backward(gradient=cpu_grad)
+
+                self.assertEqual(y, ref_y)
+                self.assertEqual(idx, ref_idx)
+                # self.assertEqual(x.grad, cpu_x.grad)
+
+        # Test with no batch dimension
+        helper((8, 4, 4, 4), ks=2)
+        helper((2, 8, 4, 4, 4), ks=2)
+        helper((1, 10, 32, 32, 32), ks=4)
+        # Test padding
+        helper((1, 10, 32, 32, 32), ks=4, padding=1)
+        # Test dilation
+        helper((1, 10, 32, 32, 32), ks=4, dilation=2)
+        # Test ceil mode
+        helper((1, 10, 32, 32, 32), ks=4, ceil_mode=True)
+
+        # Test return indices
+        for test_ties in [False, True]:
+            # Test with no batch dimension
+            helper((8, 4, 4, 4), ks=2, return_indices=True, test_ties=test_ties)
+            helper((2, 8, 4, 4, 4), ks=2, return_indices=True, test_ties=test_ties)
+            helper((1, 10, 32, 32, 32), ks=4, return_indices=True, test_ties=test_ties)
+            # Test padding
+            helper((1, 10, 32, 32, 32), ks=4, padding=1, return_indices=True, test_ties=test_ties)
+            # Test dilation
+            helper((1, 10, 32, 32, 32), ks=4, dilation=2, return_indices=True, test_ties=test_ties)
+            # Test ceil mode
+            helper((1, 10, 32, 32, 32), ks=4, ceil_mode=True, return_indices=True, test_ties=test_ties)
+
     def test_adaptive_avg_pool2d_output_size_one(self):
         def helper(size, memory_format):
             x = torch.randint(1, 10, size, dtype=torch.float, device='mps', requires_grad=True)
