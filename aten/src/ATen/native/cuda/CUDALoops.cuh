@@ -155,9 +155,16 @@ C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
   using traits = function_traits<func_t>;
   constexpr auto io_size = calc_io_size<func_t>();
-  int remaining = N - io_block_work_size<io_size>() * blockIdx.x;
+#if defined(USE_ROCM) && defined(__gfx942__)
+  // Similar check in launch_vectorized_kernel() as well. Both should be in sync.
+  constexpr int tws = (io_size >= 2) ? 8 : 16;
+#else
+  constexpr int tws = elems_per_thread<io_size>();
+#endif
+  constexpr int bws = tws * num_threads();
+  int remaining = N - bws * blockIdx.x;
 
-  if (remaining < io_block_work_size<io_size>()) { // if this block handles the reminder,
+  if (remaining < bws) { // if this block handles the reminder,
                                        // just do a naive unrolled loop
     auto input_calc = TrivialOffsetCalculator<traits::arity>();
     auto output_calc = TrivialOffsetCalculator<1>();
@@ -169,7 +176,7 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
         decltype(output_calc),
         memory::LoadWithoutCast,
         memory::StoreWithoutCast,
-        elems_per_thread<io_size>()>(
+        tws>(
         data, remaining, input_calc, output_calc, loader, storer);
     elementwise_kernel_helper(f, policy);
   } else { // if this block has a full `block_work_size` data to handle, use
@@ -180,7 +187,7 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
     constexpr auto optimal_vec_size = vec_size;
 #endif
     elementwise_kernel_helper(
-        f, memory::policies::vectorized<optimal_vec_size, array_t, elems_per_thread<io_size>()>(data));
+        f, memory::policies::vectorized<optimal_vec_size, array_t, tws>(data));
   }
 }
 
@@ -217,10 +224,10 @@ static inline void launch_vectorized_kernel(
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   using traits = function_traits<func_t>;
   constexpr auto io_size = calc_io_size<func_t>();
-  int64_t grid = (N + io_block_work_size<io_size>() - 1) / io_block_work_size<io_size>();
   auto stream = at::cuda::getCurrentCUDAStream();
 #ifdef USE_ROCM
   int vec_size = memory::can_vectorize_up_to<func_t>(data);
+<<<<<<< HEAD
 #else
   using cpp_type = typename function_traits<func_t>::result_type;
   const uint16_t max_vec_size = memory::can_vectorize_up_to<func_t>(data);
@@ -233,6 +240,18 @@ static inline void launch_vectorized_kernel(
     vec_size = std::min<uint16_t>(vec_size, 4);
   }
 #endif
+=======
+#ifdef USE_ROCM
+  // Similar check in vectorized_elementwise_kernel() as well. Both should be in sync.
+  c10::DeviceIndex curDevice = -1;
+  AT_CUDA_CHECK(c10::cuda::GetDevice(&curDevice));
+  int tws = at::detail::getCUDAHooks().isGPUArch(curDevice, {"gfx942"}) ? ((io_size >= 2) ? 8 : 16) : elems_per_thread<io_size>();
+#else
+  int tws = elems_per_thread<io_size>();
+#endif
+  int bws = tws * num_threads();
+  int64_t grid = (N + bws - 1) / bws;
+>>>>>>> 2a63495dac ([ROCm] Improve vectorized elementwise kernel performance in MI300X (#2185))
   switch (vec_size) {
 #ifdef USE_ROCM
     case 16:
@@ -261,8 +280,9 @@ static inline void launch_vectorized_kernel(
       auto output_calc = TrivialOffsetCalculator<1>();
       auto loader = memory::LoadWithoutCast();
       auto storer = memory::StoreWithoutCast();
+      int64_t grid_unrolled = (N + io_block_work_size<io_size>() - 1) / io_block_work_size<io_size>();
       unrolled_elementwise_kernel<func_t, array_t, elems_per_thread<io_size>()>
-          <<<grid, num_threads(), 0, stream>>>(
+          <<<grid_unrolled, num_threads(), 0, stream>>>(
               N, f, data, input_calc, output_calc, loader, storer);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
