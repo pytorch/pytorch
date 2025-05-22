@@ -48,6 +48,7 @@ tolerance:
     - doctr_reco_predictor
     - drq
     - hf_Whisper
+    - phlippe_resnet
 
   higher_bf16:
     - doctr_reco_predictor

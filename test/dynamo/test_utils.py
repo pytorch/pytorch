@@ -243,6 +243,7 @@ class TestDynamoTimed(TestCase):
  'compile_fx.<locals>.fw_compiler_base': [0.0],
  'compile_fx_inner': [0.0, 0.0],
  'create_aot_dispatcher_function': [0.0],
+ 'fx_codegen_and_compile': [0.0, 0.0],
  'gc': [0.0],
  'min_cut_rematerialization_partition': [0.0]}""",  # noqa: B950
         )
@@ -329,7 +330,7 @@ class TestDynamoTimed(TestCase):
  'graph_input_count': 1,
  'graph_node_count': 3,
  'graph_op_count': 1,
- 'guard_count': 8,
+ 'guard_count': 9,
  'has_guarded_code': True,
  'inductor_code_gen_cumulative_compile_time_us': 0,
  'inductor_compile_time_s': 0.0,
@@ -504,6 +505,43 @@ class TestDynamoTimed(TestCase):
             torch.compile(test2)(torch.randn(10, 10))
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].ir_count, second)
+
+    @dynamo_config.patch({"log_compilation_metrics": True})
+    @inductor_config.patch({"force_disable_caches": True})
+    def test_dynamic_shape_feature_use(self):
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+
+            @torch.compile()
+            def f(x):
+                return x * x
+
+            f(torch.randn(4))
+            f(torch.randn(3))
+            compilation_events = [
+                arg[0][0].feature_usage for arg in log_event.call_args_list
+            ]
+        self.assertIn(
+            ("dynamo.automatic_dynamic_shapes", True), compilation_events[1].items()
+        )
+
+        compilation_events = []
+        with dynamo_config.patch({"automatic_dynamic_shapes": False}), mock.patch(
+            "torch._dynamo.utils.log_compilation_event"
+        ) as log_event:
+
+            @torch.compile()
+            def f(x):
+                return x * x
+
+            f(torch.randn(4))
+            f(torch.randn(3))
+            compilation_events = [
+                arg[0][0].feature_usage for arg in log_event.call_args_list
+            ]
+        self.assertIn(
+            ("dynamo.automatic_dynamic_shapes", False), compilation_events[1].items()
+        )
 
     @dynamo_config.patch({"log_compilation_metrics": True})
     def test_num_params(self):

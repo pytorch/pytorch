@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-from unittest import expectedFailure
 from unittest.mock import patch
 
 import torch
