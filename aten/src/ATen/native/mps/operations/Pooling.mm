@@ -741,7 +741,7 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_mps(
     output,
     indices);
 
-  return std::tuple<Tensor, Tensor>(output, indices);
+  return {output, indices};
 }
 
 TORCH_IMPL_FUNC(avg_pool2d_out_mps)
