@@ -1977,7 +1977,7 @@ flex_attention_supported_platform = unittest.skipUnless(
         and torch.utils._triton.has_triton()
         and torch.cuda.get_device_capability() >= (8, 0)
     ),
-    "Requires CUDA and Triton, XPU and triton, or CPU with avx2 and later",
+    "Requires CUDA and Triton, Intel GPU and triton, or CPU with avx2 and later",
 )
 if torch.version.hip and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName:
     e4m3_type = torch.float8_e4m3fnuz
