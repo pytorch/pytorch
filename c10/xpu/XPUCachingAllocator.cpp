@@ -588,7 +588,7 @@ class XPUAllocator : public DeviceAllocator {
     }
   }
 
-  void recordStream(const DataPtr& ptr, XPUStream stream) {
+  void recordStream(const DataPtr& ptr, c10::Stream stream) {
     if (!ptr.get()) {
       return;
     }
@@ -598,7 +598,8 @@ class XPUAllocator : public DeviceAllocator {
 
     Block* block = get_allocated_block(ptr.get());
     TORCH_CHECK(block, "No allocated block can be found.");
-    device_allocators[block->device]->recordStream(block, stream);
+    c10::xpu::XPUStream xpu_stream{stream};
+    device_allocators[block->device]->recordStream(block, xpu_stream);
   }
 
   DataPtr allocate(size_t size) override {
@@ -706,7 +707,7 @@ void raw_delete(void* ptr) {
 }
 
 void recordStream(const DataPtr& dataPtr, XPUStream stream) {
-  return allocator.recordStream(dataPtr, stream);
+  return allocator.recordStream(dataPtr, stream.unwrap());
 }
 
 REGISTER_ALLOCATOR(kXPU, &allocator)
