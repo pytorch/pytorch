@@ -217,6 +217,7 @@ def set_logs(
     ddp_graphs: bool = False,
     graph: bool = False,
     graph_code: bool = False,
+    graph_code_verbose: bool = False,
     graph_breaks: bool = False,
     graph_sizes: bool = False,
     guards: bool = False,
@@ -344,6 +345,9 @@ def set_logs(
         graph_code (:class:`bool`):
             Whether to emit the python source of the graph captured by TorchDynamo.
             Default: ``False``
+
+        graph_code_verbose (:class:`bool`):
+            Whether to emit verbose/intermediate FX pass logs for graph code. Default: ``False``
 
         graph_breaks (:class:`bool`):
             Whether to emit the graph breaks encountered by TorchDynamo.
@@ -486,6 +490,14 @@ def set_logs(
                 log_state.enable_log(
                     log_registry.log_alias_to_log_qnames.get(alias, alias), val
                 )
+            elif _is_valid_module(alias):
+                if not _has_registered_parent(alias):
+                    log_registry.register_log(alias, alias)
+                else:
+                    log_registry.register_child_log(alias)
+                log_state.enable_log(
+                    log_registry.log_alias_to_log_qnames.get(alias, alias), val
+                )
             else:
                 raise ValueError(
                     f"Unrecognized log or artifact name passed to set_logs: {alias}"
@@ -511,6 +523,7 @@ def set_logs(
         dtensor=dtensor,
         graph=graph,
         graph_code=graph_code,
+        graph_code_verbose=graph_code_verbose,
         graph_breaks=graph_breaks,
         graph_sizes=graph_sizes,
         guards=guards,
@@ -631,7 +644,6 @@ def help_message(verbose=False):
         printed_artifacts = log_registry.artifact_names
     else:
         printed_artifacts = log_registry.visible_artifacts
-
     if verbose:
         heading = "All registered names"
     else:

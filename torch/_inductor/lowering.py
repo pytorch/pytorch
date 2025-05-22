@@ -2621,6 +2621,10 @@ make_fallback(aten.exponential.default, warn=False)  # (fails accuracy on test_t
 make_fallback(aten._pdist_forward)  # Has decomp. Needs benchmarks
 make_fallback(aten.soft_margin_loss_backward, warn=False)  # py_impl?
 make_fallback(aten._fused_rms_norm, warn=False)  # (MPS-only and faster than decomp)
+if torch.xpu.is_available():
+    make_fallback(
+        aten.embedding_dense_backward, warn=False
+    )  # (XPU-only and faster than decomp)
 
 
 # 1.5) Easy or Impossible
@@ -3114,6 +3118,7 @@ def _assert_scalar(data, msg):
     # NB: These will be handled at codegen time
     # Not sure if we are guaranteed to be able to serve out truth from the
     # deferred_runtime_asserts, TODO: try this assert out
+    # See [NOTE] Codegen runtime asserts in Inductor
     # assert bool(data.scalar), data
     return None
 

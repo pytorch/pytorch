@@ -1,8 +1,14 @@
 # mypy: allow-untyped-defs
+import hashlib
 import logging
 from collections.abc import Sequence
 from typing import cast
 
+from torch._inductor.codegen.cuda.cutlass_python_evt import (
+    CutlassEVTCodegen,
+    MockCutlassHandler,
+)
+from torch._inductor.utils import Placeholder
 from torch.utils._ordered_set import OrderedSet
 
 from ...._dynamo.utils import counters
@@ -58,16 +64,15 @@ class CUDACPPScheduling(BaseScheduling):
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
-        if self.is_cuda_cpp_template(node1) and isinstance(node2, SchedulerNode):
+        if self.is_cuda_cpp_template(node1) and isinstance(node2, BaseSchedulerNode):
             assert node1.node, "node1.node should not be None"
-            assert node2.node, "node2.node should not be None"
             return self._can_fuse_epilogue_impl(
                 cast(CUDATemplateBuffer, node1.node),
                 [],
                 node2,  # type: ignore[arg-type]
             )
         elif self.is_cuda_cpp_fused_template(node1) and isinstance(
-            node2, SchedulerNode
+            node2, BaseSchedulerNode
         ):
             assert node1.node, "node1.node should not be None"
             assert node2.node, "node2.node should not be None"
@@ -90,10 +95,16 @@ class CUDACPPScheduling(BaseScheduling):
                 if config.triton.descriptive_names
                 else ""
             )
-            kernel_name = "_".join(["cuda", fused_name, wrapper.next_kernel_suffix()])
+
             # use the original src_code as the key
+            kernel_hash = hashlib.sha256(src_code.encode("utf-8")).hexdigest()[:8]
+            if fused_name == "fused":
+                # no EVT kernel, use the original kernel name
+                kernel_name = f"cutlass_{kernel_hash}"
+            else:
+                kernel_name = f"cutlass_{fused_name}_{kernel_hash}"
             wrapper.src_to_kernel[src_code] = kernel_name
-            src_code = src_code.replace("KERNEL_NAME", kernel_name)
+            src_code = src_code.replace(str(Placeholder.KERNEL_NAME), kernel_name)
 
             _, _, kernel_path = get_path(code_hash(src_code), "py")
 
@@ -138,9 +149,21 @@ class CUDACPPScheduling(BaseScheduling):
         with kernel:
             for node in [template_node, *epilogue_nodes]:
                 node.mark_run()
-            src_code = render()
+
+            # typically there is a codegen pass which runs after mark_run
+            # for this kernel we've already generated the C++ code, but we still
+            # need to let the kernel know about loads/stores that occur in the fused
+            # kernel for memory planning to properly optimize allocations
+            ctb.emulate_store_fn()
+            for node in epilogue_ir_nodes:
+                with V.set_ops_handler(MockCutlassHandler(V.get_ops_handler())):
+                    assert isinstance(
+                        node, ComputedBuffer
+                    )  # Not sure why we need to do this again
+                    node.get_store_function()(CutlassEVTCodegen.get_index_vars(node))
 
         with V.set_kernel_handler(kernel):
+            src_code = render()
             node_schedule = [template_node, *epilogue_nodes]
             kernel_name = self.define_kernel(src_code, node_schedule)
 
@@ -187,45 +210,57 @@ class CUDACPPScheduling(BaseScheduling):
         - bool: True if the given node can be fused with the epilogue, False otherwise.
 
         """
-
         why = WhyNoFuseNames(cuda_template_buffer.get_name(), node_to_fuse.get_name())
 
-        ir_node_to_fuse = node_to_fuse.node
-        # for typing
-        assert ir_node_to_fuse
+        scheduler_nodes_to_fuse = node_to_fuse.get_nodes()
 
         assert isinstance(cuda_template_buffer, CUDATemplateBuffer)
-        if not isinstance(ir_node_to_fuse, ComputedBuffer):
-            return False
-        if not isinstance(ir_node_to_fuse.data, Pointwise):
-            return False
-        # We can fuse a Pointwise op that depends on the last fused epilogue node
-        # if any. If there is no epilogue node yet, it needs to depend on the template
-        # node
-        node_name = ir_node_to_fuse.get_computed_buffer_name()  # type: ignore[attr-defined]
-        if node_name is None:
-            return False
 
-        assert (
-            len(existing_epilogue_nodes)
-            or cuda_template_buffer.get_name() in ir_node_to_fuse.get_read_names()
+        # Checks on constituent nodes
+        for s_node in scheduler_nodes_to_fuse:
+            node = s_node.node
+
+            if not isinstance(node, ComputedBuffer):
+                why(f"{node} is not a ComputedBuffer")
+                return False
+            elif not isinstance(node.data, Pointwise):
+                why(f"{node} is not a Pointwise op")
+                return False
+            elif not node.get_computed_buffer_name():  # type: ignore[attr-defined]
+                why(f"{node} does not have a computed buffer name")
+                return False
+
+            name = node.get_computed_buffer_name()  # type: ignore[attr-defined]
+            # dtype can differ, and strides can differ as long as they are broadcastable
+            if node.get_size() != cuda_template_buffer.get_size():
+                why(
+                    f"{name}'s size: {node.get_size()} differs from {cuda_template_buffer.get_name()}'s \
+size: {cuda_template_buffer.get_size()}"
+                )
+                return False
+
+        assert len(
+            existing_epilogue_nodes
+        ) or cuda_template_buffer.get_name() in OrderedSet(
+            [rd.name for rd in node_to_fuse.read_writes.reads]
         ), "First epilogue node must read from cuda template buffer"
 
-        # dtype can differ, and strides can differ as long as they are broadcastable
-        if ir_node_to_fuse.get_size() != cuda_template_buffer.get_size():
-            why(
-                f"{cuda_template_buffer.get_name()}'s size: {cuda_template_buffer.get_size()} \
-differs from {node_name}'s size: {ir_node_to_fuse.get_size()}"
-            )
-            return False
-        elif node_to_fuse.has_aliasing_or_mutation():
-            why(f"{node_name} has aliasing or mutation")
+        if node_to_fuse.has_aliasing_or_mutation():
+            why(f"{node_to_fuse.get_name()} has aliasing or mutation")
             return False
         elif node_to_fuse.is_reduction():
-            why(f"{node_name} is a reduction which is not yet supported by EVT")
+            why(
+                f"{node_to_fuse.get_name()} is a reduction which is not yet supported by EVT"
+            )
             return False
-        elif not config.epilogue_fusion:
-            why("epilogue fusion is not enabled")
+        elif (
+            not config.cuda.cutlass_epilogue_fusion_enabled
+            or not config.epilogue_fusion
+        ):
+            why("cutlass epilogue fusion is not enabled")
+            return False
+        elif not cuda_template_buffer.supports_epilogue_fusion:
+            why("epilogue fusion is only supported for TMA-enabled gemm ops")
             return False
 
         try:
@@ -235,7 +270,8 @@ differs from {node_name}'s size: {ir_node_to_fuse.get_size()}"
 
             CutlassEVTCodegen.ir_to_evt_python_code(
                 cuda_template_buffer.get_name(),
-                existing_epilogue_nodes + [node_to_fuse],
+                existing_epilogue_nodes + list(node_to_fuse.get_nodes()),
+                OrderedSet(),
             )
 
         except NotImplementedError as e:
