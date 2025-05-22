@@ -247,6 +247,7 @@ class _TorchDispatchModeKey(Enum):
     FAKE = auto()
     PROXY = auto()
     FUNCTIONAL = auto()
+    AC_TRACER = auto()
 
 
 def codegen_per_backend_entries() -> str:
