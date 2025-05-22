@@ -7580,7 +7580,7 @@ def _remove_effect_token_unbacked_bindings(
 
 # This helper function is used in passes that insert runtime assertions in the graph.
 # When accessing expressions representing input placeholders, we do not apply replacements
-# since those inputs should be seen for assertions that use them to be inserted. The only replacement
+# since those inputs should be seen by assertions that use them to be inserted. The only replacement
 # that we apply is unbacked renaming.
 def _get_placeholder_expr(sym_node: SymNode) -> sympy.Expr:
     shape_env = sym_node.shape_env
