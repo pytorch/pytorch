@@ -1791,7 +1791,13 @@ def forward(self, child : torch.Tensor):
 
     def test_map_pytree_return(self):
         def _construct_pytree(a):
-            return (a, [[[a]]], a, (a, (a,), a), {"a": a})
+            return (
+                a.clone(),
+                [[[a.clone()]]],
+                a.clone(),
+                (a.clone(), (a.clone(),), a.clone()),
+                {"a": a.clone()},
+            )
 
         def f(x):
             def inner_f(xs):
@@ -1823,7 +1829,14 @@ def forward(self, L_x_ : torch.Tensor):
                 body_graph,
                 """\
 def forward(self, child : torch.Tensor):
-    return (child, child, child, child, child, child, child)""",
+    child_1 = child.clone()
+    child_2 = child.clone()
+    child_3 = child.clone()
+    child_4 = child.clone()
+    child_5 = child.clone()
+    child_6 = child.clone()
+    child_7 = child.clone();  child = None
+    return (child_1, child_2, child_3, child_4, child_5, child_6, child_7)""",
             )
 
     def test_map_kwargs(self):
@@ -6902,7 +6915,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         def test(pred, x):
             def true_fn(x):
-                return x
+                return x.clone()
 
             def false_fn(x):
                 return -x
@@ -6926,7 +6939,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         def test(pred, mode, x):
             def true_fn(x):
-                return x
+                return x.clone()
 
             def false_fn(x):
                 return -x
