@@ -4,7 +4,7 @@ import itertools
 import sys
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Iterator
-from typing import Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Callable, Literal, Optional, overload, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 
@@ -24,6 +24,8 @@ U = TypeVar("U")
 
 
 Split = tuple[sympy.Expr, ...]
+VarsAndRanges = tuple[list[sympy.Symbol, ...], list[sympy.Expr]]
+
 
 loop_tiling_log = torch._logging.getArtifactLogger(__name__, "loop_tiling")
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
@@ -190,9 +192,30 @@ class FusedNormalizedReadsWrites:
     var_ranges: dict[sympy.Symbol, int]
 
 
+@overload
 def get_pw_red_splits(
-    n: "SchedulerNode", pointwise_numel: sympy.Expr, red_numel: sympy.Expr
-) -> tuple[tuple[list[sympy.Symbol], list[int]], tuple[list[sympy.Symbol], list[int]]]:
+    n: "SchedulerNode",
+    pointwise_numel: sympy.Expr,
+    red_numel: sympy.Expr,
+    none_if_not_divisible: Literal[True],
+) -> Optional[tuple[VarsAndRanges, VarsAndRanges]]: ...
+
+
+@overload
+def get_pw_red_splits(
+    n: "SchedulerNode",
+    pointwise_numel: sympy.Expr,
+    red_numel: sympy.Expr,
+    none_if_not_divisible: Literal[False] = False,
+) -> tuple[VarsAndRanges, VarsAndRanges]: ...
+
+
+def get_pw_red_splits(
+    n: "SchedulerNode",
+    pointwise_numel: sympy.Expr,
+    red_numel: sympy.Expr,
+    none_if_not_divisible=False,
+) -> Optional[tuple[VarsAndRanges, VarsAndRanges]]:
     if n.is_reduction() or sympy_product(n._body.sizes[0]) == pointwise_numel:
         return (
             (n._body.iter_vars, n._body.sizes[0]),
@@ -206,6 +229,7 @@ def get_pw_red_splits(
         prod *= n._body.sizes[0][i]
         if prod == red_numel:
             break
+        i -= 1
 
     if i >= 0:
         pw_splits = n._body.sizes[0][0:i]
@@ -215,10 +239,13 @@ def get_pw_red_splits(
         red_vars = n._body.iter_vars[i:]
         return (iter_vars, pw_splits), (red_vars, red_splits)  # type: ignore[return-value]
 
-    # TODO - handle, not sure if possible
-    raise RuntimeError(
-        f"Unhandled node: size: {n._body.sizes}, pw: {pointwise_numel}, red: {red_numel}"
-    )
+    if none_if_not_divisible:
+        return None
+    else:
+        return (
+            (n._body.iter_vars, n._body.sizes[0]),
+            (n._body.reduce_vars, n._body.sizes[1]),
+        )
 
 
 class NodeSplitGetter:
@@ -244,9 +271,17 @@ class NodeSplitGetter:
             if not isinstance(n, torch._inductor.scheduler.SchedulerNode):
                 continue
 
-            (_, n_pw_splits), (_, n_red_splits) = get_pw_red_splits(
-                n, self.pointwise_numel, self.red_numel
+            # if we can't split the pw ranges into a (pw, red) split,
+            # dont add as a split option, but do make sure we check that this size
+            # is splittable
+            maybe_splits = get_pw_red_splits(
+                n, self.pointwise_numel, self.red_numel, none_if_not_divisible=True
             )
+            if maybe_splits is None:
+                self.all_node_sizes.add(n._body.sizes)
+                continue
+
+            (_, n_pw_splits), (_, n_red_splits) = maybe_splits
 
             # fill in reduction size
             n_pw_splits, n_red_splits = (
@@ -416,7 +451,7 @@ def apply_var_mapping(
 
 def extract_normalized_read_writes(
     node: Union["FusedSchedulerNode", "SchedulerNode"],
-) -> FusedNormalizedReadsWrites:
+) -> Optional[FusedNormalizedReadsWrites]:
     """Extracts index variables, reduce variables, read/write expressions, and variable ranges from a fused node."""
     reads: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
     writes: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
@@ -429,6 +464,15 @@ def extract_normalized_read_writes(
         if not V.graph.scheduler.can_buffer_be_removed_through_fusion(buf, op_names)
     )
     inputs = OrderedSet(dep.name for dep in node.read_writes.reads)
+    pointwise_numel: sympy.Expr = node.group[1][0]
+    red_numel: sympy.Expr = node.group[1][1]
+
+    # TODO - a few dynamic shapes issues to resolve
+    if any(
+        (isinstance(var, sympy.Expr) and not var.is_constant())
+        for var in (pointwise_numel, red_numel)
+    ):
+        return None
 
     pw_splits, red_splits = NodeSplitGetter(node).get_node_splits()
 
@@ -437,8 +481,6 @@ def extract_normalized_read_writes(
         pw_splits, red_splits, prefix="n"
     )
     node = node
-    pointwise_numel: sympy.Expr = node.group[1][0]
-    red_numel: sympy.Expr = node.group[1][1]
 
     for n in list(node.get_nodes()):
         if not isinstance(n, torch._inductor.scheduler.SchedulerNode):
@@ -558,7 +600,7 @@ class CoalesceVarAnalysis:
 
 def analyze_memory_coalescing(
     fused_node: Union["FusedSchedulerNode", "SchedulerNode"],
-) -> CoalesceVarAnalysis:
+) -> Optional[CoalesceVarAnalysis]:
     """
     Find variables that coalesce the reads and writes and score the total size.
 
@@ -573,6 +615,9 @@ def analyze_memory_coalescing(
     """
 
     norm_read_writes = extract_normalized_read_writes(fused_node)
+
+    if norm_read_writes is None:
+        return None
 
     reads = norm_read_writes.reads
     writes = norm_read_writes.writes
