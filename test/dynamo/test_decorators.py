@@ -644,9 +644,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             fn(torch.ones(10), torch.ones(1))
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
-            msg = """
-Applying `nonstrict_trace` to function <trace_me>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region.
-"""  # NOQA: B950
+            msg = "Applying `nonstrict_trace` to function <trace_me>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region."  # NOQA: B950
             self.assertIn(msg, str(e))
 
     def test_nonstrict_trace_custom_class_error(self):
