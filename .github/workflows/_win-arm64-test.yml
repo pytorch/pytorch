@@ -121,4 +121,4 @@ jobs:
         run: |
           call pytorch/.ci/pytorch/windows/arm64/bootstrap_tests.bat
           set GIT_BASH=%DEPENDENCIES_DIR%\git\usr\bin\bash.exe
-          "%GIT_BASH%" -c "bash --noprofile --norc .ci/pytorch/win-arm64-test.sh"
+          "%GIT_BASH%" -c "bash --noprofile --norc pytorch/.ci/pytorch/win-arm64-test.sh"
