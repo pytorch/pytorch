@@ -164,11 +164,13 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
   cusparseComputeType compute_type;
   auto compression_factor = 9;
 
+  #ifdef USE_ROCM
   TORCH_CHECK(
       isHipSparseLtSupported(),
       "hipSparseLt not supported on this device, supported architectures: "
       "gfx950, gfx942."
       "required ROCM version: 6.4.0 or later.");
+  #endif
 
   switch (compressed_A.scalar_type()) {
     case at::ScalarType::Char:
