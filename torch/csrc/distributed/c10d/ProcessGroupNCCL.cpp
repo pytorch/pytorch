@@ -1080,6 +1080,7 @@ void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
   LOG(INFO) << logPrefix() << "Eagerly connecting nccl backend with device "
             << device;
   initNCCLComm(key, device, OpType::ALLREDUCE);
+  eagerInit = true;
 }
 
 bool ProcessGroupNCCL::useNonblocking() {
@@ -2799,6 +2800,24 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
   // For batch_isend_irecv, ncclGroupStart() would be called upfront
   bool batchP2P = ncclActiveGroupCounter_ > 0;
   bool singleP2POp = isP2POp(opType, batchP2P);
+  // For point-to-point communication, lower rank of the two will get unique id.
+  if (rank_ == 0 || (singleP2POp && p2pRank == 0)) {
+    C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID), std::nullopt);
+  }
+
+  if (getCvarBool(TORCH_NCCL_BCAST_UNIQUEID, true) && !isSendRecvSelf) {
+    // Broadcast so that each process can have a unique NCCL ID
+    auto timeStarted = std::chrono::steady_clock::now();
+    broadcastUniqueNCCLID(&ncclID, singleP2POp, deviceKey, p2pRank);
+    auto timerDeltaMs =
+        std::chrono::duration_cast<std::chrono::duration<double>>(
+            std::chrono::steady_clock::now() - timeStarted)
+            .count() *
+        1000;
+    LOG(INFO) << logPrefix()
+              << "ProcessGroupNCCL broadcast unique ID through store took "
+              << timerDeltaMs << " ms";
+  }
 
   // Get the device index
   auto deviceIndex = device.index();
@@ -3809,23 +3828,77 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   std::string key;
-  int p2pRank = 0, p2pTargetRank = 0;
-  bool isSendRecvSelf = false;
+  int p2pRank;
+  int p2pTargetRank;
+  const bool isSendRecvSelf = rank_ == peer;
   // For batch_isend_irecv, ncclGroupStart() would be called upfront
   bool batchP2P = ncclActiveGroupCounter_ > 0;
-  if (batchP2P) {
-    // For batch P2P, we need to treat it like a collective when selecting
-    // communicator, because other ranks can call into this batch other than my
-    // rank and my peer
+
+  std::shared_ptr<NCCLComm> ncclComm = nullptr;
+  if (this->eagerInit) {
+    /* In eagerInit mode, reuse the parent comm.  Do not lazily create
+     * p2p communicators. */
+    bool showSerializationWarning =
+        getCvarBool(TORCH_NCCL_SHOW_EAGER_INIT_P2P_SERIALIZATION_WARNING, true);
+    if (!batchP2P && showSerializationWarning) {
+      TORCH_WARN_ONCE(c10::str(
+          logPrefix(),
+          "An unbatched P2P op (send/recv) was called on this ProcessGroup with size ",
+          groupRanks().size(),
+          ".  In eager initialization mode, unbatched P2P ops are treated as ",
+          "independent collective ops, and are thus serialized with ",
+          "all other ops on this ProcessGroup, including other P2P ",
+          "ops. To avoid serialization, either create additional ",
+          "independent ProcessGroups for the P2P ops or use batched ",
+          "P2P ops. You can squash this warning by setting the environment variable ",
+          "TORCH_NCCL_SHOW_EAGER_INIT_P2P_SERIALIZATION_WARNING to false."));
+    }
+
     key = getKeyFromDevice(device);
     p2pRank = rank_;
     p2pTargetRank = peer;
+    ncclComm = getNCCLComm(key);
+
+    if (ncclComm == nullptr) {
+      C10_THROW_ERROR(
+          NotImplementedError,
+          "Parent communicator missing in eager initialization mode. "
+          "Something went wrong. Please contact the PyTorch developers "
+          "with this error message.");
+    }
+    if (!coalescing_state_) {
+      // Bump P2P sequence number. Don't do so if it's a batch P2P, it will be
+      // bumped in `startCoalescing`.
+      seqP2P_++;
+    }
+  } else if (batchP2P) {
+    // TODO(whc) - unclear why we special-case batchP2P to avoid this path, but
+    // I preserved this existing special case.
+    key = getKeyFromDevice(device);
+    p2pRank = rank_;
+    p2pTargetRank = peer;
+    ncclComm = getNCCLComm(key);
   } else {
-    // For single P2P, preserve the old two-rank behavior (to avoid perf diff)
+    // We create special 2-rank communicators for each pair of
+    // send/recv ranks.  This limitation exists for two reasons: (1)
+    // we use a single stream per communicator, so if multiple
+    // unbatched p2p operations are issued on the same communicator,
+    // they would map to the same stream and thus would be serialized;
+    // and (2) Nvidia NCCL does not allow multiple p2p operations to
+    // be issued on the same communicator over different streams.
+
+    TORCH_WARN_ONCE(
+        "An unbatched P2P op (send/recv) was called on this "
+        "ProcessGroup with size {groupRanks().size()}.  In lazy "
+        "initialization mode, this will result in a new 2-rank NCCL "
+        "communicator to be created.");
+
     key = getKeySendRecv(rank_, peer);
+    /* if we are creating a new comm, reset the p2pRank and
+     * p2pTargetRank to correspond to this new 2-process communicator */
     p2pRank = rank_ <= peer ? 0 : 1;
-    isSendRecvSelf = rank_ == peer;
     p2pTargetRank = isSendRecvSelf ? 0 : 1 - p2pRank;
+    ncclComm = getNCCLComm(key);
 
     if (!coalescing_state_) {
       // Bump P2P sequence number.
@@ -3837,7 +3910,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // coalesced or individual
   op_id_++;
 
-  std::shared_ptr<NCCLComm> ncclComm = getNCCLComm(key);
   if (ncclComm == nullptr) {
     ncclComm = initNCCLComm(key, device, opType, p2pRank, isSendRecvSelf);
   }
