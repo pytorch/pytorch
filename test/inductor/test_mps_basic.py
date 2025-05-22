@@ -3,6 +3,8 @@ import importlib
 import os
 import sys
 
+import numpy as np
+
 import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes
@@ -159,6 +161,24 @@ class MPSBasicTests(TestCase):
                 return torch.nn.functional.rms_norm(x, x.shape, w)
 
         self.common(fn, (torch.rand(10), torch.ones(10)))
+
+    def test_compile_numpy_scalar(self):
+        def fn(x, y):
+            return x / y
+
+        self.common(fn, (torch.rand(10), np.exp(0.3)))
+
+    def test_conv_transpose_channels_last(self):
+        def fn(x, y):
+            return torch.nn.functional.conv_transpose2d(x, y, stride=1, padding=1)
+
+        self.common(
+            fn,
+            (
+                torch.rand(1, 1, 16, 16).to(memory_format=torch.channels_last),
+                torch.rand(1, 4, 8, 8),
+            ),
+        )
 
 
 if __name__ == "__main__":
