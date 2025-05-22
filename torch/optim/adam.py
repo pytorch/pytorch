@@ -84,6 +84,7 @@ class Adam(Optimizer):
                 )
             if betas[1].numel() != 1:
                 raise ValueError("Tensor betas[1] must be 1-element")
+        betas = tuple(map(_to_scalar, betas))
 
         defaults = {
             "lr": lr,
