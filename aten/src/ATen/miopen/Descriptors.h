@@ -5,6 +5,7 @@
 #include <ATen/miopen/miopen-wrapper.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
+#include <c10/macros/Export.h>
 
 namespace at { namespace native {
 
@@ -64,7 +65,7 @@ private:
   std::unique_ptr<T, DescriptorDeleter<T, dtor>> desc_;
 };
 
-class TensorDescriptor
+class TORCH_CUDA_CPP_API TensorDescriptor
   : public Descriptor<miopenTensorDescriptor,
                       &miopenCreateTensorDescriptor,
                       &miopenDestroyTensorDescriptor>
