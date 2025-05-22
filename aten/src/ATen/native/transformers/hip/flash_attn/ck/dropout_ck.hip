@@ -94,24 +94,17 @@ at::Tensor rand_uniform_int(
 }
 
 
-double andy_lugo(double in) {
-  std::cout << "ANDY LUGO: " << in << std::endl;
-  return -1.0;
-}
-
 
 
 } // namespace
 
 
 
-TORCH_LIBRARY_FRAGMENT(xformers, m) {
-  m.def(TORCH_SELECTIVE_SCHEMA("xformers::_ck_rand_uniform(float p, Tensor out) -> Tensor"));
-//  m.def(TORCH_SELECTIVE_SCHEMA("xformers::_andy_lugo(float in) -> float"));
+TORCH_LIBRARY_FRAGMENT(ck, m) {
+  m.def(TORCH_SELECTIVE_SCHEMA("ck::_ck_rand_uniform(float p, Tensor out) -> Tensor"));
 }
 
 
-TORCH_LIBRARY_IMPL(xformers, CUDA, m) {
-  m.impl(TORCH_SELECTIVE_NAME("xformers::_ck_rand_uniform"), TORCH_FN(rand_uniform_int));
-//  m.impl(TORCH_SELECTIVE_NAME("xformers::_andy_lugo"),TORCH_FN(andy_lugo));
+TORCH_LIBRARY_IMPL(ck, CUDA, m) {
+  m.impl(TORCH_SELECTIVE_NAME("ck::_ck_rand_uniform"), TORCH_FN(rand_uniform_int));
 }
