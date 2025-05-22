@@ -103,6 +103,76 @@ struct tanh_functor {
   }
 };
 
+// Bool specialization is need to workaround compiler crashes on MacOS-13
+// Otherwise attempts to invoke will fail to create state object with error
+// Error Domain=AGXMetal13_3 Code=3 "Compiler encountered an internal error"
+
+struct log_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(::precise::log(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return ::precise::log(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // log(x+yi) = ln(sqrt(x^2 + y^2)) + iarctan(y/x)
+    auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
+    auto real = ::precise::log(magnitude);
+    auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
+    return T(real, imag);
+  }
+  inline float operator()(const bool x) {
+    return x ? 0 : -INFINITY;
+  }
+};
+
+struct log10_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(::precise::log10(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return ::precise::log10(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // Base 10 complex log = ln(x+yi)/ln(10)
+    auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
+    auto real = ::precise::log(magnitude);
+    auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
+    return complex_div(T(real, imag), T(::precise::log(10), 0));
+  }
+  inline float operator()(const bool x) {
+    return x ? 0 : -INFINITY;
+  }
+};
+
+struct log2_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(::precise::log2(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return ::precise::log2(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // Base 10 complex log = ln(x+yi)/ln(2)
+    auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
+    auto real = ::precise::log(magnitude);
+    auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
+    return complex_div(T(real, imag), T(::precise::log(2), 0));
+  }
+  inline float operator()(const bool x) {
+    return x ? 0 : -INFINITY;
+  }
+};
+
 struct exp2_functor {
   template <typename T>
   inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
@@ -210,6 +280,9 @@ REGISTER_UNARY_OP(bitwise_not, bool, bool);
   REGISTER_UNARY_OP(erfinv, DTYPE1, DTYPE0);       \
   REGISTER_UNARY_OP(exp, DTYPE1, DTYPE0);          \
   REGISTER_UNARY_OP(exp2, DTYPE1, DTYPE0);         \
+  REGISTER_UNARY_OP(log, DTYPE1, DTYPE0);          \
+  REGISTER_UNARY_OP(log10, DTYPE1, DTYPE0);        \
+  REGISTER_UNARY_OP(log2, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sinc, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sqrt, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(rsqrt, DTYPE1, DTYPE0);        \
@@ -235,6 +308,9 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
   REGISTER_UNARY_OP(neg, DTYPE##2, DTYPE##2);   \
   REGISTER_UNARY_OP(exp, DTYPE##2, DTYPE##2);   \
   REGISTER_UNARY_OP(exp2, DTYPE##2, DTYPE##2);  \
+  REGISTER_UNARY_OP(log, DTYPE##2, DTYPE##2);   \
+  REGISTER_UNARY_OP(log10, DTYPE##2, DTYPE##2); \
+  REGISTER_UNARY_OP(log2, DTYPE##2, DTYPE##2);  \
   REGISTER_UNARY_OP(tanh, DTYPE##2, DTYPE##2);  \
   REGISTER_UNARY_OP(sqrt, DTYPE##2, DTYPE##2);  \
   REGISTER_UNARY_OP(rsqrt, DTYPE##2, DTYPE##2); \
