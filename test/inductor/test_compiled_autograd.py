@@ -4507,8 +4507,7 @@ if torch.distributed.is_available() and HAS_CUDA:
         test_dtensor.TestDTensorCompile
     )
 
-xfail_hops = {
-}
+xfail_hops = {}
 
 
 class TestCompiledAutogradOpInfo(TestCase):
