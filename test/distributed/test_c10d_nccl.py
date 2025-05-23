@@ -50,7 +50,6 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     skip_if_lt_x_gpu,
     skip_if_rocm_multiprocess,
-    sm_is_or_higher_than,
     TEST_SKIPS,
     with_dist_debug_levels,
     with_nccl_blocking_wait,
@@ -284,16 +283,17 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     def setUp(self):
         super().setUp()
-        # Need to skip return code checking for these tests since the child
-        # processes don't exit cleanly in some cuda versions
-        self.skip_return_code_checks = [
-            self.test_nan_assert_float16.__wrapped__,
-            self.test_nan_assert_float32.__wrapped__,
-            self.test_nan_assert_float64.__wrapped__,
-            self.test_nan_assert_bfloat16.__wrapped__,
-            self.test_nan_assert_float8_e4m3fn.__wrapped__,
-            self.test_nan_assert_float8_e5m2.__wrapped__,
-        ]
+
+        # These tests are expected to throw SIGABRT(6); adding the negative sign
+        # bc the test return code is actually -6
+        self.special_return_code_checks = {
+            self.test_nan_assert_float16.__wrapped__: -signal.SIGABRT,
+            self.test_nan_assert_float32.__wrapped__: -signal.SIGABRT,
+            self.test_nan_assert_float64.__wrapped__: -signal.SIGABRT,
+            self.test_nan_assert_bfloat16.__wrapped__: -signal.SIGABRT,
+            self.test_nan_assert_float8_e4m3fn.__wrapped__: -signal.SIGABRT,
+            self.test_nan_assert_float8_e5m2.__wrapped__: -signal.SIGABRT,
+        }
 
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
@@ -534,14 +534,14 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # confirm enable/disable flag works
         backend._set_enable_nan_check(False)
-        pg.allreduce(nan_tensor)
+        # Note: using all-gather here bc some NCCL/SM version does not support
+        # FP8 reduction
+        pg._allgather_base(output, nan_tensor)
 
         backend._set_enable_nan_check(True)
-        with self.assertRaises(RuntimeError):
-            # Note: using all-gather here bc FP8 types do not support reduce ops
-            # at the moment
-            pg._allgather_base(output, nan_tensor)
+        pg._allgather_base(output, nan_tensor)
         dist.destroy_process_group()
+
         # reset env
         os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
 
@@ -576,16 +576,13 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     def test_nan_check(self):
         # Not expecting an error, NaN check should not make legit code fail
         device = torch.device(f"cuda:{self.rank:d}")
-        if not sm_is_or_higher_than(device, 8, 0):
-            self.skipTest("bf16 requires sm >= 8.0")
-
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="nccl", store=store, rank=self.rank, world_size=self.world_size
         )
-        x = torch.ones((10,), dtype=torch.bfloat16, device=device) * self.rank
-        t = torch.ones(3, 4, dtype=torch.bfloat16, device=device)
+        x = torch.ones((10,), device=device) * self.rank
+        t = torch.ones(3, 4, device=device)
         c10d.broadcast(x, src=0)
         c10d.all_reduce(t)
         c10d.barrier()
@@ -683,6 +680,56 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             self._helper_test_extra_cuda_context_by_nvml()
         except ModuleNotFoundError:
             self._helper_test_extra_cuda_context_by_memory()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_extra_cuda_context_sync_ops(self):
+        # Loop a bunch of sync ops and see if any of them creates extra context.
+        # Requires nvml to check number of processes resident on a device.
+        try:
+            import pynvml
+
+            pynvml.nvmlInit()
+        except Exception:
+            self.skipTest("pynvml not available")
+
+        # Check if non-0 ranks would create extra CUDA context on device 0
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank:d}")
+        c10d.init_process_group(
+            backend="nccl",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            device_id=device,
+        )
+
+        x = torch.empty((1,), device=device)
+        y = torch.empty((self.world_size,), device=device)
+
+        c10d.all_reduce(x)
+        c10d.reduce(x, dst=0)
+        c10d.broadcast(x, src=0)
+        c10d.all_gather_into_tensor(y, x)
+        c10d.reduce_scatter_tensor(x, y)
+        c10d.barrier()
+
+        # Wait a bit for remote processes to touch my device
+        if self.rank == 0:
+            time.sleep(5)
+
+        handle = pynvml.nvmlDeviceGetHandleByIndex(self.rank)
+        processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+        nprocs = len(processes)
+
+        # Don't exit till rank 0 is done with the nvml detection
+        c10d.barrier()
+        c10d.destroy_process_group()
+        self.assertLessEqual(
+            nprocs,
+            1,
+            f"Found {nprocs} processes creating contexts on {device}, expecting 1 at most",
+        )
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
