@@ -1000,18 +1000,16 @@ class SideEffects:
                             )
                     elif (
                         isinstance(var, variables.UserDefinedObjectVariable)
-                        # slot doesn't have `__dict__`, but its setter doesn't
-                        # have side effect anyways.
-                        and not var.is_slot_attr(name)
-                        # conservatively assume all the other set descriptors
-                        # have side-effecting setter.
+                        # member descriptor doesn't go through __dict__, and are
+                        # safe to do normal setattr.
+                        and not var.is_member_descriptor(name)
+                        # setattr would trigger the `__set__` method on
+                        # descriptor, Dynamo should've already traced that
+                        # descriptor logic at this point, so we don't want to
+                        # trigger it again.
                         and var.is_set_descriptor(name)
                     ):
                         # `object.__getattribute__(obj, "__dict__")[key] = value`
-                        # is the safest, because even `object.__setattr__` could
-                        # user code if `key` is a descriptor on `type(obj)`.
-                        # Dynamo should've already traced that descriptor logic
-                        # at this point, so we don't want to trigger it again.
                         cg.add_push_null(
                             lambda: cg.load_import_from(
                                 utils.__name__, "safe_setattr_via_dict"

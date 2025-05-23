@@ -912,22 +912,24 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Emulate
             # https://github.com/python/cpython/blob/3.11/Objects/object.c#L1371-L1452
             # NOTE we use `type(...)` to ignore instance attrs.
-            setter = NO_SUCH_SUBOBJ
             descriptor = inspect.getattr_static(type(self.value), name, NO_SUCH_SUBOBJ)
-            if descriptor is not NO_SUCH_SUBOBJ:
-                setter = inspect.getattr_static(
-                    type(descriptor), "__set__", NO_SUCH_SUBOBJ
-                )
-            if setter is not NO_SUCH_SUBOBJ:
-                desc_source = None
-                func_source = None
-                if self.cls_source:
-                    desc_source = self.get_source_by_walking_mro(name)
-                    func_source = AttrSource(TypeSource(desc_source), "__set__")
-                desc_var = VariableTracker.build(tx, descriptor, desc_source)
-                func_var = VariableTracker.build(tx, setter, func_source)
-                args = [desc_var, self, value]
-                return func_var.call_function(tx, args, {})
+            # member descriptors have `__set__` impls that are safe to ignore.
+            if not inspect.ismemberdescriptor(descriptor):
+                setter = NO_SUCH_SUBOBJ
+                if descriptor is not NO_SUCH_SUBOBJ:
+                    setter = inspect.getattr_static(
+                        type(descriptor), "__set__", NO_SUCH_SUBOBJ
+                    )
+                if setter is not NO_SUCH_SUBOBJ:
+                    desc_source = None
+                    func_source = None
+                    if self.cls_source:
+                        desc_source = self.get_source_by_walking_mro(name)
+                        func_source = AttrSource(TypeSource(desc_source), "__set__")
+                    desc_var = VariableTracker.build(tx, descriptor, desc_source)
+                    func_var = VariableTracker.build(tx, setter, func_source)
+                    args = [desc_var, self, value]
+                    return func_var.call_function(tx, args, {})
 
         # Emulate the standard setattr on instance dict.
         tx.output.side_effects.store_attr(self, name, value)
@@ -1040,9 +1042,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # has side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
         if not object_has_getattribute(self.value) and (
             subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
-            or (
-                inspect.ismemberdescriptor(subobj) and self.is_slot_attr(name)
-            )  # handle memberdecriptor and slots
+            or isinstance(
+                subobj, _collections._tuplegetter
+            )  # namedtuple fields are represented by _tuplegetter
+            or inspect.ismemberdescriptor(subobj)  # handle memberdecriptor
             or self._is_c_defined_property(subobj)
             or inspect.isgetsetdescriptor(
                 subobj
@@ -1061,11 +1064,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return subobj
 
-    def is_slot_attr(self, attr_name):
-        return attr_name in inspect.getattr_static(self.value, "__slots__", [])
+    def is_member_descriptor(self, attr_name):
+        attr = inspect.getattr_static(type(self.value), attr_name, NO_SUCH_SUBOBJ)
+        return inspect.ismemberdescriptor(attr)
 
     def is_set_descriptor(self, attr_name):
-        attr = inspect.getattr_static(self.value, attr_name, NO_SUCH_SUBOBJ)
+        attr = inspect.getattr_static(type(self.value), attr_name, NO_SUCH_SUBOBJ)
         if attr is NO_SUCH_SUBOBJ:
             return False
         setter = inspect.getattr_static(attr, "__set__", NO_SUCH_SUBOBJ)
