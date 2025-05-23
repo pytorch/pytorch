@@ -43,6 +43,7 @@ from .batchnorm import (
 )
 from .channelshuffle import ChannelShuffle
 from .container import (
+    BufferDict,
     Container,
     ModuleDict,
     ModuleList,
@@ -184,6 +185,7 @@ __all__ = [
     "BatchNorm2d",
     "BatchNorm3d",
     "Bilinear",
+    "BufferDict",
     "CELU",
     "CTCLoss",
     "ChannelShuffle",
