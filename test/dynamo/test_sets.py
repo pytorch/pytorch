@@ -375,7 +375,7 @@ class _SetBase(_FrozensetBase):
         set1 = self.thetype({"apple", "banana", "cherry"})
         set2 = self.thetype({"google", "microsoft", "apple"})
         set3 = self.thetype({"shoes", "flipflops", "apple"})
-        set1.intersection_update(set2, set3)
+        self.assertIsNone(set1.intersection_update(set2, set3))
         self.assertEqual(set1, {"apple"})
 
     @make_dynamo_test
@@ -383,15 +383,15 @@ class _SetBase(_FrozensetBase):
         set1 = self.thetype({"apple", "banana", "cherry"})
         set2 = self.thetype({"google", "microsoft", "apple"})
         set3 = self.thetype({"shoes", "flipflops", "sneakers"})
-        set1.difference_update(set2, set3)
+        self.assertIsNone(set1.difference_update(set2, set3))
         self.assertEqual(set1, {"banana", "cherry"})
 
     @make_dynamo_test
     def test_symmetric_difference_update(self):
         set1 = self.thetype({"apple", "banana", "cherry"})
         set2 = self.thetype({"google", "microsoft", "apple"})
-        set1.difference(set2)
-        self.assertEqual(set1, {"banana", "cherry", "apple"})
+        self.assertIsNone(set1.symmetric_difference_update(set2))
+        self.assertEqual(set1, {"banana", "cherry", "google", "microsoft"})
         self.assertRaises(TypeError, set1.symmetric_difference_update)
 
     @make_dynamo_test
