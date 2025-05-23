@@ -80,6 +80,7 @@ dnnl::memory::data_type get_onednn_dtype(
       return dnnl::memory::data_type::bf16;
     default:
       if (!allow_undef) {
+        std::cout<<"scalar type:"<<tensor.scalar_type()<<std::endl;
         TORCH_CHECK(
             false,
             c10::toString(tensor.scalar_type()),
