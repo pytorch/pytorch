@@ -208,7 +208,6 @@ class CUDAAllocator : public DeviceAllocator {
   virtual void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) = 0;
   virtual void raw_delete(void* ptr) = 0;
   virtual void init(int device_count) = 0;
-  virtual bool initialized() = 0;
   virtual double getMemoryFraction(c10::DeviceIndex device) = 0;
   virtual void setMemoryFraction(double fraction, c10::DeviceIndex device) = 0;
   virtual void enable(bool value) = 0;
