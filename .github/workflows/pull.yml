@@ -138,6 +138,7 @@ jobs:
           { config: "default", shard: 6, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
         ]}
       sync-tag: asan-build
+      allow-reuse-old-whl: true
     secrets: inherit
 
 
@@ -202,6 +203,7 @@ jobs:
           { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
+      allow-reuse-old-whl: true
     secrets: inherit
 
   linux-focal-py3_9-clang10-test:
@@ -237,6 +239,7 @@ jobs:
           { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
+      allow-reuse-old-whl: true
     secrets: inherit
 
   linux-focal-py3_13-clang10-test:
@@ -310,6 +313,7 @@ jobs:
       build-environment: linux-focal-cuda12.6-py3.10-gcc11
       docker-image: ${{ needs.linux-focal-cuda12_6-py3_10-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_6-py3_10-gcc11-build.outputs.test-matrix }}
+      allow-reuse-old-whl: true
     secrets: inherit
 
   linux-jammy-py3-clang12-mobile-build:
@@ -450,6 +454,7 @@ jobs:
           { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
         ]}
+      allow-reuse-old-whl: true
     secrets: inherit
 
   unstable-linux-focal-cuda12_6-py3_10-gcc11-sm89-build-xfail:
@@ -522,6 +527,7 @@ jobs:
         { include: [
           { config: "pr_time_benchmarks", shard: 1, num_shards: 1, runner: "linux.g4dn.metal.nvidia.gpu" },
         ]}
+      allow-reuse-old-whl: true
     secrets: inherit
 
   linux-focal-cuda12_8-py3_10-gcc9-inductor-test:
