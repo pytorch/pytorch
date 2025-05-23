@@ -319,8 +319,10 @@ Constants
 ~~~~~~~~~~~~~~~~~~~~~~
 
 ======================================= ===========================================
-``inf``                                     A floating-point positive infinity. Alias for :attr:`math.inf`.
-``nan``                                     A floating-point "not a number" value. This value is not a legal number. Alias for :attr:`math.nan`.
+``inf``                                 A floating-point positive infinity. Alias for :attr:`math.inf`.
+``nan``                                 A floating-point "not a number" value. Alias for :attr:`math.nan`.
+``e``                                   The base of the natural logarithm. Alias for :attr:`math.e`.
+``pi``                                  The constant π. Alias for :attr:`math.pi`.
 ======================================= ===========================================
 
 Pointwise Ops
