@@ -48,6 +48,7 @@ def patches(fn):
 
 
 class TestSelectAlgorithm(TestCase):
+    device_type = GPU_TYPE
     def setUp(self):
         super().setUp()
         if not is_big_gpu():
