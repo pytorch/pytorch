@@ -1,4 +1,4 @@
-numpy=1.22.3
+numpy=1.26.4
 pyyaml=6.0
 setuptools=72.1.0
 cmake=3.22.*
