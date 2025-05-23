@@ -1,8 +1,8 @@
 #include <c10/xpu/XPUFunctions.h>
 
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
-#include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/DnnlExt.h>
+#include <ATen/native/mkldnn/xpu/detail/Utils.h>
 
 #include <oneapi/dnnl/dnnl.hpp>
 #include <cstdint>
@@ -10,11 +10,11 @@
 namespace at::native::onednn {
 
 void woq_matmul_int4_impl(
-    Tensor& result, 
-    const Tensor& mat1_, 
-    const Tensor& mat2_, 
-    const Tensor& scale, 
-    const Tensor& zp, 
+    Tensor& result,
+    const Tensor& mat1_,
+    const Tensor& mat2_,
+    const Tensor& scale,
+    const Tensor& zp,
     int64_t group_size) {
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();
@@ -180,41 +180,32 @@ static inline void set_quant_primitive_attr(
       /* mask */ (1 << 0) + (1 << 1),
       {group_size, 1},
       get_onednn_dtype(scale));
-
-  if (zp.dim() == 1) {
-    pattr.set_zero_points(
-        DNNL_ARG_WEIGHTS,
-        /* mask */ 0,
-        {},
-        memory::data_type::s8);
-  } else {
-    pattr.set_zero_points(
-        DNNL_ARG_WEIGHTS,
-        /* mask */ (1 << 0) + (1 << 1),
-        {group_size, 1},
-        memory::data_type::s8);
-  }
+  pattr.set_zero_points(
+      DNNL_ARG_WEIGHTS,
+      /* mask */ (1 << 0) + (1 << 1),
+      {group_size, 1},
+      memory::data_type::s8);
 }
 
 void woq_matmul_int4_impl_cache(
-    Tensor& result, 
-    const Tensor& mat1, 
-    const Tensor& mat2, 
-    const Tensor& scale, 
-    const Tensor& zp, 
+    Tensor& result,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Tensor& scale,
+    const Tensor& zp,
     int64_t group_size) {
   auto a_sz = mat1.sizes();
   auto c_sz = result.sizes();
 
-  const int m = std::reduce(
-      a_sz.begin(), a_sz.end() - 1, 1, std::multiplies<int64_t>());
-  const int n = *(c_sz.end() - 1); 
+  const int m =
+      std::reduce(a_sz.begin(), a_sz.end() - 1, 1, std::multiplies<int64_t>());
+  const int n = *(c_sz.end() - 1);
   const int k = *(a_sz.end() - 1);
 
   const int64_t ldb = mat2.strides()[mat2.dim() - 2] * 8; // for int4 matmul
   const int64_t lda = mat1.strides()[mat1.dim() - 2];
   const int64_t ldc = result.strides()[result.dim() - 2];
-  
+
   bias_type_t b_type = bias_type_t::none;
   trans_type_t tt = trans_type_t::nt; // only support nt for int4 matmul
 
@@ -227,16 +218,16 @@ void woq_matmul_int4_impl_cache(
     TORCH_INTERNAL_ASSERT(
         false, "Unsupported data type for int4 matmul: ", mat1.scalar_type());
   }
-  
+
   auto f_attr = [&](primitive_attr& pattr) {
     pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-    
+
     if (jd == joint_dtypes_t::f16_int4) {
       pattr.set_fpmath_mode(dnnl::fpmath_mode::f16, true);
     } else if (jd == joint_dtypes_t::bf16_int4) {
       pattr.set_fpmath_mode(dnnl::fpmath_mode::bf16, true);
     }
-    
+
     set_quant_primitive_attr(pattr, scale, zp, group_size);
 
 #if ONEDNN_SUPPORT_DETERMINISTIC
@@ -247,13 +238,25 @@ void woq_matmul_int4_impl_cache(
 #endif
   };
 
-  int64_t zp_group_size = zp.dim() == 1 ? 0 : group_size;
+  int64_t zp_group_size = group_size;
   auto device_id = c10::xpu::current_device();
   auto& matmul_ext = matmul_primitive_create_and_cache(
-      jd, tt, b_type, m, n, k, lda, ldb, ldc, device_id, f_attr, group_size, zp_group_size);
+      jd,
+      tt,
+      b_type,
+      m,
+      n,
+      k,
+      lda,
+      ldb,
+      ldc,
+      device_id,
+      f_attr,
+      group_size,
+      zp_group_size);
 
   auto& engine = GpuEngineManager::Instance().get_engine();
-  
+
   int arg_off = 0;
   // set scale and zero point for matmul args
   matmul_ext.set_attribute(
@@ -265,33 +268,19 @@ void woq_matmul_int4_impl_cache(
             get_onednn_md(scale), engine, scale.data_ptr());
       });
 
-  // set zp_md for symmetric quantization
-  if (zp.dim() == 1) {
-    matmul_ext.set_attribute(
-        arg_off++,
-        DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS,
-        zp.data_ptr(),
-        [&]() {
-          return make_onednn_memory(get_onednn_md(zp), engine, zp.data_ptr());
-        });
-  } else {
-    // set zp_md for asymmetric quantization
-    matmul_ext.set_attribute(
-        arg_off++,
-        DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS,
-        zp.data_ptr(),
-        [&]() {
-          int n = mat2.sizes()[1];
-          int k = mat1.sizes()[1];
-
-          const int64_t num_groups = (uint64_t)(k / group_size);
-          memory zp_B_u4_m(
-              {{num_groups, n}, memory::data_type::u4, {n, 1}},
-              engine,
-              zp.data_ptr());
-          return zp_B_u4_m;
-        });
-  }
+  // set zp_md for asymmetric quantization
+  matmul_ext.set_attribute(
+      arg_off++,
+      DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS,
+      zp.data_ptr(),
+      [&]() {
+        int num_groups = k / group_size;
+        memory zp_usr_m(
+            {{num_groups, n}, memory::data_type::s8, {n, 1}},
+            engine,
+            zp.data_ptr());
+        return zp_usr_m;
+      });
 
   // set general args
   std::vector<std::pair<int, void*>> arg_handles;
@@ -307,7 +296,8 @@ void woq_matmul_int4_impl_cache(
   arg_handles.emplace_back(DNNL_ARG_SCRATCHPAD, scratchpad_tensor.data_ptr());
 
   auto& strm = GpuStreamManager::Instance().get_stream();
-  auto qint4_matmul_event = matmul_ext.execute(strm, engine, std::move(arg_handles), arg_off);
+  auto qint4_matmul_event =
+      matmul_ext.execute(strm, engine, std::move(arg_handles), arg_off);
 }
 
 void woq_matmul_int4(
@@ -328,8 +318,8 @@ void woq_matmul_int4(
   TORCH_CHECK(
       cur_device == mat1_.device(),
       "_weight_int4pack_mm_with_scales_and_zeros input should be on current device.");
-  
-  if(pri_cache) {
+
+  if (pri_cache) {
     woq_matmul_int4_impl_cache(result, mat1_, mat2_, scale, zp, group_size);
   } else {
     woq_matmul_int4_impl(result, mat1_, mat2_, scale, zp, group_size);
