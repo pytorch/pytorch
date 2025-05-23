@@ -1228,6 +1228,7 @@ class TestFxGraphCache(TestCase):
         """
         Test that we bump the generated_kernel_count metric on a cache hit.
         """
+        torch._logging.set_logs(inductor_metrics=True)
 
         def fn(x, y):
             return (x * y + y,)
@@ -1250,6 +1251,7 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
         self.assertEqual(metrics.generated_kernel_count, 2)
+        torch._logging.set_logs()
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -2260,6 +2262,7 @@ class TestAutotuneCache(TestCase):
     @unittest.skipIf(
         TEST_WITH_ROCM, "Requires static cuda launcher, which does not support ROCM"
     )
+    @config.patch({"use_static_cuda_launcher": True})
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"autotune_local_cache": False})
@@ -2284,7 +2287,7 @@ class TestAutotuneCache(TestCase):
         f_compiled = torch.compile(f, fullgraph=True)
 
         with PatchCaches():
-            f_compiled(x, y, a, b)
+            a1 = f_compiled(x, y, a, b)
 
             self.assertEqual(global_stats.autotune_remote, Stats(2, 0, 2))
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
@@ -2292,7 +2295,8 @@ class TestAutotuneCache(TestCase):
 
             # Don't reset FxGraphCache, see that it loads again
             torch._dynamo.reset()
-            f_compiled(x, y, a, b)
+            a2 = f_compiled(x, y, a, b)
+            self.assertEqual(a1, a2)
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 

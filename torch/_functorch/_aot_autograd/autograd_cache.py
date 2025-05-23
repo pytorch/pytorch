@@ -202,6 +202,13 @@ def check_node_safe(node: Node):
 
     # I'd love to use a match statement here, but it wasn't introduced until py3.10
     if node.op == "call_function":
+        if node.meta and node.meta.get("is_wrapped", False):
+            # This is fx.wrap function
+            # By default we BypassAOTAutogradCache for unknown functions,
+            # But if user explicitly specified cache hash - allow to cache it.
+            if node.meta.get("user_cache_hash", None):
+                return
+
         if not is_cacheable_function(node.target):
             module = getattr(node.target, "__module__", None)
             name = getattr(node.target, "__name__", None)
@@ -259,6 +266,15 @@ def check_cacheable(gm: torch.fx.GraphModule):
     for node in nodes:
         check_node_safe(node)
 
+    # Saved tensors hooks are globally set subgraphs,
+    # that are not used explicitly in the main graph.
+    # They are inlined in aot_autograd graphs.
+    # Subgraphs are only used for caching logic.
+    if hasattr(gm, "saved_tensors_hooks_pack_0"):
+        check_cacheable(gm.saved_tensors_hooks_pack_0)  # type: ignore[arg-type]
+        # We have guarantee of unpack sugraph existance if pack subgraph exists
+        check_cacheable(gm.saved_tensors_hooks_unpack_0)  # type: ignore[arg-type]
+
 
 def check_metadata_cacheable(metadata: ViewAndMutationMeta):
     """
@@ -292,6 +308,27 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         self.disable_amp = torch._C._is_any_autocast_enabled()
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
         self.autograd_config = config.save_config()
+        self.saved_tensors_hooks_fx_wrap_cache_hashes: tuple[list[str], list[str]] = (
+            [],
+            [],
+        )
+
+        if hasattr(gm, "saved_tensors_hooks_pack_0"):
+
+            def _add_wrapped_user_cache_hashes(_gm, _l):
+                for node in _gm.graph.nodes:
+                    if node.meta and node.meta.get("is_wrapped", False):
+                        _l.append(node.meta["user_cache_hash"])
+
+            _add_wrapped_user_cache_hashes(
+                gm.saved_tensors_hooks_pack_0,
+                self.saved_tensors_hooks_fx_wrap_cache_hashes[0],
+            )
+            _add_wrapped_user_cache_hashes(
+                gm.saved_tensors_hooks_unpack_0,
+                self.saved_tensors_hooks_fx_wrap_cache_hashes[1],
+            )
+
         try:
             # FXGraphCache has constraints on what can be pickled in its inductor
             # config. Check that the gm is cacheable by inductor first,
