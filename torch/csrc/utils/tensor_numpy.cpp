@@ -7,7 +7,7 @@
 #ifndef USE_NUMPY
 
 namespace torch::utils {
-PyObject* tensor_to_numpy(const at::Tensor&, bool) {
+TORCH_API PyObject* tensor_to_numpy(const at::Tensor&, bool) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
 at::Tensor tensor_from_numpy(
