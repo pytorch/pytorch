@@ -145,7 +145,7 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(PassBase):
                 for cb, msg in zip(callbacks, messages):
                     cb(node=node, assert_msg=f"{node}" + msg)
 
-            module.recompile()
+            #module.recompile()
 
         # Sometimes this pass would return a wrong graph where we have mismatched
         # node names in signature. Before we fix it, let's just skip it.
