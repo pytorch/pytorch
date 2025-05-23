@@ -74,7 +74,7 @@ myst_enable_extensions = [
     "html_image",
 ]
 
-html_baseurl = 'https://docs.pytorch.org/docs'  # needed for sphinx-sitemap
+html_baseurl = 'https://docs.pytorch.org/docs/stable/'  # needed for sphinx-sitemap
 sitemap_locales = [None]
 sitemap_excludes = [
     "search.html",
