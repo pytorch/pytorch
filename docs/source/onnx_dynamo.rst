@@ -45,39 +45,62 @@ See below a demonstration of exporter API in action with a simple Multilayer Per
 
 .. code-block:: python
 
-  import torch
-  import torch.nn as nn
+    class MLPModel(nn.Module):
+      def __init__(self):
+          super().__init__()
+          self.fc0 = nn.Linear(8, 8, bias=True)
+          self.fc1 = nn.Linear(8, 4, bias=True)
+          self.fc2 = nn.Linear(4, 2, bias=True)
+          self.fc3 = nn.Linear(2, 2, bias=True)
+          self.fc_combined = nn.Linear(8 + 8 + 8, 8, bias=True)  # Combine all inputs
 
-  class MLPModel(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.fc0 = nn.Linear(8, 8, bias=True)
-        self.fc1 = nn.Linear(8, 4, bias=True)
-        self.fc2 = nn.Linear(4, 2, bias=True)
-        self.fc3 = nn.Linear(2, 2, bias=True)
+      def forward(self, tensor_x: torch.Tensor, input_dict: dict, input_list: list):
+          """
+          Forward method that requires all inputs:
+          - tensor_x: A direct tensor input.
+          - input_dict: A dictionary containing the tensor under the key 'tensor_x'.
+          - input_list: A list where the first element is the tensor.
+          """
+          # Extract tensors from inputs
+          dict_tensor = input_dict['tensor_x']
+          list_tensor = input_list[0]
 
-    def forward(self, tensor_x: torch.Tensor):
-        tensor_x = self.fc0(tensor_x)
-        tensor_x = torch.sigmoid(tensor_x)
-        tensor_x = self.fc1(tensor_x)
-        tensor_x = torch.sigmoid(tensor_x)
-        tensor_x = self.fc2(tensor_x)
-        tensor_x = torch.sigmoid(tensor_x)
-        output = self.fc3(tensor_x)
-        return output
+          # Combine all inputs into a single tensor
+          combined_tensor = torch.cat([tensor_x, dict_tensor, list_tensor], dim=1)
 
-  model = MLPModel()
-  tensor_x = torch.rand((97, 8), dtype=torch.float32)
-  onnx_program = torch.onnx.export(model, (tensor_x,), dynamo=True)
+          # Process the combined tensor through the layers
+          combined_tensor = self.fc_combined(combined_tensor)
+          combined_tensor = torch.sigmoid(combined_tensor)
+          combined_tensor = self.fc0(combined_tensor)
+          combined_tensor = torch.sigmoid(combined_tensor)
+          combined_tensor = self.fc1(combined_tensor)
+          combined_tensor = torch.sigmoid(combined_tensor)
+          combined_tensor = self.fc2(combined_tensor)
+          combined_tensor = torch.sigmoid(combined_tensor)
+          output = self.fc3(combined_tensor)
+          return output
+
+    model = MLPModel()
+
+    # Example inputs
+    tensor_input = torch.rand((97, 8), dtype=torch.float32)
+    dict_input = {'tensor_x': torch.rand((97, 8), dtype=torch.float32)}
+    list_input = [torch.rand((97, 8), dtype=torch.float32)]
+
+    # The input_names and output_names are used to identify the inputs and outputs of the ONNX model
+    input_names = ['tensor_input', 'tensor_x', 'list_input_index_0']
+    output_names = ['output']
+
+    # Exporting the model with all required inputs
+    onnx_program = torch.onnx.export(model,(tensor_input, dict_input, list_input), dynamic_shapes=({0: "batch_size"},{"tensor_x": {0: "batch_size"}},[{0: "batch_size"}]), input_names=input_names, output_names=output_names, dynamo=True,)
+
+    # Check the exported ONNX model is dynamic
+    assert onnx_program.model.graph.inputs[0].shape == ("batch_size", 8)
+    assert onnx_program.model.graph.inputs[1].shape == ("batch_size", 8)
+    assert onnx_program.model.graph.inputs[2].shape == ("batch_size", 8)
 
 As the code above shows, all you need is to provide :func:`torch.onnx.export` with an instance of the model and its input.
 The exporter will then return an instance of :class:`torch.onnx.ONNXProgram` that contains the exported ONNX graph along with extra information.
-
-``onnx_program.optimize()`` can be called to optimize the ONNX graph with constant folding and elimination of redundant operators. The optimization is done in-place.
-
-.. code-block:: python
-
-  onnx_program.optimize()
 
 The in-memory model available through ``onnx_program.model_proto`` is an ``onnx.ModelProto`` object in compliance with the `ONNX IR spec <https://github.com/onnx/onnx/blob/main/docs/IR.md>`_.
 The ONNX model may then be serialized into a `Protobuf file <https://protobuf.dev/>`_ using the :meth:`torch.onnx.ONNXProgram.save` API.
@@ -85,6 +108,17 @@ The ONNX model may then be serialized into a `Protobuf file <https://protobuf.de
 .. code-block:: python
 
   onnx_program.save("mlp.onnx")
+
+Use the same model to compare with the TorchScript-enabled exporter
+-------------------------------------------------------------------
+
+The biggest difference between the TorchScript-enabled exporter and the TorchDynamo-based exporter is that the latter
+requires dynamic_shapes to be the same tree structure as the input, while the former
+requires the dynamic_shapes to be a single and flatten dictionary.
+
+.. code-block:: python
+
+  torch.onnx.export(model,(tensor_input, dict_input, list_input), "mlp.onnx", dynamic_axes={"tensor_input":{0: "batch_size"}, "tensor_x": {0: "batch_size"}, "list_input_index_0": {0: "batch_size"}}, input_names=input_names, output_names=output_names)
 
 Inspecting the ONNX model using GUI
 -----------------------------------

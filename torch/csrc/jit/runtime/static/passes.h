@@ -86,5 +86,6 @@ TORCH_API void UseInPlaceGetRealInputsFromOptionalInputsV2(
 
 TORCH_API void PrepackWeights(std::shared_ptr<Graph>& graph);
 
-C10_DECLARE_bool(enable_clip_ranges_gather_fusions);
 } // namespace torch::jit
+
+C10_DECLARE_bool(enable_clip_ranges_gather_fusions);
