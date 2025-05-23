@@ -9,28 +9,27 @@
 //
 
 namespace at::native::xpu {
-at::native::onednn::Attr unary_attr_with_arg(
+at::native::onednn::Attr& unary_attr_with_arg(
+    onednn::Attr& attr,
     std::string_view unary,
     torch::List<std::optional<at::Scalar>> scalars,
-    std::optional<std::string_view> algorithm,
-    onednn::Attr attr);
+    std::optional<std::string_view> algorithm);
 
-at::native::onednn::Attr string_to_unary_attr(
-    std::string_view unary,
-    onednn::Attr attr);
+at::native::onednn::Attr& string_to_unary_attr(
+    onednn::Attr& attr,
+    std::string_view unary);
 
-at::native::onednn::Attr construct_unary_attr(
+at::native::onednn::Attr& construct_unary_attr(
+    onednn::Attr& attr,
     std::string_view unary,
     torch::List<std::optional<at::Scalar>> scalars,
-    std::optional<std::string_view> algorithm,
-    onednn::Attr attr);
+    std::optional<std::string_view> algorithm);
 
 template <bool is_matmul = false>
-onednn::Attr construct_binary_attr(
+onednn::Attr& construct_binary_attr(
+    onednn::Attr& attr,
     std::string_view binary,
-    std::optional<at::Scalar> alpha,
-    const Tensor& other,
-    onednn::Attr attr) {
+    const Tensor& other) {
   if (binary == "mul") {
     attr.append_post_binary<is_matmul>(attr.kind_with_binary_mul, other);
   } else if (binary == "sub") {
