@@ -103,7 +103,7 @@ To try and reduce the impact of functions that are non-differentiable, we define
 #. If the function is not defined (``sqrt(-1)``, ``log(-1)`` or most functions when the input is ``NaN``, for example) then the value used as the gradient is arbitrary (we might also raise an error but that is not guaranteed). Most functions will use ``NaN`` as the gradient, but for performance reasons, some functions will use other values (``log(-1)``, for example).
 #. If the function is not a deterministic mapping (i.e. it is not a `mathematical function`_), it will be marked as non-differentiable. This will make it error out in the backward if used on tensors that require grad outside of a ``no_grad`` environment.
 
-.. _mathematical function: https://en.wikipedia.org/wiki/Function_(mathematics)
+.. _mathematical function: https://en.wikipedia.org/wiki/Function_%28mathematics%29
 
 .. _locally-disable-grad-doc:
 
@@ -793,7 +793,7 @@ Example:
 
     def pack_hook(x):
         if x.numel() < SAVE_ON_DISK_THRESHOLD:
-            return x
+            return x.detach()
         temp_file = SelfDeletingTempFile()
         torch.save(tensor, temp_file.name)
         return temp_file
@@ -833,7 +833,7 @@ Tensor object creation. For example:
 
 .. code::
 
-    with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
+    with torch.autograd.graph.saved_tensors_hooks(lambda x: x.detach(), lambda x: x):
         x = torch.randn(5, requires_grad=True)
         y = x * x
 
