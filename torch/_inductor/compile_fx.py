@@ -974,7 +974,7 @@ def _compile_fx_inner(
         trace_structured(
             "artifact",
             metadata_fn=lambda: {
-                "name": "inductor_triton_kernel_to_post_grad_nodes",
+                "name": "inductor_generated_kernel_to_post_grad_nodes",
                 "encoding": "json",
             },
             payload_fn=lambda: json.dumps(debug_info),
