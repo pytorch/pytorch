@@ -209,6 +209,33 @@ inline void convolution_shape_check(
   checkSameDim(c, input, output);
 }
 
+// Adapted from jax.
+// https://github.com/jax-ml/jax/blob/6a6a13dcfe5f6dbca4155410dd32dfc2d5bf1cec/jax/_src/lax/convolution.py#L253
+template <typename T>
+std::pair<T, T> _conv_transpose_same_mode_padding_lr(
+  T kernelSize, T stride) {
+  auto total_padding = kernelSize + stride - 2;
+  T left_pad;
+  if (stride >= kernelSize) {
+    left_pad = kernelSize - 1;
+  } else {
+    // The padding on the left is ceil(total_padding / 2)
+    left_pad = (total_padding / 2) + (total_padding % 2);
+  }
+  return {std::move(left_pad), std::move(total_padding - left_pad)};
+}
+
+inline std::pair<int64_t, int64_t> conv_transpose_same_mode_padding_lr(
+    int64_t kernelSize, int64_t stride) {
+  return _conv_transpose_same_mode_padding_lr(kernelSize, stride);
+}
+
+inline std::pair<c10::SymInt, c10::SymInt> conv_transpose_same_mode_padding_lr(
+    c10::SymInt kernelSize, c10::SymInt stride) {
+  return _conv_transpose_same_mode_padding_lr(
+      std::move(kernelSize), std::move(stride));
+}
+
 // NB: conv_output_size and conv_input_size are not bijections,
 // as conv_output_size loses information; this is why conv_input_size
 // takes an extra output_padding argument to resolve the ambiguity.
