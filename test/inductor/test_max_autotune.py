@@ -704,10 +704,10 @@ class TestMaxAutotune(TestCase):
             diag = torch.diagonal(mul)
             diag.copy_(other)
             x = torch.mm(mul, z)
-            y = torch.diagonal(x).add_(torch.tensor(1, device="cuda"))
+            y = torch.diagonal(x).add_(torch.tensor(1, device=GPU_TYPE))
             return y
 
-        t = functools.partial(torch.randn, device="cuda")
+        t = functools.partial(torch.randn, device=GPU_TYPE)
         inps = (t(3, 3), t(3, 3), t(3, 3), t(3))
         fn = torch.compile(f, mode="max-autotune-no-cudagraphs")
         (
