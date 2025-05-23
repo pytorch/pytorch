@@ -230,6 +230,7 @@ mm_template = TritonTemplate(
 """
     ),
     cache_codegen_enabled_for_template=True,
+    prologue_loads_all_inputs=True,
 )
 
 persistent_tma_mm_template = TritonTemplate(
@@ -1185,6 +1186,14 @@ def tuned_scaled_mm(
                 suffix_args=suffix_args,
                 epilogue_fn=scale_mm_epilogue(),
             )
+
+    if is_nonzero and use_cutlass_template(layout, m, n, k):
+        if use_fast_accum:
+            log.warning(
+                "use_fast_accum=True is not supported by cutlass template, skipping cutlass choices"
+            )
+        else:
+            CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, input_nodes)  # type: ignore[arg-type]
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, input_nodes)
