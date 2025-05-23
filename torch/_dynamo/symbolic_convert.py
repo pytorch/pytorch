@@ -3261,8 +3261,9 @@ class InstructionTranslatorBase(
         self.nn_module_stack: dict[str, tuple[str, type[Any]]] = {}
         self.num_calls: dict[str, int] = {}
         # Flag to indicate whether tracing is used for export.
+        # NOTE: self.export and config.error_on_graph_break prevent partial compilation on graph breaks
+        # and will instead result in an error.
         self.export = export
-        self.one_graph = False
 
         self.current_speculation = None
 
@@ -3321,7 +3322,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         torch_function_mode_stack,
         code_options,
         compiler_fn,
-        one_graph,
         export,
         export_constraints,
         frame_state,
@@ -3369,13 +3369,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         # as soon as we create the tracing context we should keep it active, so any calls
         # into dynamo apis can rely on finding it
         with tracing(self.output.tracing_context), self.set_current_tx():
-            self.one_graph: bool = one_graph
             self.export = export
-            if self.export:
-                assert self.one_graph, (
-                    "Export without one graph - something has gone wrong."
-                )
-
             self.symbolic_locals = {}
             # Populate `symbolic_locals` with non-cell variables.
             cell_and_freevars: set[str] = set(self.cell_and_freevars())
@@ -3517,7 +3511,8 @@ class InstructionTranslator(InstructionTranslatorBase):
                 return False
         return (
             all(b.can_restore() for b in self.block_stack)
-            and not self.one_graph
+            and not config.error_on_graph_break
+            and not self.export
             and not self.active_generic_context_managers
         )
 
@@ -3681,7 +3676,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.inconsistent_side_effects
             and not self.symbolic_locals_contain_module_class()
             and not self.export
-            and not self.one_graph
+            and not config.error_on_graph_break
         ):
             raise exc.SkipFrame("because no content in function call")
 
@@ -4036,7 +4031,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.num_calls = parent.num_calls
         self.symbolic_result = None
         self.nn_module_stack = parent.nn_module_stack.copy()
-        self.one_graph = parent.one_graph
 
     @property
     def fake_mode(self):
