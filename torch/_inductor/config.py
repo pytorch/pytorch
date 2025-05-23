@@ -81,6 +81,9 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# precompilation timeout
+precompilation_timeout_seconds: int = 60 * 60
+
 # use fx aot graph codegen cache
 fx_graph_cache: bool = Config(
     justknob="pytorch/remote_cache:enable_local_fx_graph_cache",
@@ -673,6 +676,13 @@ def decide_worker_start_method() -> str:
 
 
 worker_start_method: str = decide_worker_start_method()
+
+# Whether to log from subprocess workers that are launched.
+worker_suppress_logging: bool = Config(
+    justknob="pytorch/compiler:worker_suppress_logging",
+    env_name_force="TORCHINDUCTOR_WORKER_SUPPRESS_LOGGING",
+    default=True,
+)
 
 # Flags to turn on all_reduce fusion. These 2 flags should be automaticaly turned
 # on by DDP and should not be set by the users.
@@ -1372,7 +1382,9 @@ class cuda:
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4, 8]
 
     # Whether to use CUTLASS EVT for epilogue fusion
-    cutlass_epilogue_fusion_enabled = False
+    cutlass_epilogue_fusion_enabled = (
+        os.environ.get("CUTLASS_EPILOGUE_FUSION", "0") == "1"
+    )
 
     # Whether to only use TMA-compatible kernels in CUTLASS
     cutlass_tma_only = False
