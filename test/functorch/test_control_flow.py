@@ -8328,10 +8328,10 @@ class GraphModule(torch.nn.Module):
         _ = self._check_export_ret_graph_str(model, args, dynamic_shapes)
 
     @skipIfTorchDynamo(
-        "Skip because _merge_tensors is not intended for dynamo to compile"
+        "Skip because _merge_output is not intended for dynamo to compile"
     )
-    def test_merge_tensors(self):
-        from torch._higher_order_ops.cond import _merge_tensors
+    def test_merge_output(self):
+        from torch._higher_order_ops.cond import _merge_output
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -8376,7 +8376,7 @@ class GraphModule(torch.nn.Module):
             with fake_mode:
                 t1 = torch.empty_strided(size1, stride1)
                 t2 = torch.empty_strided(size2, stride2)
-            out = _merge_tensors(t1, t2, fake_mode)
+            out = _merge_output(t1, t2, fake_mode)
             self.assertEqual(str(tuple(out.size())), merged_size)
             self.assertEqual(str(tuple(out.stride())), merged_stride)
 
