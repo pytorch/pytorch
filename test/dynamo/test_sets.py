@@ -340,11 +340,13 @@ class _FrozensetBase:
     def test_to_frozenset(self):
         set1 = frozenset(self.thetype({"apple", "banana", "cherry"}))
         self.assertIsInstance(set1, frozenset)
+        self.assertEqual(len(set1), 3)
 
     @make_dynamo_test
     def test_to_set(self):
         set1 = frozenset(self.thetype({"apple", "banana", "cherry"}))
         self.assertIsInstance(set1, frozenset)
+        self.assertEqual(len(set1), 3)
 
 
 class _SetBase(_FrozensetBase):
