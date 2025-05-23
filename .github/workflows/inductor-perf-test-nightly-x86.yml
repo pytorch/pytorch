@@ -47,7 +47,7 @@ on:
         description: Run freezing?
         required: false
         type: boolean
-        default: false
+        default: true
       benchmark_configs:
         description: The list of configs used the benchmark
         required: false
@@ -105,7 +105,24 @@ jobs:
     if: github.event.schedule == '0 7 * * *' || github.event_name == 'pull_request'
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
-      dashboard-tag: training-false-inference-true-default-true-default_freezing-true-dynamic-true-dynamic_freezing-true-cppwrapper-true-cppwrapper_freezing-true-aotinductor-true-aotinductor_freezing-true
+      dashboard-tag: training-false-inference-true-default-true-dynamic-true-cppwrapper-true-aotinductor-true
+      docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
+      timeout-minutes: 720
+      # disable monitor in perf tests
+      disable-monitor: false
+      monitor-log-interval: 15
+      monitor-data-collect-interval: 4
+    secrets: inherit
+
+  linux-jammy-cpu-py3_9-gcc11-inductor-test-nightly-freezing:
+    name: linux-jammy-cpu-py3.9-gcc11-inductor
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-cpu-py3_9-gcc11-inductor-build
+    if: github.event.schedule == '0 7 * * *' || github.event_name == 'pull_request'
+    with:
+      build-environment: linux-jammy-py3.9-gcc11-build
+      dashboard-tag: training-false-inference-true-default-true-dynamic-true-cppwrapper-true-aotinductor-true-freezing-true
       docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
       timeout-minutes: 720
@@ -122,7 +139,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
-      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}
+      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-freezing-${{ inputs.freezing }}
       docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
       timeout-minutes: 720
