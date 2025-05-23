@@ -2851,10 +2851,11 @@ class TestGuardsExpressions(TestCase):
             else:
                 return b * 20
 
-        # call with guarding.
+        # eager.
         self.assertEqual(func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10]))
         self.assertEqual(func(torch.tensor([2]), torch.tensor([1])), torch.tensor([20]))
 
+        # compile with unbacked.
         unbacked_func = torch.compile(func, dynamic=True, fullgraph=True)
         a = torch.tensor([1])
         b = torch.tensor([1])
@@ -2916,10 +2917,11 @@ class TestGuardsExpressions(TestCase):
             else:
                 return b * 20
 
-        # call with guarding.
+        # eager.
         self.assertEqual(func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10]))
         self.assertEqual(func(torch.tensor([2]), torch.tensor([1])), torch.tensor([20]))
 
+        # compile with unbacked.
         unbacked_func = torch.compile(func, dynamic=True, fullgraph=True)
         a = torch.tensor([1])
         b = torch.tensor([1])
