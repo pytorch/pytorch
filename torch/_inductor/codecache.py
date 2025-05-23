@@ -156,7 +156,10 @@ log = logging.getLogger(__name__)
 
 
 def use_re_build() -> bool:
-    if config.is_fbcode():
+    """
+    Use for CUTLASS compilation only right now.
+    """
+    if config.is_fbcode() and not config.cuda.cutlass_force_compile_locally:
         from triton.fb.re_build_helper import should_build_locally
 
         return not should_build_locally()
