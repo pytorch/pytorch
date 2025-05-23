@@ -264,7 +264,9 @@ import setuptools.command.sdist
 from setuptools import Extension, find_packages, setup
 from setuptools.dist import Distribution
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+cwd = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, cwd)
 
 from tools.build_pytorch_libs import build_pytorch
 from tools.generate_torch_version import get_torch_version
@@ -346,7 +348,6 @@ else:
     setuptools.distutils.log.warn = report
 
 # Constant known variables used throughout this file
-cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
 third_party_path = os.path.join(cwd, "third_party")
 
