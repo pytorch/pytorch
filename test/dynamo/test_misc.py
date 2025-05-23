@@ -2006,13 +2006,13 @@ utils_device.CURRENT_DEVICE == None""".split(
     def test_set_descriptor(self):
         class Field:
             def __set__(self, obj, value):
-                obj._value = value * 2
-
-            def __get__(self, obj, owner):
-                return obj._value + 1
+                obj.__dict__["field"] += value * 2
 
         class Foo:
             field = Field()
+
+            def __init__(self):
+                self.__dict__["field"] = 0
 
         def fn(x, foo):
             foo.field = 10
