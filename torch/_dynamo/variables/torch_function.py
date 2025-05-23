@@ -642,7 +642,11 @@ class TensorWithTFOverrideVariable(TensorVariable):
 
         # Handle non-overriden attributes inherited from `torch.Tensor`.
         attr_is_overriden = _is_attr_overidden(tx, self, name)
-        if hasattr(torch.Tensor, name) and not attr_is_overriden:
+        if (
+            hasattr(torch.Tensor, name)
+            and not attr_is_overriden
+            and not inspect.ismethoddescriptor(getattr(torch.Tensor, name))
+        ):
             args, kwargs = [self], {}
             if can_dispatch_torch_function(tx, args, kwargs):
                 if self.source:

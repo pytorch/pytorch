@@ -209,11 +209,11 @@ kernel void triu_indices(
   template [[host_name(#NAME "_indices_" #DTYPE)]] kernel void \
       NAME##_indices<DTYPE>(                                   \
           device DTYPE * tensor,                               \
-          constant int64_t & col_offset,                       \
-          constant int64_t & m_first_row,                      \
-          constant int64_t & col,                              \
-          constant int64_t & rectangle_size,                   \
-          constant int64_t & triu_size,                        \
+          constant int64_t& col_offset,                        \
+          constant int64_t& m_first_row,                       \
+          constant int64_t& col,                               \
+          constant int64_t& rectangle_size,                    \
+          constant int64_t& triu_size,                         \
           uint linear_index [[thread_position_in_grid]])
 
 INSTANTIATE_TRI_INDICES(triu, long);
