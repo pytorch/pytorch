@@ -943,7 +943,7 @@ class GitHubPR:
         # bot adds a merged label -> triggers workflow -> sometimes needs
         # approval -> is read as failure, which results in a blocked merge, but
         # this workflow doesn't provide mergability info
-        del self.conclusions["Apply lint suggestions"]
+        self.conclusions.pop("Apply lint suggestions", None)
 
         return self.conclusions
 
