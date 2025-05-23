@@ -62,8 +62,8 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
         for training in [False, True] if check_train else [False]:
             if training and self.device == "xpu":
-                # Intel GPU have not implemented sdpa backward yet mode.
-                # TODO: remove this when sdpa backward is implemented for XPU.
+                # Intel GPU have not implemented sdpa backward yet.
+                # TODO: remove this when sdpa backward is implemented.
                 continue
             for x in itertools.chain(args1[:], args2[:]):
                 if isinstance(x, torch.Tensor) and x.is_floating_point():
