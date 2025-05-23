@@ -9,7 +9,7 @@ static std::array<PyMethodDef, 1> _methods = {{
      nullptr} // Sentinel value indicating the end of the array
 }};
 
-bool is_instancemethod(py::object obj) {
+static bool is_instancemethod(py::object obj) {
   return PyInstanceMethod_Check(obj.ptr());
 }
 

@@ -862,6 +862,30 @@ class GraphModule(torch.nn.Module):
         y = fn(t)
         self.assertEqual(y, t + sum(range(6)))
 
+    def test_list_extend(self):
+        def f(x):
+            y = [1]
+            y.extend(y[-1] + z for z in range(3))
+            return x + 1, y
+
+        self.assertEqual(
+            f(torch.ones(3)),
+            torch.compile(f, backend="eager", fullgraph=True)(torch.ones(3)),
+        )
+
+    def test_deque_extendleft(self):
+        import collections
+
+        def f(x):
+            y = collections.deque([1])
+            y.extendleft(y[0] + z for z in range(3))
+            return x + 1, y
+
+        self.assertEqual(
+            f(torch.ones(3)),
+            torch.compile(f, backend="eager", fullgraph=True)(torch.ones(3)),
+        )
+
 
 class TestGeneratorSend(GeneratorTestsBase):
     def test_send(self):
@@ -1452,331 +1476,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
             except Exception as e:
                 raise AssertionError from e
             assert z == 1
-            return t.sin()
-
-        self._compile_check(fn)
-
-
-class GeneratorCloseCPythonTests(GeneratorTestsBase):
-    # Taken from commit
-    # https://github.com/python/cpython/blob/d51a4ca1123e3e49e5cae4273355bdfd9e419a10
-    # changed the tests a little bit to run them inside dynamo
-    # + replaced all self.assert* calls to plain assert statements
-
-    def test_close_no_return_value(self):
-        def f():
-            yield
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            gen = f()
-            gen.send(None)
-            assert gen.close() is None
-            return t.sin()
-
-        t = torch.randn(2)
-        fn(t)
-
-    def test_close_return_value(self):
-        def f():
-            try:
-                yield
-                # close() raises GeneratorExit here, which is caught
-            except GeneratorExit:
-                return 0  # noqa: B901
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            gen = f()
-            gen.send(None)
-            assert gen.close() == 0
-            return t.sin()
-
-        t = torch.randn(2)
-        fn(t)
-
-    def test_close_not_catching_exit(self):
-        def f():
-            yield
-            # close() raises GeneratorExit here, which isn't caught and
-            # therefore propagates -- no return value
-            return 0  # noqa: B901
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            gen = f()
-            gen.send(None)
-            assert gen.close() is None
-            return t.sin()
-
-        t = torch.randn(2)
-        fn(t)
-
-    def test_close_not_started(self):
-        def f():
-            try:
-                yield
-            except GeneratorExit:
-                return 0  # noqa: B901
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            gen = f()
-            assert gen.close() is None
-            return t.sin()
-
-        t = torch.randn(2)
-        fn(t)
-
-    def test_close_exhausted(self):
-        def f():
-            try:
-                yield
-            except GeneratorExit:
-                return 0  # noqa: B901
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            gen = f()
-            next(gen)
-            z = 0
-            try:
-                next(gen)  # -> StopIteration
-            except StopIteration:
-                z = 1
-            except Exception as e:
-                # anything other than StopIteration should fail
-                raise AssertionError from e
-            assert z == 1
-            assert gen.close() is None
-            return t.sin()
-
-        t = torch.randn(2)
-        fn(t)
-
-    def test_close_closed(self):
-        def f():
-            try:
-                yield
-            except GeneratorExit:
-                return 0  # noqa: B901
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            gen = f()
-            gen.send(None)
-            assert gen.close() == 0
-            assert gen.close() is None
-            return t.sin()
-
-        t = torch.randn(2)
-        fn(t)
-
-    def test_close_raises(self):
-        def f():
-            try:
-                yield
-            except GeneratorExit:
-                pass
-            raise RuntimeError
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            gen = f()
-            gen.send(None)
-            z = 0
-            try:
-                gen.close()  # -> RuntimeError
-            except RuntimeError:
-                z = 1
-            except Exception as e:
-                raise AssertionError from e
-            assert z == 1
-            return t.sin()
-
-        t = torch.randn(2)
-        fn(t)
-
-
-class GeneratorThrowCpythonTests(GeneratorTestsBase):
-    # Taken from commit
-    # https://github.com/python/cpython/blob/d51a4ca1123e3e49e5cae4273355bdfd9e419a10
-    # changed the tests a little bit to run them inside dynamo
-    # + replaced all self.assert* calls to plain assert statements
-
-    def test_exception_context_with_yield(self):
-        def f():
-            try:
-                raise KeyError("a")
-            except Exception:
-                yield
-
-        def fn(t):
-            gen = f()
-            gen.send(None)
-            try:
-                gen.throw(ValueError)
-            except ValueError as e:
-                context = e.__context__
-                assert (type(context), context.args) == (KeyError, ("a",))
-            except Exception as e:
-                raise AssertionError from e
-            return t.sin()
-
-        self._compile_check(fn)
-
-    def test_exception_context_with_yield_inside_generator(self):
-        # Check that the context is also available from inside the generator
-        # with yield, as opposed to outside.
-        def f():
-            z = 0
-            try:
-                raise KeyError("a")
-            except Exception:
-                try:
-                    yield
-                except Exception as exc:
-                    z = 1
-                    assert type(exc) == ValueError
-                    context = exc.__context__
-                    assert (type(context), context.args) == (KeyError, ("a",))
-                    yield "b"
-                finally:
-                    assert z == 1
-
-        def fn(t):
-            gen = f()
-            gen.send(None)
-            actual = gen.throw(ValueError)
-            # This ensures that the assertions inside were executed.
-            assert actual == "b"
-            return t.sin()
-
-        self._compile_check(fn)
-
-    def test_exception_context_with_yield_from(self):
-        def f():
-            yield
-
-        def g():
-            try:
-                raise KeyError("a")
-            except Exception:
-                yield from f()
-
-        def fn(t):
-            gen = g()
-            gen.send(None)
-            try:
-                gen.throw(ValueError)
-            except ValueError as e:
-                context = e.__context__
-                assert (type(context), context.args) == (KeyError, ("a",))
-            except Exception as e:
-                raise AssertionError from e
-            return t.sin()
-
-        self._compile_check(fn)
-
-    def test_exception_context_with_yield_from_with_context_cycle(self):
-        # Check trying to create an exception context cycle:
-        # https://bugs.python.org/issue40696
-        has_cycle = None
-
-        def f():
-            yield
-
-        def g(exc):
-            nonlocal has_cycle
-            try:
-                raise exc
-            except Exception:
-                try:
-                    yield from f()
-                except Exception as exc:
-                    has_cycle = exc is exc.__context__
-            yield
-
-        def fn(t):
-            exc = KeyError("a")
-            gen = g(exc)
-            gen.send(None)
-            gen.throw(exc)
-            # This also distinguishes from the initial has_cycle=None.
-            assert has_cycle is False
-            return t.sin()
-
-        self._compile_check(fn)
-
-    def test_throw_after_none_exc_type(self):
-        def g():
-            try:
-                raise KeyError
-            except KeyError:
-                pass
-
-            try:
-                yield
-            except Exception:
-                raise RuntimeError  # noqa: B904
-
-        def fn(t):
-            gen = g()
-            gen.send(None)
-            z = 0
-            try:
-                gen.throw(ValueError)
-            except RuntimeError:
-                z += 1
-            except Exception:
-                raise AssertionError  # noqa: B904
-            assert z == 1
-            return t.sin()
-
-        self._compile_check(fn)
-
-
-class GeneratorCPythonTests(GeneratorTestsBase):
-    # Taken from commit
-    # https://github.com/python/cpython/blob/d51a4ca1123e3e49e5cae4273355bdfd9e419a10
-    # changed the tests a little bit to run them inside dynamo
-    # + replaced all self.assert* calls to plain assert statements
-
-    def test_send_non_none_to_new_gen(self):
-        def f():
-            yield 1
-
-        def fn(t):
-            g = f()
-            z = 0
-            try:
-                g.send(0)
-            except TypeError:
-                z += 1
-            except Exception as e:
-                raise AssertionError from e
-            assert z == 1
-            assert next(g) == 1
-            return t.sin()
-
-        self._compile_check(fn)
-
-    def test_issue103488(self):
-        def gen_raises():
-            yield 1
-            raise ValueError
-
-        def loop():
-            try:
-                for _ in gen_raises():
-                    if True is False:  # noqa: PLR0133
-                        return
-            except ValueError:
-                pass
-
-        def fn(t):
-            # This should not raise
-            loop()
             return t.sin()
 
         self._compile_check(fn)

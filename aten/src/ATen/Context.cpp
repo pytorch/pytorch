@@ -694,7 +694,7 @@ void Context::setAllowFP16ReductionCPU(bool b) {
 #else
     if (true)
 #endif
-      throw std::runtime_error("Float16 arithmetic is not supported by the CPU!");
+      TORCH_CHECK(false, "Float16 arithmetic is not supported by the CPU!");
   }
   allow_fp16_reduction_cpu = b;
 }

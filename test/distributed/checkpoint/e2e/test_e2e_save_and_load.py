@@ -13,7 +13,6 @@ import torch.distributed.checkpoint as DCP
 import torch.distributed.checkpoint.state_dict_saver as saver
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
@@ -26,6 +25,7 @@ from torch.distributed.checkpoint.state_dict_loader import _load_state_dict_from
 from torch.distributed.checkpoint.state_dict_saver import AsyncCheckpointerType
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.distributed.checkpoint.utils import CheckpointException
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import ShardingStrategy
@@ -262,9 +262,11 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
             f = saver.async_save(
                 sd,
                 storage_writer=writer,
-                async_checkpointer_type=async_checkpointer_type
-                if async_checkpointer_type
-                else AsyncCheckpointerType.THREAD,
+                async_checkpointer_type=(
+                    async_checkpointer_type
+                    if async_checkpointer_type
+                    else AsyncCheckpointerType.THREAD
+                ),
             )
             t = time.monotonic()
             while not f.done():

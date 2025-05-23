@@ -28,6 +28,13 @@ namespace c10d {
 
 constexpr const char* GLOO_BACKEND_NAME = "gloo";
 
+// Control whether or not connections are established in a full mesh or lazily
+// as needed.
+static std::vector<std::string> TORCH_GLOO_LAZY_INIT = {"TORCH_GLOO_LAZY_INIT"};
+
+// Returns default value for lazyInit.
+bool TORCH_API getDefaultGlooLazyInit();
+
 // ProcessGroupGloo implements Gloo bindings for c10d.
 //
 // All functions on this class are expected to be called in the same
@@ -244,24 +251,20 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
   // Create new device instance for specific interface.
   static std::shared_ptr<::gloo::transport::Device> createDeviceForInterface(
-      const std::string& interface);
+      const std::string& interface,
+      bool lazyInit = false);
 
   // Create new device instance for specific hostname or address.
   static std::shared_ptr<::gloo::transport::Device> createDeviceForHostname(
-      const std::string& hostname);
+      const std::string& hostname,
+      bool lazyInit = false);
 
   // Create new device instance.
   // It tries to resolve this machine's hostname and bind to that address.
   // If that fails (i.e. the hostname doesn't resolve to an address), it
   // falls back to binding to the loopback address.
-  static std::shared_ptr<::gloo::transport::Device> createDefaultDevice();
-
-  // Create ProcessGroupGloo instance.
-  static c10::intrusive_ptr<ProcessGroupGloo> createProcessGroupGloo(
-      const c10::intrusive_ptr<Store>& store,
-      int rank,
-      int size,
-      std::chrono::milliseconds timeout);
+  static std::shared_ptr<::gloo::transport::Device> createDefaultDevice(
+      bool lazyInit = false);
 
   explicit ProcessGroupGloo(
       const c10::intrusive_ptr<Store>& store,
