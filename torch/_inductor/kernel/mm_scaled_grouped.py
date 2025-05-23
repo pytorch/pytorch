@@ -222,18 +222,19 @@ triton_grouped_mm_source = r"""
         m_scale_start_offset = g * M
 {% endif %}
 
-        if m_size > 0:
 {% if N_IS_DYNAMIC %}
-            # Move across groups
-            n_start_offset = n_end_offset
-            n_end_offset = tl.load(offsets_ptr + g)
-            n_size = n_end_offset - n_start_offset
-            n_scale_start_offset = n_start_offset
+        # Move across groups
+        n_start_offset = n_end_offset
+        n_end_offset = tl.load(offsets_ptr + g)
+        n_size = n_end_offset - n_start_offset
+        n_scale_start_offset = n_start_offset
 {% else %}
-            n_start_offset = 0
-            n_size = N
-            n_scale_start_offset = g * N
+        n_start_offset = 0
+        n_size = N
+        n_scale_start_offset = g * N
 {% endif %}
+
+        if m_size > 0 and n_size > 0:
 {% if K_IS_DYNAMIC %}
             # Move across groups
             k_start_offset = k_end_offset
