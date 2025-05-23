@@ -10,6 +10,10 @@ import torch._dynamo.test_case
 from torch.testing._internal.common_utils import make_dynamo_test
 
 
+class SetSubclass(set):
+    pass
+
+
 class _BaseSetTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
@@ -22,6 +26,9 @@ class _BaseSetTests(torch._dynamo.test_case.TestCase):
 
     def assertEqual(self, a, b):
         return self.assertTrue(a == b, f"{a} != {b}")
+
+    def assertNotEqual(self, a, b):
+        return self.assertTrue(a != b, f"{a} == {b}")
 
 
 class CustomSetTests(_BaseSetTests):
@@ -153,7 +160,7 @@ class _FrozensetBase:
     # + symmetric_difference
     # + union
     # BinOps:
-    # +, -, |, &, ^, <, >, <=, >=
+    # +, -, |, &, ^, <, >, <=, >=, ==, !=
 
     @make_dynamo_test
     def test_binop_sub(self):
@@ -182,7 +189,24 @@ class _FrozensetBase:
         self.assertEqual(p ^ q, self.thetype("acef"))
 
     @make_dynamo_test
-    def test_binop_less_than(self):
+    def test_cmp_eq(self):
+        p = self.thetype("abc")
+        self.assertEqual(p, p)
+        for C in set, frozenset, SetSubclass:
+            self.assertEqual(p, C("abc"))
+            self.assertEqual(p, C(p))
+
+    @make_dynamo_test
+    def test_cmp_ne(self):
+        p, q = map(self.thetype, ["abc", "bef"])
+        self.assertNotEqual(p, q)
+        self.assertNotEqual(q, p)
+        for C in set, frozenset, SetSubclass, dict.fromkeys, str, list, tuple:
+            self.assertNotEqual(p, C("abe"))
+        self.assertNotEqual(p, 1)
+
+    @make_dynamo_test
+    def test_cmp_less_than(self):
         p, q, r = map(self.thetype, ["abc", "bef", "ab"])
         self.assertFalse(p < p)
         self.assertFalse(p < q)
@@ -190,7 +214,7 @@ class _FrozensetBase:
         self.assertFalse(r < q)
 
     @make_dynamo_test
-    def test_binop_greater_than(self):
+    def test_cmp_greater_than(self):
         p, q, r = map(self.thetype, ["abc", "bef", "ab"])
         self.assertFalse(p > p)
         self.assertFalse(p > q)
@@ -198,7 +222,7 @@ class _FrozensetBase:
         self.assertFalse(q > r)
 
     @make_dynamo_test
-    def test_binop_less_than_or_equal(self):
+    def test_cmp_less_than_or_equal(self):
         p, q, r = map(self.thetype, ["abc", "bef", "ab"])
         self.assertTrue(p <= p)
         self.assertFalse(p <= q)
@@ -206,7 +230,7 @@ class _FrozensetBase:
         self.assertFalse(r <= q)
 
     @make_dynamo_test
-    def test_binop_greater_than_or_equal(self):
+    def test_cmp_greater_than_or_equal(self):
         p, q, r = map(self.thetype, ["abc", "bef", "ab"])
         self.assertTrue(p >= p)
         self.assertFalse(p >= q)
@@ -417,20 +441,20 @@ class UserDefinedSetTests(_SetBase, _BaseSetTests):
     thetype = CustomSet
 
     @unittest.expectedFailure
-    def test_binop_greater_than(self):
-        super().test_binop_greater_than()
+    def test_cmp_greater_than(self):
+        super().test_cmp_greater_than()
 
     @unittest.expectedFailure
-    def test_binop_greater_than_or_equal(self):
-        super().test_binop_greater_than_or_equal()
+    def test_cmp_greater_than_or_equal(self):
+        super().test_cmp_greater_than_or_equal()
 
     @unittest.expectedFailure
-    def test_binop_less_than(self):
-        super().test_binop_less_than()
+    def test_cmp_less_than(self):
+        super().test_cmp_less_than()
 
     @unittest.expectedFailure
-    def test_binop_less_than_or_equal(self):
-        super().test_binop_less_than_or_equal()
+    def test_cmp_less_than_or_equal(self):
+        super().test_cmp_less_than_or_equal()
 
     @unittest.expectedFailure
     def test_binop_or(self):
