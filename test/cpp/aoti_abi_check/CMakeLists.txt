@@ -17,6 +17,7 @@ add_executable(test_aoti_abi_check
 
 # TODO temporary until we can delete the old gtest polyfills.
 target_compile_definitions(test_aoti_abi_check PRIVATE USE_GTEST)
+target_compile_definitions(test_aoti_abi_check PRIVATE STANDALONE_TORCH_HEADER)
 
 # WARNING: DO NOT LINK torch!!!
 # The purpose is to check if the used aten/c10 headers are writtern in a header-only way

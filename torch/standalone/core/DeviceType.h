@@ -8,6 +8,14 @@
 #include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
 
+// Need C10_BUILD_MAIN_LIB when building libc10
+// TODO: refactor part of c10/macros/Macros.h to torch/standalone
+#if defined(CAFFE2_BUILD_MAIN_LIB) || defined(C10_BUILD_MAIN_LIB)
+#define TORCH_STANDALONE_API C10_EXPORT
+#else
+#define TORCH_STANDALONE_API C10_IMPORT
+#endif
+
 namespace torch::standalone {
 // These contains all device types that also have a BackendComponent
 // and therefore participate in per-backend functionality dispatch keys.
@@ -92,16 +100,16 @@ static_assert(
     "types registration, please be aware that you are affecting code that "
     "this number is small.  Try auditing uses of this constant.");
 
-#ifdef TORCH_STANDALONE
+#ifdef STANDALONE_TORCH_HEADER
 // The standalone mode doesn't support register_privateuse1_backend
-inline TORCH_API std::string get_privateuse1_backend(bool lower_case = true) {
+inline TORCH_STANDALONE_API std::string get_privateuse1_backend(bool lower_case = true) {
     return lower_case ? "privateuse1" : "PrivateUse1";
 }
 #else
-TORCH_API std::string get_privateuse1_backend(bool lower_case = true);
+TORCH_STANDALONE_API std::string get_privateuse1_backend(bool lower_case = true);
 #endif
 
-inline TORCH_API std::string DeviceTypeName(DeviceType d, bool lower_case = false) {
+inline TORCH_STANDALONE_API std::string DeviceTypeName(DeviceType d, bool lower_case = false) {
   switch (d) {
     // I considered instead using ctype::tolower to lower-case the strings
     // on the fly, but this seemed a bit much.
@@ -168,7 +176,7 @@ inline TORCH_API std::string DeviceTypeName(DeviceType d, bool lower_case = fals
 // the caller is allowed to cast a possibly invalid int16_t to DeviceType and
 // then pass it to this function.  (I considered making this function take an
 // int16_t directly, but that just seemed weird.)
-inline TORCH_API bool isValidDeviceType(DeviceType d) {
+inline TORCH_STANDALONE_API bool isValidDeviceType(DeviceType d) {
   switch (d) {
     case DeviceType::CPU:
     case DeviceType::CUDA:
@@ -197,7 +205,7 @@ inline TORCH_API bool isValidDeviceType(DeviceType d) {
   }
 }
 
-inline TORCH_API std::ostream& operator<<(std::ostream& stream, DeviceType type) {
+inline TORCH_STANDALONE_API std::ostream& operator<<(std::ostream& stream, DeviceType type) {
   stream << DeviceTypeName(type, /* lower case */ true);
   return stream;
 }
