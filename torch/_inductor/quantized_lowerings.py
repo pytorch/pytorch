@@ -90,19 +90,10 @@ def register_woq_mm_ops() -> None:
                 epilogue_creator=_mul_epilogue,  # type: ignore[arg-type]
             )
 
-        if (
-            len(choices) == 0
-            and inductor_config.autotune_fallback_to_aten
-            and not use_aten_gemm_kernels()
-        ):
-            log.warning("No choices for GEMM, using ATen backend as fallback")
-            return aten__weight_int8pack_mm.bind(
-                (mat1, mat2, scale), aten_layout
-            ).output_node()
-
         return autotune_select_algorithm(
             "_weight_int8pack_mm", choices, [mat1, mat2, scale], aten_layout
         )
+
 
     @register_lowering(aten._weight_int4pack_mm_for_cpu, type_promotion_kind=None)  # type: ignore[misc]
     def int4pack_mm_cpu(
@@ -152,16 +143,6 @@ def register_woq_mm_ops() -> None:
                 aten_layout,
                 [mat1, mat2, group_size, qScaleAndZeros],
             )
-
-        if (
-            len(choices) == 0
-            and inductor_config.autotune_fallback_to_aten
-            and not use_aten_gemm_kernels()
-        ):
-            log.warning("No choices for GEMM, using ATen backend as fallback")
-            return aten__weight_int4pack_mm_cpu.bind(
-                (mat1, mat2, group_size, qScaleAndZeros), aten_layout
-            ).output_node()
 
         # define functions to generate example inputs for weight and group size
         # otherwise, autotuner generates example inputs of all zeros for them
