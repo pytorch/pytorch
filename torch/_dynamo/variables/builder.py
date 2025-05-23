@@ -1445,7 +1445,7 @@ class VariableBuilder:
                 )
                 for i in range(list.__len__(L))
             ]
-            set_vt_cls = SetVariable if istype(value, set) else FrozensetVariable
+            set_vt_cls = SetVariable if isinstance(value, set) else FrozensetVariable
             set_vt = set_vt_cls(
                 output, source=self.source, mutation_type=ValueMutationExisting()
             )

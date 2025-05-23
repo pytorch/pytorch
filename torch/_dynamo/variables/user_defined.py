@@ -1605,17 +1605,19 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     def __init__(self, value, set_vt=None, **kwargs):
         super().__init__(value, **kwargs)
         self._set_vt = set_vt
+
+        python_type = set if isinstance(value, set) else frozenset
+        self._set_methods = set_methods if python_type is set else frozenset_methods
+
         if self._set_vt is None:
             assert self.source is None, (
                 "set_vt must be constructed by builder.py when source is present"
             )
             init_args = kwargs.get("init_args", {})
-            python_type = set if isinstance(value, set) else frozenset
             tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
             self._set_vt = variables.BuiltinVariable(python_type).call_function(
                 tx, init_args, {}
             )
-            self._set_methods = set_methods if python_type is set else frozenset_methods
 
     def call_method(
         self,
