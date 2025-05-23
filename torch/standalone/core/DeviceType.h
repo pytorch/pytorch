@@ -92,7 +92,8 @@ static_assert(
     "types registration, please be aware that you are affecting code that "
     "this number is small.  Try auditing uses of this constant.");
 
-#ifdef STANDALONE_TORCH_HEADER
+#ifdef TORCH_STANDALONE
+// The standalone mode doesn't support register_privateuse1_backend
 inline TORCH_API std::string get_privateuse1_backend(bool lower_case = true) {
     return lower_case ? "privateuse1" : "PrivateUse1";
 }
