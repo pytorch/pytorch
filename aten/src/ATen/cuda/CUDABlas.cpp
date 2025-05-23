@@ -1569,7 +1569,6 @@ bool gemm_and_bias(
   }
 
   using opmath_t = at::opmath_type<Dtype>;
-  TORCH_WARN("BETA VAL? ", beta_val);
 
   cudaDataType_t abType = CUDA_R_32F;
   cudaDataType_t cType = CUDA_R_32F;
@@ -1635,23 +1634,18 @@ bool gemm_and_bias(
             at::globalContext()._SMCarveout_EXPERIMENTAL().value());
   }
 #endif
-  cublasLtEpilogue_t epilogue = CUBLASLT_EPILOGUE_BIAS;
+
+  cublasLtEpilogue_t epilogue;
   if (activation == GEMMAndBiasActivationEpilogue::RELU) {
-    epilogue = CUBLASLT_EPILOGUE_RELU_BIAS;
+    epilogue = CUBLASLT_EPILOGUE_RELU;
   } else if (activation == GEMMAndBiasActivationEpilogue::GELU) {
 #if CUDA_VERSION >= 11040 || defined(USE_ROCM)
-    epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
+    epilogue = CUBLASLT_EPILOGUE_GELU;
 #endif
   }
-
-#if defined(USE_ROCM)
-  if (bias != nullptr) {
+  if (activation != GEMMAndBiasActivationEpilogue::None) {
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
   }
-#else
-#endif
-  TORCH_WARN("2D BIAS???", bias2d);
 
   CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
   CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);

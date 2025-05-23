@@ -561,7 +561,7 @@ class TestMatmulCuda(TestCase):
                 return a, b, c
 
             a, b, c = create_inputs(batch_size)
-            c.fill_(1000)
+
             a_fp32, b_fp32, c_fp32 = a.to(torch.float32), b.to(torch.float32), c.to(torch.float32)
 
             output_dtypes = [torch.float32]
@@ -570,7 +570,6 @@ class TestMatmulCuda(TestCase):
                 output_dtypes.append(input_dtype)
 
             for output_dtype in output_dtypes:
-                print("???", output_dtype, c.dtype)
                 # Catch edge case of incompat with bfloat16 and major version < 8
                 if input_dtype == torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
                     if output_dtype == torch.bfloat16:
@@ -597,7 +596,6 @@ class TestMatmulCuda(TestCase):
                             baseline = torch.addmm(c, a, b)
 
                     self.assertEqual(out.dtype, output_dtype)
-                    print(out, baseline)
                     torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
 
 
