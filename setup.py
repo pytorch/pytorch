@@ -699,8 +699,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
             )
         if cmake_cache_vars["USE_LIGHTWEIGHT_DISPATCH"]:
             report("-- Using lightweight dispatch")
-        if cmake_cache_vars["BUILD_EXECUTORCH"]:
-            report("-- Building Executorch")
 
         if cmake_cache_vars["USE_ITT"]:
             report("-- Using ITT")
