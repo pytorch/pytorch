@@ -2,12 +2,17 @@
 
 # TODO: move set tests from test_functions.py/test_misc.py to this file
 
+from collections.abc import Iterable
 import unittest
 
 import torch
 import torch._dynamo.config
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import make_dynamo_test
+
+
+class SetSubclass(set):
+    pass
 
 
 class _BaseSetTests(torch._dynamo.test_case.TestCase):
@@ -22,6 +27,9 @@ class _BaseSetTests(torch._dynamo.test_case.TestCase):
 
     def assertEqual(self, a, b):
         return self.assertTrue(a == b, f"{a} != {b}")
+
+    def assertNotEqual(self, a, b):
+        return self.assertTrue(a != b, f"{a} == {b}")
 
 
 class CustomSetTests(_BaseSetTests):
@@ -153,7 +161,7 @@ class _FrozensetBase:
     # + symmetric_difference
     # + union
     # BinOps:
-    # +, -, |, &, ^, <, >, <=, >=
+    # +, -, |, &, ^, <, >, <=, >=, ==, !=
 
     @make_dynamo_test
     def test_binop_sub(self):
@@ -182,7 +190,24 @@ class _FrozensetBase:
         self.assertEqual(p ^ q, self.thetype("acef"))
 
     @make_dynamo_test
-    def test_binop_less_than(self):
+    def test_cmp_eq(self):
+        p = self.thetype("abc")
+        self.assertEqual(p, p)
+        for C in set, frozenset, SetSubclass:
+            self.assertEqual(p, C("abc"))
+            self.assertEqual(p, C(p))
+
+    @make_dynamo_test
+    def test_cmp_ne(self):
+        p, q = map(self.thetype, ["abc", "bef"])
+        self.assertNotEqual(p, q)
+        self.assertNotEqual(q, p)
+        for C in set, frozenset, SetSubclass, dict.fromkeys, str, list, tuple:
+            self.assertNotEqual(p, C("abe"))
+        self.assertNotEqual(p, 1)
+
+    @make_dynamo_test
+    def test_cmp_less_than(self):
         p, q, r = map(self.thetype, ["abc", "bef", "ab"])
         self.assertFalse(p < p)
         self.assertFalse(p < q)
@@ -190,7 +215,7 @@ class _FrozensetBase:
         self.assertFalse(r < q)
 
     @make_dynamo_test
-    def test_binop_greater_than(self):
+    def test_cmp_greater_than(self):
         p, q, r = map(self.thetype, ["abc", "bef", "ab"])
         self.assertFalse(p > p)
         self.assertFalse(p > q)
@@ -198,7 +223,7 @@ class _FrozensetBase:
         self.assertFalse(q > r)
 
     @make_dynamo_test
-    def test_binop_less_than_or_equal(self):
+    def test_cmp_less_than_or_equal(self):
         p, q, r = map(self.thetype, ["abc", "bef", "ab"])
         self.assertTrue(p <= p)
         self.assertFalse(p <= q)
@@ -206,7 +231,7 @@ class _FrozensetBase:
         self.assertFalse(r <= q)
 
     @make_dynamo_test
-    def test_binop_greater_than_or_equal(self):
+    def test_cmp_greater_than_or_equal(self):
         p, q, r = map(self.thetype, ["abc", "bef", "ab"])
         self.assertTrue(p >= p)
         self.assertFalse(p >= q)
@@ -218,23 +243,31 @@ class _FrozensetBase:
         p = self.thetype("abc")
         q = p.copy()
         self.assertEqual(p, q)
+        self.assertRaises(TypeError, p.copy, 1)
 
     @make_dynamo_test
     def test_issubset(self):
         p, q, r = map(self.thetype, ["abc", "bc", "bef"])
         self.assertTrue(q.issubset(p))
         self.assertFalse(r.issubset(p))
+        self.assertRaises(TypeError, p.issubset)
+        self.assertRaises(TypeError, p.issubset, 1)
+        self.assertRaises(TypeError, p.issubset, [[]])
 
     @make_dynamo_test
     def test_issuperset(self):
         p, q, r = map(self.thetype, ["abc", "bc", "bef"])
         self.assertTrue(p.issuperset(q))
         self.assertFalse(p.issuperset(r))
+        self.assertRaises(TypeError, p.issuperset)
+        self.assertRaises(TypeError, p.issuperset, 1)
+        self.assertRaises(TypeError, p.issuperset, [[]])
 
     @make_dynamo_test
     def test_constructor_iterable(self):
         p = self.thetype("abc")
         self.assertIsInstance(p, self.thetype)
+        self.assertIsInstance(p, Iterable)
 
     @make_dynamo_test
     def test_equality(self):
@@ -261,6 +294,9 @@ class _FrozensetBase:
         z = self.thetype({"shoes", "flipflops", "sneakers"})
         self.assertFalse(x.isdisjoint(y))
         self.assertTrue(x.isdisjoint(z))
+        self.assertRaises(TypeError, x.isdisjoint)
+        self.assertRaises(TypeError, x.isdisjoint, 1)
+        self.assertRaises(TypeError, x.isdisjoint, [[]])
 
     @make_dynamo_test
     def test_intersection(self):
@@ -269,12 +305,17 @@ class _FrozensetBase:
         set3 = self.thetype({"shoes", "flipflops", "apple"})
         intersection_set = set1.intersection(set2, set3)
         self.assertEqual(intersection_set, {"apple"})
+        self.assertRaises(TypeError, set1.intersection, 1)
+        self.assertRaises(TypeError, set1.intersection, [[]])
 
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_union(self):
         p, q, r = map(self.thetype, ["abc", "bc", "bef"])
         union_set = p.union(q, r)
         self.assertEqual(union_set, {"a", "b", "c", "e", "f"})
+        self.assertRaises(TypeError, p.union, 1)
+        self.assertRaises(TypeError, p.union, [[]])
 
     @make_dynamo_test
     def test_difference(self):
@@ -283,6 +324,8 @@ class _FrozensetBase:
         set3 = self.thetype({"shoes", "flipflops", "sneakers"})
         difference_set = set1.difference(set2, set3)
         self.assertEqual(difference_set, {"banana", "cherry"})
+        self.assertRaises(TypeError, set1.difference, 1)
+        self.assertRaises(TypeError, set1.difference, [[]])
 
     @make_dynamo_test
     def test_symmetric_difference(self):
@@ -291,6 +334,8 @@ class _FrozensetBase:
         symmetric_diff_set = set1.difference(set2)
         self.assertEqual(symmetric_diff_set, {"banana", "cherry"})
         self.assertRaises(TypeError, set1.symmetric_difference)
+        self.assertRaises(TypeError, set1.symmetric_difference, 1)
+        self.assertRaises(TypeError, set1.symmetric_difference, [[]])
 
     @make_dynamo_test
     def test_to_frozenset(self):
@@ -353,6 +398,7 @@ class _SetBase(_FrozensetBase):
         set3 = self.thetype({"shoes", "flipflops", "apple"})
         set1.intersection_update(set2, set3)
         self.assertEqual(set1, {"apple"})
+        self.assertRaises(TypeError, set1.intersection_update, [[]])
 
     @make_dynamo_test
     def test_difference_update(self):
@@ -361,6 +407,7 @@ class _SetBase(_FrozensetBase):
         set3 = self.thetype({"shoes", "flipflops", "sneakers"})
         set1.difference_update(set2, set3)
         self.assertEqual(set1, {"banana", "cherry"})
+        self.assertRaises(TypeError, set1.difference_update, [[]])
 
     @make_dynamo_test
     def test_symmetric_difference_update(self):
@@ -369,6 +416,7 @@ class _SetBase(_FrozensetBase):
         set1.difference(set2)
         self.assertEqual(set1, {"banana", "cherry", "apple"})
         self.assertRaises(TypeError, set1.symmetric_difference_update)
+        self.assertRaises(TypeError, set1.symmetric_difference_update, [[]])
 
     @make_dynamo_test
     def test_pop(self):
@@ -383,6 +431,7 @@ class _SetBase(_FrozensetBase):
         p, q, r = map(self.thetype, ["abc", "bc", "bef"])
         p.update(q, r)
         self.assertEqual(p, {"a", "b", "c", "e", "f"})
+        self.assertRaises(TypeError, p.update, [[]])
 
     @make_dynamo_test
     def test_discard(self):
@@ -417,20 +466,20 @@ class UserDefinedSetTests(_SetBase, _BaseSetTests):
     thetype = CustomSet
 
     @unittest.expectedFailure
-    def test_binop_greater_than(self):
-        super().test_binop_greater_than()
+    def test_cmp_greater_than(self):
+        super().test_cmp_greater_than()
 
     @unittest.expectedFailure
-    def test_binop_greater_than_or_equal(self):
-        super().test_binop_greater_than_or_equal()
+    def test_cmp_greater_than_or_equal(self):
+        super().test_cmp_greater_than_or_equal()
 
     @unittest.expectedFailure
-    def test_binop_less_than(self):
-        super().test_binop_less_than()
+    def test_cmp_less_than(self):
+        super().test_cmp_less_than()
 
     @unittest.expectedFailure
-    def test_binop_less_than_or_equal(self):
-        super().test_binop_less_than_or_equal()
+    def test_cmp_less_than_or_equal(self):
+        super().test_cmp_less_than_or_equal()
 
     @unittest.expectedFailure
     def test_binop_or(self):
