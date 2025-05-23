@@ -2,8 +2,8 @@
 
 # TODO: move set tests from test_functions.py/test_misc.py to this file
 
-from collections.abc import Iterable
 import unittest
+from collections.abc import Iterable
 
 import torch
 import torch._dynamo.config
@@ -396,7 +396,7 @@ class _SetBase(_FrozensetBase):
         set1 = self.thetype({"apple", "banana", "cherry"})
         set2 = self.thetype({"google", "microsoft", "apple"})
         set3 = self.thetype({"shoes", "flipflops", "apple"})
-        set1.intersection_update(set2, set3)
+        self.assertIsNone(set1.intersection_update(set2, set3))
         self.assertEqual(set1, {"apple"})
         self.assertRaises(TypeError, set1.intersection_update, [[]])
 
@@ -405,7 +405,7 @@ class _SetBase(_FrozensetBase):
         set1 = self.thetype({"apple", "banana", "cherry"})
         set2 = self.thetype({"google", "microsoft", "apple"})
         set3 = self.thetype({"shoes", "flipflops", "sneakers"})
-        set1.difference_update(set2, set3)
+        self.assertIsNone(set1.difference_update(set2, set3))
         self.assertEqual(set1, {"banana", "cherry"})
         self.assertRaises(TypeError, set1.difference_update, [[]])
 
@@ -413,8 +413,8 @@ class _SetBase(_FrozensetBase):
     def test_symmetric_difference_update(self):
         set1 = self.thetype({"apple", "banana", "cherry"})
         set2 = self.thetype({"google", "microsoft", "apple"})
-        set1.difference(set2)
-        self.assertEqual(set1, {"banana", "cherry", "apple"})
+        self.assertIsNone(set1.symmetric_difference_update(set2))
+        self.assertEqual(set1, {"banana", "cherry", "google", "microsoft"})
         self.assertRaises(TypeError, set1.symmetric_difference_update)
         self.assertRaises(TypeError, set1.symmetric_difference_update, [[]])
 
