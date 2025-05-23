@@ -1155,7 +1155,9 @@ def _should_save_eager_input_vals(
         or target is torch.ops.higher_order.auto_functionalized_v2
     ):
         args = args_kwargs[0]
-        assert isinstance(args[0], torch._ops.OpOverload)
+        assert isinstance(
+            args[0], (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+        )
         return _should_save_eager_input_vals(args[0], None)
     if target is torch.ops.higher_order.with_effects:
         # TODO: inductor lowering for with_effects needs to be updated to propagate
@@ -1169,7 +1171,9 @@ def _should_save_eager_input_vals(
                 f"propagate the FakeTensor vals. Please file an issue."
             )
     if isinstance(target, torch._ops.OpOverload):
-        return torch._C.Tag.needs_exact_strides in target.tags
+        from torch._library.utils import get_layout_constraint_tag
+
+        return get_layout_constraint_tag(target) == torch._C.Tag.needs_exact_strides
     return False
 
 
@@ -1404,10 +1408,10 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # ProxyTorchDispatchMode state was (if there was any).
         # This lets us properly reset the state on exit.
         self.enter_stack: list[Optional[ProxyTorchDispatchMode]] = []
-        self.decomp_layers = 0
+        self.decomp_layers: int = 0
         from torch._inductor import config
 
-        self.emulate_precision_casts = config.emulate_precision_casts
+        self.emulate_precision_casts: bool = config.emulate_precision_casts
 
     @count
     def __torch_dispatch__(

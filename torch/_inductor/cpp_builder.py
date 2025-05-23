@@ -21,7 +21,7 @@ from collections.abc import Sequence
 from ctypes import cdll
 from ctypes.util import find_library
 from pathlib import Path
-from typing import Any, BinaryIO, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 from torch._dynamo.utils import dynamo_timed
@@ -32,8 +32,7 @@ from torch.torch_version import TorchVersion
 
 
 if config.is_fbcode():
-    from triton.fb import build_paths  # noqa: F401
-    from triton.fb.build import _run_build_command
+    from triton.fb.build import _run_build_command, build_paths
 
     from torch._inductor.fb.utils import (
         log_global_cache_errors,
@@ -155,6 +154,51 @@ def get_cpp_compiler() -> str:
             search = (config.cpp.cxx,)
         compiler = cpp_compiler_search(search)
     return compiler
+
+
+def get_ld_and_objcopy(use_relative_path: bool) -> tuple[str, str]:
+    if _IS_WINDOWS:
+        raise RuntimeError("Windows is not supported yet.")
+    else:
+        if config.is_fbcode():
+            ld = build_paths.ld
+            objcopy = (
+                build_paths.objcopy_fallback
+                if use_relative_path
+                else build_paths.objcopy
+            )
+        else:
+            ld = "ld"
+            objcopy = "objcopy"
+    return ld, objcopy
+
+
+def convert_cubin_to_obj(
+    cubin_file: str,
+    kernel_name: str,
+    ld: str,
+    objcopy: str,
+) -> str:
+    obj_file = cubin_file + ".o"
+    # Convert .cubin to .o
+    cmd = f"{ld} -r -b binary -z noexecstack -o {obj_file} {cubin_file}"
+    subprocess.run(cmd.split(), capture_output=True, text=True)
+    os.remove(cubin_file)
+    # Rename .data to .rodata
+    cmd = f"{objcopy} --rename-section .data=.rodata,alloc,load,readonly,data,contents {obj_file}"
+    subprocess.run(cmd.split(), capture_output=True, text=True)
+    # By default objcopy will create *_start, *_size, *_end symbols using the full path
+    # Rename to use the unique kernel name
+    file_name = re.sub(r"[\W]", "_", cubin_file)
+    cmd = (
+        objcopy
+        + f" --redefine-sym _binary_{file_name}_start=__{kernel_name}_start "
+        + f"--redefine-sym _binary_{file_name}_size=__{kernel_name}_size "
+        + f"--redefine-sym _binary_{file_name}_end=__{kernel_name}_end "
+        + obj_file
+    )
+    subprocess.run(cmd.split(), capture_output=True, text=True)
+    return obj_file
 
 
 @functools.lru_cache(None)
@@ -330,20 +374,14 @@ def _remove_dir(path_dir: str) -> None:
         os.rmdir(path_dir)
 
 
-def _run_compile_cmd(
-    cmd_line: str, cwd: str, write_stdout_to: Optional[BinaryIO] = None
-) -> None:
+def _run_compile_cmd(cmd_line: str, cwd: str) -> None:
     cmd = shlex.split(cmd_line)
     try:
         subprocess.run(
-            cmd,
-            cwd=cwd,
-            check=True,
-            stdout=write_stdout_to if write_stdout_to else subprocess.PIPE,
-            stderr=subprocess.PIPE if write_stdout_to else subprocess.STDOUT,
+            cmd, cwd=cwd, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
         )
     except subprocess.CalledProcessError as e:
-        output = (e.stderr if write_stdout_to else e.stdout).decode("utf-8")
+        output = e.stdout.decode("utf-8")
         openmp_problem = "'omp.h' file not found" in output or "libomp" in output
         if openmp_problem and sys.platform == "darwin":
             instruction = (
@@ -359,11 +397,9 @@ def _run_compile_cmd(
         raise exc.CppCompileError(cmd, output) from e
 
 
-def run_compile_cmd(
-    cmd_line: str, cwd: str, write_stdout_to: Optional[BinaryIO] = None
-) -> None:
+def run_compile_cmd(cmd_line: str, cwd: str) -> None:
     with dynamo_timed("compile_file"):
-        _run_compile_cmd(cmd_line, cwd, write_stdout_to)
+        _run_compile_cmd(cmd_line, cwd)
 
 
 def normalize_path_separator(orig_path: str) -> str:
@@ -594,28 +630,24 @@ def _get_optimization_cflags(
         return cflags
 
 
-def _get_shared_cflag(compile_only: bool) -> list[str]:
+def _get_shared_cflag(do_link: bool) -> list[str]:
     if _IS_WINDOWS:
         """
         MSVC `/MD` using python `ucrtbase.dll` lib as runtime.
         https://learn.microsoft.com/en-us/cpp/c-runtime-library/crt-library-features?view=msvc-170
         """
-        SHARED_FLAG = ["DLL", "MD"]
-    else:
-        if compile_only:
-            return ["fPIC"]
-        if platform.system() == "Darwin" and "clang" in get_cpp_compiler():
-            # This causes undefined symbols to behave the same as linux
-            return ["shared", "fPIC", "undefined dynamic_lookup"]
-        else:
-            return ["shared", "fPIC"]
-
-    return SHARED_FLAG
+        return ["DLL", "MD"]
+    if not do_link:
+        return ["fPIC"]
+    if platform.system() == "Darwin" and "clang" in get_cpp_compiler():
+        # This causes undefined symbols to behave the same as linux
+        return ["shared", "fPIC", "undefined dynamic_lookup"]
+    return ["shared", "fPIC"]
 
 
 def get_cpp_options(
     cpp_compiler: str,
-    compile_only: bool,
+    do_link: bool,
     warning_all: bool = True,
     extra_flags: Sequence[str] = (),
     min_optimize: bool = False,
@@ -629,7 +661,7 @@ def get_cpp_options(
     passthrough_args: list[str] = []
 
     cflags = (
-        _get_shared_cflag(compile_only)
+        _get_shared_cflag(do_link)
         + _get_optimization_cflags(cpp_compiler, min_optimize)
         + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
@@ -689,7 +721,7 @@ class CppOptions(BuildOptionsBase):
             passthrough_args,
         ) = get_cpp_options(
             cpp_compiler=self._compiler,
-            compile_only=compile_only,
+            do_link=not (compile_only or precompiling or preprocessing),
             extra_flags=extra_flags,
             warning_all=warning_all,
             min_optimize=min_optimize,
@@ -868,7 +900,8 @@ def is_conda_llvm_openmp_installed() -> bool:
 def homebrew_libomp() -> tuple[bool, str]:
     try:
         # check if `brew` is installed
-        subprocess.check_output(["which", "brew"])
+        if shutil.which("brew") is None:
+            return False, ""
         # get the location of `libomp` if it is installed
         # this is the location that `libomp` **would** be installed
         # see https://github.com/Homebrew/brew/issues/10261#issuecomment-756563567 for details
@@ -1048,7 +1081,6 @@ def get_cpp_torch_options(
     vec_isa: VecISA,
     include_pytorch: bool,
     aot_mode: bool,
-    compile_only: bool,
     use_relative_path: bool,
     use_mmap_weights: bool,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
@@ -1182,7 +1214,6 @@ class CppTorchOptions(CppOptions):
             vec_isa=vec_isa,
             include_pytorch=include_pytorch,
             aot_mode=aot_mode,
-            compile_only=compile_only,
             use_relative_path=use_relative_path,
             use_mmap_weights=use_mmap_weights,
         )
@@ -1283,13 +1314,6 @@ def get_cpp_torch_device_options(
                 "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
             )
 
-    if aot_mode:
-        if config.is_fbcode():
-            from torch._inductor.codecache import cpp_prefix_path
-
-            cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
-            include_dirs += cpp_prefix_include_dir
-
     if config.is_fbcode():
         include_dirs.append(build_paths.sdk_include)
 
@@ -1298,6 +1322,9 @@ def get_cpp_torch_device_options(
                 if not compile_only:
                     # Only add link args, when compile_only is false.
                     passthrough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
+
+    if config.aot_inductor.custom_op_libs:
+        libraries += config.aot_inductor.custom_op_libs
 
     return (
         definitions,
@@ -1447,7 +1474,7 @@ class CppBuilder:
     @staticmethod
     def __get_preprocessor_output_flags() -> tuple[str, str]:
         extension = ".i"
-        output_flags = "/EP" if _IS_WINDOWS else "-E -P"
+        output_flags = "/EP /P" if _IS_WINDOWS else "-E -P -o"
         return extension, output_flags
 
     def __init__(
@@ -1510,18 +1537,19 @@ class CppBuilder:
             file_ext, output_flags = self.__get_python_module_flags()
         self._target_file = os.path.join(self._output_dir, f"{self._name}{file_ext}")
 
-        if self._preprocessing:
-            self._output = output_flags
-        else:
-            relative_target_file = (
-                os.path.basename(self._target_file)
-                if self._use_relative_path
-                else self._target_file
-            )
-            if _IS_WINDOWS:
-                self._output = f"{output_flags}{relative_target_file}"
+        relative_target_file = (
+            os.path.basename(self._target_file)
+            if self._use_relative_path
+            else self._target_file
+        )
+        if _IS_WINDOWS:
+            if self._preprocessing:
+                # The target file name is automatically determined by MSVC.
+                self._output = output_flags
             else:
-                self._output = f"{output_flags} {relative_target_file}"
+                self._output = f"{output_flags}{relative_target_file}"
+        else:
+            self._output = f"{output_flags} {relative_target_file}"
 
         if isinstance(sources, str):
             sources = [sources]
@@ -1639,14 +1667,9 @@ class CppBuilder:
     def build_fbcode_re(
         self,
     ) -> None:
-        from torch._inductor.codecache import cpp_prefix_path
-
         with dynamo_timed("compile_file"):
             command = self.get_command_line().split()
             try:
-                # Need to copy our header into the same folder as the sourcecode.
-                header_path = cpp_prefix_path()
-                header_name = os.path.basename(header_path)
                 output_path = self._target_file
                 # When we build remotely, we need to make sure to carefully copy any files
                 # that are required during the compilation process into our build directly.
@@ -1654,7 +1677,6 @@ class CppBuilder:
                 torch_includes_path = os.path.join(_TORCH_PATH, "include")
                 with tempfile.TemporaryDirectory() as tmp_dir:
                     # Copy everything to tmp compilation folder
-                    shutil.copy(header_path, os.path.join(tmp_dir, header_name))
                     shutil.copy(_LINKER_SCRIPT, os.path.join(tmp_dir, "script.ld"))
                     for src in self._orig_source_paths:
                         shutil.copy(src, os.path.join(tmp_dir, os.path.basename(src)))
@@ -1691,13 +1713,7 @@ class CppBuilder:
         _create_if_dir_not_exist(_build_tmp_dir)
 
         build_cmd = self.get_command_line()
-        if self._preprocessing:
-            with open(self.get_target_file_path(), "wb") as preprocessed_file:
-                run_compile_cmd(
-                    build_cmd, cwd=_build_tmp_dir, write_stdout_to=preprocessed_file
-                )
-        else:
-            run_compile_cmd(build_cmd, cwd=_build_tmp_dir)
+        run_compile_cmd(build_cmd, cwd=_build_tmp_dir)
         _remove_dir(_build_tmp_dir)
 
     def save_compile_cmd_to_cmake(

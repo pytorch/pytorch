@@ -34,7 +34,11 @@ from .. import config, ir, scheduler
 from ..analyze_preserves_zero_mask import prologue_preserves_zero_mask
 from ..codecache import code_hash
 from ..dependencies import MemoryDep, StarDep, WeakDep
-from ..ir import IRNode, TritonTemplateBuffer
+
+
+if TYPE_CHECKING:
+    from ..ir import IRNode
+
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.runtime_utils import green_text, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
@@ -136,6 +140,12 @@ class IterationRanges:
 
 
 class IterationRangesRoot(IterationRanges):
+    """
+    Root of a iteration range tree that represents a single
+    tiled dimension in the output kernel. It contains muliple
+    sets of iteration represented with IterationRangesEntry.
+    """
+
     def __init__(
         self,
         name: str,
@@ -228,13 +238,29 @@ class IterationRangesRoot(IterationRanges):
         self, index: sympy.Expr
     ) -> tuple[list[sympy.Symbol], list[sympy.Expr]]:
         """Figure out vars from this tree used in index"""
-        nodes = [V.kernel.range_tree_nodes.get(s) for s in index.free_symbols]
-        nodes = [n for n in nodes if n and n.prefix == self.prefix]
-        nodes.sort(
-            key=lambda x: V.graph.sizevars.size_hint(
+
+        def get_sort_key(x: IterationRangesEntry) -> tuple[int, bool]:
+            """
+            Gets the key for sorting nodes. When two nodes have the
+            same divisor, the node with length as 1 should be handled
+            first so the current divisor is not changed after multiplied
+            node.length. Returns `not length_is_one_hint` for ascending
+            sort.
+            """
+            divisor_hint = V.graph.sizevars.size_hint(
                 x.divisor, fallback=config.unbacked_symint_fallback
             )
-        )
+            length_is_one_hint = (
+                V.graph.sizevars.size_hint(
+                    x.length, fallback=config.unbacked_symint_fallback
+                )
+                == 1
+            )
+            return (divisor_hint, not length_is_one_hint)
+
+        nodes = [V.kernel.range_tree_nodes.get(s) for s in index.free_symbols]
+        nodes = [n for n in nodes if n and n.prefix == self.prefix]
+        nodes.sort(key=lambda x: get_sort_key(x))
         divisor = sympy.S.One
         index_vars = []
         sizes = []
@@ -1133,16 +1159,9 @@ class SIMDScheduling(BaseScheduling):
                             )
                             return False
 
-            for n, node_name in zip((node1, node2), ("node1", "node2")):
+            for n in (node1, node2):
                 if n.is_template():
-                    # Only allow fusion for TritonTemplates for now.
-                    # Fusion for CUDATemplates are not supported.
-                    is_triton_template = isinstance(
-                        n.get_template_node(), TritonTemplateBuffer
-                    )
-                    if not is_triton_template:
-                        why(f"{node_name} is not TritonTemplateBuffer")
-                    return is_triton_template
+                    return True
 
             # check for a bad combined tiling
             tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
@@ -1322,7 +1341,9 @@ class SIMDScheduling(BaseScheduling):
     @staticmethod
     def can_use_32bit_indexing(
         numel: sympy.Expr,
-        buffers: Iterable[Union[ir.Buffer, ir.TensorBox, ir.TorchBindObject]],
+        buffers: Iterable[
+            Union[ir.Buffer, ir.TensorBox, ir.TorchBindObject, ir.IRNode]
+        ],
     ) -> bool:
         int_max = torch.iinfo(torch.int32).max
 
@@ -1925,7 +1946,15 @@ class SIMDScheduling(BaseScheduling):
                     dims = match_result[0] if match_result is not None else [numel]
                     index_tiling.extend(dims)
 
-                node_tilings.append(index_tiling)
+                # Prune dimensions of size 1.
+                index_tiling = [
+                    dim
+                    for dim in index_tiling
+                    if not V.graph.sizevars.statically_known_equals(dim, sympy.S.One)
+                ]
+
+                if len(index_tiling) > 0:
+                    node_tilings.append(index_tiling)
 
             # Flatten leading dimensions, assigning labels to each dim.
             for node_tiling in node_tilings:

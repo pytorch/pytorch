@@ -8,7 +8,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.pipelining import PipelineStage
@@ -20,6 +19,7 @@ from torch.distributed.pipelining.schedules import (
     ScheduleInterleavedZeroBubble,
     ScheduleLoopedBFS,
 )
+from torch.distributed.tensor import DTensor
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
@@ -385,7 +385,7 @@ if __name__ == "__main__":
     if not (
         dist.is_available()
         and dist.is_nccl_available()
-        and torch.cuda.device_count() > 1
+        and torch.cuda.device_count() > 3
     ):
         print(
             "c10d NCCL not available or not enough GPUs, skipping tests",

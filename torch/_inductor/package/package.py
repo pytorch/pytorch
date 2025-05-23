@@ -14,14 +14,13 @@ import torch.utils._pytree as pytree
 from torch._inductor import config
 from torch._inductor.cpp_builder import BuildOptionsBase, CppBuilder
 from torch.export._tree_utils import reorder_kwargs
-from torch.types import FileLike
-
-from .pt2_archive_constants import (
+from torch.export.pt2_archive.constants import (
     AOTINDUCTOR_DIR,
-    ARCHIVE_VERSION,
+    ARCHIVE_VERSION_VALUE,
     CONSTANTS_DIR,
     CUSTOM_OBJ_FILENAME_PREFIX,
 )
+from torch.types import FileLike
 
 
 log = logging.getLogger(__name__)
@@ -37,7 +36,7 @@ class PT2ArchiveWriter:
         self.archive_file = zipfile.ZipFile(
             self.archive_path, "w", compression=zipfile.ZIP_STORED
         )
-        self.writestr("version", str(ARCHIVE_VERSION))
+        self.writestr("version", str(ARCHIVE_VERSION_VALUE))
         self.writestr("archive_format", "pt2")
         return self
 
@@ -259,6 +258,7 @@ class AOTICompiledModel:
         constants_map: dict[str, torch.Tensor],
         *,
         check_full_update: bool,
+        user_managed: bool = False,
     ) -> None:
         """
         Given a mapping of constant fqns to tensors, load the constants into the model.
@@ -270,7 +270,9 @@ class AOTICompiledModel:
             check_full_update: Whether to add check to see if all the constants
             are updated and have values.
         """
-        self.loader.load_constants(constants_map, False, check_full_update)  # type: ignore[attr-defined]
+        self.loader.load_constants(  # type: ignore[attr-defined]
+            constants_map, False, check_full_update, user_managed
+        )
 
     def get_constant_fqns(self) -> list[str]:
         return self.loader.get_constant_fqns()  # type: ignore[attr-defined]
@@ -287,6 +289,7 @@ def load_package(
     model_name: str = "model",
     run_single_threaded: bool = False,
     num_runners: int = 1,
+    device_index: int = -1,
 ) -> AOTICompiledModel:  # type: ignore[type-arg]
     assert (
         isinstance(path, (io.IOBase, IO)) and path.readable() and path.seekable()
@@ -302,12 +305,12 @@ def load_package(
             path.seek(0)
             log.debug("Writing buffer to tmp file located at %s.", f.name)
             loader = torch._C._aoti.AOTIModelPackageLoader(
-                f.name, model_name, run_single_threaded, num_runners
+                f.name, model_name, run_single_threaded, num_runners, device_index
             )  # type: ignore[call-arg]
             return AOTICompiledModel(loader)
 
     path = os.fspath(path)  # AOTIModelPackageLoader expects (str, str)
     loader = torch._C._aoti.AOTIModelPackageLoader(
-        path, model_name, run_single_threaded, num_runners
+        path, model_name, run_single_threaded, num_runners, device_index
     )  # type: ignore[call-arg]
     return AOTICompiledModel(loader)

@@ -1,5 +1,6 @@
 ARG CUDA_VERSION=12.4
 ARG BASE_TARGET=cuda${CUDA_VERSION}
+ARG ROCM_IMAGE=rocm/dev-almalinux-8:6.3-complete
 FROM amd64/almalinux:8 as base
 
 ENV LC_ALL en_US.UTF-8
@@ -7,10 +8,6 @@ ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US.UTF-8
 
 ARG DEVTOOLSET_VERSION=11
-
-ENV LC_ALL en_US.UTF-8
-ENV LANG en_US.UTF-8
-ENV LANGUAGE en_US.UTF-8
 
 RUN yum -y update
 RUN yum -y install epel-release
@@ -41,11 +38,12 @@ RUN bash ./install_conda.sh && rm install_conda.sh
 
 # Install CUDA
 FROM base as cuda
-ARG CUDA_VERSION=12.4
+ARG CUDA_VERSION=12.6
 RUN rm -rf /usr/local/cuda-*
 ADD ./common/install_cuda.sh install_cuda.sh
 COPY ./common/install_nccl.sh install_nccl.sh
 COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
+COPY ./common/install_cusparselt.sh install_cusparselt.sh
 ENV CUDA_HOME=/usr/local/cuda-${CUDA_VERSION}
 # Preserve CUDA_VERSION for the builds
 ENV CUDA_VERSION=${CUDA_VERSION}
@@ -56,17 +54,19 @@ FROM cuda as cuda11.8
 RUN bash ./install_cuda.sh 11.8
 ENV DESIRED_CUDA=11.8
 
-FROM cuda as cuda12.1
-RUN bash ./install_cuda.sh 12.1
-ENV DESIRED_CUDA=12.1
-
-FROM cuda as cuda12.4
-RUN bash ./install_cuda.sh 12.4
-ENV DESIRED_CUDA=12.4
-
 FROM cuda as cuda12.6
 RUN bash ./install_cuda.sh 12.6
 ENV DESIRED_CUDA=12.6
+
+FROM cuda as cuda12.8
+RUN bash ./install_cuda.sh 12.8
+ENV DESIRED_CUDA=12.8
+
+FROM ${ROCM_IMAGE} as rocm
+ENV PYTORCH_ROCM_ARCH="gfx900;gfx906;gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201"
+ADD ./common/install_mkl.sh install_mkl.sh
+RUN bash ./install_mkl.sh && rm install_mkl.sh
+ENV MKLROOT /opt/intel
 
 # Install MNIST test data
 FROM base as mnist
@@ -75,9 +75,8 @@ RUN bash ./install_mnist.sh
 
 FROM base as all_cuda
 COPY --from=cuda11.8  /usr/local/cuda-11.8 /usr/local/cuda-11.8
-COPY --from=cuda12.1  /usr/local/cuda-12.1 /usr/local/cuda-12.1
-COPY --from=cuda12.4  /usr/local/cuda-12.4 /usr/local/cuda-12.4
 COPY --from=cuda12.6  /usr/local/cuda-12.6 /usr/local/cuda-12.6
+COPY --from=cuda12.4  /usr/local/cuda-12.8 /usr/local/cuda-12.8
 
 # Final step
 FROM ${BASE_TARGET} as final
