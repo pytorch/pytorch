@@ -937,7 +937,6 @@ if torch.backends.mps.is_available():
             "masked.softmax": [torch.float32, torch.float16],
             "masked.log_softmax": [torch.float32, torch.float16],
             "atanh": [torch.float16],
-            "__rmod__": [torch.float16],
             "triangular_solve": [torch.float32],
             # Unsupported Border padding mode, forward pass success as fallback to cpu
             "grid_sampler_2d": [torch.float32, torch.float16, torch.bfloat16],
