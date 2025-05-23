@@ -1,16 +1,20 @@
 # mypy: allow-untyped-defs
+import atexit
 import gc
+import json
+import logging
 import sys
-from typing import Any, NamedTuple, Optional
 import types
 import weakref
-import json
 from tempfile import NamedTemporaryFile
+from typing import Any, NamedTuple, Optional
+
 import torch
-from torch.cuda._memory_viz import _frames_fmt, _block_extra
-import atexit
-import logging
+from torch.cuda._memory_viz import _block_extra, _frames_fmt
+
+
 logger = logging.getLogger(__name__)
+
 
 def observe_garbage(observer):
     enabled = True
@@ -20,6 +24,7 @@ def observe_garbage(observer):
         # so we have to disable the callback to avoid hitting errors.
         nonlocal enabled
         enabled = False
+
     atexit.register(disable)
 
     def gc_callback(phase, info):
@@ -45,7 +50,7 @@ def observe_garbage(observer):
                         # but that might _also_ free other stuff and we don't want to miss
                         # that stuff. So we have to now force gc at the highest level here,
                         # report all of what we found, _then_ we can free it up.
-                        if info['generation'] != 2:
+                        if info["generation"] != 2:
                             gc.collect()
                         observer(gc.garbage)
                         gc.garbage.clear()
@@ -56,11 +61,15 @@ def observe_garbage(observer):
                         gc.collect()
                         after = torch.cuda.memory_allocated()
                         if before != after:
-                            logger.warning("CUDA Memory changed during GC, %d bytes freed.", before - after)
+                            logger.warning(
+                                "CUDA Memory changed during GC, %d bytes freed.",
+                                before - after,
+                            )
                     finally:
                         enabled = True
                 if orig_trace is not None:
                     return orig_trace(*args, **kwargs)
+
             sys.setprofile(do_collect)
 
     gc.callbacks.append(gc_callback)
@@ -68,7 +77,9 @@ def observe_garbage(observer):
     # provide a way to disarm the callback
     def remove():
         gc.callbacks.remove(gc_callback)
+
     return remove
+
 
 # Function to visualize cycles adapated from refcycle:
 # Copyright 2013 Mark Dickinson
@@ -85,12 +96,16 @@ def observe_garbage(observer):
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 def _get_cell_type():
     def f(x=None):
         return lambda: x
+
     return type(f().__closure__[0])
 
+
 CellType = _get_cell_type()
+
 
 def annotated_references(obj):
     """
@@ -122,17 +137,17 @@ def annotated_references(obj):
             pass
 
     def add_function_references():
-        add_attrs("__defaults__",
-                  "__closure__",
-                  "__globals__",
-                  "__code__",
-                  "__name__",
-                  "__module__",
-                  "__doc__"
-                  "__qualname__",
-                  "__annotations__",
-                  "__kwdefaults__")
-
+        add_attrs(
+            "__defaults__",
+            "__closure__",
+            "__globals__",
+            "__code__",
+            "__name__",
+            "__module__",
+            "__doc__" "__qualname__",
+            "__annotations__",
+            "__kwdefaults__",
+        )
 
     def add_sequence_references():
         for position, item in enumerate(obj):
@@ -158,7 +173,6 @@ def annotated_references(obj):
             if len(referents) == 1:
                 target = referents[0]
                 add_reference("__callback__", target)
-
 
     def add_frame_references():
         f_locals = obj.f_locals
@@ -197,12 +211,14 @@ def annotated_references(obj):
 
     return references
 
+
 ###############################################################################
 # Object annotations.
 
 
 BASE_TYPES = (int, float, complex, type(None), str, bytes)
 FRAME_FILENAME_LIMIT = 32
+
 
 def object_annotation(obj):
     """
@@ -212,15 +228,18 @@ def object_annotation(obj):
     """
 
     def format_sequence(obj):
-        body = ','.join(repr(x) if isinstance(x, BASE_TYPES) else type(x).__name__ for i, x in zip(range(8), obj))
+        body = ",".join(
+            repr(x) if isinstance(x, BASE_TYPES) else type(x).__name__
+            for i, x in zip(range(8), obj)
+        )
         if len(obj) > 8:
-            body = f'{body}, ...{len(obj) - 8}'
+            body = f"{body}, ...{len(obj) - 8}"
         return body
 
     # For basic types, use the repr.
     if isinstance(obj, BASE_TYPES):
         return repr(obj)
-    if type(obj).__name__ == 'function':
+    if type(obj).__name__ == "function":
         return f"function\n{obj.__name__}"
     elif isinstance(obj, types.MethodType):
         try:
@@ -247,11 +266,10 @@ def object_annotation(obj):
     elif isinstance(obj, types.FrameType):
         filename = obj.f_code.co_filename
         if len(filename) > FRAME_FILENAME_LIMIT:
-            filename = "..." + filename[-(FRAME_FILENAME_LIMIT - 3):]
+            filename = "..." + filename[-(FRAME_FILENAME_LIMIT - 3) :]
         return f"frame\n{filename}:{obj.f_lineno}"
     else:
         return f"object\n{type(obj).__module__}.{type(obj).__name__}"
-
 
 
 class Node(NamedTuple):
@@ -260,6 +278,7 @@ class Node(NamedTuple):
     root: bool
     referrents: list[tuple[str, int]]
 
+
 def create_graph(objects, *, context=None, filter=None):
     if context is None:
         context = cuda_allocation_context()
@@ -267,7 +286,9 @@ def create_graph(objects, *, context=None, filter=None):
         filter = is_cuda_tensor
 
     objects = [obj for obj in objects if not isinstance(obj, weakref.ProxyTypes)]
-    nodes = [Node(object_annotation(obj), context(obj), filter(obj), []) for obj in objects]
+    nodes = [
+        Node(object_annotation(obj), context(obj), filter(obj), []) for obj in objects
+    ]
     node_referrers: list[list[int]] = [[] for obj in objects]
 
     id_to_node = {id(obj): i for i, obj in enumerate(objects)}
@@ -301,48 +322,61 @@ def create_graph(objects, *, context=None, filter=None):
             id_to_filtered_id[i] = len(id_to_filtered_id)
             filtered.append(n)
     for n in filtered:
-        n.referrents[:] = [(label, id_to_filtered_id[idx])
-                           for (label, idx) in n.referrents
-                           if idx in id_to_filtered_id]
+        n.referrents[:] = [
+            (label, id_to_filtered_id[idx])
+            for (label, idx) in n.referrents
+            if idx in id_to_filtered_id
+        ]
     return filtered
+
 
 def escape(n):
     return json.dumps(n)
 
 
 def is_cuda_tensor(obj):
-    return isinstance(obj, torch.Tensor) and obj.is_cuda and not isinstance(obj, torch._subclasses.FakeTensor)
+    return (
+        isinstance(obj, torch.Tensor)
+        and obj.is_cuda
+        and not isinstance(obj, torch._subclasses.FakeTensor)
+    )
+
 
 def cuda_allocation_context():
     snapshot = torch.cuda.memory._snapshot()
     addr_to_frame = {}
-    for seg in snapshot['segments']:
-        addr = seg['address']
-        for blk in seg['blocks']:
-            if blk['state'] == 'active_allocated':
+    for seg in snapshot["segments"]:
+        addr = seg["address"]
+        for blk in seg["blocks"]:
+            if blk["state"] == "active_allocated":
                 frames, _real_size = _block_extra(blk)
                 addr_to_frame[addr] = frames
-            addr += blk['size']
+            addr += blk["size"]
 
     def object_context(obj):
         if is_cuda_tensor(obj):
             addr = obj.untyped_storage().data_ptr()
             frames = addr_to_frame.get(addr)
             if frames is not None:
-                return '\n'.join(_frames_fmt(frames, full_filename=True))
+                return "\n".join(_frames_fmt(frames, full_filename=True))
         return None
+
     return object_context
 
+
 def to_dot(nodes):
-    lines = ["digraph GraphName {", "node [shape=rect];", 'rankdir=LR;']
+    lines = ["digraph GraphName {", "node [shape=rect];", "rankdir=LR;"]
     for i, n in enumerate(nodes):
-        lines.append(f'{i} [label={escape(n.label)}, color={ "red" if n.root else "black"}];')
+        lines.append(
+            f'{i} [label={escape(n.label)}, color={ "red" if n.root else "black"}];'
+        )
 
     for i, f in enumerate(nodes):
         for label, j in f.referrents:
-            lines.append(f'{i} -> {j} [label = {escape(label)}]')
+            lines.append(f"{i} -> {j} [label = {escape(label)}]")
     lines.append("}\n")
-    return '\n'.join(lines)
+    return "\n".join(lines)
+
 
 _template = """
 <!DOCTYPE html>
@@ -455,15 +489,22 @@ document.getElementById('node{id}').addEventListener('mouseover', function(event
   document.getElementById("stacktrace").textContent = {stack}
 }})
 """
+
+
 def to_html(nodes):
     listeners = []
     for i, n in enumerate(nodes):
         if n.context is None:
             continue
-        s = _listener_template.format(id=str(i + 1), stack=escape(f'{n.label}:\n{n.context}'))
+        s = _listener_template.format(
+            id=str(i + 1), stack=escape(f"{n.label}:\n{n.context}")
+        )
         listeners.append(s)
     dot = to_dot(nodes)
-    return _template.replace('$DOT', repr(dot)).replace('$LISTENERS', '\n'.join(listeners))
+    return _template.replace("$DOT", repr(dot)).replace(
+        "$LISTENERS", "\n".join(listeners)
+    )
+
 
 def observe_tensor_cycles(callback):
     torch.cuda.memory._record_memory_history(max_entries=100000)
@@ -474,6 +515,7 @@ def observe_tensor_cycles(callback):
                 logger.info("No CUDA Tensors found in garbage")
                 return
             callback(to_html(create_graph(garbage)))
+
     return observe_garbage(observer)
 
 
@@ -493,7 +535,11 @@ def warn_tensor_cycles():
     logger.info("Watching Python reference cycles for CUDA Tensors.")
 
     def write_and_log(html):
-        with NamedTemporaryFile('w', suffix='.html', delete=False) as f:
+        with NamedTemporaryFile("w", suffix=".html", delete=False) as f:
             f.write(html)
-            logger.warning('Reference cycle includes a CUDA Tensor see visualization of cycle %s', f.name)
+            logger.warning(
+                "Reference cycle includes a CUDA Tensor see visualization of cycle %s",
+                f.name,
+            )
+
     return observe_tensor_cycles(write_and_log)
