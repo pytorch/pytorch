@@ -5820,6 +5820,8 @@ GPU_TEST_FAILURES = {
     "test_stft": fail_gpu(("xpu",)),
 }
 
+MPS_TEST_FAILURES = {}
+
 
 class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
@@ -5836,6 +5838,25 @@ copy_tests(
     AOTInductorTestABICompatibleCpu,
     "cpu",
     CPU_TEST_FAILURES,
+)
+
+
+@unittest.skipIf(not torch.backends.mps.is_available(), "No MPS backend available")
+class AOTInductorTestABICompatibleMps(TestCase):
+    device = "mps"
+    device_type = "mps"
+    check_model = check_model
+    check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    code_check_count = code_check_count
+    allow_stack_allocation = False
+    use_minimal_arrayref_interface = False
+
+
+copy_tests(
+    AOTInductorTestsTemplate,
+    AOTInductorTestABICompatibleMps,
+    "mps",
+    MPS_TEST_FAILURES,
 )
 
 
