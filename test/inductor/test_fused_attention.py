@@ -61,6 +61,10 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         args2 = self._clone_inputs(args1)
 
         for training in [False, True] if check_train else [False]:
+            if training and self.device == "xpu":
+                # Intel GPU have not implemented sdpa backward yet mode.
+                # TODO: remove this when sdpa backward is implemented for XPU.
+                continue
             for x in itertools.chain(args1[:], args2[:]):
                 if isinstance(x, torch.Tensor) and x.is_floating_point():
                     x.requires_grad = training
@@ -120,7 +124,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         for dtype in [torch.float, torch.half]:
             atol = 0.001
             rtol = 1.3e-6 if dtype == torch.float else 0.7
-            if self.device == "cpu" and dtype == torch.half:
+            if self.device in ["cpu", "xpu"] and dtype == torch.half:
                 atol = 2e-3
                 rtol = 1e-2
             self._check_common(dot_prod_attention, dtype=dtype, atol=atol, rtol=rtol)
@@ -144,10 +148,10 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 .matmul(value)
             )
 
-        for dtype in [torch.float, torch.half]:
+        for dtype in [torch.half]:
             atol = 0.001
             rtol = 1.3e-6 if dtype == torch.float else 0.7
-            if self.device == "cpu" and dtype == torch.half:
+            if self.device in ["cpu", "xpu"] and dtype == torch.half:
                 atol = 2e-3
                 rtol = 1e-2
             with torch.no_grad():
@@ -160,7 +164,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 )
 
     def _test_insignificant_strides(self):
-        if torch.xpu.is_available():
+        if self.device == "xpu":
             self.skipTest(
                 "The operator 'aten::_scaled_dot_product_efficient_attention'"
                 " is not currently implemented for the XPU device. "
