@@ -12,6 +12,7 @@ import torch
 from torch._inductor import config
 from torch._inductor.dependencies import index_vars_no_squeeze
 from torch._inductor.utils import sympy_product, sympy_subs
+from torch.utils._sympy.functions import Identity
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.symbol import symbol_is_type, SymT
@@ -525,8 +526,12 @@ def extract_normalized_read_writes(
             return_getters_groups,
         )
 
-        n_reads_new = {sympy_subs(read, var_map): v for read, v in n_reads.items()}
-        n_writes_new = {sympy_subs(write, var_map): v for write, v in n_writes.items()}
+        def remove_identity(expr):
+            return expr.replace(Identity, lambda x: x)
+
+        n_reads_new = {sympy_subs(remove_identity(read), var_map): v for read, v in n_reads.items()}
+        n_writes_new = {sympy_subs(remove_identity(write), var_map): v for write, v in n_writes.items()}
+
 
         for expr, buf_names in n_reads_new.items():
             reads[expr] |= buf_names
