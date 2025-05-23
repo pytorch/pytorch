@@ -228,13 +228,6 @@ def _get_param_all_gather_inputs(
             if hasattr(fsdp_param, "sharded_param"):
                 fsdp_param.sharded_param = fsdp_param.sharded_param.to(param_dtype)
                 fsdp_param.sharded_param.requires_grad_(True)
-            if hasattr(fsdp_param, "sharded_param_fully_shard"):
-                # torch.distributed.breakpoint()
-                fsdp_param.sharded_param_fully_shard = (
-                    fsdp_param.sharded_param_fully_shard.to(param_dtype)
-                )
-                buff_grad = torch.empty_like(fsdp_param.sharded_param_fully_shard)
-                fsdp_param.sharded_param_fully_shard.grad = buff_grad
         else:
             param_all_gather_inputs[i] = fsdp_param.all_gather_inputs
 
@@ -550,8 +543,6 @@ def foreach_reduce(
                 new_sharded_dtensor_grad = _from_local_no_grad(
                     new_sharded_grad, fsdp_param._sharding_spec
                 )
-                # torch.distributed.breakpoint()
-                # fsdp_param.sharded_param_fully_shard.grad = new_sharded_dtensor_grad
                 fsdp_param.sharded_param_fully_shard.grad = new_sharded_dtensor_grad.to(
                     fsdp_param.sharded_param_fully_shard.dtype
                 )
