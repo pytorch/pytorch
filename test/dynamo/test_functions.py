@@ -37,7 +37,6 @@ from torch.nn import functional as F
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    make_dynamo_test,
     parametrize,
 )
 
@@ -53,10 +52,6 @@ flag = True
 
 
 class CustomDictSubclass(collections.OrderedDict):
-    pass
-
-
-class SetSubclass(set):
     pass
 
 
@@ -1755,23 +1750,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.rand(4)
         self.assertEqual(fn(x), opt_fn(x))
-
-    @parametrize("method", ["add", "__contains__"], name_fn=lambda x: x)
-    def test_set_raise_TypeError_on_unshashable_obj(self, method):
-        @make_test
-        def fn(a, b):
-            s = set({1, 2, 3, 4})
-            try:
-                m = getattr(s, method)
-                m([[]])
-            except TypeError:
-                return a + b
-            except Exception:
-                return a - b
-            else:
-                return a * b
-
-        fn(self)
 
     def test_constant_set(self):
         s = set([1, 2])
