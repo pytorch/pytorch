@@ -2717,8 +2717,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # prune choices based on prescreening timings
         candidates_to_prune = OrderedSet(
-            candidate.hash_key()
-            for candidate in sorted_candidates[num_to_keep:]
+            candidate.hash_key() for candidate in sorted_candidates[num_to_keep:]
         )
         for candidate in sorted_candidates[:num_to_keep]:
             if candidate_timings[candidate] == float("inf"):
