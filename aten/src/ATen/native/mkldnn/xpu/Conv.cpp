@@ -684,14 +684,14 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
 Tensor convolution_pointwise(
     const Tensor& input_t,
     const Tensor& weight_t,
-    const c10::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& bias_opt,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
-    c10::string_view attr,
-    torch::List<c10::optional<at::Scalar>> scalars,
-    c10::optional<c10::string_view> algorithm) {
+    std::string_view attr,
+    torch::List<std::optional<at::Scalar>> scalars,
+    std::optional<std::string_view> algorithm) {
   Attr att;
   att = construct_unary_attr(att, attr, scalars, algorithm);
   const Tensor bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
@@ -714,16 +714,16 @@ Tensor convolution_pointwise_binary(
     const Tensor& input_t,
     const Tensor& other_t,
     const Tensor& weight_t,
-    const c10::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& bias_opt,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
-    c10::string_view binary_attr,
-    c10::optional<at::Scalar> alpha,
-    c10::optional<c10::string_view> unary_attr,
-    torch::List<c10::optional<at::Scalar>> unary_scalars,
-    c10::optional<c10::string_view> unary_algorithm) {
+    std::string_view binary_attr,
+    std::optional<at::Scalar> alpha,
+    std::optional<std::string_view> unary_attr,
+    torch::List<std::optional<at::Scalar>> unary_scalars,
+    std::optional<std::string_view> unary_algorithm) {
   Tensor output;
   Tensor bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
   // Step1: Construct binary attr
@@ -755,16 +755,16 @@ Tensor& convolution_pointwise_binary_(
     Tensor& other_t,
     const Tensor& input_t,
     const Tensor& weight_t,
-    const c10::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& bias_opt,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
-    c10::string_view binary_attr,
-    c10::optional<at::Scalar> alpha,
-    c10::optional<c10::string_view> unary_attr,
-    torch::List<c10::optional<at::Scalar>> unary_scalars,
-    c10::optional<c10::string_view> unary_algorithm) {
+    std::string_view binary_attr,
+    std::optional<at::Scalar> alpha,
+    std::optional<std::string_view> unary_attr,
+    torch::List<std::optional<at::Scalar>> unary_scalars,
+    std::optional<std::string_view> unary_algorithm) {
   Tensor bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
   // Step1: Construct binary attr
   Attr attr;
