@@ -59,6 +59,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/RangeUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorConversions.h>
 #include <c10/core/ScalarType.h>
@@ -129,18 +130,7 @@ TORCH_API std::vector<Shape> compute_shape_arange_out(
               step.to<double>());
         }
 
-        TORCH_CHECK(xstep > 0 || xstep < 0, "step must be nonzero");
-        TORCH_CHECK(
-            std::isfinite(static_cast<double>(xstart)) &&
-                std::isfinite(static_cast<double>(xend)),
-            "unsupported range: ",
-            xstart,
-            " -> ",
-            xend);
-        TORCH_CHECK(
-            ((xstep > 0) && (xend >= xstart)) ||
-                ((xstep < 0) && (xend <= xstart)),
-            "upper bound and lower bound inconsistent with step sign");
+        at::native::arange_check_bounds(start, end, step);
 
         TORCH_CHECK(
             size_d >= 0 &&

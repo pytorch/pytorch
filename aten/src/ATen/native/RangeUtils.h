@@ -6,6 +6,27 @@
 
 namespace at::native {
 
+inline void arange_check_bounds(
+    const c10::Scalar& start,
+    const c10::Scalar& end,
+    const c10::Scalar& step) {
+  // use double precision for validation to avoid precision issues
+  double dstart = start.to<double>();
+  double dend = end.to<double>();
+  double dstep = step.to<double>();
+
+  TORCH_CHECK(dstep > 0 || dstep < 0, "step must be nonzero");
+  TORCH_CHECK(
+      std::isfinite(dstart) && std::isfinite(dend),
+      "unsupported range: ",
+      dstart,
+      " -> ",
+      dend);
+  TORCH_CHECK(
+      ((dstep > 0) && (dend >= dstart)) || ((dstep < 0) && (dend <= dstart)),
+      "upper bound and lower bound inconsistent with step sign");
+}
+
 template <typename scalar_t>
 int64_t compute_arange_size(const Scalar& start, const Scalar& end, const Scalar& step) {
   using accscalar_t = at::acc_type<scalar_t, false>;
@@ -13,13 +34,7 @@ int64_t compute_arange_size(const Scalar& start, const Scalar& end, const Scalar
   auto xend = end.to<accscalar_t>();
   auto xstep = step.to<accscalar_t>();
 
-  TORCH_CHECK(xstep > 0 || xstep < 0, "step must be nonzero");
-  TORCH_CHECK(std::isfinite(static_cast<double>(xstart)) &&
-            std::isfinite(static_cast<double>(xend)),
-            "unsupported range: ", xstart, " -> ", xend);
-  TORCH_CHECK(
-      ((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
-      "upper bound and lower bound inconsistent with step sign");
+  arange_check_bounds(start, end, step);
 
   // we use double precision for (start - end) / step
   // to compute size_d for consistency across devices.
