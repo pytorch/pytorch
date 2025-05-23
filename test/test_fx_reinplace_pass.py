@@ -1,20 +1,22 @@
 # Owner(s): ["module: functionalization"]
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.fx.passes.reinplace import reinplace
-from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch._dynamo.source import ConstantSource
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.sym_node import SymNode
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.passes.reinplace import reinplace
+from torch.testing._internal.common_utils import run_tests, TestCase
+
 
 try:
     from functorch.experimental import functionalize
+
     HAS_FUNCTIONALIZATION = True
 except Exception:
     HAS_FUNCTIONALIZATION = False
 
-class TestReinplacePass(TestCase):
 
+class TestReinplacePass(TestCase):
     def test_reinplace_basic(self):
         # Basic test: the out-of-place add() call should be converted
         # into add_()
@@ -28,7 +30,9 @@ class TestReinplacePass(TestCase):
         expected_out = f(inpt)
         actual_out = f2(inpt)
         self.assertEqual(actual_out, expected_out)
-        self.assertExpectedInline(f2.code, """\
+        self.assertExpectedInline(
+            f2.code,
+            """\
 
 
 
@@ -36,8 +40,8 @@ def forward(self, x_1):
     clone = torch.ops.aten.clone.default(x_1);  x_1 = None
     add = torch.ops.aten.add_.Tensor(clone, 1);  add = None
     return clone
-    """)
-
+    """,
+        )
 
     def test_reinplace_with_view(self):
         def f(x):
@@ -55,7 +59,9 @@ def forward(self, x_1):
         expected_out = f(inpt)
         actual_out = f2(inpt)
         self.assertEqual(actual_out, expected_out)
-        self.assertExpectedInline(f2.code, """\
+        self.assertExpectedInline(
+            f2.code,
+            """\
 
 
 
@@ -65,7 +71,8 @@ def forward(self, x_1):
     add = torch.ops.aten.add.Tensor(clone, 1);  clone = add = None
     add_1 = torch.ops.aten.add_.Tensor(view, 1);  add_1 = None
     return view
-    """)
+    """,
+        )
 
     def test_reinplace_different_metadata(self):
         def f(a_):
@@ -75,13 +82,16 @@ def forward(self, x_1):
             # because that would require resizing "b" (from a float to a bool tensor).
             c = torch.ge(b, a)
             return c
+
         inpt = torch.ones(4)
         f2 = reinplace(make_fx(f)(inpt), inpt)
         expected_out = f(inpt)
         actual_out = f2(inpt)
         self.assertEqual(actual_out, expected_out)
         # The .ge() should not be reinplaced.
-        self.assertExpectedInline(f2.code, """\
+        self.assertExpectedInline(
+            f2.code,
+            """\
 
 
 
@@ -90,7 +100,8 @@ def forward(self, a__1):
     add = torch.ops.aten.add.Tensor(clone, 1)
     ge = torch.ops.aten.ge.Tensor(add, clone);  add = clone = None
     return ge
-    """)
+    """,
+        )
 
     def test_reinplace_overlapping_memory(self):
         def f(a_):
@@ -99,12 +110,15 @@ def forward(self, a__1):
             # Can't reinplace because b has overlapping memory.
             c = b.add(1)
             return c
+
         inpt = torch.ones(1)
         f2 = reinplace(make_fx(f)(inpt), inpt)
         expected_out = f(inpt)
         actual_out = f2(inpt)
         self.assertEqual(actual_out, expected_out)
-        self.assertExpectedInline(f2.code, """\
+        self.assertExpectedInline(
+            f2.code,
+            """\
 
 
 
@@ -113,7 +127,8 @@ def forward(self, a__1):
     expand = torch.ops.aten.expand.default(clone, [4, 4]);  clone = None
     add = torch.ops.aten.add.Tensor(expand, 1);  expand = None
     return add
-    """)
+    """,
+        )
 
     # This test won't actually run in CI, because it requires functionalize() from functorch.
     # I'm planning on testing more comprehensively with torchbench models,
@@ -142,7 +157,9 @@ def forward(self, a__1):
         # This shouldn't really hurt performance though, since creating an extra view
         # is effectively just moving some metadata around (and allocating a new TensorImpl).
         # We can/should update the pass in the future to clean this up.
-        self.assertExpectedInline(f2.code, """\
+        self.assertExpectedInline(
+            f2.code,
+            """\
 
 
 
@@ -163,7 +180,8 @@ def forward(self, a__1):
     view_8 = torch.ops.aten.view.default(view_5, [-1])
     add_1 = torch.ops.aten.add_.Tensor(view_5, view_8);  view_8 = add_1 = None
     return view_5
-    """)
+    """,
+        )
 
     def test_reinplace_scatter_twice(self):
         def f(a_):
@@ -182,7 +200,9 @@ def forward(self, a__1):
         expected_out = f(inpt)
         actual_out = f2(inpt)
         self.assertEqual(actual_out, expected_out)
-        self.assertExpectedInline(f2.code, """\
+        self.assertExpectedInline(
+            f2.code,
+            """\
 
 
 
@@ -198,7 +218,8 @@ def forward(self, a__1):
     select_3 = torch.ops.aten.select.int(slice_3, 1, 1);  slice_3 = None
     select_4 = torch.ops.aten.select.int(select_3, 0, 1);  select_3 = select_4 = None
     return clone
-    """)
+    """,
+        )
 
     def test_reinplace_scatter_twice_with_different_view_op_valid(self):
         def f(a_):
@@ -222,7 +243,9 @@ def forward(self, a__1):
         expected_out = f(inpt)
         actual_out = f2(inpt)
         self.assertEqual(actual_out, expected_out)
-        self.assertExpectedInline(f2.code, """\
+        self.assertExpectedInline(
+            f2.code,
+            """\
 
 
 
@@ -234,7 +257,8 @@ def forward(self, a__1):
     add = torch.ops.aten.add_.Tensor(select_1, 1);  select_1 = add = None
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [4], 1);  clone = None
     return as_strided
-    """)
+    """,
+        )
 
     # Test example where we have a scatter op, where the base tensor
     # has the same size/stride/storage offset (even though it is a different view),
@@ -258,7 +282,9 @@ def forward(self, a__1):
         expected_out = f(inpt)
         actual_out = f2(inpt)
         self.assertEqual(actual_out, expected_out)
-        self.assertExpectedInline(f2.code, """\
+        self.assertExpectedInline(
+            f2.code,
+            """\
 
 
 
@@ -272,7 +298,8 @@ def forward(self, a__1):
     select_int = torch.ops.aten.select.int(as_strided, 0, 0)
     copy__default = torch.ops.aten.copy_.default(select_int, add);  select_int = add = copy__default = None
     return as_strided
-    """)  # noqa: B950
+    """,
+        )  # noqa: B950
 
     def test_reinplace_scatter_twice_with_different_view_op_invalid2(self):
         def f(a_):
@@ -291,7 +318,9 @@ def forward(self, a__1):
         expected_out = f(inpt)  # noqa: F841
         actual_out = f2(inpt)  # noqa: F841
         # self.assertEqual(actual_out, expected_out)
-        self.assertExpectedInline(f2.code, """\
+        self.assertExpectedInline(
+            f2.code,
+            """\
 
 
 
@@ -305,8 +334,8 @@ def forward(self, a__1):
     select_int = torch.ops.aten.select.int(as_strided, 0, 1)
     copy__default = torch.ops.aten.copy_.default(select_int, add);  select_int = add = copy__default = None
     return as_strided
-    """)  # noqa: B950
-
+    """,
+        )  # noqa: B950
 
     def test_out_node_updated(self):
         def f():
@@ -323,7 +352,9 @@ def forward(self, a__1):
         expected_out = f()
         actual_out = f2()
         self.assertEqual(actual_out, expected_out)
-        self.assertExpectedInline(f2.code, """\
+        self.assertExpectedInline(
+            f2.code,
+            """\
 
 
 
@@ -332,7 +363,8 @@ def forward(self):
     diagonal = torch.ops.aten.diagonal.default(zeros)
     add = torch.ops.aten.add_.Tensor(diagonal, 1);  diagonal = add = None
     return [zeros]
-    """)
+    """,
+        )
 
     def test_reinplace_index_mutation(self):
         def f():
@@ -346,7 +378,9 @@ def forward(self):
         expected_out = f()
         actual_out = f2()
         self.assertEqual(actual_out, expected_out)
-        self.assertExpectedInline(f2.code, """\
+        self.assertExpectedInline(
+            f2.code,
+            """\
 
 
 
@@ -360,7 +394,8 @@ def forward(self):
     slice_4 = torch.ops.aten.slice.Tensor(zeros, 0, 0, 9223372036854775807)
     slice_5 = torch.ops.aten.slice.Tensor(slice_4, 1, 2, 9223372036854775807);  slice_4 = slice_5 = None
     return zeros
-    """)
+    """,
+        )
 
     def test_reinplace_sym_input(self):
         # Symbolic input test: the out-of-place add() call should be converted
@@ -374,8 +409,9 @@ def forward(self):
         x = torch.randn((4, 8, 16, 16), requires_grad=False)
         index = 2
         shape_env = ShapeEnv()
-        symbol = shape_env.create_symbol(index, source=ConstantSource(
-            f"__testing_only{len(shape_env.var_to_val)}"))
+        symbol = shape_env.create_symbol(
+            index, source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}")
+        )
         sym_index = torch.SymInt(SymNode(symbol, shape_env, int, hint=index))
 
         inpt = [x, sym_index]
@@ -386,7 +422,9 @@ def forward(self):
         actual_out = f2(*real_inpt)
         self.assertEqual(actual_out, expected_out)
         print(f2.code)
-        self.assertExpectedInline(f2.code, """\
+        self.assertExpectedInline(
+            f2.code,
+            """\
 
 
 
@@ -395,8 +433,9 @@ def forward(self, x_1, index_1):
     clone = torch.ops.aten.clone.default(select);  select = None
     add = torch.ops.aten.add_.Tensor(clone, 1);  add = None
     return clone
-    """)
+    """,
+        )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()
