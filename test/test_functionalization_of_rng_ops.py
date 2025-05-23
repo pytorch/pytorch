@@ -7,13 +7,12 @@ from unittest.mock import patch
 import torch
 import torch.utils.checkpoint
 from functorch.compile import aot_function, min_cut_rematerialization_partition, nop
-
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
 )
-
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, run_tests, TestCase
+
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write("torch.compile not supported on windows")

@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 # flake8: noqa: E221
 
+
 import builtins
 import collections
 import contextlib
@@ -20,26 +21,10 @@ import types
 import typing
 import unittest
 import warnings
-from math import sqrt
-from torch.multiprocessing import Process
-from torch.testing import FileCheck
-from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
-import torch.utils._pytree as pytree
-import torch.fx._pytree as fx_pytree
-from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, PH, CodeGen
-from torch.fx.node import Target, Argument, ArgumentT, _format_arg
-from torch.fx.passes import shape_prop
-from torch.fx.immutable_collections import immutable_dict, immutable_list
-from torch.fx.experimental.rewriter import RewritingTracer
-from torch.fx.operator_schemas import get_signature_for_torch_op
-from copy import deepcopy
 from collections import namedtuple
+from copy import deepcopy
+from math import sqrt
 from typing import Any, Callable, NamedTuple, Optional, Union
-
-import torch
-
-from functorch.experimental import control_flow
 
 from fx.named_tup import MyNamedTup
 from fx.test_common_passes import TestCommonPass  # noqa: F401
@@ -49,7 +34,6 @@ from fx.test_fx_const_fold import TestConstFold  # noqa: F401
 from fx.test_fx_param_shape_control_flow import (  # noqa: F401
     TestConstParamShapeInControlFlow,
 )
-
 from fx.test_gradual_type import (  # noqa: F401  # noqa: F401
     AnnotationsTest,
     TypeCheckerTest,
@@ -58,10 +42,40 @@ from fx.test_matcher_utils import TestMatcher  # noqa: F401
 from fx.test_pass_infra import TestPassManager  # noqa: F401
 from fx.test_source_matcher_utils import TestSourceMatcher  # noqa: F401
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
+
+import torch
+import torch.fx._pytree as fx_pytree
+import torch.utils._pytree as pytree
+from functorch.experimental import control_flow
+from torch.fx import (
+    CodeGen,
+    Graph,
+    GraphModule,
+    Interpreter,
+    Node,
+    PH,
+    Proxy,
+    symbolic_trace,
+    Tracer,
+    Transformer,
+    wrap,
+)
 from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMPATIBILITY
 from torch.fx._symbolic_trace import PHBase, PHWithMeta
-
+from torch.fx.experimental.rewriter import RewritingTracer
+from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.fx.node import _format_arg, Argument, ArgumentT, Target
+from torch.fx.operator_schemas import get_signature_for_torch_op
+from torch.fx.passes import shape_prop
 from torch.fx.proxy import TraceError
+from torch.multiprocessing import Process
+from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCPU,
+    ops,
+)
+from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
@@ -71,6 +85,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
 )
 from torch.testing._internal.jit_utils import JitTestCase
+
 
 try:
     from torchvision import models as torchvision_models
@@ -726,16 +741,16 @@ class TestFX(JitTestCase):
 
         graph = tracer.trace(M())
         # saving the original list because we will insert new nodes as a part of a test
-        stack_traces = "\n".join([node.meta.get("stack_trace", "") for node in graph.nodes])
-        FileCheck().check_count(
-            "c = a + b", 1, exactly=True
-        ).run(stack_traces.strip())
-        FileCheck().check_count(
-            "c = foo(a, c)", 1, exactly=True
-        ).run(stack_traces.strip())
-        FileCheck().check_count(
-            "return a * b", 1, exactly=True
-        ).run(stack_traces.strip())
+        stack_traces = "\n".join(
+            [node.meta.get("stack_trace", "") for node in graph.nodes]
+        )
+        FileCheck().check_count("c = a + b", 1, exactly=True).run(stack_traces.strip())
+        FileCheck().check_count("c = foo(a, c)", 1, exactly=True).run(
+            stack_traces.strip()
+        )
+        FileCheck().check_count("return a * b", 1, exactly=True).run(
+            stack_traces.strip()
+        )
 
     def test_stack_traces_with_transformer(self):
         class M(torch.nn.Module):
@@ -1285,13 +1300,15 @@ class TestFX(JitTestCase):
 
         graph: torch.fx.Graph = torch.fx.Graph()
         a: torch.fx.Node = graph.create_node("placeholder", "x")
-        b: torch.fx.Node = graph.create_node("call_function", op, (a,), type_expr=type_name)
-        c: torch.fx.Node = graph.create_node("call_function", op, (b,), type_expr=type_name)
+        b: torch.fx.Node = graph.create_node(
+            "call_function", op, (a,), type_expr=type_name
+        )
+        c: torch.fx.Node = graph.create_node(
+            "call_function", op, (b,), type_expr=type_name
+        )
         graph.output((b, c))
 
-        gm: torch.fx.GraphModule = torch.fx.GraphModule(
-            torch.nn.Module(), graph
-        )
+        gm: torch.fx.GraphModule = torch.fx.GraphModule(torch.nn.Module(), graph)
         gm.graph.lint()
         text = gm.print_readable(False)
         assert 2 == text.count("_torch__ops_aten_aten_relu_")
@@ -2284,16 +2301,17 @@ class TestFX(JitTestCase):
         )
         output: torch.fx.Node = graph.output(b)
 
-        self.assertTrue('list[float]' in str(graph))
+        self.assertTrue("list[float]" in str(graph))
 
     def test_typename_print_pre_pep585(self):
-        graph : torch.fx.Graph = torch.fx.Graph()
-        x : torch.fx.Node = graph.create_node('placeholder', 'x')
-        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,),
-                                              type_expr=typing.List[float])  # noqa: UP006
-        output : torch.fx.Node = graph.output(b)
+        graph: torch.fx.Graph = torch.fx.Graph()
+        x: torch.fx.Node = graph.create_node("placeholder", "x")
+        b: torch.fx.Node = graph.create_node(
+            "call_function", target=torch.relu, args=(x,), type_expr=list[float]
+        )  # noqa: UP006
+        output: torch.fx.Node = graph.output(b)
 
-        self.assertTrue("typing.List[float]" in str(graph))
+        self.assertTrue("list[float]" in str(graph))
 
     def test_layout(self):
         class M(torch.nn.Module):
@@ -2946,10 +2964,10 @@ class TestFX(JitTestCase):
 
     def test_return_type_exists_pre_pep585(self):
         class ReturnTypeModule(torch.nn.Module):
-            def other(self, x: typing.List[str]) -> typing.List[str]:  # noqa: UP006
+            def other(self, x: list[str]) -> list[str]:  # noqa: UP006
                 return x
 
-            def forward(self, x: typing.List[str]) -> typing.List[str]:  # noqa: UP006
+            def forward(self, x: list[str]) -> list[str]:  # noqa: UP006
                 return self.other(x)
 
         traced = symbolic_trace(ReturnTypeModule())
@@ -3002,9 +3020,7 @@ class TestFX(JitTestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "'wrapper_fn' is "
-            "being compiled since it was called"
-            " from 'fn.forward'",
+            "'wrapper_fn' is being compiled since it was called from 'fn.forward'",
         ):
             scripted = torch.jit.script(traced)
 
@@ -3017,7 +3033,7 @@ class TestFX(JitTestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "'wrapper_fn' is " "being compiled since it was called" " from 'M.forward'",
+            "'wrapper_fn' is being compiled since it was called from 'M.forward'",
         ):
             scripted = torch.jit.script(traced)
 
@@ -3415,7 +3431,7 @@ class TestFX(JitTestCase):
         self.assertFalse(module_exists(a, "net_b.net_c.conv"))
 
         # Test `get_submodule` with a deleted submodule
-        with self.assertRaisesRegex(AttributeError, "has no attribute " "`conv`"):
+        with self.assertRaisesRegex(AttributeError, "has no attribute `conv`"):
             self.assertIsNone(a.get_submodule("net_b.net_c.conv"))
 
         # Test `get_attr` warnings
@@ -3444,16 +3460,16 @@ class TestFX(JitTestCase):
 
         # Test `get_parameter`
         a.get_parameter("net_b.net_c.param")
-        with self.assertRaisesRegex(AttributeError, "is not an " "nn.Parameter"):
+        with self.assertRaisesRegex(AttributeError, "is not an nn.Parameter"):
             a.get_parameter("net_b.buf")
-        with self.assertRaisesRegex(AttributeError, "has no attribute " "`param`"):
+        with self.assertRaisesRegex(AttributeError, "has no attribute `param`"):
             a.get_parameter("net_b.param")
 
         # Test `get_buffer`
         a.get_buffer("net_b.buf")
-        with self.assertRaisesRegex(AttributeError, "is not a " "buffer"):
+        with self.assertRaisesRegex(AttributeError, "is not a buffer"):
             a.get_buffer("net_b.net_c.param")
-        with self.assertRaisesRegex(AttributeError, "has no attribute " "`buf`"):
+        with self.assertRaisesRegex(AttributeError, "has no attribute `buf`"):
             a.get_buffer("net_b.net_c.buf")
 
         # Test non-nested attributes
@@ -3765,7 +3781,7 @@ class TestFX(JitTestCase):
     @unittest.skipIf(sys.version_info > (3, 11), "Does not work in 3.11")
     def test_annotations_empty_tuple(self):
         class Foo(torch.nn.Module):
-            def forward(self, x: typing.Tuple[()], y: typing.Tuple[str, typing.Tuple[()]]):  # noqa: UP006
+            def forward(self, x: tuple[()], y: tuple[str, tuple[()]]):  # noqa: UP006
                 return "foo"
 
         traced = torch.fx.symbolic_trace(Foo())
@@ -3987,7 +4003,7 @@ class TestFX(JitTestCase):
             def gen_fn_def(self, free_vars, maybe_return_annotation):
                 lst_unpack = f"""
 def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
-    {', '.join(free_vars)} = args_list"""
+    {", ".join(free_vars)} = args_list"""
                 return lst_unpack
 
             def additional_globals(self):
@@ -4024,7 +4040,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
             def gen_fn_def(self, free_vars, maybe_return_annotation):
                 lst_unpack = f"""
 def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
-    {', '.join(free_vars)} = args_list"""
+    {", ".join(free_vars)} = args_list"""
                 return lst_unpack
 
             def additional_globals(self):
@@ -4053,7 +4069,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
             def gen_fn_def(self, free_vars, maybe_return_annotation):
                 lst_unpack = f"""
 def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
-    {', '.join(free_vars)} = args_list"""
+    {", ".join(free_vars)} = args_list"""
                 return lst_unpack
 
             def additional_globals(self):
@@ -4315,7 +4331,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
             else ""
         )
 
-        return f'{fn_name}({", ".join(arg_strs)}){return_annot}'
+        return f"{fn_name}({', '.join(arg_strs)}){return_annot}"
 
     _trivial_mappings = {
         str: "str",
@@ -4351,8 +4367,8 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         type,
         typing.Callable,
         typing.Dict,  # noqa: UP006
-        typing.List,  # noqa: UP006
-        typing.Tuple,  # noqa: UP006
+        list,  # noqa: UP006
+        tuple,  # noqa: UP006
         typing.Type,  # noqa: UP006
         typing.Union,
     }
@@ -4390,7 +4406,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
             self._annotation_type_to_stable_str(ct, sig_str, True) for ct in contained
         ]
         contained_type_str = (
-            f'[{", ".join(contained_type_annots)}]'
+            f"[{', '.join(contained_type_annots)}]"
             if len(contained_type_annots) > 0
             else ""
         )
@@ -4420,17 +4436,19 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
             return f"Type{contained_type_str}"
         if isinstance(t, typing.Callable):
             if len(contained) > 0 and contained[0] is not Ellipsis:
-                return f'Callable[[{", ".join(contained_type_annots[:-1])}], {contained_type_annots[-1]}]'
+                return f"Callable[[{', '.join(contained_type_annots[:-1])}], {contained_type_annots[-1]}]"
             else:
-                return f'Callable{contained_type_str}'
+                return f"Callable{contained_type_str}"
 
         if t is ArgumentT:
             # ArgumentT is a TypeVar bound to torch.fx.node.Argument
-            return f'torch.fx.node.Argument{contained_type_str}'
+            return f"torch.fx.node.Argument{contained_type_str}"
 
-        raise RuntimeError(f'Unrecognized type {t} used in BC-compatible type signature {sig_str}.'
-                           f'Please add support for this type and confirm with the '
-                           f'FX team that your signature change is valid.')
+        raise RuntimeError(
+            f"Unrecognized type {t} used in BC-compatible type signature {sig_str}."
+            f"Please add support for this type and confirm with the "
+            f"FX team that your signature change is valid."
+        )
 
         raise RuntimeError(
             f"Unrecognized type {t} used in BC-compatible type signature {sig_str}."
