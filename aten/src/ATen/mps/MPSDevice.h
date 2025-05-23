@@ -71,7 +71,6 @@ TORCH_API bool is_available();
 TORCH_API bool is_macos_13_or_newer(MacOSVersion version);
 TORCH_API at::Allocator* GetMPSAllocator(bool useSharedAllocator = false);
 
-
 inline Device getDeviceFromPtr(void* ptr) {
   return {c10::DeviceType::MPS, 0};
 }

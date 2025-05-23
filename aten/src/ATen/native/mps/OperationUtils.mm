@@ -563,7 +563,6 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
   // tensor.numel() could be zero, but tensor is valid as long as the buffer size is non-zero.
   // if buffer size is zero in here, it's not a user error. It could be a missing check for
   // tensor.numel() == 0 in our internal implementations of ops.
-  // IT''S THIS LINE AHHHHHHHHHHHHHHH
   TORCH_INTERNAL_ASSERT([srcBuf length] > 0, "Placeholder tensor is empty!");
   if (dataType == MPSDataTypeInvalid) {
     const auto scalar_type = _tensor.scalar_type();

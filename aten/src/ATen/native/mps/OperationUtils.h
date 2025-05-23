@@ -109,6 +109,7 @@ MPSShape* getMPSShape(const TensorBase& t, c10::MemoryFormat memory_format = Mem
 MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
 
 static inline id<MTLBuffer> getMTLBufferStorage(const TensorBase& tensor) {
+  std::cout << "getMTLBufferStorage " << tensor.storage().data() << std::endl;
   return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
 }
 
