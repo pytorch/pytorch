@@ -572,6 +572,10 @@ class XPUAllocator : public DeviceAllocator {
     }
   }
 
+  bool initialized() override {
+    return !device_allocator.empty();
+  }
+
   void malloc(
       void** devPtr,
       DeviceIndex device,
@@ -606,13 +610,13 @@ class XPUAllocator : public DeviceAllocator {
     }
   }
 
-  void emptyCache() {
+  void emptyCache() override {
     for (auto& da : device_allocators) {
       da->emptyCache();
     }
   }
 
-  void recordStream(const DataPtr& ptr, c10::Stream stream) {
+  void recordStream(const DataPtr& ptr, c10::Stream stream) override {
     if (!ptr.get()) {
       return;
     }
@@ -676,17 +680,17 @@ class XPUAllocator : public DeviceAllocator {
         ": did you call init?");
   }
 
-  DeviceStats getDeviceStats(DeviceIndex device) {
+  DeviceStats getDeviceStats(DeviceIndex device) override {
     assertValidDevice(device);
     return device_allocators[device]->getStats();
   }
 
-  void resetPeakStats(DeviceIndex device) {
+  void resetPeakStats(DeviceIndex device) override {
     assertValidDevice(device);
     device_allocators[device]->resetPeakStats();
   }
 
-  void resetAccumulatedStats(DeviceIndex device) {
+  void resetAccumulatedStats(DeviceIndex device) override {
     assertValidDevice(device);
     device_allocators[device]->resetAccumulatedStats();
   }

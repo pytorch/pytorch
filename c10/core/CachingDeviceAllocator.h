@@ -64,6 +64,7 @@ struct DeviceStats {
 namespace c10 {
 
 struct C10_API DeviceAllocator : public c10::Allocator {
+  virtual bool initialized() = 0;
   virtual void emptyCache() = 0;
   virtual void recordStream(const DataPtr&, c10::Stream stream) = 0;
   virtual CachingDeviceAllocator::DeviceStats getDeviceStats(
