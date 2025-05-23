@@ -3,6 +3,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/detail/FunctionTraits.h>
+#include <ATen/native/RangeUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/arange_native.h>
 #include <ATen/ops/linspace_native.h>
@@ -65,15 +66,7 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
       size_d = std::ceil(static_cast<double>(end.to<double>() - start.to<double>()) / step.to<double>());
     }
 
-    // use double precision for validation to match cpu behavior and avoid precision issues
-    double dstart = start.to<double>();
-    double dend = end.to<double>();
-    double dstep = step.to<double>();
-
-    TORCH_CHECK(dstep != 0.0, "step must be nonzero");
-    TORCH_CHECK(std::isfinite(dstart) && std::isfinite(dend), "unsupported range: ", dstart, " -> ", dend);
-    TORCH_CHECK((dstep > 0 && dstart <= dend) || (dstep < 0 && dstart >= dend),
-                "upper bound and lower bound inconsistent with step sign");
+    arange_check_bounds(start, end, step);
 
     TORCH_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
                 "invalid size, possible overflow?");
@@ -148,15 +141,7 @@ Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step
       size_d = static_cast<double>(end.to<double>() - start.to<double>()) / step.to<double>() + 1;
     }
 
-    // use double precision for validation to match cpu behavior and avoid precision issues
-    double dstart = start.to<double>();
-    double dend = end.to<double>();
-    double dstep = step.to<double>();
-
-    TORCH_CHECK(dstep != 0.0, "step must be nonzero");
-    TORCH_CHECK(std::isfinite(dstart) && std::isfinite(dend), "unsupported range: ", dstart, " -> ", dend);
-    TORCH_CHECK((dstep > 0 && dstart <= dend) || (dstep < 0 && dstart >= dend),
-                "upper bound and lower bound inconsistent with step sign");
+    arange_check_bounds(start, end, step);
 
     TORCH_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
                 "invalid size, possible overflow?");
