@@ -1345,7 +1345,9 @@ def sym_eq(x: _T, y: _T) -> BoolLikeType:
     Like ==, but when run on list/tuple, it will recursively test equality
     and use sym_and to join the results together, without guarding.
     """
-    if isinstance(x, (tuple, list)) and isinstance(y, (list, tuple)):
+    if (isinstance(x, tuple) and isinstance(y, tuple)) or (
+        isinstance(x, list) and isinstance(y, list)
+    ):
         if len(x) != len(y):
             return False
         return functools.reduce(operator.and_, map(sym_eq, x, y), True)
