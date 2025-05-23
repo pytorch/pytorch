@@ -3,12 +3,6 @@
 
 set -ex
 
-magma_pat=$1
-
-ver() {
-    printf "%3d%03d%03d%03d" $(echo "$1" | tr '.' ' ');
-}
-
 # Magma build scripts need `python`
 ln -sf /usr/bin/python3 /usr/bin/python
 
@@ -25,17 +19,11 @@ esac
 MKLROOT=${MKLROOT:-/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION}
 
 # "install" hipMAGMA into /opt/rocm/magma by copying after build
-if [[ $(ver $ROCM_VERSION) -ge $(ver 7.0) ]]; then
-    git clone https://${magma_pat}@github.com/ROCm/magma -b rel29_rocm70_hip_update
-    pushd magma
-    # version 2.9 + ROCm 7.0 related updates
-    git checkout 0e657ad9be1d8212a897efb6b0246d6ec51edbe4
-else
-    git clone https://bitbucket.org/icl/magma.git
-    pushd magma
-    # Version 2.7.2 + ROCm related updates
-    git checkout a1625ff4d9bc362906bd01f805dbbe12612953f6
-fi
+git clone https://bitbucket.org/icl/magma.git
+pushd magma
+
+# Version 2.7.2 + ROCm related updates
+git checkout a1625ff4d9bc362906bd01f805dbbe12612953f6
 
 cp make.inc-examples/make.inc.hip-gcc-mkl make.inc
 echo 'LIBDIR += -L$(MKLROOT)/lib' >> make.inc
