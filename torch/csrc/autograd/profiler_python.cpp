@@ -1234,6 +1234,75 @@ void PythonMemoryTracer::stop() {
 }
 
 // ============================================================================
+// == Memory Tracer ======================================================
+// ============================================================================
+
+// Assuming python_tracer::PythonMemoryTracerBase is defined elsewhere
+class MTIAPythonMemoryTracer final
+    : public python_tracer::PythonMemoryTracerBase {
+ public:
+  explicit MTIAPythonMemoryTracer() = default;
+  ~MTIAPythonMemoryTracer() override = default;
+  void start() override;
+  void stop() override;
+  void export_memory_history(const std::string path) override;
+};
+
+static void toggle_mtia_memory_tracing(bool enable) {
+  PyGILState_STATE gil_state = PyGILState_Ensure();
+  THPObjectPtr torch_mtia_module(PyImport_ImportModule("torch.mtia"));
+  if (!torch_mtia_module) {
+    return;
+  }
+  THPObjectPtr snapshot_func(
+      PyObject_GetAttrString(torch_mtia_module.get(), "record_memory_history"));
+  if (!snapshot_func) {
+    return;
+  }
+  // Call the function with arguments
+  PyObject* args = PyTuple_New(3);
+  PyTuple_SetItem(args, 0, enable ? PyUnicode_FromString("all") : Py_None);
+  PyTuple_SetItem(args, 1, PyUnicode_FromString("all")); // stacks
+  PyTuple_SetItem(args, 2, THPUtils_packInt64(100000)); // max_entries
+  PyObject* result = PyObject_Call(snapshot_func.get(), args, nullptr);
+  Py_DECREF(args);
+  if (result == nullptr) {
+    return;
+  }
+  PyGILState_Release(gil_state);
+}
+
+void MTIAPythonMemoryTracer::start() {
+  toggle_mtia_memory_tracing(true);
+}
+
+void MTIAPythonMemoryTracer::export_memory_history(const std::string path) {
+  PyGILState_STATE gil_state = PyGILState_Ensure();
+  THPObjectPtr torch_mtia_memory_module(PyImport_ImportModule("torch.mtia"));
+  if (!torch_mtia_memory_module) {
+    return;
+  }
+  THPObjectPtr snapshot_func(
+      PyObject_GetAttrString(torch_mtia_memory_module.get(), "dump_snapshot"));
+  if (!snapshot_func) {
+    return;
+  }
+  PyObject* py_filename = PyUnicode_FromString(path.c_str());
+  // Call the function with arguments (e.g., a file path)
+  PyObject* args = PyTuple_Pack(1, py_filename);
+  PyObject* result = PyObject_Call(snapshot_func.get(), args, nullptr);
+  Py_DECREF(args);
+  if (result == nullptr) {
+    return;
+  }
+  PyGILState_Release(gil_state);
+}
+
+void MTIAPythonMemoryTracer::stop() {
+  toggle_mtia_memory_tracing(false);
+}
+
+// ============================================================================
 // == API =====================================================================
 // ============================================================================
 int PythonTracer::pyProfileFn(
@@ -1271,6 +1340,9 @@ std::unique_ptr<python_tracer::PythonTracerBase> getTracer(
 }
 
 std::unique_ptr<python_tracer::PythonMemoryTracerBase> getMemoryTracer() {
+  if (at::hasMTIA()) {
+    return std::make_unique<MTIAPythonMemoryTracer>();
+  }
   return std::make_unique<PythonMemoryTracer>();
 }
 
