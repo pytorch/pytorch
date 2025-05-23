@@ -7234,6 +7234,26 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         output = capturedOutput.getvalue()
         self.assertNotIn("class GraphModule", output)
 
+    def test_deepcopy_constant_tensor_in_aot_bwd(self):
+        class Fn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x + 1
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out * torch.tensor(2) * grad_out.shape[0]
+
+        def f(x):
+            return Fn.apply(x)
+
+        x = torch.randn(8, requires_grad=True)
+        out = f(x)  # should not raise
+        c_out = torch.compile(f, backend="aot_eager", dynamic=True)(x)
+        expected = torch.autograd.grad(out.sum(), inputs=(x,))
+        actual = torch.autograd.grad(c_out.sum(), inputs=(x,))
+        self.assertEqual(expected, actual)
+
 
 instantiate_parametrized_tests(ReproTests)
 
