@@ -679,6 +679,11 @@ class MultiProcessTestCase(TestCase):
             self.processes.append(process)
 
     def _spawn_processes(self) -> None:
+        try:
+            torch.multiprocessing.set_start_method("spawn")
+        except RuntimeError:
+            pass
+
         proc = torch.multiprocessing.get_context("spawn").Process
         self._start_processes(proc)
 
@@ -1509,6 +1514,8 @@ class MultiProcContinousTest(TestCase):
     rdvz_file: Optional[str] = None
     # timeout configured per class
     timeout: timedelta = timedelta(seconds=120)
+    # Poison pill for rest of tests if one of them fails
+    poison_pill: bool = False
 
     @classmethod
     def backend_str(cls) -> Optional[str]:
@@ -1579,11 +1586,17 @@ class MultiProcContinousTest(TestCase):
         while True:
             test_id = task_queue.get()
             logger.debug(f"Got test {test_id}")  # noqa: G004
+            # None means exit
             if test_id is None:
                 break
 
-            cls._run_test_given_id(test_id)
-            completion_queue.put(test_id)
+            # Run the test
+            try:
+                cls._run_test_given_id(test_id)
+                completion_queue.put(test_id)
+            except BaseException as ex:
+                # Send the exception back to the dispatcher
+                completion_queue.put(ex)
 
         # Termination
         logger.info("Terminating ...")
@@ -1599,8 +1612,11 @@ class MultiProcContinousTest(TestCase):
 
         # CUDA multiprocessing requires spawn instead of fork, to make sure
         # child processes have their own memory space.
-        if torch.multiprocessing.get_start_method(allow_none=True) != "spawn":
+        try:
             torch.multiprocessing.set_start_method("spawn")
+        except RuntimeError:
+            # The start method has already been set
+            pass
 
         for rank in range(int(world_size)):
             task_queue = torch.multiprocessing.Queue()
@@ -1608,6 +1624,7 @@ class MultiProcContinousTest(TestCase):
             process = torch.multiprocessing.Process(
                 target=cls._worker_loop,
                 name="process " + str(rank),
+                daemon=True,  # so that child processes will exit if parent decides to terminate
                 args=(rank, world_size, cls.rdvz_file, task_queue, completion_queue),
             )
             process.start()
@@ -1671,6 +1688,10 @@ class MultiProcContinousTest(TestCase):
         # I am the dispatcher
         self.rank = self.MAIN_PROCESS_RANK
 
+        # If this test class hits an exception in one test, skip the rest of tests
+        if self.__class__.poison_pill:
+            raise unittest.SkipTest(f"Previous test failed, skipping {self.id()}")
+
         # Enqueue "current test" to all workers
         for i, task_queue in enumerate(self.task_queues):
             logger.debug(f"Sending Rank {i}: {self.id()}")  # noqa: G004
@@ -1683,10 +1704,22 @@ class MultiProcContinousTest(TestCase):
                 logger.debug(f"Waiting for workers to finish {self.id()}")  # noqa: G004
                 # Wait for the workers to finish the test
                 for i, completion_queue in enumerate(self.completion_queues):
-                    test_id = completion_queue.get()
-                    assert test_id == self.id()
+                    rv = completion_queue.get()
+                    if isinstance(rv, BaseException):
+                        # Hit an exception, re-raise it in the main process.
+                        logger.warning(
+                            f"Detected failure from Rank {i} in: {self.id()}, "  # noqa: G004
+                            f"skipping rest of tests in Test class: {self.__class__.__name__}"  # noqa: G004
+                        )
+                        # Poison rest of tests (because ProcessGroup may be not
+                        # re-usable now)
+                        self.__class__.poison_pill = True
+                        raise rv
+
+                    # Success
+                    assert rv == self.id()
                     logger.debug(
-                        f"Main proc detected rank {i} finished {test_id}"  # noqa: G004
+                        f"Main proc detected rank {i} finished {self.id()}"  # noqa: G004
                     )
             else:
                 # Worker just runs the test
