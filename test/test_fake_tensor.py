@@ -1116,11 +1116,6 @@ class FakeTensorOpInfoTest(TestCase):
 
 make_propagate_real_tensors_cls(FakeTensorOpInfoTest)
 instantiate_device_type_tests(FakeTensorOpInfoTest, globals(), only_for=("cpu", "cuda"))
-instantiate_device_type_tests(
-    PropagateRealTensorsFakeTensorOpInfoTest,
-    globals(),
-    only_for=("cpu",),  # noqa: F821
-)
 
 
 class FakeTensorConverterTest(TestCase):
