@@ -294,6 +294,9 @@ void initJITBindings(PyObject* module) {
             return EliminateDeadCode(g->block()); // overload resolution
           })
       .def(
+          "_jit_pass_dce_graph",
+          [](std::shared_ptr<Graph>& g) { return EliminateDeadCode(g); })
+      .def(
           "_jit_pass_dce_allow_deleting_nodes_with_side_effects",
           [](std::shared_ptr<Graph>& g) {
             return EliminateDeadCode(

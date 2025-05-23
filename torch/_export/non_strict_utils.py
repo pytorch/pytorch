@@ -295,7 +295,11 @@ def make_fake_inputs(
         # create another fake mode.
         fake_mode = context.fake_mode
     elif not _is_torch_jit_trace:
-        code = nn_module.forward.__code__
+        if isinstance(nn_module.forward, functools.partial):
+            # functools handles nesting by itself, no need to recurse
+            code = nn_module.forward.func.__code__
+        else:
+            code = nn_module.forward.__code__
         co_fields = {
             "co_name": code.co_name,
             "co_filename": code.co_filename,
