@@ -1730,7 +1730,7 @@ def compile_fx_aot(
         torch._guards.compile_context(saved_compile_context),
         chromium_event_timed(
             "compile_fx_aot",
-            
+            log_pt2_compile_event=True,
             reset_event_log_on_exit=True,
         ),
         get_metrics_context(),
