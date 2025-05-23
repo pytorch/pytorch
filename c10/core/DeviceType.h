@@ -36,10 +36,10 @@ using torch::standalone::COMPILE_TIME_MAX_DEVICE_TYPES;
 // clang-format on
 
 using torch::standalone::DeviceTypeName;
+using torch::standalone::get_privateuse1_backend;
 using torch::standalone::isValidDeviceType;
 
 C10_API void register_privateuse1_backend(const std::string& backend_name);
-C10_API std::string get_privateuse1_backend(bool lower_case = true);
 C10_API bool is_privateuse1_backend_registered();
 } // namespace c10
 

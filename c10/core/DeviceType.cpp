@@ -6,7 +6,7 @@
 #include <atomic>
 #include <mutex>
 
-namespace c10 {
+namespace {
 // We use both a mutex and an atomic here because:
 // (1) Mutex is needed during writing:
 //     We need to first check the value and potentially error,
@@ -19,10 +19,12 @@ namespace c10 {
 //     set this variable at the same time that another thread is print the
 //     device name. We could re-use the same mutex, but reading the atomic will
 //     be much faster.
-static std::atomic<bool> privateuse1_backend_name_set;
-static std::string privateuse1_backend_name;
-static std::mutex privateuse1_lock;
+std::atomic<bool> privateuse1_backend_name_set;
+std::string privateuse1_backend_name;
+std::mutex privateuse1_lock;
+} // namespace
 
+namespace torch::standalone {
 std::string get_privateuse1_backend(bool lower_case) {
   // Applying the same atomic read memory ordering logic as in Note [Memory
   // ordering on Python interpreter tag].
@@ -37,7 +39,9 @@ std::string get_privateuse1_backend(bool lower_case) {
       backend_name.begin(), backend_name.end(), backend_name.begin(), op_case);
   return backend_name;
 }
+} // namespace torch::standalone
 
+namespace c10 {
 void register_privateuse1_backend(const std::string& backend_name) {
   std::lock_guard<std::mutex> guard(privateuse1_lock);
   TORCH_CHECK(
@@ -62,5 +66,4 @@ void register_privateuse1_backend(const std::string& backend_name) {
 bool is_privateuse1_backend_registered() {
   return privateuse1_backend_name_set.load(std::memory_order_acquire);
 }
-
 } // namespace c10

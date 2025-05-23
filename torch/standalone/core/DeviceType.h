@@ -8,15 +8,6 @@
 #include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
 
-namespace c10 {
-#ifndef STANDALONE_TORCH_HEADER
-// forward declaration
-// When building standalone, this function will not be used.
-// When building libtorch, this function is defined in c10/core/DeviceType.cpp.
-extern std::string get_privateuse1_backend(bool lower_case);
-#endif
-}
-
 namespace torch::standalone {
 // These contains all device types that also have a BackendComponent
 // and therefore participate in per-backend functionality dispatch keys.
@@ -101,6 +92,14 @@ static_assert(
     "types registration, please be aware that you are affecting code that "
     "this number is small.  Try auditing uses of this constant.");
 
+#ifdef STANDALONE_TORCH_HEADER
+inline TORCH_API std::string get_privateuse1_backend(bool lower_case = true) {
+    return lower_case ? "privateuse1" : "PrivateUse1";
+}
+#else
+TORCH_API std::string get_privateuse1_backend(bool lower_case = true);
+#endif
+
 inline TORCH_API std::string DeviceTypeName(DeviceType d, bool lower_case = false) {
   switch (d) {
     // I considered instead using ctype::tolower to lower-case the strings
@@ -146,11 +145,7 @@ inline TORCH_API std::string DeviceTypeName(DeviceType d, bool lower_case = fals
     case DeviceType::MTIA:
       return lower_case ? "mtia" : "MTIA";
     case DeviceType::PrivateUse1:
-#ifdef STANDALONE_TORCH_HEADER
-      return lower_case ? "privateuse1" : "PrivateUse1";
-#else
-      return c10::get_privateuse1_backend(/*lower_case=*/lower_case);
-#endif
+      return get_privateuse1_backend(lower_case);
     default:
       TORCH_CHECK(
           false,
