@@ -263,6 +263,9 @@ import setuptools.command.install
 import setuptools.command.sdist
 from setuptools import Extension, find_packages, setup
 from setuptools.dist import Distribution
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from tools.build_pytorch_libs import build_pytorch
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake
@@ -445,7 +448,7 @@ def check_submodules():
             ],
         )
     check_for_files(
-        os.path.join(third_party_path, "fbgemm", "third_party", "asmjit"),
+        os.path.join(third_party_path, "fbgemm", "external", "asmjit"),
         ["CMakeLists.txt"],
     )
 
@@ -1281,8 +1284,7 @@ def main():
         entry_points=entry_points,
         install_requires=install_requires,
         package_data=package_data,
-        # TODO fix later Manifest.IN file was previously ignored
-        include_package_data=False,  # defaults to True with pyproject.toml file
+        include_package_data=True,
     )
     if EMIT_BUILD_WARNING:
         print_box(build_update_message)

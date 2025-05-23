@@ -148,6 +148,17 @@ template <typename T>
 constexpr constant bool is_scalar_integral_v =
     ::metal::is_integral_v<T> && ::metal::is_scalar_v<T>;
 
+// floor_divide
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_integral_v<T> && is_scalar_integral_v<U>,
+        bool> = true>
+inline decltype(T(0) + U(0)) floor_divide(T x, U y) {
+  const auto quot = x / y;
+  return (x < 0) == (y < 0) ? quot : (x % y != 0) ? quot - 1 : quot;
+}
 // cast_to primitives
 //  - No-op if types as the same
 template <
