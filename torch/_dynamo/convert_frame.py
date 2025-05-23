@@ -1234,96 +1234,97 @@ class ConvertFrame:
     ) -> ConvertFrameReturn:
         input_codes.add(frame.f_code)
         counters["frames"]["total"] += 1
-        prev_error_on_graph_break = config.error_on_graph_break
-        try:
-            if self._nopython:
-                config.error_on_graph_break = True
-            result = self._inner_convert(
-                frame, cache_entry, hooks, frame_state, skip=skip + 1
-            )
-            counters["frames"]["ok"] += 1
-            return result
-        except Exception as e:
-            if config.error_on_graph_break:
-                raise
-
-            # These two exception types are "soft" failure, in the sense that
-            # we know this is due to something we didn't implement all the
-            # way, scare the user less about it.  That being said, if you
-            # are trying to understand why a graph break happened, it's still
-            # important to have this information, so offer it.
-            #
-            # NB: NotImplementedError used to be on this list, but actually
-            # it is impossible for it to reach here, as it is converted into
-            # InternalTorchDynamoError.  This behavior seemed reasonable
-            # to me (ezyang, Aug 2023) so I kept it, but maybe at some point
-            # someone wanted these to also get suppressed.  If so, you'll
-            # need to make these exceptions not get wrapped
-
-            # We intentionally don't want to suppress error here.
-            if isinstance(e, UncapturedHigherOrderOpError):
-                raise
-
-            soft_fail = isinstance(e, Unsupported)
-
-            # This is a soft failure. In the sense, the code path reaches here
-            # when we do not support graph breaks on bytecodes like LOAD_ATTR,
-            # BUILD_SET etc. In such case, we can fallback to eager without
-            # scaring users.
-            if soft_fail and graph_break_log.isEnabledFor(logging.DEBUG):
-                # Log this message in the graph break. Also use the string
-                # "skip: " to tell that the whole frame is falling back to
-                # eager.
-                if hasattr(e, "compile_id") and hasattr(e, "real_stack"):
-                    with compile_context(CompileContext(e.compile_id)):  # type: ignore[attr-defined]
-                        user_stack = e.real_stack
-                        user_stack_formatted = "".join(
-                            traceback.format_list(user_stack)
-                        )
-                        user_stack_trace = f"Graph break: skip: from user code at:\n{user_stack_formatted}"
-                        torch._logging.trace_structured(
-                            "artifact",
-                            metadata_fn=lambda: {
-                                "name": "dynamo_graph_break_reason",
-                                "encoding": "string",
-                            },
-                            payload_fn=lambda: f"{user_stack_trace}\n{traceback.format_exc()}",
-                        )
-                        graph_break_log.debug(
-                            user_stack_trace,
-                            exc_info=True,
-                        )
-
-            if not config.suppress_errors and not soft_fail:
-                raise
-
-            # Suppress the error.  NB: It's very important to do the
-            # suppression logging HERE, where the actual suppression
-            # happens. Previously it was somewhere else and so it was
-            # possible to accidentally not log at all.
-            record_filename = getattr(e, "record_filename", None)
-            code = frame.f_code
-            error_msg = format_error_msg(e, code, record_filename, frame)
-
-            if soft_fail:
-                log.info(error_msg, exc_info=True)
-            else:
-                log.warning(error_msg, exc_info=True)
-
-            if isinstance(e, SkipCodeRecursiveException):
-                return ConvertFrameReturn(
-                    frame_exec_strategy=FrameExecStrategy(
-                        FrameAction.SKIP, FrameAction.SKIP
-                    )
+        nopython_ctx = (
+            decorators.set_fullgraph(fullgraph=True)
+            if self._nopython
+            else contextlib.nullcontext()
+        )
+        with nopython_ctx:
+            try:
+                result = self._inner_convert(
+                    frame, cache_entry, hooks, frame_state, skip=skip + 1
                 )
-            elif isinstance(e, RecompileLimitExceeded):
-                return ConvertFrameReturn(
-                    frame_exec_strategy=FrameExecStrategy(
-                        FrameAction.RUN_ONLY, FrameAction.RUN_ONLY
+                counters["frames"]["ok"] += 1
+                return result
+            except Exception as e:
+                if config.error_on_graph_break:
+                    raise
+
+                # These two exception types are "soft" failure, in the sense that
+                # we know this is due to something we didn't implement all the
+                # way, scare the user less about it.  That being said, if you
+                # are trying to understand why a graph break happened, it's still
+                # important to have this information, so offer it.
+                #
+                # NB: NotImplementedError used to be on this list, but actually
+                # it is impossible for it to reach here, as it is converted into
+                # InternalTorchDynamoError.  This behavior seemed reasonable
+                # to me (ezyang, Aug 2023) so I kept it, but maybe at some point
+                # someone wanted these to also get suppressed.  If so, you'll
+                # need to make these exceptions not get wrapped
+
+                # We intentionally don't want to suppress error here.
+                if isinstance(e, UncapturedHigherOrderOpError):
+                    raise
+
+                soft_fail = isinstance(e, Unsupported)
+
+                # This is a soft failure. In the sense, the code path reaches here
+                # when we do not support graph breaks on bytecodes like LOAD_ATTR,
+                # BUILD_SET etc. In such case, we can fallback to eager without
+                # scaring users.
+                if soft_fail and graph_break_log.isEnabledFor(logging.DEBUG):
+                    # Log this message in the graph break. Also use the string
+                    # "skip: " to tell that the whole frame is falling back to
+                    # eager.
+                    if hasattr(e, "compile_id") and hasattr(e, "real_stack"):
+                        with compile_context(CompileContext(e.compile_id)):  # type: ignore[attr-defined]
+                            user_stack = e.real_stack
+                            user_stack_formatted = "".join(
+                                traceback.format_list(user_stack)
+                            )
+                            user_stack_trace = f"Graph break: skip: from user code at:\n{user_stack_formatted}"
+                            torch._logging.trace_structured(
+                                "artifact",
+                                metadata_fn=lambda: {
+                                    "name": "dynamo_graph_break_reason",
+                                    "encoding": "string",
+                                },
+                                payload_fn=lambda: f"{user_stack_trace}\n{traceback.format_exc()}",
+                            )
+                            graph_break_log.debug(
+                                user_stack_trace,
+                                exc_info=True,
+                            )
+
+                if not config.suppress_errors and not soft_fail:
+                    raise
+
+                # Suppress the error.  NB: It's very important to do the
+                # suppression logging HERE, where the actual suppression
+                # happens. Previously it was somewhere else and so it was
+                # possible to accidentally not log at all.
+                record_filename = getattr(e, "record_filename", None)
+                code = frame.f_code
+                error_msg = format_error_msg(e, code, record_filename, frame)
+
+                if soft_fail:
+                    log.info(error_msg, exc_info=True)
+                else:
+                    log.warning(error_msg, exc_info=True)
+
+                if isinstance(e, SkipCodeRecursiveException):
+                    return ConvertFrameReturn(
+                        frame_exec_strategy=FrameExecStrategy(
+                            FrameAction.SKIP, FrameAction.SKIP
+                        )
                     )
-                )
-        finally:
-            config.error_on_graph_break = prev_error_on_graph_break
+                elif isinstance(e, RecompileLimitExceeded):
+                    return ConvertFrameReturn(
+                        frame_exec_strategy=FrameExecStrategy(
+                            FrameAction.RUN_ONLY, FrameAction.RUN_ONLY
+                        )
+                    )
 
         return ConvertFrameReturn()
 
@@ -1349,28 +1350,26 @@ def replay(filename: str) -> None:
         record = ExecutionRecord.load(in_file)
     record.globals = dict(itertools.chain(record.globals.items(), globals().items()))
 
-    prev_error_on_graph_break = config.error_on_graph_break
-    try:
-        config.error_on_graph_break = False
-        _compile(
-            record.code,
-            record.globals,
-            record.locals,
-            record.builtins,
-            record.closure,
-            compiler_fn=eager,
-            export=False,
-            export_constraints=None,
-            hooks=Hooks(),
-            cache_size=CacheSizeRelevantForFrame(0, 0),
-            cache_entry=None,
-            frame=None,
-            frame_state={},
-            compile_id=CompileId(frame_id=42, frame_compile_id=999),
-        )
-    finally:
-        config.replay_record_enabled = original_replay_val
-        config.error_on_graph_break = prev_error_on_graph_break
+    with decorators.set_fullgraph(fullgraph=False):
+        try:
+            _compile(
+                record.code,
+                record.globals,
+                record.locals,
+                record.builtins,
+                record.closure,
+                compiler_fn=eager,
+                export=False,
+                export_constraints=None,
+                hooks=Hooks(),
+                cache_size=CacheSizeRelevantForFrame(0, 0),
+                cache_entry=None,
+                frame=None,
+                frame_state={},
+                compile_id=CompileId(frame_id=42, frame_compile_id=999),
+            )
+        finally:
+            config.replay_record_enabled = original_replay_val
 
 
 def first_real_inst_idx(code: CodeType) -> int:
