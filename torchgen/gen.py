@@ -2977,6 +2977,7 @@ def main() -> None:
         DispatchKey.CompositeExplicitAutograd,
         DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.Meta,
+        DispatchKey.MTIA,
     }
 
     aoti_backends = {
