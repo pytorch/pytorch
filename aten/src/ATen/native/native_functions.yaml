@@ -1548,7 +1548,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: clamp_out
+    CPU, CUDA, MTIA: clamp_out
     MPS: clamp_out_mps
   tags: pointwise
 
@@ -1588,7 +1588,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: clamp_max_out
+    CPU, CUDA, MTIA: clamp_max_out
     MPS: clamp_max_out_mps
   tags: pointwise
 
@@ -1628,7 +1628,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: clamp_min_out
+    CPU, CUDA, MTIA: clamp_min_out
     MPS: clamp_min_out_mps
   tags: pointwise
 
@@ -3180,7 +3180,7 @@
   variants: function
   structured: True
   dispatch:
-    CPU, CUDA: isin_Tensor_Scalar_out
+    CPU, CUDA, MPS: isin_Tensor_Scalar_out
 
 - func: isin.Tensor_Scalar(Tensor elements, Scalar test_element, *, bool assume_unique=False, bool invert=False) -> Tensor
   variants: function
@@ -3191,6 +3191,7 @@
   structured: True
   dispatch:
     CPU, CUDA: isin_Scalar_Tensor_out
+    MPS: isin_Scalar_Tensor_out_mps
 
 - func: isin.Scalar_Tensor(Scalar element, Tensor test_elements, *, bool assume_unique=False, bool invert=False) -> Tensor
   variants: function
