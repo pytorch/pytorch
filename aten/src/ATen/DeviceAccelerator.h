@@ -80,27 +80,20 @@ TORCH_API inline void emptyCache() {
   }
 }
 
-TORCH_API inline std::optional<at::CachingDeviceAllocator::DeviceStats>
-get_device_stats(c10::DeviceIndex device_index) {
+TORCH_API inline at::CachingDeviceAllocator::DeviceStats
+getDeviceStats(c10::DeviceIndex device_index) {
   const auto device_type = getAccelerator(true).value();
-  if (at::GetDeviceAllocator(device_type)->initialized()) {
-    at::GetDeviceAllocator(device_type)->getDeviceStats(device_index);
-  }
-  return std::nullopt;
+  return at::GetDeviceAllocator(device_type)->getDeviceStats(device_index);
 }
 
-TORCH_API inline void reset_accumulated_stats(c10::DeviceIndex device_index) {
+TORCH_API inline void resetAccumulatedStats(c10::DeviceIndex device_index) {
   const auto device_type = getAccelerator(true).value();
-  if (at::GetDeviceAllocator(device_type)->initialized()) {
     at::GetDeviceAllocator(device_type)->resetAccumulatedStats(device_index);
-  }
 }
 
-TORCH_API inline void reset_peak_stats(c10::DeviceIndex device_index) {
+TORCH_API inline void resetPeakStats(c10::DeviceIndex device_index) {
   const auto device_type = getAccelerator(true).value();
-  if (at::GetDeviceAllocator(device_type)->initialized()) {
     at::GetDeviceAllocator(device_type)->resetPeakStats(device_index);
-  }
 }
 
 } // namespace at::accelerator
