@@ -1626,14 +1626,19 @@ class TestFP8Matmul(TestCase):
     @parametrize("use_torch_compile", [False, True])
     def test_scaled_grouped_gemm_2d_2d(self, fast_accum, strided, use_torch_compile):
         device = "cuda"
-        m, n, k, n_groups = 16, 16, 16, 4  # all sizes have to be divisible by 16
+        m, n, k, n_groups = 16, 32, 64, 4  # all sizes have to be divisible by 16
         a = torch.randn(m, k * n_groups + k * int(strided), device=device).to(torch.float8_e4m3fn)[:, :k * n_groups]
         b = torch.randn(n, k * n_groups + k * int(strided), device=device).to(torch.float8_e4m3fn)[:, :k * n_groups]
         scale_a = torch.arange(m * n_groups, device=device, dtype=torch.float32) / 4
         scale_b = torch.arange(n * n_groups, device=device, dtype=torch.float32) / 4
         offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
         f = torch._scaled_grouped_mm
-        f = torch.compile(f) if use_torch_compile else f
+        f = torch.compile(
+            f,
+            options={
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            }) if use_torch_compile else f
         out = f(a, b.t(), scale_a, scale_b, offs=offs,
                 out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
         offs_cpu = offs.cpu()
@@ -1657,7 +1662,7 @@ class TestFP8Matmul(TestCase):
     def test_scaled_grouped_gemm_2d_3d(self, fast_accum, strided, use_torch_compile):
         device = "cuda"
         s_int = int(strided)
-        m, n, k, n_groups = 16, 32, 16, 4
+        m, n, k, n_groups = 16, 32, 64, 4
         a = torch.randn(m * n_groups, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[:, :k]
         b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
         self.assertTrue(a.is_contiguous() is not strided)
@@ -1670,7 +1675,12 @@ class TestFP8Matmul(TestCase):
             scale_b = torch.ones(n_groups * n, device="cuda", dtype=torch.float32).view(n_groups, n)
 
             f = torch._scaled_grouped_mm
-            f = torch.compile(f, dynamic=False) if use_torch_compile else f
+            f = torch.compile(
+                f,
+                options={
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                }) if use_torch_compile else f
             out = f(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
                     out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
 
@@ -1682,7 +1692,7 @@ class TestFP8Matmul(TestCase):
                 ascalelist.append(scale_a[start:offs_cpu[i]])
                 outlist.append(out[start:offs_cpu[i]])
                 start = offs_cpu[i]
-            self.scaled_grouped_mm_helper(alist, b, ascalelist, scale_b, outlist, fast_accum)
+                self.scaled_grouped_mm_helper(alist, b, ascalelist, scale_b, outlist, fast_accum)
 
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
@@ -1694,7 +1704,7 @@ class TestFP8Matmul(TestCase):
     def test_scaled_grouped_gemm_3d_3d(self, fast_accum, strided, use_torch_compile):
         device = "cuda"
         s_int = int(strided)
-        m, n, k, n_groups = 16, 32, 16, 4
+        m, n, k, n_groups = 16, 32, 64, 4
         a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
         b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
         self.assertTrue(a.is_contiguous() is not strided)
@@ -1703,7 +1713,12 @@ class TestFP8Matmul(TestCase):
         scale_b = torch.ones(n_groups * n, device="cuda", dtype=torch.float32).view(n_groups, n)
 
         f = torch._scaled_grouped_mm
-        f = torch.compile(f) if use_torch_compile else f
+        f = torch.compile(
+            f,
+            options={
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            }) if use_torch_compile else f
         out = f(a, b.transpose(-2, -1), scale_a, scale_b,
                 out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
 
@@ -1719,7 +1734,7 @@ class TestFP8Matmul(TestCase):
     def test_scaled_grouped_gemm_3d_2d(self, fast_accum, strided, use_torch_compile):
         device = "cuda"
         s_int = int(strided)
-        m, n, k, n_groups = 16, 32, 16, 4
+        m, n, k, n_groups = 16, 128, 64, 4
         a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
         b = torch.randn(n * n_groups, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[:, :k]
         self.assertTrue(a.is_contiguous() is not strided)
@@ -1732,7 +1747,12 @@ class TestFP8Matmul(TestCase):
                 offs[0] = offs[1]
 
             f = torch._scaled_grouped_mm
-            f = torch.compile(f) if use_torch_compile else f
+            f = torch.compile(
+                f,
+                options={
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                }) if use_torch_compile else f
             out = f(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
                     out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
             offs_cpu = offs.cpu()
@@ -1743,7 +1763,7 @@ class TestFP8Matmul(TestCase):
                 bscalelist.append(scale_b[start:offs_cpu[i]])
                 outlist.append(out[:, start:offs_cpu[i]])
                 start = offs_cpu[i]
-            self.scaled_grouped_mm_helper(a, blist, scale_a, bscalelist, outlist, fast_accum)
+                self.scaled_grouped_mm_helper(a, blist, scale_a, bscalelist, outlist, fast_accum)
 
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
