@@ -940,6 +940,34 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             check_train=False,
         )
 
+    def _test_sdpa_rewriter_20(self):
+        def dot_prod_attention(
+            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, training
+        ) -> torch.Tensor:
+            """Input tensors assumed to have shape (batch_size, seq_len, n_head, embed_dim)"""
+            q = query.transpose(1, 2)
+            k = key.transpose(1, 2)
+            v = value.transpose(1, 2)
+            bs = q.size(0)
+            k_len = k.size(-2)
+            q = q / math.sqrt(q.size(-1))
+            scores = torch.matmul(q, k.transpose(-2, -1))
+            attn_mask = torch.ones(
+                bs, k_len, dtype=torch.bool, device=query.device
+            ).tril(diagonal=0)
+            attn_mask = (attn_mask == 0).view((bs, 1, 1, k_len)).expand_as(scores)
+            scores = scores.masked_fill(attn_mask, -float("inf"))
+            weights = torch.nn.functional.softmax(scores, dim=-1)
+            weights = torch.nn.functional.dropout(
+                weights,
+                p=0.4,
+                training=training,
+                inplace=False,
+            )
+            return torch.matmul(weights, v)
+
+        self._check_common(dot_prod_attention, check_train=False, has_dropout=True)
+
 
 if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
 
@@ -1014,6 +1042,9 @@ if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
         test_sdpa_rewriter_19_cuda = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_19
         )
+        test_sdpa_rewriter_20_cuda = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_20
+        )
 
     class SDPAPatternRewriterCudaDynamicTests(SDPAPatternRewriterCudaTests):
         use_static_shapes = False
@@ -1067,6 +1098,9 @@ if HAS_CPU:
         )
         test_sdpa_rewriter_19_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_19
+        )
+        test_sdpa_rewriter_20_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_20
         )
 
     class SDPAPatternRewriterCpuDynamicTests(SDPAPatternRewriterCpuTests):

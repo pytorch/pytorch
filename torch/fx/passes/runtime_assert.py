@@ -28,7 +28,7 @@ from torch.fx.graph_module import GraphModule
 __all__ = ["insert_deferred_runtime_asserts"]
 
 log = logging.getLogger(__name__)
-graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
+graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code_verbose")
 
 
 def _get_example_value(node: fx.Node) -> Optional[str]:

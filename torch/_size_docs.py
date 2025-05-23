@@ -19,6 +19,7 @@ More formally, for a tensor ``x = tensor.ones(10, 10)`` with size ``s = torch.Si
 ``x.numel() == x.size().numel() == s.numel() == 100`` holds true.
 
 Example::
+
     >>> x=torch.ones(10, 10)
     >>> s=x.size()
     >>> s
