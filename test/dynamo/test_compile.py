@@ -9,6 +9,7 @@ from unittest.mock import patch
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
+from torch.testing._internal.common_device_type import onlyCUDA
 
 
 class ToyModel(torch.nn.Module):
@@ -110,6 +111,15 @@ class InPlaceCompilationTests(TestCase):
             return x + x
 
         g(torch.randn(3))
+
+    @onlyCUDA
+    def test_cuda_tensor_no_graph_break_for_cuda_float_tensor(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f2():
+            return torch.cuda.FloatTensor(1, 2, 3)
+
+        output2 = f2()
+        self.assertIsNotNone(output2)
 
     def test_compilation_callback_with_graph_break(self):
         torch._dynamo.reset()
