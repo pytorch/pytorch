@@ -271,9 +271,15 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
   using torch::nn::ConvNdImpl<D, Derived>::ConvNdImpl;
   explicit ConvTransposeNdImpl(detail::ConvNdOptions<D> options_)
       : ConvNdImpl<D, Derived>(options_) {
-    TORCH_INTERNAL_ASSERT(
-        std::holds_alternative<ExpandingArray<D>>(this->options.padding()),
-        "ConvTranspose padding cannot be a string");
+    if (std::holds_alternative<torch::enumtype::kSame>(options_.padding())) {
+      for (const auto i : c10::irange(D)) {
+        const auto output_padding = (*options_.output_padding())[i];
+        TORCH_CHECK(
+          output_padding == 0,
+          "padding='same' only supports output_padding=0, but got ",
+          output_padding, " at dimension ", i, ".");
+      }
+    }
   }
 
   /// Pretty prints the `ConvTranspose{1,2,3}d` module into the given `stream`.
@@ -283,10 +289,16 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
            << this->options.out_channels()
            << ", kernel_size=" << this->options.kernel_size()
            << ", stride=" << this->options.stride();
-    const auto& pad = padding();
-    if (*pad != *ExpandingArray<D>(0)) {
-      stream << ", padding=" << pad;
-    }
+    std::visit(
+      c10::overloaded(
+        [&](enumtype::kValid) { stream << ", padding='valid'"; },
+        [&](enumtype::kSame) { stream << ", padding='same'"; },
+        [&](const ExpandingArray<D>& pad) {
+          if (*pad != *ExpandingArray<D>(0)) {
+            stream << ", padding=" << pad;
+          }
+        }),
+      this->options.padding());
     if (*this->options.dilation() != *ExpandingArray<D>(1)) {
       stream << ", dilation=" << this->options.dilation();
     }
@@ -307,9 +319,16 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
   }
 
  protected:
-  const ExpandingArray<D>& padding() const {
-    return std::get<ExpandingArray<D>>(this->options.padding());
+  const detail::conv_padding_t<D>& padding() const {
+    return this->options.padding();
   }
+
+  std::vector<int64_t> _output_padding(
+      const Tensor& input,
+      const std::optional<at::IntArrayRef>& output_size,
+      const ExpandingArray<D>& stride,
+      const detail::conv_padding_t<D>& padding,
+      const ExpandingArray<D>& kernel_size);
 
   std::vector<int64_t> _output_padding(
       const Tensor& input,
