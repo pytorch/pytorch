@@ -112,6 +112,7 @@ from ..source import (
     NumpyTensorSource,
     OptimizerSource,
     RandomValueSource,
+    SetGetItemSource,
     Source,
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
@@ -750,6 +751,18 @@ class VariableBuilder:
             var = TorchFunctionModeVariable(value, source=self.source)
             self.tx.output.side_effects.track_object_existing(value, var)
             return var
+        elif istype(value, set):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+
+            # The dictionary gives a ordering for the set items
+            d = dict.fromkeys(value)
+            items = [
+                LazyVariableTracker.create(v, source=SetGetItemSource(self.source, i))
+                for i, v in enumerate(d.keys())
+            ]
+            result = SetVariable(items, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, frozenset) and all(
             (
                 # For DBR quantization, we could get a frozenset of torch funcs.
