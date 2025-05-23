@@ -33,24 +33,6 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 
 namespace mps {
 
-void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& output) {
-  TORCH_INTERNAL_ASSERT(c10::isComplexType(input.scalar_type()) || c10::isComplexType(other.scalar_type()));
-  auto new_size = at::infer_size(input.sizes(), other.sizes());
-  if (!output.sizes().equals(new_size)) {
-    output.resize_(new_size);
-  }
-  uint32_t length = output.numel();
-  if (length == 0) {
-    return;
-  }
-  auto common_dtype = output.scalar_type();
-  auto input_cast = input.to(kMPS, common_dtype);
-  auto other_cast = other.to(kMPS, common_dtype);
-  auto iter = TensorIteratorConfig().add_output(output).add_const_input(input_cast).add_const_input(other_cast).build();
-
-  lib.exec_binary_kernel(iter, "complex_mul");
-}
-
 void binary_op_kernel(const std::string func_name,
                       const Tensor& input,
                       const Tensor& other,

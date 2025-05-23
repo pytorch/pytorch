@@ -12919,7 +12919,9 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.half,)),
                # RuntimeError: view size is not compatible with input tensor's size and stride
                DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCOW', 'test_cow_input_with_grad_not_mutated', device_type='mps'),
+               DecorateInfo(
+                   unittest.skip("Skipped!"), 'TestCOW', 'test_cow_input_with_grad_not_mutated', device_type='mps',
+                   active_if=lambda _: MACOS_VERSION < 14.0),
            )),
     BinaryUfuncInfo('complex',
                     dtypes=floating_types_and(torch.half),
@@ -12932,7 +12934,8 @@ op_db: list[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out', device_type='mps'),
                         DecorateInfo(
-                            unittest.skip("Skipped!"), 'TestCOW', 'test_cow_input_with_grad_not_mutated', device_type='mps'),
+                            unittest.skip("Skipped!"), 'TestCOW', 'test_cow_input_with_grad_not_mutated', device_type='mps',
+                            active_if=lambda _: MACOS_VERSION < 14.0),
                         DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),)),
     BinaryUfuncInfo('copysign',
                     sample_inputs_func=sample_inputs_copysign,
@@ -16492,7 +16495,8 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"),
                          'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                          dtypes=(torch.complex64,)),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCOW', 'test_cow_input_with_grad_not_mutated', device_type='mps'),)
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestCOW', 'test_cow_input_with_grad_not_mutated', device_type='mps'),),
     ),
     UnaryUfuncInfo(
         'nn.functional.hardsigmoid',
@@ -18253,7 +18257,8 @@ op_db: list[OpInfo] = [
                         # tensor([[-0.0047]], dtype=torch.float64, grad_fn=<CopySlices>)
                         DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
                         DecorateInfo(
-                            unittest.skip("Skipped!"), 'TestCOW', 'test_cow_input_with_grad_not_mutated', device_type='mps'),
+                            unittest.skip("Skipped!"), 'TestCOW', 'test_cow_input_with_grad_not_mutated', device_type='mps',
+                            active_if=lambda _: MACOS_VERSION < 14.0),
                     )),
     # TODO(@kshitij12345): Refactor similar to `mvlgamma` entries.
     # To test reference numerics against multiple values of argument `n`,
@@ -18824,7 +18829,9 @@ op_db: list[OpInfo] = [
             # RuntimeError: attribute lookup is not defined on builtin
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCOW', 'test_cow_input_with_grad_not_mutated', device_type='mps'),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestCOW', 'test_cow_input_with_grad_not_mutated', device_type='mps',
+                active_if=lambda _: MACOS_VERSION < 14.0),
         )),
     UnaryUfuncInfo(
         'chalf',
@@ -18852,7 +18859,9 @@ op_db: list[OpInfo] = [
             # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
             # RuntimeError: "neg_conj_cuda" not implemented for 'ComplexHalf'
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCOW', 'test_cow_input_with_grad_not_mutated', device_type='mps'),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestCOW', 'test_cow_input_with_grad_not_mutated', device_type='mps',
+                active_if=lambda _: MACOS_VERSION < 14.0),
         )
     ),
     OpInfo('empty_like',

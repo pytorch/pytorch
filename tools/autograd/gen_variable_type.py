@@ -300,6 +300,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "_fft_c2c",
     "_fft_r2c",
     "linalg_solve",
+    "_lazy_clone",
     "sqrt",
     "stack",
     "gather",
