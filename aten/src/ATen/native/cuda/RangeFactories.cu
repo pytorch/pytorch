@@ -182,7 +182,7 @@ Tensor& range_cuda_out(const Scalar& start, const Scalar& end, const Scalar& ste
     auto xend = end.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
 
-    arange_check_bounds(start, end, step); 
+    arange_check_bounds(start, end, step);
     
     int64_t size = static_cast<int64_t>(((xend - xstart) / xstep) + 1);
 
