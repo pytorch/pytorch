@@ -246,6 +246,20 @@ struct div_trunc_functor {
   }
 };
 
+struct remainder_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return T(a - b * c10::metal::floor_divide(a, b));
+  }
+};
+
+struct fmod_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return c10::metal::fmod(a, b);
+  }
+};
+
 REGISTER_BINARY_OP(copysign, long, float);
 REGISTER_BINARY_OP(copysign, int, float);
 REGISTER_BINARY_OP(copysign, float, float);
@@ -324,6 +338,22 @@ REGISTER_BINARY_OP(div_true, short, float);
 REGISTER_BINARY_OP(div_true, uchar, float);
 REGISTER_BINARY_OP(div_true, char, float);
 REGISTER_BINARY_OP(div_true, bool, float);
+REGISTER_BINARY_OP(remainder, long, long);
+REGISTER_BINARY_OP(remainder, int, int);
+REGISTER_BINARY_OP(remainder, float, float);
+REGISTER_OPMATH_BINARY_OP(remainder, half, half);
+REGISTER_BINARY_OP(remainder, short, short);
+REGISTER_BINARY_OP(remainder, uchar, uchar);
+REGISTER_BINARY_OP(remainder, char, char);
+REGISTER_BINARY_OP(remainder, bool, bool);
+REGISTER_BINARY_OP(fmod, long, long);
+REGISTER_BINARY_OP(fmod, int, int);
+REGISTER_BINARY_OP(fmod, float, float);
+REGISTER_OPMATH_BINARY_OP(fmod, half, half);
+REGISTER_BINARY_OP(fmod, short, short);
+REGISTER_BINARY_OP(fmod, uchar, uchar);
+REGISTER_BINARY_OP(fmod, char, char);
+REGISTER_BINARY_OP(fmod, bool, bool);
 REGISTER_BINARY_ALPHA_OP(add_alpha, long, long);
 REGISTER_BINARY_ALPHA_OP(add_alpha, int, int);
 REGISTER_BINARY_ALPHA_OP(add_alpha, float, float);
@@ -371,6 +401,8 @@ REGISTER_OPMATH_BINARY_OP(div_true, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(add_alpha, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(sub_alpha, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, bfloat, bfloat);
+REGISTER_OPMATH_BINARY_OP(remainder, bfloat, bfloat);
+REGISTER_OPMATH_BINARY_OP(fmod, bfloat, bfloat);
 #endif
 
 // Complex binary functions
