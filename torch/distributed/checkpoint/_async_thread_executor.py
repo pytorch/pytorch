@@ -23,6 +23,8 @@ class _ThreadBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
         process_group: Optional[dist.ProcessGroup] = None,
+        no_dist: bool = False,
+        no_rank_coordination: bool = False,
     ) -> Future:
         from torch.distributed.checkpoint.state_dict_saver import save
 
@@ -33,6 +35,8 @@ class _ThreadBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
             storage_writer=storage_writer,
             planner=planner,
             process_group=process_group,
+            no_dist=no_dist,
+            no_rank_coordination=no_rank_coordination,
         )
         f.add_done_callback(lambda f: self._executor.shutdown(wait=False))
 
