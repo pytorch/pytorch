@@ -12,6 +12,7 @@ from torch import Tensor
 from torch._ops import ops
 from torch.ao.nn.quantized.modules.conv import _reverse_repeat_padding
 from torch.nn.common_types import _size_1_t
+from torch.nn.modules.conv import PaddingMode
 from torch.nn.modules.utils import _pair, _single, _triple
 
 
@@ -62,7 +63,7 @@ class Conv1d(nnq.Conv1d):
         dilation: _size_1_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",
+        padding_mode: PaddingMode = "zeros",
         device=None,
         dtype=None,
         reduce_range=True,

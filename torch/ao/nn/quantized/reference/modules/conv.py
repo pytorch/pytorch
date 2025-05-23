@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.common_types import _size_1_t
+from torch.nn.modules.conv import PaddingMode
 
 from .utils import ReferenceQuantizedModule
 
@@ -62,7 +63,7 @@ class Conv1d(_ConvNd, nn.Conv1d):
         dilation: _size_1_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",
+        padding_mode: PaddingMode = "zeros",
         device=None,
         dtype=None,
         weight_qparams: Optional[dict[str, Any]] = None,
@@ -282,7 +283,7 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
         groups: int = 1,
         bias: bool = True,
         dilation: _size_1_t = 1,
-        padding_mode: str = "zeros",
+        padding_mode: PaddingMode = "zeros",
         device=None,
         dtype=None,
         weight_qparams: Optional[dict[str, Any]] = None,
