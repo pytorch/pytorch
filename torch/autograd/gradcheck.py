@@ -767,9 +767,14 @@ def _check_analytical_jacobian_attributes(
     diff_input_list = list(_iter_tensors(inputs, True))
 
     def vjp_fn(grad_output):
-        return torch.autograd.grad(
-            output, diff_input_list, grad_output, retain_graph=True, allow_unused=True
-        )
+        with torch._dynamo.compiled_autograd._disable():
+            return torch.autograd.grad(
+                output,
+                diff_input_list,
+                grad_output,
+                retain_graph=True,
+                allow_unused=True,
+            )
 
     # Compute everything twice to check for nondeterminism (which we call reentrancy)
     if fast_mode:

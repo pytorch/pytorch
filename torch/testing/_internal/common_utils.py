@@ -1555,6 +1555,10 @@ TEST_WITH_TORCHDYNAMO: bool = TestEnvironment.def_flag(
     env_var="PYTORCH_TEST_WITH_DYNAMO",
     implied_by_fn=lambda: TEST_WITH_TORCHINDUCTOR or TEST_WITH_AOT_EAGER,
 )
+TEST_DISABLE_CA: bool = TestEnvironment.def_flag(
+    "TEST_DISABLE_CA",
+    env_var="PYTORCH_DISABLE_CA",
+)
 
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
@@ -1564,10 +1568,11 @@ if TEST_WITH_TORCHDYNAMO:
     torch._dynamo.config.log_compilation_metrics = False
     # Silence 3.13.0 guard performance warnings
     torch._dynamo.config.issue_3_13_0_warning = False
-    torch._dynamo.config.compiled_autograd = True
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
+    else:
+        torch._dynamo.config.compiled_autograd = not TEST_DISABLE_CA
 
 
 # seems like this is only used in test/torch_np
