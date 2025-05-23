@@ -468,7 +468,7 @@ class TestTensorBoardSummary(BaseTestCase):
 
     def test_image_without_channel(self):
         self.assertImageProto(
-            summary.image("dummy", tensor_N(shape=(8, 8)), dataformats="HW"), self
+            summary.image("dummy", tensor_N(shape=(8, 8)), dataformats="HW")
         )
 
     def test_video(self):
