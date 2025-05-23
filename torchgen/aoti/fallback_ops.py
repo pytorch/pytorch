@@ -8,7 +8,6 @@
 # But it is NOT ok to remove an existing fallback op from the list, since that will break
 # some existing AOTInductor-compiled models.
 inductor_fallback_ops = {
-    "aten.permute.default",
     "aten._adaptive_avg_pool2d_backward.default",
     "aten._adaptive_avg_pool2d.default",
     "aten._adaptive_avg_pool3d_backward.default",
@@ -54,6 +53,7 @@ inductor_fallback_ops = {
     "aten._trilinear.default",
     "aten._weight_int4pack_mm.default",
     "aten._weight_int8pack_mm.default",
+    "aten.abs.default",
     "aten.adaptive_max_pool2d_backward.default",
     "aten.adaptive_max_pool2d.default",
     "aten.adaptive_max_pool3d_backward.default",
@@ -90,6 +90,7 @@ inductor_fallback_ops = {
     "aten.gcd.default",
     "aten.geqrf.default",
     "aten.grid_sampler_2d_backward.default",
+    "aten.hann_window.default",
     "aten.histc.default",
     "aten.histogram.bin_ct",
     "aten.index_put.default",
@@ -117,6 +118,7 @@ inductor_fallback_ops = {
     "aten.nonzero.default",
     "aten.normal_functional.default",
     "aten.ormqr.default",
+    "aten.permute.default",
     "aten.polar.default",
     "aten.pow.Scalar",
     "aten.pow.Tensor_Scalar",
@@ -147,6 +149,7 @@ inductor_fallback_ops = {
     "aten.soft_margin_loss_backward.default",
     "aten.sort.default",
     "aten.sort.stable",
+    "aten.squeeze.dim",
     "aten.to_sparse.default",
     "aten.topk.default",
     "aten.triangular_solve.default",

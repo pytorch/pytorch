@@ -3629,7 +3629,7 @@ class AOTInductorTestsTemplate:
         class M(torch.nn.Module):
             def forward(self, x):
                 return torch.ops.aten.permute.default(x, [0, 2, 1])
-        print("running")
+
         ep = torch.export.export(M(), (torch.randn((1, 3001, 201), dtype=torch.complex64),))
         torch._inductor.aoti_compile_and_package(ep)
 
