@@ -8391,6 +8391,17 @@ utils_device.CURRENT_DEVICE == None""".split(
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    def test_recursion_depth_guards(self):
+        @torch.compile(dynamic=True)
+        def foo(*args, **kwargs):
+            if sum(args) == 0:
+                return 0
+            return 1
+
+        args = list(range(2000))
+        foo(*args)
+        # Previously would have crashed
+
     @dataclasses.dataclass
     class CSETestCase:
         expr: str
