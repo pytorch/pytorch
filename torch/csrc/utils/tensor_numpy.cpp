@@ -120,7 +120,7 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject* py_seq) {
   return result;
 }
 
-PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force /*=false*/) {
+TORCH_API PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force /*=false*/) {
   TORCH_CHECK(is_numpy_available(), "Numpy is not available");
 
   TORCH_CHECK(
