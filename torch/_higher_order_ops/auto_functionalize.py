@@ -577,7 +577,7 @@ def do_auto_functionalize(
 
 def do_auto_functionalize_v2(
     mode: "torch._subclasses.functional_tensor.FunctionalTensorMode",
-    op: _MutableOpType,
+    op: Union[OpOverload, HopInstance],
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> Any:
@@ -589,12 +589,9 @@ def do_auto_functionalize_v2(
     # args come from the schema. This makes it easier for us to work with them.
     normalized_kwargs = {}
 
+    schema = op._schema
+    op = op._op if isinstance(op, HopInstance) else op
     assert isinstance(op, get_args(_MutableOpType))
-    schema = (
-        op.gen_schema(*args, **kwargs)
-        if isinstance(op, HigherOrderOperator)
-        else op._schema
-    )
 
     def _functionalize_callable(arg: Any):
         if callable(arg):

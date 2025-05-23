@@ -956,6 +956,10 @@ class HopInstance:
     def __call__(self, *args, **kwargs):
         return self._op(*args, **kwargs)
 
+    @staticmethod
+    def create(hop: HigherOrderOperator, *args, **kwargs):
+        return HopInstance(hop, hop.gen_schema(*args, **kwargs))
+
 
 # This call_op can be used to call a HopInstance with
 # flat args and kwargs. We need to make use of the hop's schema's tree_spec
