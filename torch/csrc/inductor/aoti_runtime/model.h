@@ -15,11 +15,14 @@
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_runtime/device_utils.h>
+#ifdef __APPLE__
+#include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>
+#endif // __APPLE__
 #ifdef USE_XPU
 #include <torch/csrc/inductor/aoti_runtime/utils_xpu.h>
 #else
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
-#endif
+#endif // USE_XPU
 #include <torch/csrc/inductor/aoti_runtime/constant_type.h>
 
 #define AOTI_RUNTIME_CHECK(EXPR, MSG) \
@@ -71,6 +74,15 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
   void* data_ptr = sycl::malloc_device(num_bytes, *queue_ptr);
   auto deleter = [queue_ptr](void* ptr) { sycl::free(ptr, *queue_ptr); };
+  return RAIIDataPtr(data_ptr, deleter);
+}
+
+#elif defined(__APPLE__)
+
+RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
+  void* data_ptr = nullptr;
+  aoti_torch_mps_malloc(&data_ptr, num_bytes);
+  auto deleter = [](void* ptr) { aoti_torch_mps_free(ptr); };
   return RAIIDataPtr(data_ptr, deleter);
 }
 
@@ -304,7 +316,7 @@ class AOTInductorModelBase {
     if (!include_weights) {
       return;
     }
-#if defined(USE_CUDA) || defined(USE_XPU)
+#if defined(USE_CUDA) || defined(USE_XPU) || defined(__APPLE__)
     constant_blob_ = RAII_gpuMalloc(blob_size);
 #else
     constant_blob_ = RAII_cpuMalloc(blob_size);
