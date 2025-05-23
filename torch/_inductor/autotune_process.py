@@ -720,7 +720,7 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             workspace_ptr = c_void_p(self.workspace.data_ptr())
 
         # Generate partial function.
-        return functools.partial(
+        ret = functools.partial(
             run_method,
             *args,
             *self.extra_args,
@@ -728,6 +728,20 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             workspace_ptr,  # set workspace ptr,
             stream_ptr,
         )
+
+        # sanity check to make sure we cleanup run fn properly
+        try:
+            ret()
+        except RuntimeError as e:
+            err_msg = str(e)
+
+            def raise_runtime_error():
+                raise RuntimeError(err_msg)
+
+            self.cleanup_run_fn()
+            return raise_runtime_error
+
+        return ret
 
     def update_workspace_size(self) -> None:
         if self._workspace_size_updated:

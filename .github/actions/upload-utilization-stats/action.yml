@@ -1,6 +1,6 @@
 name: upload-utilization-stats
 
-description: Upload utilization stats to artifacts
+description: Upload utilization stats to artifacts.
 
 inputs:
     workflow_run_id:
@@ -23,6 +23,11 @@ inputs:
       type: string
       description: 'the job name of the test'
       required: True
+    local_path:
+      type: string
+      description: 'the local path to the utilization stats file'
+      required: False
+      default: ''
     artifact_prefix:
       type: string
       description: |
@@ -42,6 +47,7 @@ runs:
         echo "job_id: ${{inputs.job_id}}"
         echo "job_name:  ${{inputs.job_name}}"
         echo "artifact_prefix: ${{inputs.artifact_prefix}}"
+        python3 --version
     - uses: nick-fields/retry@v3.0.0
       name: Setup dependencies
       with:
@@ -61,4 +67,5 @@ runs:
           --workflow-run-attempt "${{inputs.workflow_attempt}}" \
           --job-id "${{inputs.job_id}}" \
           --job-name "${{inputs.job_name}}" \
+          --local-path "${{inputs.local_path}}" \
           --artifact-prefix "${{inputs.artifact_prefix}}"
