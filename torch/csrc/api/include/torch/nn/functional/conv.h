@@ -173,7 +173,14 @@ inline Tensor conv_transpose1d(
   return std::visit(
       [&](const auto& pad) {
         return torch::conv_transpose1d(
-            input, weight, bias, stride, padding_unwrap(pad), output_padding, groups, dilation);
+            input,
+            weight,
+            bias,
+            stride,
+            padding_unwrap(pad),
+            output_padding,
+            groups,
+            dilation);
       },
       padding);
 }
@@ -222,7 +229,14 @@ inline Tensor conv_transpose2d(
   return std::visit(
       [&](const auto& pad) {
         return torch::conv_transpose2d(
-            input, weight, bias, stride, padding_unwrap(pad), output_padding, groups, dilation);
+            input,
+            weight,
+            bias,
+            stride,
+            padding_unwrap(pad),
+            output_padding,
+            groups,
+            dilation);
       },
       padding);
 }
@@ -271,7 +285,14 @@ inline Tensor conv_transpose3d(
   return std::visit(
       [&](const auto& pad) {
         return torch::conv_transpose3d(
-            input, weight, bias, stride, padding_unwrap(pad), output_padding, groups, dilation);
+            input,
+            weight,
+            bias,
+            stride,
+            padding_unwrap(pad),
+            output_padding,
+            groups,
+            dilation);
       },
       padding);
 }

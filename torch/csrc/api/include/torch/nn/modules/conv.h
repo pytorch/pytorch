@@ -275,9 +275,12 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
       for (const auto i : c10::irange(D)) {
         const auto output_padding = (*options_.output_padding())[i];
         TORCH_CHECK(
-          output_padding == 0,
-          "padding='same' only supports output_padding=0, but got ",
-          output_padding, " at dimension ", i, ".");
+            output_padding == 0,
+            "padding='same' only supports output_padding=0, but got ",
+            output_padding,
+            " at dimension ",
+            i,
+            ".");
       }
     }
   }
@@ -290,15 +293,15 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
            << ", kernel_size=" << this->options.kernel_size()
            << ", stride=" << this->options.stride();
     std::visit(
-      c10::overloaded(
-        [&](enumtype::kValid) { stream << ", padding='valid'"; },
-        [&](enumtype::kSame) { stream << ", padding='same'"; },
-        [&](const ExpandingArray<D>& pad) {
-          if (*pad != *ExpandingArray<D>(0)) {
-            stream << ", padding=" << pad;
-          }
-        }),
-      this->options.padding());
+        c10::overloaded(
+            [&](enumtype::kValid) { stream << ", padding='valid'"; },
+            [&](enumtype::kSame) { stream << ", padding='same'"; },
+            [&](const ExpandingArray<D>& pad) {
+              if (*pad != *ExpandingArray<D>(0)) {
+                stream << ", padding=" << pad;
+              }
+            }),
+        this->options.padding());
     if (*this->options.dilation() != *ExpandingArray<D>(1)) {
       stream << ", dilation=" << this->options.dilation();
     }
