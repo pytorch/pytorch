@@ -1,5 +1,5 @@
 numpy=1.26.4
-pyyaml=6.0
+pyyaml=6.0.2
 setuptools=72.1.0
 cmake=3.22.*
 typing-extensions=4.11.0
