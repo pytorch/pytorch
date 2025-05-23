@@ -2003,6 +2003,30 @@ utils_device.CURRENT_DEVICE == None""".split(
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             res = opt_fn(g, torch.ones(2, 2))
 
+    def test_set_descriptor(self):
+        class Field:
+            def __set__(self, obj, value):
+                obj._value = value * 2
+
+            def __get__(self, obj, owner):
+                return obj._value + 1
+
+        class Foo:
+            field = Field()
+
+        def fn(x, foo):
+            foo.field = 10
+            return x + foo.field
+
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        x = torch.zeros(2)
+        foo1, foo2 = Foo(), Foo()
+
+        ref = fn(x, foo1)
+        res = opt_fn(x, foo2)
+        self.assertEqual(ref, res)
+        self.assertEqual(foo1.field, foo2.field)
+
     def test_get_attr_function(self):
         def fn(g, x):
             return g(x)
