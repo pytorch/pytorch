@@ -218,6 +218,45 @@ Tensor amaxamin_jvp(
   return at::where(mask, dx, 0.).sum(dim, keepdim) / mask.sum(dim, keepdim);
 }
 
+Tensor aminmax_backward(
+    const Tensor& self,
+    c10::optional<int64_t> dim,
+    bool keepdim,
+    const Tensor& grad_min,
+    const Tensor& grad_max,
+    const Tensor& min,
+    const Tensor& max) {
+  auto dims = dim.has_value() ? IntArrayRef{*dim} : IntArrayRef{};
+
+  auto min_reduced = restore_reduced_dims(min, dims, keepdim);
+  auto max_reduced = restore_reduced_dims(max, dims, keepdim);
+
+  auto min_mask =
+      at::isnan(min).all().item<bool>() ? self.isnan() : self == min_reduced;
+  auto max_mask =
+      at::isnan(max).all().item<bool>() ? self.isnan() : self == max_reduced;
+
+  Tensor result;
+  if (grad_min.defined()) {
+    result = scale_grad_by_count(grad_min, min_mask, dims);
+
+    if (grad_max.defined()) {
+      auto grad_max_result = scale_grad_by_count(grad_max, max_mask, dims);
+      if (!areAnyTensorSubclassLike({result, grad_max_result})) {
+        result.add_(grad_max_result);
+      } else {
+        result = result + grad_max_result;
+      }
+    }
+  } else if (grad_max.defined()) {
+    result = scale_grad_by_count(grad_max, max_mask, dims);
+  } else {
+    result = at::zeros_symint(self.sym_sizes(), self.options());
+  }
+
+  return result;
+}
+
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(
     const Tensor& grad,
     const Tensor& x1,
