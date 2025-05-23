@@ -376,7 +376,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
            self.size(1) == mat2_sizes[1])) &&
           self.is_contiguous() && result.is_contiguous() &&
 	  self.scalar_type() == result.scalar_type() &&
-	  self.scalar_type
 #ifdef USE_ROCM
           (scalar_type == at::ScalarType::Float ||
            scalar_type == at::ScalarType::Half ||
@@ -432,7 +431,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
   cublasCommonArgs args(mat1, mat2, result);
   bool bias2d = self.dim() == 2;
-  TORCH_WARN("DISPATCHING WITH BIAS ", self.sizes(), " ", mat1_sizes, " ", mat2_sizes);
 
   if (mat1.numel() == 0) {
     // By definition, when beta==0, values in self should be ignored. nans and infs
