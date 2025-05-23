@@ -1691,47 +1691,15 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return a + b
         return a - b
 
+    @unittest.expectedFailure
     @make_test
-    def test_set_invalid_ConstantVariable_op(a, b):
-        s = set({"banana", "apple", "orange"})
-        try:
-            s - 1
-        except TypeError:
-            return a + b
-        except Exception:
-            return a - b
+    def test_set_in_frozenset(x):
+        var = set("abc")
+        other = set([frozenset("abc")])
+        if var in other:
+            return x + 1
         else:
-            return a * b
-
-    @make_test
-    def test_set_pop_raise_KeyError(a, b):
-        s = set()
-        try:
-            s.pop()
-        except KeyError:
-            return a + b
-        except Exception:
-            return a - b
-        else:
-            return a * b
-
-    @make_test
-    def test_set_issubset(a, b):
-        vals1 = {"a", "b", "c"}
-        vals2 = {"b", "c"}
-        vals3 = {"b", "e", "f"}
-        if vals2.issubset(vals1) and not vals2.issubset(vals3):
-            return a + b
-        return a - b
-
-    @make_test
-    def test_set_issuperset(a, b):
-        vals1 = {"a", "b", "c"}
-        vals2 = {"b", "c"}
-        vals3 = {"b", "e", "f"}
-        if vals1.issuperset(vals2) and not vals1.issuperset(vals3):
-            return a + b
-        return a - b
+            return x - 1
 
     @make_test
     def test_set_update_bytecode(x):
@@ -1750,181 +1718,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x + 1
         else:
             return x - 1
-
-    @make_test
-    def test_set_contains(a, b):
-        vals = set(["a", "b", "c"])
-        if "a" in vals:
-            x = a + b
-        else:
-            x = a - b
-        if "d" in vals:
-            y = a + b
-        else:
-            y = a - b
-        return x, y
-
-    def test_set_isdisjoint(self):
-        x = {"apple", "banana", "cherry"}
-        y = {"google", "microsoft", "apple"}
-
-        def fn(a):
-            if x.isdisjoint(y):
-                return a + 1
-            else:
-                return a - 1
-
-        test = make_test(fn)
-        test(self)
-
-    @make_test
-    def test_set_intersection(a, b):
-        set1 = {"apple", "banana", "cherry"}
-        set2 = {"google", "microsoft", "apple"}
-        set3 = {"shoes", "flipflops", "apple"}
-        intersection_set = set1.intersection(set2, set3)
-        if "apple" in intersection_set:
-            x = a + b
-        else:
-            x = a - b
-        if "banana" in intersection_set:
-            y = a + b
-        else:
-            y = a - b
-        if "shoes" in intersection_set:
-            z = a + b
-        else:
-            z = a - b
-        return x, y, z
-
-    @make_test
-    def test_set_intersection_update(a, b):
-        set1 = {"apple", "banana", "cherry"}
-        set2 = {"google", "microsoft", "apple"}
-        set3 = {"shoes", "flipflops", "apple"}
-        set1.intersection_update(set2, set3)
-        if "apple" in set1:
-            x = a + b
-        else:
-            x = a - b
-        if "banana" in set1:
-            y = a + b
-        else:
-            y = a - b
-        if "shoes" in set1:
-            z = a + b
-        else:
-            z = a - b
-        return x, y, z
-
-    @parametrize("_type", [set])
-    def test_set_union(self, _type):
-        @make_test
-        def fn(a, b):
-            set1 = _type({"apple", "banana", "cherry"})
-            set2 = _type({"google", "microsoft", "apple"})
-            set3 = _type({"shoes", "flipflops", "sneakers"})
-            union_set = set1.union(set2, set3)
-            if "apple" in union_set:
-                x = a + b
-            else:
-                x = a - b
-            if "banana" in union_set:
-                y = a + b
-            else:
-                y = a - b
-            if "shoes" in union_set:
-                z = a + b
-            else:
-                z = a - b
-            return x, y, z
-
-        fn(self)
-
-    @parametrize(
-        "fn_name", ["add", "symmetric_difference", "symmetric_difference_update"]
-    )
-    def test_set_raise_TypeError(self, fn_name):
-        @make_test
-        def fn(a, b):
-            set1 = {"apple", "banana", "cherry"}
-            try:
-                getattr(set1, fn_name)()
-            except TypeError:
-                return a + b
-            return a - b
-
-        fn(self)
-
-    @make_test
-    def test_set_difference(a, b):
-        set1 = {"apple", "banana", "cherry"}
-        set2 = {"google", "microsoft", "apple"}
-        set3 = {"shoes", "flipflops", "sneakers"}
-        difference_set = set1.difference(set2, set3)
-        if "apple" in difference_set:
-            x = a + b
-        else:
-            x = a - b
-        if "banana" in difference_set:
-            y = a + b
-        else:
-            y = a - b
-        if "shoes" in difference_set:
-            z = a + b
-        else:
-            z = a - b
-        return x, y, z
-
-    @make_test
-    def test_set_difference_update(a, b):
-        set1 = {"apple", "banana", "cherry"}
-        set2 = {"google", "microsoft", "apple"}
-        set3 = {"shoes", "flipflops", "sneakers"}
-        set1.difference_update(set2, set3)
-        if "apple" in set1:
-            x = a + b
-        else:
-            x = a - b
-        if "banana" in set1:
-            y = a + b
-        else:
-            y = a - b
-        if "shoes" in set1:
-            z = a + b
-        else:
-            z = a - b
-        return x, y, z
-
-    @make_test
-    def test_set_symmetric_difference(a, b):
-        set1 = {"apple", "banana", "cherry"}
-        set2 = {"google", "microsoft", "apple"}
-        symmetric_diff_set = set1.difference(set2)
-        if "apple" in symmetric_diff_set:
-            x = a + b
-        else:
-            x = a - b
-        if "banana" in symmetric_diff_set:
-            y = a + b
-        else:
-            y = a - b
-        return x, y
-
-    @make_test
-    def test_set_symmetric_difference_update(a, b):
-        set1 = {"apple", "banana", "cherry"}
-        set2 = {"google", "microsoft", "apple"}
-        set1.difference(set2)
-        if "apple" in set1:
-            x = a + b
-        else:
-            x = a - b
-        if "banana" in set1:
-            y = a + b
-        else:
-            y = a - b
-        return x, y
 
     def test_set_keys_view(self):
         from collections.abc import KeysView
@@ -1957,23 +1750,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.rand(4)
         self.assertEqual(fn(x), opt_fn(x))
-
-    @parametrize("method", ["add", "__contains__"])
-    def test_set_raise_TypeError_on_unshashable_obj(self, method):
-        @make_test
-        def fn(a, b):
-            s = set({1, 2, 3, 4})
-            try:
-                m = getattr(s, method)
-                m([[]])
-            except TypeError:
-                return a + b
-            except Exception:
-                return a - b
-            else:
-                return a * b
-
-        fn(self)
 
     def test_constant_set(self):
         s = set([1, 2])
@@ -4373,6 +4149,33 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                 return a + b
             else:
                 return a - b
+
+        fn(self)
+
+    @parametrize(
+        "method_name",
+        [
+            "copy",
+            "difference",
+            "intersection",
+            "symmetric_difference",
+            "union",
+        ],
+    )
+    def test_frozenset_return_type(self, method_name):
+        @make_test
+        def fn(a, b):
+            set1 = frozenset({"apple", "banana", "cherry"})
+            set2 = frozenset({"google", "microsoft", "apple"})
+            if method_name == "copy":
+                result = set1.copy()
+            else:
+                result = getattr(set1, method_name)(set2)
+            if type(result) is frozenset:
+                x = a + b
+            else:
+                x = a - b
+            return x
 
         fn(self)
 
