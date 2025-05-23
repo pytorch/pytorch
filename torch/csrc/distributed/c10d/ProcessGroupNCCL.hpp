@@ -551,7 +551,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // the int value of `NCCL_SPLIT_NOCOLOR` (-1) instead.
     int split_color{-2};
 #endif
+    // global ranks map
     std::vector<uint64_t> global_ranks_in_group;
+    // profiling ranks map (to be displayed in traces)
+    std::vector<uint64_t> profiling_ranks_in_group;
     std::string group_name;
   };
 
@@ -1040,6 +1043,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // devices. It is called in the constructor of ProcessGroupNCCL, so it always
   // return the rank_ of the the very first PG created, aka, default global PG.
   const int& globalRank() const;
+
+  // get profiling rank for the current rank. (to be displayed in trace)
+  int profilingRank(int rank) const;
 
   // Returns the global ranks of a PG.
   const std::vector<uint64_t>& groupRanks() const;
