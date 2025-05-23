@@ -170,7 +170,7 @@ template <
         is_scalar_floating_point_v<T> && is_scalar_floating_point_v<U>,
         bool> = true>
 inline common_dtype<T, U> floor_divide(T x, U y) {
-    return ::metal::floor(x / y);
+  return ::metal::floor(x / y);
 }
 
 // fmod
@@ -191,7 +191,7 @@ template <
         is_scalar_floating_point_v<T> && is_scalar_floating_point_v<U>,
         bool> = true>
 inline common_dtype<T, U> fmod(T x, U y) {
-    return ::metal::fmod(x, y);
+  return ::metal::fmod(x, y);
 }
 
 // cast_to primitives
