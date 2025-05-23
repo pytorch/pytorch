@@ -165,6 +165,11 @@ class AOTInductorModelBase {
       aoti_torch_set_current_xpu_device(device_idx_);
     }
 #endif // USE_XPU
+#ifdef __APPLE__
+    if (device_idx_ == -1) {
+      device_idx_ = 0;
+    }
+#endif // __APPLE__
   }
 
   // NOLINTNEXTLINE(modernize-use-equals-default)

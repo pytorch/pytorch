@@ -2082,7 +2082,8 @@ class AotCodeCompiler:
                 so_builder.build()
                 for o_file in obj_srcs:
                     # Remove these as they are not needed anymore
-                    os.remove(o_file)
+                    pass
+                    # os.remove(o_file)
 
                 if use_mmap_weights:
                     import resource
