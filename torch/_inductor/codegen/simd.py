@@ -2096,11 +2096,14 @@ class SIMDScheduling(BaseScheduling):
                     tile = var_tiling.tiling_factor
                     remainder = FloorDiv(v_range, var_tiling.tiling_factor)
 
-                    splits.append(prod * tile)
+                    splits.append(prod * remainder)
+                    split_scores.append(var_tiling.score)
+
+                    splits.append(tile)
                     split_scores.append(coalesce_analysis.coalesced_by_var.get(v, 0))
 
-                    splits.append(remainder)
-                    split_scores.append(var_tiling.score)
+                    prod = 1
+                    prev_var_coalesced_score = 0
 
                     continue
 
@@ -2109,7 +2112,7 @@ class SIMDScheduling(BaseScheduling):
                 split_scores.append(coalesce_analysis.coalesced_by_var.get(v, 0))
                 prod = 1
 
-            if prod != 1:
+            if prod != 1 or (is_pointwise and len(splits) == 0):
                 splits.append(prod)
                 split_scores.append(prev_var_coalesced_score)
 
@@ -2167,8 +2170,12 @@ class SIMDScheduling(BaseScheduling):
 
         default_tiling = cls.create_tiling([pointwise_numel], [reduction_numel])
 
+        # add a slight penalty for longer tilings that dont increase score much
+        def score_mod(t):
+            return -t[0].score / (1.01 ** (len(t[0].tiling) - 1))
+
         # apply penalty for longer tilings that dont increase score much
-        for cand, tiling_score in sorted(tilings, key=lambda t: (-t[0].score / (1.01 ** len(t[0].tiling) - 1))):
+        for cand, tiling_score in sorted(tilings, key=score_mod):
             if cls.tiling_is_compatible(
                 node_schedule, pointwise_numel, reduction_numel, cand.tiling
             ):
@@ -2262,9 +2269,21 @@ class SIMDScheduling(BaseScheduling):
             torch._inductor.config.test_configs.global_tiling_analysis
             and coalesce_analysis
         ):
-            return cls.compute_tiling_strategy(
+            # breakpoint()
+            out = cls.compute_tiling_strategy(
                 node_schedule, numel, reduction_numel, coalesce_analysis
             )
+            out2 = cls.get_tiling_and_scores(
+                node_schedule, numel, reduction_numel, None
+            )
+            # if not out[0] == out2[0]:
+            #     breakpoint()
+            #     out = cls.compute_tiling_strategy(
+            #         node_schedule, numel, reduction_numel, coalesce_analysis
+            #     )
+            # assert out[0] == out2[0]
+            return out
+                
         if (
             not is_pointwise and not config.triton.tile_reductions
         ) or config.triton.max_tiles <= 1:
