@@ -447,7 +447,9 @@ TEST_F(ModulesTest, ConvTranspose3dSameOutputPadding) {
   options.stride({1, 1, 1}).output_padding({0, 0, 0}).padding(torch::kSame);
   ConvTranspose3d model_valid(options);
   ASSERT_THROWS_WITH(
-      [&] { ConvTranspose3d model_invalid(options.output_padding({0, 0, 3})); }(),
+      [&] {
+        ConvTranspose3d model_invalid(options.output_padding({0, 0, 3}));
+      }(),
       "padding='same' only supports output_padding=0, but got 3 at dimension 2.");
 }
 
