@@ -180,6 +180,7 @@ py::class_<ModuleType, Extra...> add_module_bindings(
           py::arg("dtype"),
           py::arg("non_blocking") = false)
       .def("cuda", [](ModuleType& module) { module.to(kCUDA); })
+      .def("mps", [](ModuleType& module) { module.to(kMPS); })
       .def("cpu", [](ModuleType& module) { module.to(kCPU); })
       .def("float", [](ModuleType& module) { module.to(kFloat32); })
       .def("double", [](ModuleType& module) { module.to(kFloat64); })
