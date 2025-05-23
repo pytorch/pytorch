@@ -1,6 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/BinaryOps.h>
 
+#include <cmath>
+#include <iostream>
 #include <type_traits>
 #include <utility>
 
@@ -144,6 +146,9 @@
 #include <ATen/ops/xlogy.h>
 #include <ATen/ops/xlogy_native.h>
 #include <ATen/ops/xor_native.h>
+#include <ATen/native/cpu/Loops.h>  
+#include <ATen/native/DispatchStub.h>  
+#include <ATen/Dispatch.h> 
 #endif
 
 namespace at::meta {
@@ -1542,27 +1547,45 @@ TORCH_IMPL_FUNC(heaviside_out) (
   heaviside_stub(device_type(), *this);
 }
 
-static inline Tensor _pow2(const Tensor& self, const Tensor& other) {
-  const auto self_dtype = self.scalar_type();
-  // All integral types are promoted to float32
-  if (isIntegralType(self_dtype, true) || self_dtype == kFloat) {
-      return at::pow(2.0, other);
-  }
-  // For double and reduced floating types do regular type promotion
-  return at::full({}, 2.0, self.options()).pow(other);
+// Note:
+// For low-precision dtypes like float16, results may overflow or underflow.
+// - For very small exponents (e.g., exp <= -25), the result will likely underflow to 0.0.
+//   The smallest positive subnormal representable float16 is ~2^-24 ≈ 5.96e-08.
+// - For very large exponents (e.g., exp >= 16), the result may overflow to inf.
+//   The largest finite float16 is 65504, approximately 2^15.999.
+//
+// These behaviors are expected and conform to IEEE 754 float16 specification.
+static void ldexp_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(0), "ldexp_cpu", [&] {
+    using scalar_t_exp = int;
+    cpu_kernel(iter, [](scalar_t x, scalar_t_exp exp) -> scalar_t {
+      return static_cast<scalar_t>(std::ldexp(static_cast<double>(x), exp));
+    });
+  });
 }
 
 Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  return at::mul_out(result, self, _pow2(self, other));
+  TORCH_CHECK(other.scalar_type() == at::kInt || other.scalar_type() == at::kLong,
+              "ldexp(): exponent must be an integer tensor (int32 or int64), but got ", other.scalar_type());
+
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .add_output(result)
+    .add_input(self)
+    .add_input(other)
+    .build();
+
+  ldexp_kernel(iter);
+  return result;
 }
 
-
 Tensor ldexp(const Tensor& self, const Tensor& other) {
-  return at::mul(self, _pow2(self, other));
+  Tensor result = at::empty_like(self);
+  return at::native::ldexp_out(self, other, result);
 }
 
 Tensor& ldexp_(Tensor& self, const Tensor& other) {
-  return at::ldexp_out(self, self, other);
+  return at::native::ldexp_out(self, other, self);
 }
 
 Tensor& xlogy_out(const Scalar& self, const Tensor& other, Tensor& result) {
