@@ -1687,6 +1687,7 @@ class TestBinaryUfuncs(TestCase):
             self._test_pow(base, exp)
 
     @onlyCUDA
+    @dtypes(torch.complex64, torch.complex128)
     def test_pow_cuda_complex_extremal_passing(self, device):
         t = torch.tensor(complex(-1.0, float("inf")), device=device)
         cuda_out = t.pow(2)
