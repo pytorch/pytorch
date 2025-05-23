@@ -165,9 +165,8 @@ void _fused_sgd_with_momentum_kernel_cuda_(
     const std::optional<at::Tensor>& grad_scale,
     const std::optional<at::Tensor>& found_inf) {
   TORCH_CHECK_GT(momentum, 0);
-  TORCH_CHECK(
-      at::native::check_fast_path_restrictions(
-          {params, grads, momentum_buffer_list}));
+  TORCH_CHECK(at::native::check_fast_path_restrictions(
+      {params, grads, momentum_buffer_list}));
   float* grad_scale_ptr =
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
   float* found_inf_ptr =
@@ -228,9 +227,8 @@ void _fused_sgd_with_momentum_kernel_cuda_(
     return;
   }
   TORCH_CHECK_GT(momentum, 0);
-  TORCH_CHECK(
-      at::native::check_fast_path_restrictions(
-          {params, grads, momentum_buffer_list}));
+  TORCH_CHECK(at::native::check_fast_path_restrictions(
+      {params, grads, momentum_buffer_list}));
   if (grad_scale.has_value()) {
     TORCH_CHECK(
         grad_scale->device() == params[0].device(),
