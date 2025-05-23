@@ -3500,6 +3500,11 @@ def object_has_getattribute(value: Any):
     return class_has_getattribute(type(value))
 
 
+def safe_setattr_via_dict(obj, name, value):
+    d = object.__getattribute__(obj, "__dict__")
+    d[name] = value
+
+
 def class_has_getattribute(cls: type):
     try:
         if isinstance(
