@@ -5,8 +5,13 @@
 
 namespace torch::utils {
 
-TORCH_API PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force = false);
-at::Tensor tensor_from_numpy(PyObject* obj, bool warn_if_not_writeable = true);
+TORCH_API PyObject* tensor_to_numpy(
+    const at::Tensor& tensor,
+    bool force = false);
+
+TORCH_API at::Tensor tensor_from_numpy(
+    PyObject* obj,
+    bool warn_if_not_writeable = true);
 
 int aten_to_numpy_dtype(const at::ScalarType scalar_type);
 at::ScalarType numpy_dtype_to_aten(int dtype);
