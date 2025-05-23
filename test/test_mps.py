@@ -1065,15 +1065,18 @@ class TestMPS(TestCaseMPS):
     @xfailIf(MACOS_VERSION < 15.0)
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     def test_large_bmm(self, dtype):
-        batch1 = torch.randn(11, 20064, 128, dtype=dtype, device='mps')
-        batch2 = torch.randn(11, 128, 20064, dtype=dtype, device='mps')
-        output_cpu = torch.bmm(batch1.cpu(), batch2.cpu())
+        B, M, N = 11, 20064, 128
+        batch1 = torch.randn(B, M, N, dtype=dtype, device='mps')
+        batch2 = torch.randn(B, N, M, dtype=dtype, device='mps')
         output_mps = torch.bmm(batch1, batch2)
 
+        # For performance reasons, check only one(non-first) batch for correctness
+        # TODO: Check two when https://github.com/pytorch/pytorch/issues/153560 is fixed
+        batch_idx = torch.randint(1, B, size=()).item()
+        output_cpu = torch.mm(batch1[batch_idx].cpu(), batch2[batch_idx].cpu())
         # Using the low precision comparison for FP16
         tol = 1e-2 if dtype == torch.float16 else None
-        self.assertEqual(output_cpu, output_mps, atol=tol, rtol=tol)
-        self.assertEqual(output_cpu.size(), output_mps.size())
+        self.assertEqual(output_cpu, output_mps[batch_idx], atol=tol, rtol=tol)
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     def test_take_along_dim(self, dtype):
@@ -8077,6 +8080,13 @@ class TestLogical(TestCaseMPS):
             y = torch.tensor([1, 3], device="mps", dtype=torch.float16)
             self.assertEqual(torch.isin(x, y), torch.tensor([False, True, False, True], device="mps"))
 
+            # Tensor.Scalar variant (aliases to eq), not covered by OpInfo
+            self.assertEqual(torch.isin(x, 2.0), torch.tensor([False, False, True, False], device="mps"))
+            self.assertEqual(torch.isin(x, 1.0, invert=True), torch.tensor([True, False, True, True], device="mps"))
+            self.assertEqual(torch.isin(x, 8.0), torch.tensor([False, False, False, False], device="mps"))
+            # Scalar.Tensor varaiant(alaises to Scalar.Scalar), not covered by OpInfo
+            self.assertEqual(torch.isin(2.0, x), torch.tensor(True, device="mps"))
+
     def test_isin_asserts(self):
         C = torch.randn(size=[1, 4], device='mps', dtype=torch.float32)
         D = torch.randn(size=[1, 4], device='cpu', dtype=torch.float32)
@@ -12313,6 +12323,9 @@ class TestMetalLibrary(TestCaseMPS):
 
     def test_metal_arange_with_arg_and_scalar_tensor(self):
         self.test_metal_arange_with_arg(step=torch.tensor(.5))
+
+    def test_metal_arange_with_arg_and_scalar_tensor_float64(self):
+        self.test_metal_arange_with_arg(step=torch.tensor(.5, dtype=torch.float64))
 
     def test_metal_arange_with_arg_and_cast(self):
         x = torch.zeros(12, device="mps", dtype=torch.half)

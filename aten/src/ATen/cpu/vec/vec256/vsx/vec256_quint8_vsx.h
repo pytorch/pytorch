@@ -33,6 +33,9 @@ namespace at {
 namespace vec {
 inline namespace CPU_CAPABILITY {
 
+template <>
+struct is_vec_specialized_for<c10::quint8> : std::bool_constant<true> {};
+
 const vint16 mask_unsigned = vec_splats((short int)0xFF);
 template <>
 struct Vectorized<c10::quint8> {
