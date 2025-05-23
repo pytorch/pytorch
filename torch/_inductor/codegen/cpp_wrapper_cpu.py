@@ -449,7 +449,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # inline done by the host compiler
         self.prefix.splice(
             """
-            bool _check_aoti_runtime_check_inputs_env() {
+            static bool _check_aoti_runtime_check_inputs_env() {
                 const static char* env_var_value = getenv("AOTI_RUNTIME_CHECK_INPUTS");
                 const static bool result = env_var_value != nullptr && env_var_value[0] != '0';
                 return result;
@@ -606,7 +606,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 if not V.graph.is_const_graph:
                     self.prefix.writeline("inputs.clear();")
                 self.prefix.writeline(
-                    "auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
+                    "[[maybe_unused]] auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
                 )
 
     def codegen_tensor_dtype_var_decl(self, code: IndentedBuffer, name):
@@ -701,7 +701,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                                const std::string& device_str,
                                                std::optional<std::string> cubin_dir,
                                                bool include_weights)
-                : AOTInductorModelBase({num_inputs}, {num_outputs}, {num_constants}, device_str, cubin_dir, {include_weights}) {{
+                : AOTInductorModelBase({num_inputs},
+                                       {num_outputs},
+                                       {num_constants},
+                                       device_str,
+                                       std::move(cubin_dir),
+                                       {include_weights}) {{
             """
         )
 
@@ -812,10 +817,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 )
 
             self.prefix.writeline(
-                f'in_spec_ = "{escape_string(config.aot_inductor.serialized_in_spec)}";'
+                f'in_spec_ = R"({config.aot_inductor.serialized_in_spec})";'
             )
             self.prefix.writeline(
-                f'out_spec_ = "{escape_string(config.aot_inductor.serialized_out_spec)}";'
+                f'out_spec_ = R"({config.aot_inductor.serialized_out_spec})";'
             )
 
             for idx, output in enumerate(V.graph.graph_outputs):

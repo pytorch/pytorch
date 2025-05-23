@@ -45,12 +45,6 @@
 #include <ATen/native/Math.h>
 #endif
 
-typedef at::Half half;
-typedef at::BFloat16 bfloat16;
-
-typedef at::Float8_e4m3fn float8_e4m3fn;
-typedef at::Float8_e5m2 float8_e5m2;
-
 template <typename T>
 struct Welford {
   T mean = T(0);
@@ -637,7 +631,7 @@ inline int64_t randint64_cpu(uint32_t seed, uint32_t offset, int64_t low, int64_
 template <typename T> struct AsIntegerType { typedef T type; };
 template <> struct AsIntegerType<float> { typedef uint32_t type; };
 template <> struct AsIntegerType<double> { typedef uint64_t type; };
-template <> struct AsIntegerType<bfloat16> { typedef uint16_t type; };
+template <> struct AsIntegerType<at::BFloat16> { typedef uint16_t type; };
 
 template <typename T>
 typename std::enable_if_t<!c10::is_reduced_floating_point_v<T>, T>

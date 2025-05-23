@@ -222,7 +222,6 @@ option(
   BUILD_MOBILE_TEST
   "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)"
   OFF)
-option(BUILD_JNI "Build JNI bindings" OFF)
 option(BUILD_MOBILE_AUTOGRAD
        "Build autograd function in mobile build (in development)" OFF)
 cmake_dependent_option(INSTALL_TEST "Install test binaries if BUILD_TEST is on"
@@ -259,6 +258,8 @@ option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(USE_MPS "Use MPS for macOS build" ON "MPS_FOUND" OFF)
 cmake_dependent_option(USE_NCCL "Use NCCL" ON
                        "USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
+cmake_dependent_option(USE_XCCL "Use XCCL" OFF
+                       "USE_XPU;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_RCCL "Use RCCL" ON USE_NCCL OFF)
 cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
 cmake_dependent_option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF "USE_NCCL"
@@ -332,9 +333,14 @@ cmake_dependent_option(
   USE_GLOO_WITH_OPENSSL "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
     "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
 cmake_dependent_option(
+  USE_GLOO_IBVERBS "Use Gloo with ibverbs backend. Only available if USE_GLOO is on." OFF
+    "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
+cmake_dependent_option(
     USE_C10D_GLOO "USE C10D GLOO" ON "USE_DISTRIBUTED;USE_GLOO" OFF)
 cmake_dependent_option(
     USE_C10D_NCCL "USE C10D NCCL" ON "USE_DISTRIBUTED;USE_NCCL" OFF)
+cmake_dependent_option(
+    USE_C10D_XCCL "USE C10D XCCL" ON "USE_DISTRIBUTED;USE_XCCL" OFF)
 cmake_dependent_option(
     USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI" OFF)
 cmake_dependent_option(
@@ -1341,16 +1347,6 @@ endif()
 # built in the previous Modules section above).
 if(BUILD_BINARY)
   add_subdirectory(binaries)
-endif()
-
-# ---[ JNI
-if(BUILD_JNI)
-  if(NOT MSVC)
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-variable")
-  endif()
-  set(BUILD_LIBTORCH_WITH_JNI 1)
-  set(FBJNI_SKIP_TESTS 1)
-  add_subdirectory(android/pytorch_android)
 endif()
 
 include(cmake/Summary.cmake)

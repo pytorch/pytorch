@@ -1762,19 +1762,6 @@ TEST_WITH_TV = os.getenv('PYTORCH_TEST_WITH_TV') == '1'
 if TEST_WITH_TV:
     torch.fx.experimental._config.translation_validation = True
 
-# Some tests take too long when dynamic_shapes is combined with
-# translation_validation. Whenever that happens, we solve that by
-# disabling translation_validation.
-def disable_translation_validation_if_dynamic_shapes(fn):
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        if torch._dynamo.config.dynamic_shapes:
-            # Turning TV off due to high latency on dynamic shapes.
-            torch.fx.experimental._config.translation_validation = False
-        return fn(*args, **kwargs)
-    return wrapper
-
-
 # Determine whether to enable cuda memory leak check.
 # CUDA mem leak check is expensive and thus we don't want to execute it on every
 # test case / configuration.
@@ -5635,25 +5622,5 @@ def scoped_load_inline(func):
                 return cpp_extension.load_inline(*args, **kwargs)
 
         return func(*args, load_inline=load_inline, **kwargs)
+
     return wrapper
-
-def recover_orig_fp32_precision(fn):
-    @contextlib.contextmanager
-    def recover():
-        old_mkldnn_conv_p = torch.backends.mkldnn.conv.fp32_precision  # type: ignore[attr-defined]
-        old_mkldnn_rnn_p = torch.backends.mkldnn.rnn.fp32_precision  # type: ignore[attr-defined]
-        old_mkldnn_matmul_p = torch.backends.mkldnn.matmul.fp32_precision  # type: ignore[attr-defined]
-        old_cudnn_conv_p = torch.backends.cudnn.conv.fp32_precision  # type: ignore[attr-defined]
-        old_cudnn_rnn_p = torch.backends.cudnn.rnn.fp32_precision  # type: ignore[attr-defined]
-        old_cuda_matmul_p = torch.backends.cuda.matmul.fp32_precision
-        try:
-            yield
-        finally:
-            torch.backends.mkldnn.conv.fp32_precision = old_mkldnn_conv_p  # type: ignore[attr-defined]
-            torch.backends.mkldnn.rnn.fp32_precision = old_mkldnn_rnn_p  # type: ignore[attr-defined]
-            torch.backends.mkldnn.matmul.fp32_precision = old_mkldnn_matmul_p  # type: ignore[attr-defined]
-            torch.backends.cudnn.conv.fp32_precision = old_cudnn_conv_p  # type: ignore[attr-defined]
-            torch.backends.cudnn.rnn.fp32_precision = old_cudnn_rnn_p  # type: ignore[attr-defined]
-            torch.backends.cuda.matmul.fp32_precision = old_cuda_matmul_p
-
-    return recover()(fn)

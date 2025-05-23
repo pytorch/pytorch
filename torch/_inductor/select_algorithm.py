@@ -1500,7 +1500,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None
-        return self.bmreq.benchmark(*args, output_tensor=out)
+        return self.bmreq.benchmark(*args, out=out)
 
     def precompile(self):
         assert self.bmreq is not None
@@ -2137,8 +2137,8 @@ class AlgorithmSelectorCache(PersistentCache):
                     counters["inductor"]["select_algorithm_num_precompiles"] += 1
                     log.info(
                         "Precompiling benchmark choice %s took %.02fs",
-                        futures[future],
-                        elapsed_times[future],
+                        futures.get(future),
+                        elapsed_times.get(future),
                     )
 
             executor.shutdown(wait=True)

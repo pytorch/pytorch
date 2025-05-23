@@ -1154,7 +1154,7 @@ def tuned_scaled_mm(
                 )
 
         for config in scaled_mm_configs(m, n, k):
-            if k == 16 and config.kwargs["BLOCK_M"] >= 64:
+            if k <= 16:
                 continue  # Triton crashes in this case
 
             # On NVIDIA B200 GPUs, K dim must be >= 32 for tcgen05.mma.kind::f8f6f4.* PTX instruction to be valid

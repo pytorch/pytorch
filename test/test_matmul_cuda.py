@@ -42,7 +42,6 @@ from torch.testing._internal.common_device_type import (
 )
 
 from torch.testing._internal.common_utils import (
-    IS_ARM64,
     IS_JETSON,
     IS_WINDOWS,
     parametrize,
@@ -63,7 +62,6 @@ if TEST_CUDA:
 assert torch.get_default_dtype() is torch.float32
 
 
-@unittest.skipIf(IS_ARM64, "Issue with numpy version on arm")
 class TestMatmulCuda(TestCase):
     def setUp(self):
         super().setUp()

@@ -212,15 +212,6 @@ docs/source/scripts/lr_scheduler_images/
 # Compiled MATLAB
 *.mex*
 
-# IPython notebook checkpoints
-.ipynb_checkpoints
-
-# Editor temporaries
-*.swn
-*.swo
-*.swp
-*~
-
 # NFS handle files
 **/.nfs*
 

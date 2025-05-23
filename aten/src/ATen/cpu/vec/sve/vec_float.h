@@ -25,6 +25,9 @@ inline namespace CPU_CAPABILITY {
 #if defined(CPU_CAPABILITY_SVE)
 
 template <>
+struct is_vec_specialized_for<float> : std::bool_constant<true> {};
+
+template <>
 class Vectorized<float> {
  private:
   vls_float32_t values;

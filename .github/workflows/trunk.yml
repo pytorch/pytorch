@@ -138,6 +138,7 @@ jobs:
       build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
       test-matrix: ${{ needs.win-vs2022-cpu-py3-build.outputs.test-matrix }}
+      disable-monitor: false
     secrets: inherit
 
   win-vs2022-cuda12_6-py3-build:
