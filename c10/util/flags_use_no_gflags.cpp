@@ -10,9 +10,7 @@
 
 namespace c10 {
 
-using std::string;
-
-C10_DEFINE_REGISTRY(C10FlagsRegistry, C10FlagParser, const string&)
+C10_DEFINE_REGISTRY(C10FlagsRegistry, C10FlagParser, const std::string&)
 
 namespace {
 static bool gCommandLineFlagsParsed = false;
@@ -26,8 +24,8 @@ std::stringstream& GlobalInitStream() {
 static const char* gUsageMessage = "(Usage message not set.)";
 } // namespace
 
-C10_EXPORT void SetUsageMessage(const string& str) {
-  static string usage_message_safe_copy = str;
+C10_EXPORT void SetUsageMessage(const std::string& str) {
+  static std::string usage_message_safe_copy = str;
   gUsageMessage = usage_message_safe_copy.c_str();
 }
 
@@ -44,9 +42,9 @@ C10_EXPORT bool ParseCommandLineFlags(int* pargc, char*** pargv) {
   // write_head is the location we write the unused arguments to.
   int write_head = 1;
   for (int i = 1; i < *pargc; ++i) {
-    string arg(argv[i]);
+    std::string arg(argv[i]);
 
-    if (arg.find("--help") != string::npos) {
+    if (arg.find("--help") != std::string::npos) {
       // Print the help message, and quit.
       std::cout << UsageMessage() << '\n';
       std::cout << "Arguments: " << '\n';
@@ -66,10 +64,10 @@ C10_EXPORT bool ParseCommandLineFlags(int* pargc, char*** pargv) {
       continue;
     }
 
-    string key;
-    string value;
+    std::string key;
+    std::string value;
     size_t prefix_idx = arg.find('=');
-    if (prefix_idx == string::npos) {
+    if (prefix_idx == std::string::npos) {
       // If there is no equality char in the arg, it means that the
       // arg is specified in the next argument.
       key = arg.substr(2, arg.size() - 2);
@@ -82,12 +80,12 @@ C10_EXPORT bool ParseCommandLineFlags(int* pargc, char*** pargv) {
         success = false;
         break;
       }
-      value = string(argv[i]);
+      value = std::string(argv[i]);
     } else {
       // If there is an equality character, we will basically use the value
       // after the "=".
       key = arg.substr(2, prefix_idx - 2);
-      value = arg.substr(prefix_idx + 1, string::npos);
+      value = arg.substr(prefix_idx + 1, std::string::npos);
     }
     // If the flag is not registered, we will ignore it.
     if (!C10FlagsRegistry()->Has(key)) {
@@ -124,15 +122,15 @@ C10_EXPORT bool CommandLineFlagsHasBeenParsed() {
 }
 
 template <>
-C10_EXPORT bool C10FlagParser::Parse<string>(
-    const string& content,
-    string* value) {
+C10_EXPORT bool C10FlagParser::Parse<std::string>(
+    const std::string& content,
+    std::string* value) {
   *value = content;
   return true;
 }
 
 template <>
-C10_EXPORT bool C10FlagParser::Parse<int>(const string& content, int* value) {
+C10_EXPORT bool C10FlagParser::Parse<int>(const std::string& content, int* value) {
   try {
     *value = std::atoi(content.c_str());
     return true;
@@ -145,7 +143,7 @@ C10_EXPORT bool C10FlagParser::Parse<int>(const string& content, int* value) {
 
 template <>
 C10_EXPORT bool C10FlagParser::Parse<int64_t>(
-    const string& content,
+    const std::string& content,
     int64_t* value) {
   try {
     static_assert(sizeof(long long) == sizeof(int64_t));
@@ -165,7 +163,7 @@ C10_EXPORT bool C10FlagParser::Parse<int64_t>(
 
 template <>
 C10_EXPORT bool C10FlagParser::Parse<double>(
-    const string& content,
+    const std::string& content,
     double* value) {
   try {
     *value = std::atof(content.c_str());
@@ -178,7 +176,7 @@ C10_EXPORT bool C10FlagParser::Parse<double>(
 }
 
 template <>
-C10_EXPORT bool C10FlagParser::Parse<bool>(const string& content, bool* value) {
+C10_EXPORT bool C10FlagParser::Parse<bool>(const std::string& content, bool* value) {
   if (content == "false" || content == "False" || content == "FALSE" ||
       content == "0") {
     *value = false;
