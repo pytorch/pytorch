@@ -8,6 +8,7 @@
 # But it is NOT ok to remove an existing fallback op from the list, since that will break
 # some existing AOTInductor-compiled models.
 inductor_fallback_ops = {
+    "aten.permute.default",
     "aten._adaptive_avg_pool2d_backward.default",
     "aten._adaptive_avg_pool2d.default",
     "aten._adaptive_avg_pool3d_backward.default",

@@ -3625,6 +3625,38 @@ class AOTInductorTestsTemplate:
         m = M()
         self.check_model(m, example_args, dynamic_shapes=dynamic_shapes)
 
+    def test_proxy_executor_permute(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.permute.default(x, [0, 2, 1])
+        print("running")
+        ep = torch.export.export(M(), (torch.randn((1, 3001, 201), dtype=torch.complex64),))
+        torch._inductor.aoti_compile_and_package(ep)
+
+    def test_proxy_executor_abs(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.abs.default(x)
+
+        ep = torch.export.export(M(), (torch.randn((201, 3001), dtype=torch.complex64),))
+        torch._inductor.aoti_compile_and_package(ep)
+
+    def test_proxy_executor_squeeze(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.squeeze.dim(x, 0)
+
+        ep = torch.export.export(M(), (torch.randn((1, 201, 3001), dtype=torch.complex64),))
+        torch._inductor.aoti_compile_and_package(ep)
+
+    def test_proxy_executor_hann(self):
+        class M(torch.nn.Module):
+            def forward(self):
+                return torch.ops.aten.hann_window.default(400)
+
+        ep = torch.export.export(M(), ())
+        torch._inductor.aoti_compile_and_package(ep)
+
     def test_fqn(self):
         class NestedChild(torch.nn.Module):
             def __init__(self) -> None:
