@@ -5,20 +5,24 @@
 
 namespace at::native::xpu {
 
-std::tuple<std::vector<int64_t>, std::vector<int64_t>, std::vector<int64_t>> collapse_in_out_dim(at::Tensor input, int64_t dim, at::Tensor weight){
-  
+std::tuple<std::vector<int64_t>, std::vector<int64_t>, std::vector<int64_t>>
+collapse_in_out_dim(at::Tensor input, int64_t dim, at::Tensor weight) {
   // dim collapse, e.g. [B, M, K] -> [BM, K]
-  std::vector<int64_t> input_reshaped_size = (dim == 2) ? std::vector<int64_t>(input.size(0), input.size(1)) : std::vector<int64_t>{input.numel()/(input.size(input.dim()-1)), input.size(input.dim() -1)};
-  // [B, M, K] -> [B, M] 
-  std::vector<int64_t> output_size(input.sizes().begin(), input.sizes().end() -1);
+  std::vector<int64_t> input_reshaped_size = (dim == 2)
+      ? std::vector<int64_t>(input.size(0), input.size(1))
+      : std::vector<int64_t>{
+            input.numel() / (input.size(input.dim() - 1)),
+            input.size(input.dim() - 1)};
+  // [B, M, K] -> [B, M]
+  std::vector<int64_t> output_size(
+      input.sizes().begin(), input.sizes().end() - 1);
   // [B, M, N]
   output_size.push_back(weight.size(0));
 
   // [BM, N]
-  std::vector<int64_t> output_reshaped_size{input_reshaped_size[0], weight.size(0)};
+  std::vector<int64_t> output_reshaped_size{
+      input_reshaped_size[0], weight.size(0)};
   return {input_reshaped_size, output_size, output_reshaped_size};
-  
-  
 }
 
 Tensor linear_pointwise(
@@ -35,10 +39,11 @@ Tensor linear_pointwise(
 
   const int64_t dim = input.dim();
 
-  auto [input_reshaped_size, output_size, output_reshaped_size] = collapse_in_out_dim(input, dim, weight_t);
+  auto [input_reshaped_size, output_size, output_reshaped_size] =
+      collapse_in_out_dim(input, dim, weight_t);
   Tensor output = at::empty(output_size, input.options());
   Tensor input_reshaped = input;
-  if(dim!= 2){
+  if (dim != 2) {
     output = output.reshape(output_reshaped_size);
     input_reshaped = input_reshaped.reshape(input_reshaped_size);
   }
@@ -68,7 +73,8 @@ Tensor linear_pointwise_binary(
   const int64_t dim = input.dim();
 
   // dim collapse
-  auto [input_reshaped_size, output_size, output_reshaped_size] = collapse_in_out_dim(input, dim, weight_t);
+  auto [input_reshaped_size, output_size, output_reshaped_size] =
+      collapse_in_out_dim(input, dim, weight_t);
   Tensor output = at::empty(output_size, input.options());
   Tensor input_reshaped = input;
 

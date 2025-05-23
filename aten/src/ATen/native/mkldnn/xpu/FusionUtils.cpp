@@ -8,8 +8,7 @@ onednn::Attr& unary_attr_with_arg(
     onednn::Attr& attr,
     std::string_view unary,
     torch::List<std::optional<at::Scalar>> scalars,
-    std::optional<std::string_view> algorithm
-    ) {
+    std::optional<std::string_view> algorithm) {
   if (unary == "hardswish") {
     return attr.append_post_eltwise(
         1.0f, 1.f / 6.f, 1.f / 2.f, attr.kind_with_hardswish);
@@ -51,9 +50,14 @@ onednn::Attr& string_to_unary_attr(onednn::Attr& attr, std::string_view unary) {
   } else if (unary == "tanh") {
     return attr.append_post_eltwise(1.0f, 0.0f, 0.0f, attr.kind_with_tanh);
   } else if (unary == "hardswish") {
-    return unary_attr_with_arg(attr, "hardswish", torch::List<std::optional<at::Scalar>>(), std::nullopt);
+    return unary_attr_with_arg(
+        attr,
+        "hardswish",
+        torch::List<std::optional<at::Scalar>>(),
+        std::nullopt);
   } else if (unary == "swish") {
-    return unary_attr_with_arg(attr, "silu", torch::List<std::optional<at::Scalar>>(), std::nullopt);
+    return unary_attr_with_arg(
+        attr, "silu", torch::List<std::optional<at::Scalar>>(), std::nullopt);
   }
   return attr;
 }
@@ -62,8 +66,7 @@ onednn::Attr& construct_unary_attr(
     onednn::Attr& attr,
     std::string_view unary,
     torch::List<std::optional<at::Scalar>> scalars,
-    std::optional<std::string_view> algorithm
-    ) {
+    std::optional<std::string_view> algorithm) {
   static const std::set<std::string_view> simple_unary = {
       "relu", "sigmoid", "tanh", "hardswish", "swish"};
   if (simple_unary.find(unary) != simple_unary.end()) {
