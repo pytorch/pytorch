@@ -182,7 +182,7 @@ class _FrozensetBase:
         self.assertEqual(p ^ q, self.thetype("acef"))
 
     @make_dynamo_test
-    def test_binop_less_than(self):
+    def test_cmp_less_than(self):
         p, q, r = map(self.thetype, ["abc", "bef", "ab"])
         self.assertFalse(p < p)
         self.assertFalse(p < q)
@@ -190,7 +190,7 @@ class _FrozensetBase:
         self.assertFalse(r < q)
 
     @make_dynamo_test
-    def test_binop_greater_than(self):
+    def test_cmp_greater_than(self):
         p, q, r = map(self.thetype, ["abc", "bef", "ab"])
         self.assertFalse(p > p)
         self.assertFalse(p > q)
@@ -198,7 +198,7 @@ class _FrozensetBase:
         self.assertFalse(q > r)
 
     @make_dynamo_test
-    def test_binop_less_than_or_equal(self):
+    def test_cmp_less_than_or_equal(self):
         p, q, r = map(self.thetype, ["abc", "bef", "ab"])
         self.assertTrue(p <= p)
         self.assertFalse(p <= q)
@@ -206,7 +206,7 @@ class _FrozensetBase:
         self.assertFalse(r <= q)
 
     @make_dynamo_test
-    def test_binop_greater_than_or_equal(self):
+    def test_cmp_greater_than_or_equal(self):
         p, q, r = map(self.thetype, ["abc", "bef", "ab"])
         self.assertTrue(p >= p)
         self.assertFalse(p >= q)
@@ -417,20 +417,20 @@ class UserDefinedSetTests(_SetBase, _BaseSetTests):
     thetype = CustomSet
 
     @unittest.expectedFailure
-    def test_binop_greater_than(self):
-        super().test_binop_greater_than()
+    def test_cmp_greater_than(self):
+        super().test_cmp_greater_than()
 
     @unittest.expectedFailure
-    def test_binop_greater_than_or_equal(self):
-        super().test_binop_greater_than_or_equal()
+    def test_cmp_greater_than_or_equal(self):
+        super().test_cmp_greater_than_or_equal()
 
     @unittest.expectedFailure
-    def test_binop_less_than(self):
-        super().test_binop_less_than()
+    def test_cmp_less_than(self):
+        super().test_cmp_less_than()
 
     @unittest.expectedFailure
-    def test_binop_less_than_or_equal(self):
-        super().test_binop_less_than_or_equal()
+    def test_cmp_less_than_or_equal(self):
+        super().test_cmp_less_than_or_equal()
 
     @unittest.expectedFailure
     def test_binop_sub(self):
