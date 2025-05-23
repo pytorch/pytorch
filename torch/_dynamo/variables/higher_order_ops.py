@@ -566,7 +566,10 @@ def _merge_graph_inputs(
     def fixup_branch_inps(graph, lifted_freevars, shared, unique_l, unique_r):
         def _insert_or_replace_phs(new_args, name_suffix):
             for arg in new_args:
+                import copy
+
                 new_ph = graph.placeholder(arg.node.name + name_suffix)
+                new_ph.meta = copy.copy(arg.node.meta)
                 # Override with new_ph if there exists a old placeholder.
                 if arg in lifted_freevars:
                     old_ph = lifted_freevars[arg].node
