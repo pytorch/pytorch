@@ -3237,8 +3237,8 @@ class GraphModule(torch.nn.Module):
             )
 
         opt_fn = torch.compile(fn, fullgraph=True, dynamic=True)
-        values = torch.randn(10, 5, device="cuda")
-        offsets = torch.tensor([0, 2, 4, 7, 10], device="cuda")
+        values = torch.randn(10, 5)
+        offsets = torch.tensor([0, 2, 4, 7, 10])
         max_seqlen = 5
 
         ref = fn(values, offsets, max_seqlen)
