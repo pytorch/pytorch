@@ -313,7 +313,6 @@ jobs:
       build-environment: linux-focal-cuda12.6-py3.10-gcc11
       docker-image: ${{ needs.linux-focal-cuda12_6-py3_10-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_6-py3_10-gcc11-build.outputs.test-matrix }}
-      allow-reuse-old-whl: true
     secrets: inherit
 
   linux-jammy-py3-clang12-mobile-build:
