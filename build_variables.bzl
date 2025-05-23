@@ -101,6 +101,7 @@ libtorch_profiler_sources = [
     "torch/csrc/profiler/collection.cpp",
     "torch/csrc/profiler/data_flow.cpp",
     "torch/csrc/profiler/kineto_shim.cpp",
+    "torch/csrc/mtia/profiler/MTIAMemoryProfiler.cpp",
     "torch/csrc/profiler/kineto_client_interface.cpp",
     "torch/csrc/profiler/orchestration/observer.cpp",
     "torch/csrc/profiler/orchestration/python_tracer.cpp",
@@ -587,6 +588,14 @@ jit_sources_full = [
 
 libtorch_core_jit_sources = sorted(jit_sources_full)
 
+
+libtorch_nativert_sources = [
+    "torch/nativert/graph/GraphSignature.cpp",
+    "torch/nativert/graph/TensorMeta.cpp",
+    "torch/nativert/executor/Placement.cpp",
+    "torch/nativert/executor/PlacementUtils.cpp",
+]
+
 torch_mobile_tracer_sources = [
     "torch/csrc/jit/mobile/model_tracer/tracer.cpp",
     "torch/csrc/jit/mobile/model_tracer/TensorUtils.cpp",
@@ -619,7 +628,7 @@ libtorch_lite_cmake_sources = sorted(
     torch_mobile_core,
 )
 
-libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
+libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources + libtorch_nativert_sources
 
 libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/autograd/TraceTypeManual.cpp",
@@ -659,7 +668,7 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
 
 def libtorch_sources(gencode_pattern = ":generate-code[{}]"):
     return (
-        libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources
+        libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources + libtorch_nativert_sources
     )
 
 libtorch_cuda_core_sources = [
@@ -688,6 +697,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/NCCLUtils.cpp",
     "torch/csrc/distributed/c10d/FlightRecorder.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp",
+    "torch/csrc/distributed/c10d/ProcessGroupGlooCuda.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupUCC.cpp",
     "torch/csrc/distributed/c10d/UCCTracing.cpp",
     "torch/csrc/distributed/c10d/UCCUtils.cpp",

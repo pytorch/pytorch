@@ -420,6 +420,9 @@ def flex_attention_functionalize(
         functional_score_mod = ctx.functionalize(score_mod)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         with TransformGetItemToIndex():
+            # TODO: So far only the input mutations are checked
+            # In the other HOPs, also aliases are checked which is
+            # omitted here
             mutates = _has_potential_branch_input_mutation(
                 score_mod, example_vals, pre_dispatch
             )
