@@ -1,7 +1,7 @@
 import json
 import logging
-import sys
 import subprocess
+import sys
 import time
 import traceback
 from argparse import ArgumentParser, Namespace
@@ -72,21 +72,21 @@ class LintMessage:
         # e.g. tools/linter.py:15:9-20: error: Incompatibl...int")  [assignment]
         path = ""
         try:
-            path, line, columns, rest = source_line.split(":", maxsplit=3)
+            path, _line, columns, rest = source_line.split(":", maxsplit=3)
         except Exception:
             pass
 
-        if not ((path.endswith(".py") or path.endswith(".pyi")) and "/" in path):
+        if not (path.endswith((".py", ".pyi")) and "/" in path):
             if REPORT_ERRORS:
                 return LintMessage(name="bad-error-line", description=source_line)
             return None
 
         try:
-            line = int(line)
+            line: Optional[int] = int(_line)
         except Exception:
             line = None
         try:
-            char = int(columns.partition("-")[0])
+            char: Optional[int] = int(columns.partition("-")[0])
         except Exception:
             char = None
 
