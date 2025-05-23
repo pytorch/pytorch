@@ -16,7 +16,6 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cpu/Loops.h>
-#include <ATen/native/quantized/AffineQuantizer.h>
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <ATen/ops/view.h>
@@ -30,23 +29,6 @@ static c10::DeviceIndex custom_device_index = 0;
 static uint64_t storageImpl_counter = 0;
 static uint64_t last_storageImpl_saved_value = 0;
 
-namespace {
-
-void quantize_tensor_per_tensor_affine_privateuse1(
-    const at::Tensor& rtensor,
-    at::Tensor& qtensor,
-    double scale,
-    int64_t zero_point) {
-    // do nothing
-}
-
-} // namespace
-
-namespace at::native {
-
-REGISTER_PRIVATEUSE1_DISPATCH(quantize_tensor_per_tensor_affine_stub, &quantize_tensor_per_tensor_affine_privateuse1);
-
-} // namespace at::native
 struct CustomBackendMetadata : public c10::BackendMeta {
   // for testing this field will mutate when clone() is called by shallow_copy_from.
   int backend_version_format_{-1};
@@ -184,7 +166,6 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("add.Tensor", &custom_add_Tensor);
   m.impl("_copy_from_and_resize", &custom__copy_from_and_resize);
   m.impl("set_.source_Storage", &custom_set_source_Storage);
-  m.impl("quantize_per_tensor", at::native::quantize_per_tensor);
 }
 
 void custom_cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
