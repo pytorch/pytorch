@@ -402,7 +402,7 @@ Tensor _convolution_out(
           params.output_padding,
           params.groups);
       output = at::empty(dst_tz, input.options(), mfmt);
-    }else{
+    } else {
       output = output_r;
     }
 
@@ -446,7 +446,7 @@ Tensor _convolution_out(
           params.stride,
           params.dilation);
       output = at::empty(dst_tz, input.options(), mfmt);
-    }else{
+    } else {
       output = output_r;
     }
     onednn::convolution(
@@ -751,7 +751,6 @@ Tensor convolution_pointwise_binary(
   return res;
 }
 
-
 Tensor& convolution_pointwise_binary_(
     Tensor& other_t,
     const Tensor& input_t,
@@ -770,12 +769,12 @@ Tensor& convolution_pointwise_binary_(
   // Step1: Construct binary attr
   Attr attr;
   attr = construct_binary_attr(attr, binary_attr, other_t);
-  
+
   // Step2: Append unary attr
   if (unary_attr.has_value())
     attr = construct_unary_attr(
-      attr, unary_attr.value(), unary_scalars, unary_algorithm);
-  
+        attr, unary_attr.value(), unary_scalars, unary_algorithm);
+
   _convolution_out(
       other_t,
       input_t,

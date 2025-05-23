@@ -121,7 +121,7 @@ class TestoneDNNFusion(TestCase):
                     attr,
                 )
                 self.assertEqual(ref, fused)
-    
+
     def test_conv_unary_fusion_ops(self):
         class M(nn.Module):
             def __init__(
