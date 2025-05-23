@@ -701,6 +701,35 @@ graph():
     return (add,)""",
         )
 
+    def test_int_shape_specialization(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                ori_size = (
+                    int(x.shape[-2] / 1),
+                    int(x.shape[-1] / 1),
+                )
+                x = F.interpolate(x, size=ori_size, mode="bilinear")
+                return x
+
+        input1 = (torch.rand(1, 3, 28, 28),)
+        input2 = (torch.rand(1, 3, 56, 56),)
+        inputs = [input1, input2]
+        model = M()
+        dynamic_shapes = {
+            "x": {2: torch.export.Dim.DYNAMIC, 3: torch.export.Dim.DYNAMIC},
+        }
+        with self.assertRaisesRegex(
+            (
+                torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
+                torch._dynamo.exc.UserError,
+            ),
+            (
+                r"your code specialized it to be a constant \(28\)(.*\n)*.*"
+                r"your code specialized it to be a constant \(28\)(.*\n)*.*"
+            ),
+        ):
+            export(model, input1, dynamic_shapes=dynamic_shapes, strict=False)
+
     def test_external_call_non_strict_real_tensor(self):
         class ExternalMethod:
             def add(self, x):
@@ -792,6 +821,15 @@ graph():
         self.assertEqual(gm(*args), m(*args))
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
+
+    def test_unused_constant(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = torch.tensor(3)
+                return x * x
+
+        ep = export(M(), (torch.ones(3),))
+        self.assertEqual(len(ep.constants), 0)
 
     def test_unbacked_bincount(self):
         class Foo(torch.nn.Module):
@@ -1316,6 +1354,98 @@ graph():
 
         M()(torch.randn(7))
         torch.export.export(M(), (torch.randn(7),), strict=strict)
+
+    def test_cond_branches_return_constant_int(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                idx = torch.cond(x.sum() > 3, lambda: 0, lambda: 1, tuple())
+                return x[idx]
+
+        args = (torch.randn(3, 3),)
+        m = M()
+        ep = export(M(), args)
+        if self._testMethodName == "test_cond_branches_return_constant_int":
+            self.assertExpectedInline(
+                normalize_gm(ep.module().print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, x):
+        x: "f32[3, 3]";
+
+        x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+        sum_1: "f32[]" = torch.ops.aten.sum.default(x)
+        gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 3);  sum_1 = None
+
+        true_graph_0 = self.true_graph_0
+        false_graph_0 = self.false_graph_0
+        cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, ());  gt = true_graph_0 = false_graph_0 = None
+
+        getitem_1: "Sym(u0)" = cond[0];  cond = None
+
+        ge_1: "Sym(u0 >= 0)" = getitem_1 >= 0
+        _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
+        le_1: "Sym(u0 <= 1)" = getitem_1 <= 1
+        _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le_1, "Runtime assertion failed for expression u0 <= 1 on node 'le_1'");  le_1 = _assert_scalar_default_1 = None
+
+        select: "f32[3]" = torch.ops.aten.select.int(x, 0, getitem_1);  x = getitem_1 = None
+        return pytree.tree_unflatten((select,), self._out_spec)
+
+    class true_graph_0(torch.nn.Module):
+        def forward(self):
+            return (0,)
+
+    class false_graph_0(torch.nn.Module):
+        def forward(self):
+            return (1,)
+""",  # noqa: B950
+            )
+        self.assertEqual(m(*args), ep.module()(*args))
+
+    def test_cond_branches_return_same_int(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                idx = torch.cond(x.sum() > 3, lambda: 0, lambda: 0, tuple())
+                return x[idx]
+
+        args = (torch.randn(3, 3),)
+        m = M()
+        ep = export(M(), args)
+        # Ideally, we could remove the cond at the front end directly
+        # since it's not used anyway. But we can only do this early
+        # optimization if all the outputs are the same constants, which
+        # will complicates the output check so just keep it in the graph.
+        # let downstream to dce it.
+        if self._testMethodName == "test_cond_branches_return_same_int":
+            self.assertExpectedInline(
+                normalize_gm(ep.module().print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, x):
+        x: "f32[3, 3]";
+
+        x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+        sum_1: "f32[]" = torch.ops.aten.sum.default(x)
+        gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 3);  sum_1 = None
+
+        true_graph_0 = self.true_graph_0
+        false_graph_0 = self.false_graph_0
+        cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, ());  gt = true_graph_0 = false_graph_0 = None
+        getitem = cond[0];  cond = getitem = None
+
+        select: "f32[3]" = torch.ops.aten.select.int(x, 0, 0);  x = None
+        return pytree.tree_unflatten((select,), self._out_spec)
+
+    class true_graph_0(torch.nn.Module):
+        def forward(self):
+            return (0,)
+
+    class false_graph_0(torch.nn.Module):
+        def forward(self):
+            return (0,)
+""",  # noqa: B950
+            )
+
+        self.assertEqual(m(*args), ep.module()(*args))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_cond_contains_unbacked_no_escape(self):
@@ -7575,20 +7705,25 @@ def forward(self, b_a_buffer, x):
         self.assertTrue(torch.allclose(ep.module()(xs), module_out))
 
     @requires_cuda
-    @testing.expectedFailureCppRuntime
     def test_export_associative_scan_lifted_buffers(self):
         device = torch.device("cuda")
         combine_mode = "pointwise"
 
+        class A(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.buffer = torch.nn.Buffer(torch.ones(3, 2, device=device))
+
+            def forward(self):
+                return self.buffer.cos()
+
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer(
-                    "buf", torch.ones(3, 2, device=device), persistent=False
-                )
+                self.a = A()
 
             def combine_fn(self, x, y):
-                return x + y * self.buf
+                return (x + y) * self.a()
 
             def forward(self, x):
                 return associative_scan(
