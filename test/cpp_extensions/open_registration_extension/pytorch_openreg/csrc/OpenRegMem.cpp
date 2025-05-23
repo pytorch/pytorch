@@ -4,10 +4,12 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/ops/as_strided_cpu_dispatch.h>
+#include <ATen/ops/quantize_per_tensor_native.h>
 #include <ATen/ops/set_cpu_dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <ATen/native/quantized/AffineQuantizer.h>
 
 #include <c10/core/Allocator.h>
 
@@ -254,11 +256,20 @@ int64_t _fused_sdp_choice_privateuse1(
   return static_cast<int64_t>(backend);
 }
 
+void quantize_tensor_per_tensor_affine_privateuse1(
+    const at::Tensor& rtensor,
+    at::Tensor& qtensor,
+    double scale,
+    int64_t zero_point) {
+    // Just test the process, so do nothing
+}
+
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("empty.memory_format", empty_openreg);
   m.impl("empty_strided", empty_strided_openreg);
   m.impl("as_strided", as_strided_openreg);
   m.impl("set_.source_Storage_storage_offset", set_openreg);
+  m.impl("quantize_per_tensor", at::native::quantize_per_tensor);
   m.impl("_fused_sdp_choice", &_fused_sdp_choice_privateuse1);
   m.impl("_scaled_dot_product_fused_attention_overrideable", &custom_scaled_dot_product_fused_attention_overrideable);
   m.impl("_scaled_dot_product_fused_attention_overrideable_backward", &custom_scaled_dot_product_fused_attention_overrideable_backward);
@@ -267,6 +278,9 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
 
 namespace at::native {
 REGISTER_PRIVATEUSE1_DISPATCH(abs_stub, &openreg::abs_kernel);
+REGISTER_PRIVATEUSE1_DISPATCH(
+    quantize_tensor_per_tensor_affine_stub,
+    &openreg::quantize_tensor_per_tensor_affine_privateuse1);
 REGISTER_PRIVATEUSE1_DISPATCH(
     _fused_sdp_choice_stub,
     &openreg::_fused_sdp_choice_privateuse1);
