@@ -174,6 +174,8 @@ if HAS_GPU:
             "cpu",
         )
     elif TEST_ON_XPU:
+        # TODO: Pending on oneDNN's tf32 support.
+        torch.backends.cuda.matmul.allow_tf32 = False
         test_device = ("xpu",)
 else:
     test_device = ("cpu",)
@@ -3972,12 +3974,13 @@ class GraphModule(torch.nn.Module):
 
     @supported_platform
     @skip_on_cpu
+    @skip_on_xpu
     @skipCUDAIf(not has_triton_tma_device(), "Requires TMA enabled CUDA device")
-    def test_tma_with_customer_kernel_options(self):
+    def test_tma_with_customer_kernel_options(self, device):
         make_tensor = functools.partial(
             torch.ones,
             (1, 1, 256, 128),
-            device="cuda",
+            device=device,
             dtype=torch.bfloat16,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
