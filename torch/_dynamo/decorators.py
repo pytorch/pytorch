@@ -777,6 +777,7 @@ _allowed_config_patches = (
     "allow_unspec_int_on_nn_module",
     "skip_torchrec",
     "dont_skip_tracing",
+    "error_on_graph_break",
 )
 
 from . import config
@@ -839,6 +840,16 @@ def dont_skip_tracing(fn=None):
     This decorator will also apply to recursively invoked functions.
     """
     ctx = patch_dynamo_config(dont_skip_tracing=True)
+    if fn:
+        return ctx(fn)
+    return ctx
+
+
+def set_fullgraph(fn=None, fullgraph=True):
+    """
+    Context manager/decorator to toggle fullgraph setting.
+    """
+    ctx = patch_dynamo_config(error_on_graph_break=fullgraph)
     if fn:
         return ctx(fn)
     return ctx
