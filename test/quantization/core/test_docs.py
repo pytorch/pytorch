@@ -1,18 +1,17 @@
 # Owner(s): ["oncall: quantization"]
 
-import re
 import contextlib
+import re
+import unittest
 from pathlib import Path
 
 import torch
-
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     SingleLayerLinearModel,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import IS_ARM64, IS_FBCODE
-import unittest
 
 
 @unittest.skipIf(IS_FBCODE, "some path issues in fbcode")
@@ -25,7 +24,9 @@ class TestQuantizationDocs(QuantizationTestCase):
     """
 
     def run(self, result=None):
-        with override_quantized_engine("qnnpack") if IS_ARM64 else contextlib.nullcontext():
+        with override_quantized_engine(
+            "qnnpack"
+        ) if IS_ARM64 else contextlib.nullcontext():
             super().run(result)
 
     def _get_code(
@@ -63,7 +64,9 @@ class TestQuantizationDocs(QuantizationTestCase):
             if "\n" not in unique_identifier:
                 unique_identifier += "\n"
 
-            assert unique_identifier in content, f"could not find {unique_identifier} in {path_to_file}"
+            assert (
+                unique_identifier in content
+            ), f"could not find {unique_identifier} in {path_to_file}"
 
             # get index of first line of code
             line_num_start = content.index(unique_identifier) + 1

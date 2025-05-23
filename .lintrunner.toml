@@ -1160,14 +1160,6 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
-    'test/quantization/core/experimental/test_nonuniform_observer.py',
-    'test/quantization/core/experimental/test_quantized_tensor.py',
-    'test/quantization/core/experimental/test_quantizer.py',
-    'test/quantization/core/test_backend_config.py',
-    'test/quantization/core/test_docs.py',
-    'test/quantization/core/test_quantized_functional.py',
-    'test/quantization/core/test_quantized_module.py',
-    'test/quantization/core/test_quantized_op.py',
     'test/quantization/core/test_quantized_tensor.py',
     'test/quantization/core/test_top_level_apis.py',
     'test/quantization/core/test_utils.py',
