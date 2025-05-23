@@ -46,6 +46,7 @@
 #include <ATen/ops/_triton_multi_head_attention_native.h>
 #include <ATen/ops/_triton_scaled_dot_attention.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_strided.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/linear.h>
 #include <ATen/ops/narrow_native.h>
@@ -1008,44 +1009,45 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
 
   // when bs is larger than allowed maximum, process in chunks
   if (batch_size > MAX_BATCH_SIZE) {
-    std::vector<Tensor> attention_chunks;
-    std::vector<Tensor> log_sumexp_chunks;
-    std::vector<Tensor> seed_chunks;
-    std::vector<Tensor> offset_chunks;
-    int expected_chunks = static_cast<int>(
-        std::ceil(static_cast<double>(batch_size) / MAX_BATCH_SIZE)
-    );
+    int64_t start = 0;
+    int64_t end = std::min(start + MAX_BATCH_SIZE, batch_size);
 
-    attention_chunks.reserve(expected_chunks);
-    log_sumexp_chunks.reserve(expected_chunks);
-    seed_chunks.reserve(expected_chunks);
-    offset_chunks.reserve(expected_chunks);
+    Tensor query_chunk = query.slice(0, start, end);
+    Tensor key_chunk = key.slice(0, start, end);
+    Tensor value_chunk = value.slice(0, start, end);
+    std::optional<Tensor> bias_chunk;
+    if (attn_bias.has_value()) {
+      bias_chunk = attn_bias.value().slice(0, start, end);
+    }
+    auto [attn, log_sumexp, seed, offset] =
+        process_chunk(query_chunk, key_chunk, value_chunk, bias_chunk);
+    int dim = attn.dim();
+    std::vector<int64_t> sizes;
+    sizes.reserve(dim);
+    sizes.push_back(batch_size);
+    for (int i = 1; i < dim; i++) {
+        sizes.push_back(attn.size(i));
+    }
+    Tensor final_attention = at::empty_strided(sizes, attn.strides(), attn.options());
+    final_attention.slice(0, start, end).copy_(attn);
 
-    for (int64_t start = 0; start < batch_size; start += MAX_BATCH_SIZE) {
-      int64_t end = std::min(start + MAX_BATCH_SIZE, batch_size);
-      Tensor query_chunk = query.slice(0, start, end);
-      Tensor key_chunk   = key.slice(0, start, end);
-      Tensor value_chunk = value.slice(0, start, end);
-
-      std::optional<Tensor> bias_chunk;
+    for (start = end; start < batch_size; start += MAX_BATCH_SIZE) {
+      end = std::min(start + MAX_BATCH_SIZE, batch_size);
+      query_chunk = query.slice(0, start, end);
+      key_chunk = key.slice(0, start, end);
+      value_chunk = value.slice(0, start, end);
       if (attn_bias.has_value()) {
         bias_chunk = attn_bias.value().slice(0, start, end);
+      } else {
+        bias_chunk.reset();
       }
 
-      auto [attn, log_sumexp, seed, offset] =
+      auto [chunk_attn, chunk_log_sumexp, chunk_seed, chunk_offset] =
           process_chunk(query_chunk, key_chunk, value_chunk, bias_chunk);
-
-      attention_chunks.push_back(std::move(attn));
-      log_sumexp_chunks.push_back(std::move(log_sumexp));
-      seed_chunks.push_back(std::move(seed));
-      offset_chunks.push_back(std::move(offset));
+      final_attention.slice(0, start, end).copy_(chunk_attn);
     }
 
-    Tensor attention = at::cat(attention_chunks, 0);
-    Tensor log_sumexp = log_sumexp_chunks[0];
-    Tensor seed = seed_chunks[0];
-    Tensor offset = offset_chunks[0];
-    return std::make_tuple(std::move(attention),
+    return std::make_tuple(std::move(final_attention),
               std::move(log_sumexp),
               std::move(seed),
               std::move(offset));
