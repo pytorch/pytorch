@@ -1,26 +1,35 @@
 # Owner(s): ["oncall: quantization"]
 
-import torch
 import unittest
-from torch.ao.quantization.experimental.observer import APoTObserver
-from torch.ao.quantization.experimental.quantizer import quantize_APoT, dequantize_APoT
+
+import torch
 from torch.ao.quantization.experimental.fake_quantize import APoTFakeQuantize
-from torch.ao.quantization.experimental.fake_quantize_function import fake_quantize_function
+from torch.ao.quantization.experimental.fake_quantize_function import (
+    fake_quantize_function,
+)
+from torch.ao.quantization.experimental.observer import APoTObserver
+from torch.ao.quantization.experimental.quantizer import dequantize_APoT, quantize_APoT
+
+
 forward_helper = fake_quantize_function.forward
 backward = fake_quantize_function.backward
 from torch.autograd import gradcheck
 
+
 class TestFakeQuantize(unittest.TestCase):
-    r""" Tests fake quantize calculate_qparams() method
-         by comparing with result from observer calculate_qparams.
-         Uses hard-coded values: alpha=1.0, b=4, k=2.
+    r"""Tests fake quantize calculate_qparams() method
+    by comparing with result from observer calculate_qparams.
+    Uses hard-coded values: alpha=1.0, b=4, k=2.
     """
+
     def test_fake_calc_qparams(self):
         apot_fake = APoTFakeQuantize(b=4, k=2)
         apot_fake.activation_post_process.min_val = torch.tensor([0.0])
         apot_fake.activation_post_process.max_val = torch.tensor([1.0])
 
-        alpha, gamma, quantization_levels, level_indices = apot_fake.calculate_qparams(signed=False)
+        alpha, gamma, quantization_levels, level_indices = apot_fake.calculate_qparams(
+            signed=False
+        )
 
         observer = APoTObserver(b=4, k=2)
         observer.min_val = torch.tensor([0.0])
@@ -39,6 +48,7 @@ class TestFakeQuantize(unittest.TestCase):
          Uses input tensor with random values from 0 -> 1000
          and APoT observer with hard-coded values b=4, k=2
     """
+
     def test_forward(self):
         # generate a tensor of size 20 with random values
         # between 0 -> 1000 to quantize -> dequantize
@@ -46,7 +56,9 @@ class TestFakeQuantize(unittest.TestCase):
 
         observer = APoTObserver(b=4, k=2)
         observer.forward(X)
-        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
+        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(
+            signed=False
+        )
 
         apot_fake = APoTFakeQuantize(b=4, k=2)
         apot_fake.enable_observer()
@@ -63,6 +75,7 @@ class TestFakeQuantize(unittest.TestCase):
     r""" Tests fake quantize forward() method
          throws error when qparams are None
     """
+
     def test_forward_exception(self):
         # generate a tensor of size 20 with random values
         # between 0 -> 1000 to quantize -> dequantize
@@ -79,14 +92,22 @@ class TestFakeQuantize(unittest.TestCase):
     r""" Tests fake quantize helper backward() method
          using torch.autograd.gradcheck function.
     """
+
     def test_backward(self):
         input = torch.randn(20, dtype=torch.double, requires_grad=True)
 
         observer = APoTObserver(b=4, k=2)
         observer(input)
-        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
+        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(
+            signed=False
+        )
 
-        gradcheck(fake_quantize_function.apply, (input, alpha, gamma, quantization_levels, level_indices), atol=1e-4)
+        gradcheck(
+            fake_quantize_function.apply,
+            (input, alpha, gamma, quantization_levels, level_indices),
+            atol=1e-4,
+        )
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()
