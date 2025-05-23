@@ -742,7 +742,7 @@ Tensor convolution_pointwise_binary(
       stride,
       padding,
       dilation,
-      /*transpoced*/ false,
+      /*transposed*/ false,
       {{0, 0}},
       groups,
       attr);
@@ -771,7 +771,6 @@ Tensor& convolution_pointwise_binary_(
   Attr attr;
   attr = construct_binary_attr(attr, binary_attr, other_t);
   
-  std::cout<<"binary_attr"<<binary_attr<<std::endl;
   // Step2: Append unary attr
   if (unary_attr.has_value())
     attr = construct_unary_attr(
@@ -785,7 +784,7 @@ Tensor& convolution_pointwise_binary_(
       stride,
       padding,
       dilation,
-      /*transpoced*/ false,
+      /*transposed*/ false,
       {{0, 0}},
       groups,
       attr);
