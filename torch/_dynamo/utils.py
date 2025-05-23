@@ -2148,7 +2148,7 @@ def torchscript(model, example_inputs, verbose=False):
             if verbose:
                 log.exception("jit error")
             else:
-                log.error("Both torch.jit.trace and torch.jit.script failed")  # noqa: TRY400
+                log.error("Both torch.jit.trace and torch.jit.script failed")
     return None
 
 

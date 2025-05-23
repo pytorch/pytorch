@@ -343,7 +343,7 @@ def load_model_from_path(path_and_class_str):
     return model, inputs
 
 
-def write_outputs(filename, headers, row):
+def write_outputs(filename, headers, row, upload_to_benchmark_db: bool = True):
     """
     Write both CSV and JSON outputs using the original CSV output interface
     """
@@ -352,7 +352,8 @@ def write_outputs(filename, headers, row):
         return
 
     output_csv(filename, headers, row)
-    output_json(filename, headers, row)
+    if upload_to_benchmark_db:
+        output_json(filename, headers, row)
 
 
 def output_csv(filename, headers, row):
@@ -1700,8 +1701,8 @@ def maybe_snapshot_memory(should_snapshot_memory, suffix):
                         f"{output_filename.rstrip('.csv')}_{suffix}.pickle",
                     )
                 )
-            except Exception:
-                log.exception("Failed to save memory snapshot")
+            except Exception as e:
+                log.error("Failed to save memory snapshot, %s", e)
 
             torch.cuda.memory._record_memory_history(enabled=None)
 
@@ -2742,7 +2743,7 @@ class BenchmarkRunner:
         try:
             shutil.move("repro.py", f"{repro_dir}/{name}_repro.py")
         except OSError:
-            log.exception("Could not find repro script for model %s", name)
+            log.error("Could not find repro script for model %s", name)
         else:
             log.info(
                 "Repro script for model %s with minified graph saved to %s",
@@ -2847,10 +2848,15 @@ class BenchmarkRunner:
                 user_stack = add_double_quotes(
                     ", ".join([str(x) for x in graph_break.user_stack])
                 )
+
+                # NB: Don't upload them to the benchmark database as they are debugging
+                # infomation. There are also around a million records a day which is
+                # wasteful to store
                 write_outputs(
                     filename,
                     ["model", "reason", "user_stack"],
                     [current_name, reason, user_stack],
+                    False,
                 )
 
         if self.args.stats:

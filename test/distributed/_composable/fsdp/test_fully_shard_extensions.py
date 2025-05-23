@@ -5,7 +5,6 @@ import copy
 import functools
 import math
 import threading
-import unittest
 from typing import Any, Optional, Union
 
 import torch
@@ -15,18 +14,21 @@ import torch.utils._pytree as pytree
 from torch.autograd.grad_mode import _unsafe_preserve_version_counter
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     FSDPTest,
     FSDPTestMultiThread,
+    get_devtype,
     MLP,
 )
 from torch.testing._internal.common_utils import run_tests, TEST_XPU
 from torch.testing._internal.two_tensor import TwoTensor
 
 device_type = torch.accelerator.current_accelerator().type
+
+device_type = torch.device(get_devtype())
+
 
 def two_tensor_fsdp_pre_all_gather_v1(
     self, mesh: DeviceMesh
@@ -223,7 +225,7 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
     def _test_all_gather_extensions_train_parity(self, reshard_after_forward: bool):
         torch.manual_seed(42)
         model = self._init_two_tensor_mlp()
-        ref_model = copy.deepcopy(model).to(device=device_type)
+        ref_model = copy.deepcopy(model).to(device_type)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=True)
         fully_shard_fn = functools.partial(
             fully_shard, reshard_after_forward=reshard_after_forward
@@ -262,9 +264,9 @@ class TestFullyShardAllGatherExtensionsMultiThread(
 
     @property
     def device(self) -> torch.device:
-        return torch.device("{}:0".format(device_type))
+        return torch.device(device_type)
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda and no xpu")
+    @skip_if_lt_x_gpu(1)
     def test_all_gather_extensions_end_to_end(self):
         with self._patch_two_tensor_fsdp_all_gather(pre_all_gather_version=1):
             self.run_subtests(
@@ -304,7 +306,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             optim.step()
             optim.zero_grad()
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda and no xpu")
+    @skip_if_lt_x_gpu(1)
     def test_all_gather_extensions_monkey_patch(self):
         tls = threading.local()
         tls.ran_pre_all_gather = False
@@ -376,7 +378,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             optim.zero_grad()
         assert tls.ran_pre_all_gather
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda and no xpu")
+    @skip_if_lt_x_gpu(1)
     def test_all_gather_extension_outer_size_stride(self):
         """
         NOTE: We cannot easily test the incorrect case where the user-defined
@@ -402,13 +404,13 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         optim.step()
         optim.zero_grad()
 
-    @unittest.skipIf(not TEST_CUDA and TEST_XPU, "no cuda and no xpu")
+    @skip_if_lt_x_gpu(1)
     def test_all_gather_extension_hsdp_mesh(self):
         tls = threading.local()
         replicate_size = 2
         shard_size = self.world_size // replicate_size
         mesh = init_device_mesh(
-            device_type,
+            device_type.type,
             (replicate_size, shard_size),
             mesh_dim_names=("dp_replicate", "dp_shard"),
         )

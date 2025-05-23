@@ -31,7 +31,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     sm_is_or_higher_than,
 )
-from torch.testing._internal.common_fsdp import FSDPTest, MLP
+from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLP
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
@@ -39,6 +39,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 
+
+device_type = torch.device(get_devtype())
 
 log = logging.getLogger(__name__)
 
@@ -105,7 +107,7 @@ class TestFullyShardCompileCompute(FSDPTest):
         torch.distributed.barrier()
         torch._dynamo.config.skip_fsdp_hooks = skip_fsdp_hooks
         torch._dynamo.trace_rules.check = patched_trace_rules_check
-        model = MLP(4)
+        model = MLP(4).to(device_type)
         fully_shard(model)
         model.compile()
         model(torch.randn((4, 4), device=device_type))
@@ -131,7 +133,10 @@ class TestFullyShardCompile(FSDPTest):
         # XPU is not applicable in this function
         if device_type == 'xpu':
             return
-        device = torch.device(device_type, self.rank % torch.accelerator.device_count())
+        device = torch.device(
+            device_type.type,
+            self.rank % torch.get_device_module(device_type).device_count(),
+        )
         if not sm_is_or_higher_than(device, 8, 0):
             self.skipTest("bf16 requires sm >= 8.0")
 
@@ -143,7 +148,7 @@ class TestFullyShardCompile(FSDPTest):
             (torch.nn.Linear(1, 1),),  # module: Tuple[nn.Module, ...],
             None,  # mesh_info: FSDPMeshInfo,
             None,  # post_forward_mesh_info: Optional[FSDPMeshInfo],
-            torch.device(device_type),  # device: torch.device,
+            device_type,  # device: torch.device,
             None,  # shard_placement_fn: Optional[Callable],
             None,  # mp_policy: MixedPrecisionPolicy,
             None,  # offload_policy: OffloadPolicy,
@@ -684,7 +689,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         def model_init_fn():
             torch.manual_seed(self.rank)
             fsdp_config = {}
-            mesh = init_device_mesh(device_type, (self.world_size,))
+            mesh = init_device_mesh(device_type.type, (self.world_size,))
             model = TestModule(n_layers=3)
             for mod in model.layers:
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
@@ -727,9 +732,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 fwd_fullgraph=fwd_fullgraph,
             )
 
-    @skipIfRocm
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    def test_nested_fully_shard_backend_inductor_fullgraph_True(self):
+    def _test_nested_fully_shard_backend_inductor_fullgraph_True(self):
         self.skipTestForOldSm()
         for fwd_fullgraph in [True]:
             with self._reinplace_all_gather_with_optional_checks(
@@ -764,7 +767,14 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
                 )
                 fwd_code = triton_codes[0]
-                file_check = FileCheck().check("def call(args):")
+
+                extra_str_from_graph_partition = (
+                    "self, " if torch._inductor.config.graph_partition else ""
+                )
+
+                file_check = FileCheck().check(
+                    f"def call({extra_str_from_graph_partition}args):"
+                )
                 for fwd_ag_block_info in [
                     dict(overlapped_compute_op_str=None),
                     dict(
@@ -800,7 +810,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 file_check.run(fwd_code)
 
                 bwd_code = triton_codes[1]
-                file_check = FileCheck().check("def call(args):")
+                file_check = FileCheck().check(
+                    f"def call({extra_str_from_graph_partition}args):"
+                )
                 for bwd_ag_block_info in [
                     dict(overlapped_compute_op_str=None),
                     dict(
@@ -827,6 +839,17 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     # )
                     pass
                 file_check.run(bwd_code)
+
+    @skipIfRocm
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_nested_fully_shard_backend_inductor_fullgraph_True(self):
+        self._test_nested_fully_shard_backend_inductor_fullgraph_True()
+
+    @skipIfRocm
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_nested_fully_shard_backend_inductor_fullgraph_True_graph_partition(self):
+        self._test_nested_fully_shard_backend_inductor_fullgraph_True()
 
     @unittest.skip("TODO: fix fwd_fullgraph=False case")
     @skipIfRocm
@@ -858,7 +881,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         def model_init_fn():
             torch.manual_seed(self.rank)
             fsdp_config = {}
-            mesh = init_device_mesh(device_type, (self.world_size,))
+            mesh = init_device_mesh(device_type.type, (self.world_size,))
             model_args = ModelArgs(
                 vocab_size=vocab_size,
                 n_layers=n_layers,
@@ -943,11 +966,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     fwd_fullgraph=fwd_fullgraph,
                 )
 
-    @skipIfRocm
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    # TODO: native_dropout causes CUDA IMA error, need to figure out why
-    @torch._inductor.config.patch(fallback_random=True)
-    def test_transformer_backend_inductor_fullgraph_True(self):
+    def _test_transformer_backend_inductor_fullgraph_True(self):
         self.skipTestForOldSm()
         for (
             fwd_fullgraph,
@@ -993,7 +1012,13 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
                 )
                 fwd_code = triton_codes[0]
-                file_check = FileCheck().check("def call(args):")
+                extra_str_from_graph_partition = (
+                    "self, " if torch._inductor.config.graph_partition else ""
+                )
+
+                file_check = FileCheck().check(
+                    f"def call({extra_str_from_graph_partition}args):"
+                )
                 for fwd_ag_block_info in [
                     dict(
                         overlapped_compute_op_str=(
@@ -1018,7 +1043,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 file_check.run(fwd_code)
 
                 bwd_code = triton_codes[1]
-                file_check = FileCheck().check("def call(args):")
+                file_check = FileCheck().check(
+                    f"def call({extra_str_from_graph_partition}args):"
+                )
                 for bwd_ag_block_info in [
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
@@ -1054,6 +1081,21 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     #     )
                     pass
                 file_check.run(bwd_code)
+
+    @skipIfRocm
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    # TODO: native_dropout causes CUDA IMA error, need to figure out why
+    @torch._inductor.config.patch(fallback_random=True)
+    def test_transformer_backend_inductor_fullgraph_True(self):
+        self._test_transformer_backend_inductor_fullgraph_True()
+
+    @skipIfRocm
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    # TODO: native_dropout causes CUDA IMA error, need to figure out why
+    @torch._inductor.config.patch(fallback_random=True)
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_transformer_backend_inductor_fullgraph_True_graph_partition(self):
+        self._test_transformer_backend_inductor_fullgraph_True()
 
     @unittest.skip("TODO: fix fwd_fullgraph=False case")
     @skipIfRocm
