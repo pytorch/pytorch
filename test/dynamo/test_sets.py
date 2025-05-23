@@ -3,6 +3,7 @@
 # TODO: move set tests from test_functions.py/test_misc.py to this file
 
 import unittest
+from collections.abc import Iterable
 
 import torch
 import torch._dynamo.config
@@ -242,23 +243,31 @@ class _FrozensetBase:
         p = self.thetype("abc")
         q = p.copy()
         self.assertEqual(p, q)
+        self.assertRaises(TypeError, p.copy, 1)
 
     @make_dynamo_test
     def test_issubset(self):
         p, q, r = map(self.thetype, ["abc", "bc", "bef"])
         self.assertTrue(q.issubset(p))
         self.assertFalse(r.issubset(p))
+        self.assertRaises(TypeError, p.issubset)
+        self.assertRaises(TypeError, p.issubset, 1)
+        self.assertRaises(TypeError, p.issubset, [[]])
 
     @make_dynamo_test
     def test_issuperset(self):
         p, q, r = map(self.thetype, ["abc", "bc", "bef"])
         self.assertTrue(p.issuperset(q))
         self.assertFalse(p.issuperset(r))
+        self.assertRaises(TypeError, p.issuperset)
+        self.assertRaises(TypeError, p.issuperset, 1)
+        self.assertRaises(TypeError, p.issuperset, [[]])
 
     @make_dynamo_test
     def test_constructor_iterable(self):
         p = self.thetype("abc")
         self.assertIsInstance(p, self.thetype)
+        self.assertIsInstance(p, Iterable)
 
     @make_dynamo_test
     def test_equality(self):
@@ -285,6 +294,9 @@ class _FrozensetBase:
         z = self.thetype({"shoes", "flipflops", "sneakers"})
         self.assertFalse(x.isdisjoint(y))
         self.assertTrue(x.isdisjoint(z))
+        self.assertRaises(TypeError, x.isdisjoint)
+        self.assertRaises(TypeError, x.isdisjoint, 1)
+        self.assertRaises(TypeError, x.isdisjoint, [[]])
 
     @make_dynamo_test
     def test_intersection(self):
@@ -293,12 +305,17 @@ class _FrozensetBase:
         set3 = self.thetype({"shoes", "flipflops", "apple"})
         intersection_set = set1.intersection(set2, set3)
         self.assertEqual(intersection_set, {"apple"})
+        self.assertRaises(TypeError, set1.intersection, 1)
+        self.assertRaises(TypeError, set1.intersection, [[]])
 
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_union(self):
         p, q, r = map(self.thetype, ["abc", "bc", "bef"])
         union_set = p.union(q, r)
         self.assertEqual(union_set, {"a", "b", "c", "e", "f"})
+        self.assertRaises(TypeError, p.union, 1)
+        self.assertRaises(TypeError, p.union, [[]])
 
     @make_dynamo_test
     def test_difference(self):
@@ -307,6 +324,8 @@ class _FrozensetBase:
         set3 = self.thetype({"shoes", "flipflops", "sneakers"})
         difference_set = set1.difference(set2, set3)
         self.assertEqual(difference_set, {"banana", "cherry"})
+        self.assertRaises(TypeError, set1.difference, 1)
+        self.assertRaises(TypeError, set1.difference, [[]])
 
     @make_dynamo_test
     def test_symmetric_difference(self):
@@ -315,6 +334,8 @@ class _FrozensetBase:
         symmetric_diff_set = set1.difference(set2)
         self.assertEqual(symmetric_diff_set, {"banana", "cherry"})
         self.assertRaises(TypeError, set1.symmetric_difference)
+        self.assertRaises(TypeError, set1.symmetric_difference, 1)
+        self.assertRaises(TypeError, set1.symmetric_difference, [[]])
 
     @make_dynamo_test
     def test_to_frozenset(self):
@@ -379,6 +400,7 @@ class _SetBase(_FrozensetBase):
         set3 = self.thetype({"shoes", "flipflops", "apple"})
         self.assertIsNone(set1.intersection_update(set2, set3))
         self.assertEqual(set1, {"apple"})
+        self.assertRaises(TypeError, set1.intersection_update, [[]])
 
     @make_dynamo_test
     def test_difference_update(self):
@@ -387,6 +409,7 @@ class _SetBase(_FrozensetBase):
         set3 = self.thetype({"shoes", "flipflops", "sneakers"})
         self.assertIsNone(set1.difference_update(set2, set3))
         self.assertEqual(set1, {"banana", "cherry"})
+        self.assertRaises(TypeError, set1.difference_update, [[]])
 
     @make_dynamo_test
     def test_symmetric_difference_update(self):
@@ -395,6 +418,7 @@ class _SetBase(_FrozensetBase):
         self.assertIsNone(set1.symmetric_difference_update(set2))
         self.assertEqual(set1, {"banana", "cherry", "google", "microsoft"})
         self.assertRaises(TypeError, set1.symmetric_difference_update)
+        self.assertRaises(TypeError, set1.symmetric_difference_update, [[]])
 
     @make_dynamo_test
     def test_pop(self):
@@ -409,6 +433,7 @@ class _SetBase(_FrozensetBase):
         p, q, r = map(self.thetype, ["abc", "bc", "bef"])
         p.update(q, r)
         self.assertEqual(p, {"a", "b", "c", "e", "f"})
+        self.assertRaises(TypeError, p.update, [[]])
 
     @make_dynamo_test
     def test_discard(self):
