@@ -31,7 +31,7 @@ def main() -> None:
     # If a stub file exists, have pyrefly check it instead of the original file, in
     # accordance with PEP-484 (see https://www.python.org/dev/peps/pep-0484/#stub-files)
     filedict: dict[str, bool] = {}
-    for filename in args.filedict:
+    for filename in args.filenames:
         if filename.endswith(".py") and Path(filename + "i").exists():
             filename += "i"
         filedict[filename] = True
