@@ -167,6 +167,46 @@ template class ConvNdImpl<3, Conv3dImpl>;
 
 template <size_t D, typename Derived>
 std::vector<int64_t> ConvTransposeNdImpl<D, Derived>::_output_padding(
+  const Tensor& input,
+  const std::optional<at::IntArrayRef>& output_size,
+  const ExpandingArray<D>& stride,
+  const detail::conv_padding_t<D>& padding,
+  const ExpandingArray<D>& kernel_size) {
+  return std::visit(c10::overloaded(
+    [&](enumtype::kSame) {
+      if (output_size != std::nullopt) { // check if all output_padding is 0
+        for (const auto i : c10::irange(D)) {
+          const auto output_padding = (*this->options.output_padding())[i];
+          TORCH_CHECK(
+            output_padding == 0,
+            "padding='same' only supports output_padding=0, but got ",
+            output_padding, " at dimension ", i, ".");
+        }
+      }
+      return at::IntArrayRef(this->options.output_padding()).vec();
+    },
+    [&](enumtype::kValid) {
+      ExpandingArray<D> zero_padding(0);
+      return _output_padding(
+        input,
+        output_size,
+        stride,
+        zero_padding,
+        kernel_size);
+    },
+    [&](const ExpandingArray<D>& pad) {
+      return _output_padding(
+        input,
+        output_size,
+        stride,
+        pad,
+        kernel_size);
+    }),
+                    padding);
+}
+
+template <size_t D, typename Derived>
+std::vector<int64_t> ConvTransposeNdImpl<D, Derived>::_output_padding(
     const Tensor& input,
     const std::optional<at::IntArrayRef>& output_size,
     const ExpandingArray<D>& stride,
