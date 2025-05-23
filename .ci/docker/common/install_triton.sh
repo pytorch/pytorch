@@ -17,12 +17,17 @@ get_pip_version() {
 if [ -n "${XPU_VERSION}" ]; then
   TRITON_REPO="https://github.com/intel/intel-xpu-backend-for-triton"
   TRITON_TEXT_FILE="triton-xpu"
+  # Since the https://github.com/triton-lang/triton/commit/a782a3665c48707752f1d71f8db832f10e522d5a ,
+  # the setup.py file is moved to the root folder. So we need to set the SETUP_PY_FOLDER to ".".
+  SETUP_PY_FOLDER="."
 elif [ -n "${TRITON_CPU}" ]; then
   TRITON_REPO="https://github.com/triton-lang/triton-cpu"
   TRITON_TEXT_FILE="triton-cpu"
+  SETUP_PY_FOLDER="python"
 else
   TRITON_REPO="https://github.com/triton-lang/triton"
   TRITON_TEXT_FILE="triton"
+  SETUP_PY_FOLDER="python"
 fi
 
 # The logic here is copied from .ci/pytorch/common_utils.sh
@@ -51,11 +56,14 @@ as_jenkins git clone --recursive ${TRITON_REPO} triton
 cd triton
 as_jenkins git checkout ${TRITON_PINNED_COMMIT}
 as_jenkins git submodule update --init --recursive
-cd python
+cd ${SETUP_PY_FOLDER}
 pip_install pybind11==2.13.6
 
-# TODO: remove patch setup.py once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
-as_jenkins sed -i -e 's/https:\/\/tritonlang.blob.core.windows.net\/llvm-builds/https:\/\/oaitriton.blob.core.windows.net\/public\/llvm-builds/g' setup.py
+# XPU triton have upgraded that the following issues has been resolved.
+if [ -z "${XPU_VERSION}" ]; then
+  # TODO: remove patch setup.py once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
+  as_jenkins sed -i -e 's/https:\/\/tritonlang.blob.core.windows.net\/llvm-builds/https:\/\/oaitriton.blob.core.windows.net\/public\/llvm-builds/g' setup.py
+fi
 
 if [ -n "${UBUNTU_VERSION}" ] && [ -n "${GCC_VERSION}" ] && [[ "${GCC_VERSION}" == "7" ]]; then
   # Triton needs at least gcc-9 to build

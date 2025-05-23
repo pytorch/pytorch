@@ -12,6 +12,7 @@ from torch._dynamo.utils import counters
 from torch._inductor.autotune_process import TritonBenchmarkRequest
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import is_big_gpu
+from torch.testing._internal.common_device_type import expectedFailureXPU
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -249,6 +250,8 @@ class TestSelectAlgorithm(TestCase):
 
     @expectedFailureDynamicWrapper
     @patches
+    # TODO remove this xfail after issue resolved("https://github.com/intel/intel-xpu-backend-for-triton/issues/4232")
+    @expectedFailureXPU
     def test_convolution1(self):
         @torch.compile
         def foo(x, w, b):
