@@ -898,7 +898,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def method_setattr_standard(self, tx: "InstructionTranslator", name, value):
+    def method_setattr_standard(
+        self, tx: "InstructionTranslator", name, value, bypass_descriptor=False
+    ):
         try:
             name = name.as_python_constant()
         except NotImplementedError:
@@ -906,6 +908,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if not tx.output.side_effects.is_attribute_mutation(self):
             unimplemented(f"setattr({self}, {name}, ...)")
 
+        if not bypass_descriptor:
+            # Emulate
+            # https://github.com/python/cpython/blob/3.11/Objects/object.c#L1371-L1452
+            # NOTE we use `type(...)` to ignore instance attrs.
+            setter = NO_SUCH_SUBOBJ
+            descriptor = inspect.getattr_static(type(self.value), name, NO_SUCH_SUBOBJ)
+            if descriptor is not NO_SUCH_SUBOBJ:
+                setter = inspect.getattr_static(
+                    type(descriptor), "__set__", NO_SUCH_SUBOBJ
+                )
+            if setter is not NO_SUCH_SUBOBJ:
+                desc_source = None
+                func_source = None
+                if self.cls_source:
+                    desc_source = self.get_source_by_walking_mro(name)
+                    func_source = AttrSource(TypeSource(desc_source), "__set__")
+                desc_var = VariableTracker.build(tx, descriptor, desc_source)
+                func_var = VariableTracker.build(tx, setter, func_source)
+                args = [desc_var, self, value]
+                return func_var.call_function(tx, args, {})
+
+        # Emulate the standard setattr on instance dict.
         tx.output.side_effects.store_attr(self, name, value)
         return variables.ConstantVariable(None)
 
@@ -1189,9 +1213,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # e.g.: inspect.getattr_static({}, "fromkeys")
             func = subobj.__get__(self.value, None)
             return VariableTracker.build(tx, func, source)
-        elif inspect.ismethoddescriptor(subobj) and not is_wrapper_or_member_descriptor(
-            subobj.__get__
+        elif inspect.getattr_static(
+            type(subobj), "__get__", NO_SUCH_SUBOBJ
+        ) is not NO_SUCH_SUBOBJ and not is_wrapper_or_member_descriptor(
+            type(subobj).__get__
         ):
+            # Emulate https://github.com/python/cpython/blob/3.11/Objects/object.c#L1271-L1285
+            #
             # Attribute has a __get__ method. Create a user defined object vt
             # for the subobj, and then trace the __get__ method.
             descriptor_source = None
@@ -1200,7 +1228,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # To access the method descriptor from the udf object w/o using
                 # inspect.getattr_static, we can look into the class mro
                 descriptor_source = self.get_source_by_walking_mro(name)
-                descriptor_get_source = AttrSource(descriptor_source, "__get__")
+                descriptor_get_source = AttrSource(
+                    TypeSource(descriptor_source), "__get__"
+                )
                 descriptor_var = VariableTracker.build(tx, subobj, descriptor_source)
             else:
                 # Sourceless Builder does not support user defined objects

@@ -668,6 +668,13 @@ class BuiltinVariable(VariableTracker):
                 )
 
                 def handle_is(tx: "InstructionTranslator", left, right):
+                    # Stay conservative when we see `GetAttrVariable`, because
+                    # it might represent the other VariableTracker under the
+                    # hood.
+                    if isinstance(left, variables.GetAttrVariable) or isinstance(
+                        right, variables.GetAttrVariable
+                    ):
+                        return None
                     # If the two objects are of different type, we can safely return False
                     # and True for `is` and `is not`, respectively
                     if type(left) is not type(right):
@@ -2342,10 +2349,13 @@ class BuiltinVariable(VariableTracker):
                 and id(extract_fake_example_value(left.as_proxy().node))
                 == id(extract_fake_example_value(right.as_proxy().node))
             )
-            if op is operator.is_:
-                return ConstantVariable.create(is_result)
-            else:
-                return ConstantVariable.create(not is_result)
+            if is_result:
+                return ConstantVariable.create(op is operator.is_)
+            # Else we stay conservative, because we might have `GetAttrVariable`
+            # which represents a `TensorVariable` under the hood and happens to
+            # be the same as the other `TensorVariable`. This happens with
+            # numpy's `flatiter.base` descriptor.
+            return None
 
         if op not in supported_tensor_comparison_op_values:
             unimplemented_v2(
