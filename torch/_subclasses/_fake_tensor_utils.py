@@ -218,11 +218,6 @@ class _CacheKeyState:
     # matches one of the inputs so we can uncache it properly.
     sym_node_lookup: dict[int, int]  # id(SymNode) -> index
 
-    # This is a list of all seen input sympy.Symbols. We use it when building
-    # the cache entry to see if the output value has any symbols that we didn't
-    # see on input. See _has_unrepresented_symbols().
-    known_symbols: set[sympy.Symbol]
-
     # There are cases where we're asked to perform an op when we have no
     # ShapeEnv on the FakeTensorMode - but for SymNodes we MUST have a
     # ShapeEnv. So as we scan if we see a SymNode (with a ShapeEnv) we record it
@@ -231,7 +226,6 @@ class _CacheKeyState:
 
     def __init__(self, shape_env: Optional[ShapeEnv] = None) -> None:
         self.sym_node_lookup = {}
-        self.known_symbols = set()
         self.shape_env = shape_env
 
     def cache_on_shape_env(self) -> bool:
@@ -253,7 +247,6 @@ class _CacheKeyState:
             result.append(_InputBackref(self.sym_node_lookup[node_id]))
         else:
             self.sym_node_lookup[node_id] = len(result)
-            self.known_symbols.update(arg.node.expr.free_symbols)
             if self.shape_env is None:
                 self.shape_env = arg.node.shape_env
             result.append(_PySymInputStub(arg))
