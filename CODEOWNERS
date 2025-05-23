@@ -14,6 +14,7 @@
 /torch/csrc/autograd/ @albanD @soulitzer
 /torch/autograd/ @albanD @soulitzer
 /tools/autograd/ @albanD @soulitzer
+/torch/header_only_apis.txt @janeyx99
 /torch/nn/ @albanD @jbschlosser @mikaylagawarecki
 /torch/optim/ @albanD @janeyx99
 /test/test_public_bindings.py @albanD

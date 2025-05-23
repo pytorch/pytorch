@@ -1736,3 +1736,15 @@ command = [
 include_patterns = [
     'test/**/test_*.py',
 ]
+
+# 'header_only_linter' reports on properly testing header-only APIs.
+[[linter]]
+code = 'HEADER_ONLY_LINTER'
+command = [
+    'python3',
+    'tools/linter/adapters/header_only_linter.py',
+]
+include_patterns = [
+    'torch/header_only_apis.txt',
+]
+is_formatter = false
