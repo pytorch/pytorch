@@ -24,11 +24,13 @@ bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
     }
     return false;
   }
-  if (query_size_last > 256) {
+  constexpr int MAX_HEAD_DIM = 576;
+  if (query_size_last > MAX_HEAD_DIM) {
     if (debug) {
       TORCH_WARN(
-          "OneDNN attention requires q,k,v to have head dimension less than 256.",
-          " Got ",
+          "OneDNN attention requires q,k,v to have head dimension less than ",
+          MAX_HEAD_DIM,
+          ". Got ",
           query_size_last,
           " instead.");
     }
