@@ -16,6 +16,7 @@ from itertools import product
 from functools import reduce, partial
 from typing import Union, Optional
 from torch._prims_common import DimsType
+from packaging import version
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
@@ -6667,6 +6668,12 @@ class TestLinalg(TestCase):
         def test_tracker(worker):
             k = worker.iparams['k']
             nc = worker.ivars['converged_count']
+
+            # Regression test for PR #152789 (fixes issue #101075)
+            # Ensure rerr is non-negative at each iteration
+            rerr = worker.tvars['rerr']
+            self.assertGreaterEqual(rerr.min(), 0.)
+
             if k <= nc:
                 tol = worker.fparams['tol']
                 rerr = worker.tvars['rerr']
@@ -6696,9 +6703,26 @@ class TestLinalg(TestCase):
             kwargs['tol'] = 1e-8
             return orig_lobpcg(*args, **kwargs)
         prec = 5e-4
+        mm = torch.matmul
+
+        # Regression test for PR #152789 (fixes issue #101075)
+        # https://github.com/pytorch/pytorch/issues/101075#issuecomment-1548483685
+        # Demonstrates the original bug: negative residuals in the 2nd iteration
+        A = torch.Tensor([
+            [-0.56142016, 0.29639858, -0.16059532],
+            [0.29639858, -0.69093563, 0.26248195],
+            [-0.16059532, 0.26248195, -0.40236716]
+        ])
+        B = torch.Tensor([
+            [1.89193057, -0.08174309, -0.3557846],
+            [-0.08174309, 1.64589643, -0.46436347],
+            [-0.3557846, -0.46436347, 1.67404367]
+        ])
+        X = torch.Tensor([[0.61591334, 0.63823109, 0.46185694]]).T
+        E, V = lobpcg(A=A, B=B, X=X, k=1)
+        self.assertEqual(matmul(A, V), mm(matmul(B, V), E.diag_embed()), atol=prec, rtol=0)
 
         # check dense input
-        mm = torch.matmul
         for batches in [(), (2,), (2, 3)]:
             for m, n, k in [
                     (9, 3, 1),
@@ -6791,7 +6815,8 @@ class TestLinalg(TestCase):
         eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
         self.assertLess(eq_err, 1e-6)
 
-    @unittest.skipIf(not TEST_SCIPY or (TEST_SCIPY and scipy.__version__ < '1.4.1'), "Scipy not found or older than 1.4.1")
+    @unittest.skipIf(not TEST_SCIPY or (TEST_SCIPY and version.parse(scipy.__version__) < version.parse('1.4.1')),
+                     "Scipy not found or older than 1.4.1")
     @skipCPUIfNoLapack
     @skipIfTorchDynamo("fails in tracing scipy.sparse.lobpcg")
     @onlyCPU
@@ -7003,8 +7028,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                   torch.half))
     @dtypes(torch.bfloat16, torch.half, torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_addmv(self, device, dtype):
-        if IS_ARM64 and device == 'cpu' and dtype == torch.float16:
-            raise unittest.SkipTest("Fails on ARM, see https://github.com/pytorch/pytorch/issues/125438")
         # have to use torch.randn(...).to(bfloat16) instead of
         # torch.randn(..., dtype=bfloat16). randn does not support
         # bfloat16 yet.
@@ -9446,6 +9469,24 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         a = torch.tensordot(torch.tensor(0.), torch.tensor(0.), 0)
         an = torch.from_numpy(np.tensordot(np.zeros((), dtype=np.float32), np.zeros((), dtype=np.float32), 0))
         self.assertEqual(a, an)
+
+        # Testing the fast path introduced in #145936,
+        # i.e. reduction to a scalar has to be of right dim.
+        a = torch.rand(2, 2, device=device)
+        a_dims = [-1, -2]
+        b = torch.rand(2, 2, device=device)
+        b_dims = [-2, -1]
+        for res_ndim in range(5):
+            res_torch = torch.tensordot(a, b, [a_dims, b_dims])
+            self.assertEqual(res_torch.ndim, res_ndim)
+
+            res_numpy = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy(), [a_dims, b_dims]))
+            self.assertEqual(res_torch, res_numpy)
+
+            if res_ndim % 2:
+                b.unsqueeze_(0)
+            else:
+                a.unsqueeze_(0)
 
     @skipCUDAIfNoCusolver
     @skipCUDAIfNoMagma

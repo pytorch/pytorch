@@ -29,7 +29,7 @@
 #endif
 
 // Useful build settings that are recorded in the compiled binary
-// torch.__build__.show()
+// torch.__config__.show()
 #define CAFFE2_BUILD_STRINGS { \
   {"TORCH_VERSION", "${TORCH_VERSION}"}, \
   {"CXX_COMPILER", "${CMAKE_CXX_COMPILER}"}, \
@@ -65,4 +65,6 @@
   {"USE_ITT", "${CAFFE2_USE_ITT}"}, \
   {"USE_ROCM_KERNEL_ASSERT", "${USE_ROCM_KERNEL_ASSERT}"}, \
   {"USE_CUSPARSELT", "${USE_CUSPARSELT}"}, \
+  {"USE_XPU", "${USE_XPU}"}, \
+  {"USE_XCCL", "${USE_XCCL}"}, \
 }
