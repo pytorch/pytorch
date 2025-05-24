@@ -605,7 +605,7 @@ computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
 }
 
 
-static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>, int64_t, int64_t> 
+static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>, int64_t, int64_t>
 makeLinearIndex(Tensor self, IOptTensorListRef orig, bool check_range) {
   checkIndexTensorTypes(orig, /*allow_int*/true);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
@@ -627,7 +627,7 @@ makeLinearIndex(Tensor self, IOptTensorListRef orig, bool check_range) {
   if (!hasContiguousSubspace(indices)) {
     std::tie(self, indices, inversePerm) = transposeToFrontAndInvPerm(self, indices);
   }
-  auto [linearIndex, nElemBefore, strideBefore, nElemAfter, dims_before, dims_indexed] = 
+  auto [linearIndex, nElemBefore, strideBefore, nElemAfter, dims_before, dims_indexed] =
     computeLinearIndex(self, indices, check_range);
   return std::make_tuple(linearIndex, self, nElemBefore, strideBefore, nElemAfter, inversePerm,
                          dims_before, dims_indexed);
@@ -642,7 +642,7 @@ int64_t largestIndex(const Tensor &self) {
   return result;
 }
 
-DimVector valsShape(IntArrayRef self_sizes, 
+DimVector valsShape(IntArrayRef self_sizes,
                               int64_t dims_before,
                               int64_t dims_indexed,
                               IntArrayRef replacement_shape) {
@@ -692,7 +692,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
         linearIndex.const_data_ptr<int64_t>(), sorted_indices.mutable_data_ptr<int64_t>(),
         range.const_data_ptr<int64_t>(), orig_indices.mutable_data_ptr<int64_t>(),
         num_indices, false, 0, nbits);
-      
+
 
       TORCH_INTERNAL_ASSERT(
           linearIndex.numel()*sliceSize*nElemBefore == expandedValue.numel(),
@@ -870,7 +870,7 @@ void index_put_with_sort_quantized(Tensor & self, const c10::List<std::optional<
         linearIndex.const_data_ptr<int64_t>(), sorted_indices.mutable_data_ptr<int64_t>(),
         range.const_data_ptr<int64_t>(), orig_indices.mutable_data_ptr<int64_t>(),
         num_indices, false, 0, nbits);
-      
+
 
       TORCH_INTERNAL_ASSERT(
           linearIndex.numel()*sliceSize*nElemBefore == expandedValue.numel(),
