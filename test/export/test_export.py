@@ -831,6 +831,20 @@ graph():
         ep = export(M(), (torch.ones(3),))
         self.assertEqual(len(ep.constants), 0)
 
+    @testing.expectedFailureCppRuntime
+    def test_unbacked_select(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x[y.item()]
+
+        mod = Foo()
+        x = torch.arange(10)
+        y = torch.tensor([5])
+        ep = export(mod, (x, y))
+        self.assertEqual(mod(x, y), ep.module()(x, y))
+        y = torch.tensor([-3])
+        self.assertEqual(mod(x, y), ep.module()(x, y))
+
     def test_unbacked_bincount(self):
         class Foo(torch.nn.Module):
             def forward(self, xs):
