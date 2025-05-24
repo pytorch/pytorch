@@ -246,6 +246,20 @@ struct div_trunc_functor {
   }
 };
 
+struct remainder_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return T(a - b * c10::metal::floor_divide(a, b));
+  }
+};
+
+struct fmod_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return c10::metal::fmod(a, b);
+  }
+};
+
 // Some helper defines
 #if __METAL_VERSION__ >= 310
 #define _METAL_310_PLUS(x) x
@@ -304,6 +318,10 @@ REGISTER_FLOAT_BINARY_OP(div_trunc);
 REGISTER_INTEGER_BINARY_OP(div_trunc);
 REGISTER_OPMATH_FLOAT_BINARY_OP(div_true);
 REGISTER_INT2FLOAT_BINARY_OP(div_true);
+REGISTER_OPMATH_FLOAT_BINARY_OP(remainder);
+REGISTER_INTEGER_BINARY_OP(remainder);
+REGISTER_OPMATH_FLOAT_BINARY_OP(fmod);
+REGISTER_INTEGER_BINARY_OP(fmod);
 REGISTER_BINARY_ALPHA_OP(add_alpha, long, long);
 REGISTER_BINARY_ALPHA_OP(add_alpha, int, int);
 REGISTER_BINARY_ALPHA_OP(add_alpha, float, float);

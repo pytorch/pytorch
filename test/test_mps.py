@@ -5587,6 +5587,10 @@ class TestMPS(TestCaseMPS):
             torch.tensor([1, 2, 3, 4, 5], dtype=torch.int32, device="mps"), -1.5)
         self.assertEqual(res_cpu, res_mps)
 
+        # Regression test for https://github.com/pytorch/pytorch/issues/154171
+        # Essentially remained over integral types should rely on integers ops
+        self.assertEqual(torch.tensor(42309891, device='mps') % torch.tensor(31, device='mps'), torch.tensor(6, device='mps'))
+
     def test_expand(self):
         def helper(n, c):
             values = [[1.0], [4.0], [7.0]]
