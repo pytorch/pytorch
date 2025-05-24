@@ -1380,7 +1380,7 @@ class VariableBuilder:
 
             result = UserDefinedDictVariable(value, dict_vt=dict_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
-        elif isinstance(value, tuple) and type(value).__new__ is tuple.__new__:
+        elif isinstance(value, tuple):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
@@ -1397,7 +1397,7 @@ class VariableBuilder:
             tuple_vt = TupleVariable(
                 output, source=self.source, mutation_type=ValueMutationExisting()
             )
-            result = UserDefinedTupleVariable.create(
+            result = UserDefinedTupleVariable(
                 value, tuple_vt=tuple_vt, source=self.source
             )
             return self.tx.output.side_effects.track_object_existing(value, result)
