@@ -1006,7 +1006,7 @@ class SideEffects:
                         # descriptor, Dynamo should've already traced that
                         # descriptor logic at this point, so we don't want to
                         # trigger it again.
-                        and var.is_set_descriptor(name)
+                        and var.attr_has_traceable_descriptor_setter(name)
                     ):
                         # `object.__getattribute__(obj, "__dict__")[key] = value`
                         cg.add_push_null(
