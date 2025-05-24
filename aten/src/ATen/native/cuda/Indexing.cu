@@ -669,7 +669,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
   std::vector<int64_t> inversePerm;
   std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm,
   dims_before, dims_indexed) = makeLinearIndex(self_, indices, !unsafe);
-  auto vals_shape = valsShape(self.sizes(), dims_before, dims_indexed, linearIndex.sizes());
+  auto vals_shape = valsShape(src.sizes(), dims_before, dims_indexed, linearIndex.sizes());
   int64_t num_indices = linearIndex.numel();
   expandedValue = expandedValue.expand(vals_shape).contiguous();
 
