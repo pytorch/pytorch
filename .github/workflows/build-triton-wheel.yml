@@ -147,8 +147,9 @@ jobs:
           fi
 
           if [[ "${BUILD_DEVICE}" == xpu ]]; then
+            docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -m pip install -U "cmake>=3.20,<4.0"
             docker exec -t "${container_name}" bash -c "dnf install -y gcc-toolset-13-gcc-c++"
-            docker exec -t "${container_name}" bash -c "source /opt/rh/gcc-toolset-13/enable && ${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
+            docker exec -t "${container_name}" bash -c "source /opt/rh/gcc-toolset-13/enable && export PATH=\$(${PYTHON_EXECUTABLE} -c 'import cmake; print(cmake.CMAKE_BIN_DIR)'):\$PATH && ${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
           else
             docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
           fi

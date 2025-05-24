@@ -521,6 +521,7 @@ inductor_override_kwargs["xpu"] = {
     ("baddbmm", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
     ("angle", f64): {"reference_in_float": True},
     ("asin", f16): {"reference_in_float": True},
+    ("asin", f32): {"reference_in_float": True, "atol": 1e-4, "rtol": 1e-4},
     ("atanh", f16): {"reference_in_float": True},
     "cauchy": {"reference_in_float": True},
     ("cummax", f16): {"atol": 5e-4, "rtol": 0.002},

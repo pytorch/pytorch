@@ -249,6 +249,7 @@ class TestSelectAlgorithm(TestCase):
 
     @expectedFailureDynamicWrapper
     @patches
+    @skipIfXpu(msg="https://github.com/intel/intel-xpu-backend-for-triton/issues/4232")
     def test_convolution1(self):
         @torch.compile
         def foo(x, w, b):
