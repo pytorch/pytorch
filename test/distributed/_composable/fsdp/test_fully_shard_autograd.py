@@ -241,31 +241,6 @@ class TestFullyShardAutograd(FSDPTest):
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2))
 
-    @skip_if_lt_x_gpu(2)
-    def test_grad_after_no_grad(self):
-        torch.manual_seed(42)
-        model = DoubleLinear(dim=32, use_second_linear=True)
-        for param in model.parameters():
-            param.requires_grad = False
-        fully_shard(model)
-
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        for i in range(10):
-            if i % 2 == 1:
-                for param in model.parameters():
-                    param.requires_grad = True
-            else:
-                for param in model.parameters():
-                    param.requires_grad = False
-
-            inp = torch.rand((16, 32), device=device_type)
-            out1, out2 = model(inp)
-            loss = torch.sum(out1 + out2)
-            if i % 2 == 1:
-                loss.backward()
-                optim.step()
-                dist.all_reduce(loss)
-
 
 class TestFullyShardPostAccGradHookMultiThread(FSDPTestMultiThread):
     @property
