@@ -50,7 +50,7 @@ jobs:
   wheel-py3_11-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "windows-11-arm64"
+    runs-on: "windows-11-arm64-preview"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -61,7 +61,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.11"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Populate binary env
         shell: cmd
@@ -74,23 +73,12 @@ jobs:
         run: |
           mkdir "%NIGHTLIES_PYTORCH_ROOT%"
           mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
+      - name: Enable long paths
+        shell: cmd
+        run: |
+          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
+          git config --system core.longpaths true
       - name: Git checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          path: "pytorch"
-      - name: Bootstrap Build Tools
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
-      - name: Bootstrap Git
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
-      - name: Remove Pytorch folder
-        shell: cmd
-        run: |
-          rmdir /s /q "pytorch"
-      - name: Git checkout PyTorch - recursive
         uses: actions/checkout@v4
         with:
           path: "pytorch"
@@ -135,7 +123,7 @@ jobs:
     needs:
       - wheel-py3_11-cpu-build
       - get-label-type
-    runs-on: "windows-11-arm64"
+    runs-on: "windows-11-arm64-preview"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -153,18 +141,11 @@ jobs:
           echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
           echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
           echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
-      - name: Git checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          path: "pytorch"
-      - name: Populate binary env
+      - name: Enable long paths
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
-      - name: Remove Pytorch folder
-        shell: cmd
-        run: |
-          rmdir /s /q "pytorch"
+          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
+          git config --system core.longpaths true
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -178,10 +159,6 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
-      - name: Bootstrap Build Tools
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
@@ -220,7 +197,7 @@ jobs:
   wheel-py3_12-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "windows-11-arm64"
+    runs-on: "windows-11-arm64-preview"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -231,7 +208,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.12"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Populate binary env
         shell: cmd
@@ -244,23 +220,12 @@ jobs:
         run: |
           mkdir "%NIGHTLIES_PYTORCH_ROOT%"
           mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
+      - name: Enable long paths
+        shell: cmd
+        run: |
+          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
+          git config --system core.longpaths true
       - name: Git checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          path: "pytorch"
-      - name: Bootstrap Build Tools
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
-      - name: Bootstrap Git
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
-      - name: Remove Pytorch folder
-        shell: cmd
-        run: |
-          rmdir /s /q "pytorch"
-      - name: Git checkout PyTorch - recursive
         uses: actions/checkout@v4
         with:
           path: "pytorch"
@@ -305,7 +270,7 @@ jobs:
     needs:
       - wheel-py3_12-cpu-build
       - get-label-type
-    runs-on: "windows-11-arm64"
+    runs-on: "windows-11-arm64-preview"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -323,18 +288,11 @@ jobs:
           echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
           echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
           echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
-      - name: Git checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          path: "pytorch"
-      - name: Populate binary env
+      - name: Enable long paths
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
-      - name: Remove Pytorch folder
-        shell: cmd
-        run: |
-          rmdir /s /q "pytorch"
+          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
+          git config --system core.longpaths true
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -348,10 +306,6 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
-      - name: Bootstrap Build Tools
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
@@ -390,7 +344,7 @@ jobs:
   wheel-py3_13-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "windows-11-arm64"
+    runs-on: "windows-11-arm64-preview"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -401,7 +355,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
     steps:
       - name: Populate binary env
         shell: cmd
@@ -414,23 +367,12 @@ jobs:
         run: |
           mkdir "%NIGHTLIES_PYTORCH_ROOT%"
           mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
+      - name: Enable long paths
+        shell: cmd
+        run: |
+          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
+          git config --system core.longpaths true
       - name: Git checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          path: "pytorch"
-      - name: Bootstrap Build Tools
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
-      - name: Bootstrap Git
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
-      - name: Remove Pytorch folder
-        shell: cmd
-        run: |
-          rmdir /s /q "pytorch"
-      - name: Git checkout PyTorch - recursive
         uses: actions/checkout@v4
         with:
           path: "pytorch"
@@ -475,7 +417,7 @@ jobs:
     needs:
       - wheel-py3_13-cpu-build
       - get-label-type
-    runs-on: "windows-11-arm64"
+    runs-on: "windows-11-arm64-preview"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -493,18 +435,11 @@ jobs:
           echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
           echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
           echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
-      - name: Git checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          path: "pytorch"
-      - name: Populate binary env
+      - name: Enable long paths
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
-      - name: Remove Pytorch folder
-        shell: cmd
-        run: |
-          rmdir /s /q "pytorch"
+          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
+          git config --system core.longpaths true
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -518,10 +453,6 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
-      - name: Bootstrap Build Tools
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |

@@ -22,18 +22,3 @@ runs:
         retention-days: 14
         if-no-files-found: warn
         path: sccache-stats-*.json
-
-    - name: Format sccache stats
-      shell: bash
-      run: |
-        python3 -m tools.stats.sccache_stats_to_benchmark_format
-      env:
-        BUILD_TIME: ${{ inputs.build-time }}
-
-    - name: Upload sccache stats as benchmark
-      uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
-      with:
-        benchmark-results-dir: test/test-reports
-        dry-run: false
-        schema-version: v3
-        github-token: ${{ inputs.github-token }}
