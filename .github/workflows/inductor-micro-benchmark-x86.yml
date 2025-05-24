@@ -27,6 +27,7 @@ jobs:
       test-matrix: |
         { include: [
           { config: "inductor-micro-benchmark-cpu-x86", shard: 1, num_shards: 1, runner: "linux.24xl.spr-metal", owners: ["oncall:pt2"] },
+          { config: "inductor-micro-benchmark-cpu-x86", shard: 1, num_shards: 1, runner: "linux.24xlarge.amd", owners: ["oncall:pt2"] },
         ]}
     secrets: inherit
 

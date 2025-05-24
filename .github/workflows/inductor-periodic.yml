@@ -156,6 +156,17 @@ jobs:
           { config: "cpu_inductor_freezing_avx2_torchbench", shard: 2, num_shards: 2, runner: "linux.10xlarge.avx2" },
           { config: "cpu_inductor_freezing_avx2_timm", shard: 1, num_shards: 2, runner: "linux.10xlarge.avx2" },
           { config: "cpu_inductor_freezing_avx2_timm", shard: 2, num_shards: 2, runner: "linux.10xlarge.avx2" },
+          { config: "cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amd" },
+          { config: "cpu_inductor_timm", shard: 1, num_shards: 2, runner: "linux.8xlarge.amd" },
+          { config: "cpu_inductor_timm", shard: 2, num_shards: 2, runner: "linux.8xlarge.amd" },
+          { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amd" },
+          { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "linux.8xlarge.amd" },
+          { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "linux.8xlarge.amd" },
+          { config: "cpu_inductor_freezing_avx2_huggingface", shard: 1, num_shards: 1, runner: "linux.12xlarge.amd" },
+          { config: "cpu_inductor_freezing_avx2_torchbench", shard: 1, num_shards: 2, runner: "linux.12xlarge.amd" },
+          { config: "cpu_inductor_freezing_avx2_torchbench", shard: 2, num_shards: 2, runner: "linux.12xlarge.amd" },
+          { config: "cpu_inductor_freezing_avx2_timm", shard: 1, num_shards: 2, runner: "linux.12xlarge.amd" },
+          { config: "cpu_inductor_freezing_avx2_timm", shard: 2, num_shards: 2, runner: "linux.12xlarge.amd" },
         ]}
     secrets: inherit
 
