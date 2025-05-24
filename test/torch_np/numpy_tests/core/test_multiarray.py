@@ -4328,7 +4328,7 @@ class TestFromBuffer(TestCase):
     @skipif(
         IS_PYPY,
         reason="PyPy's memoryview currently does not track exports. See: "
-        "https://foss.heptapod.net/pypy/pypy/-/issues/3724",
+        "https://github.com/pypy/pypy/issues/3723",
     )
     def test_mmap_close(self):
         # The old buffer protocol was not safe for some things that the new
