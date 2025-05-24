@@ -1238,6 +1238,30 @@ def gen_pyi(
                     "S",
                 )
             ],
+            "_make_wrapper_subclass": [
+                "@staticmethod\n"
+                + defs(
+                    "_make_wrapper_subclass",
+                    [
+                        "cls: type[S]",
+                        "size: Sequence[_int | SymInt]",
+                        "strides: Sequence[_int | SymInt] | None = None",
+                        "storage_offset: _int | SymInt | None = None",
+                        "memory_format: torch.memory_format | None = None",
+                        "dtype: _dtype | None = None",
+                        "layout: _layout = strided",
+                        "device: _device | None = None",
+                        "pin_memory: _bool = False",
+                        "requires_grad: _bool = False",
+                        "dispatch_sizes_strides_policy: str | None = None",
+                        "dispatch_device: _bool = False",
+                        "dispatch_layout: _bool = False",
+                        "_extra_dispatch_keys: torch.DispatchKeySet | None = None",
+                        "storage_size: _int | SymInt | None = None",
+                    ],
+                    "S",
+                )
+            ],
             "__contains__": [defs("__contains__", ["self", "item: Any", "/"], "_bool")],
             "__getitem__": [defs("__getitem__", ["self", INDICES, "/"], "Tensor")],
             "__setitem__": [
