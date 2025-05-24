@@ -1,7 +1,6 @@
 # Not pinning certifi so that we can always get the latest certificates
 certifi
 cmake=3.22.*
-dataclasses=0.8
 expecttest=0.3.0
 numpy=1.26.4
 pillow=10.0.1
