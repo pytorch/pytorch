@@ -1125,6 +1125,15 @@ AOTITorchError aoti_torch_view_dtype(
   });
 }
 
+std::string getDebugIntermediateValueDir() {
+  char* envVar = std::getenv("AOT_INDUCTOR_DEBUG_INTERMEDIATE_VALUE_DIR");
+  if (envVar != nullptr) {
+    return std::string(envVar);
+  } else {
+    return get_current_path();
+  }
+}
+
 void aoti_torch_save_tensor_handle(
     AtenTensorHandle self,
     const char* tensor_name,
@@ -1133,7 +1142,7 @@ void aoti_torch_save_tensor_handle(
   at::Tensor* t = tensor_handle_to_tensor_pointer(self);
 #ifndef C10_MOBILE
   // Save tensor to tmp .pt file for tensors and can be torch.load'ed later
-  std::string cwd = get_current_path();
+  std::string cwd = getDebugIntermediateValueDir();
   std::string tmp_folder = cwd + "/tmp/aoti_torch/";
   if (!file_exists(tmp_folder)) {
     std::cout
