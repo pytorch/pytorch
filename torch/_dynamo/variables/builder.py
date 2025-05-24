@@ -2937,6 +2937,7 @@ def is_dynamic_source(source_name: str) -> bool:
             return True
     return False
 
+
 def record_automatic_dynamic(
     tx: "InstructionTranslator", name: str, e: torch.Tensor
 ) -> FrameStateSizeEntry:
