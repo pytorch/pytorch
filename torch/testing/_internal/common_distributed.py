@@ -1529,7 +1529,10 @@ class MultiProcContinousTest(TestCase):
     # Please override if you intend to test on specific device type
     @classmethod
     def device_type(cls) -> str:
-        return torch.accelerator.current_accelerator().type
+        curr_device = torch.accelerator.current_accelerator()
+        if curr_device is None:
+            return "cpu"
+        return curr_device.type
 
     @classmethod
     def opts(cls, high_priority_stream=False):
