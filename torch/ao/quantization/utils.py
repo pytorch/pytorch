@@ -800,7 +800,7 @@ DEPRECATION_WARNING = (
     "torch.ao.quantization.quantize_fx.convert_fx, please migrate to use torchao pt2e quantization "
     "API instead (prepare_pt2e, convert_pt2e) \n"
     "3. pt2e quantization has been migrated to torchao (https://github.com/pytorch/ao/tree/main/torchao/quantization/pt2e) \n"
-    "see https://github.com/pytorch/ao/issues/2259 for more details",
+    "see https://github.com/pytorch/ao/issues/2259 for more details"
 )
 
 
