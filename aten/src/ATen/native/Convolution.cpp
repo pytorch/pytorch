@@ -44,6 +44,8 @@
 #include <ATen/ops/_convolution_mode.h>
 #include <ATen/ops/_convolution_mode_native.h>
 #include <ATen/ops/_convolution_native.h>
+#include <ATen/ops/_convolution_transpose_mode.h>
+#include <ATen/ops/_convolution_transpose_mode_native.h>
 #include <ATen/ops/_mps_convolution.h>
 #include <ATen/ops/_mps_convolution_transpose.h>
 #include <ATen/ops/_nnpack_available.h>
@@ -1105,6 +1107,211 @@ at::Tensor conv3d_padding_symint(
     output = complex_convolution_mode(input, weight, bias, stride, padding, dilation, groups);
   } else {
     output = at::_convolution_mode_symint(input, weight, bias, stride, padding, dilation, groups);
+  }
+  return is_batched ? std::move(output) : output.squeeze(0);
+}
+
+// Follows same argument order as conv_transpose*d_symint
+static Tensor convolution_transpose_same(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    SymIntArrayRef stride,
+    SymIntArrayRef output_padding,
+    const c10::SymInt& groups,
+    SymIntArrayRef dilation) {
+  auto k = weight.dim();
+  auto dim = static_cast<size_t>(k - 2);
+  auto weight_sizes = weight.sym_sizes();
+  TORCH_CHECK(k > 2, "weight should have at least three dimensions");
+  TORCH_CHECK(groups > 0, "non-positive groups is not supported");
+  TORCH_CHECK(
+      k == input.dim(),
+      "Expected ",
+      k,
+      "-dimensional input for ",
+      k,
+      "-dimensional weight",
+      weight_sizes,
+      ", but got ",
+      input.dim(),
+      "-dimensional input of size ",
+      input.sizes(),
+      " instead");
+  TORCH_CHECK(
+      stride.size() == dim || stride.size() == 1U,
+      "stride cannot broadcast to ",
+      dim,
+      " dimensions");
+  TORCH_CHECK(
+      dilation.size() == dim || dilation.size() == 1U,
+      "dilation cannot broadcast to ",
+      dim,
+      " dimensions");
+  TORCH_CHECK(
+      output_padding.size() == dim || output_padding.size() == 1U,
+      "output_padding cannot broadcast to ",
+      dim,
+      " dimensions");
+
+  // NOTE: This restriction is here because it exists for traditional
+  // convolutions.
+  for (auto i : c10::irange(stride.size())) {
+    TORCH_CHECK(
+        stride[i] == 1,
+        "padding='same' is not supported for strided convolutions");
+  }
+
+  for (auto i : c10::irange(output_padding.size())) {
+    TORCH_CHECK(
+        output_padding[i] == 0,
+        "padding='same' only supports output_padding=0");
+  }
+
+  // Compute the required padding for each spatial dimension.
+  SymDimVector common_pad_lr, extra_pad_left;
+  for (auto i : c10::irange(dim)) {
+    auto dim_dilation = dilation.size() == 1 ? dilation[0] : dilation[i];
+    auto dim_stride = stride.size() == 1 ? stride[0] : stride[i];
+    auto effective_kernel = dim_dilation * (weight_sizes[i + 2] - 1) + 1;
+    auto pad =
+        conv_transpose_same_mode_padding_lr(effective_kernel, dim_stride);
+
+    auto min_pad = pad.second < pad.first ? pad.second : pad.first;
+    common_pad_lr.push_back(min_pad);
+    extra_pad_left.push_back(pad.first - pad.second);
+  }
+
+  // Compute the convolution, using the smallest needed padding
+  auto convolution_result = at::convolution_symint(
+      input,
+      weight,
+      bias,
+      stride,
+      /*padding=*/common_pad_lr,
+      dilation,
+      /*transposed=*/true,
+      output_padding,
+      groups);
+
+  // crop on the left side to ensure that the output size will be the same as
+  // the input size.
+  // The output is not modified for symmetric convolutions, as extra_pad_left[i]
+  // = 0 for all i.
+  for (auto i : c10::irange(dim)) {
+    if (extra_pad_left[i] > 0) { // Crop left
+      convolution_result = convolution_result.slice_symint(
+          (int64_t)i + 2, extra_pad_left[i]);
+    } else if (extra_pad_left[i] < 0) { // Crop right
+      // NOTE: this section never runs, as stride == 1.
+      // NOTE: this section only runs when:
+      // right_pad > left_pad -> stride > effective_kernel.
+      // See [conv_transpose_same_mode_padding_lr]
+      convolution_result = convolution_result.slice_symint(
+          (int64_t)i + 2,
+          /*start=*/ 0,
+          /*end=*/ convolution_result.size((int64_t)i + 2) + extra_pad_left[i]);
+    }
+  }
+  return convolution_result;
+}
+
+Tensor _convolution_transpose_mode_symint(
+    const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt,
+    SymIntArrayRef stride, std::string_view padding, SymIntArrayRef output_padding,
+    c10::SymInt groups, SymIntArrayRef dilation) {
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
+  if (padding == "same") {
+    return at::native::convolution_transpose_same(
+        input, weight, bias, stride, output_padding, groups, dilation);
+  } else if (padding == "valid") {
+    return at::convolution_symint(
+        input, weight, bias, stride, /*padding=*/ {{0}}, dilation, /*transposed=*/ true, output_padding, groups);
+  }
+  TORCH_CHECK(false, "Invalid padding string: '", padding, "'");
+}
+
+static at::Tensor complex_convolution_transpose_mode(
+    const at::Tensor& input, const at::Tensor& weight, const std::optional<at::Tensor>& bias_opt,
+    c10::SymIntArrayRef stride, std::string_view padding, SymIntArrayRef output_padding,
+    const c10::SymInt& groups, c10::SymIntArrayRef dilation) {
+  auto bias = bias_opt.value_or(Tensor());
+  check_input_same_type_as_parameters(input, weight, bias);
+  auto [i_r, i_i] = complex_to_real(input.resolve_conj());
+  auto [w_r, w_i] = complex_to_real(weight.resolve_conj());
+
+  // See [NOTE] Complex Convolution
+  Tensor a, b, c;
+  if (!bias.defined()) {
+    a = at::_convolution_transpose_mode_symint(
+        i_r, w_r, bias, stride, padding, output_padding, groups, dilation);
+    b = at::_convolution_transpose_mode_symint(
+        i_i, w_i, bias, stride, padding, output_padding, groups, dilation);
+    c = at::_convolution_transpose_mode_symint(
+        i_r + i_i, w_r + w_i, bias, stride, padding, output_padding, groups, dilation);
+  } else {
+    auto [b_r, b_i] = complex_to_real(bias.resolve_conj());
+    a = at::_convolution_transpose_mode_symint(
+        i_r, w_r, b_r, stride, padding, output_padding, groups, dilation);
+    b = at::_convolution_transpose_mode_symint(
+        i_i, w_i, Tensor(), stride, padding, output_padding, groups, dilation);
+    c = at::_convolution_transpose_mode_symint(
+        i_r + i_i, w_r + w_i, b_r + b_i, stride, padding, output_padding, groups, dilation);
+  }
+
+  auto i = c10::Scalar(c10::complex<double>(0, 1));
+  return a - b + i * (c - a - b);
+}
+
+at::Tensor conv_transpose1d_padding_symint(
+    const Tensor& input_, const Tensor& weight, const std::optional<Tensor>& bias_opt,
+    c10::SymIntArrayRef stride, std::string_view padding, SymIntArrayRef output_padding,
+  c10::SymInt groups, c10::SymIntArrayRef dilation) {
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
+  auto [input, is_batched] = batchify(input_, /*num_spatial_dims=*/ 1, "conv_transpose1d");
+  Tensor output;
+  if (at::isComplexType(input_.scalar_type())) {
+    output = complex_convolution_transpose_mode(input, weight, bias, stride, padding, output_padding, groups, dilation);
+  } else {
+    output = at::_convolution_transpose_mode_symint(input, weight, bias, stride, padding, output_padding, groups, dilation);
+  }
+  return is_batched ? std::move(output) : output.squeeze(0);
+}
+
+at::Tensor conv_transpose2d_padding_symint(
+    const Tensor& input_, const Tensor& weight, const std::optional<Tensor>& bias_opt,
+    c10::SymIntArrayRef stride, std::string_view padding, SymIntArrayRef output_padding,
+  c10::SymInt groups, c10::SymIntArrayRef dilation) {
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
+  auto [input, is_batched] = batchify(input_, /*num_spatial_dims=*/ 2, "conv_transpose2d");
+  Tensor output;
+  if (at::isComplexType(input_.scalar_type())) {
+    output = complex_convolution_transpose_mode(input, weight, bias, stride, padding, output_padding, groups, dilation);
+  } else {
+    output = at::_convolution_transpose_mode_symint(input, weight, bias, stride, padding, output_padding, groups, dilation);
+  }
+  return is_batched ? std::move(output) : output.squeeze(0);
+}
+
+at::Tensor conv_transpose3d_padding_symint(
+    const Tensor& input_, const Tensor& weight, const std::optional<Tensor>& bias_opt,
+    c10::SymIntArrayRef stride, std::string_view padding, SymIntArrayRef output_padding,
+  c10::SymInt groups, c10::SymIntArrayRef dilation) {
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
+  auto [input, is_batched] = batchify(input_, /*num_spatial_dims=*/ 3, "conv_transpose3d");
+  Tensor output;
+  if (at::isComplexType(input_.scalar_type())) {
+    output = complex_convolution_transpose_mode(input, weight, bias, stride, padding, output_padding, groups, dilation);
+  } else {
+    output = at::_convolution_transpose_mode_symint(input, weight, bias, stride, padding, output_padding, groups, dilation);
   }
   return is_batched ? std::move(output) : output.squeeze(0);
 }

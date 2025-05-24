@@ -166,12 +166,23 @@ inline Tensor conv_transpose1d(
     const Tensor& weight,
     const Tensor& bias,
     IntArrayRef stride,
-    IntArrayRef padding,
+    const ConvTranspose1dFuncOptions::padding_t& padding,
     IntArrayRef output_padding,
     int64_t groups,
     IntArrayRef dilation) {
-  return torch::conv_transpose1d(
-      input, weight, bias, stride, padding, output_padding, groups, dilation);
+  return std::visit(
+      [&](const auto& pad) {
+        return torch::conv_transpose1d(
+            input,
+            weight,
+            bias,
+            stride,
+            padding_unwrap(pad),
+            output_padding,
+            groups,
+            dilation);
+      },
+      padding);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -211,12 +222,23 @@ inline Tensor conv_transpose2d(
     const Tensor& weight,
     const Tensor& bias,
     IntArrayRef stride,
-    IntArrayRef padding,
+    const ConvTranspose2dFuncOptions::padding_t& padding,
     IntArrayRef output_padding,
     int64_t groups,
     IntArrayRef dilation) {
-  return torch::conv_transpose2d(
-      input, weight, bias, stride, padding, output_padding, groups, dilation);
+  return std::visit(
+      [&](const auto& pad) {
+        return torch::conv_transpose2d(
+            input,
+            weight,
+            bias,
+            stride,
+            padding_unwrap(pad),
+            output_padding,
+            groups,
+            dilation);
+      },
+      padding);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -256,12 +278,23 @@ inline Tensor conv_transpose3d(
     const Tensor& weight,
     const Tensor& bias,
     IntArrayRef stride,
-    IntArrayRef padding,
+    const ConvTranspose3dFuncOptions::padding_t& padding,
     IntArrayRef output_padding,
     int64_t groups,
     IntArrayRef dilation) {
-  return torch::conv_transpose3d(
-      input, weight, bias, stride, padding, output_padding, groups, dilation);
+  return std::visit(
+      [&](const auto& pad) {
+        return torch::conv_transpose3d(
+            input,
+            weight,
+            bias,
+            stride,
+            padding_unwrap(pad),
+            output_padding,
+            groups,
+            dilation);
+      },
+      padding);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
