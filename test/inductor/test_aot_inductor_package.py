@@ -216,8 +216,10 @@ class TestAOTInductorPackage(TestCase):
             with tempfile.TemporaryDirectory() as tmp_dir, zipfile.ZipFile(
                 package_path, "r"
             ) as zip_ref:
+                filenames = zip_ref.namelist()
+                prefix = filenames[0].split("/")[0]
                 zip_ref.extractall(tmp_dir)
-                tmp_path = Path(tmp_dir) / "data" / "aotinductor" / "model"
+                tmp_path = Path(tmp_dir) / prefix / "data" / "aotinductor" / "model"
                 self.assertTrue(tmp_path.exists())
                 if self.device == GPU_TYPE:
                     kernel_bin = get_kernel_bin_format(self.device)
