@@ -45,7 +45,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     TransformerBlock,
 )
 
-
 device_type = torch.device(get_devtype())
 
 
@@ -62,6 +61,7 @@ class TestFullyShardDeviceTensor(FSDPTestMultiThread):
         for tensor in itertools.chain(model.parameters(), model.buffers()):
             self.assertEqual(tensor.device, torch.device("cpu"))
         fully_shard(model)
+
         accelerator_device = torch.device(
             device_type.type, torch.get_device_module(device_type).current_device()
         )

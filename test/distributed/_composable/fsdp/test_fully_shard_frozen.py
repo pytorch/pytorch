@@ -26,6 +26,7 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import run_tests
 
+device_type = torch.accelerator.current_accelerator().type
 
 device_type = torch.device(get_devtype())
 

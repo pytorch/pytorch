@@ -55,6 +55,7 @@ def _is_fallback_op_in_snodes(snodes, op):
 
 orig_F_scaled_dot_product_attention = F.scaled_dot_product_attention
 
+device_type = torch.accelerator.current_accelerator().type
 
 class Mod(torch.nn.Module):
     def __init__(self):
@@ -129,6 +130,9 @@ class TestFullyShardCompile(FSDPTest):
     def skipTestForOldSm(self):
         # Assumption: This test class is only run on GPU. See `HAS_GPU` check at
         # the top of the class.
+        # XPU is not applicable in this function
+        if device_type == 'xpu':
+            return
         device = torch.device(
             device_type.type,
             self.rank % torch.get_device_module(device_type).device_count(),

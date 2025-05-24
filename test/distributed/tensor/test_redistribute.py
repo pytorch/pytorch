@@ -15,7 +15,8 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor._collective_utils import shard_dim_alltoall
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TEST_HPU
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -499,7 +500,7 @@ class RedistributeTest(DTensorTestBase):
                 local_out_dt = out_dt.to_local()
                 local_expected_dt = expected_dt.to_local()
                 self.assertEqual(out_dt.to_local(), expected_dt.to_local())
-                if TEST_HPU or TEST_CUDA:
+                if torch.accelerator.is_available():
                     self.assertEqual(
                         comm_mode.get_comm_counts()[
                             torch.ops._dtensor.shard_dim_alltoall
@@ -582,7 +583,7 @@ class RedistributeTest(DTensorTestBase):
 class MultiDimRedistributeTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
-        return 8
+        return min(8, torch.accelerator.device_count())
 
     @with_comms
     def test_multi_dim_mesh(self):
@@ -634,6 +635,7 @@ class MultiDimRedistributeTest(DTensorTestBase):
                         self.assertEqual(local_full, expected)
 
     @with_comms
+    @skip_if_lt_x_gpu(8)
     def test_redistribute_shard_dim_multi_dim_mesh(self):
         mesh = init_device_mesh(self.device_type, (2, 2, 2))
         input_data = torch.randn((8, 8, 8), device=self.device_type)

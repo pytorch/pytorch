@@ -45,7 +45,7 @@ from torch.testing._internal.common_fsdp import (
     patch_reshard,
     patch_unshard,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_XPU
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -220,6 +220,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 reduce_scatter_stream=reduce_scatter_stream,
                 reduce_scatter_dtype=torch.float32,
             )
+
 
     @skip_if_lt_x_gpu(1)
     def test_reduce_scatter_fp16(self):

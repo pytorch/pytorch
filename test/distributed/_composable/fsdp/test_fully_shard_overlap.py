@@ -17,6 +17,7 @@ from torch.testing._internal.common_fsdp import (
     patch_all_gather,
     patch_reduce_scatter,
 )
+
 from torch.testing._internal.common_utils import get_cycles_per_ms, run_tests, TEST_HPU
 
 
@@ -66,6 +67,7 @@ class TestFullyShardOverlap(FSDPTest):
         def delay_collective():
             # Share a stream so that all-gather and reduce-scatter block each
             # other like in `ProcessGroupNCCL`
+
             comm_stream.wait_stream(
                 torch.get_device_module(device_type).current_stream()
             )
