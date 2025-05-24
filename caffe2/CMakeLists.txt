@@ -1427,6 +1427,7 @@ if(USE_ROCM)
     set(ROCM_SOURCE_DIR "/opt/rocm")
   endif()
   message(INFO "caffe2 ROCM_SOURCE_DIR = ${ROCM_SOURCE_DIR}")
+
   if(USE_FLASH_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE
         USE_FLASH_ATTENTION
