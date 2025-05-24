@@ -1052,16 +1052,11 @@ class TestIndexing(TestCase):
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
     @onlyCUDA
-    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
-    def test_index_put_accumulate_with_optional_tensors(self, device):
-        # TODO: replace with a better solution.
-        # Currently, here using torchscript to put None into indices.
-        # on C++ it gives indices as a list of 2 optional tensors: first is null and
-        # the second is a valid tensor.
-        @torch.jit.script
+    def test_index_put_deterministic_with_optional_tensors(self, device):
+
         def func(x, i, v):
-            idx = [None, i]
-            x.index_put_(idx, v, accumulate=True)
+            with DeterministicGuard(True):
+                x[:, i] = v
             return x
 
         n = 4
@@ -1079,6 +1074,7 @@ class TestIndexing(TestCase):
         out_cuda = func(t_dev, indices_dev, value1d.cuda())
         out_cpu = func(t, indices, value1d)
         self.assertEqual(out_cuda.cpu(), out_cpu)
+
 
     @onlyNativeDeviceTypes
     def test_index_put_accumulate_duplicate_indices(self, device):
