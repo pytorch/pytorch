@@ -262,6 +262,12 @@ struct fmod_functor {
 
 
 // Some helper defines
+#if __METAL_VERSION__ >= 310
+#define _METAL_310_PLUS(x) x
+#else
+#define _METAL_310_PLUS(x)
+#endif
+
 #define REGISTER_INTEGER_BINARY_OP(NAME)  \
   REGISTER_BINARY_OP(NAME, long, long);   \
   REGISTER_BINARY_OP(NAME, int, int);     \
@@ -278,25 +284,15 @@ struct fmod_functor {
   REGISTER_BINARY_OP(NAME, char, float);   \
   REGISTER_BINARY_OP(NAME, bool, float)
 
-#if __METAL_VERSION__ >= 310
 #define REGISTER_FLOAT_BINARY_OP(NAME)    \
   REGISTER_BINARY_OP(NAME, float, float); \
   REGISTER_BINARY_OP(NAME, half, half);   \
-  REGISTER_BINARY_OP(NAME, bfloat, bfloat)
+  _METAL_310_PLUS(REGISTER_BINARY_OP(NAME, bfloat, bfloat))
 
 #define REGISTER_OPMATH_FLOAT_BINARY_OP(NAME)    \
   REGISTER_OPMATH_BINARY_OP(NAME, float, float); \
   REGISTER_OPMATH_BINARY_OP(NAME, half, half);   \
-  REGISTER_OPMATH_BINARY_OP(NAME, bfloat, bfloat)
-#else
-#define REGISTER_FLOAT_BINARY_OP(NAME)    \
-  REGISTER_BINARY_OP(NAME, float, float); \
-  REGISTER_BINARY_OP(NAME, half, half)
-
-#define REGISTER_OPMATH_FLOAT_BINARY_OP(NAME)    \
-  REGISTER_OPMATH_BINARY_OP(NAME, float, float); \
-  REGISTER_OPMATH_BINARY_OP(NAME, half, half)
-#endif
+  _METAL_310_PLUS(REGISTER_OPMATH_BINARY_OP(NAME, bfloat, bfloat))
 
 REGISTER_FLOAT_BINARY_OP(copysign);
 REGISTER_INT2FLOAT_BINARY_OP(copysign);
