@@ -420,11 +420,13 @@ def write(
     extra: str = "",
     hash_type: str = "code",
     specified_dir: str = "",
+    key: Optional[str] = None,
 ) -> tuple[str, str]:
-    # use striped content to compute hash so we don't end up with different
-    # hashes just because the content begins/ends with different number of
-    # spaces.
-    key: str = get_hash(content.strip(), extra, hash_type)
+    if key is None:
+        # use striped content to compute hash so we don't end up with different
+        # hashes just because the content begins/ends with different number of
+        # spaces.
+        key = get_hash(content.strip(), extra, hash_type)
     basename, _subdir, path = get_path(key, extension, specified_dir)
     if not os.path.exists(path):
         write_atomic(path, content, make_dirs=True)
@@ -1639,6 +1641,7 @@ class AotCodeCompiler:
             "wrapper.cpp",
             extra=cpp_command,
             specified_dir=specified_output_path,
+            key=config.aot_inductor.model_name_for_generated_files,
         )
         kernel_code = (
             f"// Triton kernels are embedded as comments in {wrapper_path}\n"
@@ -1649,6 +1652,7 @@ class AotCodeCompiler:
             "kernel.cpp",
             extra=cpp_command,
             specified_dir=specified_output_path,
+            key=config.aot_inductor.model_name_for_generated_files,
         )
 
         # Log the AOTInductor wrapper and kernel code, if needed.
