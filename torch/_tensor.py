@@ -1675,6 +1675,7 @@ class Tensor(torch._C.TensorBase):
 
     def __dlpack__(
         self,
+        *,
         stream: Optional[Any] = None,
         max_version: Optional[tuple[int, int]] = None,
         dl_device: Optional[tuple[enum.IntEnum, int]] = None,
@@ -1690,69 +1691,87 @@ class Tensor(torch._C.TensorBase):
 
         Args:
             stream (integer or None): An optional Python integer representing a
-            pointer to a CUDA stream. The current stream is synchronized with
-            this stream before the capsule is created, and since the capsule
-            shares its storage with the tensor this make it safe to access from
-            both streams.  If None or -1 is passed then no synchronization is performed.
-            If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
-            synchronization.
+                pointer to a CUDA stream. The current stream is synchronized with
+                this stream before the capsule is created, and since the capsule
+                shares its storage with the tensor this make it safe to access from
+                both streams.  If None or -1 is passed then no synchronization is performed.
+                If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
+                synchronization.
 
             max_version (tuple[int, int] or None): An optional Python tuple with
-            2 integers, representing the maximum version the caller supports. If
-            None (default), PyTorch will fallback to DLPack 0.8.
+                2 integers, representing the maximum version the caller supports. If
+                None (default), PyTorch will fallback to DLPack 0.8.
+
+            dl_device (tuple[DLDeviceType, int] or None): An optional tuple specifying
+                in which device the exported DLPack capsule should be on. If None (default),
+                the exported DLPack capsule will be on the same device as ``self``.
+            
+            copy (bool or None): An optional boolean indicating whether or not to copy
+                ``self``. If None, PyTorch will copy only if necessary.
         """
         if has_torch_function_unary(self):
-            args = (self, stream, max_version, dl_device, copy)
-            return handle_torch_function(Tensor.__dlpack__, (self,), *args)
+            args = (self,)
+            kwargs = {
+                "stream": stream,
+                "max_version": max_version,
+                "dl_device": dl_device,
+                "copy": copy,
+            }
+            return handle_torch_function(Tensor.__dlpack__, (self,), *args, **kwargs)
 
         # DLPack capsules can't capture all of PyTorch's semantics,
         # so we prohibit exporting tensors that would lose their properties like
         # requires_grad and having the conjugate bit set.
         if self.requires_grad:
-            raise RuntimeError(
-                "Can't export tensors that require gradient, use tensor.detach()"
-            )
+            raise BufferError("Can't export tensors that require gradient, use tensor.detach()")
         if self.is_conj():
-            raise RuntimeError("Can't export tensors with the conjugate bit set")
+            raise BufferError("Can't export tensors with the conjugate bit set")
         if self.layout != torch.strided:
-            raise RuntimeError(
-                "Can't export tensors with layout other than torch.strided"
+            raise BufferError("Can't export tensors with layout other than torch.strided")
+        if self.device.type == "cuda" and self.device != torch.cuda.current_device():
+            raise BufferError(
+                "Can't export tensors on a different CUDA device. "
+                f"Expected: {self.device}. "
+                f"Current device: {torch.cuda.current_device()}."
             )
 
         if stream is not None and type(stream) is not int:
             # Stream pointers in CUDA/ROCm are uniquely numbered and can
             # be retrieved from their integer value.
             raise TypeError("stream must be ``int`` or ``none``")
-        elif stream != -1:
-            if self.device.type == "cuda":
-                # NB: This logic handles the special case values for default
-                # streams and must be kept in sync with from_dlpack in
-                # torch/utils/dlpack.py
-                is_rocm = torch.version.hip is not None
-                is_cuda = not is_rocm
+        elif self.device.type == "cuda" and stream != -1:
+            # NB: This logic handles the special case values for default
+            # streams and must be kept in sync with from_dlpack in
+            # torch/utils/dlpack.py
+            is_rocm = torch.version.hip is not None
+            is_cuda = not is_rocm
 
-                if (
-                    stream is None
-                    or (is_rocm and stream == 0)
-                    or (is_cuda and stream == 1)
-                ):
-                    stream = torch.cuda.default_stream()
-                else:
-                    if is_cuda and stream == 2:
-                        raise BufferError("per-thread default stream is not supported.")
+            if (
+                stream is None
+                or (is_rocm and stream == 0)
+                or (is_cuda and stream == 1)
+            ):
+                stream = torch.cuda.default_stream()
+            else:
+                if is_cuda and stream == 2:
+                    raise BufferError("per-thread default stream is not supported.")
 
-                    assert is_cuda or (is_rocm and stream not in (1, 2)), (
-                        f"unsupported stream {stream} for ROCm."
-                    )
+                device_str = "CUDA" if is_cuda else "ROCm"
+                assert (is_cuda and stream != 0) or (is_rocm and stream not in (1, 2)), (
+                    f"unsupported stream on {device_str}: {stream}."
+                )
 
-                    stream = torch.cuda.ExternalStream(stream)
+                stream = torch.cuda.ExternalStream(stream)
 
-                # Only synchronize on different streams
-                current_stream = torch.cuda.current_stream()
-                if stream != current_stream:
-                    event = torch.cuda.Event()
-                    event.record(current_stream)
-                    stream.wait_event(event)
+            # Only synchronize on different streams
+            current_stream = torch.cuda.current_stream()
+            if stream != current_stream:
+                event = torch.cuda.Event()
+                event.record(current_stream)
+                stream.wait_event(event)
+        elif self.device.type == "cpu":
+            assert stream is None, "stream should be None on cpu."
+
 
         if self.device.type == "xla":
             import torch_xla

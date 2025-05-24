@@ -3,6 +3,7 @@
 import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast,
     dtypes,
     instantiate_device_type_tests,
     onlyCPU,
@@ -171,7 +172,7 @@ class TestTorchDlPack(TestCase):
         # in the current stream to make sure that it was correctly populated.
         with torch.cuda.stream(stream_a):
             x = make_tensor((5,), dtype=dtype, device=device) + 1
-            z = torch.from_dlpack(x.__dlpack__(stream_b.cuda_stream))
+            z = torch.from_dlpack(x.__dlpack__(stream=stream_b.cuda_stream))
             stream_a.synchronize()
         stream_b.synchronize()
         self.assertEqual(z, x)
@@ -208,7 +209,7 @@ class TestTorchDlPack(TestCase):
                     assert stream == 1
                 else:
                     assert stream == 0
-                capsule = self.tensor.__dlpack__(stream)
+                capsule = self.tensor.__dlpack__(stream=stream)
                 return capsule
 
         # CUDA-based tests runs on non-default streams
@@ -231,7 +232,7 @@ class TestTorchDlPack(TestCase):
             x = torch.zeros(1, device=device)
             torch.cuda._sleep(2**20)
             self.assertTrue(torch.cuda.default_stream().query())
-            x.__dlpack__(1)
+            x.__dlpack__(stream=1)
         # check that the default stream has work (a pending cudaStreamWaitEvent)
         self.assertFalse(torch.cuda.default_stream().query())
 
@@ -253,20 +254,48 @@ class TestTorchDlPack(TestCase):
         with self.assertRaisesRegex(
             BufferError, "per-thread default stream is not supported"
         ):
-            torch.from_dlpack(x.__dlpack__(stream=2))
+            x.__dlpack__(stream=2)
 
     @skipMeta
     @onlyCUDA
     @skipCUDAIfNotRocm
-    def test_dlpack_invalid_streams(self, device):
+    def test_dlpack_invalid_rocm_streams(self, device):
         # Test that we correctly raise errors on unsupported ROCm streams.
         def test(x, stream):
-            with self.assertRaisesRegex(BufferError, r"unsupported stream \d for ROCm"):
-                torch.from_dlpack(x.__dlpack__(stream=stream))
+            with self.assertRaisesRegex(AssertionError, r"unsupported stream on ROCm: \d"):
+                x.__dlpack__(stream=stream)
 
         x = make_tensor((5,), dtype=torch.float32, device=device)
         test(x, stream=1)
         test(x, stream=2)
+
+    @skipMeta
+    @onlyCUDA
+    @skipCUDAIfRocm
+    def test_dlpack_invalid_cuda_streams(self, device):
+        x = make_tensor((5,), dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(AssertionError, r"unsupported stream on CUDA: \d"):
+            x.__dlpack__(stream=0)
+
+    @skipMeta
+    def test_dlpack_invalid_cpu_stream(self):
+        x = make_tensor((5,), dtype=torch.float32, device="cpu")
+        with self.assertRaisesRegex(AssertionError, r"stream should be None on cpu."):
+            x.__dlpack__(stream=0)
+
+    @skipMeta
+    @onlyCUDA
+    @deviceCountAtLeast(2)
+    def test_dlpack_tensor_on_different_device(self, devices):
+        dev0, dev1 = devices[:2]
+
+        with torch.device(dev0):
+            x = make_tensor((5,), dtype=torch.float32, device=dev0)
+
+        with self.assertRaisesRegex(BufferError, r"Can't export tensors on a different CUDA device"):
+            with torch.device(dev1):
+                x.__dlpack__()
+
 
     # TODO: add interchange tests once NumPy 1.22 (dlpack support) is required
     @skipMeta
@@ -317,9 +346,19 @@ class TestTorchDlPack(TestCase):
     @skipIfTorchDynamo("__dlpack__ doesn't work with dynamo")
     @onlyNativeDeviceTypes
     def test_max_version(self, device):
+        def capsule_name(kwargs):
+            is_versioned = "max_version" in kwargs and kwargs["max_version"][0] >= 1
+            return "dltensor_versioned" if is_versioned(kwargs) else "dltensor"
+
         def test(device, **kwargs):
             inp = make_tensor((5,), dtype=torch.float32, device=device)
-            out = torch.from_dlpack(inp.__dlpack__(**kwargs))
+
+            # Make sure we are actually using the (un)versioned DLPack tensor, based on the
+            # informed keyword arguments.
+            capsule = inp.__dlpack__(**kwargs)
+            self.assertRegex(str(capsule), f"""capsule object "{capsule_name(kwargs)}" at""")
+
+            out = torch.from_dlpack(capsule)
             self.assertEqual(inp, out)
 
         # Use the DLPack 0.X version implementation, since max_version=None.
@@ -363,9 +402,7 @@ class TestTorchDlPack(TestCase):
         # Transform the NumPy array back using DLPack.
         res = from_dlpack(t_arr)
 
-        self.assertEqual(t, res.cpu())
-        # If device is CPU (same as our original tensor), then they
-        # should alias each other.
+        self.assertEqual(t, res)
         self.assertEqual(t.data_ptr(), res.data_ptr())
 
     def _test_from_dlpack(self, device, out_device=None, copy=None):

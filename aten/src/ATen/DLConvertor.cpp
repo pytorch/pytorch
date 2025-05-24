@@ -404,17 +404,17 @@ Tensor maybeCopyTensor(
     if (device != data.device()) {
       TORCH_CHECK_VALUE(
           !force_move,
-          "cannot move tensor from ",
+          "cannot move (i.e. copy=False) tensor from ",
           data.device(),
           " to ",
           device,
-          " without copying. Set copy=True is needed.");
+          " without copying.");
       return data.to(device);
     }
   }
 
   if (force_copy) {
-    return data.detach().clone();
+    return data.clone();
   }
 
   return data;
