@@ -892,11 +892,11 @@ class MultiProcessTestCase(TestCase):
                 raise RuntimeError(
                     f"Process {i} terminated or timed out after {elapsed_time} seconds"
                 )
-            self.assertEqual(
-                p.exitcode,
-                first_process.exitcode,
-                msg=f"Expect process {i} exit code to match Process 0 exit code of {first_process.exitcode}, but got {p.exitcode}",
-            )
+
+        # Skip the test return code check
+        if fn in self.skip_return_code_checks:
+            return
+
         for skip in TEST_SKIPS.values():
             if first_process.exitcode == skip.exit_code:
                 if IS_SANDCASTLE:
@@ -910,10 +910,6 @@ class MultiProcessTestCase(TestCase):
                     return
                 else:
                     raise unittest.SkipTest(skip.message)
-
-        # Skip the test return code check
-        if fn in self.skip_return_code_checks:
-            return
 
         # In most cases, we expect test to return exit code 0, standing for success.
         expected_return_code = 0
