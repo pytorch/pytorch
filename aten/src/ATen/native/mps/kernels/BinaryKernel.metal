@@ -260,7 +260,6 @@ struct fmod_functor {
   }
 };
 
-
 // Some helper defines
 #if __METAL_VERSION__ >= 310
 #define _METAL_310_PLUS(x) x
