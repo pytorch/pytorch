@@ -36,13 +36,22 @@ UNITS = {
 }
 PERF_OVER_ATEN_STR: str = "perf_over_aten (%)"
 
-OP_NAMES = ["mm"]
+OP_NAMES = [
+    "mm",
+    "addmm",
+    "bmm",
+]
 
 SHAPES = [
     # M, N, K
     (1024, 1024, 1024),
     (2048, 2048, 2048),
     (8192, 8192, 8192),
+]
+
+BATCH_SIZES = [
+    # For non-bmm testing, still need to specify something
+    8,
 ]
 
 DTYPES = [
@@ -59,10 +68,9 @@ ENABLE_PERSISTENT_TMA_MATMULS = [
 # cutlass knobs
 CUTLASS_INSTANTIATION_LEVELS = [
     "0",
-    "1111",
-    "2222",
-    # not ready yet
-    # "3333",
+    # "1111",
+    # "2222",
+    "3333",
 ]
 
 
@@ -137,12 +145,18 @@ class ExperimentGroupConfig:
     op_name: str
     shape: tuple[int, int, int]
     dtype: torch.dtype
+    batch_size: int
 
     experiments: list[ExperimentConfig] = field(default_factory=list)
 
     def name(self) -> str:
         M, N, K = self.shape
-        sizes = f"({M}x{K}, {K}x{N})"
+        B = self.batch_size
+        sizes = (
+            f"(BS: {B}, {M}x{K}, {K}x{N})"
+            if self.op_name == "bmm"
+            else f"({M}x{K}, {K}x{N})"
+        )
         return f"{self.op_name} {sizes} {self.dtype}"
 
 
@@ -164,17 +178,26 @@ class ExperimentGroup:
 
 def get_inputs(
     config: ExperimentGroupConfig,
-) -> tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+) -> tuple[torch.Tensor, ...]:
     op_name = config.op_name
     M, N, K = config.shape
+    batch_size = config.batch_size
     dtype = config.dtype
     device = torch.device("cuda")
 
     if op_name == "mm":
         A = torch.randn(M, K, dtype=dtype, device=device)
         B = torch.randn(N, K, dtype=dtype, device=device).t()
-        C = None
-        return A, B, C
+        return A, B
+    elif op_name == "addmm":
+        A = torch.randn(M, K, dtype=dtype, device=device)
+        B = torch.randn(N, K, dtype=dtype, device=device).t()
+        C = torch.randn(N, dtype=dtype, device=device)
+        return C, A, B
+    elif op_name == "bmm":
+        A = torch.randn(batch_size, M, K, dtype=dtype, device=device)
+        B = torch.randn(batch_size, N, K, dtype=dtype, device=device).permute(0, 2, 1)
+        return A, B
     else:
         raise ValueError(f"Unknown op {op_name}")
 
@@ -182,7 +205,7 @@ def get_inputs(
 def run_single_experiment_group(
     group_config: ExperimentGroupConfig,
 ) -> list[ExperimentResults]:
-    A, B, C = get_inputs(group_config)
+    inputs = get_inputs(group_config)
     op = getattr(torch, group_config.op_name)
 
     results = []
@@ -194,9 +217,14 @@ def run_single_experiment_group(
 
         start_time = time.perf_counter()
         try:
-            _ = compiled_op(A, B)
+            _ = compiled_op(*inputs)
         except Exception as e:
-            log.warning(f"Benchmark config {config.name()} failed: {e}")  # noqa: G004
+            import traceback
+
+            log.warning(
+                f"Benchmark config {config.name()} failed: {e}, "  # noqa: G004
+                f"traceback: {traceback.format_exc()}"
+            )
             results.append(
                 ExperimentResults(
                     name=config.name(),
@@ -209,8 +237,7 @@ def run_single_experiment_group(
 
         forward_time = benchmark_torch_function_in_microseconds(
             compiled_op,
-            A,
-            B,
+            *inputs,
         )
 
         results.append(
@@ -230,13 +257,20 @@ def generate_experiment_groups(
     dtypes: list[torch.dtype],
     enable_persistent_tma_matmuls: list[bool],
     cutlass_instantiation_levels: list[str],
+    batch_sizes: list[int],
 ) -> list[ExperimentGroupConfig]:
     groups = []
-    for op_name, shape, dtype in itertools.product(op_names, shapes, dtypes):
+    for (
+        op_name,
+        shape,
+        dtype,
+        batch_size,
+    ) in itertools.product(op_names, shapes, dtypes, batch_sizes):
         group = ExperimentGroupConfig(
             op_name=op_name,
             shape=shape,
             dtype=dtype,
+            batch_size=batch_size,
         )
         experiments = generate_experiment_configs(
             enable_persistent_tma_matmuls, cutlass_instantiation_levels
@@ -304,22 +338,25 @@ def calculate_table_data(results: list[ExperimentResults]) -> dict:
     return table_data
 
 
-def print_results(experiment_groups: list[ExperimentGroup]):
+def get_printable_results(experiment_groups: list[ExperimentGroup]) -> list[str]:
     edge_over_aten = defaultdict(list)
+    output = []
+
     for experiment_group in experiment_groups:
         group_config_name = experiment_group.config.name()
-        print(f"\nExperiment group: {group_config_name}")
+        output.append(f"\nExperiment group: {group_config_name}")
 
         table_data = calculate_table_data(experiment_group.results)
         for name, edge in zip(table_data["name"], table_data[PERF_OVER_ATEN_STR]):
             edge_over_aten[name].append(edge)
-        print(tabulate(table_data, headers="keys", tablefmt="pretty", floatfmt=".3f"))
+        output.append(
+            tabulate(table_data, headers="keys", tablefmt="pretty", floatfmt=".3f")
+        )
 
     if "aten" in edge_over_aten:
-        print("\nAverage edge over aten (max(-edge, 0), higher is better):")
+        output.append("\nAverage edge over aten (max(-edge, 0), higher is better):")
         for name in edge_over_aten:
             if name != "aten":
-                # calculate average edge over aten, but need to exclude inf
                 values = [
                     max(-v, 0.0)
                     for v in edge_over_aten[name]
@@ -327,28 +364,38 @@ def print_results(experiment_groups: list[ExperimentGroup]):
                 ]
                 valid_count = len(values)
                 average_edge = sum(values) / valid_count if values else "No valid data"
-                print(f"{name}: {average_edge} (from {valid_count} valid values)")
+                output.append(
+                    f"{name}: {average_edge} (from {valid_count} valid values)"
+                )
+        output.append("\n")
+
+    return "\n".join(output)
 
 
 def main():
     seed = 123
     torch.manual_seed(seed)
     results = []
-    for group_config in tqdm(
+    log.info("Starting benchmarking...")
+    configs = list(
         generate_experiment_groups(
             OP_NAMES,
             SHAPES,
             DTYPES,
             ENABLE_PERSISTENT_TMA_MATMULS,
             CUTLASS_INSTANTIATION_LEVELS,
+            BATCH_SIZES,
         )
-    ):
-        group_results = run_single_experiment_group(group_config)
+    )
+    for i, group_config in enumerate(tqdm(configs)):
+        group_results = run_single_experiment_group(group_config)  # noqa: G004
         results.append(
             ExperimentGroup(config=group_config, results=group_results),
         )
-
-    print_results(results)
+        log.info(f"\nINTERMEDIATE results: {i}/{len(configs)}")  # noqa: G004
+        log.info(get_printable_results(results))
+    print("\nFINAL results...")
+    print(get_printable_results(results))
 
 
 if __name__ == "__main__":

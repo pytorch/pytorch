@@ -52,14 +52,21 @@ def replace_params_with_constants(
         in (MutationType.MUTATED_IN_GRAPH, MutationType.MUTATED_OUT_GRAPH)
     ]
 
+    static_indices_new = []
+    static_indices_offset = 0
     for i, (real_input, node) in enumerate(zip(flat_params, fake_inp_nodes)):
         if i in mutated_inps or i in aliased_input_args:
             preserved_arg_indices.append(i)
-            continue
-        replace_node_with_constant(gm, node, real_input)
+            if i in fw_metadata.static_input_indices:
+                new_static_index = i - static_indices_offset
+                static_indices_new.append(new_static_index)
+        else:
+            replace_node_with_constant(gm, node, real_input)
+            static_indices_offset += 1
     # add on non param inputs
     preserved_arg_indices.extend(range(len(flat_params), len(params)))
     # is this necessary ?
+    fw_metadata.static_input_indices = static_indices_new
     gm.recompile()
     return preserved_arg_indices
 

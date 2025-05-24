@@ -175,9 +175,10 @@ TORCH_META_FUNC(gather)
   auto is_index_empty = index.numel() == 0;
   if (!is_index_empty) {
     TORCH_CHECK(
-        index.scalar_type() == at::ScalarType::Long,
+        index.scalar_type() == ScalarType::Long ||
+            index.scalar_type() == ScalarType::Int,
         "gather",
-        "(): Expected dtype int64 for index");
+        "(): Expected dtype int32/int64 for index");
   }
   if (is_index_empty)
     return;
