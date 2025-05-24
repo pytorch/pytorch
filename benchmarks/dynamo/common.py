@@ -3603,6 +3603,17 @@ def run(runner, args, original_dir=None):
             "sam_fast",
             "resnet50_quantized_qat",
             "mobilenet_v2_quantized_qat",
+            "detectron2_maskrcnn",
+            "detectron2_maskrcnn_r_101_c4",
+            "detectron2_maskrcnn_r_101_fpn",
+            "detectron2_maskrcnn_r_50_c4",
+            "detectron2_maskrcnn_r_50_fpn",
+            "detectron2_fasterrcnn_r_101_c4",
+            "detectron2_fasterrcnn_r_101_dc5",
+            "detectron2_fasterrcnn_r_101_fpn",
+            "detectron2_fasterrcnn_r_50_c4",
+            "detectron2_fasterrcnn_r_50_dc5",
+            "detectron2_fasterrcnn_r_50_fpn",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
