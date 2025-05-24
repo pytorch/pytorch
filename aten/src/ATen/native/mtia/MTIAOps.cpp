@@ -1,5 +1,3 @@
-// (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
-
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/native/mtia/MTIAOps.h>
