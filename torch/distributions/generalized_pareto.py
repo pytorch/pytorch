@@ -1,11 +1,13 @@
-# mypy: allow-untyped-defs
 import math
-from numbers import Number, Real
+from typing import Optional, Union
+from typing_extensions import Self
 
 import torch
-from torch import inf, nan
+from torch import inf, nan, Tensor
 from torch.distributions import constraints, Distribution
+from torch.distributions.constraints import Constraint
 from torch.distributions.utils import broadcast_all
+from torch.types import _Number, _size
 
 
 __all__ = ["GeneralizedPareto"]
@@ -35,28 +37,34 @@ class GeneralizedPareto(Distribution):
         concentration (float or Tensor): Concentration parameter of the distribution
     """
 
-    arg_constraints = {
+    arg_constraints: dict[str, Constraint] = {
         "loc": constraints.real,
         "scale": constraints.positive,
         "concentration": constraints.real,
     }
-    has_rsample = True
+    has_rsample: bool = True
 
-    def __init__(self, loc, scale, concentration, validate_args=None):
+    def __init__(
+        self,
+        loc: Union[float, Tensor],
+        scale: Union[float, Tensor],
+        concentration: Union[float, Tensor],
+        validate_args: Optional[bool] = None,
+    ):
         self.loc, self.scale, self.concentration = broadcast_all(
             loc, scale, concentration
         )
         if (
-            isinstance(loc, Number)
-            and isinstance(scale, Number)
-            and isinstance(concentration, Number)
+            isinstance(loc, _Number)
+            and isinstance(scale, _Number)
+            and isinstance(concentration, _Number)
         ):
             batch_shape = torch.Size()
         else:
             batch_shape = self.loc.size()
         super().__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(GeneralizedPareto, _instance)
         batch_shape = torch.Size(batch_shape)
         new.loc = self.loc.expand(batch_shape)
@@ -66,12 +74,12 @@ class GeneralizedPareto(Distribution):
         new._validate_args = self._validate_args
         return new
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         u = torch.rand(shape, dtype=self.loc.dtype, device=self.loc.device)
         return self.icdf(u)
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         z = self._z(value)
@@ -82,11 +90,13 @@ class GeneralizedPareto(Distribution):
         y = 1 / safe_conc + torch.ones_like(z)
         where_nonzero = torch.where(y == 0, y, y * torch.log1p(safe_conc * z))
         log_scale = (
-            math.log(self.scale) if isinstance(self.scale, Real) else self.scale.log()
+            math.log(self.scale)
+            if isinstance(self.scale, _Number)
+            else self.scale.log()
         )
         return -log_scale - torch.where(eq_zero, z, where_nonzero)
 
-    def log_survival_function(self, value):
+    def log_survival_function(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         z = self._z(value)
@@ -97,13 +107,13 @@ class GeneralizedPareto(Distribution):
         where_nonzero = -torch.log1p(safe_conc * z) / safe_conc
         return torch.where(eq_zero, -z, where_nonzero)
 
-    def log_cdf(self, value):
+    def log_cdf(self, value: Tensor) -> Tensor:
         return torch.log1p(-torch.exp(self.log_survival_function(value)))
 
-    def cdf(self, value):
+    def cdf(self, value: Tensor) -> Tensor:
         return torch.exp(self.log_cdf(value))
 
-    def icdf(self, value):
+    def icdf(self, value: Tensor) -> Tensor:
         loc = self.loc
         scale = self.scale
         concentration = self.concentration
@@ -114,11 +124,11 @@ class GeneralizedPareto(Distribution):
         where_zero = loc - scale * logu
         return torch.where(eq_zero, where_zero, where_nonzero)
 
-    def _z(self, x):
+    def _z(self, x: Tensor) -> Tensor:
         return (x - self.loc) / self.scale
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         concentration = self.concentration
         valid = concentration < 1
         safe_conc = torch.where(valid, concentration, 0.5)
@@ -126,23 +136,23 @@ class GeneralizedPareto(Distribution):
         return torch.where(valid, result, nan)
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         concentration = self.concentration
         valid = concentration < 0.5
         safe_conc = torch.where(valid, concentration, 0.25)
         result = self.scale**2 / ((1 - safe_conc) ** 2 * (1 - 2 * safe_conc))
         return torch.where(valid, result, nan)
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         ans = torch.log(self.scale) + self.concentration + 1
         return torch.broadcast_to(ans, self._batch_shape)
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return self.loc
 
     @constraints.dependent_property(is_discrete=False, event_dim=0)
-    def support(self):
+    def support(self) -> Constraint:
         lower = self.loc
         upper = torch.where(
             self.concentration < 0, lower - self.scale / self.concentration, inf
