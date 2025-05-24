@@ -279,6 +279,31 @@ class TestLazyCloneDeviceType(TestCase):
         self.assertEqual(a, c)
         self.assertEqual(b, c)
 
+    @skipCUDAIf(True, "Does not work for CUDA")
+    @skipXLA
+    def test_to_compile(self, device):
+        pin_memory = torch.device(device).type == "mps"
+
+        @torch.compile
+        def fn(x):
+            x = x + 1
+            x = x + 2
+            x = x.to(device=device)
+            x = x + 3
+            x = x + 4
+            x = x.cpu()
+            x = x + 5
+            x = x + 6
+            x = x.to(device=device)
+            x = x + 7
+            x = x + 8
+            x = x.cpu()
+            x = x + 9
+            x = x + 10
+            return x
+
+        fn(torch.randn([2, 2, 10], pin_memory=pin_memory))
+
 
 instantiate_device_type_tests(TestLazyCloneDeviceType, globals(), allow_mps=True)
 

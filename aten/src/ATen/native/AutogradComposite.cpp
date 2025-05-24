@@ -11,6 +11,7 @@
 #include <ATen/ops/_has_same_storage_numel_native.h>
 #include <ATen/ops/_make_dual_native.h>
 #include <ATen/ops/_new_zeros_with_same_feature_meta_native.h>
+#include <ATen/ops/zeros_like.h>
 #include <ATen/ops/_unpack_dual_native.h>
 #include <ATen/ops/_lazy_clone_native.h>
 #include <ATen/ops/alias.h>
@@ -96,6 +97,10 @@ bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
 Tensor _lazy_clone(Tensor const& self, std::optional<c10::Device> device_opt) {
   c10::StorageImpl* self_storage = self.storage().unsafeGetStorageImpl();
   c10::intrusive_ptr<c10::StorageImpl> storage = nullptr;
+
+  if (src_device_type == c10::kMeta) {
+    return zeros_like(self, self.options());
+  }
 
   if (device_opt.has_value()) {
     c10::Device src_device = self.device();
