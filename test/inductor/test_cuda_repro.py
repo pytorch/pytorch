@@ -581,7 +581,7 @@ class CudaReproTests(TestCase):
         """
         This UT tests autotune on an inplace kernel. The autotune should not contaminate
         the input buffers when tuning with multiple configs. For more details, refer to
-        https://github.com/openai/triton/issues/781
+        https://github.com/triton-lang/triton/issues/781
         https://github.com/pytorch/torchdynamo/issues/1670
         """
         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
@@ -1587,7 +1587,7 @@ class CudaReproTests(TestCase):
 
     @config.patch("triton.use_block_ptr", True)
     def test_selecsls42b_misaligned_address(self):
-        # https://github.com/openai/triton/issues/2836
+        # https://github.com/triton-lang/triton/issues/2836
 
         @torch.compile(fullgraph=True)
         def fn(arg207_1, arg208_1, convert_element_type_40, expand, full, mul_3):
