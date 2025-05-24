@@ -73,7 +73,7 @@ void initModule(PyObject* module) {
     return at::accelerator::maybeExchangeDevice(device_index);
   });
 
-  m.def("_accelerator_allocaterInitialized", []() {
+  m.def("_accelerator_allocatorInitialized", []() {
     const auto device_type = at::accelerator::getAccelerator(true).value();
     return at::GetDeviceAllocator(device_type)->initialized();
   });
