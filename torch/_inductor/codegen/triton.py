@@ -96,6 +96,7 @@ from .triton_utils import (
 )
 from .wrapper import SymbolicCallArg
 
+import traceback
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -2524,9 +2525,24 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 {result_var} = {self.reduction_resize(f"{result_var}_idx")}
                 """
             )
+        
+        #if reduction_type in ('max') and reduction_type in ('argmax'):
+        #    reduction_type = "max_argmax"
+        TritonKernel.current_reductions.append((src_dtype, reduction_type, value))
 
-        cache_key = (src_dtype, reduction_type, value)
+
+        reduction_type_search = reduction_type
+        reduction_analog_map = {
+            "argmax":"max"
+        }
+        if reduction_type_search in list(reduction_analog_map.keys()):
+              reduction_type =   reduction_analog_map[reduction_type_search]
+
+
+
+        cache_key = (src_dtype, reduction_type_search, value)
         if cache_key in self.cse.reduction_cache:
+
             return self.cse.reduction_cache[cache_key]
 
         acc_type = triton_acc_type(src_dtype)
@@ -2570,7 +2586,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         dtype=accumulator_dtype,
                     )
                 )
+
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
+
                 final_argreduce(
                     self.compute, result_var, masked_value, accumulator_index
                 )
