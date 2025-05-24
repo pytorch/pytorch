@@ -50,7 +50,7 @@ def _display_stats_tabular(headers: list[str], table_data: list[list[Any]]) -> N
 
 
 # Based on:
-# https://github.com/fairinternal/xformers/blob/0ded5697a2ea15711ce45131002d04e72053cc6d/xformers/checkpoint.py#L62
+# https://github.com/facebookresearch/xformers/blob/main/xformers/checkpoint.py#L71
 @dataclass
 class _SACMetadata:
     """
@@ -358,13 +358,11 @@ class SACEstimator(TorchDispatchMode):
         output_ids = tuple(hash(st) for st in out_storages)
         # 4. If the function is not inplace, return
         if not is_inplace(func):
-            return curr_idx, output_ids, {mod_fqn: () for mod_fqn in active_mod_fqns}
+            return curr_idx, output_ids, dict.fromkeys(active_mod_fqns, ())
 
         op_idx = curr_idx
         # 5. Initialize the parent op ids of the inplace op for each of the active modules
-        mod_op_parent_idxs: dict[str, int] = {
-            mod_fqn: -1 for mod_fqn in active_mod_fqns
-        }
+        mod_op_parent_idxs: dict[str, int] = dict.fromkeys(active_mod_fqns, -1)
         for i, d in enumerate(self._sac_metadata):
             # 6. Find the first occurence of a tensor corresponding to each module that
             # shares the same storage as the current tensor

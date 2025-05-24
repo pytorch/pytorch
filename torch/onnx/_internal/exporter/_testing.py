@@ -35,7 +35,7 @@ def assert_onnx_program(
         kwargs: The keyword arguments to pass to the program.
             If None, the default example inputs in the ExportedProgram will be used.
         strategy: Assert the capture strategy used to export the program. Values can be
-            class names like "TorchExportStrategy" or "TorchExportNonStrictStrategy" etc.
+            class names like "TorchExportNonStrictStrategy".
             If None, the strategy is not asserted.
     """
     if strategy is not None:

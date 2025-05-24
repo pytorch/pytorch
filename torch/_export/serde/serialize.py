@@ -15,6 +15,7 @@ import traceback
 import typing
 
 from collections import OrderedDict, namedtuple
+from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
@@ -35,9 +36,9 @@ import torch
 import torch.export.exported_program as ep
 from torch._export.verifier import load_verifier
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
-from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
+from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import treespec_dumps, treespec_loads
 from torch.utils._sympy.numbers import int_oo
@@ -572,6 +573,20 @@ class GraphModuleSerializer(metaclass=Final):
                 # AOTI compiled graph module in node.args[0] is stateful, and will fail the verifier check
                 # Skip serializing original_gm as a workaround
                 serializable_args[1] = None
+
+                serializable_weight_nodes = []
+                if serializable_args[2] is not None and isinstance(serializable_args[2], Iterable):
+                    for weight_node in serializable_args[2]:
+                        # skip passing custom obj into the weight arg as an hack
+                        # The schema of weight input is a list of Tensors.
+                        # Downstream runtime is not actively consuming the weighs arg for anything meaningful.
+                        if (
+                            isinstance(weight_node, torch.fx.Node)
+                            and isinstance(weight_node.meta.get("val", None), ep.CustomObjArgument)
+                        ):
+                            continue
+                        serializable_weight_nodes.append(weight_node)
+                    serializable_args[2] = serializable_weight_nodes
 
                 def serialize_tensor_list_output(node):
                     meta_val = node.meta.get("val", None)
@@ -1610,7 +1625,7 @@ class GraphModuleDeserializer(metaclass=Final):
         module_call_graph: list[ep.ModuleCallEntry]
         names_to_symbols: dict[str, sympy.Symbol]
         state_dict: dict[str, Union[torch.Tensor, torch.nn.Parameter]]
-        constants: dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]]
+        constants: dict[str, _ConstantAttributeType]
         example_inputs: Optional[tuple[tuple[torch.Tensor, ...], dict[str, Any]]]
 
     def __init__(self) -> None:
@@ -1626,11 +1641,13 @@ class GraphModuleDeserializer(metaclass=Final):
             self.module,
             self.serialized_name_to_node,
             self.serialized_name_to_meta,
+            self.unbacked_symbols
         )
         self.graph = torch.fx.Graph()
         self.module = torch.nn.Module()
         self.serialized_name_to_node = {}
         self.serialized_name_to_meta = {}
+        self.unbacked_symbols: set[sympy.Symbol] = set()
         try:
             yield
         finally:
@@ -1639,6 +1656,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 self.module,
                 self.serialized_name_to_node,
                 self.serialized_name_to_meta,
+                self.unbacked_symbols
             ) = saved
 
     def deserialize_extension_operator(self, serialized_target: str):
@@ -2169,7 +2187,7 @@ class GraphModuleDeserializer(metaclass=Final):
             self.symbol_name_to_range = {}
             # we also need to bump unbacked sym[float,int] counters in the
             # shape env to accommodate unbacked symbols in the exported program
-            self.unbacked_symbols: set[sympy.Symbol] = set()
+            self.unbacked_symbols = set()
             count_unbacked_symfloat, count_unbacked_symint = -1, -1
             unbacked_symfloat_prefix, unbacked_symint_prefix = (
                 prefix_str[t] for t in [SymT.UNBACKED_FLOAT, SymT.UNBACKED_INT]
@@ -2407,26 +2425,33 @@ class GraphModuleDeserializer(metaclass=Final):
         # Check single value return
         if len(serialized_node.outputs) == 0:
             return
+
         if (
             len(serialized_node.outputs) == 1
-            and serialized_node.outputs[0].type == "as_tensor"
+            and "torch.ops.higher_order" in serialized_node.target
+            and not getattr(serialized_node, "is_hop_single_tensor_return", True)
         ):
-            # If it is a HOP node and it returns a tuple containing a single element
-            # we manually insert a getitem node to ensure the graph is consistent
-            # For BC, getattr() will return True if `is_single_tensor_return` doens't exist
-            # as prior to adding this field, it is guaranteed to have a single tensor return
-            # when the serialized_node has length=1 outputs and of type `as_tensor`.
-            if (
-                "torch.ops.higher_order" in serialized_node.target
-                and not getattr(serialized_node, "is_hop_single_tensor_return", True)
-            ):
+            def _deserialize_hop_with_single_return(serialized_node, fx_node):
                 meta_val: list[Any] = []
-                arg = serialized_node.outputs[0].as_tensor
+                arg = None
+                if serialized_node.outputs[0].type == "as_tensor":
+                    arg = serialized_node.outputs[0].as_tensor
+                elif isinstance(serialized_node.outputs[0].value, (SymIntArgument, SymBoolArgument, SymFloatArgument)):
+                    arg = serialized_node.outputs[0].value
                 deserialized_metadata = self.deserialize_metadata(serialized_node.metadata)
+                assert arg is not None
                 self.generate_getitem(meta_val, fx_node, arg, 0, deserialized_metadata)
                 fx_node.meta["val"] = tuple(meta_val)
                 self.serialized_name_to_node[fx_node.name] = fx_node
                 return
+
+            return _deserialize_hop_with_single_return(serialized_node, fx_node)
+
+
+        if (
+            len(serialized_node.outputs) == 1
+            and serialized_node.outputs[0].type == "as_tensor"
+        ):
 
             self.sync_fx_node(serialized_node.outputs[0].as_tensor.name, fx_node)
             return
