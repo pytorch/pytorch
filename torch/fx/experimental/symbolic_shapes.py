@@ -6745,6 +6745,9 @@ class ShapeEnv:
 
         # store LOC
         locs = co_lines[frame.f_lineno - offset : last_lineno + 1 - offset]
+        if not locs:
+            return _FrameLocalResult()
+
         indent = len(locs[0]) - len(locs[0].lstrip())
         frame_loc = "".join([loc[indent:] for loc in locs]).strip()  # type: ignore[assignment]
         return _FrameLocalResult(
