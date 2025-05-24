@@ -4,6 +4,7 @@ import torch
 import enum
 
 from torch._C import _to_dlpack as to_dlpack
+from torch.types import Device as _Device
 
 __all__ = [
     "DLDeviceType",
@@ -54,7 +55,12 @@ The DLPack capsule shares the tensor's memory.
 
 # TODO: add a typing.Protocol to be able to tell Mypy that only objects with
 # __dlpack__ and __dlpack_device__ methods are accepted.
-def from_dlpack(ext_tensor: Any, device: Any = None, copy: Optional[bool] = None) -> 'torch.Tensor':
+def from_dlpack(
+    ext_tensor: Any,
+    *,
+    device: Optional[_Device] = None,
+    copy: Optional[bool] = None
+) -> 'torch.Tensor':
     """from_dlpack(ext_tensor) -> Tensor
 
     Converts a tensor from an external library into a ``torch.Tensor``.
@@ -75,6 +81,13 @@ def from_dlpack(ext_tensor: Any, device: Any = None, copy: Optional[bool] = None
             method). Otherwise ``ext_tensor`` may be a DLPack capsule, which is
             an opaque ``PyCapsule`` instance, typically produced by a
             ``to_dlpack`` function or method.
+
+        device (torch.device or str or None): An optional PyTorch device
+            specifying where to place the new tensor. If None (default), the
+            new tensor will be on the same device as ``ext_tensor``. 
+
+        copy (bool or None): An optional boolean indicating whether or not to copy
+            ``self``. If None, PyTorch will copy only if necessary.
 
     Examples::
 
@@ -106,10 +119,13 @@ def from_dlpack(ext_tensor: Any, device: Any = None, copy: Optional[bool] = None
 
     """
     if hasattr(ext_tensor, '__dlpack__'):
+        # Only populate kwargs if any of the optional arguments are, in fact, not None. Otherwise,
+        # leave them out, since we might end up falling back to no-extra-kwargs __dlpack__ call.
         kwargs: dict[str, Any] = {}
-
         kwargs["max_version"] = (1, 0)
-        kwargs["copy"] = copy
+
+        if copy is not None:
+            kwargs["copy"] = copy
 
         # Parse the device parameter.
         # At this moment, it can either be a torch.device or a str representing
@@ -121,8 +137,7 @@ def from_dlpack(ext_tensor: Any, device: Any = None, copy: Optional[bool] = None
                 f"from_dlpack: unsupported device type: {type(device)}"
             )
             device = torch._C._torchDeviceToDLDevice(device)
-
-        kwargs["dl_device"] = device
+            kwargs["dl_device"] = device
 
         ext_device = ext_tensor.__dlpack_device__()
         # ext_device is either CUDA or ROCm, we need to pass the current
@@ -144,11 +159,8 @@ def from_dlpack(ext_tensor: Any, device: Any = None, copy: Optional[bool] = None
             # Try running __dlpack__ while specifying `max_version` argument.
             dlpack = ext_tensor.__dlpack__(**kwargs)
         except TypeError:
-            # If that doesn't work, try removing the all the arguments but those
-            # corresponding to DLPack 2022.12 specification.
+            # If that doesn't work, try removing the `max_version` argument.
             kwargs.pop("max_version")
-            kwargs.pop("dl_device")
-            kwargs.pop("copy")
             dlpack = ext_tensor.__dlpack__(**kwargs)
 
     else:
