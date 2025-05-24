@@ -3589,15 +3589,21 @@ class CUDACodeCache:
                                 cmd_parts, stderr=subprocess.STDOUT, env=os.environ
                             )
                     except subprocess.CalledProcessError as error:
-                        error_json = json.dumps(
-                            [cmd_parts, error.output.decode("utf-8")]
+                        cls._record_cuda_compile_error(
+                            error.output.decode("utf-8"),
+                            key,
+                            cmd_parts,
+                            input_path,
+                            output_path,
                         )
-                        cls.cache[key] = CUDACodeCache.CacheEntry(
-                            input_path, output_path, error_json
-                        )
-                        with open(output_path + ".error", "w", encoding="utf-8") as fh:
-                            fh.write(error_json)
                         raise exc.CUDACompileError(cmd_parts, error.output) from error
+                    except Exception as error:
+                        if "COMPILE FAILED WITH" in str(error):
+                            cls._record_cuda_compile_error(
+                                str(error), key, cmd_parts, input_path, output_path
+                            )
+                            raise exc.CUDACompileError(cmd_parts, str(error)) from error
+                        raise error
                     end_time = time()
                     log_duration_msg = f"CUDA Compilation took {end_time - start_time} seconds. Compile command: {cmd}"
                     log.info(log_duration_msg)
@@ -3630,6 +3636,20 @@ class CUDACodeCache:
             source_code, dst_file_ext
         )
         return (DLLWrapper(dst_file_path), hash_key, source_code_path)
+
+    @classmethod
+    def _record_cuda_compile_error(
+        cls,
+        error_str: str,
+        key: str,
+        cmd_parts: list[str],
+        input_path: str,
+        output_path: str,
+    ) -> None:
+        error_json = json.dumps([cmd_parts, error_str])
+        cls.cache[key] = CUDACodeCache.CacheEntry(input_path, output_path, error_json)
+        with open(output_path + ".error", "w", encoding="utf-8") as fh:
+            fh.write(error_json)
 
 
 @clear_on_fresh_inductor_cache
