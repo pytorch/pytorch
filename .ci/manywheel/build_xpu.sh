@@ -24,7 +24,7 @@ source /opt/intel/oneapi/ccl/latest/env/vars.sh
 source /opt/intel/oneapi/mpi/latest/env/vars.sh
 export USE_STATIC_MKL=1
 export USE_ONEMKL=1
-export USE_XCCL=1
+export USE_XCCL=0
 
 WHEELHOUSE_DIR="wheelhousexpu"
 LIBTORCH_HOUSE_DIR="libtorch_housexpu"
