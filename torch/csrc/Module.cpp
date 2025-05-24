@@ -597,12 +597,11 @@ void DLPack_Capsule_Destructor(PyObject* data) {
   // since consuming libraries should rename the capsule according to spec.
   // Note that this cannot set a python error (we checked validity above),
   // so we don't need to handle python error state here.
-  DLManagedTensor* dlMTensor = (DLManagedTensor*)PyCapsule_GetPointer(
-      data, at::DLPackTraits<T>::capsule);
+  T* tensor = (T*) PyCapsule_GetPointer(data, at::DLPackTraits<T>::capsule);
   // the dlMTensor has not been consumed, call deleter ourselves.
   // DLPack spec mentions that deleter may be NULL, but deleter from
   // `at::toDLPack` is never NULL, so no need for an additional check here.
-  dlMTensor->deleter(dlMTensor);
+  tensor->deleter(tensor);
   END_HANDLE_TH_ERRORS_RET()
 }
 
@@ -640,7 +639,7 @@ PyObject* THPModule_toDLPackImpl(
         tensor, at::DLPackTraits<T>::capsule, DLPack_Capsule_Destructor<T>);
   }
 
-  return nullptr;
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -678,8 +677,8 @@ static PyObject* THPModule_torchDeviceToDLDevice(
   auto device = reinterpret_cast<THPDevice*>(data)->device;
   auto dl_device = at::torchDeviceToDLDevice(device);
   auto tuple = PyTuple_New(2);
-  PyTuple_SetItem(tuple, 0, THPUtils_packInt64(dl_device.device_type));
-  PyTuple_SetItem(tuple, 1, THPUtils_packInt64(dl_device.device_id));
+  PyTuple_SET_ITEM(tuple, 0, THPUtils_packInt64(dl_device.device_type));
+  PyTuple_SET_ITEM(tuple, 1, THPUtils_packInt64(dl_device.device_id));
   return tuple;
   END_HANDLE_TH_ERRORS
 }
