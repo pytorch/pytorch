@@ -125,11 +125,13 @@
 // linear algebra function uses that routine
 #if AT_BUILD_WITH_LAPACK()
 
+#ifndef _ARMPL_H  // ArmPL's `cblas.h` pulls in these prototypes.
 // getrf
 extern "C" void zgetrf_(int *m, int *n, std::complex<double> *a, int *lda, int *ipiv, int *info);
 extern "C" void cgetrf_(int *m, int *n, std::complex<float> *a, int *lda, int *ipiv, int *info);
 extern "C" void dgetrf_(int *m, int *n, double *a, int *lda, int *ipiv, int *info);
 extern "C" void sgetrf_(int *m, int *n, float *a, int *lda, int *ipiv, int *info);
+#endif
 
 // potrs
 #if defined(_WIN32) && defined(_M_ARM64)
@@ -165,13 +167,16 @@ static inline void spotrs_(char *uplo, int *n, int *nrhs, float *a, int *lda, fl
 
 #else
 
+#ifndef _ARMPL_H  // ArmPL's `cblas.h` pulls in these prototypes.
 extern "C" void zpotrs_(char *uplo, int *n, int *nrhs, std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb, int *info);
 extern "C" void cpotrs_(char *uplo, int *n, int *nrhs, std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb, int *info);
 extern "C" void dpotrs_(char *uplo, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, int *info);
 extern "C" void spotrs_(char *uplo, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, int *info);
+#endif
 
 #endif
 
+#ifndef _ARMPL_H  // ArmPL's `cblas.h` pulls in these prototypes.
 // potrf
 extern "C" void zpotrf_(char *uplo, int *n, std::complex<double> *a, int *lda, int *info);
 extern "C" void cpotrf_(char *uplo, int *n, std::complex<float> *a, int *lda, int *info);
@@ -317,6 +322,7 @@ extern "C" void zungqr_(int *m, int *n, int *k, std::complex<double> *a, int *ld
 extern "C" void cungqr_(int *m, int *n, int *k, std::complex<float> *a, int *lda, std::complex<float> *tau, std::complex<float> *work, int *lwork, int *info);
 extern "C" void dorgqr_(int *m, int *n, int *k, double *a, int *lda, double *tau, double *work, int *lwork, int *info);
 extern "C" void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
+#endif
 
 // ormqr
 #if defined(_WIN32) && defined(_M_ARM64)
@@ -347,11 +353,14 @@ static inline void sormqr_(char *side, char *trans, int *m, int *n, int *k, floa
     *info = LAPACKE_sormqr_work(LAPACK_COL_MAJOR, *side, *trans, *m, *n, *k, a, *lda, tau, c, *ldc, work, *lwork);
 }
 #else
+#ifndef _ARMPL_H  // ArmPL's `cblas.h` pulls in these prototypes.
 extern "C" void zunmqr_(char *side, char *trans, int *m, int *n, int *k, std::complex<double> *a, int *lda, std::complex<double> *tau, std::complex<double> *c, int *ldc, std::complex<double> *work, int *lwork, int *info);
 extern "C" void cunmqr_(char *side, char *trans, int *m, int *n, int *k, std::complex<float> *a, int *lda, std::complex<float> *tau, std::complex<float> *c, int *ldc, std::complex<float> *work, int *lwork, int *info);
 extern "C" void dormqr_(char *side, char *trans, int *m, int *n, int *k, double *a, int *lda, double *tau, double *c, int *ldc, double *work, int *lwork, int *info);
 extern "C" void sormqr_(char *side, char *trans, int *m, int *n, int *k, float *a, int *lda, float *tau, float *c, int *ldc, float *work, int *lwork, int *info);
 #endif
+#endif
+#ifndef _ARMPL_H  // ArmPL's `cblas.h` pulls in these prototypes.
 // syevd
 extern "C" void zheevd_(char *jobz, char *uplo, int *n, std::complex<double> *a, int *lda, double *w, std::complex<double> *work, int *lwork, double *rwork, int *lrwork, int *iwork, int *liwork, int *info);
 extern "C" void cheevd_(char *jobz, char *uplo, int *n, std::complex<float> *a, int *lda, float *w, std::complex<float> *work, int *lwork, float *rwork, int *lrwork, int *iwork, int *liwork, int *info);
@@ -466,13 +475,16 @@ extern "C" void sgelss_(int *m, int *n, int *nrhs,
     float *s, float *rcond, int *rank,
     float *work, int *lwork, int *info);
 #endif
+#endif
 
 #if AT_BUILD_WITH_BLAS()
 // trsm
+#ifndef _ARMPL_H  // ArmPL's `cblas.h` pulls in these prototypes.
 extern "C" void ztrsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, std::complex<double> *alpha, std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb);
 extern "C" void ctrsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, std::complex<float> *alpha, std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb);
 extern "C" void dtrsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, double *alpha, double *a, int *lda, double *b, int *ldb);
 extern "C" void strsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, float *alpha, float *a, int *lda, float *b, int *ldb);
+#endif
 #endif
 
 namespace at::meta {

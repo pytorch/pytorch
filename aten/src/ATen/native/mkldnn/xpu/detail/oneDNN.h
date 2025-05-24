@@ -156,11 +156,11 @@ void quantized_matmul(
     std::optional<at::Tensor> other, // extra input for binary-post-op
     double other_scale,
     int64_t other_zero_point,
-    const c10::string_view& binary_post_op,
+    const std::string_view& binary_post_op,
     double binary_alpha,
-    const c10::string_view& unary_post_op,
+    const std::string_view& unary_post_op,
     torch::List<std::optional<at::Scalar>>& unary_post_op_args,
-    c10::string_view unary_post_op_algorithm,
+    std::string_view unary_post_op_algorithm,
     bool m2_trnas);
 
 void gpu_float_sdpa(

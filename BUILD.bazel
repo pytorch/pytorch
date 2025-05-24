@@ -376,6 +376,7 @@ cc_library(
         ":torch_headers",
         "@fbgemm",
         "@ideep",
+        "@nlohmann",
     ],
     alwayslink = True,
 )
@@ -740,6 +741,7 @@ cc_library(
             "torch/csrc/distributed/c10d/intra_node_comm.cu",
             "torch/csrc/distributed/c10d/CUDASymmetricMemory.cu",
             "torch/csrc/distributed/c10d/CUDASymmetricMemoryOps.cu",
+            "torch/csrc/distributed/c10d/CUDASymmetricMemoryUtils.cpp",
             "torch/csrc/distributed/c10d/cuda/AsyncMM.cu",
             "torch/csrc/distributed/c10d/NanCheck.cu",
             "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",

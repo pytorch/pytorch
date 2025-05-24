@@ -15,9 +15,16 @@ fi
 DOCKER_TAG_PREFIX=$(echo "${image}" | awk -F':' '{print $2}')
 
 CUDA_VERSION=""
+ROCM_VERSION=""
+EXTRA_BUILD_ARGS=""
 if [[ "${DOCKER_TAG_PREFIX}" == cuda* ]]; then
     # extract cuda version from image name and tag.  e.g. manylinux2_28-builder:cuda12.8 returns 12.8
     CUDA_VERSION=$(echo "${DOCKER_TAG_PREFIX}" | awk -F'cuda' '{print $2}')
+    EXTRA_BUILD_ARGS="--build-arg CUDA_VERSION=${CUDA_VERSION}"
+elif [[ "${DOCKER_TAG_PREFIX}" == rocm* ]]; then
+    # extract rocm version from image name and tag.  e.g. manylinux2_28-builder:rocm6.2.4 returns 6.2.4
+    ROCM_VERSION=$(echo "${DOCKER_TAG_PREFIX}" | awk -F'rocm' '{print $2}')
+    EXTRA_BUILD_ARGS="--build-arg ROCM_IMAGE=rocm/dev-almalinux-8:${ROCM_VERSION}-complete"
 fi
 
 case ${DOCKER_TAG_PREFIX} in
@@ -26,6 +33,9 @@ case ${DOCKER_TAG_PREFIX} in
     ;;
   cuda*)
     BASE_TARGET=cuda${CUDA_VERSION}
+    ;;
+  rocm*)
+    BASE_TARGET=rocm
     ;;
   *)
     echo "ERROR: Unknown docker tag ${DOCKER_TAG_PREFIX}"
@@ -47,8 +57,8 @@ docker build \
   --target final \
   --progress plain \
   --build-arg "BASE_TARGET=${BASE_TARGET}" \
-  --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
   --build-arg "DEVTOOLSET_VERSION=11" \
+  ${EXTRA_BUILD_ARGS} \
   -t ${tmp_tag} \
   $@ \
   -f "${TOPDIR}/.ci/docker/almalinux/Dockerfile" \
