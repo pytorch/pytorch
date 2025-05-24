@@ -1673,7 +1673,7 @@ class Tensor(torch._C.TensorBase):
 
     __torch_dispatch__ = _C._disabled_torch_dispatch_impl
 
-    def __dlpack__(self, stream=None, max_version=None):
+    def __dlpack__(self, *, stream=None, max_version=None):
         """
         Creates a DLpack `capsule https://data-apis.org/array-api/latest/design_topics/data_interchange.html#data-interchange`_
         of the current tensor to be exported to other libraries.
@@ -1696,8 +1696,12 @@ class Tensor(torch._C.TensorBase):
             None (default), PyTorch will fallback to DLPack 0.8.
         """
         if has_torch_function_unary(self):
-            args = (self, stream, max_version)
-            return handle_torch_function(Tensor.__dlpack__, (self,), *args)
+            args = (self,)
+            kwargs = {
+                "stream": stream,
+                "max_version": max_version,
+            }
+            return handle_torch_function(Tensor.__dlpack__, (self,), *args, **kwargs)
 
         # DLPack capsules can't capture all of PyTorch's semantics,
         # so we prohibit exporting tensors that would lose their properties like
