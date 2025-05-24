@@ -756,7 +756,6 @@ class TestAutoWrap(TestCase):
         file_name = tempfile.NamedTemporaryFile(delete=False).name
         torch.distributed.init_process_group(
             backend="nccl",
-            init_method=f"{FILE_SCHEMA}_{file_name}",
             rank=0,
             world_size=1,
         )
