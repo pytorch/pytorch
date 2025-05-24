@@ -160,6 +160,7 @@ __all__ = [
     "SymIntSymbolicContext",
     "TrackedFake",
     "statically_known_true",
+    "statically_known_false",
     "guard_size_oblivious",
     "check_consistent",
     "compute_unbacked_bindings",
@@ -1290,6 +1291,29 @@ def _static_eval_sym_bool(x: SymBool) -> Optional[bool]:
     except Exception:
         log.debug("Could not simplify %s", expr)
         return None
+
+
+def statically_known_false(x: BoolLikeType) -> bool:
+    """
+    Returns True if x can be simplified to a constant and is False.
+    If x cannot be evaluated from static, we return False
+
+    .. note::
+        This function doesn't introduce new guards, so the expression may end
+        up evaluating to False at runtime even if this function returns False.
+
+    Args:
+        x (bool, SymBool): The expression to try statically evaluating
+    """
+    if not isinstance(x, SymBool):
+        assert isinstance(x, bool)
+        return not x
+
+    result = _static_eval_sym_bool(x)
+    if result is None:
+        return False
+
+    return not result
 
 
 def statically_known_true(x: BoolLikeType) -> bool:
