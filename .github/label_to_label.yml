@@ -42,7 +42,7 @@
   - "module: aotinductor"
   - "module: cudagraphs"
   - "oncall: export"
-  - "module: startup-tracing-compile"
+  - "module: compile-time"
   - "module: compiled autograd"
   - "module: flex attention"
   - "module: dynamic shapes"

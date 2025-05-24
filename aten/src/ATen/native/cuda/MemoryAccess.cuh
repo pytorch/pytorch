@@ -48,7 +48,7 @@ struct static_unroll {
 template<template<int i> typename func, int end>
 struct static_unroll<func, end, end> {
   template<typename... Args>
-  static inline C10_HOST_DEVICE void with_args(Args... args) {}
+  static inline C10_HOST_DEVICE void with_args(Args... /*args*/) {}
 };
 
 // helper structs to be used with static_unroll to load arguments
@@ -516,7 +516,7 @@ inline C10_HOST_DEVICE int can_vectorize_up_to(char *pointer) {
 template<int i>
 struct can_vectorize_up_to_helper {
   template <typename array_t, typename traits>
-  static C10_HOST_DEVICE void apply(int &result, array_t pointers, traits _) {
+  static C10_HOST_DEVICE void apply(int &result, array_t pointers, traits /*_*/) {
     using arg_t = typename traits::template arg<i>::type;
     // `pointers` hold the data_ptr for tensors [output, input0, input1, ...], so we
     // need a +1 offset to get the input
