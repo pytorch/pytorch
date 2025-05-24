@@ -412,7 +412,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   std::vector<std::string> obj_filenames;
   std::string model_directory = file_prefix + "data" + k_separator +
       "aotinductor" + k_separator + model_name;
-  std::string const_directory = "data" + k_separator + "constants";
+  std::string const_directory =
+      file_prefix + "data" + k_separator + "constants";
 
   for (const std::string& filename_str : found_filenames) {
     // Only compile files in the specified model directory
