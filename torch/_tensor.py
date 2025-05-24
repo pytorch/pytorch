@@ -1725,16 +1725,11 @@ class Tensor(torch._C.TensorBase):
         # so we prohibit exporting tensors that would lose their properties like
         # requires_grad and having the conjugate bit set.
         if self.requires_grad:
-            raise RuntimeError(
-                "Can't export tensors that require gradient, use tensor.detach()"
-            )
+            raise BufferError("Can't export tensors that require gradient, use tensor.detach()")
         if self.is_conj():
-            raise RuntimeError("Can't export tensors with the conjugate bit set")
+            raise BufferError("Can't export tensors with the conjugate bit set")
         if self.layout != torch.strided:
-            raise RuntimeError(
-                "Can't export tensors with layout other than torch.strided"
-            )
-
+            raise BufferError("Can't export tensors with layout other than torch.strided")
         if self.device.type == "cuda" and self.device != torch.cuda.current_device():
             raise BufferError(
                 "Can't export tensors on a different CUDA device. "
