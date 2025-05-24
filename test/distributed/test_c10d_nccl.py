@@ -50,6 +50,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     skip_if_lt_x_gpu,
     skip_if_rocm_multiprocess,
+    sm_is_or_higher_than,
     TEST_SKIPS,
     with_dist_debug_levels,
     with_nccl_blocking_wait,
@@ -283,17 +284,16 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     def setUp(self):
         super().setUp()
-
-        # These tests are expected to throw SIGABRT(6); adding the negative sign
-        # bc the test return code is actually -6
-        self.special_return_code_checks = {
-            self.test_nan_assert_float16.__wrapped__: -signal.SIGABRT,
-            self.test_nan_assert_float32.__wrapped__: -signal.SIGABRT,
-            self.test_nan_assert_float64.__wrapped__: -signal.SIGABRT,
-            self.test_nan_assert_bfloat16.__wrapped__: -signal.SIGABRT,
-            self.test_nan_assert_float8_e4m3fn.__wrapped__: -signal.SIGABRT,
-            self.test_nan_assert_float8_e5m2.__wrapped__: -signal.SIGABRT,
-        }
+        # Need to skip return code checking for these tests since the child
+        # processes don't exit cleanly in some cuda versions
+        self.skip_return_code_checks = [
+            self.test_nan_assert_float16.__wrapped__,
+            self.test_nan_assert_float32.__wrapped__,
+            self.test_nan_assert_float64.__wrapped__,
+            self.test_nan_assert_bfloat16.__wrapped__,
+            self.test_nan_assert_float8_e4m3fn.__wrapped__,
+            self.test_nan_assert_float8_e5m2.__wrapped__,
+        ]
 
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
@@ -534,14 +534,14 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # confirm enable/disable flag works
         backend._set_enable_nan_check(False)
-        # Note: using all-gather here bc some NCCL/SM version does not support
-        # FP8 reduction
-        pg._allgather_base(output, nan_tensor)
+        pg.allreduce(nan_tensor)
 
         backend._set_enable_nan_check(True)
-        pg._allgather_base(output, nan_tensor)
+        with self.assertRaises(RuntimeError):
+            # Note: using all-gather here bc FP8 types do not support reduce ops
+            # at the moment
+            pg._allgather_base(output, nan_tensor)
         dist.destroy_process_group()
-
         # reset env
         os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
 
@@ -576,13 +576,16 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     def test_nan_check(self):
         # Not expecting an error, NaN check should not make legit code fail
         device = torch.device(f"cuda:{self.rank:d}")
+        if not sm_is_or_higher_than(device, 8, 0):
+            self.skipTest("bf16 requires sm >= 8.0")
+
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="nccl", store=store, rank=self.rank, world_size=self.world_size
         )
-        x = torch.ones((10,), device=device) * self.rank
-        t = torch.ones(3, 4, device=device)
+        x = torch.ones((10,), dtype=torch.bfloat16, device=device) * self.rank
+        t = torch.ones(3, 4, dtype=torch.bfloat16, device=device)
         c10d.broadcast(x, src=0)
         c10d.all_reduce(t)
         c10d.barrier()
