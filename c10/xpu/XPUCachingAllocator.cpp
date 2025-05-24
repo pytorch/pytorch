@@ -573,7 +573,7 @@ class XPUAllocator : public DeviceAllocator {
   }
 
   bool initialized() override {
-    return !device_allocator.empty();
+    return !device_allocators.empty();
   }
 
   void malloc(
