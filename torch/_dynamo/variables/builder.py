@@ -2901,6 +2901,7 @@ def is_dynamic_source(source_name: str) -> bool:
             return True
     return False
 
+
 _UNBACKED_SOURCES: Optional[set[str]] = None
 _UNBACKED_SOURCES_CONFIG_HASH: Optional[int] = None
 
@@ -2936,6 +2937,7 @@ def is_unbacked_source(source_name: str) -> bool:
             )
             return True
     return False
+
 
 # Tracks the sources of all fake tensors we wrap in Dynamo.
 # Used by shape guard computation.
