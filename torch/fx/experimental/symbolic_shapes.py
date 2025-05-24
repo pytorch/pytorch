@@ -160,6 +160,7 @@ __all__ = [
     "SymIntSymbolicContext",
     "TrackedFake",
     "statically_known_true",
+    "statically_known_false",
     "guard_size_oblivious",
     "check_consistent",
     "compute_unbacked_bindings",
@@ -1292,6 +1293,29 @@ def _static_eval_sym_bool(x: SymBool) -> Optional[bool]:
         return None
 
 
+def statically_known_false(x: BoolLikeType) -> bool:
+    """
+    Returns True if x can be simplified to a constant and is False.
+    If x cannot be evaluated from static, we return False
+
+    .. note::
+        This function doesn't introduce new guards, so the expression may end
+        up evaluating to False at runtime even if this function returns False.
+
+    Args:
+        x (bool, SymBool): The expression to try statically evaluating
+    """
+    if not isinstance(x, SymBool):
+        assert isinstance(x, bool)
+        return not x
+
+    result = _static_eval_sym_bool(x)
+    if result is None:
+        return False
+
+    return not result
+
+
 def statically_known_true(x: BoolLikeType) -> bool:
     """
     Returns True if x can be simplified to a constant and is true.
@@ -2372,10 +2396,12 @@ class _ShapeGuardPrinter(abc.ABC):
         return self.print_source(self.symbol_to_source[expr][0])
 
     @abc.abstractmethod
-    def print_source(self, source: Source) -> str: ...
+    def print_source(self, source: Source) -> str:
+        ...
 
     @abc.abstractmethod
-    def doprint(self, expr: sympy.Expr) -> str: ...
+    def doprint(self, expr: sympy.Expr) -> str:
+        ...
 
 
 class ShapeGuardPythonPrinter(_ShapeGuardPrinter, PythonPrinter):
@@ -2487,9 +2513,9 @@ class DimConstraints:
         source_name_to_debug_name: Mapping[str, str],
     ) -> None:
         # We try to solve systems of inequalities with 1 free variable.
-        self._univariate_inequalities: dict[sympy.Symbol, set[SympyBoolean]] = (
-            defaultdict(set)
-        )
+        self._univariate_inequalities: dict[
+            sympy.Symbol, set[SympyBoolean]
+        ] = defaultdict(set)
         # Among them, we prioritize solving for a free variable that has equalities.
         # NOTE: _symbols_with_equalities is always a subset of _univariate_inequalities.keys()
         # and removing a symbol from the former => removing it from the latter.
@@ -4032,11 +4058,7 @@ class ShapeEnv:
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
-    ) -> tuple[
-        tuple[IntLikeType, ...],
-        tuple[IntLikeType, ...],
-        IntLikeType,
-    ]:
+    ) -> tuple[tuple[IntLikeType, ...], tuple[IntLikeType, ...], IntLikeType,]:
         """
         Returns a list of symbolic sizes and strides for the given tensor.
         We try our best to express stride in terms of the sizes, so as to not
@@ -4119,11 +4141,7 @@ class ShapeEnv:
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
-    ) -> tuple[
-        tuple[IntLikeType, ...],
-        tuple[IntLikeType, ...],
-        IntLikeType,
-    ]:
+    ) -> tuple[tuple[IntLikeType, ...], tuple[IntLikeType, ...], IntLikeType,]:
         dim = len(ex_size)
 
         # Reimplement the legacy behavior
@@ -4687,9 +4705,9 @@ class ShapeEnv:
                         sloc,
                     )
                 else:
-                    self.var_to_range[sympy_expr] = (
-                        self._default_unspecified_value_range()
-                    )
+                    self.var_to_range[
+                        sympy_expr
+                    ] = self._default_unspecified_value_range()
                     self.var_to_range_sloc[sympy_expr] = ValueRangesSLoc(sloc, sloc)
 
                 # Small performance optimization: if we have a min-max constraint,
@@ -4978,9 +4996,9 @@ class ShapeEnv:
         symbol_to_source: dict[sympy.Symbol, list[Source]] = collections.defaultdict(
             list
         )
-        symbol_to_constraints: defaultdict[sympy.Symbol, set[Constraint]] = (
-            collections.defaultdict(set)
-        )
+        symbol_to_constraints: defaultdict[
+            sympy.Symbol, set[Constraint]
+        ] = collections.defaultdict(set)
         constraint_violations: list[tuple[bool, str, Callable[[], str]]] = []
 
         printers: list[_ShapeGuardPrinter] = []
@@ -6751,6 +6769,9 @@ class ShapeEnv:
 
         # store LOC
         locs = co_lines[frame.f_lineno - offset : last_lineno + 1 - offset]
+        if not locs:
+            return _FrameLocalResult()
+
         indent = len(locs[0]) - len(locs[0].lstrip())
         frame_loc = "".join([loc[indent:] for loc in locs]).strip()  # type: ignore[assignment]
         return _FrameLocalResult(
