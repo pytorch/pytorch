@@ -219,9 +219,14 @@ Args:
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple ``(sW,)``. Default: 1
-    padding: ``dilation * (kernel_size - 1) - padding`` zero-padding will be added to both
-      sides of each dimension in the input. Can be a single number or a tuple
-      ``(padW,)``. Default: 0
+    padding: controls the amount of implicit zero-padding added to both sides of each
+      dimension in the input. Can be a string {'valid', 'same'}, a single number,
+      or a tuple `(padW,)`. Default: 0.
+      ``padding='valid'`` means no padding. ``padding='same'`` adds padding so that
+      the output size matches the input size.
+      This mode only supports ``stride=1`` and ``output_padding=0``.
+      When using an integer or tuple, the actual padding added is computed as
+      ``dilation * (kernel_size - 1) - padding``.
     output_padding: additional size added to one side of each dimension in the
       output shape. Can be a single number or a tuple ``(out_padW)``. Default: 0
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
@@ -262,9 +267,14 @@ Args:
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple ``(sH, sW)``. Default: 1
-    padding: ``dilation * (kernel_size - 1) - padding`` zero-padding will be added to both
-      sides of each dimension in the input. Can be a single number or a tuple
-      ``(padH, padW)``. Default: 0
+    padding: controls the amount of implicit zero-padding added to both sides of each
+      dimension in the input. Can be a string {'valid', 'same'}, a single number,
+      or a tuple `(padH, padW)`. Default: 0.
+      ``padding='valid'`` means no padding. ``padding='same'`` adds padding so that
+      the output size matches the input size.
+      This mode only supports ``stride=1`` and ``output_padding=0``.
+      When using an integer or tuple, the actual padding added is computed as
+      ``dilation * (kernel_size - 1) - padding``.
     output_padding: additional size added to one side of each dimension in the
       output shape. Can be a single number or a tuple ``(out_padH, out_padW)``.
       Default: 0
@@ -307,9 +317,14 @@ Args:
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple ``(sT, sH, sW)``. Default: 1
-    padding: ``dilation * (kernel_size - 1) - padding`` zero-padding will be added to both
-      sides of each dimension in the input. Can be a single number or a tuple
-      ``(padT, padH, padW)``. Default: 0
+    padding: controls the amount of implicit zero-padding added to both sides of each
+      dimension in the input. Can be a string {'valid', 'same'}, a single number,
+      or a tuple `(padT, padH, padW)`. Default: 0.
+      ``padding='valid'`` means no padding. ``padding='same'`` adds padding so that
+      the output size matches the input size.
+      This mode only supports ``stride=1`` and ``output_padding=0``.
+      When using an integer or tuple, the actual padding added is computed as
+      ``dilation * (kernel_size - 1) - padding``.
     output_padding: additional size added to one side of each dimension in the
       output shape. Can be a single number or a tuple
       ``(out_padT, out_padH, out_padW)``. Default: 0
