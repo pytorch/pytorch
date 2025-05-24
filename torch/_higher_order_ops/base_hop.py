@@ -202,7 +202,12 @@ class BaseHOPFunction(torch.autograd.Function):
         kwargs = ctx.kwargs
 
         # TODO: Something special needs to happen with min cut partitioner
-        with suspend_functionalization(), disable_functional_mode(), torch.enable_grad(), torch._dynamo.compiled_autograd._disable():
+        with (
+            suspend_functionalization(),
+            disable_functional_mode(),
+            torch.enable_grad(),
+            torch._dynamo.compiled_autograd._disable(),
+        ):
             with disable_proxy_modes_tracing():
                 from .invoke_subgraph import create_fw_bw_graph
                 from .utils import _from_fun
