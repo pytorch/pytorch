@@ -480,7 +480,7 @@ add_custom_target(
   gen_torch_version ALL
   "${Python_EXECUTABLE}" "${TOOLS_PATH}/generate_torch_version.py"
     --is-debug=${TORCH_VERSION_DEBUG}
-    --cuda-version=${CUDA_VERSION}
+    --cuda-version=${CUDAToolkit_VERSION}
     --hip-version=${HIP_VERSION}
     --xpu-version=${SYCL_COMPILER_VERSION}
   BYPRODUCTS ${TORCH_SRC_DIR}/version.py
