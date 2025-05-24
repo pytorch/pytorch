@@ -7,13 +7,16 @@ from torch.distributed.pipelining import pipe_split, SplitPoint
 
 
 class ExampleCode(torch.nn.Module):
-    def __init__(self, d_hid):
+    def __init__(self, d_hid, splits=2):
+        assert splits <= 4
         super().__init__()
+        self.splits = splits
         self.mm_param0 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
         self.mm_param1 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
         self.cval = torch.nn.Buffer(torch.randn((d_hid,), requires_grad=False))
         self.lin0 = torch.nn.Linear(d_hid, d_hid)
         self.lin1 = torch.nn.Linear(d_hid, d_hid)
+        self.lin2 = torch.nn.Linear(d_hid, d_hid)
 
     def forward(self, x):
         x = torch.mm(x, self.mm_param0)
@@ -24,8 +27,14 @@ class ExampleCode(torch.nn.Module):
         pipe_split()
         x = torch.relu(x) + a_constant
         x = torch.mm(x, self.mm_param1)
-        x = self.lin1(x)
-        x = torch.relu(x)
+        if self.splits > 2:
+            pipe_split()
+            x = self.lin1(x)
+            x = torch.relu(x)
+        if self.splits > 3:
+            pipe_split()
+            x = self.lin2(x)
+            x = torch.relu(x)
         return x
 
 
@@ -33,12 +42,16 @@ class ModelWithKwargs(torch.nn.Module):
     DEFAULT_DHID = 512
     DEFAULT_BATCH_SIZE = 256
 
-    def __init__(self, d_hid: int = DEFAULT_DHID):
+    def __init__(self, d_hid: int = DEFAULT_DHID, splits=2):
+        assert splits <= 4
         super().__init__()
+        self.splits = splits
         self.mm_param0 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
         self.mm_param1 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
         self.lin0 = torch.nn.Linear(d_hid, d_hid)
         self.lin1 = torch.nn.Linear(d_hid, d_hid)
+        self.lin2 = torch.nn.Linear(d_hid, d_hid)
+        self.lin3 = torch.nn.Linear(d_hid, d_hid)
 
     def forward(self, x, y=torch.zeros(DEFAULT_BATCH_SIZE, DEFAULT_DHID)):
         x = torch.mm(x, self.mm_param0)
@@ -49,6 +62,14 @@ class ModelWithKwargs(torch.nn.Module):
         x = torch.mm(x, self.mm_param1)
         x = self.lin1(x)
         x = torch.relu(x)
+        if self.splits > 2:
+            pipe_split()
+            x = self.lin2(x)
+            x = torch.relu(x)
+        if self.splits > 3:
+            pipe_split()
+            x = self.lin3(x)
+            x = torch.relu(x)
         return x
 
 
