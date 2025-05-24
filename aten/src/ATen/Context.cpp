@@ -384,6 +384,20 @@ at::BlasBackend Context::blasPreferredBackend() {
   return blas_preferred_backend;
 }
 
+bool ckSupported() {
+  static const std::vector<std::string> supported_archs = {
+    "gfx90a", "gfx942"
+  };
+  for (auto index : c10::irange(detail::getCUDAHooks().deviceCount())) {
+    if(!detail::getCUDAHooks().isGPUArch(supported_archs, index)) {
+      TORCH_WARN_ONCE(
+        "Attempting to use CK on an unsupported architecture! Cannot set backend to CK");
+      return false;
+    }
+  }
+  return true;
+}
+
 void Context::setBlasPreferredBackend(at::BlasBackend b) {
 #ifdef _MSC_VER
   TORCH_WARN_ONCE(
@@ -393,7 +407,7 @@ void Context::setBlasPreferredBackend(at::BlasBackend b) {
 #else
   TORCH_CHECK((b != at::BlasBackend::Cublaslt) || hasCuBLASLt(),
       "Cannot set preferred backend to cuBLASLt if PyTorch has not been compiled with cuBLASLt.");
-  TORCH_CHECK((b != at::BlasBackend::Ck) || hasROCM(),
+  TORCH_CHECK((b != at::BlasBackend::Ck) || (hasROCM() && ckSupported()),
       "Cannot set preferred backend to Ck if PyTorch has not been compiled for ROCm.");
   if (b != at::BlasBackend::Default && b != at::BlasBackend::Cublas) {
     TORCH_WARN_ONCE(
@@ -417,20 +431,11 @@ void Context::setROCmFAPreferredBackend(at::ROCmFABackend b) {
       "Cannot set preferred flash attention backend to Ck if PyTorch has not been compiled for ROCm.");
 #ifdef USE_ROCM
   if(b == at::ROCmFABackend::Ck) {
-    static const bool ck_unsupported = []() {
-      static const std::vector<std::string> archs = {
-          "gfx90a",  "gfx942"
-      };
-      for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
-        if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
-          TORCH_WARN_ONCE(
-            "Attempting to use CK on an unsupported architecture! Cannot set backend to CK");
-          return true;
-        }
-      }
-      return false;
-    }();
-    if(!ck_unsupported) rocm_fa_preferred_backend = b;
+    if(ckSupported()){
+      rocm_fa_preferred_backend = b;
+    } else { // leave backend as is
+      return;
+    }
   }
   else {
      rocm_fa_preferred_backend = b;
