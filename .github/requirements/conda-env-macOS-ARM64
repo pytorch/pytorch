@@ -3,9 +3,6 @@ certifi
 cmake=3.22.*
 dataclasses=0.8
 expecttest=0.3.0
-# Cross-compiling arm64 from x86-64 picks up 1.40.0 while testing on arm64
-# itself only has up to 1.39.0 from upstream conda. Both work though
-libuv>=1.39.0,<=1.40.0
 numpy=1.26.4
 pillow=10.0.1
 pip=23.2.1
