@@ -107,6 +107,9 @@ class TestMatmulCuda(TestCase):
         if fp16_accumulate:
             m_1 = m_1 / 100
             m_2 = m_2 / 100
+        if reduced_precision:
+            m_1 = m_1 / 10
+            m_2 = m_2 / 10
         # *(B)FLOAT16 Special Handling*
         # Backend does not tensorize float16 on CPU,
         # and bloat16 may present accuracy issues,
@@ -158,8 +161,8 @@ class TestMatmulCuda(TestCase):
     @onlyCUDA
     @skipIfRocmVersionLessThan((5, 2))
     # imported 'tol' as 'xtol' to avoid aliasing in code above
-    @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
-                        torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})
+    @toleranceOverride({torch.float16: xtol(atol=5e-1, rtol=1e-2),
+                        torch.bfloat16: xtol(atol=1e0, rtol=1e-1)})
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("size", [100, 1000, 10000])
     @parametrize("backend", ["cublas", "cublaslt"])
@@ -191,7 +194,7 @@ class TestMatmulCuda(TestCase):
     @onlyCUDA
     @skipIfRocmVersionLessThan((5, 2))
     # imported 'tol' as 'xtol' to avoid aliasing in code above
-    @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
+    @toleranceOverride({torch.float16: xtol(atol=2e-1, rtol=2e-1),
                         torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("size", [100, 1000, 10000])
