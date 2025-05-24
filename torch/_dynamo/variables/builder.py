@@ -2901,6 +2901,41 @@ def is_dynamic_source(source_name: str) -> bool:
             return True
     return False
 
+_UNBACKED_SOURCES: Optional[set[str]] = None
+_UNBACKED_SOURCES_CONFIG_HASH: Optional[int] = None
+
+
+def get_unbacked_sources() -> set[str]:
+    global _UNBACKED_SOURCES, _UNBACKED_SOURCES_CONFIG_HASH
+
+    current_hash = hash(torch.compiler.config.unbacked_sources)
+
+    # If we have already calculated the sources and the config hasn't changed, return cached result
+    if _UNBACKED_SOURCES is not None and _UNBACKED_SOURCES_CONFIG_HASH == current_hash:
+        return _UNBACKED_SOURCES
+
+    # Config has changed or first time, (re)calculate the sources
+    _UNBACKED_SOURCES = {
+        s
+        for s in torch.compiler.config.unbacked_sources.replace(" ", "").split(",")
+        if s
+    }
+    _UNBACKED_SOURCES_CONFIG_HASH = current_hash
+
+    return _UNBACKED_SOURCES
+
+
+def is_unbacked_source(source_name: str) -> bool:
+    unbacked_sources = get_unbacked_sources()
+    for pattern in unbacked_sources:
+        if pattern == source_name or re.match(pattern, source_name):
+            log.debug(
+                "%s was marked unbacked due to unbacked source allowlist pattern: %s",
+                source_name,
+                pattern,
+            )
+            return True
+    return False
 
 # Tracks the sources of all fake tensors we wrap in Dynamo.
 # Used by shape guard computation.
@@ -3110,6 +3145,11 @@ def _automatic_dynamic(
             automatic_dynamic_size = True
             automatic_dynamic_stride = True
 
+        if is_unbacked_source(name):
+            log.debug("%s marked unbacked via source whitelist", name)
+            automatic_dynamic_size = True
+            automatic_dynamic_stride = True
+
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
 
         # We will process constraints first, as they will imply that we
@@ -3157,7 +3197,7 @@ def _automatic_dynamic(
         constraint_sizes.append(constraint_size)
         constraint_strides.append(constraint_stride)
 
-        if marked_unbacked:
+        if marked_unbacked or is_unbacked_source(name):
             dynamic_size = DimDynamic.SIZE_LIKE_UNBACKED
         elif (
             constraint_size is not None
