@@ -356,7 +356,6 @@ def _load_global_deps() -> None:
             "cusparselt": "libcusparseLt.so.*[0-9]",
             "cusolver": "libcusolver.so.*[0-9]",
             "nccl": "libnccl.so.*[0-9]",
-            "nvtx": "libnvToolsExt.so.*[0-9]",
             "nvshmem": "libnvshmem_host.so.*[0-9]",
         }
         # cufiile is only available on cuda 12+
@@ -366,6 +365,12 @@ def _load_global_deps() -> None:
             t_major = int(t_version[0])  # type: ignore[operator]
             if t_major >= 12:
                 cuda_libs["cufile"] = "libcufile.so.*[0-9]"
+
+        # libnvToolsExt.so.*[0-9] is only available on CUDA < 12.9
+        if cuda_version:
+        major, minor, *_ = map(int, cuda_version.split("."))
+            if (major, minor) < (12, 9):
+                cuda_libs["nvtx"] = "libnvToolsExt.so.*[0-9]"
 
         is_cuda_lib_err = [
             lib for lib in cuda_libs.values() if lib.split(".")[0] in err.args[0]
