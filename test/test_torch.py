@@ -10977,6 +10977,63 @@ def add_neg_dim_tests():
         assert not hasattr(TestTorch, test_name), "Duplicated test name: " + test_name
         setattr(TestTorch, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
 
+def test_ldexp_pow2_float16_cases():
+    import torch
+
+    test_cases = [
+        {
+            "desc": "Bug Fix: 2 * 2^-25 → 2^-24",
+            "a": torch.tensor([2.], dtype=torch.float16),
+            "b": torch.tensor([-25], dtype=torch.int32),
+            "expected": torch.tensor([2**-24], dtype=torch.float16),
+        },
+        {
+            "desc": "Underflow: 2 * 2^-30 → 0.0",
+            "a": torch.tensor([2.], dtype=torch.float16),
+            "b": torch.tensor([-30], dtype=torch.int32),
+            "expected": torch.tensor([0.], dtype=torch.float16),
+        },
+        {
+            "desc": "Small representable: 2 * 2^-20 → 2^-19",
+            "a": torch.tensor([2.], dtype=torch.float16),
+            "b": torch.tensor([-20], dtype=torch.int32),
+            "expected": torch.tensor([2**-19], dtype=torch.float16),
+        },
+        {
+            "desc": "Overflow: 2 * 2^16 → inf",
+            "a": torch.tensor([2.], dtype=torch.float16),
+            "b": torch.tensor([16], dtype=torch.int32),
+            "expected": torch.tensor([float("inf")], dtype=torch.float16),
+        }
+    ]
+
+    for case in test_cases:
+        a, b, expected = case["a"], case["b"], case["expected"]
+        print(f"\n[CASE] {case['desc']} — a={a.item()}, b={b.item()}")
+
+        # Functional
+        result_func = torch.ldexp(a, b)
+        print(f"  Functional: {result_func.item()} (expected: {expected.item()})")
+        assert torch.allclose(result_func, expected, atol=1e-8) or \
+               (torch.isinf(expected) and torch.isinf(result_func)), \
+               f"(functional) Expected {expected.item()}, got {result_func.item()}"
+
+        # In-place
+        a_clone = a.clone()
+        a_clone.ldexp_(b)
+        print(f"  In-place: {a_clone.item()} (expected: {expected.item()})")
+        assert torch.allclose(a_clone, expected, atol=1e-8) or \
+               (torch.isinf(expected) and torch.isinf(a_clone)), \
+               f"(in-place) Expected {expected.item()}, got {a_clone.item()}"
+
+        # Out variant
+        out_tensor = torch.empty_like(a)
+        torch.ldexp(a, b, out=out_tensor)
+        print(f"  Out: {out_tensor.item()} (expected: {expected.item()})")
+        assert torch.allclose(out_tensor, expected, atol=1e-8) or \
+               (torch.isinf(expected) and torch.isinf(out_tensor)), \
+               f"(out) Expected {expected.item()}, got {out_tensor.item()}"
+
 # TODO: these empy classes are temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
 class TestViewOps(TestCase):
