@@ -158,6 +158,7 @@ __all__ = [
     "SubclassSymbolicContext",
     "SymIntSymbolicContext",
     "statically_known_true",
+    "statically_known_false",
     "guard_size_oblivious",
     "check_consistent",
     "compute_unbacked_bindings",
