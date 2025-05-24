@@ -75,11 +75,14 @@ class PgoTest(torch._dynamo.test_case.TestCase):
             "L['self'].attr",
             "L['y']",
         ]
+
         def check_whitelist(sources_):
             state = torch._dynamo.pgo.render_code_state(
                 torch._dynamo.pgo.get_code_state()
             )
-            whitelist = re.search(r'TORCH_COMPILE_DYNAMIC_SOURCES="(.*)"', state).group(1)
+            whitelist = re.search(r'TORCH_COMPILE_DYNAMIC_SOURCES="(.*)"', state).group(
+                1
+            )
             for src in sources_:
                 self.assertTrue(src in whitelist)
 
@@ -102,9 +105,7 @@ class PgoTest(torch._dynamo.test_case.TestCase):
         # now use suggested whitelist
         self.reset()
         cnts.clear()
-        state = torch._dynamo.pgo.render_code_state(
-            torch._dynamo.pgo.get_code_state()
-        )
+        state = torch._dynamo.pgo.render_code_state(torch._dynamo.pgo.get_code_state())
         whitelist = re.search(r'TORCH_COMPILE_DYNAMIC_SOURCES="(.*)"', state).group(1)
         with torch.compiler.config.patch(dynamic_sources=whitelist):
             f = Foo()
@@ -123,10 +124,12 @@ class PgoTest(torch._dynamo.test_case.TestCase):
             def __init__(self):
                 super().__init__()
                 self.lin = None
+
             def forward(self, x):
                 return self.lin(x)
 
         f = Foo()
+
         def run():
             self.reset()
             cnts.clear()

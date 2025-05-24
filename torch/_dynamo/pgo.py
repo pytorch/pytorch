@@ -37,12 +37,12 @@ from torch._dynamo.utils import (
 )
 from torch._environment import is_fbcode
 from torch._logging._internal import trace_structured_artifact
-from torch.utils._ordered_set import OrderedSet
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
     CacheArtifactManager,
 )
+from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
@@ -598,7 +598,7 @@ def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
         cs_terms: list[str] = []
         for src, fs in v.automatic_dynamic.items():
             cs_terms.append(f"  {src}: {fs.render()}")
-            if auto_dynamic in fs.size:
+            if isinstance(fs.size, tuple) and auto_dynamic in fs.size:  # type: ignore[operator]
                 dynamic_sources.add(src)
         terms.append(f"{k}:\n" + "\n".join(cs_terms))
     code_state_str = "\n".join(terms)

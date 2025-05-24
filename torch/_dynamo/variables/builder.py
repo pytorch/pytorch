@@ -2937,7 +2937,9 @@ def is_dynamic_source(source_name: str) -> bool:
             return True
     return False
 
-def record_automatic_dynamic(tx: "InstructionTranslator", name: str, e: torch.Tensor) -> FrameStateSizeEntry:
+def record_automatic_dynamic(
+    tx: "InstructionTranslator", name: str, e: torch.Tensor
+) -> FrameStateSizeEntry:
     # This mimics stride inference algorithm in _create_symbolic_sizes_strides_storage_offset
     ex_size = e.size()
     if not is_sparse_any(e):
