@@ -144,8 +144,8 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: ${{ inputs.python-version }}
-          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
-          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
+          environment-file: .github/requirements/conda-env-macOS-ARM64
+          pip-requirements-file: .github/requirements/pip-requirements-macOS.txt
 
       - name: Parse ref
         id: parse-ref
