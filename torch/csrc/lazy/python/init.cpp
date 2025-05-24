@@ -103,7 +103,7 @@ void initLazyBindings(PyObject* module) {
 
   lazy.def(
       "_mark_step",
-      // TODO(whc) this API should probably change from vector<string> to
+      // TODO(whc) this API should probably change from vector<std::string> to
       // vector<c10::device> but in a separate PR
       [](const std::string& device_str,
          const std::vector<std::string>& devices,
