@@ -1047,6 +1047,9 @@ def bound_sympy(
             vr = ValueRanges.unknown()
         return vr
 
-    return sympy_interp(
-        SymPyValueRangeAnalysis, ranges, expr, missing_handler=missing_handler
-    )
+    try:
+        return sympy_interp(
+            SymPyValueRangeAnalysis, ranges, expr, missing_handler=missing_handler
+        )
+    except TypeError:
+        return ValueRanges.unknown()
