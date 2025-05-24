@@ -1295,6 +1295,7 @@ def _static_eval_sym_bool(x: SymBool) -> Optional[bool]:
 def statically_known_true(x: BoolLikeType) -> bool:
     """
     Returns True if x can be simplified to a constant and is true.
+    If x cannot be evaluated from static, we return False
 
     .. note::
         This function doesn't introduce new guards, so the expression may end
@@ -1310,6 +1311,29 @@ def statically_known_true(x: BoolLikeType) -> bool:
     result = _static_eval_sym_bool(x)
     if result is None:
         return False
+
+    return result
+
+
+def statically_known_false(x: BoolLikeType) -> bool:
+    """
+    Returns True if x can be simplified to a constant and is true.
+    If x cannot be evaluated from static, we return True
+
+    .. note::
+        This function doesn't introduce new guards, so the expression may end
+        up evaluating to true at runtime even if this function returns False.
+
+    Args:
+        x (bool, SymBool): The expression to try statically evaluating
+    """
+    if not isinstance(x, SymBool):
+        assert isinstance(x, bool)
+        return x
+
+    result = _static_eval_sym_bool(x)
+    if result is None:
+        return True
 
     return result
 

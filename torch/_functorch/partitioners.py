@@ -32,6 +32,7 @@ from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     hint_int,
     is_symbol_binding_fx_node,
+    statically_known_false,
 )
 from torch.fx.passes import graph_drawer
 from torch.utils._ordered_set import OrderedSet
@@ -491,10 +492,19 @@ def should_quantize(node: torch.fx.Node) -> bool:
 
     # calculate the size of the node
     size_in_mb = calculate_tensor_size(node.meta["val"])
-
-    return size_in_mb >= torch._inductor.config.post_grad_fusion_options[
+    if torch._inductor.config.post_grad_fusion_options[
         "activation_quantization_aten_pass"
-    ].get("size_in_mb", 100)
+    ].get("skip_dynamo_guards", False):
+        return size_in_mb >= torch._inductor.config.post_grad_fusion_options[
+            "activation_quantization_aten_pass"
+        ].get("size_in_mb", 100)
+    else:
+        return statically_known_false(
+            size_in_mb
+            >= torch._inductor.config.post_grad_fusion_options[
+                "activation_quantization_aten_pass"
+            ].get("size_in_mb", 100)
+        )
 
 
 def get_quant_type() -> torch.dtype:
