@@ -908,18 +908,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             unimplemented(f"setattr({self}, {name}, ...)")
 
         if not bypass_descriptor:
-            # Emulate
-            # https://github.com/python/cpython/blob/3.11/Objects/object.c#L1371-L1452
-            # NOTE we use `type(...)` to ignore instance attrs.
-            descriptor = inspect.getattr_static(type(self.value), name, NO_SUCH_SUBOBJ)
-            # member descriptors have `__set__` impls that are safe to ignore.
-            if not inspect.ismemberdescriptor(descriptor):
-                setter = NO_SUCH_SUBOBJ
-                if descriptor is not NO_SUCH_SUBOBJ:
-                    setter = inspect.getattr_static(
-                        type(descriptor), "__set__", NO_SUCH_SUBOBJ
-                    )
-                if setter is not NO_SUCH_SUBOBJ:
+            tmp = self.try_get_descritor_and_setter_py_func(name)
+            if tmp:
+                descriptor, setter = tmp
+                # Emulate
+                # https://github.com/python/cpython/blob/3.11/Objects/object.c#L1371-L1452
+                # NOTE we use `type(...)` to ignore instance attrs.
+                # member descriptors have `__set__` impls that are safe to ignore.
+                if setter is not NO_SUCH_SUBOBJ and not (
+                    inspect.ismemberdescriptor(descriptor)
+                    or inspect.isgetsetdescriptor(descriptor)
+                ):
                     desc_source = None
                     func_source = None
                     if self.cls_source:
@@ -1040,20 +1039,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         # In some cases, we have to do dynamic lookup because getattr_static is not enough. For example, threading.local
         # has side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
+        # NOTE we assume the following descriptors are side-effect-free as far
+        # as Dynamo tracing is concerned.
         if not object_has_getattribute(self.value) and (
             subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
-            or isinstance(
-                subobj, _collections._tuplegetter
-            )  # namedtuple fields are represented by _tuplegetter
-            or inspect.ismemberdescriptor(subobj)  # handle memberdecriptor
+            or isinstance(subobj, _collections._tuplegetter)  # namedtuple fields
+            or inspect.ismemberdescriptor(subobj)  # e.g., __slots__
+            or inspect.isgetsetdescriptor(subobj)  # e.g., __dict__
             or self._is_c_defined_property(subobj)
-            or inspect.isgetsetdescriptor(
-                subobj
-            )  # handle getsetdescriptor like __dict__
         ):
             # Call __getattribute__, we have already checked that this is not overridden and side-effect free. We don't
             # want to call getattr because it can be user-overridden.
-            subobj = self.value.__getattribute__(name)
+            subobj = type(self.value).__getattribute__(self.value, name)
         elif object_has_getattribute(self.value) and subobj is NO_SUCH_SUBOBJ:
             # If the object has an overridden getattribute method, Dynamo has
             # already tried tracing it, and encountered an AttributeError. We
@@ -1068,12 +1065,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         attr = inspect.getattr_static(type(self.value), attr_name, NO_SUCH_SUBOBJ)
         return inspect.ismemberdescriptor(attr)
 
-    def is_set_descriptor(self, attr_name):
-        attr = inspect.getattr_static(type(self.value), attr_name, NO_SUCH_SUBOBJ)
-        if attr is NO_SUCH_SUBOBJ:
-            return False
-        setter = inspect.getattr_static(attr, "__set__", NO_SUCH_SUBOBJ)
-        return setter is not NO_SUCH_SUBOBJ
+    def attr_has_traceable_descriptor_setter(self, attr_name):
+        return self.try_get_descritor_and_setter_py_func(attr_name) is not None
+
+    def try_get_descritor_and_setter_py_func(self, attr_name):
+        descriptor = inspect.getattr_static(type(self.value), attr_name, None)
+        if descriptor:
+            setter = inspect.getattr_static(type(descriptor), "__set__", None)
+            if inspect.isfunction(setter):
+                return (descriptor, setter)
+        return None
 
     def has_key_in_generic_dict(self, tx: "InstructionTranslator", key):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
