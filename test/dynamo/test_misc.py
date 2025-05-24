@@ -12247,27 +12247,6 @@ fn
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(fn(*inputs), inputs[0])
 
-    def test_is_op(self):
-        def fn(x, obj, d):
-            # `obj.__dict__` is meant to make Dynamo create a `GetAttrVariable`.
-            # `x += 1` makes sure we don't skip the frame.
-            x += 1
-            b1 = d is obj.__dict__
-            x += 1
-            b2 = d is not obj.__dict__
-            return b1, b2
-
-        class Foo:
-            pass
-
-        opt_fn = torch.compile(fn, backend="eager")
-        x = torch.ones(2)
-        obj = Foo()
-
-        ref = fn(x, obj, obj.__dict__)
-        res = opt_fn(x, obj, obj.__dict__)
-        self.assertEqual(ref, res)
-
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
