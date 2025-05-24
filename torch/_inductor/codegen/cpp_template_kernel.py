@@ -14,7 +14,7 @@ from .. import config, cpp_builder, ir, lowering as L
 from ..autotune_process import CppBenchmarkRequest
 from ..loop_body import LoopBody
 from ..select_algorithm import PartialRender
-from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
+from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix, do_bench_using_profiling
 from ..virtualized import V
 from .common import REMOVED
 from .cpp import CppKernel, CppKernelProxy, KernelGroup
@@ -564,9 +564,13 @@ class CppTemplateCaller(ir.ChoiceCaller):
         assert self.bmreq is not None
         self.bmreq.precompile()
 
-    def benchmark(self, *args, out) -> float:
+    def benchmark(self, *args, out, using_profiler=False) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(*args, out=out)
+        if using_profiler:
+            algo = self.bmreq.make_run_fn(*args, out=out)
+            return do_bench_using_profiling(algo)
+        else:
+            return self.bmreq.benchmark(*args, out=out)
 
     def hash_key(self) -> str:
         return "-".join(
