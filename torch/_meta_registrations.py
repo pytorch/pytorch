@@ -2289,6 +2289,8 @@ def calc_conv_nd_return_shape(
     groups: int,
     output_padding: Optional[Union[list[int], int]] = None,
 ):
+    from torch.fx.experimental.symbolic_shapes import sym_or
+
     def _formula(ln: int, p: int, d: int, k: int, s: int) -> int:
         """
         Formula to apply to calculate the length of some dimension of the output
@@ -2376,8 +2378,9 @@ def calc_conv_nd_return_shape(
             ret_shape.append(
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
+
     torch._check(
-        any(x > 0 for x in ret_shape[2:]),
+        sym_or(*[x > 0 for x in ret_shape[2:]]),
         lambda: f"Given input size per channel: {list(dims)}. "
         f"Calculated output size per channel: {ret_shape[2:]}. "
         f"Output size is too small",
@@ -2440,17 +2443,22 @@ def meta_conv(
     output_padding: list[int],
     groups: int,
 ):
+    from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
+
     def pick_memory_format():
-        if device_hint(input_tensor) == "cuda":
-            if is_channels_last(input_tensor) or is_channels_last(weight):
-                return torch.channels_last
-        else:
-            if is_channels_last(input_tensor):
-                return torch.channels_last
-        if input_tensor.is_contiguous(memory_format=torch.contiguous_format):
-            return torch.contiguous_format
-        elif input_tensor.is_contiguous(memory_format=torch.preserve_format):
-            return torch.preserve_format
+        try:
+            if device_hint(input_tensor) == "cuda":
+                if is_channels_last(input_tensor) or is_channels_last(weight):
+                    return torch.channels_last
+            else:
+                if is_channels_last(input_tensor):
+                    return torch.channels_last
+            if input_tensor.is_contiguous(memory_format=torch.contiguous_format):
+                return torch.contiguous_format
+            elif input_tensor.is_contiguous(memory_format=torch.preserve_format):
+                return torch.preserve_format
+        except GuardOnDataDependentSymNode:
+            return
 
     shape_out = calc_conv_nd_return_shape(
         input_tensor,
