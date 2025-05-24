@@ -31,27 +31,28 @@ def build_ArmComputeLibrary() -> None:
         "build=native",
     ]
     acl_install_dir = "/acl"
-    acl_checkout_dir = "ComputeLibrary"
-    os.makedirs(acl_install_dir)
-    check_call(
-        [
-            "git",
-            "clone",
-            "https://github.com/ARM-software/ComputeLibrary.git",
-            "-b",
-            "v25.02",
-            "--depth",
-            "1",
-            "--shallow-submodules",
-        ]
-    )
+    acl_checkout_dir = os.getenv("ACL_SOURCE_DIR", "ComputeLibrary")
+    if os.path.isdir(acl_install_dir):
+        shutil.rmtree(acl_install_dir)
+    if not os.path.isdir(acl_checkout_dir) or not len(os.listdir(acl_checkout_dir)):
+        check_call(
+            [
+                "git",
+                "clone",
+                "https://github.com/ARM-software/ComputeLibrary.git",
+                "-b",
+                "v25.02",
+                "--depth",
+                "1",
+                "--shallow-submodules",
+            ]
+        )
 
     check_call(
-        ["scons", "Werror=1", "-j8", f"build_dir=/{acl_install_dir}/build"]
-        + acl_build_flags,
+        ["scons", "Werror=1", f"-j{os.cpu_count()}"] + acl_build_flags,
         cwd=acl_checkout_dir,
     )
-    for d in ["arm_compute", "include", "utils", "support", "src"]:
+    for d in ["arm_compute", "include", "utils", "support", "src", "build"]:
         shutil.copytree(f"{acl_checkout_dir}/{d}", f"{acl_install_dir}/{d}")
 
 
@@ -203,8 +204,10 @@ if __name__ == "__main__":
     ).decode()
 
     print("Building PyTorch wheel")
-    build_vars = "MAX_JOBS=5 CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000 "
-    os.system("cd /pytorch; python setup.py clean")
+    build_vars = "CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000 "
+    # MAX_JOB=5 is not required for CPU backend (see commit 465d98b)
+    if enable_cuda:
+        build_vars = "MAX_JOBS=5 " + build_vars
 
     override_package_version = os.getenv("OVERRIDE_PACKAGE_VERSION")
     desired_cuda = os.getenv("DESIRED_CUDA")
