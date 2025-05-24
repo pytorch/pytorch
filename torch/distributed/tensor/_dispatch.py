@@ -341,17 +341,23 @@ class OpDispatcher:
         local_kwargs: dict[str, object] = {}
         compute_mesh: Optional[DeviceMesh] = None
 
-        for arg in args_list:
+        valid_dtensor_groups = 0
+        for arg in args:
+            if arg is None or isinstance(arg, (int, float, bool)) or (isinstance(arg, (list, tuple)) and len(arg) == 0):
+                continue
+            valid_dtensor_groups += 1
+        num_dtensor_in_one_group = len(args_list) // valid_dtensor_groups
+
+        dtensor_device_mesh_map = {}
+        for idx, arg in enumerate(args_list):
             if isinstance(arg, dtensor.DTensor):
                 local_args.append(arg._local_tensor)
                 args_schema.append(arg._spec)
-                if compute_mesh is None:
-                    # record the first compute device mesh from args
-                    compute_mesh = arg.device_mesh
+                if idx < num_dtensor_in_one_group:
+                    dtensor_device_mesh_map[idx] = arg.device_mesh
             elif isinstance(arg, torch.Tensor):
-                compute_mesh = compute_mesh or try_find_mesh_from_args(
-                    op_call, args_list
-                )
+                idx_correpsonding_to_dtensor = idx // num_dtensor_in_one_group
+                compute_mesh = dtensor_device_mesh_map.get(idx_correpsonding_to_dtensor, try_find_mesh_from_args(op_call, args_list))
                 args_schema.append(
                     self._try_replicate_spec_for_scalar_tensor(
                         op_call, arg, compute_mesh
@@ -362,7 +368,8 @@ class OpDispatcher:
                 # non DTensor/Tensor args (i.e. int/float/bool), just add to args_schema/local_args
                 args_schema.append(arg)
                 local_args.append(arg)
-
+        compute_mesh = dtensor_device_mesh_map.get(0, compute_mesh)
+        del dtensor_device_mesh_map
         for k, v in kwargs.items():
             if isinstance(v, dtensor.DTensor):
                 local_kwargs[k] = v._local_tensor
