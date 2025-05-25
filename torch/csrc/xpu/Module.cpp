@@ -18,7 +18,7 @@ using namespace torch;
 static PyObject* THXPModule_getArchFlags(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
 #ifdef XPU_ARCH_FLAGS
-  static constexpr const char* flags = std::string(C10_STRINGIZE(XPU_ARCH_FLAGS)).c_str();
+  static const char* flags = std::string(C10_STRINGIZE(XPU_ARCH_FLAGS)).c_str();
   return THPUtils_packString(flags);
 #else
   Py_RETURN_NONE;
