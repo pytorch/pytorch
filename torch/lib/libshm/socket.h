@@ -17,12 +17,12 @@
 class Socket {
  public:
   int socket_fd;
+  Socket(const Socket& other) = delete;
 
  protected:
   Socket() {
     SYSCHECK_ERR_RETURN_NEG1(socket_fd = socket(AF_UNIX, SOCK_STREAM, 0));
   }
-  Socket(const Socket& other) = delete;
   Socket(Socket&& other) noexcept : socket_fd(other.socket_fd) {
     other.socket_fd = -1;
   };
@@ -122,7 +122,7 @@ class ManagerServerSocket : public Socket {
       SYSCHECK_ERR_RETURN_NEG1(unlink(socket_path.c_str()));
   }
 
-  virtual ~ManagerServerSocket() {
+  ~ManagerServerSocket() override {
     unlink(socket_path.c_str());
   }
 

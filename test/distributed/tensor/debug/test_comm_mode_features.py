@@ -4,8 +4,7 @@
 from typing import Any
 
 import torch
-from torch.distributed._tensor import DeviceMesh
-from torch.distributed._tensor.api import distribute_tensor, DTensor
+from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,

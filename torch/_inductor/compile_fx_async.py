@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from concurrent.futures import Future
 
-    from torch._inductor.utils import BoxedBool, InputType
+    from torch._inductor.utils import InputType
     from torch.fx import GraphModule
 
     from .compile_fx_ext import _OutOfProcessFxCompile, _WireProtocolPickledOutput
@@ -24,8 +24,8 @@ if TYPE_CHECKING:
 @dataclass
 class _PostCompileData:
     example_inputs: Sequence[InputType]
-    cudagraphs: BoxedBool
     constants: CompiledFxGraphConstants
+    graph_kwargs: _CompileFxKwargs
 
 
 # _AsyncOutputCode handles the actual management of waiting for an
@@ -81,7 +81,10 @@ class _AsyncOutputCode(OutputCode):
 
         if pcd := self._post_compile_data:
             self._post_compile_data = None
-            output_code.post_compile(pcd.example_inputs, pcd.cudagraphs, pcd.constants)
+
+            output_code.post_compile(
+                pcd.example_inputs, pcd.constants, pcd.graph_kwargs
+            )
 
         self._output_code = output_code
         self._eager_forward = None
@@ -102,16 +105,16 @@ class _AsyncOutputCode(OutputCode):
     def post_compile(
         self,
         example_inputs: Sequence[InputType],
-        cudagraphs: BoxedBool,
         constants: CompiledFxGraphConstants,
+        graph_kwargs: _CompileFxKwargs,
     ) -> None:
         if self._eager_forward is not None:
             self._post_compile_data = _PostCompileData(
-                example_inputs, cudagraphs, constants
+                example_inputs, constants, graph_kwargs
             )
         else:
             assert self._output_code is not None
-            self._output_code.post_compile(example_inputs, cudagraphs, constants)
+            self._output_code.post_compile(example_inputs, constants, graph_kwargs)
 
 
 # Given an FxCompile for an out-of-process compile _AsyncFxCompile will run

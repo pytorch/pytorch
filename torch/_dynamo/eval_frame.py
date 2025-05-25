@@ -64,12 +64,17 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
 )
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.types import ConvertFrameReturn, FrameAction, FrameExecStrategy
+from torch._export.utils import _compiling_state_context
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
     _combine_args,
+    _DimHint,
+    _DimHintType,
+    _IntWrapper,
     _process_dynamic_shapes,
     _RelaxedConstraint,
+    Constraint,
 )
 from torch.fx import GraphModule
 from torch.fx.experimental._dynamism import (
@@ -214,7 +219,7 @@ def _callback_from_stance(callback):
         raise RuntimeError(f"invalid torch.compile stance '{_stance}'")
 
 
-def _create_wrapped_callback(compiler_fn, dynamism=None):
+def _create_wrapped_callback(compiler_fn):
     hooks = Hooks()
     return convert_frame.catch_errors_wrapper(
         convert_frame.convert_frame(  # type: ignore[arg-type]
@@ -254,7 +259,7 @@ def _create_delayed_compile_callback(callback, stance):
         dynamism = track_dynamism_across_examples(example_inputs)
         code_context.get_context(frame.f_code)["dynamism"] = dynamism
         compiler_fn = callback._torchdynamo_orig_callable._torchdynamo_orig_callable
-        return _create_wrapped_callback(compiler_fn, dynamism)(*args, **kwargs)
+        return _create_wrapped_callback(compiler_fn)(*args, **kwargs)
 
     return callback_fn
 
@@ -308,12 +313,23 @@ class OptimizedModule(torch.nn.Module):
         "_forward",
         "__dict__",
         "named_children_walk",
+        "_super_module_initialized",
     }
 
     def __init__(self, mod: torch.nn.Module, dynamo_ctx) -> None:
+        # NOTE: this must go first, because attribute reads/writes of `self`
+        # uses `_orig_mod`, and sometimes users override `Module.__init__` to
+        # do attribute reads/writes on `self`.
+        #
+        # We also can't use regular setattr because `super().__setattr__` will
+        # complain for module value before `super().__init__()`
+        object.__setattr__(self, "_orig_mod", mod)
+        self._super_module_initialized = False
         super().__init__()
+        self._super_module_initialized = True
+
         # Installs the params/buffer
-        self._orig_mod = mod
+        self._orig_mod = mod  # `super().__setattr__` will register this module
         self.dynamo_ctx = dynamo_ctx
         self._initialize()
         self.training = self._orig_mod.training
@@ -323,9 +339,12 @@ class OptimizedModule(torch.nn.Module):
         if isinstance(self.dynamo_ctx, DisableContext):
             # No need to check trace rules
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
-        elif isinstance(self._orig_mod.forward, types.MethodType) and (
-            trace_rules.check(self._orig_mod.forward)
-            or getattr(self._orig_mod, "_is_fsdp_managed_module", False)
+        elif config.wrap_top_frame or (
+            isinstance(self._orig_mod.forward, types.MethodType)
+            and (
+                trace_rules.check(self._orig_mod.forward)
+                or getattr(self._orig_mod, "_is_fsdp_managed_module", False)
+            )
         ):
             # This may be a torch.nn.* instance in trace_rules.py which
             # won't trigger a frame evaluation workaround to add an extra
@@ -338,6 +357,19 @@ class OptimizedModule(torch.nn.Module):
         if hasattr(self._orig_mod, "_initialize_hook"):
             self._forward = self.forward
             self.forward = self._call_lazy_check
+
+    def __call__(self, *args, **kwargs):
+        if torch.nn.modules.module._has_any_global_hook():
+            warnings.warn(
+                "Using `torch.compile(module)` when there are global hooks on "
+                "modules (e.g., from `register_module_forward_hook`); this will"
+                " cause the hooks to fire an extra time for the "
+                "`OptimizedModule` created by `torch.compile(module)`. If this "
+                "causes undesired behavior, please try using `module.compile()`"
+                ", or use the per-module hooks instead",
+                stacklevel=2,
+            )
+        return super().__call__(*args, **kwargs)
 
     def __reduce__(self):
         return (self.__class__, (self._orig_mod, self.dynamo_ctx))
@@ -358,12 +390,11 @@ class OptimizedModule(torch.nn.Module):
 
     @training.setter
     def training(self, value):
-        try:
-            super().__getattr__("_orig_mod")
+        # Ignore the `training` mutation in `super().__init__()`, since that's
+        # setting the default on `nn.Module`, but we are mirroring the
+        # `training` attr in `self._orig_mod`.
+        if self._super_module_initialized:
             self._orig_mod.training = value
-        except AttributeError:
-            # still initializing
-            pass
 
     def __getattr__(self, name):
         if name == "_orig_mod":
@@ -378,6 +409,15 @@ class OptimizedModule(torch.nn.Module):
         if name in OptimizedModule._opt_mod_attributes:
             return super().__setattr__(name, val)
         return setattr(self._orig_mod, name, val)
+
+    def __delattr__(self, name):
+        # This mirrors `__setattr__`
+        if hasattr(type(self), name):
+            return super().__delattr__(name)
+
+        if name in OptimizedModule._opt_mod_attributes:
+            return super().__delattr__(name)
+        return delattr(self._orig_mod, name)
 
     def _call_lazy_check(self, *args, **kwargs):
         if (
@@ -433,7 +473,9 @@ def innermost_fn(fn):
     unaltered_fn = fn
     while hasattr(unaltered_fn, "_torchdynamo_orig_callable"):
         unaltered_fn = unaltered_fn._torchdynamo_orig_callable
-        assert callable(unaltered_fn)
+        assert callable(unaltered_fn), (
+            f"A callable function is expected, but {type(unaltered_fn)} is provided."
+        )
     return unaltered_fn
 
 
@@ -588,13 +630,15 @@ class _TorchDynamoContext:
                 cls_obj._call_impl = self(cls_obj._call_impl)
             return cls_obj
 
-        assert callable(fn)
+        assert callable(fn), (
+            f"A callable function is expected, but {type(fn)} is provided."
+        )
 
         try:
             filename = inspect.getsourcefile(fn)
         except TypeError:
             filename = None
-        if (
+        if config.wrap_top_frame or (
             (filename is None or trace_rules.check(fn))
             and (
                 getattr(fn, "__name__", "")
@@ -617,7 +661,7 @@ class _TorchDynamoContext:
         is_fx_tracing = torch.fx._symbolic_trace.is_fx_tracing
 
         @functools.wraps(fn)
-        def _fn(*args, **kwargs):
+        def compile_wrapper(*args, **kwargs):
             prior = set_eval_frame(None)
             try:
                 if is_fx_tracing():
@@ -656,7 +700,12 @@ class _TorchDynamoContext:
                 except Unsupported as e:
                     if config.verbose:
                         raise
-                    raise e.with_traceback(None) from None
+                    # strip internal tracebacks from causes
+                    cur_exn: BaseException = e
+                    while cur_exn.__cause__ is not None:
+                        cur_exn.__cause__.with_traceback(None)
+                        cur_exn = cur_exn.__cause__
+                    raise e.with_traceback(None) from e.__cause__  # User compiler error
                 except ShortenTraceback as e:
                     # Failures in the backend likely don't have useful
                     # data in the TorchDynamo frames, so we strip them out.
@@ -675,16 +724,16 @@ class _TorchDynamoContext:
                 _maybe_set_eval_frame(prior)
 
         # hooks to properly handle inlining
-        _fn._torchdynamo_inline = fn  # type: ignore[attr-defined]
+        compile_wrapper._torchdynamo_inline = fn  # type: ignore[attr-defined]
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
-        _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+        compile_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
 
         # when compiling user function instead of nn.Module
         # provide public api _fn.get_compiler_config()
-        assert not hasattr(_fn, "get_compiler_config")
-        _fn.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
+        assert not hasattr(compile_wrapper, "get_compiler_config")
+        compile_wrapper.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
 
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
@@ -725,7 +774,7 @@ class _TorchDynamoContext:
                 )
             always_optimize_code_objects[fn.__code__] = True
 
-        return _fn
+        return compile_wrapper
 
 
 class OptimizeContext(_TorchDynamoContext):
@@ -757,12 +806,15 @@ class OptimizeContext(_TorchDynamoContext):
         )
 
         if config.compiled_autograd:
+            _dynamic = self._dynamic
+            if _dynamic is None:
+                _dynamic = not torch._dynamo.config.assume_static_by_default
 
             def call_compiled_autograd():
                 assert rebuild_ctx is not None
                 compiler_fn = rebuild_ctx()
                 ctx = torch._dynamo.compiled_autograd._enable(
-                    compiler_fn, dynamic=self._dynamic
+                    compiler_fn, dynamic=_dynamic
                 )
                 ctx.__enter__()
                 return functools.partial(ctx.__exit__, None, None, None)
@@ -794,8 +846,9 @@ class RunOnlyContext(_TorchDynamoContext):
 
 
 class DisableContext(_TorchDynamoContext):
-    def __init__(self) -> None:
+    def __init__(self, msg: Optional[str] = None) -> None:
         super().__init__(callback=None)
+        self.msg = msg
 
     def __call__(self, fn):
         # Earlier this code was in the base class _TorchDynamoContext. But we
@@ -824,7 +877,9 @@ class DisableContext(_TorchDynamoContext):
                 cls_obj._call_impl = self(cls_obj._call_impl)
             return cls_obj
 
-        assert callable(fn)
+        assert callable(fn), (
+            f"A callable function is expected, but {type(fn)} is provided."
+        )
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
@@ -843,6 +898,7 @@ class DisableContext(_TorchDynamoContext):
                 _maybe_set_eval_frame(prior)
 
         _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
+        _fn._torchdynamo_disable_msg = self.msg  # type: ignore[attr-defined]
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
@@ -889,7 +945,9 @@ def get_compiler_fn(compiler_fn):
 
 class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
     def __call__(self, fn):
-        assert callable(fn)
+        assert callable(fn), (
+            f"A callable function is expected, but {type(fn)} is provided."
+        )
         return fn
 
 
@@ -956,6 +1014,7 @@ def _optimize(
     nopython=False,
     guard_export_fn=None,
     guard_fail_fn=None,
+    guard_filter_fn=None,
     disable=False,
     dynamic=None,
 ) -> Union[OptimizeContext, _NullDecorator]:
@@ -991,7 +1050,11 @@ def _optimize(
     # There is some prior art around this, w/r/t nesting backend calls are enforced to be the same
     # compiler, however, this feels onerous for callback and hooks, and it feels better to give our users an
     # easier to understand UX at the cost of a little more plumbing on our end.
-    hooks = Hooks(guard_export_fn=guard_export_fn, guard_fail_fn=guard_fail_fn)
+    hooks = Hooks(
+        guard_export_fn=guard_export_fn,
+        guard_fail_fn=guard_fail_fn,
+        guard_filter_fn=guard_filter_fn,
+    )
     torch._C._log_api_usage_once("torch._dynamo.optimize")
     if (
         disable
@@ -1000,11 +1063,6 @@ def _optimize(
     ):
         return _NullDecorator()
 
-    backend = get_compiler_fn(backend)
-
-    # Find if backend has any extra context manager
-    backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
-
     if nopython:
         return optimize_assert(
             backend,
@@ -1012,6 +1070,12 @@ def _optimize(
             hooks=hooks,
             rebuild_ctx=rebuild_ctx,
         )
+
+    backend = get_compiler_fn(backend)
+
+    # Find if backend has any extra context manager
+    backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
+
     # The backend function is stashed in the callable returned by
     # _optimize_catch_errors in the field _torchdynamo_orig_callable. This can
     # be used by eval_frame.c to insert a guard on the backend.
@@ -1148,6 +1212,11 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
                             constraint_sizes=[None] * len(flat_args[i].shape),
                         ),
                     )
+                elif isinstance(flat_args[i], _IntWrapper):
+                    arg.node.meta["val"] = flat_args[i].val
+                else:
+                    arg.node.meta["val"] = flat_args[i]
+
             self.new_args.append(arg)
         self.old_args_gen = (self.new_args[i] for i in matched_input_elements_positions)
         self.matched_output_elements_positions = matched_output_elements_positions
@@ -1287,6 +1356,7 @@ def rewrite_signature(
             torch.SymFloat,
             torch.SymBool,
             torch._C.ScriptObject,
+            _IntWrapper,
         ] + list(common_constant_types)
 
         def is_supported_type(val):
@@ -1483,6 +1553,7 @@ def export(
     prefer_deferred_runtime_asserts_over_guards: bool = False,
     allow_complex_guards_as_runtime_asserts: bool = False,
     _log_export_usage: bool = True,
+    constraints: Optional[list[Constraint]] = None,
     **extra_kwargs,
 ) -> Callable[..., ExportResult]:
     """
@@ -1545,10 +1616,15 @@ def export(
     _f = f
     _specialize_float = specialize_float
     _assume_static_by_default = assume_static_by_default
+    _constraints = constraints
 
     def inner(*args, **kwargs):
-        combined_args = _combine_args(_f, args, kwargs)
-        constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
+        if not _constraints:
+            combined_args = _combine_args(_f, args, kwargs)
+            constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
+        else:
+            constraints = _constraints
+
         f = _f
         specialize_float = _specialize_float
         assume_static_by_default = _assume_static_by_default
@@ -1639,8 +1715,35 @@ def export(
                             value, static_shapes=True
                         )
 
-                    fake_graph_inputs = pytree.tree_map(
-                        ambient_fake_mode.from_tensor, graph_inputs
+                    def fakify_with_ambient(path, t):
+                        if isinstance(t, torch.Tensor):
+                            return ambient_fake_mode.from_tensor(t, static_shapes=True)
+                        elif isinstance(t, _IntWrapper):
+                            if (
+                                t.dynamism is not None
+                                and isinstance(t.dynamism, _DimHint)
+                                and t.dynamism.type
+                                in (
+                                    _DimHintType.DYNAMIC,
+                                    _DimHintType.AUTO,
+                                )
+                            ):  # type: ignore[union-attr]
+                                from torch._export.non_strict_utils import (
+                                    key_path_to_source,
+                                )
+
+                                source = key_path_to_source(path)
+                                symint = ambient_fake_mode.shape_env.create_unspecified_symint_and_symbol(  # type: ignore[union-attr]
+                                    t.val, source, DimDynamic.DYNAMIC
+                                )
+                                return symint
+                            else:
+                                return t.val
+                        else:
+                            return t
+
+                    fake_graph_inputs = pytree.tree_map_with_path(
+                        fakify_with_ambient, graph_inputs
                     )
                     graph_captured_result = torch.func.functional_call(
                         graph, fake_params_buffers, fake_graph_inputs
@@ -1658,15 +1761,18 @@ def export(
         constraint_violation_error = None
         if tracing_mode != "symbolic":
             assume_static_by_default = True
-        with config.patch(
-            specialize_int=True,
-            specialize_float=specialize_float,
-            assume_static_by_default=assume_static_by_default,
-            automatic_dynamic_shapes=False,
-            capture_dynamic_output_shape_ops=True,
-            capture_scalar_outputs=True,
-            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
-            allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+        with (
+            config.patch(
+                specialize_int=True,
+                specialize_float=specialize_float,
+                assume_static_by_default=assume_static_by_default,
+                automatic_dynamic_shapes=False,
+                capture_dynamic_output_shape_ops=True,
+                capture_scalar_outputs=True,
+                prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+                allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+            ),
+            _compiling_state_context(),
         ):
             opt_f = optimize_assert(
                 dynamo_normalization_capturing_compiler,
@@ -1776,7 +1882,10 @@ def export(
                 check_signature_rewritable(graph)
 
         # NB: This is mostly hitting the cache; Dynamo already converted these
-        example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
+        example_fake_inputs = [
+            fake_mode.from_tensor(t) if isinstance(t, torch.Tensor) else t
+            for t in example_inputs
+        ]
 
         if aten_graph:
             # Running graph with interpreter is needed for propagating the stack_trace
@@ -1850,14 +1959,27 @@ def export(
         return inner
 
 
-def optimize_assert(
+def optimize_assert(*args, **kwargs):
+    if "rebuild_ctx" in kwargs and kwargs["rebuild_ctx"] is not None:
+        # called from optimize
+        rebuild_ctx = kwargs["rebuild_ctx"]
+        del kwargs["rebuild_ctx"]
+    else:
+
+        def rebuild_ctx():
+            return optimize_assert(*args, **kwargs)
+
+    return _optimize_assert(rebuild_ctx, *args, **kwargs)
+
+
+def _optimize_assert(
+    rebuild_ctx: Callable[[], OptimizeContext],
     backend,
     *,
-    hooks=Hooks(None, None),
+    hooks=Hooks(None, None, None),
     export=False,
     export_constraints=None,
     dynamic=None,
-    rebuild_ctx=None,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
@@ -1888,11 +2010,20 @@ class TorchPatcher:
         # with torch.deploy internally.
         from .decorators import disable
 
-        torch.jit.trace = disable(torch.jit.trace)
-        torch.jit.trace_module = disable(torch.jit.trace_module)
-        torch.jit._get_trace_graph = disable(torch.jit._get_trace_graph)
+        torch.jit.trace = disable(
+            torch.jit.trace, reason="tracing into TorchScript not fully supported"
+        )
+        torch.jit.trace_module = disable(
+            torch.jit.trace_module,
+            reason="tracing into TorchScript not fully supported",
+        )
+        torch.jit._get_trace_graph = disable(
+            torch.jit._get_trace_graph,
+            reason="tracing into TorchScript not fully supported",
+        )
         torch.fx._symbolic_trace.Tracer.trace = disable(
-            torch.fx._symbolic_trace.Tracer.trace
+            torch.fx._symbolic_trace.Tracer.trace,
+            reason="tracing into FX not fully supported",
         )
         torch.distributions.Distribution.set_default_validate_args(False)
 
@@ -1934,7 +2065,12 @@ class TorchPatcher:
 
             if hasattr(opt_mod, fused_fn_name):
                 setattr(
-                    opt_mod, fused_fn_name, disable(getattr(opt_mod, fused_fn_name))
+                    opt_mod,
+                    fused_fn_name,
+                    disable(
+                        getattr(opt_mod, fused_fn_name),
+                        reason="don't trace into fused optimizer",
+                    ),
                 )
 
         optimizer_classes = [
@@ -1951,10 +2087,14 @@ class TorchPatcher:
 
         for opt in optimizer_classes:
             if opt in excluded_optimizer_classes:
-                opt.step = disable(opt.step)
+                opt.step = disable(
+                    opt.step, reason=f"optimizer {opt} step not supported"
+                )
 
             if hasattr(opt, "_init_group"):
-                opt._init_group = disable(opt._init_group)
+                opt._init_group = disable(
+                    opt._init_group, reason=f"optimizer {opt} _init_group not supported"
+                )
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):

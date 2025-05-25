@@ -47,6 +47,7 @@ docs/source/generated/
 docs/source/compile/generated/
 log
 usage_log.txt
+usage_log*
 test-reports/
 test/*.bak
 test/**/*.bak
@@ -62,9 +63,7 @@ test/forward_backward_compatibility/nightly_schemas.txt
 dropout_model.pt
 test/generated_type_hints_smoketest.py
 test/htmlcov
-test/cpp_extensions/install/
-test/cpp_extensions/open_registration_extension/install
-test/cpp_extensions/libtorch_agnostic_extension/install
+test/cpp_extensions/**/install
 test/kernel.errors.txt
 third_party/build/
 third_party/nccl/
@@ -180,6 +179,7 @@ compile_commands.json
 *.egg-info/
 docs/source/scripts/activation_images/
 docs/source/scripts/quantization_backend_configs/
+docs/source/scripts/lr_scheduler_images/
 
 ## General
 
@@ -212,15 +212,6 @@ docs/source/scripts/quantization_backend_configs/
 
 # Compiled MATLAB
 *.mex*
-
-# IPython notebook checkpoints
-.ipynb_checkpoints
-
-# Editor temporaries
-*.swn
-*.swo
-*.swp
-*~
 
 # NFS handle files
 **/.nfs*
