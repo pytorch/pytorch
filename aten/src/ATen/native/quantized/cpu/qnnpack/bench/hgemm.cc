@@ -40,7 +40,7 @@ class HGEMM : public benchmark::Fixture {
 
    void SetUp(const benchmark::State&) override {
     const uint_fast32_t seed =
-        std::chrono::system_clock::now().time_since_epoch().count();
+        std::chrono::steady_clock::now().time_since_epoch().count();
     auto rng = std::bind(
         fp16_ieee_from_fp32_value,
         std::bind(std::uniform_real_distribution<float>(), std::mt19937(seed)));
