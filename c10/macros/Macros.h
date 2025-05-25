@@ -241,7 +241,7 @@ using namespace c10::xpu;
 #ifdef __HIPCC__
 // Unlike CUDA, HIP requires a HIP header to be included for __host__ to work.
 // We do this #include here so that C10_HOST_DEVICE and friends will Just Work.
-// See https://github.com/ROCm-Developer-Tools/HIP/issues/441
+// See https://github.com/ROCm/hip/issues/441
 #include <hip/hip_runtime.h>
 #endif
 
@@ -286,7 +286,7 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_MIN_BLOCKS_PER_SM(threads_per_block, blocks_per_sm)        \
   ((((threads_per_block) * (blocks_per_sm) <= CUDA_MAX_THREADS_PER_SM) \
         ? (blocks_per_sm)                                              \
-        : ((CUDA_MAX_THREADS_PER_SM + (threads_per_block)-1) /         \
+        : ((CUDA_MAX_THREADS_PER_SM + (threads_per_block) - 1) /       \
            (threads_per_block))))
 // C10_LAUNCH_BOUNDS is analogous to __launch_bounds__
 #define C10_LAUNCH_BOUNDS_0 \
@@ -506,6 +506,16 @@ __host__ __device__
 #define C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(warning)
 #define C10_DIAGNOSTIC_POP()
 
+#endif
+
+// This macro is used to find older C++ compilers
+// that don't support move optimization for return values.
+
+#if (defined(__GNUC__) && __GNUC__ < 13) || \
+    (defined(__clang_major__) && __clang_major__ < 13)
+#define C10_RETURN_MOVE_IF_OLD_COMPILER 1
+#else
+#define C10_RETURN_MOVE_IF_OLD_COMPILER 0
 #endif
 
 #endif // C10_MACROS_MACROS_H_

@@ -85,6 +85,9 @@ The following types define the planner interface used during checkpoint:
 .. autoclass:: torch.distributed.checkpoint.planner.WriteItem
   :members:
 
+.. autoclass:: torch.distributed.checkpoint.planner.BytesIOWriteData
+  :members:
+
 We provide a filesystem based storage layer:
 
 .. autoclass:: torch.distributed.checkpoint.FileSystemReader

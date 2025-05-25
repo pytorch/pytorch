@@ -598,7 +598,6 @@ class GraphModule(torch.nn.Module):
         l_weird_b = L_weird_b
         l_weird_c = L_weird_c
 
-        function_ctx = torch.autograd.function.FunctionCtx();  function_ctx = None
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
         autograd_function_apply: "f32[]" = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_z_, l_weird_b, l_weird_c, args_tensor_mask = [True, False, True], non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = l_z_ = l_weird_b = l_weird_c = None
@@ -1120,7 +1119,6 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
         l_weight_ = L_weight_
 
-        function_ctx = torch.autograd.function.FunctionCtx();  function_ctx = None
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
         autograd_function_apply: "f32[5, 4]" = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_weight_, args_tensor_mask = [True, True], non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = l_weight_ = None
@@ -1305,7 +1303,6 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
         l_y_ = L_y_
 
-        function_ctx = torch.autograd.function.FunctionCtx();  function_ctx = None
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
         autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_y_, args_tensor_mask = [True, True], non_differentiable_idx = [1]);  fwd_body_0 = bwd_body_0 = l_x_ = l_y_ = None
@@ -1474,7 +1471,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(out, x + 1)
         self.assertEqual(x.grad.shape, shape)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 2)
+        self.assertEqual(cnt.op_count, 1)
 
     @requires_cuda
     def test_triton_kernel_basic(self):

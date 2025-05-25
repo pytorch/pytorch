@@ -15,7 +15,6 @@ import pytest
 
 import torch
 from torch.autograd import function
-from torch.onnx._internal import diagnostics
 from torch.testing._internal import common_utils
 
 
@@ -292,15 +291,9 @@ def xfail(error_message: str, reason: Optional[str] = None):
             try:
                 func(self, *args, **kwargs)
             except Exception as e:
-                if isinstance(e, torch.onnx.OnnxExporterError):
-                    # diagnostic message is in the cause of the exception
-                    assert error_message in str(e.__cause__), (
-                        f"Expected error message: {error_message} NOT in {str(e.__cause__)}"
-                    )
-                else:
-                    assert error_message in str(e), (
-                        f"Expected error message: {error_message} NOT in {str(e)}"
-                    )
+                assert error_message in str(e), (
+                    f"Expected error message: {error_message} NOT in {str(e)}"
+                )
                 pytest.xfail(reason if reason else f"Expected failure: {error_message}")
             else:
                 pytest.fail("Unexpected success!")
@@ -417,4 +410,3 @@ class ExportTestCase(common_utils.TestCase):
         set_rng_seed(0)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(0)
-        diagnostics.engine.clear()

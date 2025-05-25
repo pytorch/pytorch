@@ -1393,7 +1393,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
 #else
   // CUDA Implementation
   cudaDeviceProp* p = at::cuda::getDeviceProperties(query.device().index());
-  const int computeCapability = p->major * 10 + p->minor;
+  int computeCapability = p->major * 10 + p->minor;
+  if (computeCapability == 121) {
+    computeCapability = 120;
+  }
 
   bool kernel_launched = false;
   const auto maxShmem = p->sharedMemPerBlockOptin;

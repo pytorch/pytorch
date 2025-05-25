@@ -23,7 +23,7 @@ from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 
 from ..._dynamo.utils import counters
-from .. import codecache, config, cpp_builder, cpu_vec_isa, ir, metrics
+from .. import config, cpp_builder, cpu_vec_isa, ir, metrics
 from ..loop_body import LoopBody
 from ..scheduler import (
     BaseSchedulerNode,
@@ -72,6 +72,7 @@ from .cpp_utils import (
     codegen_rand,
     CppCSEVariable,
     DTYPE_TO_CPP,
+    get_promote_dtype,
     INDEX_TYPE,
     LocalBufferContext,
     may_unify_binary_op_mask_type,
@@ -153,6 +154,8 @@ VECTORIZABLE_DTYPES: list[torch.dtype] = [
     torch.int8,
     torch.int32,
     torch.int64,
+    torch.float8_e4m3fn,
+    torch.float8_e5m2,
 ]
 
 MASKED_VECTORIZABLE_DTYPES: list[torch.dtype] = [
@@ -647,20 +650,31 @@ class RecordOptimizationContext:
         return self.current_node
 
 
+def decltype_promoted(*args):
+    assert not any(isinstance(arg, CppCSEVariable) and arg.is_vec for arg in args), (
+        "Promotion of vector types is not supported"
+    )
+
+    if (dt := get_promote_dtype(args)) is not None:
+        return DTYPE_TO_CPP[dt]
+    else:
+        return f"decltype({args[0]})"
+
+
 class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
 
     @staticmethod
     def add(a, b):
-        return f"decltype({a})({a} + {b})"
+        return f"{decltype_promoted(a, b)}({a} + {b})"
 
     @staticmethod
     def sub(a, b):
-        return f"decltype({a})({a} - {b})"
+        return f"{decltype_promoted(a, b)}({a} - {b})"
 
     @staticmethod
     def mul(a, b):
-        return f"decltype({a})({a} * {b})"
+        return f"{decltype_promoted(a, b)}({a} * {b})"
 
     @staticmethod
     def to_dtype(x, dtype, src_dtype=None, use_compute_types=True):
@@ -1408,7 +1422,15 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def tanh(a):
-        return f"{a}.tanh()"
+        if config.cpp.use_decompose_tanh:
+            vec_one = f"decltype({a})(1)"
+            vec_two = f"decltype({a})(2)"
+            vec_minus_two = f"decltype({a})(-2)"
+            return (
+                f"{vec_two} / ({vec_one} + ({vec_minus_two} * {a}).exp()) - {vec_one}"
+            )
+        else:
+            return f"{a}.tanh()"
 
     @staticmethod
     def reciprocal(a):
@@ -1587,6 +1609,8 @@ class CppVecOverrides(CppOverrides):
             torch.int8,
             torch.int32,
             torch.int64,
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
         ], f"{__name__} does not support {dtype}"
         assert isinstance(x, CppCSEVariable)
         src_dtype = x.dtype
@@ -2047,7 +2071,7 @@ class CppKernel(Kernel):
         var = self.args.input(name)
         index = self.rename_indexing(index)
         line = f"{var}[{cexpr_index(index)}]"
-        csevar = self.cse.generate(self.loads, line)
+        csevar = self.cse.generate(self.loads, line, dtype=V.graph.get_dtype(name))
         csevar.update_on_args("load", (self, name, index), {})
         return csevar
 
@@ -2660,7 +2684,7 @@ class CppVecKernel(CppKernel):
             buffer.splice(code)
             return None
         else:
-            csevar = self.cse.generate(buffer, code)
+            csevar = self.cse.generate(buffer, code, dtype=dtype)
             assert isinstance(csevar, CppCSEVariable)
             csevar.is_vec = True
             return csevar
@@ -2677,7 +2701,7 @@ class CppVecKernel(CppKernel):
         elif stride == 1:
             # load contiguously
             line = self._get_vec_load_line(var, index, dtype, self._load_mask)  # type: ignore[arg-type]
-            csevar = self.cse.generate(self.loads, line)  # type: ignore[assignment]
+            csevar = self.cse.generate(self.loads, line, dtype=dtype)  # type: ignore[assignment]
         else:
             csevar = self._load_or_store_non_contiguous(var, index, dtype)  # type: ignore[assignment]
         assert isinstance(csevar, CppCSEVariable)
@@ -2978,7 +3002,9 @@ class CppVecKernel(CppKernel):
         else:
             # Vertical reduction
             if out_dtype != dtype:
-                converted_value = f"{DTYPE_TO_CPP[out_dtype]}_{value}"
+                converted_value = (
+                    f"{DTYPE_TO_CPP[out_dtype].replace('::', '_')}_{value}"
+                )
                 if out_dtype == torch.bool:
                     convert = f"{value}.template cast<bool,{self._get_num_vectors(torch.bool)}>()"
                 else:
@@ -3423,7 +3449,7 @@ class CppTile2DKernel(CppVecKernel):
             loadbuf = f"{tile_var} + {cexpr_index(inner * self.num_elems)}"
             dtype = V.graph.get_dtype(name)
             line = self._get_vec_load_line(loadbuf, 0, dtype)  # type: ignore[arg-type]
-            csevar = self.cse.generate(self.loads, line)
+            csevar = self.cse.generate(self.loads, line, dtype=dtype)
             csevar.update_on_args("load", (self, name, index), {})
             assert isinstance(csevar, CppCSEVariable)
             csevar.is_vec = True
@@ -4867,9 +4893,8 @@ class CppScheduling(BaseScheduling):
                 len(get_call_ranges(_node)) == node.outer_loop_fusion_depth + 1
                 for _node in node.get_outer_nodes()
             ):
-                # Ref to the typical case of local buffer
-                # in https://github.com/pytorch/pytorch/blob/
-                # 1115a25c36340554442f28f9570abd42f0aface2/aten/src/ATen/native/cpu/SoftMaxKernel.cpp#L159
+                # Ref to the typical case of local buffer in
+                # https://github.com/pytorch/pytorch/blob/1115a25c36340554442f28f9570abd42f0aface2/aten/src/ATen/native/cpu/SoftMaxKernel.cpp#L159 # noqa: B950
                 # where the buffer is with size of last dim and contiguous.
                 # Only support this typical case at first.
                 visited_scheduler_nodes = OrderedSet[str]()
@@ -5166,6 +5191,9 @@ class CppScheduling(BaseScheduling):
         # excluding the the first line including cpp_prefix.h.
         first_char = src_code.rfind('extern "C"')
         last_char = src_code.find(")", first_char)
+        if _IS_WINDOWS:
+            # get_export_declaration introduced one more ')' in Windows
+            last_char = src_code.find(")", last_char + 1)
         kernel_definition = f"{src_code[first_char : last_char + 1]};\n"
 
         compile_wrapper = IndentedBuffer()
@@ -5232,7 +5260,7 @@ class KernelGroup:
         ]
         if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
-        code.writeline(codecache.cpp_prefix())
+        code.writeline("#include <torch/csrc/inductor/cpp_prefix.h>")
 
         # 2. Function definition
         kernel_decl_name = str(Placeholder.KERNEL_NAME) if name is None else name
@@ -5445,20 +5473,36 @@ class LoopNest:
         start_depth = 0
         max_depth = 0
         is_reduction = self.loops[0].is_reduction
-        loop_sizes = sympy.Integer(1)
+        num_steps = sympy.Integer(1)
         for loop in self.loops:
             if loop.is_reduction != is_reduction:
                 break
-            loop_sizes = loop_sizes * loop.size
+            num_steps = num_steps * FloorDiv(loop.size, loop.steps)
             max_depth += 1
 
-        # When the range of the first inner loop is much larger than the range of all outer loops,
-        # change `start_depth` to the first inner loop and recalculate `max_depth`.
+        def get_simd_vec_depth(loops):
+            # Return the first loop level which is simd_vec
+            for i, loop in enumerate(loops):
+                if loop.simd_vec:
+                    return i
+            return None
+
+        simd_vec_depth = get_simd_vec_depth(self.loops)
+
+        # When the number of steps of the first inner loop is much larger than the number of steps of
+        # all outer loops, change `start_depth` to the first inner loop and recalculate `max_depth`.
         if (
             max_depth < len(self.loops)
-            and isinstance(loop_sizes, sympy.Integer)
+            and isinstance(num_steps, sympy.Integer)
             and isinstance(self.loops[max_depth].size, sympy.Integer)
-            and loop_sizes * 300 < self.loops[max_depth].size
+            and num_steps * 300
+            < FloorDiv(self.loops[max_depth].size, self.loops[max_depth].steps)
+            and not (
+                # Disable parallel reduction under the vec loop
+                simd_vec_depth is not None
+                and max_depth > simd_vec_depth
+                and self.loops[max_depth].is_reduction
+            )
         ):
             start_depth = max_depth
             max_depth = 0

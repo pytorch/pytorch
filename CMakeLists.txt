@@ -64,24 +64,12 @@ endif()
 
 # This define is needed to preserve behavior given anticpated changes to
 # cccl/thrust
-# https://nvidia.github.io/libcudacxx/standard_api/numerics_library/complex.html
+# https://nvidia.github.io/cccl/libcudacxx/standard_api/numerics_library/complex.html
 string(APPEND CMAKE_CUDA_FLAGS
        " -DLIBCUDACXX_ENABLE_SIMPLIFIED_COMPLEX_OPERATIONS")
 
 if(LINUX)
-  include(cmake/CheckAbi.cmake)
-  string(APPEND CMAKE_CXX_FLAGS
-         " -D_GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
-  string(APPEND CMAKE_CUDA_FLAGS
-         " -D_GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
-  if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
-    set(CXX_STANDARD_REQUIRED ON)
-  else()
-    # Please note this is required in order to ensure compatibility between gcc
-    # 9 and gcc 7 This could be removed when all Linux PyTorch binary builds are
-    # compiled by the same toolchain again
-    append_cxx_flag_if_supported("-fabi-version=11" CMAKE_CXX_FLAGS)
-  endif()
+  set(CXX_STANDARD_REQUIRED ON)
 endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -271,6 +259,8 @@ option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(USE_MPS "Use MPS for macOS build" ON "MPS_FOUND" OFF)
 cmake_dependent_option(USE_NCCL "Use NCCL" ON
                        "USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
+cmake_dependent_option(USE_XCCL "Use XCCL" OFF
+                       "USE_XPU;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_RCCL "Use RCCL" ON USE_NCCL OFF)
 cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
 cmake_dependent_option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF "USE_NCCL"
@@ -344,9 +334,14 @@ cmake_dependent_option(
   USE_GLOO_WITH_OPENSSL "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
     "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
 cmake_dependent_option(
+  USE_GLOO_IBVERBS "Use Gloo with ibverbs backend. Only available if USE_GLOO is on." OFF
+    "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
+cmake_dependent_option(
     USE_C10D_GLOO "USE C10D GLOO" ON "USE_DISTRIBUTED;USE_GLOO" OFF)
 cmake_dependent_option(
     USE_C10D_NCCL "USE C10D NCCL" ON "USE_DISTRIBUTED;USE_NCCL" OFF)
+cmake_dependent_option(
+    USE_C10D_XCCL "USE C10D XCCL" ON "USE_DISTRIBUTED;USE_XCCL" OFF)
 cmake_dependent_option(
     USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI" OFF)
 cmake_dependent_option(
@@ -990,6 +985,12 @@ endif()
 include(cmake/public/utils.cmake)
 if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -O2 -fPIC")
+
+  # This prevents use of `c10::optional`, `c10::nullopt` etc within the codebase
+  string(APPEND CMAKE_CXX_FLAGS " -DC10_NODEPRECATED")
+  string(APPEND CMAKE_CUDA_FLAGS " -DC10_NODEPRECATED")
+  string(APPEND CMAKE_OBJCXX_FLAGS " -DC10_NODEPRECATED")
+
   # Eigen fails to build with some versions, so convert this to a warning
   # Details at http://eigen.tuxfamily.org/bz/show_bug.cgi?id=1459
   string(APPEND CMAKE_CXX_FLAGS " -Wall")
@@ -1096,7 +1097,6 @@ if(NOT MSVC)
   if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
     append_cxx_flag_if_supported("-Wno-dangling-reference" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-error=dangling-reference" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-error=redundant-move" CMAKE_CXX_FLAGS)
   endif()
 else()
   # Define export functions for AOTI.

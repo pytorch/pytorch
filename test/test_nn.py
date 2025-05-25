@@ -1812,7 +1812,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
 
     def test_weight_norm(self):
-        for dtype in [torch.float, torch.bfloat16]:
+        for dtype in [torch.float, torch.bfloat16, torch.float16]:
             input = torch.randn(3, 4, dtype=dtype)
             m = nn.Linear(4, 5).to(dtype=dtype)
             expected_output = m(input)
@@ -6398,6 +6398,24 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         output = torch.nn.ChannelShuffle(groups)(input_tensor)
         torch.testing.assert_close(output, input_tensor)
 
+    def test_channel_shuffle_input_checks(self):
+        input_tensor = torch.rand([1, 3, 2, 2])
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Number of groups to divide channels in must be positive.*"):
+            groups = 0
+            torch.native_channel_shuffle(input_tensor, groups)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Number of channels must be divisible by groups.*"):
+            groups = 2
+            torch.native_channel_shuffle(input_tensor, groups)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "channel_shuffle expects input with > 2 dims,.*"):
+            input_tensor = torch.rand([1, 2])
+            groups = 2
+            torch.native_channel_shuffle(input_tensor, groups)
+
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_native_channel_shuffle_return_alias_of_self(self):
         groups = 3
@@ -6716,6 +6734,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, ".*both arguments.*1D.*"):
             m(inp)
 
+    @tf32_on_and_off(0.005)
     @parametrize_test('device', ['cpu'] + (['cuda'] if TEST_CUDA else []))
     @parametrize_test('bias', [
         subtest(False, name='nobias'), subtest(True, name='bias')])
@@ -7192,6 +7211,26 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         x = torch.Tensor([[[2.0, 2.0], [14.0, 14.0]], [[2.0, 2.0], [14.0, 14.0]]])
         ln = torch.nn.LayerNorm(2, eps=1e-6, elementwise_affine=False)
         self.assertEqual(ln.forward(x), torch.zeros_like(x))
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_layer_norm_backwards_eps(self):
+        dtype = torch.float
+        m_x_n_list = [(3, 3), (5, 5), (11, 11), (55, 55),
+                      (32, 32), (1024, 32), (1024, 1024),
+                      (33, 33), (1025, 33), (1025, 1025)]
+        for m, n in m_x_n_list:
+            x = torch.randn((m, n), dtype=dtype, requires_grad=True)
+            grad_output = torch.rand_like(x)
+            x_cuda = x.clone().detach().to("cuda").requires_grad_()
+            grad_output_cuda = grad_output.clone().detach().to("cuda")
+            ln = nn.LayerNorm(n, dtype=dtype)
+            ln_cuda = nn.LayerNorm(n, device="cuda", dtype=dtype)
+            ln_out = ln(x)
+            ln_out_cuda = ln_cuda(x_cuda)
+            ln_out.backward(grad_output)
+            ln_out_cuda.backward(grad_output_cuda)
+            self.assertEqual(ln.weight.grad, ln_cuda.weight.grad, f"weight grad failed: {m=} {n=}", rtol=1e-5, atol=1e-4)
+            self.assertEqual(ln.bias.grad, ln_cuda.bias.grad, f"bias grad failed: {m=} {n=}", rtol=1e-5, atol=1e-4)
 
     @largeTensorTest("40GB", device="cuda")
     def test_layer_norm_large_tensor(self):
@@ -8096,7 +8135,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
-    @tf32_on_and_off(0.001)
+    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.001)
     @bf32_on_and_off(0.001)
     def test_affine_2d_rotate90(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
@@ -8224,7 +8263,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
     @bf32_on_and_off(0.005)
     def test_affine_2d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
@@ -8277,7 +8316,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @expectedFailureMPS  # aten::grid_sampler_3d not implemented https://github.com/pytorch/pytorch/issues/77764
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
     @bf32_on_and_off(0.005)
     def test_affine_3d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
@@ -9095,7 +9134,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @dtypes(torch.float, torch.double)
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
     def test_rnn_fused(self, device, dtype):
 
         def copy_rnn(rnn1, rnn2):
@@ -11484,7 +11523,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm(msg="skipped Cudnn test on ROCm")
-    def test_ctc_loss_cudnn_tensor(self, device):
+    def test_ctc_loss_cudnn_tensor_cuda(self):
         batch_size = 16
         input_length = 30
         num_labels = 101
@@ -11510,10 +11549,49 @@ class TestNNDeviceType(NNTestCase):
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
+    @onlyCUDA
+    @skipCUDAIfRocm(msg="skipped Cudnn test on ROCm")
+    def test_ctc_loss_cudnn_tensor_cpu_length_cuda(self):
+        # batch size
+        N = 50
+        # audio length
+        T = 100
+        # text dimension
+        C = 80
+        # max text length
+        S = 10
+
+        prob_device = torch.device("cuda")
+        other_device = torch.device("cpu")
+        other_dtype = torch.int32
+
+        log_probs = torch.randn(T, N, C).log_softmax(2).to(prob_device)
+
+        input_lengths = torch.full((N,), T, dtype=other_dtype).to(other_device)
+        target_lengths = torch.randint(low=1, high=S, size=(N,), dtype=other_dtype).to(other_device)
+        targets = torch.randint(low=0, high=C, size=(sum(target_lengths),), dtype=other_dtype).to(other_device)
+
+        ctc_loss = torch.nn.functional.ctc_loss(
+            log_probs=log_probs,
+            targets=targets,
+            input_lengths=input_lengths,
+            target_lengths=target_lengths,
+            reduction="sum",
+        )
+
+    @expectedFailureMPS
+    def test_ctc_loss_error(self, device):
+        log_probs = torch.rand(0, 0, 4, device=device)
+        targets = torch.tensor([], device=device, dtype=torch.long)
+        input_lengths = torch.tensor([], device=device, dtype=torch.long)
+        target_lengths = torch.tensor([], device=device, dtype=torch.long)
+        with self.assertRaisesRegex(RuntimeError, "log_probs tensor must not be empty"):
+            F.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
+
     @expectedFailureMPS  # RuntimeError: LSTM with projections is not currently supported with MPS.
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_variable_sequence(self, device, dtype):
         def pad(var, length):
@@ -11721,7 +11799,7 @@ class TestNNDeviceType(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 F.nll_loss(x, t, weight=weight)
 
-    # Ref: https://github.com/pytorch/pytorch/issue/85005
+    # Ref: https://github.com/pytorch/pytorch/issues/85005
     @onlyCUDA
     @largeTensorTest("120GB", "cpu")
     @largeTensorTest("45GB", "cuda")
@@ -11754,7 +11832,7 @@ class TestNNDeviceType(NNTestCase):
             with torch.no_grad():
                 self.assertTrue(torch.allclose(input.grad.cpu(), input_cpu.grad, rtol=rtol, atol=atol))
 
-    # Ref: https://github.com/pytorch/pytorch/issue/108345
+    # Ref: https://github.com/pytorch/pytorch/issues/108345
     @onlyCUDA
     @largeTensorTest("20GB", "cpu")
     @largeTensorTest("20GB", "cuda")
@@ -12121,7 +12199,7 @@ if __name__ == '__main__':
 
     # Ref: https://github.com/pytorch/pytorch/issues/85005
     @onlyCUDA
-    @largeTensorTest("45GB", "cpu")
+    @largeTensorTest("120GB", "cpu")
     @largeTensorTest("70GB", "cuda")
     @parametrize_test("reduction", ("none", "mean", "sum"))
     def test_cross_entropy_large_tensor(self, device, reduction):
@@ -13038,6 +13116,16 @@ if __name__ == '__main__':
         clip_grad_norm_(p1, max_norm, norm_type=norm_type, foreach=foreach)
         clip_grad_norm_([p2], max_norm, norm_type=norm_type, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
+
+        # Should warning when parameters generator exhausted
+        params = l.parameters()
+        for p in params:
+            pass
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            clip_grad_norm_(params, max_norm, norm_type=norm_type, foreach=foreach)
+            self.assertEqual(len(w), 1)
+            self.assertEqual(str(w[0].message), "`parameters` is an empty generator, no gradient clipping will occur.")
 
     # reference issue: https://github.com/pytorch/pytorch/issues/111484
     @onlyCUDA
