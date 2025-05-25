@@ -1235,9 +1235,9 @@ class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
-        assert value.device.type == device.type, (
-            "stream value is not equal to the passed device"
-        )
+        assert (
+            value.device.type == device.type
+        ), "stream value is not equal to the passed device"
         super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value
@@ -1345,7 +1345,7 @@ class EventVariable(VariableTracker):
                 f"{type(self.value).__module__}.{type(self.value).__qualname__}.{name}"
             )
             unimplemented_v2(
-                gb_type=f"Unsupported {method_name} method",
+                gb_type="Unsupported event method",
                 context=str(name),
                 explanation=f"Dynamo doesn't support tracing the {method_name} method. "
                 f"We currently support wait, record, synchronize, and query.",
