@@ -247,6 +247,7 @@ class _WireProtocolOutput:
     metrics: CachedMetricsDeltas
     logs: list[logging.LogRecord]
     warning_replay: Optional[list[warnings.WarningMessage]]
+    shape_env: Optional[torch.fx.experimental.symbolic_shapes.ShapeEnv]
 
     def serialize(self) -> _WireProtocolPickledOutput:
         """
@@ -546,7 +547,11 @@ class _SerializedFxCompile(FxCompile):
         logs = captured_logs.finish()
 
         return _WireProtocolOutput(
-            output_graph, metrics.get_deltas(), logs, warning_replay
+            output_graph,
+            metrics.get_deltas(),
+            logs,
+            warning_replay,
+            fake_mode.shape_env,
         ).serialize()
 
 
