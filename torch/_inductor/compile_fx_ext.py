@@ -167,6 +167,7 @@ class _FakeTensorModeSerializer:
 
     def __init__(self, fake_mode: FakeTensorMode) -> None:
         self.allow_non_fake_inputs = fake_mode.allow_non_fake_inputs
+        self.shape_env = fake_mode.shape_env
 
     @contextlib.contextmanager
     def patch(self, fake_mode: FakeTensorMode) -> Generator[None, None, None]:
