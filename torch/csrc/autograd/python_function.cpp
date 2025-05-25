@@ -34,6 +34,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 
+#include <torch/csrc/autograd/function.h>
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -1624,7 +1625,7 @@ using setter = int (*)(PyObject*, PyObject*, void*);
 
 namespace {
 
-template <PyObject* THPFunction::*ptr>
+template <PyObject* THPFunction::* ptr>
 PyObject* getObject(PyObject* obj, void* _unused) {
   auto self = (THPFunction*)obj;
   PyObject* value = self->*ptr;
@@ -1635,7 +1636,7 @@ PyObject* getObject(PyObject* obj, void* _unused) {
   return value;
 }
 
-template <PyObject* THPFunction::*ptr>
+template <PyObject* THPFunction::* ptr>
 int setObject(PyObject* obj, PyObject* value, void* _unused) {
   auto self = (THPFunction*)obj;
   if (value == Py_None) {
@@ -1647,13 +1648,13 @@ int setObject(PyObject* obj, PyObject* value, void* _unused) {
   return 0;
 }
 
-template <typename M, M THPFunction::*ptr, PyObject* (*Convert)(long)>
+template <typename M, M THPFunction::* ptr, PyObject* (*Convert)(long)>
 PyObject* getMember(PyObject* obj, void* _unused) {
   auto self = (THPFunction*)obj;
   return Convert(self->*ptr);
 }
 
-template <typename M, M autograd::Node::*ptr, PyObject* (*Convert)(long)>
+template <typename M, M autograd::Node::* ptr, PyObject* (*Convert)(long)>
 PyObject* getImplMember(PyObject* obj, void* _unused) {
   auto self = (THPFunction*)obj;
   return Convert(self->cdata.*ptr);

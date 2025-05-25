@@ -191,6 +191,10 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
     # shellcheck disable=SC1091
     source /opt/intel/oneapi/umf/latest/env/vars.sh
   fi
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/ccl/latest/env/vars.sh
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/mpi/latest/env/vars.sh
   # Check XPU status before testing
   xpu-smi discovery
 fi
@@ -314,6 +318,12 @@ test_python() {
   assert_git_not_dirty
 }
 
+test_python_smoke() {
+  # Smoke tests for H100
+  time python test/run_test.py --include test_matmul_cuda inductor/test_fp8 inductor/test_max_autotune $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  assert_git_not_dirty
+}
+
 test_lazy_tensor_meta_reference_disabled() {
   export TORCH_DISABLE_FUNCTIONALIZATION_META_REFERENCE=1
   echo "Testing lazy tensor operations without meta reference"
@@ -398,8 +408,15 @@ test_inductor_aoti() {
     # We need to hipify before building again
     python3 tools/amd_build/build_amd.py
   fi
-  BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
-  CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference
+  if [[ "$BUILD_ENVIRONMENT" == *sm86* ]]; then
+    BUILD_AOT_INDUCTOR_TEST=1 TORCH_CUDA_ARCH_LIST=8.6 USE_FLASH_ATTENTION=OFF python setup.py develop
+    # TODO: Replace me completely, as one should not use conda libstdc++, nor need special path to TORCH_LIB
+    LD_LIBRARY_PATH=/opt/conda/envs/py_3.10/lib/:${TORCH_LIB_DIR}:$LD_LIBRARY_PATH
+    CPP_TESTS_DIR="${BUILD_BIN_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference -dist=loadfile
+  else
+    BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
+    CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference -dist=loadfile
+  fi
 }
 
 test_inductor_cpp_wrapper_shard() {
@@ -414,10 +431,11 @@ test_inductor_cpp_wrapper_shard() {
 
   if [[ "$1" -eq "2" ]]; then
     # For now, manually put the opinfo tests in shard 2, and all other tests in
-    # shard 1.  Test specific things triggering past bugs, for now.
+    # shard 1.  Run all CPU tests, as well as specific GPU tests triggering past
+    # bugs, for now.
     python test/run_test.py \
       --include inductor/test_torchinductor_opinfo \
-      -k 'linalg or to_sparse' \
+      -k 'linalg or to_sparse or TestInductorOpInfoCPU' \
       --verbose
     exit
   fi
@@ -1173,7 +1191,7 @@ build_xla() {
   apply_patches
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
   # These functions are defined in .circleci/common.sh in pytorch/xla repo
-  retry install_deps_pytorch_xla $XLA_DIR $USE_CACHE
+  retry install_pre_deps_pytorch_xla $XLA_DIR $USE_CACHE
   CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SANDBOX_BUILD=1 build_torch_xla $XLA_DIR
   assert_git_not_dirty
 }
@@ -1474,11 +1492,8 @@ test_executorch() {
   pushd /executorch
 
   export PYTHON_EXECUTABLE=python
-  export EXECUTORCH_BUILD_PYBIND=ON
-  export CMAKE_ARGS="-DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
+  export CMAKE_ARGS="-DEXECUTORCH_BUILD_PYBIND=ON -DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
 
-  # For llama3
-  bash examples/models/llama3_2_vision/install_requirements.sh
   # NB: We need to rebuild ExecuTorch runner here because it depends on PyTorch
   # from the PR
   bash .ci/scripts/setup-linux.sh --build-tool cmake
@@ -1521,11 +1536,32 @@ test_linux_aarch64() {
        inductor/test_inplacing_pass inductor/test_kernel_benchmark inductor/test_layout_optim \
        inductor/test_max_autotune inductor/test_memory_planning inductor/test_metrics inductor/test_multi_kernel inductor/test_pad_mm \
        inductor/test_pattern_matcher inductor/test_perf inductor/test_profiler inductor/test_select_algorithm inductor/test_smoke \
-       inductor/test_split_cat_fx_passes inductor/test_standalone_compile inductor/test_torchinductor \
+       inductor/test_split_cat_fx_passes inductor/test_compile inductor/test_torchinductor \
        inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes inductor/test_memory \
        inductor/test_triton_cpu_backend inductor/test_triton_extension_backend inductor/test_mkldnn_pattern_matcher inductor/test_cpu_cpp_wrapper \
        --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 }
+
+test_operator_benchmark() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  TEST_DIR=$(pwd)
+
+  test_inductor_set_cpu_affinity
+
+  cd benchmarks/operator_benchmark/pt_extension
+  python setup.py install
+
+  cd "${TEST_DIR}"/benchmarks/operator_benchmark
+  $TASKSET python -m benchmark_all_test --device "$1" --tag-filter "$2" \
+      --output-dir "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv"
+
+  pip_install pandas
+  python check_perf_csv.py \
+      --actual "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
+      --expected "expected_ci_operator_benchmark_eager_float32_cpu.csv"
+}
+
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
@@ -1556,6 +1592,19 @@ elif [[ "$TEST_CONFIG" == distributed ]]; then
   # Only run RPC C++ tests on the first shard
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_rpc
+  fi
+elif [[ "${TEST_CONFIG}" == *operator_benchmark* ]]; then
+  TEST_MODE="short"
+
+  if [[ "${TEST_CONFIG}" == *cpu* ]]; then
+    if [[ "${TEST_CONFIG}" == *long* ]]; then
+      TEST_MODE="long"
+    elif [[ "${TEST_CONFIG}" == *all* ]]; then
+      TEST_MODE="all"
+    fi
+
+    test_operator_benchmark cpu ${TEST_MODE}
+
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
@@ -1673,6 +1722,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
   test_python
   test_aten
   test_xpu_bin
+elif [[ "${TEST_CONFIG}" == smoke ]]; then
+  test_python_smoke
 else
   install_torchvision
   install_monkeytype

@@ -182,5 +182,6 @@ bool sr_schema_check(
 }
 
 bool sr_schema_check_kind(torch::jit::Node* node, c10::Symbol node_kind);
-
 } // namespace torch::jit
+
+C10_DECLARE_bool(static_runtime_enable_fast_math);

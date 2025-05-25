@@ -530,7 +530,7 @@ RE_EXTERN_SHARED = re.compile(r"extern\s+([\w\(\)]+)?\s*__shared__\s+([\w:<>\s]+
 
 def replace_extern_shared(input_string):
     """Match extern __shared__ type foo[]; syntax and use HIP_DYNAMIC_SHARED() MACRO instead.
-       https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_kernel_language.md#__shared__
+       https://github.com/ROCm/hip/blob/master/docs/markdown/hip_kernel_language.md#__shared__
     Example:
         "extern __shared__ char smemChar[];" => "HIP_DYNAMIC_SHARED( char, smemChar)"
         "extern __shared__ unsigned char smem[];" => "HIP_DYNAMIC_SHARED( unsigned char, my_smem)"
@@ -989,7 +989,7 @@ def preprocessor(
             hipify_result.status = "[ok]"
             hipify_result.current_state = CurrentState.DONE
             return hipify_result
-        except PermissionError as e:
+        except OSError as e:
             print(f'{bcolors.WARNING}Failed to save {fout_path} with "{e.strerror}", leaving {fin_path} unchanged.{bcolors.ENDC}',
                   file=sys.stderr)
             hipify_result.hipified_path = fin_path
