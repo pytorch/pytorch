@@ -292,7 +292,7 @@ class ComposeTransform(Transform):
             the latest single value is cached. Only 0 and 1 are supported.
     """
 
-    parts: Sequence[Transform]
+    parts: list[Transform]
 
     def __init__(self, parts: Sequence[Transform], cache_size: int = 0) -> None:
         if cache_size:
