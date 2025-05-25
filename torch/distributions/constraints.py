@@ -33,7 +33,7 @@ The following constraints are implemented:
 """
 
 from collections.abc import Sequence
-from typing import Callable, Generic, Optional, TypeVar
+from typing import Callable, Generic, Optional, TypeVar, Union
 from typing_extensions import TypeAlias, TypeIs
 
 import torch
@@ -358,7 +358,9 @@ class _IntegerInterval(Constraint):
 
     is_discrete = True
 
-    def __init__(self, lower_bound: int, upper_bound: int) -> None:
+    def __init__(
+        self, lower_bound: Union[int, Tensor], upper_bound: Union[int, Tensor]
+    ) -> None:
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
         super().__init__()
@@ -383,7 +385,7 @@ class _IntegerLessThan(Constraint):
 
     is_discrete = True
 
-    def __init__(self, upper_bound: int) -> None:
+    def __init__(self, upper_bound: Union[int, Tensor]) -> None:
         self.upper_bound = upper_bound
         super().__init__()
 
@@ -403,7 +405,7 @@ class _IntegerGreaterThan(Constraint):
 
     is_discrete = True
 
-    def __init__(self, lower_bound: int) -> None:
+    def __init__(self, lower_bound: Union[int, Tensor]) -> None:
         self.lower_bound = lower_bound
         super().__init__()
 
@@ -430,7 +432,7 @@ class _GreaterThan(Constraint):
     Constrain to a real half line `(lower_bound, inf]`.
     """
 
-    def __init__(self, lower_bound: float) -> None:
+    def __init__(self, lower_bound: Union[float, Tensor]) -> None:
         self.lower_bound = lower_bound
         super().__init__()
 
@@ -448,7 +450,7 @@ class _GreaterThanEq(Constraint):
     Constrain to a real half line `[lower_bound, inf)`.
     """
 
-    def __init__(self, lower_bound: float) -> None:
+    def __init__(self, lower_bound: Union[float, Tensor]) -> None:
         self.lower_bound = lower_bound
         super().__init__()
 
@@ -466,7 +468,7 @@ class _LessThan(Constraint):
     Constrain to a real half line `[-inf, upper_bound)`.
     """
 
-    def __init__(self, upper_bound: float) -> None:
+    def __init__(self, upper_bound: Union[float, Tensor]) -> None:
         self.upper_bound = upper_bound
         super().__init__()
 
@@ -484,7 +486,9 @@ class _Interval(Constraint):
     Constrain to a real interval `[lower_bound, upper_bound]`.
     """
 
-    def __init__(self, lower_bound: float, upper_bound: float) -> None:
+    def __init__(
+        self, lower_bound: Union[float, Tensor], upper_bound: Union[float, Tensor]
+    ) -> None:
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
         super().__init__()
@@ -505,7 +509,9 @@ class _HalfOpenInterval(Constraint):
     Constrain to a real interval `[lower_bound, upper_bound)`.
     """
 
-    def __init__(self, lower_bound: float, upper_bound: float) -> None:
+    def __init__(
+        self, lower_bound: Union[float, Tensor], upper_bound: Union[float, Tensor]
+    ) -> None:
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
         super().__init__()
@@ -545,7 +551,7 @@ class _Multinomial(Constraint):
     is_discrete = True
     event_dim = 1
 
-    def __init__(self, upper_bound: int) -> None:
+    def __init__(self, upper_bound: Union[int, Tensor]) -> None:
         self.upper_bound = upper_bound
 
     def check(self, x: Tensor) -> Tensor:
