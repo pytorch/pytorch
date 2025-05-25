@@ -859,6 +859,66 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
+    @torch._dynamo.config.patch(wrap_top_frame=True)
+    def test_wrap_top_frame_with_hooks(self):
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net1 = torch.nn.Linear(18, 18, bias=False)
+
+            def forward(self, x):
+                return self.net1(x)
+
+        mod = ToyModel()
+        mod.register_forward_pre_hook(lambda mod, input: input[0] + 1)
+
+        # Case 1: torch.compile(mod)
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled_mod = torch.compile(mod, backend=cnts)
+
+        x = torch.rand(18, 18)
+        ref = mod(x)
+        res = compiled_mod(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+
+        # Case 2: mod.compile()
+        cnts = torch._dynamo.testing.CompileCounter()
+        mod.compile(backend=cnts)
+        res = mod(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_global_module_forward_pre_hook(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                return x - 1
+
+        counter = 0
+
+        def hook(mod, args):
+            nonlocal counter
+            counter += 1
+            return args
+
+        x = torch.rand(18, 18)
+        mod = Mod()
+        compiled_mod = torch.compile(mod, backend="eager")
+
+        try:
+            hook_handle = torch.nn.modules.module.register_module_forward_pre_hook(hook)
+            ref = mod(x)
+            self.assertEqual(counter, 1)
+            with self.assertWarnsRegex(
+                UserWarning,
+                r"Using `torch.compile\(module\)` when there are global hooks.*",
+            ):
+                res = compiled_mod(x)
+            self.assertEqual(counter, 3)
+            self.assertEqual(ref, res)
+        finally:
+            hook_handle.remove()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

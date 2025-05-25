@@ -49,18 +49,10 @@ from torch._logging.scribe import open_source_signpost
 
 
 try:
-    from torch._dynamo.utils import (
-        clone_inputs,
-        graph_break_reasons,
-        maybe_enable_compiled_autograd,
-    )
+    from torch._dynamo.utils import clone_inputs, graph_break_reasons
     from torch._inductor.utils import fresh_inductor_cache
 except ImportError:
-    from _dynamo.utils import (
-        clone_inputs,
-        graph_break_reasons,
-        maybe_enable_compiled_autograd,
-    )
+    from _dynamo.utils import clone_inputs, graph_break_reasons
 
 import torch._functorch.config
 from torch._functorch.aot_autograd import set_model_name
@@ -89,6 +81,7 @@ log = logging.getLogger(__name__)
 
 # We are primarily interested in TF32
 torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)
 
 # Suppress torch.profiler spam
 os.environ["KINETO_LOG_LEVEL"] = "5"
@@ -350,7 +343,7 @@ def load_model_from_path(path_and_class_str):
     return model, inputs
 
 
-def write_outputs(filename, headers, row):
+def write_outputs(filename, headers, row, upload_to_benchmark_db: bool = True):
     """
     Write both CSV and JSON outputs using the original CSV output interface
     """
@@ -359,7 +352,8 @@ def write_outputs(filename, headers, row):
         return
 
     output_csv(filename, headers, row)
-    output_json(filename, headers, row)
+    if upload_to_benchmark_db:
+        output_json(filename, headers, row)
 
 
 def output_csv(filename, headers, row):
@@ -593,17 +587,14 @@ def empty_gpu_cache(device):
     Explicitly empty gpu cache to avoid OOM in subsequent run.
     """
 
-    if device not in ["cuda", "xpu"]:
+    if device not in ["cuda", "xpu", "mps"]:
         log.warning(
             "Trying to call the empty_gpu_cache for device: %s, which is not in list [cuda, xpu]",
             device,
         )
         return
 
-    if device == "cuda":
-        torch.cuda.empty_cache()
-    elif device == "xpu":
-        torch.xpu.empty_cache()
+    getattr(torch, device).empty_cache()
 
 
 def synchronize():
@@ -916,14 +907,7 @@ def latency_experiment(args, model_iter_fn, model, example_inputs, mark, **kwarg
             # inputs will incur high penalty then the next one.
             maybe_mark_step(args)
 
-            with (
-                maybe_mark_profile(p=p, mark=mark),
-                maybe_enable_compiled_autograd(
-                    args.compiled_autograd,
-                    fullgraph=args.nopython,
-                    dynamic=args.dynamic_shapes,
-                ),
-            ):
+            with maybe_mark_profile(p=p, mark=mark):
                 timings[rep], actual_output = timed(
                     model,
                     model_iter_fn,
@@ -1064,7 +1048,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     with maybe_profile(args.export_profiler_trace, **args.profile_details) as p:
         if args.export_aot_inductor:
-            frozen_model_iter_fn = export_aot_inductor(model, example_inputs)
+            frozen_model_iter_fn = export_aot_inductor(
+                model, example_inputs, args.inductor_compile_mode
+            )
         else:
             frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
 
@@ -1093,14 +1079,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             # call mark_step between the 2 calls to make the comparison fair.
             maybe_mark_step(args)
 
-            with (
-                maybe_mark_profile(p=p, mark="actual"),
-                maybe_enable_compiled_autograd(
-                    args.compiled_autograd,
-                    fullgraph=args.nopython,
-                    dynamic=args.dynamic_shapes,
-                ),
-            ):
+            with maybe_mark_profile(p=p, mark="actual"):
                 timings[rep, 1], actual_output = timed(
                     model,
                     frozen_model_iter_fn,
@@ -1398,16 +1377,15 @@ def _produce_dynamic_shapes_for_export(path, x):
 
     if not isinstance(x, torch.Tensor):
         return None
-    return {i: Dim.AUTO for i in getattr(x, "_dynamo_dynamic_indices", {})}
+    return dict.fromkeys(getattr(x, "_dynamo_dynamic_indices", {}), Dim.AUTO)
 
 
 class AOTInductorModelCache:
-    cache = {}
+    cache: dict[weakref.ref, tuple[Any, float]] = {}
 
     @classmethod
-    def load(cls, model, example_inputs):
+    def load(cls, model, example_inputs, mode):
         import torch._inductor
-        import torch.export._trace
         from torch.export.dynamic_shapes import _combine_args, _tree_map_with_path
 
         key = weakref.ref(model)
@@ -1417,9 +1395,11 @@ class AOTInductorModelCache:
             with torch.no_grad():
                 # copy.deepcopy is required to prevent any surprising side-effect,
                 # see https://github.com/pytorch/pytorch/issues/113029
+                # This will cause memory stats to be overshadowed by this eager run.
+                # To fix that, memory stats will be reset later.
                 example_outputs = copy.deepcopy(model)(*example_args, **example_kwargs)
 
-            if pytree._is_namedtuple_instance(example_outputs):
+            if pytree.is_namedtuple_instance(example_outputs):
                 typ = type(example_outputs)
                 pytree._register_namedtuple(
                     typ,
@@ -1433,19 +1413,63 @@ class AOTInductorModelCache:
                 _produce_dynamic_shapes_for_export, combined_args
             )
 
+            # delete example_outputs and reset memory stats here
+            del example_outputs
+            if current_device == "cuda":
+                empty_gpu_cache(current_device)
+                torch.cuda.reset_peak_memory_stats()
+                pre_clone_memory_used = torch.cuda.max_memory_allocated()
+            elif current_device == "hpu":
+                torch.hpu.reset_peak_memory_stats()
+                pre_clone_memory_used = torch.hpu.max_memory_allocated()
+
+            # Clone the model pre-exporting.  This prevents scenarios observed in a few
+            # models, where the forward pass modifies model state while exporting, and
+            # FakeTensors are thus saved as model data members.  This invalidates model
+            # reuse in eager mode, so it's safest to export a model clone.
+            model_clone = copy.deepcopy(model)
+
+            # Since CPU doesn't monitor max memory allocation, anything measuring peak
+            # memory will miss our transient model clone on CPU anyway.
+            #
+            # The justification for tracking this value (in order to remove it from the
+            # AOTInductor memory measurements) is that normal usage of AOTInductor would
+            # not clone the model, since the eager model would be unused post-export.
+            clone_memory_used = 0.0
+            if current_device == "cuda":
+                clone_memory_used = (
+                    torch.cuda.max_memory_allocated() - pre_clone_memory_used
+                ) / 1e9
+            elif current_device == "hpu":
+                clone_memory_used = (
+                    torch.hpu.max_memory_allocated() - pre_clone_memory_used
+                ) / 1e9
+
+            inductor_configs = {}
+            if mode == "max-autotune":
+                inductor_configs["max_autotune"] = True
             ep = torch.export.export(
-                model,
+                model_clone,
                 example_args,
                 example_kwargs,
                 dynamic_shapes=dynamic_shapes,
                 strict=False,
             )
             with torch.no_grad():
-                package_path = torch._inductor.aoti_compile_and_package(ep)  # type: ignore[arg-type]
+                package_path = torch._inductor.aoti_compile_and_package(
+                    ep, inductor_configs=inductor_configs
+                )  # type: ignore[arg-type]
 
-            cls.cache[key] = torch._inductor.aoti_load_package(package_path)
+            cls.cache[key] = (
+                torch._inductor.aoti_load_package(package_path),
+                clone_memory_used,
+            )
 
-        return cls.cache[key]
+        return cls.cache[key][0]
+
+    @classmethod
+    def get_excess_memory(cls, model) -> float:
+        return cls.cache.get(weakref.ref(model), (None, 0.0))[1]
 
 
 def export(model, example_inputs):
@@ -1460,6 +1484,9 @@ def export(model, example_inputs):
         _produce_dynamic_shapes_for_export, combined_args
     )
 
+    # NOTE: if args.export is ever enabled for --performance mode (rather than solely
+    # --accuracy), we'll need to clone the model and subtract out extra memory usage, as
+    # done in AOTInductorModelCache.
     ep = torch.export.export(
         model, example_args, example_kwargs, dynamic_shapes=dynamic_shapes, strict=True
     )
@@ -1471,8 +1498,8 @@ def export(model, example_inputs):
     return opt_export
 
 
-def export_aot_inductor(model, example_inputs):
-    optimized = AOTInductorModelCache.load(model, example_inputs)
+def export_aot_inductor(model, example_inputs, mode):
+    optimized = AOTInductorModelCache.load(model, example_inputs, mode)
 
     def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
@@ -1675,7 +1702,7 @@ def maybe_snapshot_memory(should_snapshot_memory, suffix):
                     )
                 )
             except Exception as e:
-                logging.error("Failed to save memory snapshot, %s", e)
+                log.error("Failed to save memory snapshot, %s", e)
 
             torch.cuda.memory._record_memory_history(enabled=None)
 
@@ -2234,14 +2261,9 @@ class BenchmarkRunner:
                         new_result = optimized_model_iter_fn(model_copy, example_inputs)
                 else:
                     optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
-                    with maybe_enable_compiled_autograd(
-                        self.args.compiled_autograd,
-                        fullgraph=self.args.nopython,
-                        dynamic=self.args.dynamic_shapes,
-                    ):
-                        new_result = self.run_n_iterations(
-                            model_copy, example_inputs, optimized_model_iter_fn
-                        )
+                    new_result = self.run_n_iterations(
+                        model_copy, example_inputs, optimized_model_iter_fn
+                    )
             except Exception as e:
                 log.exception("")
                 print(
@@ -2463,15 +2485,8 @@ class BenchmarkRunner:
             else:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
 
-            with (
-                maybe_enable_compiled_autograd(
-                    self.args.compiled_autograd,
-                    fullgraph=self.args.nopython,
-                    dynamic=self.args.dynamic_shapes,
-                ),
-                maybe_snapshot_memory(
-                    self.args.snapshot_memory, f"compiled_{self.args.only}"
-                ),
+            with maybe_snapshot_memory(
+                self.args.snapshot_memory, f"compiled_{self.args.only}"
             ):
                 dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
                     optimized_model_iter_fn, model, example_inputs, "dynamo"
@@ -2484,17 +2499,17 @@ class BenchmarkRunner:
                         "dynamo",
                         niters=1,
                     )
+                # If we use warm peak memory, the AOT model loading transient memory
+                # won't be present on the warm measurement.  We only have to account for
+                # it when using cold memory.
+                elif self.args.export_aot_inductor:
+                    dynamo_peak_mem -= AOTInductorModelCache.get_excess_memory(model)
 
             if self.args.profile_dynamo_cache_lookup:
                 with torch.profiler.profile(
                     activities=[torch.profiler.ProfilerActivity.CPU]
                 ) as prof:
-                    with maybe_enable_compiled_autograd(
-                        self.args.compiled_autograd,
-                        fullgraph=self.args.nopython,
-                        dynamic=self.args.dynamic_shapes,
-                    ):
-                        warmup(optimized_model_iter_fn, model, example_inputs, "dynamo")
+                    warmup(optimized_model_iter_fn, model, example_inputs, "dynamo")
 
                 events = list(
                     filter(
@@ -2623,15 +2638,8 @@ class BenchmarkRunner:
             else:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
 
-            with (
-                maybe_enable_compiled_autograd(
-                    self.args.compiled_autograd,
-                    fullgraph=self.args.nopython,
-                    dynamic=self.args.dynamic_shapes,
-                ),
-                maybe_snapshot_memory(
-                    self.args.snapshot_memory, f"compiled_{self.args.only}"
-                ),
+            with maybe_snapshot_memory(
+                self.args.snapshot_memory, f"compiled_{self.args.only}"
             ):
                 dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
                     optimized_model_iter_fn, model, example_inputs, "dynamo"
@@ -2644,17 +2652,17 @@ class BenchmarkRunner:
                         "dynamo",
                         niters=1,
                     )
+                # If we use warm peak memory, the AOT model loading transient memory
+                # won't be present on the warm measurement.  We only have to account for
+                # it when using cold memory.
+                elif self.args.export_aot_inductor:
+                    dynamo_peak_mem -= AOTInductorModelCache.get_excess_memory(model)
 
             if self.args.profile_dynamo_cache_lookup:
                 with torch.profiler.profile(
                     activities=[torch.profiler.ProfilerActivity.CPU]
                 ) as prof:
-                    with maybe_enable_compiled_autograd(
-                        self.args.compiled_autograd,
-                        fullgraph=self.args.nopython,
-                        dynamic=self.args.dynamic_shapes,
-                    ):
-                        warmup(optimized_model_iter_fn, model, example_inputs, "dynamo")
+                    warmup(optimized_model_iter_fn, model, example_inputs, "dynamo")
 
                 events = list(
                     filter(
@@ -2720,7 +2728,7 @@ class BenchmarkRunner:
         experiment,
         tag,
     ):
-        logging.info("Minifying %s...", name)
+        log.info("Minifying %s...", name)
         os.environ["TORCH_COMPILE_DEBUG"] = "1"
         os.environ["TORCHDYNAMO_REPRO_AFTER"] = "dynamo"
         os.environ["TORCHDYNAMO_REPRO_LEVEL"] = "4"
@@ -2735,9 +2743,9 @@ class BenchmarkRunner:
         try:
             shutil.move("repro.py", f"{repro_dir}/{name}_repro.py")
         except OSError:
-            logging.error("Could not find repro script for model %s", name)
+            log.error("Could not find repro script for model %s", name)
         else:
-            logging.info(
+            log.info(
                 "Repro script for model %s with minified graph saved to %s",
                 name,
                 repro_dir,
@@ -2840,10 +2848,15 @@ class BenchmarkRunner:
                 user_stack = add_double_quotes(
                     ", ".join([str(x) for x in graph_break.user_stack])
                 )
+
+                # NB: Don't upload them to the benchmark database as they are debugging
+                # infomation. There are also around a million records a day which is
+                # wasteful to store
                 write_outputs(
                     filename,
                     ["model", "reason", "user_stack"],
                     [current_name, reason, user_stack],
+                    False,
                 )
 
         if self.args.stats:
@@ -3532,6 +3545,8 @@ def run(runner, args, original_dir=None):
     if args.dynamic_shapes:
         if not args.dynamic_batch_only:
             torch._dynamo.config.assume_static_by_default = False
+    if args.compiled_autograd:
+        torch._dynamo.config.compiled_autograd = True
     if args.propagate_real_tensors:
         # TODO: Separate flag for data dependent
         torch._dynamo.config.capture_scalar_outputs = True
@@ -3591,11 +3606,23 @@ def run(runner, args, original_dir=None):
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
+        if args.devices == ["xpu"]:
+            torch.use_deterministic_algorithms(True, warn_only=True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+        if args.only is not None and args.only in {
+            "DebertaForQuestionAnswering",
+            "nvidia_deeprecommender",
+            "crossvit_9_240",
+        }:
+            # These seem unhappy with numerics of larger cuBLASLt workspace
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
         torch.backends.cudnn.benchmark = False
         torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(False)
 
         torch.backends.mkldnn.deterministic = True
 
@@ -3777,7 +3804,9 @@ def run(runner, args, original_dir=None):
     elif args.backend or args.export_aot_inductor:
         if args.export_aot_inductor:
             assert not args.training, "AOTInductor only supports inference"
-            optimize_ctx = functools.partial(export_aot_inductor)
+            optimize_ctx = functools.partial(
+                export_aot_inductor, mode=args.inductor_compile_mode
+            )
 
             # AOTInductor doesn't support control flow yet
             runner.skip_models.update(runner.skip_models_due_to_control_flow)

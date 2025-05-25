@@ -608,6 +608,16 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([3], device=device))
 
+    def test_meta_dynamic_shapes(self):
+        def foobar(x, y):
+            return x * 2, y * 3
+
+        foo_c = torch.compile(dynamic=True)(foobar)
+        t = torch.empty((1, 16, 128, 128), device="meta")
+        y = torch.rand([64])
+
+        self.assertEqual(foo_c(t, y), foobar(t, y))
+
     def test_floor(self):
         def fn(x):
             n = x.size(-1)
@@ -1042,6 +1052,19 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
         self.assertEqual(fn(x, 4.0), fn_opt(x, 4.0))
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_unspecialized_float_dynamic(self):
+        def fn(x, y):
+            return x * y
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn_opt = torch.compile(fn, dynamic=True, backend=cnt)
+        x = torch.randn(5, 5)
+
+        self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
+        self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
+        self.assertEqual(fn(x, 4.0), fn_opt(x, 4.0))
+        self.assertEqual(cnt.frame_count, 1)
 
     @torch._dynamo.config.patch(specialize_float=False)
     def test_unspecialized_float_fallback_symint_specialization(self):

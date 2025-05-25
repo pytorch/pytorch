@@ -93,7 +93,7 @@ librosa>=0.6.2 ; python_version < "3.11"
 #Pinned versions:
 #test that import:
 
-mypy==1.14.0
+mypy==1.15.0
 # Pin MyPy version because new errors are likely to appear with each release
 #Description: linter
 #Pinned versions: 1.14.0
@@ -166,9 +166,9 @@ pillow==11.0.0
 #Pinned versions: 10.3.0
 #test that import:
 
-protobuf==3.20.2
-#Description:  Google’s data interchange format
-#Pinned versions: 3.20.1
+protobuf==5.29.4
+#Description:  Google's data interchange format
+#Pinned versions: 5.29.4
 #test that import: test_tensorboard.py
 
 psutil
@@ -356,7 +356,7 @@ parameterized==0.8.1
 #Pinned versions: 1.24.0
 #test that import: test_sac_estimator.py
 
-pwlf==2.2.1 ; python_version >= "3.8"
+pwlf==2.2.1
 #Description: required for testing torch/distributed/_tools/sac_estimator.py
 #Pinned versions: 2.2.1
 #test that import: test_sac_estimator.py
@@ -370,7 +370,7 @@ setuptools
 
 scons==4.5.2 ; platform_machine == "aarch64"
 
-pulp==2.9.0 ; python_version >= "3.8"
+pulp==2.9.0
 #Description: required for testing ilp formulaiton under torch/distributed/_tools
 #Pinned versions: 2.9.0
 #test that import: test_sac_ilp.py
@@ -379,3 +379,6 @@ dataclasses_json==0.6.7
 #Description: required for data pipeline and scripts under tools/stats
 #Pinned versions: 0.6.7
 #test that import:
+
+cmake==4.0.0
+#Description: required for building

@@ -46,6 +46,7 @@ from torch.testing._internal.common_distributed import (
     requires_gloo,
     simple_sparse_reduce_tests,
     skip_if_lt_x_gpu,
+    skip_if_win32,
     verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
@@ -79,6 +80,11 @@ def simple_reduce_tests(rank, world_size):
             c10d.ReduceOp.MAX,
             torch.tensor([rank + 1.0]),
             torch.tensor([float(world_size)]),
+        ),
+        (
+            c10d.ReduceOp.AVG,
+            torch.tensor([rank + 1.0]),
+            torch.tensor([float((world_size + 1) / 2)]),
         ),
     ]
 
@@ -185,6 +191,17 @@ def simple_multi_input_reduce_tests(rank, world_size):
     ]
 
 
+class RendezvousTCPTest(TestCase):
+    @retry_on_connect_failures
+    def test_tcp_init(self):
+        rendezvous_iterator = dist.rendezvous("tcp://127.0.0.1:0", rank=0, world_size=1)
+        store, rank, world_size = next(rendezvous_iterator)
+        self.assertEqual(rank, 0)
+        self.assertEqual(world_size, 1)
+        # port number should get assigned
+        self.assertNotEqual(store.port, "0")
+
+
 class RendezvousEnvTest(TestCase):
     @requires_gloo()
     @retry_on_connect_failures
@@ -214,6 +231,8 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
 
 
 class ProcessGroupGlooTest(MultiProcessTestCase):
+    lazy_init = False
+
     def _create_process_group_gloo(self, store, rank, world_size, opts):
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, opts)
         dist.barrier(group=pg)
@@ -226,7 +245,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def opts(self, threads=2):
         opts = c10d.ProcessGroupGloo._Options()
         opts._timeout = 50.0
-        opts._devices = [create_device(interface=LOOPBACK)]
+        opts._devices = [create_device(interface=LOOPBACK, lazy_init=self.lazy_init)]
         opts._threads = threads
         return opts
 
@@ -236,8 +255,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         opts = c10d.ProcessGroupGloo._Options()
         opts._timeout = 5.0
         opts._devices = [
-            create_device(interface=LOOPBACK),
-            create_device(interface=LOOPBACK),
+            create_device(interface=LOOPBACK, lazy_init=self.lazy_init),
+            create_device(interface=LOOPBACK, lazy_init=self.lazy_init),
         ]
         pg = self._create_process_group_gloo(store, self.rank, self.world_size, opts)
 
@@ -699,6 +718,27 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         for output, input in zip(outputs, inputs):
             expect = torch.cat([input] * self.world_size)
             self.assertTrue(torch.allclose(output, expect))
+
+    @requires_gloo()
+    def test_reduce_scatter(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+        torch.manual_seed(42)
+
+        # variable size per rank
+        inputs = [torch.rand(i) for i in range(self.world_size)]
+        output = torch.empty(self.rank)
+
+        work = dist.reduce_scatter(output, inputs, async_op=True)
+        work.wait()
+
+        expect = inputs[self.rank] * self.world_size
+        self.assertTrue(torch.allclose(output, expect))
 
     @requires_gloo()
     def test_reduce_scatter_tensor(self):
@@ -2306,6 +2346,19 @@ class ReducerTest(TestCase):
             reducer.prepare_for_backward(output)
             output.backward()
             optimizer.step()
+
+
+@skip_if_win32()
+class ProcessGroupGlooLazyInitTest(ProcessGroupGlooTest):
+    lazy_init = True
+
+    def setUp(self):
+        os.environ["TORCH_GLOO_LAZY_INIT"] = "1"
+        super().setUp()
+
+    def tearDown(self) -> None:
+        del os.environ["TORCH_GLOO_LAZY_INIT"]
+        return super().tearDown()
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
