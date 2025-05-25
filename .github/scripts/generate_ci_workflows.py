@@ -63,6 +63,7 @@ class BinaryBuildWorkflow:
     use_split_build: bool = False
     # Mainly used for libtorch builds
     build_variant: str = ""
+    use_sequential: bool = False
 
     def __post_init__(self) -> None:
         if self.build_environment == "":
@@ -155,6 +156,7 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
             arches=["11.8", "12.6", "12.8"],
             python_versions=["3.9"],
         ),
+        use_sequential=True,
         branches="main",
     ),
     # See https://github.com/pytorch/pytorch/issues/138750

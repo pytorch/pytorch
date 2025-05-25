@@ -154,7 +154,19 @@ if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
     USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
     python setup.py bdist_wheel -d /tmp/$WHEELHOUSE_DIR --cmake
     echo "Finished setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
-else
+  elif [[ "${USE_SEQUENTIAL:-0}" = "1" ]]; then
+    # NOTE: I know this shouldn't be hardcoded but for the sake of quick prototype
+    # TOOD: Dynamically find these, should be easy in manylinux and then we can
+    #       use uv to find these on other platforms
+    python3 tools/packaging/build_wheel.py \
+      -p /opt/python/cp39-cp39/bin/python3 \
+      -p /opt/python/cp310-cp310/bin/python3 \
+      -p /opt/python/cp311-cp311/bin/python3 \
+      -p /opt/python/cp312-cp312/bin/python3 \
+      -p /opt/python/cp313-cp313/bin/python3 \
+      -p /opt/python/cp313-cp313t/bin/python3 \
+      -d /tmp/${WHEELHOUSE_DIR}
+  else
     time CMAKE_ARGS=${CMAKE_ARGS[@]} \
         EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
         BUILD_LIBTORCH_CPU_WITH_DEBUG=$BUILD_DEBUG_INFO \
