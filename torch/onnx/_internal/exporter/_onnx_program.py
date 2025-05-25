@@ -81,7 +81,7 @@ def _set_graph_outputs(
         graph: The graph to set the outputs for.
         outputs: The outputs to set.
     """
-    original_outputs = graph.outputs.copy()
+    original_outputs = list(graph.outputs)
     graph.outputs.clear()
     graph.outputs.extend(outputs)
     try:
