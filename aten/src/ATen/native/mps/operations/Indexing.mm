@@ -327,7 +327,8 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
         mtl_setArgs<8>(computeEncoder, input_strides_buffer, output_strides_buffer, source_strides_buffer);
       }
       MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
-      MTLSize threadgroupSize = MTLSizeMake(std::min(numThreads, 256), 1, 1);
+      MTLSize threadgroupSize =
+          MTLSizeMake(std::min(numThreads, static_cast<int32_t>(indexCopyPSO.maxTotalThreadsPerThreadgroup)), 1, 1);
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
     }
   });
