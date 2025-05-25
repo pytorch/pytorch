@@ -93,7 +93,7 @@ librosa>=0.6.2 ; python_version < "3.11"
 #Pinned versions:
 #test that import:
 
-mypy==1.14.0
+mypy==1.15.0
 # Pin MyPy version because new errors are likely to appear with each release
 #Description: linter
 #Pinned versions: 1.14.0
@@ -166,9 +166,9 @@ pillow==11.0.0
 #Pinned versions: 10.3.0
 #test that import:
 
-protobuf==3.20.2
-#Description:  Google’s data interchange format
-#Pinned versions: 3.20.1
+protobuf==5.29.4
+#Description:  Google's data interchange format
+#Pinned versions: 5.29.4
 #test that import: test_tensorboard.py
 
 psutil

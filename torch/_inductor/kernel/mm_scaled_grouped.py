@@ -123,38 +123,38 @@ def early_config_prune(configs, named_args):
 
 # Copied from fbgemm grouped_gemm.py
 triton_grouped_mm_source = r"""
-{% if SCALED %}
-{% if A_IS_2D or B_IS_2D %}
+{%- if SCALED %}
+{%- if A_IS_2D or B_IS_2D %}
 {{def_kernel("a_ptr", "b_ptr", "scale_a_ptr", "scale_b_ptr", "offsets_ptr")}}
-{% else %}
+{%- else %}
 {{def_kernel("a_ptr", "b_ptr", "scale_a_ptr", "scale_b_ptr")}}
-{% endif %}
-{% else %}
-{% if A_IS_2D or B_IS_2D %}
+{%- endif %}
+{%- else %}
+{%- if A_IS_2D or B_IS_2D %}
 {{def_kernel("a_ptr", "b_ptr", "offsets_ptr")}}
-{% else %}
+{%- else %}
 {{def_kernel("a_ptr", "b_ptr")}}
-{% endif %}
-{% endif %}
+{%- endif %}
+{%- endif %}
     tidx = tl.program_id(0)
 
-{% set M_IS_DYNAMIC = A_IS_2D and not B_IS_2D %}
-{% set N_IS_DYNAMIC = not A_IS_2D and B_IS_2D %}
-{% set K_IS_DYNAMIC = A_IS_2D and B_IS_2D %}
+{%- set M_IS_VARYING = A_IS_2D and not B_IS_2D %}
+{%- set N_IS_VARYING = not A_IS_2D and B_IS_2D %}
+{%- set K_IS_VARYING = A_IS_2D and B_IS_2D %}
 
-{% if A_IS_2D %}
-{% if B_IS_2D %}
+{%- if A_IS_2D %}
+{%- if B_IS_2D %}
     G = {{size("offsets_ptr", 0)}}
-{% else %}
+{%- else %}
     G = {{size("b_ptr", 0)}}
-{% endif %}
-{% else %}
-{% if B_IS_2D %}
+{%- endif %}
+{%- else %}
+{%- if B_IS_2D %}
     G = {{size("a_ptr", 0)}}
-{% else %}
+{%- else %}
     G = {{size("a_ptr", 0)}}
-{% endif %}
-{% endif %}
+{%- endif %}
+{%- endif %}
 
     # the b_ptr tensor is given with its last two dims transposed, revert here
 
@@ -164,108 +164,108 @@ triton_grouped_mm_source = r"""
 
     A_STRIDE_M = {{stride("a_ptr", -2)}}
     A_STRIDE_K = {{stride("a_ptr", -1)}}
-{% if not A_IS_2D %}
+{%- if not A_IS_2D %}
     A_STRIDE_G = {{stride("a_ptr", 0)}}
-{% if SCALED %}
+{%- if SCALED %}
     SCALE_A_STRIDE_G = {{stride("scale_a_ptr", 0)}}
-{% endif %}
-{% endif %}
+{%- endif %}
+{%- endif %}
     B_STRIDE_N = {{stride("b_ptr", -1)}}
     B_STRIDE_K = {{stride("b_ptr", -2)}}
-{% if not B_IS_2D %}
+{%- if not B_IS_2D %}
     B_STRIDE_G = {{stride("b_ptr", 0)}}
-{% if SCALED %}
+{%- if SCALED %}
     SCALE_B_STRIDE_G = {{stride("scale_b_ptr", 0)}}
-{% endif %}
-{% endif %}
+{%- endif %}
+{%- endif %}
 
-{% if USE_TMA_LOAD %}
+{%- if USE_TMA_LOAD %}
     # fixme: a_desc = tl.make_tensor_descriptor(
     a_desc = tl._experimental_make_tensor_descriptor(
         a_ptr,
-{% if A_IS_2D %}
+{%- if A_IS_2D %}
         shape=[M, K],
         # fixme: strides=[A_STRIDE_M, A_STRIDE_K],
         strides=[{{stride("a_ptr", -2)}}, {{stride("a_ptr", -1)}}],
         block_shape=[BLOCK_M, BLOCK_K],
-{% else %}
+{%- else %}
         shape=[G, M, K],
         # fixme: strides=[A_STRIDE_G, A_STRIDE_M, A_STRIDE_K],
         strides=[{{stride("a_ptr", 0)}}, {{stride("a_ptr", -2)}}, {{stride("a_ptr", -1)}}],
         block_shape=[1, BLOCK_M, BLOCK_K],
-{% endif %}
+{%- endif %}
     )
 
     # fixme: b_desc = tl.make_tensor_descriptor(
     b_desc = tl._experimental_make_tensor_descriptor(
         b_ptr,
-{% if B_IS_2D %}
+{%- if B_IS_2D %}
         shape=[N, K],
         # fixme: strides=[B_STRIDE_N, B_STRIDE_K],
         strides=[{{stride("b_ptr", -1)}}, {{stride("b_ptr", -2)}}],
         block_shape=[BLOCK_N, BLOCK_K],
-{% else %}
+{%- else %}
         shape=[G, N, K],
         # fixme: strides=[B_STRIDE_G, B_STRIDE_N, B_STRIDE_K],
         strides=[{{stride("b_ptr", 0)}}, {{stride("b_ptr", -1)}}, {{stride("b_ptr", -2)}}],
         block_shape=[1, BLOCK_N, BLOCK_K],
-{% endif %}
+{%- endif %}
     )
-{% endif %}
+{%- endif %}
 
-{% if M_IS_DYNAMIC %}
+{%- if M_IS_VARYING %}
     m_end_offset = 0
-{% endif %}
-{% if N_IS_DYNAMIC %}
+{%- endif %}
+{%- if N_IS_VARYING %}
     n_end_offset = 0
-{% endif %}
-{% if K_IS_DYNAMIC %}
+{%- endif %}
+{%- if K_IS_VARYING %}
     k_end_offset = 0
-{% endif %}
+{%- endif %}
     iterated_tiles = 0
     for g in tl.range(G):
-{% if M_IS_DYNAMIC %}
+{%- if M_IS_VARYING %}
         # Move across groups
         m_start_offset = m_end_offset
         m_end_offset = tl.load(offsets_ptr + g)
         m_size = m_end_offset - m_start_offset
-{% if SCALED %}
+{%- if SCALED %}
         m_scale_start_offset = m_start_offset
-{% endif %}
-{% else %}
+{%- endif %}
+{%- else %}
         m_start_offset = 0
         m_size = M
-{% if SCALED %}
+{%- if SCALED %}
         m_scale_start_offset = g * M
-{% endif %}
-{% endif %}
+{%- endif %}
+{%- endif %}
 
-{% if N_IS_DYNAMIC %}
+{%- if N_IS_VARYING %}
         # Move across groups
         n_start_offset = n_end_offset
         n_end_offset = tl.load(offsets_ptr + g)
         n_size = n_end_offset - n_start_offset
-{% if SCALED %}
+{%- if SCALED %}
         n_scale_start_offset = n_start_offset
-{% endif %}
-{% else %}
+{%- endif %}
+{%- else %}
         n_start_offset = 0
         n_size = N
-{% if SCALED %}
+{%- if SCALED %}
         n_scale_start_offset = g * N
-{% endif %}
-{% endif %}
+{%- endif %}
+{%- endif %}
 
         if m_size > 0 and n_size > 0:
-{% if K_IS_DYNAMIC %}
+{%- if K_IS_VARYING %}
             # Move across groups
             k_start_offset = k_end_offset
             k_end_offset = tl.load(offsets_ptr + g)
             k_size = k_end_offset - k_start_offset
-{% else %}
+{%- else %}
             k_start_offset = 0
             k_size = K
-{% endif %}
+{%- endif %}
 
             num_m_tiles = tl.cdiv(m_size, BLOCK_M)
             num_n_tiles = tl.cdiv(n_size, BLOCK_N)
@@ -280,51 +280,51 @@ triton_grouped_mm_source = r"""
 
                 accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
 
-{% if USE_TMA_LOAD %}
+{%- if USE_TMA_LOAD %}
                 m_offset = (m_start_offset + tile_m_idx * BLOCK_M).to(tl.int32)
                 n_offset = (n_start_offset + tile_n_idx * BLOCK_N).to(tl.int32)
 
                 for k_offset in range(0, k_size, BLOCK_K):
-{% if A_IS_2D %}
+{%- if A_IS_2D %}
                     a = a_desc.load([m_offset, k_start_offset + k_offset])
-{% else %}
+{%- else %}
                     a = a_desc.load([g, m_offset, k_start_offset + k_offset]).reshape(BLOCK_M, BLOCK_K)
-{% endif %}
-{% if B_IS_2D %}
+{%- endif %}
+{%- if B_IS_2D %}
                     b = b_desc.load([n_offset, k_start_offset + k_offset])
-{% else %}
+{%- else %}
                     b = b_desc.load([g, n_offset, k_start_offset + k_offset]).reshape(BLOCK_N, BLOCK_K)
-{% endif %}
+{%- endif %}
 
-{% if K_IS_DYNAMIC %}
+{%- if K_IS_VARYING %}
                     if k_offset + BLOCK_K > k_size:
                         group_offs_k = k_offset + tl.arange(0, BLOCK_K)
                         a = tl.where(group_offs_k < k_size, a, 0)
                         b = tl.where(group_offs_k < k_size, b, 0)
-{% endif %}
+{%- endif %}
 
-{% if USE_FAST_ACCUM %}
+{%- if USE_FAST_ACCUM %}
                     accumulator = tl.dot(a, b.T, accumulator)
-{% else %}
+{%- else %}
                     accumulator += tl.dot(a, b.T)
-{% endif %}
-{% else %}
+{%- endif %}
+{%- else %}
                 offs_am = tile_m_idx * BLOCK_M + tl.arange(0, BLOCK_M)
                 offs_bn = tile_n_idx * BLOCK_N + tl.arange(0, BLOCK_N)
                 offs_k = k_start_offset + tl.arange(0, BLOCK_K)
                 a_ptrs = (
                     a_ptr
-{% if not A_IS_2D %}
+{%- if not A_IS_2D %}
                     + g * A_STRIDE_G
-{% endif %}
+{%- endif %}
                     + (m_start_offset + offs_am[:, None]) * A_STRIDE_M
                     + offs_k[None, :] * A_STRIDE_K
                 )
                 b_ptrs = (
                     b_ptr
-{% if not B_IS_2D %}
+{%- if not B_IS_2D %}
                     + g * B_STRIDE_G
-{% endif %}
+{%- endif %}
                     + (n_start_offset + offs_bn[:, None]) * B_STRIDE_N
                     + offs_k[None, :] * B_STRIDE_K
                 )
@@ -335,59 +335,59 @@ triton_grouped_mm_source = r"""
                         group_offs_k = k_offset + tl.arange(0, BLOCK_K)
                         a = tl.where(group_offs_k < k_size, a, 0)
                         b = tl.where(group_offs_k < k_size, b, 0)
-{% if USE_FAST_ACCUM %}
+{%- if USE_FAST_ACCUM %}
                     accumulator = tl.dot(a, b.T, accumulator)
-{% else %}
+{%- else %}
                     accumulator += tl.dot(a, b.T)
-{% endif %}
+{%- endif %}
                     a_ptrs += BLOCK_K
                     b_ptrs += BLOCK_K
-{% endif %}
+{%- endif %}
 
                 offs_am = tile_m_idx * BLOCK_M + tl.arange(0, BLOCK_M)
                 offs_bn = tile_n_idx * BLOCK_N + tl.arange(0, BLOCK_N)
-{% if SCALED %}
+{%- if SCALED %}
                 scale_a = tl.load(
                     scale_a_ptr
-{% if A_IS_2D %}
+{%- if A_IS_2D %}
                     + m_scale_start_offset
-{% else %}
+{%- else %}
                     + g * SCALE_A_STRIDE_G
-{% endif %}
+{%- endif %}
                     + offs_am[:, None],
                     mask=offs_am[:, None] < m_size,
                 )
                 scale_b = tl.load(
                     scale_b_ptr
-{% if B_IS_2D %}
+{%- if B_IS_2D %}
                     + n_scale_start_offset
-{% else %}
+{%- else %}
                     + g * SCALE_B_STRIDE_G
-{% endif %}
+{%- endif %}
                     + offs_bn[None, :],
                     mask=offs_bn[None, :] < n_size,
                 )
                 c = accumulator.to(tl.float32) * scale_a * scale_b
-{% else %}
+{%- else %}
                 c = accumulator.to(tl.float32)
-{% endif %}
+{%- endif %}
 
-{% if M_IS_DYNAMIC %}
+{%- if M_IS_VARYING %}
                 idx_m = (m_start_offset + offs_am[:, None])
-{% else %}
+{%- else %}
                 idx_m = offs_am[:, None]
-{% endif %}
-{% if N_IS_DYNAMIC %}
+{%- endif %}
+{%- if N_IS_VARYING %}
                 idx_n = (n_start_offset + offs_bn[None, :])
-{% else %}
+{%- else %}
                 idx_n = offs_bn[None, :]
-{% endif %}
+{%- endif %}
                 mask = offs_am[:, None] < m_size and offs_bn[None, :] < n_size
-{% if M_IS_DYNAMIC or N_IS_DYNAMIC %}
+{%- if M_IS_VARYING or N_IS_VARYING %}
                 {{store_output(("idx_m", "idx_n"), "c", "mask", indent_width=16)}}
-{% else %}
+{%- else %}
                 {{store_output(("g", "idx_m", "idx_n"), "c", "mask", indent_width=16)}}
-{% endif %}
+{%- endif %}
                 tidx += NUM_SMS
 
             iterated_tiles += num_tiles
