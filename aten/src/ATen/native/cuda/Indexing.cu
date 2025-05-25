@@ -835,21 +835,9 @@ void index_put_with_sort_quantized(Tensor & self, const c10::List<std::optional<
   std::vector<int64_t> inversePerm;
   std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm,
   dims_before, dims_indexed) = makeLinearIndex(self_, indices, !unsafe);
+  auto vals_shape = valsShape(src.sizes(), dims_before, dims_indexed, linearIndex.sizes());
   int64_t num_indices = linearIndex.numel();
-
-  if (expandedValue.numel() < num_indices * nElemBefore * sliceSize) {
-    auto expanded_size = at::DimVector(expandedValue.sizes());
-    auto size1 = expandedValue.sizes();
-    auto size2 = linearIndex.sizes();
-    if (are_expandable(size1, size2)) {
-      expanded_size = infer_size_dimvector(size1, size2);
-    }
-    if (nElemBefore > 1) {
-      expanded_size.insert(expanded_size.begin(), nElemBefore);
-    }
-    expandedValue = expandedValue.expand(expanded_size);
-  }
-  expandedValue = expandedValue.contiguous();
+  expandedValue = expandedValue.expand(vals_shape).contiguous();
 
   if (num_indices > 0 && sliceSize > 0) {
       const bool permuted = !src.is_contiguous();
