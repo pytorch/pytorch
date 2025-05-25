@@ -29,7 +29,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Concatenate, ParamSpec, Self
+from typing_extensions import Concatenate, ParamSpec, Self, TypeVarTuple, Unpack
 from weakref import WeakKeyDictionary
 
 import torch
@@ -116,6 +116,7 @@ T = TypeVar("T")
 U = TypeVar("U")
 _P = ParamSpec("_P")
 R = TypeVar("R")
+_Ts = TypeVarTuple("_Ts")
 
 null_ctx_type = type(nullcontext)
 # We currently convert all SymInt to proxies before we use them.
@@ -147,7 +148,7 @@ def fake_signature(fn: Callable[_P, R], nargs: int) -> Callable[_P, R]:
 
 @contextmanager
 def decompose(
-    decomposition_table: Optional[Mapping[OpOverload, Callable]]
+    decomposition_table: Optional[Mapping[OpOverload, Callable]],
 ) -> Generator[Mapping[OpOverload, Callable], None, None]:
     global CURRENT_DECOMPOSITION_TABLE
     old_decomposition_table = CURRENT_DECOMPOSITION_TABLE
@@ -1262,7 +1263,10 @@ def dispatch_trace(
 
 
 def wrap_key(
-    f: Callable[_P, R], tensors: _P.args, tracer: _ProxyTracer, pre_dispatch: bool
+    f: Callable[[Unpack[_Ts]], R],
+    tensors: tuple[Unpack[_Ts]],
+    tracer: _ProxyTracer,
+    pre_dispatch: bool,
 ) -> Callable[_P, R]:
     flat_tensors, _tensors_spec = pytree.tree_flatten(tensors)
 
@@ -1462,17 +1466,21 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
             n_args = (
                 tuple(
-                    get_proxy_slot(a, self.tracer).force().node
-                    if isinstance(a, py_sym_types)
-                    else a
+                    (
+                        get_proxy_slot(a, self.tracer).force().node
+                        if isinstance(a, py_sym_types)
+                        else a
+                    )
                     for a in args[0]
                 ),
             )
         else:
             n_args = tuple(
-                get_proxy_slot(a, self.tracer).force().node
-                if isinstance(a, py_sym_types)
-                else a
+                (
+                    get_proxy_slot(a, self.tracer).force().node
+                    if isinstance(a, py_sym_types)
+                    else a
+                )
                 for a in args
             )
 
@@ -2320,7 +2328,11 @@ def get_proxy_mode() -> Optional[ProxyTorchDispatchMode]:
     return pre_dispatch_mode or mode
 
 
-def handle_sym_dispatch(func: Callable[_P, R], args: _P.args, kwargs: _P.kwargs) -> R:
+def handle_sym_dispatch(
+    func: Callable[_P, R],
+    args: _P.args,  # type: ignore[valid-type]  # not allowed to use _P.args here
+    kwargs: _P.kwargs,  # type: ignore[valid-type]  # not allowed to use _P.kwargs here
+) -> R:
     """
     Call into the currently active proxy tracing mode to do a
     SymInt/SymFloat/SymBool dispatch trace on a function that operates on
