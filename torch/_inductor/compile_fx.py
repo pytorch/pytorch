@@ -1201,6 +1201,8 @@ class _InProcessFxCompile(FxCompile):
                     include_device=True,
                     fast_sympy_print=True,
                 )
+                # "after_post_grad_graph" is used in inductor provenance
+                # tracking highlighter front-end.
                 trace_structured(
                     "artifact",
                     metadata_fn=lambda: {
@@ -2061,6 +2063,8 @@ def compile_fx(
         # having AOTAutograd trace it.
         # TODO: Get rid of this?
         if isinstance(model_, GraphModule):
+            # "before_pre_grad_graph" is used in inductor provenance
+            # tracking highlighter front-end.
             trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
