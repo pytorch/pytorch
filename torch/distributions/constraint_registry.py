@@ -66,7 +66,7 @@ object.
 """
 
 from typing import Callable, Optional, overload, Union
-from typing_extensions import TypeAlias, TypeVar
+from typing_extensions import Never, TypeAlias, TypeVar
 
 from torch.distributions import constraints, transforms
 from torch.distributions.constraints import (
@@ -98,9 +98,11 @@ __all__ = [
     "transform_to",
 ]
 
-Con = TypeVar("Con", bound=Constraint, contravariant=True)
-T = TypeVar("T")
-Factory: TypeAlias = Callable[[T], Transform]
+Con = TypeVar("Con", bound=Constraint)
+Factory: TypeAlias = Callable[[Con], Transform]
+# Note: Technically, `F` should be lower-bounded by `Con`, but higher-kinded
+#    type-variables are not supported at the time of writing this.
+F = TypeVar("F", bound=Callable[[Never], Transform])
 
 
 class ConstraintRegistry:
@@ -116,21 +118,21 @@ class ConstraintRegistry:
     def register(
         self,
         constraint: Union[Con, type[Con]],
-        factory: Factory[Con],
-    ) -> Factory[Con]: ...
+        factory: F,
+    ) -> F: ...
 
     @overload  # decorator usage
     def register(
         self,
         constraint: Union[Con, type[Con]],
         factory: None = ...,
-    ) -> Union[Callable[[Factory[Con]], Factory[Con]]]: ...
+    ) -> Callable[[F], F]: ...
 
     def register(
         self,
         constraint: Union[Con, type[Con]],
-        factory: Optional[Factory[Con]] = None,
-    ) -> Union[Factory[Con], Callable[[Factory[Con]], Factory[Con]]]:
+        factory: Optional[F] = None,
+    ) -> Union[F, Callable[[F], F]]:
         """
         Registers a :class:`~torch.distributions.constraints.Constraint`
         subclass in this registry. Usage::
@@ -223,7 +225,7 @@ def _transform_to_independent(constraint: Independent) -> Transform:
     )
 
 
-@biject_to.register(constraints.positive)  # type: ignore[arg-type]
+@biject_to.register(constraints.positive)
 @biject_to.register(constraints.nonnegative)
 @transform_to.register(constraints.positive)
 @transform_to.register(constraints.nonnegative)
@@ -231,7 +233,7 @@ def _transform_to_positive(constraint: Union[Positive, NonNegative]) -> Transfor
     return transforms.ExpTransform()
 
 
-@biject_to.register(constraints.greater_than)  # type: ignore[arg-type]
+@biject_to.register(constraints.greater_than)
 @biject_to.register(constraints.greater_than_eq)
 @transform_to.register(constraints.greater_than)
 @transform_to.register(constraints.greater_than_eq)
@@ -257,7 +259,7 @@ def _transform_to_less_than(constraint: LessThan) -> Transform:
     )
 
 
-@biject_to.register(constraints.interval)  # type: ignore[arg-type]
+@biject_to.register(constraints.interval)
 @biject_to.register(constraints.half_open_interval)
 @transform_to.register(constraints.interval)
 @transform_to.register(constraints.half_open_interval)
@@ -295,7 +297,7 @@ def _transform_to_lower_cholesky(constraint: LowerCholesky) -> Transform:
     return transforms.LowerCholeskyTransform()
 
 
-@transform_to.register(constraints.positive_definite)  # type: ignore[arg-type]
+@transform_to.register(constraints.positive_definite)
 @transform_to.register(constraints.positive_semidefinite)
 def _transform_to_positive_definite(
     constraint: Union[PositiveDefinite, PositiveSemidefinite],
