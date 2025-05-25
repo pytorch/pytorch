@@ -300,6 +300,10 @@ class OutputGraphGuardsState:
     guard_on_key_order: set[Source]
     # Map from graph input's `Source` to sizes / strides metadata
     input_source_to_sizes_strides: dict[Source, dict[str, Any]]
+    dual_level: int
+    functorch_layers: list[torch._functorch.pyfunctorch.FuncTorchInterpreter]
+    current_device: Optional[torch.device]
+
     export: bool = False
     export_constraints: bool = False
 
@@ -351,6 +355,9 @@ class OutputGraph(OutputGraphGuardsState):
             torch_function_mode_stack,
             guard_on_key_order=set(),
             input_source_to_sizes_strides={},
+            dual_level=torch.autograd.forward_ad._current_level,
+            functorch_layers=torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters(),
+            current_device=torch.utils._device.CURRENT_DEVICE,
         )
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
@@ -510,6 +517,27 @@ class OutputGraph(OutputGraphGuardsState):
             self.install_builtins_dict_in_fglobals()
         )
 
+        self.compiler_trace_stack = contextlib.ExitStack()
+
+        # These are the ambient, currently-global saved_tensor_hooks stashed in autograd,
+        # that are set for the entire duration of the compiled region.
+        # This is an invariant today because we graph break on the saved_tensor_hook
+        # context manager inside a compiled region
+        self.saved_tensors_hooks_subgraph_names: Optional[list[str]] = (
+            self.maybe_install_saved_tensors_hooks_subgraphs()
+        )
+
+    def mark_bytecode_tracing_start(self):
+        self.compiler_trace_stack.enter_context(
+            dynamo_timed(
+                "bytecode_tracing",
+                log_pt2_compile_event=True,
+            )
+        )
+
+    def mark_bytecode_tracing_stop(self):
+        self.compiler_trace_stack.close()
+
     def install_builtins_dict_in_fglobals(self):
         # f_globals["__builtins__"] can be a dict or a module. This is an
         # implemenation detail -
@@ -578,6 +606,41 @@ class OutputGraph(OutputGraphGuardsState):
             self.guards.add(
                 GlobalStateSource().make_guard(GuardBuilder.FUNCTORCH_STACK_MATCH)
             )
+        if not torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+            self.guards.add(
+                GlobalStateSource().make_guard(
+                    GuardBuilder.AUTOGRAD_SAVED_TENSORS_HOOKS
+                )
+            )
+
+    def maybe_install_saved_tensors_hooks_subgraphs(self) -> Optional[list[str]]:
+        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+            return None
+
+        get_hooks = torch._functorch._aot_autograd.utils.top_saved_tensors_hooks
+        are_inline_hooks = (
+            torch._functorch._aot_autograd.utils.saved_tensors_hooks_are_inlineable
+        )
+        hooks = get_hooks()
+        if not are_inline_hooks(hooks):
+            return None
+
+        # If GraphModule provided by user contains fx.wrap,
+        # We can only rely on user provided cache hash in this case.
+        # If user did not provide cache hash - then we always bypass cache.
+
+        pack_gm, unpack_gm = hooks
+        pack_subgraph_name = self.install_subgraph(
+            "saved_tensors_hooks_pack",
+            torch.fx.GraphModule(self.nn_modules, pack_gm.graph),
+        )
+        unpack_subgraph_name = self.install_subgraph(
+            "saved_tensors_hooks_unpack",
+            torch.fx.GraphModule(self.nn_modules, unpack_gm.graph),
+        )
+        assert pack_subgraph_name == "saved_tensors_hooks_pack_0"
+        assert unpack_subgraph_name == "saved_tensors_hooks_unpack_0"
+        return [pack_subgraph_name, unpack_subgraph_name]
 
     def dump_guards_state(self):
         return OutputGraphGuardsState(
@@ -586,6 +649,9 @@ class OutputGraph(OutputGraphGuardsState):
             torch_function_mode_stack=self.torch_function_mode_stack,
             guard_on_key_order=self.guard_on_key_order,
             input_source_to_sizes_strides=self.input_source_to_sizes_strides,
+            dual_level=self.dual_level,
+            functorch_layers=self.functorch_layers,
+            current_device=self.current_device,
             export=self.export,
             export_constraints=self.export_constraints,
             _guards=self.guards,
@@ -831,7 +897,7 @@ class OutputGraph(OutputGraphGuardsState):
         *names,
         **options,
     ):
-        if is_dynamic_nn_module(target, self.root_tx.export):
+        if is_dynamic_nn_module(target, self.export):
             # Instead of returning UnspecializedNNModuleVariable, call
             # VariableTracker.build so that it is tracked for mutation.
             return VariableTracker.build(self.current_tx, target, **options)
@@ -1058,6 +1124,8 @@ class OutputGraph(OutputGraphGuardsState):
         Generate a subgraph to continue execution on user code.
         Automatically restore live variables.
         """
+        # bytecode tracing has finished. Pop the context manager for dynamo_timed
+        self.mark_bytecode_tracing_stop()
         assert reason is not None
 
         from .decorators import disable
@@ -1115,7 +1183,7 @@ class OutputGraph(OutputGraphGuardsState):
         # realize any unrealized tensor VTs in case they
         # need to be added to self.nn_modules as attributes
         for value in stack_values:
-            value.realize()
+            variables.LazyVariableTracker.realize_all(value)
 
         # Use nn.Module "proxies" in the constructed GraphModule so that
         # the resulting GM does not hold additional strong references to the original modules.
@@ -1418,7 +1486,7 @@ class OutputGraph(OutputGraphGuardsState):
 
             self.run_compiler_collective(tx)
 
-            name = unique_id("__compiled_fn")
+            name = unique_id("__compiled_fn", with_uuid=True)
 
             assert isinstance(rv, list)
             assert isinstance(root, FakeRootModule)
@@ -1459,6 +1527,14 @@ class OutputGraph(OutputGraphGuardsState):
             self.real_value_cache.clear()
 
             gm = _make_graph_module(root, self.graph)
+
+            # Saved tensors hooks are not used by the graph.
+            # GraphModule by default only copies used in the graph submodules.
+            # Copying them into the result graph manually.
+            if self.saved_tensors_hooks_subgraph_names:
+                for subgraph_name in self.saved_tensors_hooks_subgraph_names:
+                    setattr(gm, subgraph_name, getattr(root, subgraph_name))
+
             for register_finalizer in self.register_finalizer_fns:
                 register_finalizer(gm)
 
@@ -1547,6 +1623,8 @@ class OutputGraph(OutputGraphGuardsState):
             "OutputGraph.call_user_compiler",
             phase_name="backend_compile",
             log_pt2_compile_event=True,
+            log_waitcounter=True,
+            waitcounter_name_override="compile_aot_autograd",
             dynamo_compile_column_us="aot_autograd_cumulative_compile_time_us",
         ):
             return self._call_user_compiler(gm)
@@ -2627,7 +2705,7 @@ class SubgraphTracer(fx.Tracer):
         self, example_value: Union[torch.SymInt, torch.Tensor], src: Optional[Source]
     ):
         # The before arg is for inserting symints in the sizes/strides of a tensor
-        # before the tensor. This odering ensures that when we look at the tensor's
+        # before the tensor. This ordering ensures that when we look at the tensor's
         # symbols, they're already lifted/tracked. E.g. this assumption is used
         # in insert_deferred_runtime_asserts.
         def _lift_symbols_in_symint(
@@ -2804,11 +2882,13 @@ class SubgraphTracer(fx.Tracer):
         return MutationInfo(False, "")
 
     def has_aliasing(self):
+        from torch._higher_order_ops.utils import _collect_fake_inputs
+
         input_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
 
         for node in self.graph.nodes:
             if node.op == "placeholder":
-                example_value = node.meta["example_value"]
+                example_value = _collect_fake_inputs([node])[0]
                 if isinstance(example_value, torch.Tensor):
                     storage = StorageWeakRef(example_value._typed_storage())
                     if storage in input_storages:
@@ -2821,9 +2901,9 @@ class SubgraphTracer(fx.Tracer):
 
         output_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
         out_nodes = self.graph.find_nodes(op="output")[0]
-        for out_node in out_nodes.args[0]:
+        for out_node in pytree.tree_leaves(out_nodes.args[0]):
             if out_node:
-                example_value = out_node.meta["example_value"]
+                example_value = _collect_fake_inputs([out_node])[0]
                 assert not isinstance(example_value, list)
                 if isinstance(example_value, torch.Tensor):
                     storage = StorageWeakRef(example_value._typed_storage())

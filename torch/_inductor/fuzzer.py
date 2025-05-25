@@ -220,9 +220,9 @@ class SamplingMethod(Enum):
             elem_type = getattr(
                 type_hint,
                 "__args__",
-                [type(default[0])] if len(default) else [type(None)],
+                [type(default[0])] if default and len(default) else [type(None)],
             )[0]
-            new_default = default[0] if len(default) > 0 else None
+            new_default = default[0] if default and len(default) > 0 else None
             return [
                 SamplingMethod._generate_value_for_type(
                     random_sample, field_name, elem_type, new_default
@@ -234,9 +234,9 @@ class SamplingMethod(Enum):
             elem_type = getattr(
                 type_hint,
                 "__args__",
-                [type(indexable[0])] if len(default) else [type(None)],
+                [type(indexable[0])] if default and len(default) else [type(None)],
             )[0]
-            new_default = indexable[0] if len(default) > 0 else None
+            new_default = indexable[0] if default and len(default) > 0 else None
             return {  # noqa: set_linter
                 SamplingMethod._generate_value_for_type(
                     random_sample, field_name, elem_type, new_default
@@ -248,9 +248,9 @@ class SamplingMethod(Enum):
             elem_type = getattr(
                 type_hint,
                 "__args__",
-                [type(indexable[0])] if len(default) else [type(None)],
+                [type(indexable[0])] if default and len(default) else [type(None)],
             )[0]
-            new_default = indexable[0] if len(default) > 0 else None
+            new_default = indexable[0] if default and len(default) > 0 else None
             return OrderedSet(
                 [
                     SamplingMethod._generate_value_for_type(
@@ -363,6 +363,8 @@ class SamplingMethod(Enum):
                 )
 
             return dummy_function
+        elif type_hint == torch._ops.OpOverload:
+            return torch.ops.aten.add.default
         elif TypeExemplars.contains(type_hint):
             return TypeExemplars.example(type_hint)
         elif type_hint == Any:
