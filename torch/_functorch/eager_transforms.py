@@ -1701,6 +1701,7 @@ def linearize(func: Callable, *primals) -> tuple[Any, Callable]:
         with a single evaluation.
 
     Example::
+
         >>> import torch
         >>> from torch.func import linearize
         >>> def fn(x):

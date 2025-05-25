@@ -43,6 +43,7 @@ jobs:
           { config: "inductor_cpp_wrapper", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_cpp_wrapper", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
+      allow-reuse-old-whl: true
     secrets: inherit
 
   linux-focal-cuda12_6-py3_10-gcc9-inductor-test:
@@ -69,6 +70,7 @@ jobs:
           { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
+      allow-reuse-old-whl: true
     secrets: inherit
 
   linux-focal-cuda12_6-py3_12-gcc9-inductor-test:
@@ -93,6 +95,7 @@ jobs:
         { include: [
           { config: "inductor-halide", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
         ]}
+      allow-reuse-old-whl: true
     secrets: inherit
 
   linux-jammy-cpu-py3_12-inductor-halide-test:
@@ -117,6 +120,7 @@ jobs:
         { include: [
           { config: "inductor-triton-cpu", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
         ]}
+      allow-reuse-old-whl: true
     secrets: inherit
 
   linux-jammy-cpu-py3_12-inductor-triton-cpu-test:
@@ -144,6 +148,7 @@ jobs:
           { config: "inductor_avx2", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.10xlarge.avx2" },
           { config: "inductor_avx2", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.10xlarge.avx2" },
         ]}
+      allow-reuse-old-whl: true
     secrets: inherit
 
   linux-jammy-cpu-py3_9-gcc11-inductor-test:
@@ -169,6 +174,7 @@ jobs:
           { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
+      allow-reuse-old-whl: true
     secrets: inherit
 
   linux-focal-cuda12_6-py3_13-gcc9-inductor-test:

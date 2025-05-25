@@ -275,6 +275,11 @@ if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)
       "${TORCH_SRC_DIR}/csrc/lazy/generated/RegisterLazy.cpp"
     )
   endif()
+  if(USE_MPS)
+    list(APPEND GENERATED_CXX_TORCH
+      "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_mps.cpp"
+    )
+  endif()
 endif()
 
 set(GENERATED_H_TORCH
@@ -703,6 +708,8 @@ list(APPEND Caffe2_CPU_SRCS ${TORCH_SRCS})
 
 if(USE_MPS)
   list(APPEND Caffe2_CPU_SRCS ${Caffe2_MPS_SRCS})
+  list(APPEND Caffe2_CPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/shim_mps.cpp)
+  list(APPEND Caffe2_CPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_runner/model_container_runner_mps.cpp)
   if(CAN_COMPILE_METAL)
       file(TOUCH ${CMAKE_BINARY_DIR}/aten/src/ATen/metallib_dummy.cpp)
       list(APPEND Caffe2_CPU_SRCS ${CMAKE_BINARY_DIR}/aten/src/ATen/metallib_dummy.cpp)
@@ -1731,6 +1738,10 @@ if(USE_ROCM)
     foreach(_item ${MY_DEFINITIONS})
       list(APPEND HIP_CLANG_FLAGS "-D${_item}")
     endforeach()
+  endif()
+
+  if(WIN32)
+    list(APPEND HIP_CXX_FLAGS "-fms-extensions")
   endif()
 
   # Call again since Caffe2_HIP_INCLUDE is extended with ATen include dirs.

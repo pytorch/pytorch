@@ -172,6 +172,7 @@ select = [
     "PLW2101", # useless lock statement
     "PLW3301", # nested min max
     "PT006", # TODO: enable more PT rules
+    "PT014", # duplicate parameterize case
     "PT022",
     "PT023",
     "PT024",

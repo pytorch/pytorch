@@ -1641,11 +1641,13 @@ class GraphModuleDeserializer(metaclass=Final):
             self.module,
             self.serialized_name_to_node,
             self.serialized_name_to_meta,
+            self.unbacked_symbols
         )
         self.graph = torch.fx.Graph()
         self.module = torch.nn.Module()
         self.serialized_name_to_node = {}
         self.serialized_name_to_meta = {}
+        self.unbacked_symbols: set[sympy.Symbol] = set()
         try:
             yield
         finally:
@@ -1654,6 +1656,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 self.module,
                 self.serialized_name_to_node,
                 self.serialized_name_to_meta,
+                self.unbacked_symbols
             ) = saved
 
     def deserialize_extension_operator(self, serialized_target: str):
@@ -2184,7 +2187,7 @@ class GraphModuleDeserializer(metaclass=Final):
             self.symbol_name_to_range = {}
             # we also need to bump unbacked sym[float,int] counters in the
             # shape env to accommodate unbacked symbols in the exported program
-            self.unbacked_symbols: set[sympy.Symbol] = set()
+            self.unbacked_symbols = set()
             count_unbacked_symfloat, count_unbacked_symint = -1, -1
             unbacked_symfloat_prefix, unbacked_symint_prefix = (
                 prefix_str[t] for t in [SymT.UNBACKED_FLOAT, SymT.UNBACKED_INT]
@@ -2422,26 +2425,33 @@ class GraphModuleDeserializer(metaclass=Final):
         # Check single value return
         if len(serialized_node.outputs) == 0:
             return
+
         if (
             len(serialized_node.outputs) == 1
-            and serialized_node.outputs[0].type == "as_tensor"
+            and "torch.ops.higher_order" in serialized_node.target
+            and not getattr(serialized_node, "is_hop_single_tensor_return", True)
         ):
-            # If it is a HOP node and it returns a tuple containing a single element
-            # we manually insert a getitem node to ensure the graph is consistent
-            # For BC, getattr() will return True if `is_single_tensor_return` doens't exist
-            # as prior to adding this field, it is guaranteed to have a single tensor return
-            # when the serialized_node has length=1 outputs and of type `as_tensor`.
-            if (
-                "torch.ops.higher_order" in serialized_node.target
-                and not getattr(serialized_node, "is_hop_single_tensor_return", True)
-            ):
+            def _deserialize_hop_with_single_return(serialized_node, fx_node):
                 meta_val: list[Any] = []
-                arg = serialized_node.outputs[0].as_tensor
+                arg = None
+                if serialized_node.outputs[0].type == "as_tensor":
+                    arg = serialized_node.outputs[0].as_tensor
+                elif isinstance(serialized_node.outputs[0].value, (SymIntArgument, SymBoolArgument, SymFloatArgument)):
+                    arg = serialized_node.outputs[0].value
                 deserialized_metadata = self.deserialize_metadata(serialized_node.metadata)
+                assert arg is not None
                 self.generate_getitem(meta_val, fx_node, arg, 0, deserialized_metadata)
                 fx_node.meta["val"] = tuple(meta_val)
                 self.serialized_name_to_node[fx_node.name] = fx_node
                 return
+
+            return _deserialize_hop_with_single_return(serialized_node, fx_node)
+
+
+        if (
+            len(serialized_node.outputs) == 1
+            and serialized_node.outputs[0].type == "as_tensor"
+        ):
 
             self.sync_fx_node(serialized_node.outputs[0].as_tensor.name, fx_node)
             return

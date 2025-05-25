@@ -25,6 +25,8 @@ from torch.utils._pytree import tree_map
 from torch.utils._sympy.functions import ModularIndexing
 
 
+# set so that metrics appear
+torch._logging.set_logs(inductor_metrics=True)
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 

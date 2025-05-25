@@ -956,8 +956,8 @@ from user code:
 Traceback (most recent call last):
   File "test_error_messages.py", line N, in test_no_internal_compiler_stacktrace
     torch.compile(fn, backend="eager", fullgraph=True)()
-  File "eval_frame.py", line N, in _fn
-    raise e.with_traceback(None) from e.__cause__
+  File "eval_frame.py", line N, in compile_wrapper
+    raise e.with_traceback(None) from e.__cause__  # User compiler error
 torch._dynamo.exc.Unsupported: Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.

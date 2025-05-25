@@ -3,6 +3,7 @@
 # flake8: noqa: E731
 
 import unittest
+import unittest.mock as mock
 
 from parameterized import parameterized_class
 
@@ -14,10 +15,12 @@ import torch._inductor.decomposition
 from functorch.compile import aot_function, nop
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
+    EagerAndRecordGraphs,
     InductorAndRecordGraphs,
     normalize_gm,
 )
 from torch._higher_order_ops.invoke_subgraph import mark_compile_region
+from torch._higher_order_ops.schema import find_hop_schema
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
@@ -166,6 +169,134 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
+
+    def test_gen_schema(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c = 5
+
+            @mark_compile_region
+            def forward(self, x, y):
+                return torch.mul(x, y).sin() + self.c
+
+        mod = Mod()
+
+        def fn(x, y):
+            return mod(x, y) + mod(x, y)
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
+        backend = AotEagerAndRecordGraphs()
+        res = torch.compile(fn, backend=backend, fullgraph=True)(x_clone, y_clone)
+        res.sum().backward()
+
+        self.assertEqual(len(backend.fw_graphs), 1)
+        self.assertEqual(len(backend.bw_graphs), 1)
+        fw_schema = find_hop_schema(
+            backend.fw_graphs[0], torch.ops.higher_order.invoke_subgraph
+        )
+        bw_schema = find_hop_schema(
+            backend.bw_graphs[0], torch.ops.higher_order.invoke_subgraph
+        )
+        self.assertExpectedInline(
+            str(fw_schema[0]),
+            """invoke_subgraph(Any subgraph, str identifier, Tensor arg0, Tensor arg1) -> (Tensor, Tensor, Tensor)""",
+        )
+        self.assertExpectedInline(
+            str(fw_schema[1]),
+            """invoke_subgraph(Any subgraph, str identifier, Tensor arg0, Tensor arg1) -> (Tensor, Tensor, Tensor)""",
+        )
+        self.assertExpectedInline(
+            str(bw_schema[0]),
+            """invoke_subgraph(Any subgraph, str identifier, Tensor arg0, Tensor arg1, Tensor arg2) -> (Tensor, Tensor)""",
+        )
+        self.assertExpectedInline(
+            str(bw_schema[1]),
+            """invoke_subgraph(Any subgraph, str identifier, Tensor arg0, Tensor arg1, Tensor arg2) -> (Tensor, Tensor)""",
+        )
+
+    def test_gen_schema_with_buffer_mutation(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c = 5
+                self.register_buffer("buf", torch.ones(8, requires_grad=False))
+
+            @mark_compile_region
+            def forward(self, x, y):
+                self.buf.add_(1)
+                return torch.mul(x, y).sin() + self.c + self.buf
+
+        mod_ref = Mod()
+        mod = Mod()
+
+        def fn(mod, x, y):
+            return mod(x, y) + mod(x, y)
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        ref = fn(mod_ref, x, y)
+
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
+        backend = EagerAndRecordGraphs()
+        with mock.patch(
+            "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
+            True,
+        ):
+            res = torch.compile(fn, backend=backend, fullgraph=True)(
+                mod, x_clone, y_clone
+            )
+
+        self.assertEqual(len(backend.graphs), 1)
+        fw_schema = find_hop_schema(
+            backend.graphs[0], torch.ops.higher_order.invoke_subgraph
+        )
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[8]", L_y_: "f32[8]", L_mod_buffers_buf_: "f32[8]"):
+        l_x_ = L_x_
+        l_y_ = L_y_
+        l_mod_buffers_buf_ = L_mod_buffers_buf_
+
+        subgraph_0 = self.subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_mod_buffers_buf_, l_x_, l_y_);  subgraph_0 = None
+        getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
+        subgraph_1 = self.subgraph_0
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', l_mod_buffers_buf_, l_x_, l_y_);  subgraph_1 = l_mod_buffers_buf_ = l_x_ = l_y_ = None
+        getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+
+        add: "f32[8]" = getitem + getitem_1;  getitem = getitem_1 = None
+        return (add,)
+
+    class subgraph_0(torch.nn.Module):
+        def forward(self, l_mod_buffers_buf_: "f32[8]", l_x_: "f32[8]", l_y_: "f32[8]"):
+            add_: "f32[8]" = l_mod_buffers_buf_.add_(1);  add_ = None
+
+            mul: "f32[8]" = torch.mul(l_x_, l_y_);  l_x_ = l_y_ = None
+            sin: "f32[8]" = mul.sin();  mul = None
+            add: "f32[8]" = sin + 5;  sin = None
+            add_1: "f32[8]" = add + l_mod_buffers_buf_;  add = l_mod_buffers_buf_ = None
+            return (add_1,)
+""",
+            )
+        self.assertExpectedInline(
+            str(fw_schema[0]),
+            """invoke_subgraph(Any subgraph, str identifier, Tensor(a2!) arg0, Tensor arg1, Tensor arg2) -> ((Tensor))""",
+        )
+        self.assertExpectedInline(
+            str(fw_schema[1]),
+            """invoke_subgraph(Any subgraph, str identifier, Tensor(a2!) arg0, Tensor arg1, Tensor arg2) -> ((Tensor))""",
+        )
+        self.assertEqual(res, ref)
+        self.assertEqual(mod.buf, mod_ref.buf)
 
     def test_list(self):
         @mark_compile_region

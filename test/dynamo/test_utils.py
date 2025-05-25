@@ -330,7 +330,7 @@ class TestDynamoTimed(TestCase):
  'graph_input_count': 1,
  'graph_node_count': 3,
  'graph_op_count': 1,
- 'guard_count': 8,
+ 'guard_count': 9,
  'has_guarded_code': True,
  'inductor_code_gen_cumulative_compile_time_us': 0,
  'inductor_compile_time_s': 0.0,
@@ -481,7 +481,7 @@ class TestDynamoTimed(TestCase):
             (3, 9): (10, 6),
             (3, 10): (10, 6),
             (3, 11): (10, 6),
-            (3, 12): (10, 6),
+            (3, 12): (11, 7),
             (3, 13): (11, 7),
         }[version]
 

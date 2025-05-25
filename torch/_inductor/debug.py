@@ -558,7 +558,7 @@ class DebugFormatter:
         shutil.copy(filename, self.filename(f"output_code.{extension}"))
 
     def log_inductor_triton_kernel_to_post_grad_node_info(
-        self, filename: str = "inductor_triton_kernel_to_post_grad_nodes.json"
+        self, filename: str = "inductor_generated_kernel_to_post_grad_nodes.json"
     ) -> tuple[dict[str, list[str]], dict[str, Any]]:
         debug_info = {}
         with self.fopen(filename, "w") as fd:

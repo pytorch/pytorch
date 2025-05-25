@@ -2259,6 +2259,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skip_on_cpu
     def test_epilogue_fused(self, device):
+        # set so that metrics appear
+        torch._logging.set_logs(inductor_metrics=True)
+
         @torch.compile
         def f(q, k, v):
             out = flex_attention(q, k, v)
@@ -2277,6 +2280,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         # We need this fudge factor for now as we write the extraneous logsumexp
         num_accesses += 1
         self.assertLess(metrics.num_bytes_accessed, accessed_bytes * num_accesses)
+        torch._logging.set_logs()
 
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes)

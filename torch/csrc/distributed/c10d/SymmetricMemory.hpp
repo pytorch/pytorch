@@ -74,11 +74,11 @@ class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
 
   virtual std::vector<int> get_rank_to_global_rank() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
 
   virtual int* get_rank_to_global_rank_dev() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
 };
 
 class SymmetricMemoryAllocator : public c10::intrusive_ptr_target {

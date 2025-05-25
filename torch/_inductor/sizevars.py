@@ -8,7 +8,11 @@ from typing import Any, Callable, cast, Optional, Union
 import sympy
 from sympy import Expr
 
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, ShapeEnv
+from torch.fx.experimental.symbolic_shapes import (
+    free_unbacked_symbols,
+    has_free_unbacked_symbols,
+    ShapeEnv,
+)
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
@@ -62,7 +66,7 @@ class SizeVarAllocator:
         self.shape_env = shape_env
         self.var_to_val = self.shape_env.var_to_val
         self.replacements: dict[sympy.Symbol, Expr] = self.shape_env.replacements
-        self.unbacked_replacements: dict[Expr, Expr] = {}
+        self.unbacked_replacements: Optional[dict[Expr, Expr]] = None
         # Maps of dynamic sizes that have to be precomputed on the host to the kernel args.
         # The basic idea is if we have some complicated sympy expression
         # f(s0), we may choose to precompute it on the host and then replace
@@ -639,7 +643,7 @@ class SizeVarAllocator:
                 )
         return strides
 
-    def _get_unbacked_replacements(self, expr: Expr) -> dict[Expr, Expr]:
+    def _get_unbacked_replacements(self) -> dict[Expr, Expr]:
         """
         This helps with covering unbacked symint cases where you may have two
         expressions: s0 + u0 and u1. And s0 + u0 is known to be equal to u1
@@ -649,33 +653,49 @@ class SizeVarAllocator:
         hint for both s0 + u0 and u1, but it first needs to know they are equal.
         Then it can substitute s0 + u0 for u1.
         """
-        if expr in self.unbacked_replacements:
-            return self.unbacked_replacements[expr]
+        if self.unbacked_replacements is not None:
+            return self.unbacked_replacements
 
-        runtime_asserts = itertools.chain.from_iterable(
-            self.shape_env.deferred_runtime_asserts.get(u, [])
-            for u in free_unbacked_symbols(expr)
-        )
-        equalities = (
-            assertion.expr
-            for assertion in runtime_asserts
-            if isinstance(assertion.expr, sympy.Equality)
-        )
-        replacements = {eq.rhs: eq.lhs for eq in equalities}
+        self.unbacked_replacements = {}
+        for assertions in self.shape_env.deferred_runtime_asserts.values():
+            for assertion in assertions:
+                if not isinstance(assertion.expr, sympy.Equality):
+                    continue
 
-        self.unbacked_replacements[expr] = replacements
-        return replacements
+                lhs, rhs = assertion.expr.lhs, assertion.expr.rhs
+                l2r = lhs.compare(rhs) == 1  # see sympy.Basic.compare
+                src = lhs if l2r else rhs
+                dst = rhs if l2r else lhs
+
+                existing_replacement = self.unbacked_replacements.get(src, None)
+                if existing_replacement and isinstance(
+                    existing_replacement, sympy.Symbol
+                ):
+                    # Prefer to keep replacements with symbols.
+                    continue
+                self.unbacked_replacements[src] = dst
+        return self.unbacked_replacements
+
+    @functools.lru_cache  # noqa: B019
+    def _sub_unbacked_exprs(self, expr: Expr) -> Expr:
+        # it's fine to cache this fn since self is a singleton
+        replacements = self._get_unbacked_replacements()
+        while True:
+            new_expr = expr.subs(replacements)
+            if new_expr == expr:
+                return new_expr
+            expr = sympy.factor(new_expr)
 
     def atomically_apply_size_hint(
         self, expr: Union[Expr, int], *, fallback: Optional[int] = None
     ) -> Union[Expr, int]:
-        if isinstance(expr, int):
+        if isinstance(expr, (int, sympy.Integer)):
             return int(expr)
 
-        # Make sure to substitute with the factored version
-        # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
-        unbacked_replacements = self._get_unbacked_replacements(expr)
-        expr = sympy.factor(expr).subs(unbacked_replacements)
+        if has_free_unbacked_symbols(expr):
+            # Make sure to substitute with the factored version
+            # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
+            expr = self._sub_unbacked_exprs(sympy.factor(expr))
 
         # For multiple expressions that depend on an unbacked symint,
         # we want to compute them consistently for a size hint we have chosen.

@@ -298,7 +298,7 @@ class Sequential(Module):
         self._modules[str(index)] = module
         return self
 
-    def extend(self, sequential) -> Self:
+    def extend(self, sequential: Iterable[Module]) -> Self:
         """
         Extends the current Sequential container with layers from another Sequential container.
 

@@ -149,6 +149,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             on those futures independently.
 
         Example::
+
             >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_FUTURES)
             >>> def callback(fut):
             ...     print(f"RPC return value is {fut.wait()}.")
@@ -197,6 +198,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             for handling completion/waiting on those futures independently.
 
         Example::
+
             >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_FUTURES)
             >>> def callback(fut):
             ...     print("This will run after the future has finished.")
@@ -230,6 +232,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             result (object): the result object of this ``Future``.
 
         Example::
+
             >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_FUTURES)
             >>> import threading
             >>> import time
@@ -259,6 +262,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             result (BaseException): the exception for this ``Future``.
 
         Example::
+
             >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_FUTURES)
             >>> fut = torch.futures.Future()
             >>> fut.set_exception(ValueError("foo"))
