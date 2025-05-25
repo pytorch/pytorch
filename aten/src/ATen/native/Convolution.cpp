@@ -1170,7 +1170,7 @@ static Tensor convolution_transpose_same(
         conv_transpose_same_mode_padding_lr(effective_kernel, dim_stride);
 
     auto min_pad = pad.second < pad.first ? pad.second : pad.first;
-    common_pad_lr.push_back(min_pad);
+    common_pad_lr.push_back(std::move(min_pad));
     extra_pad_left.push_back(pad.first - pad.second);
   }
 
