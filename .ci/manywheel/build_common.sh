@@ -18,12 +18,10 @@ retry () {
     $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
 }
 
-PLATFORM="manylinux2014_x86_64"
+PLATFORM=""
 # TODO move this into the Docker images
 OS_NAME=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
-if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
-    retry yum install -q -y zip openssl
-elif [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
+if [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
     retry yum install -q -y zip openssl
     PLATFORM="manylinux_2_28_x86_64"
 elif [[ "$OS_NAME" == *"Red Hat Enterprise Linux"* ]]; then
@@ -78,8 +76,6 @@ if [[ -e /opt/openssl ]]; then
     export OPENSSL_ROOT_DIR=/opt/openssl
     export CMAKE_INCLUDE_PATH="/opt/openssl/include":$CMAKE_INCLUDE_PATH
 fi
-
-
 
 mkdir -p /tmp/$WHEELHOUSE_DIR
 
