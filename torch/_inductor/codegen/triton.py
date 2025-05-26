@@ -513,7 +513,7 @@ class TMADescriptorOptions(BlockDescriptorOptions):
         # see Note: TMA API Restrictions
         # Here we compute the minimum value of the block type that is used
         # in the innermost block size that can guarantee that 16 bytes of data
-        # can be loaded
+        # can be loaded / stored
         element_size = torch._utils._element_size(dtype)
         innermost_block_shape = self.block_shape[-1]
         innermost_block_type = None
@@ -1923,13 +1923,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # Also see Note: TMA API Restrictions for the below
 
                 # `no_x_dim` with use_tma_api => XBLOCK=1, but the TMA API requires that
-                # atleast 16 bytes of data can be loaded
+                # atleast 16 bytes of data can be loaded / stored
                 if self.no_x_dim:
                     return False
 
                 # RN blocks for persistent reductions are static. So the nnermost rnumel
-                # must have atleast 16 bytes of data to be loaded. The dtype is not known
-                # here so conservatively require 16 elements
+                # must have atleast 16 bytes of data to be loaded / stored. The dtype is
+                # not known here so conservatively require 16 elements
                 if self.persistent_reduction:
                     reduction_prefix, innermost_rnumel = (None, None)
                     for t in self.range_trees:
@@ -2075,7 +2075,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if config.triton.use_tma_api:
                     # Also see Note: TMA API Restrictions
                     # For a mod_div_block match, the innermost block shape is e.g. Min(dim_size, XBLOCK)
-                    # and XBLOCK should be large enough to load 16 bytes to use TMA descriptors.
+                    # and XBLOCK should be large enough to load / store 16 bytes to use TMA descriptors.
                     # The dtype of the input / output is not known here so conservatively require 16 elements
                     if not V.graph.sizevars.statically_known_geq(
                         dims[-1], sympy.Integer(16)
