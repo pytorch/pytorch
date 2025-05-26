@@ -21,6 +21,6 @@ fi
 
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers/arm64
 
-"$SCRIPT_HELPERS_DIR"/build_pytorch.bat
+"$SCRIPT_HELPERS_DIR"/build_pytorch.sh
 
 echo "BUILD PASSED"
