@@ -1075,6 +1075,7 @@ class TritonTemplateKernel(TritonKernel):
         copy_shape=None,
         override_mask=None,
         block_ptr=False,
+        tma_descriptor=False,
     ):
         """
         Override the default indexing to use our custom mask and force
@@ -1088,6 +1089,7 @@ class TritonTemplateKernel(TritonKernel):
             copy_shape=self.template_out,
             override_mask=self.template_mask,
             block_ptr=block_ptr,
+            tma_descriptor=tma_descriptor,
         )
 
     def codegen_range_tree(self):

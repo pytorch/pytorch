@@ -51,56 +51,10 @@ tiled_reduction_config = {
 }
 
 
-def run_and_compare(
-    self: InductorTestCase,
-    func: Callable[..., Any],
-    *args,
-    compile_kwargs: Optional[dict] = None,
-    expected_num_block_pointers: Optional[int] = None,
-    expected_num_programs: int = 1,
-    expected_num_triton_kernels: int = 1,
-    config_patches: Optional[dict] = None,
-    rtol: Optional[float] = None,
-    atol: Optional[float] = None,
-):
-    """
-    Runs the module through Inductor, comparing to eager reference.
-    """
-    if compile_kwargs is None:
-        compile_kwargs = {}
-    if config_patches is None:
-        config_patches = {}
-
-    def flatten_tensors(tensors):
-        flat, spec = pytree.tree_flatten(tensors)
-        return flat
-
-    with config.patch(config_patches):
-        compiled = torch.compile(func, backend="inductor", **compile_kwargs)
-        result, code = run_and_get_code(compiled, *args)
-
-    # Check numerical accuracy
-    ref_tensors = flatten_tensors(func(*args))
-    actual_tensors = flatten_tensors(result)
-    for ref, actual in zip(ref_tensors, actual_tensors):
-        # Don't clobber the default tolerance values
-        tol = {t: v for t, v in {"rtol": rtol, "atol": atol}.items() if v is not None}
-        self.assertTrue(torch.allclose(ref, actual, **tol))
-
-    def count_code(substr: str, expected: Optional[int]):
-        count = sum(prog.count(substr) for prog in code)
-        if expected is not None:
-            self.assertEqual(count, expected)
-
-    # Check the code
-    self.assertEqual(len(code), expected_num_programs)
-    count_code("@triton.jit", expected_num_triton_kernels)
-    count_code("tl.make_block_ptr", expected_num_block_pointers)
-
-    return result, code
-
-
 class BlockPointerTestBase(InductorTestCase):
+
+    block_pointer_constructor_str = "tl.make_block_pointer"
+
     def _discontiguous_tensor(
         self, view_size: tuple[int, ...], device: Union[torch.device, str]
     ) -> torch.Tensor:
@@ -132,6 +86,54 @@ class BlockPointerTestBase(InductorTestCase):
     def _get_lines_containing_substr(self, code: str, substr: str) -> str:
         return "\n".join(line for line in code.split("\n") if substr in line)
 
+    def _run_and_compare(
+        self: InductorTestCase,
+        func: Callable[..., Any],
+        *args,
+        compile_kwargs: Optional[dict] = None,
+        expected_num_block_pointers: Optional[int] = None,
+        expected_num_programs: int = 1,
+        expected_num_triton_kernels: int = 1,
+        config_patches: Optional[dict] = None,
+        rtol: Optional[float] = None,
+        atol: Optional[float] = None,
+    ):
+        """
+        Runs the module through Inductor, comparing to eager reference.
+        """
+        if compile_kwargs is None:
+            compile_kwargs = {}
+        if config_patches is None:
+            config_patches = {}
+
+        def flatten_tensors(tensors):
+            flat, spec = pytree.tree_flatten(tensors)
+            return flat
+
+        with config.patch(config_patches):
+            compiled = torch.compile(func, backend="inductor", **compile_kwargs)
+            result, code = run_and_get_code(compiled, *args)
+
+        # Check numerical accuracy
+        ref_tensors = flatten_tensors(func(*args))
+        actual_tensors = flatten_tensors(result)
+        for ref, actual in zip(ref_tensors, actual_tensors):
+            # Don't clobber the default tolerance values
+            tol = {t: v for t, v in {"rtol": rtol, "atol": atol}.items() if v is not None}
+            self.assertTrue(torch.allclose(ref, actual, **tol))
+
+        def count_code(substr: str, expected: Optional[int]):
+            count = sum(prog.count(substr) for prog in code)
+            if expected is not None:
+                self.assertEqual(count, expected)
+
+        # Check the code
+        self.assertEqual(len(code), expected_num_programs)
+        count_code("@triton.jit", expected_num_triton_kernels)
+        count_code(self.block_pointer_constructor_str, expected_num_block_pointers)
+
+        return result, code
+
 
 @instantiate_parametrized_tests
 class CommonTemplate:
@@ -158,8 +160,7 @@ class CommonTemplate:
         # Expect failure for bad inputs
         with self.assertRaises(AssertionError) if raises else contextlib.nullcontext():
             # Expect 3 block pointers: 2 inputs 1 output
-            run_and_compare(
-                self,
+            self._run_and_compare(
                 foo,
                 *inputs,
                 expected_num_block_pointers=expected_num_block_pointers,
@@ -234,8 +235,7 @@ class CommonTemplate:
         args = [get_input() for arg_idx in range(2)]
 
         # Expect 3 block pointers: 2 inputs 1 output
-        run_and_compare(
-            self,
+        self._run_and_compare(
             torch.add,
             *args,
             expected_num_block_pointers=3 if require_block_ptr else None,
@@ -283,8 +283,7 @@ class CommonTemplate:
         self.assertIn(1, all_dims)
 
         # Expect 3 block pointers: 2 inputs one output
-        run_and_compare(
-            self,
+        self._run_and_compare(
             foo,
             x,
             y,
@@ -334,7 +333,7 @@ class CommonTemplate:
             if i != 1:
                 self.assertEqual(i, j)
 
-        result, (triton_code,) = run_and_compare(self, foo, x, y)
+        result, (triton_code,) = self._run_and_compare(foo, x, y)
 
     @parametrize("prefer_nd_tiling", [False, True])
     @config.patch("triton.skip_l1_cache", False)
@@ -350,8 +349,7 @@ class CommonTemplate:
         col = torch.as_strided(full, col_shape, full.stride())
 
         # Expect 3 block pointers: 2 inputs one output
-        result, (triton_code,) = run_and_compare(
-            self,
+        result, (triton_code,) = self._run_and_compare(
             torch.add,
             full,
             col,
@@ -447,8 +445,7 @@ class CommonTemplate:
 
         # Expect at least 1 block pointer for the input.
         # Add 2 more if we generate 2 kernels.
-        result, (code,) = run_and_compare(
-            self,
+        result, (code,) = self._run_and_compare(
             torch.sum,
             view,
             expected_num_block_pointers=num_block_pointers,
@@ -482,8 +479,7 @@ class CommonTemplate:
         ]
 
         # Expect 2 block pointers: inputs
-        result, (code,) = run_and_compare(
-            self,
+        result, (code,) = self._run_and_compare(
             foo,
             *inputs,
             expected_num_block_pointers=num_block_pointers,
@@ -514,7 +510,7 @@ class CommonTemplate:
         self.assertTrue(len(nontrivial_dims) > 1)
 
         # Expect 2 block pointers: input and output
-        run_and_compare(self, foo, view, expected_num_block_pointers=2)
+        self._run_and_compare(foo, view, expected_num_block_pointers=2)
 
     @parametrize(
         "nd_tiling,num_block_pointers",
@@ -531,8 +527,7 @@ class CommonTemplate:
         view_size = (4, 4)
         view = self._discontiguous_tensor(view_size, self.device)
 
-        run_and_compare(
-            self,
+        self._run_and_compare(
             torch.div,
             view,
             view,
@@ -557,8 +552,7 @@ class CommonTemplate:
         view_size = (4, 4)
         view = self._discontiguous_tensor(view_size, self.device)
 
-        run_and_compare(
-            self,
+        self._run_and_compare(
             torch.prod,
             view,
             expected_num_block_pointers=num_block_pointers,
@@ -588,8 +582,8 @@ class CommonTemplate:
         x = torch.randn(x_size).to(device)
 
         # Expect 2 block pointers: input and output
-        run_and_compare(
-            self, x, compile_kwargs={"dynamic": True}, expected_num_block_pointers=2
+        self._run_and_compare(
+            x, compile_kwargs={"dynamic": True}, expected_num_block_pointers=2
         )
 
     @parametrize(
@@ -649,8 +643,7 @@ class CommonTemplate:
         args = [get_input() for arg_idx in range(2)]
 
         # Expect up to 3 block pointers: 2 inputs 1 output.
-        result, code = run_and_compare(
-            self,
+        result, code = self._run_and_compare(
             torch.add,
             *args,
             expected_num_block_pointers=num_block_pointers,
@@ -694,8 +687,7 @@ class CommonTemplate:
 
         # Expect at least 1 block pointer for the input.
         # Add 2 more if we generate 2 kernels.
-        result, (code,) = run_and_compare(
-            self,
+        result, (code,) = self._run_and_compare(
             reduction_op,
             view,
             expected_num_block_pointers=num_block_pointers,
@@ -714,8 +706,7 @@ class CommonTemplate:
         view = self._discontiguous_tensor((2, 346), self.device)
 
         # Expect 1 block pointer for the input.
-        result, (code,) = run_and_compare(
-            self,
+        result, (code,) = self._run_and_compare(
             torch.prod,
             view,
             expected_num_block_pointers=1,
@@ -757,8 +748,7 @@ class CommonTemplate:
         view = self._discontiguous_tensor(size, self.device)
 
         # We expect many block pointers for this one.
-        result, (code,) = run_and_compare(
-            self,
+        result, (code,) = self._run_and_compare(
             torch.var_mean,
             view,
             expected_num_block_pointers=expected_num_block_pointers,
@@ -785,8 +775,7 @@ class CommonTemplate:
         view = self._discontiguous_tensor((259, 311), self.device)
 
         # We expect many block pointers for this one.
-        result, (code,) = run_and_compare(
-            self,
+        result, (code,) = self._run_and_compare(
             torch.var_mean,
             view,
             expected_num_block_pointers=6,
@@ -808,8 +797,7 @@ class CommonTemplate:
         # Use odd shapes to frustrate block pointer analysis.
         view = self._discontiguous_tensor((3, 7, 11), self.device)
 
-        result, (code,) = run_and_compare(
-            self,
+        result, (code,) = self._run_and_compare(
             torch.sum,
             view,
             expected_num_block_pointers=0,
@@ -834,8 +822,7 @@ class CommonTemplate:
             x = x.reshape(x.shape[0], -1)
             return torch.softmax(x, -1)
 
-        result, (code,) = run_and_compare(
-            self,
+        result, (code,) = self._run_and_compare(
             foo,
             view,
             expected_num_block_pointers=6,
@@ -866,8 +853,7 @@ class CommonTemplate:
         view = self._discontiguous_tensor(view_size, self.device)
 
         # Expect at least 1 block pointer for the input.
-        result, (code,) = run_and_compare(
-            self,
+        result, (code,) = self._run_and_compare(
             foo,
             view,
             expected_num_block_pointers=1,
@@ -896,8 +882,7 @@ class CommonTemplate:
         arg1 = torch.empty(view_size)
 
         # No guarantees on the number of kernels or pointers.
-        result, (code,) = run_and_compare(
-            self,
+        result, (code,) = self._run_and_compare(
             foo,
             arg0,
             arg1,
@@ -918,8 +903,7 @@ class CommonTemplate:
         view = self._discontiguous_tensor((9, 11), self.device)
 
         # If tiled, we expect 1 block pointer for the input.
-        result, (code,) = run_and_compare(
-            self,
+        result, (code,) = self._run_and_compare(
             torch.sum,
             view,
             expected_num_block_pointers=1 if tile_reductions else 0,
@@ -946,8 +930,7 @@ class CommonTemplate:
             return clone_0, clone_1
 
         inps = (torch.rand((8, 2048), device=self.device, dtype=torch.float32),) * 2
-        result, code = run_and_compare(
-            self,
+        result, code = self._run_and_compare(
             func,
             *inps,
             expected_num_triton_kernels=2,
@@ -968,8 +951,7 @@ class CommonTemplate:
             return a + b
 
         inps = (torch.rand((51, 51, 51), device=self.device, dtype=torch.float32),) * 3
-        result, (code,) = run_and_compare(
-            self,
+        result, (code,) = self._run_and_compare(
             foo,
             *inps,
             expected_num_triton_kernels=1,
@@ -1005,8 +987,7 @@ class CommonTemplate:
         )
 
         with torch._dynamo.config.patch({"capture_scalar_outputs": True}):
-            run_and_compare(
-                self,
+            self._run_and_compare(
                 foo,
                 *inps,
                 expected_num_triton_kernels=1,
@@ -1031,8 +1012,7 @@ class CommonTemplate:
             return aten.bernoulli(a).sum() / torch.prod(torch.tensor(a.size()))
 
         p = 0.3
-        result, code = run_and_compare(
-            self,
+        result, code = self._run_and_compare(
             fn,
             *[torch.ones(200, 200, device=self.device) * p],
             expected_num_triton_kernels=2,
@@ -1051,8 +1031,7 @@ class CommonTemplate:
             self._discontiguous_tensor((5, 5, 5), device=self.device) for _ in range(2)
         ]
 
-        result, (triton_code,) = run_and_compare(
-            self,
+        result, (triton_code,) = self._run_and_compare(
             torch.add,
             *inps,
             expected_num_triton_kernels=1,
@@ -1100,8 +1079,7 @@ class CommonTemplate:
             return x.expand(*expanded_size).clone()
 
         inps = [torch.randn(base_size, device=self.device)]
-        result, (triton_code,) = run_and_compare(
-            self,
+        result, (triton_code,) = self._run_and_compare(
             foo,
             *inps,
             expected_num_triton_kernels=1,
@@ -1130,8 +1108,7 @@ class CommonTemplate:
             torch.randn((128,), device=self.device),
             torch.randn((8, 11, 128), device=self.device),
         ]
-        result, (triton_code,) = run_and_compare(
-            self,
+        result, (triton_code,) = self._run_and_compare(
             foo,
             *inps,
             expected_num_triton_kernels=1,
@@ -1295,15 +1272,26 @@ class CommonTemplate:
 class TritonBlockPointerTestCPU(BlockPointerTestBase):
     device = "cpu"
 
-
 test_torchinductor.copy_tests(
     CommonTemplate,
     TritonBlockPointerTestCPU,
     "cpu",
     xfail_prop="_expected_failure_triton_cpu",
 )
+@unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
+@config.patch(cpu_backend="triton")
+@config.patch("triton.use_tma_api", True)
+class TritonTMADescriptorTestCPU(BlockPointerTestBase):
+    block_pointer_constructor_str = "tl.make_tensor_descriptor"
+    device = "cpu"
 
 
+test_torchinductor.copy_tests(
+    CommonTemplate,
+    TritonTMADescriptorTestCPU,
+    "cpu",
+    xfail_prop="_expected_failure_triton_cpu",
+)
 @unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
 @config.patch("triton.use_block_ptr", True)
 class TritonBlockPointerTestGPU(BlockPointerTestBase):
@@ -1311,6 +1299,14 @@ class TritonBlockPointerTestGPU(BlockPointerTestBase):
 
 
 test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYPE)
+@unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
+@config.patch("triton.use_tma_api", True)
+class TritonTMADescriptorTestGPU(BlockPointerTestBase):
+    block_pointer_constructor_str = "tl.make_tensor_descriptor"
+    device = GPU_TYPE
+
+
+test_torchinductor.copy_tests(CommonTemplate, TritonTMADescriptorTestGPU, GPU_TYPE)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
