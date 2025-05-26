@@ -7,14 +7,11 @@ librosa>=0.6.2
 mpmath==1.3.0
 networkx==2.8.7
 numba==0.59.0
-nvidia-ml-py==11.525.84
 opt-einsum>=3.3
 optree==0.13.0
 packaging==23.1
 parameterized==0.8.1
-# NB: test_hparams_* from test_tensorboard is failing with protobuf 5.26.0 in
-# which the stringify metadata is wrong when escaping double quote
-protobuf==3.20.2
+protobuf==5.29.4
 psutil==5.9.1
 pygments==2.15.0
 pytest-cpp==2.3.0
