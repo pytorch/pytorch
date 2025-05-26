@@ -11,6 +11,8 @@ ARG DEVTOOLSET_VERSION=11
 
 RUN yum -y update
 RUN yum -y install epel-release
+# install glibc-langpack-en make sure en_US.UTF-8 locale is available
+RUN yum -y install glibc-langpack-en
 RUN yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl zlib-devel openssl-devel yum-utils autoconf automake make gcc-toolset-${DEVTOOLSET_VERSION}-toolchain
 # Just add everything as a safe.directory for git since these will be used in multiple places with git
 RUN git config --global --add safe.directory '*'
