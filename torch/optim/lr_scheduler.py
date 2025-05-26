@@ -667,16 +667,14 @@ class LinearLR(LRScheduler):
     Notice that such decay can happen simultaneously with other changes to the learning rate
     from outside this scheduler. When last_epoch=-1, sets initial lr as lr.
 
-    Let :math:`lr_n` be the learning rate at the `n-th` iteration, :math:`lr_0` be the initial
-    learning rate, :math:`N` be the total number of iterations, :math:`s` be the start factor,
-    and :math:`e` be the end factor. Then:
-
     .. math::
         lr_n = \begin{cases}
             s\times lr_0, & \text{if } n = 0; \\
             lr_0, & \text{if } n > N; \\
             lr_0\times\left(1 + \frac{e - s}{N\times s+(n - 1)\times(e - s)}\right), & \text{if } 0 < n \leq N.
          \end{cases}
+
+    :math:`N` be the total number of iterations, :math:`s` be the start factor, and :math:`e` be the end factor.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
