@@ -454,7 +454,7 @@ extern "C"
       auto j_kvi = is_broadcast_head_kvi ? j/gqa_shards_kvi : j;
       auto kv_logical_num_data = kv_num_blocks_data + i_kvi * num_kviStrideB +
                               j_kvi * num_kviStrideH + k;
-      auto kv_indice_num = *kv_logical_num_data;
+      int kv_indice_num = *kv_logical_num_data;
       std::vector<int> kv_indice_list(kv_indice_num);
       for(int kv_i = 0; kv_i < kv_indice_num; kv_i++){
         auto kv_logical_data = kv_indices_data + i_kvi * kviStrideB +
@@ -464,8 +464,8 @@ extern "C"
 {%- if has_full_kv_block %}
       auto full_kv_logical_num_data = full_kv_num_blocks_data + i_kvi * num_kviStrideB +
                               j_kvi * num_kviStrideH + k;
-      auto full_kv_indice_num = *full_kv_logical_num_data;
-      std::vector<int> full_kv_indice_list;
+      int full_kv_indice_num = *full_kv_logical_num_data;
+      std::vector<int> full_kv_indice_list(full_kv_indice_num);
       for(int kv_i = 0; kv_i < full_kv_indice_num; kv_i++){
         auto full_kv_logical_data = full_kv_indices_data + i_kvi * full_kviStrideB +
                                   j_kvi * full_kviStrideH + k*full_kviStrideQ + kv_i;
