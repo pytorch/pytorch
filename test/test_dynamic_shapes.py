@@ -34,6 +34,7 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbolic,
     ShapeEnv,
     StatelessSymbolicContext,
+    statically_known_false,
     statically_known_true,
 )
 from torch.testing._internal.common_dtype import all_types_and
@@ -1210,6 +1211,36 @@ class f(torch.nn.Module):
         self.assertFalse(statically_known_true(s2 == s3))
         self.assertFalse(statically_known_true(s2 > s3))
         self.assertFalse(statically_known_true(s3 + s3 == s4))
+
+        # No guards should be generated
+        self.assertEqual(len(shape_env.guards), 0)
+
+    def test_statically_known_false(self):
+        shape_env = ShapeEnv()
+        s2, s3, s4 = (create_symint(shape_env, i) for i in range(2, 5))
+
+        # Statically known true
+        self.assertFalse(statically_known_false(True))
+        self.assertFalse(statically_known_false(s2 == s2))
+        self.assertFalse(statically_known_false(s2 * s3 > s3))
+        self.assertFalse(statically_known_false(s3 * s4 > s4))
+        self.assertFalse(statically_known_false((s3 + s3) % 2 == 0))
+
+        # Statically known false
+        self.assertTrue(statically_known_false(False))
+        self.assertTrue(statically_known_false(s3 * s4 <= s4))
+        self.assertTrue(statically_known_false((s3 + s3) % 2 == 1))
+
+        # True for hints, but not known statically
+        self.assertFalse(statically_known_false(s2 + s2 == s4))
+        self.assertFalse(statically_known_false(s4 % s2 == 0))
+        self.assertFalse(statically_known_false(s2 != s3))
+        self.assertFalse(statically_known_false(s3 * s4 > s2))
+
+        # False for hints, but not known statically
+        self.assertFalse(statically_known_false(s2 == s3))
+        self.assertFalse(statically_known_false(s2 > s3))
+        self.assertFalse(statically_known_false(s3 + s3 == s4))
 
         # No guards should be generated
         self.assertEqual(len(shape_env.guards), 0)
@@ -2851,10 +2882,11 @@ class TestGuardsExpressions(TestCase):
             else:
                 return b * 20
 
-        # call with guarding.
+        # eager.
         self.assertEqual(func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10]))
         self.assertEqual(func(torch.tensor([2]), torch.tensor([1])), torch.tensor([20]))
 
+        # compile with unbacked.
         unbacked_func = torch.compile(func, dynamic=True, fullgraph=True)
         a = torch.tensor([1])
         b = torch.tensor([1])
@@ -2916,10 +2948,11 @@ class TestGuardsExpressions(TestCase):
             else:
                 return b * 20
 
-        # call with guarding.
+        # eager.
         self.assertEqual(func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10]))
         self.assertEqual(func(torch.tensor([2]), torch.tensor([1])), torch.tensor([20]))
 
+        # compile with unbacked.
         unbacked_func = torch.compile(func, dynamic=True, fullgraph=True)
         a = torch.tensor([1])
         b = torch.tensor([1])
