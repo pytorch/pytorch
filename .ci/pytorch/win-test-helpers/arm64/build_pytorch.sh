@@ -51,7 +51,7 @@ cp "$libuv_ROOT/lib/Release/uv.dll" torch/lib/uv.dll || true
 # Create Python virtual environment
 python -m venv .venv
 echo "*" > .venv/.gitignore
-source .venv/bin/activate
+source .venv\Scripts\activate
 which python
 
 # Install Python dependencies
