@@ -49,7 +49,7 @@ cd "$PYTORCH_ROOT"
 cp "$libuv_ROOT/lib/Release/uv.dll" torch/lib/uv.dll || true
 
 # Create Python virtual environment
-python3 -m venv .venv
+python -m venv .venv
 echo "*" > .venv/.gitignore
 source .venv/bin/activate
 which python
