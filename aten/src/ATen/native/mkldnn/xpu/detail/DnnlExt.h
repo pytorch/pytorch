@@ -2,9 +2,9 @@
 
 #include <ATen/ATen.h>
 
-#include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 #include <ATen/native/mkldnn/xpu/detail/LRUCache.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
+#include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 
 #include <oneapi/dnnl/dnnl.h>
 #include <oneapi/dnnl/dnnl.hpp>
@@ -254,7 +254,8 @@ class primitive_ext : public primitive {
       case DNNL_ARG_BIAS:
         return make_bias(aengine, handle);
       default:
-        throw std::exception();
+        TORCH_INTERNAL_ASSERT(
+            false, "unsupported argument class for primitive_ext");
     }
   }
 
@@ -302,7 +303,7 @@ class primitive_ext : public primitive {
 };
 
 // Specifies the combined data types of input and weight tensors.
-// For example, f32 means both input and weight are FP32, 
+// For example, f32 means both input and weight are FP32,
 // bf16_int4 means input is BF16 and weight is INT4.
 enum class joint_dtypes_t { f32 = 0, f16, bf16, int8, f16_int4, bf16_int4 };
 
@@ -361,7 +362,6 @@ T1 concat(const T1& t1, const T2& t2, const Ts&... ts) {
   return concat(concat(t1, t2), ts...);
 }
 
-
 template <joint_dtypes_t Ts>
 struct onednn_types_mapper;
 
@@ -400,11 +400,11 @@ static inline dnnl::memory::dims get_bias_type(
     case bias_type_t::mn:
       return {m, n};
     default:
-      throw std::runtime_error("unsupported bias type ...");
+      TORCH_INTERNAL_ASSERT(false, "unsupported bias type ...");
   }
 }
 
-// TODO: use template specialization on struct 
+// TODO: use template specialization on struct
 template <trans_type_t Tt>
 inline void get_strides(
     memory::dims& src_strides,
@@ -427,7 +427,8 @@ inline void get_strides<trans_type_t::nt>(
   dst_strides = {ldc, 1};
 }
 
-using primitive_cache = at::native::onednn::lru_cache<memory::dims, primitive_ext>;
+using primitive_cache =
+    at::native::onednn::lru_cache<memory::dims, primitive_ext>;
 
 template <trans_type_t Tt, joint_dtypes_t Ts, typename F>
 struct matmul_primitive_cache_t {
@@ -448,7 +449,14 @@ struct matmul_primitive_cache_t {
     memory::dims src_strides, wei_strides, dst_strides;
     get_strides<Tt>(src_strides, wei_strides, dst_strides, lda, ldb, ldc);
     auto pri_key = at::native::onednn::concat(
-        src_strides, wei_strides, m, n, k, int(b_dims), int(scale_group_size), int(zp_group_size));
+        src_strides,
+        wei_strides,
+        m,
+        n,
+        k,
+        int(b_dims),
+        int(scale_group_size),
+        int(zp_group_size));
     auto iter = cached.find(pri_key);
     if (iter == cached.end()) {
       auto [src_dt, wei_dt] = onednn_types_mapper<Ts>::get();
@@ -467,8 +475,9 @@ struct matmul_primitive_cache_t {
       f_attr(pattr);
 
       dnnl::matmul::primitive_desc matmul_pd;
-      at::Device cur_device = at::Device(at::kXPU, device_id);
-      auto aengine = at::native::onednn::GpuEngineManager::Instance().get_engine(cur_device);
+      auto aengine =
+          at::native::onednn::GpuEngineManager::Instance().get_engine(
+              device_id);
       if (b_dims == bias_type_t::none) {
         matmul_pd = dnnl::matmul::primitive_desc(
             aengine, src_md, wei_md, dst_md, pattr);
@@ -511,15 +520,25 @@ static inline primitive_ext& matmul_primitive_create_and_cache(
     const int64_t ldb,
     const int64_t ldc,
     const int device_id,
-    F attr, 
+    F attr,
     const int64_t scale_group_size,
     const int64_t zp_group_size) {
   switch (Tt) {
     case trans_type_t::nt:
       return matmul_primitive_cache_t<trans_type_t::nt, Ts, F>::get(
-          m, n, k, lda, ldb, ldc, b_dims, device_id, attr, scale_group_size, zp_group_size);
+          m,
+          n,
+          k,
+          lda,
+          ldb,
+          ldc,
+          b_dims,
+          device_id,
+          attr,
+          scale_group_size,
+          zp_group_size);
     default:
-      throw std::runtime_error("unsupported trans type ...");
+      TORCH_INTERNAL_ASSERT(false, "unsupported trans type ...");
   }
 }
 
@@ -541,13 +560,35 @@ static inline primitive_ext& matmul_primitive_create_and_cache(
   switch (Ts) {
     case joint_dtypes_t::f16_int4:
       return matmul_primitive_create_and_cache<joint_dtypes_t::f16_int4, F>(
-          Tt, b_dims, m, n, k, lda, ldb, ldc, device_id, attr, scale_group_size, zp_group_size);
+          Tt,
+          b_dims,
+          m,
+          n,
+          k,
+          lda,
+          ldb,
+          ldc,
+          device_id,
+          attr,
+          scale_group_size,
+          zp_group_size);
     case joint_dtypes_t::bf16_int4:
       return matmul_primitive_create_and_cache<joint_dtypes_t::bf16_int4, F>(
-          Tt, b_dims, m, n, k, lda, ldb, ldc, device_id, attr, scale_group_size, zp_group_size);
+          Tt,
+          b_dims,
+          m,
+          n,
+          k,
+          lda,
+          ldb,
+          ldc,
+          device_id,
+          attr,
+          scale_group_size,
+          zp_group_size);
     default:
-      throw std::runtime_error("Only support int4 ...");
+      TORCH_INTERNAL_ASSERT(false, "Only support int4 ...");
   }
 }
 
-} // namespace dnnl
+} // namespace at::native::onednn

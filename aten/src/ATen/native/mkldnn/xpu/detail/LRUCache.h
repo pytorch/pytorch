@@ -88,17 +88,6 @@ class lru_cache {
     }
   }
 
-  // Is this feasible?
-  const_iterator find(const key_t& key) const {
-    const auto it = map_.find(key);
-    if (it == map_.end()) {
-      return end();
-    } else {
-      vlist_.splice(vlist_.begin(), vlist_, it->second);
-      return it->second;
-    }
-  }
-
   bool empty() const noexcept {
     return vlist_.empty();
   }
