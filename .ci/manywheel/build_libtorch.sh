@@ -33,6 +33,9 @@ elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
     sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
     retry apt-get update
     retry apt-get -y install zip openssl
+else
+    echo "Unknown OS: '$OS_NAME'"
+    exit 1
 fi
 
 # Version: setup.py uses $PYTORCH_BUILD_VERSION.post$PYTORCH_BUILD_NUMBER if
