@@ -2138,7 +2138,6 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         scheduler = V.graph.scheduler
         if not scheduler:
             return
-
         fused_node_names = OrderedSet(
             scheduler.name_to_buf[buf].defining_op_name()
             for buf in self.store_buffer_names

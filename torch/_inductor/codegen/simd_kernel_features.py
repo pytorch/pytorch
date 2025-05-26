@@ -125,6 +125,7 @@ class SIMDKernelFeatures:
                 mutations.update(buf.get_mutations())
         return mutations
 
+    @cache_on_self
     def select_index_dtype(self) -> torch.dtype:
         # Gather all used buffer names
         buffer_names = OrderedSet[str]()
