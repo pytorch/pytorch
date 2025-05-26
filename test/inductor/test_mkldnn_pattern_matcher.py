@@ -4206,11 +4206,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
         )
         if test_for_pointwise_binary:
             self.assertEqual(counters["inductor"]["qlinear_binary_matcher_count"], 1)
+
     @skipIfNoONEDNN
     @parametrize("has_bias", [True, False])
     @parametrize("dtype", [torch.float32, torch.bfloat16])
+    @parametrize("input_dim_exceeds_two", [True, False])
     def test_scaled_mm(
-        self, has_bias, dtype
+        self, has_bias, dtype, input_dim_exceeds_two
     ):
         class FP8QDQLinear(torch.nn.Module):
             def __init__(self, in_features, out_features):
@@ -4266,9 +4268,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 y = self.l0(x)
                 return y
 
-        M, N, K = 2, 13, 16
+        M1, M2, N, K = 2, 3, 13, 16
+        M = M1 * M2
         mod = Mod(N, K)
-        v = torch.randn(M, N).to(dtype)
+        if input_dim_exceeds_two:
+            v = torch.randn(M1, M2, N)
+        else:
+            v = torch.randn(M, N)
+        v = v.to(dtype)
 
         def matcher_check_fn():
             print("scaled_mm_matcher_count: ", counters["inductor"]["scaled_mm_matcher_count"])

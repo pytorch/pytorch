@@ -2143,7 +2143,7 @@ def _register_qconv_weight_prepack():
                 weight_prepack_pattern, pass_number=1, dtype=dtype
             )
 
-def _generate_dequant_fp8_linear_node_pattern(dtype):
+def _generate_dequant_fp8_linear_node_pattern(dtype, input_dim_exceeds_two):
     #   + - - - - | - - - - - - | - - - - - +
    #   |    dq_per_tensor  dq_per_tensor   |
    #   |         |              |          |
@@ -2155,6 +2155,7 @@ def _generate_dequant_fp8_linear_node_pattern(dtype):
    #   |                |                  |
    #   |      OPT(quant_per_tensor)        |
     assert dtype in [torch.float32, torch.bfloat16]
+    is_tensor_overload = True
     dequant_wgt_pattern = CallFunction(
         quantized_decomposed.dequantize_per_tensor.tensor,
         KeywordArg('q_weight'),
@@ -2173,29 +2174,46 @@ def _generate_dequant_fp8_linear_node_pattern(dtype):
         ),
         KeywordArg('permute_axes')
     )
-    act_pattern = _may_generate_pattern_with_dtype_convert(
-        get_dequantize_per_tensor_activation_pattern(True),
-        KeywordArg("autocast_act_dtype"),
-        dtype == torch.bfloat16,
-    )
 
-    dequant_fp8_linear_bias_pattern = CallFunction(
-        aten.addmm.default,
-        KeywordArg("b"),
-        act_pattern,
-        t_pattern,
+    dequant_fp8_linear_bias_pattern = _may_generate_pattern_with_reshape(
+        CallFunction(
+            aten.addmm.default,
+            KeywordArg("b"),
+            _may_generate_pattern_with_reshape(
+                _may_generate_pattern_with_dtype_convert(
+                    get_dequantize_per_tensor_activation_pattern(is_tensor_overload),
+                    KeywordArg("autocast_act_dtype"),
+                    dtype == torch.bfloat16,
+                ),
+                KeywordArg("act_reshape_size"),
+                input_dim_exceeds_two,
+            ),
+            t_pattern,
+        ),
+        KeywordArg("output_reshape_size"),
+        input_dim_exceeds_two,
     )
-
-    dequant_fp8_linear_no_bias_pattern = CallFunction(
-        aten.mm.default,
-        act_pattern,
-        t_pattern,
+    dequant_fp8_linear_no_bias_pattern = _may_generate_pattern_with_reshape(
+        CallFunction(
+            aten.mm.default,
+            _may_generate_pattern_with_reshape(
+                _may_generate_pattern_with_dtype_convert(
+                    get_dequantize_per_tensor_activation_pattern(is_tensor_overload),
+                    KeywordArg("autocast_act_dtype"),
+                    dtype == torch.bfloat16,
+                ),
+                KeywordArg("act_reshape_size"),
+                input_dim_exceeds_two,
+            ),
+            t_pattern,
+        ),
+        KeywordArg("output_reshape_size"),
+        input_dim_exceeds_two,
     )
     return dequant_fp8_linear_bias_pattern, dequant_fp8_linear_no_bias_pattern
 
-def _is_valid_scaled_mm_pattern(dtype):
+def _is_valid_scaled_mm_pattern(dtype, input_dim_exceeds_two):
     def _inner(match):
-        input_dim_exceeds_two = False
         input_contiguous = True
         # Check dequant pattern has only 1 user.
         (
@@ -2228,14 +2246,13 @@ def _is_valid_scaled_mm_pattern(dtype):
 
     return _inner
 
-def _register_scaled_mm_pass(pattern, dtype):
+def _register_scaled_mm_pass(pattern, dtype, input_dim_exceeds_two):
     @register_freezing_graph_pattern(
         pattern,
-        extra_check=_is_valid_scaled_mm_pattern(dtype),
+        extra_check=_is_valid_scaled_mm_pattern(dtype, input_dim_exceeds_two),
         pass_number=1,
     )
     def scaled_mm_fusion(match: Match, *args, **kwargs):
-        input_dim_exceeds_two = False
         input_contiguous = True
         assert dtype in [torch.float32, torch.bfloat16]
         (
@@ -2294,6 +2311,16 @@ def _register_scaled_mm_pass(pattern, dtype):
             x_shape = None
         graph = match.graph
         with graph.inserting_before(linear_node):
+            scaled_mm_input_node = qx
+            if input_dim_exceeds_two:
+                new_reshape_args: tuple[Any, ...] = (
+                    qx,
+                    act_reshape_node.args[1]
+                )
+                new_act_reshape_node = graph.call_function(
+                    torch.ops.aten.reshape.default, args=new_reshape_args
+                )
+                scaled_mm_input_node = new_act_reshape_node
             # Insert weight prepack node and the qlinear node
             permute_weight_inputs = (
                 qw,
@@ -2305,7 +2332,7 @@ def _register_scaled_mm_pass(pattern, dtype):
             )
             output_scale = torch.tensor(1.0)
             new_args: tuple[Any, ...] = (
-                qx,
+                scaled_mm_input_node,
                 permute_weight_node,
                 x_scale,
                 w_scale,
@@ -2317,36 +2344,13 @@ def _register_scaled_mm_pass(pattern, dtype):
             new_linear_node = graph.call_function(
                 torch.ops.aten._scaled_mm.default, args=new_args
             )
-            if input_dim_exceeds_two:
-                if input_contiguous:
-                    output_reshape_node.replace_all_uses_with(new_linear_node)
-                    new_linear_node.meta.update(output_reshape_node.meta)
-                else:
-                    if bias:
-                        output_add_node_for_bias = match.output_node()
-                        assert output_add_node_for_bias.target is aten.add.Tensor
-                        output_add_node_for_bias.replace_all_uses_with(new_linear_node)
-                        new_linear_node.meta.update(output_add_node_for_bias.meta)
-                    else:
-                        linear_node.replace_all_uses_with(new_linear_node)
-                        new_linear_node.meta.update(linear_node.meta)
-            else:
-                linear_node.replace_all_uses_with(new_linear_node)
-                new_linear_node.meta.update(linear_node.meta)
 
-            # Erase the original linear node
-            if input_dim_exceeds_two:
-                if input_contiguous:
-                    graph.erase_node(output_reshape_node)
-                elif not input_contiguous and bias:
-                    graph.erase_node(output_add_node_for_bias)  # type: ignore[possibly-undefined]
+            linear_node.replace_all_uses_with(new_linear_node)
+            new_linear_node.meta.update(linear_node.meta)
+
             graph.erase_node(linear_node)
             if input_dim_exceeds_two:
-                if input_contiguous:
-                    graph.erase_node(act_reshape_node)
-                else:
-                    graph.erase_node(act_expand_node)
-                    graph.erase_node(wgt_expand_node)  # type: ignore[possibly-undefined]
+                graph.erase_node(act_reshape_node)
             if dtype == torch.bfloat16:
                 graph.erase_node(activation_to_bf16_node)
             # Erase the dequant pattern
@@ -2364,10 +2368,13 @@ def _register_scaled_mm_pass(pattern, dtype):
 
 
 def _register_scaled_mm():
-    for dtype in [torch.bfloat16, torch.float32]:
-        patterns = _generate_dequant_fp8_linear_node_pattern(dtype)
+    fp8_linear_weight_prepack_cases = itertools.product(
+        [torch.float32, torch.bfloat16], [False, True]
+    )
+    for dtype, input_dim_exceeds_two in fp8_linear_weight_prepack_cases:
+        patterns = _generate_dequant_fp8_linear_node_pattern(dtype, input_dim_exceeds_two)
         for pattern in patterns:
-            _register_scaled_mm_pass(pattern, dtype)
+            _register_scaled_mm_pass(pattern, dtype, input_dim_exceeds_two)
 
 
 def _register_qlinear_weight_prepack():
