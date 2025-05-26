@@ -2103,7 +2103,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
             assert isinstance(
                 op_overload, torch._higher_order_ops.torchbind.CallTorchBind
             ), type(op_overload)
-            assert raw_args is not None
             assert len(raw_args) > 1
             obj = raw_args[0]
             method = raw_args[1]
