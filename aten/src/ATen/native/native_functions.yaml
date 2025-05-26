@@ -6247,7 +6247,7 @@
 - func: _nested_tensor_storage_offsets(Tensor self) -> Tensor
   variants: method
   dispatch:
-    NestedTensorCPU, NestedTensorCUDA, NestedTensorMeta: _nested_tensor_storage_offsets
+    NestedTensorCPU, NestedTensorCUDA, NestedTensorMeta, NestedTensorHPU: _nested_tensor_storage_offsets
   autogen: _nested_tensor_storage_offsets.out
 
 # _nested_from_padded is not usable from Python, so
