@@ -2,9 +2,8 @@
 from typing import Optional, Union
 
 import torch
-from torch._C._distributed_rpc import _TensorPipeRpcBackendOptionsBase
 
-from . import constants as rpc_contants
+from . import constants as rpc_contants, is_tensorpipe_available
 
 
 DeviceType = Union[int, str, torch.device]
@@ -41,6 +40,12 @@ def _to_device_map(
 
 def _to_device_list(devices: list[DeviceType]) -> list[torch.device]:
     return list(map(_to_device, devices))
+
+
+if is_tensorpipe_available():
+    from torch._C._distributed_rpc import _TensorPipeRpcBackendOptionsBase
+else:
+    _TensorPipeRpcBackendOptionsBase = object  # type: ignore[assignment, misc]
 
 
 class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
