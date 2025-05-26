@@ -12,6 +12,7 @@ import torch._logging
 from torch._dispatch.python import no_python_dispatcher
 from torch._ops import OpOverload
 from torch._prims_common import (
+    definitely_contiguous_for_memory_format,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -956,7 +957,7 @@ def make_fast_binary_impl(
             final_shape = infer_size(final_shape, shape)
         assert final_shape is not None
 
-        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq
+        from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 
         # Do some extra safety checks to see if the output
         # stride is obvious
@@ -964,7 +965,7 @@ def make_fast_binary_impl(
             if (
                 isinstance(op, torch.Tensor)
                 and len(op.shape) == len(final_shape)
-                and guard_size_oblivious(sym_eq(op.shape, final_shape))
+                and guard_or_false(sym_eq(op.shape, final_shape))
             ):
                 break
         else:
@@ -1010,8 +1011,8 @@ def make_fast_binary_impl(
                 return slow("error")
 
         # compute_fast_setup_type
-        is_contiguous = True
-        is_channels_last = True
+        is_definitely_contiguous= True
+        is_definitely_channels_last = True
         # TODO: is_non-overlapping_and_dense (not bound from Python
         # no inplace, no out, everything defined
 
@@ -1019,13 +1020,13 @@ def make_fast_binary_impl(
             for op in operands:
                 if not isinstance(op, torch.Tensor):
                     continue
-                is_contiguous = is_contiguous and op.is_contiguous(
+                is_definitely_contiguous = is_definitely_contiguous and definitely_contiguous_for_memory_format(op,
                     memory_format=torch.contiguous_format
                 )
-                is_channels_last = is_channels_last and op.is_contiguous(
+                is_definitely_channels_last = is_definitely_channels_last and  definitely_contiguous_for_memory_format(op,
                     memory_format=torch.channels_last
                 )
-        if is_contiguous:
+        if is_definitely_contiguous:
             # do contiguous
             count_label("fast is_contiguous")
             return FakeTensor(
@@ -1038,7 +1039,7 @@ def make_fast_binary_impl(
                 ),
                 device=common_device,
             )
-        if is_channels_last:
+        if is_definitely_channels_last:
             count_label("fast channels_last")
             # do channels last
             return FakeTensor(

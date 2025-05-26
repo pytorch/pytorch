@@ -15,6 +15,7 @@ from functools import wraps
 from typing import Callable, Optional
 
 import torch
+from torch._prims_common import definitely_contiguous_for_memory_format
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._guards import detect_fake_mode
