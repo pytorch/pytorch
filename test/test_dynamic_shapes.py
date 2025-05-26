@@ -34,6 +34,7 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbolic,
     ShapeEnv,
     StatelessSymbolicContext,
+    statically_known_false,
     statically_known_true,
 )
 from torch.testing._internal.common_dtype import all_types_and
@@ -1210,6 +1211,36 @@ class f(torch.nn.Module):
         self.assertFalse(statically_known_true(s2 == s3))
         self.assertFalse(statically_known_true(s2 > s3))
         self.assertFalse(statically_known_true(s3 + s3 == s4))
+
+        # No guards should be generated
+        self.assertEqual(len(shape_env.guards), 0)
+
+    def test_statically_known_false(self):
+        shape_env = ShapeEnv()
+        s2, s3, s4 = (create_symint(shape_env, i) for i in range(2, 5))
+
+        # Statically known true
+        self.assertFalse(statically_known_false(True))
+        self.assertFalse(statically_known_false(s2 == s2))
+        self.assertFalse(statically_known_false(s2 * s3 > s3))
+        self.assertFalse(statically_known_false(s3 * s4 > s4))
+        self.assertFalse(statically_known_false((s3 + s3) % 2 == 0))
+
+        # Statically known false
+        self.assertTrue(statically_known_false(False))
+        self.assertTrue(statically_known_false(s3 * s4 <= s4))
+        self.assertTrue(statically_known_false((s3 + s3) % 2 == 1))
+
+        # True for hints, but not known statically
+        self.assertFalse(statically_known_false(s2 + s2 == s4))
+        self.assertFalse(statically_known_false(s4 % s2 == 0))
+        self.assertFalse(statically_known_false(s2 != s3))
+        self.assertFalse(statically_known_false(s3 * s4 > s2))
+
+        # False for hints, but not known statically
+        self.assertFalse(statically_known_false(s2 == s3))
+        self.assertFalse(statically_known_false(s2 > s3))
+        self.assertFalse(statically_known_false(s3 + s3 == s4))
 
         # No guards should be generated
         self.assertEqual(len(shape_env.guards), 0)
@@ -2851,10 +2882,11 @@ class TestGuardsExpressions(TestCase):
             else:
                 return b * 20
 
-        # call with guarding.
+        # eager.
         self.assertEqual(func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10]))
         self.assertEqual(func(torch.tensor([2]), torch.tensor([1])), torch.tensor([20]))
 
+        # compile with unbacked.
         unbacked_func = torch.compile(func, dynamic=True, fullgraph=True)
         a = torch.tensor([1])
         b = torch.tensor([1])
@@ -2916,10 +2948,11 @@ class TestGuardsExpressions(TestCase):
             else:
                 return b * 20
 
-        # call with guarding.
+        # eager.
         self.assertEqual(func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10]))
         self.assertEqual(func(torch.tensor([2]), torch.tensor([1])), torch.tensor([20]))
 
+        # compile with unbacked.
         unbacked_func = torch.compile(func, dynamic=True, fullgraph=True)
         a = torch.tensor([1])
         b = torch.tensor([1])
@@ -3068,6 +3101,8 @@ class TestGuardsExpressions(TestCase):
         with self.assertRaises(RuntimeError):
             func(a, torch.rand(2, 1))
 
+
+class TestUbackedOps(TestCase):
     @fresh_inductor_cache()
     @skipIfTorchDynamo("not allowed to trace mark_unbacked")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -3090,7 +3125,7 @@ class TestGuardsExpressions(TestCase):
             dynamic=True,
         )(func)
 
-        # create a non-contigious with data being even numbers in [0:cnt-1]
+        # create a non-contiguous with data being even numbers in [0:cnt-1]
         # and reshape it into sqrt(cnt)*sqrt(cnt)
         def make_non_contiguous_tensor_and_test(cnt):
             # create a non-contiguous tensor x that is skipping odd indices.
@@ -3134,7 +3169,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         self.assertEqual(cnt.frame_count, 1)
 
         # Pass in a contiguous tensor, it will recompile due to stride being 1 (0/1 specialization).
-        # marking strides unabcked would have avoided the recompilatipn here.
+        # marking strides unbacked would have avoided the recompilation here.
         x = torch.arange(100)
         torch._dynamo.decorators.mark_unbacked(x, 0)
 
@@ -3181,16 +3216,13 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
 
         # This reshape requires a clone when the input is not contiguous and we cant compute strides.
         # reshape (u2, u3) -> (u0, u1)
-        def func(x, y, with_view=False):
+        def func(x, y):
             u0, u1 = y.tolist()
             torch._check_is_size(u0)
             torch._check_is_size(u1)
 
             result1 = torch.reshape(x, (u0, u1))
-            result2 = None
-            if with_view:
-                result2 = x.view(x, (u0, u1)) * 10
-            return result1 * 10, result2
+            return result1 * 10
 
         compiled_func = torch.compile(fullgraph=True, backend=cnt, dynamic=True)(func)
 
@@ -3232,8 +3264,8 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         _assert_scalar_4 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u2*u3, u0*u1) on node 'eq'");  eq = _assert_scalar_4 = None
         clone: "f32[u2, u3][Max(1, u3), 1]cpu" = torch.ops.aten.clone.default(arg3_1, memory_format = torch.contiguous_format);  arg3_1 = None
         view: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.view.default(clone, [_local_scalar_dense, _local_scalar_dense_1]);  clone = _local_scalar_dense = _local_scalar_dense_1 = None
-        mul_16: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
-        return (mul_16,)""",  # noqa: B950
+        mul_18: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
+        return (mul_18,)""",  # noqa: B950
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -3255,11 +3287,19 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         )
         with ctx():
             # This used to hit could guard on data-dependent expression Eq(10, u3) x.stride[0]==10. and x.size()=[u2, u3].
-            # but not anymore since we use is_known_contiguous.
-            # We need a way to mark trides unbacked to avoid the recompilation here.
+            # but not anymore since we use  definitely_contiguous .
+            # We need a way to mark strides unbacked to avoid the recompilation here.
             x = torch.randn(10, 10)
             torch._dynamo.decorators.mark_unbacked(x, 0)
             torch._dynamo.decorators.mark_unbacked(x, 1)
+
+        aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
+        self.assertExpectedInline(
+            aot_graphs,
+            """""",  # noqa: B950
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
 
         result_compiled = compiled_func(x, torch.tensor([2, 50]))
         result_eager = func(x, torch.tensor([2, 50]))
@@ -3286,10 +3326,10 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
             t2 = x.reshape((f, f))
             return t1, t2
 
-        # create a non-contigious with data being even numbers in [0:cnt-1]
+        # create a non-contiguous with data being even numbers in [0:cnt-1]
         def make_non_contiguous_tensor(cnt):
             # create a non-contiguous tensor x that is skipping odd indices.
-            x = torch.arange(cnt * 2, device="cuda")
+            x = torch.arange(cnt * 2)
             x = x.as_strided((x.size()[0] // 2,), (2,))
             return x
 
@@ -3303,6 +3343,32 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         compiled_result = compiled_func(x, torch.tensor([2]))
         eager_result = func(x, torch.tensor([2]))
         self.assertEqual(compiled_result, eager_result)
+
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_invalid_view_unbacked_view(self):
+        cnt = CompileCounterWithBackend("inductor")
+
+        # This view (u2, u3) -> (u0, u1) cant happen in general unless we know that input is contigous or we have
+        # hints to to compute strides.
+        def func(x, y):
+            u0, u1 = y.tolist()
+            torch._check_is_size(u0)
+            torch._check_is_size(u1)
+
+            result2 = x.view(u0, u1) * 10
+            return result2
+
+        compiled_func = torch.compile(fullgraph=True, backend=cnt, dynamic=True)(func)
+
+        x = torch.randn(10, 10)
+        # make x not contiguous.
+        x = x.t_()
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        with self.assertRaises(torch._dynamo.exc.UserError):
+            # throws a data dependent error.
+            compiled_func(x, torch.tensor([5, 20]))
 
 
 if __name__ == "__main__":

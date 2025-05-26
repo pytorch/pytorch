@@ -7,6 +7,7 @@
 #include <torch/library.h>
 #include <c10/util/irange.h>
 #include <c10/util/strides.h>
+#include <ATen/EmptyTensor.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/ATen.h>
@@ -317,15 +318,31 @@ static at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymInt
   auto inferred_size = at::infer_size_dv(size, self.sym_numel());
 
   auto stride = at::detail::computeStride(self.sym_sizes(), self.sym_strides(), inferred_size);
-  if (! stride.has_value()){
-    // See if the view is valid. If it's not, then we copy.
-    // It's OK to copy, because _unsafe_view(x) guarantees that x isn't used
-    // anymore.
-    if (!stride.has_value()) {
-      auto tmp = self_.contiguous();
-      stride = tmp.sym_strides();
-    }
+
+  if (!stride.has_value()) {
+    // With unbacked symints, computeStride could fail even on contiguous
+    // tensors. In this case, we can use the strides of an empty tensor of
+    // inferred_size.
+    TORCH_CHECK(
+        self.is_contiguous(),
+        "View is not valid from size:",
+        self.sym_sizes(),
+        " stride: ",
+        self.sym_strides(),
+        " to shape: ",
+        inferred_size,
+        " in case of unbacked symbols consider adding torch.check to guide computing strides.");
+
+    stride = at::detail::empty_symint_meta(
+                 inferred_size,
+                 std::nullopt,
+                 std::nullopt,
+                 std::nullopt,
+                 std::nullopt,
+                 std::nullopt)
+                 .sym_strides();
   }
+
   out.unsafeGetTensorImpl()->set_sizes_and_strides(inferred_size, stride.value());
   return out;
 }
