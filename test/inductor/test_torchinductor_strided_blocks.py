@@ -1373,7 +1373,6 @@ test_torchinductor.copy_tests(
 @unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
 @config.patch("triton.use_block_ptr", True)
 class TritonBlockPointerTestGPU(BlockDescriptorTestBase):
-    block_descriptor_constructor_str = "tl.make_tensor_descriptor"
     device = GPU_TYPE
 
 
@@ -1383,6 +1382,7 @@ test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYP
 @unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
 @config.patch("triton.use_tma_api", True)
 class TritonTMADescriptorTestGPU(BlockDescriptorTestBase):
+    block_descriptor_constructor_str = "tl.make_tensor_descriptor"
     device = GPU_TYPE
 
 
