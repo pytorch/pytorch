@@ -5,8 +5,8 @@
 import unittest
 
 import torch
-import torch._dynamo.config
 import torch._dynamo.test_case
+from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import make_dynamo_test
 
 
@@ -61,7 +61,7 @@ class SetGuardsSet(torch._dynamo.test_case.TestCase):
             torch.amp._exit_autocast,
         }
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = CompileCounter()
 
         def fn(x, s):
             if torch.amp._exit_autocast in s:
@@ -91,7 +91,7 @@ class SetGuardsSet(torch._dynamo.test_case.TestCase):
             torch.amp._exit_autocast,
         }
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = CompileCounter()
 
         def fn(x, s):
             if torch.amp._exit_autocast in s:
@@ -125,7 +125,7 @@ class SetGuardsSet(torch._dynamo.test_case.TestCase):
             torch.amp._exit_autocast,
         }
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = CompileCounter()
 
         def fn(x, s):
             for e in s:
