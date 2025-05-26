@@ -156,7 +156,7 @@ FusedKernelCUDA::FusedKernelCUDA(
       [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
   AT_CUDA_NVRTC_CHECK(result);
   size_t ptx_size = 0;
-#if defined(CUDA_VERSION)
+#if !defined(USE_ROCM)
   // compile_to_sass determines whether we are generating SASS or PTX, hence
   // the different API.
   const auto getSize = compile_to_sass

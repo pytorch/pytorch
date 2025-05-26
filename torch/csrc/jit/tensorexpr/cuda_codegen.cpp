@@ -1321,7 +1321,7 @@ void CudaCodeGen::CompileToNVRTC(
   AT_CUDA_NVRTC_CHECK(result);
   size_t ptx_size = 0;
   std::vector<char> ptx;
-#if defined(CUDA_VERSION)
+#if !defined(USE_ROCM)
   // compile_to_sass determines whether we are generating SASS or PTX, hence
   // the different API.
   auto getSize = compile_to_sass
