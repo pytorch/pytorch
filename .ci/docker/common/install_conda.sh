@@ -93,7 +93,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 
   # Install PyTorch mkl deps, as per https://github.com/pytorch/pytorch README
   if [[ $(uname -m) != "aarch64" ]]; then
-    pip install mkl-static==2024.2.0 mkl-include==2024.2.0
+    pip_install mkl-static==2024.2.0 mkl-include==2024.2.0
   fi
 
   if [ -n "$DOCS" ]; then
