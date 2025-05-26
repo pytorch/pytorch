@@ -107,9 +107,6 @@ TORCH_API std::vector<Shape> compute_shape_arange_out(
         // Note: acc_type further defines an accumulataion type depending on the
         // scalar_t and whether its on cuda vs cpu.
         using accscalar_t = at::acc_type<scalar_t, false>;
-        auto xstart = start.to<accscalar_t>();
-        auto xend = end.to<accscalar_t>();
-        auto xstep = step.to<accscalar_t>();
 
         // we use double precision for (start - end) / step
         // to compute size_d for consistency across devices.
