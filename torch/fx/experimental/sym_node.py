@@ -572,6 +572,12 @@ class SymNode:
             _advise_is_size(SymInt(self))
         return r
 
+    def statically_known_true(self, file, line):
+        from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+        assert self.is_bool()
+        return statically_known_true(SymBool(self))
+
     def guard_size_oblivious(self, file, line):
         """
         Like guard_bool, but if we encounter unbacked symbols, if those symbols
@@ -865,6 +871,7 @@ def _optimized_add(
     from sympy.core.basic import _args_sortkey as sortkey
 
     def make_optimized(ordered_args):
+        assert ordered_args is not None
         result = sympy.Add(*ordered_args, evaluate=False)
         return (True, result)
 
@@ -882,20 +889,27 @@ def _optimized_add(
             return make_optimized(rhs._args + lhs._args)
 
         #  (a1+a3) + (a0+a2) => (a0+a1+a2+a3)
-        new_args = list(lhs._args)
-        for a in rhs._args:
-            new_args = _binary_search_insert_arg(new_args, a)
-        return make_optimized(new_args)
+        if len(lhs._args) <= 2 and len(rhs._args) <= 2:
+            new_args = list(lhs._args)
+            for a in rhs._args:
+                new_args = _binary_search_insert_arg(new_args, a)
+                if new_args is None:
+                    break
+            # None means an element already exists.
+            if new_args is not None:
+                return make_optimized(new_args)
 
     # (a0+a2) + a1 => (a0+a1+a2)
     if lhs_is_optimized_summation and rhs.is_symbol:
         new_args = _binary_search_insert_arg(list(lhs._args), rhs)
+        # None means an element already exists.
         if new_args is not None:
             return make_optimized(new_args)
 
     # a1 + (a0+a2)=> (a0+a1+a2)
     if rhs_is_optimized_summation and lhs.is_symbol:
         new_args = _binary_search_insert_arg(list(rhs._args), lhs)
+        # None means an element already exists.
         if new_args is not None:
             return make_optimized(new_args)
 
@@ -1211,11 +1225,6 @@ sizes_strides_methods = {
     "is_non_overlapping_and_dense_indicator": _sympy_is_non_overlapping_and_dense_indicator,
 }
 
-alternate_impl_if_hinted_methods = {
-    "sym_min": builtins.min,
-    "sym_max": builtins.max,
-}
-
 
 def to_node(self, num):
     if isinstance(num, SymTypes):
@@ -1333,10 +1342,6 @@ def _make_node_magic(method, func):
         out_hint = None
         if self.hint is not None and other.hint is not None:
             out_hint = op(self.hint, other.hint)
-
-        alternate_impl = alternate_impl_if_hinted_methods.get(method)
-        if alternate_impl and out_hint is not None:
-            return to_node(self, alternate_impl(wrap_node(self), wrap_node(other)))
 
         if get_proxy_mode():
             return to_node(

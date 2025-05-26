@@ -707,7 +707,6 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
     def fn(self):
         return self.value
 
-    @property
     def python_type(self):
         return self.value
 
@@ -808,18 +807,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def get_torch_fn(self, tx):
         self.torch_function_check()
-        from .torch_function import build_torch_function_fn
+        from .torch_function import get_torch_function_fn
 
-        return build_torch_function_fn(tx, self.value, self.source)
+        return get_torch_function_fn(tx, self)
 
     def call_torch_function(self, tx: "InstructionTranslator", fn, types, args, kwargs):
         self.torch_function_check()
 
-        from .torch_function import _get_subclass_type_var, call_torch_function
+        from .torch_function import call_torch_function
 
         return call_torch_function(
             tx,
-            _get_subclass_type_var(tx, self),
             self.get_torch_fn(tx),
             fn,
             types,
@@ -989,7 +987,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return func_var.call_function(tx, [obj_var] + args, kwargs)
         elif callable(self.value):
             if self.source:
-                install_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
+                source = AttrSource(self.cls_source, "__call__")
+                install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
             return self.call_method(tx, "__call__", args, kwargs)
 
         return super().call_function(tx, args, kwargs)
@@ -1162,11 +1161,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 subobj.fget, self, source=source
             ).call_function(tx, [], {})
         elif isinstance(subobj, staticmethod):
+            # Safe because `staticmethod.__get__` basically won't trigger user
+            # code and just returns the underlying `__func__`:
+            # https://github.com/python/cpython/blob/3.11/Objects/funcobject.c#L1088-L1100
             func = subobj.__get__(self.value)
-            if source is not None:
-                return trace_rules.lookup(func).create_with_source(func, source=source)
-            else:
-                return trace_rules.lookup(func)(func)
+            return VariableTracker.build(tx, func, source)
         elif isinstance(subobj, classmethod):
             return variables.UserMethodVariable(
                 subobj.__func__, self.var_getattr(tx, "__class__"), source=source
@@ -1221,12 +1220,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                             f"Found a method whose __func__ is not of FunctionType - {dynamic_subobj}"
                         )
 
-                    from .builder import SourcelessUserDefinedObjectBuilder
-
-                    # This means that we are calling a method of some other object here.
-                    object_vt = SourcelessUserDefinedObjectBuilder.create(
-                        tx, dynamic_subobj.__self__
+                    # Use the __self__ attribute of the method to find the
+                    # source of the new self object.
+                    self_source = None
+                    if source is not None:
+                        self_source = AttrSource(source, "__self__")
+                    object_vt = VariableTracker.build(
+                        tx, dynamic_subobj.__self__, self_source
                     )
+
                     return variables.UserMethodVariable(
                         dynamic_subobj.__func__, object_vt
                     )
@@ -1259,7 +1261,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and isinstance(self, variables.UnspecializedNNModuleVariable)
             # export has some awkwardness around specialized and unspecialized modules. Skip wrapping source for export
             # usecase for now.
-            and not tx.output.export
+            and (not tx.output.export or torch._dynamo.config.install_free_tensors)
         ):
             # Recalculate source for params/buffers
             if name in ("_buffers", "_parameters"):
@@ -1478,6 +1480,15 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
             with TracingContext.patch(force_unspec_int_unbacked_size_like=True):
                 return super().var_getattr(tx, name)
         return super().var_getattr(tx, name)
+
+
+class IntWrapperVariable(UserDefinedObjectVariable):
+    # Dummy class to check if the object is an IntWrapper, and turn it into a
+    # symint
+    @staticmethod
+    def is_matching_object(obj):
+        mod = sys.modules.get("torch.export.dynamic_shapes")
+        return mod is not None and type(obj) is mod._IntWrapper
 
 
 class RemovableHandleClass:

@@ -3,6 +3,8 @@ import importlib
 import os
 import sys
 
+import numpy as np
+
 import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes
@@ -132,7 +134,7 @@ class MPSBasicTests(TestCase):
             "chebyshev_polynomial_u",
             "chebyshev_polynomial_v",
             "chebyshev_polynomial_w",
-            "hermite_polynomial_h",
+            "hermite_polynomial_he",
         ],
     )
     def test_pointwise_binary_op(self, op_name):
@@ -152,94 +154,48 @@ class MPSBasicTests(TestCase):
 
         self.common(inc_, (torch.rand(1024),))
 
-    # TODO(NS): Replace me with full test_prod when multi-stage reductions are implemented
-    def test_prod(self):
-        def fn(a):
-            return a.prod(0), a.prod(1), a.prod()
+    def test_rms_norm_nograd(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/150629
+        def fn(x, w):
+            with torch.no_grad():
+                return torch.nn.functional.rms_norm(x, x.shape, w)
 
-        self.common(fn, (torch.rand((10, 10)),))
+        self.common(fn, (torch.rand(10), torch.ones(10)))
+
+    def test_compile_numpy_scalar(self):
+        def fn(x, y):
+            return x / y
+
+        self.common(fn, (torch.rand(10), np.exp(0.3)))
+
+    def test_conv_transpose_channels_last(self):
+        def fn(x, y):
+            return torch.nn.functional.conv_transpose2d(x, y, stride=1, padding=1)
+
+        self.common(
+            fn,
+            (
+                torch.rand(1, 1, 16, 16).to(memory_format=torch.channels_last),
+                torch.rand(1, 4, 8, 8),
+            ),
+        )
 
 
-# Copy tests
-for test_name in [
-    "test_min_max_reduction",
-    "test_add_complex4",
-    "test_add_const_int",
-    "test_add_inplace_permuted",
-    "test_addmm",
-    "test_angle",
-    "test_any",
-    "test_arange5",
-    "test_argmax_min_int32",
-    "test_argmax_argmin1",
-    "test_argmax_argmin2",
-    "test_avg_pool2d5",
-    "test_avg_pool2d8",
-    "test_bernoulli1",
-    "test_builtins_round",
-    "test_builtins_round_float_ndigits_neg",
-    "test_cat_empty",
-    "test_cat_unbacked_empty_1d",
-    "test_consecutive_split_cumprod",
-    "test_consecutive_split_cumsum",
-    "test_constant_pad_float64",
-    "test_cumsum_inf",
-    "test_custom_op_2",
-    "test_div1",
-    "test_div2",
-    "test_div3",
-    "test_erfinv",
-    "test_floordiv",
-    "test_full_truncation",
-    "test_fmod",
-    "test_fmod_zero_dim",
-    "test_index_dynamic_shapes",
-    "test_inf",
-    "test_isinf",
-    "test_isinf2",
-    "test_large_broadcast_reduction",
-    "test_layer_norm",
-    "test_lgamma",
-    "test_linear_float64",
-    "test_log_fp64",
-    "test_low_memory_max_pool_dilation_1_dim_2",
-    "test_low_memory_max_pool_dilation_2_dim_2",
-    "test_max_min",
-    "test_max_pool2d2",
-    "test_multilayer_prime_size",
-    "test_min_max_reduction_nan",
-    "test_nan_to_num",
-    "test_neg_max_uint8",
-    "test_pow2",
-    "test_prod",
-    "test_randint_int64_mod",
-    "test_randn_generator",
-    "test_remainder",
-    "test_remove_no_ops",
-    "test_reflection_pad2d",
-    "test_rsqrt",
-    "test_scalar_cpu_tensor_arg",
-    "test_scalar_output",
-    "test_setitem_with_int_parameter",
-    "test_signbit",
-    "test_silu",
-    "test_slice_scatter4",
-    "test_softmax",
-    "test_sort",
-    "test_split_cumsum",
-    "test_sum_int",
-    "test_sum_keepdims",
-    "test_tanh",
-    "test_vectorized_ops_masked",
-    "test_var_mean_tile_reduction_True",
-    "test_view_as_complex",
-    "test_view_on_aliased",
-    "test_views3",
-    "test_views6",
-    "test_views7",
-    "test_zero_dim_reductions",
-]:
-    setattr(MPSBasicTests, test_name, getattr(CommonTemplate, test_name))
+class MPSBasicTestsAOTI(TestCase):
+    def test_add_mps(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        inp = (torch.ones(3, 3, device="mps"), torch.ones(3, 3, device="mps"))
+        m = M().to("mps")
+        res2 = m(*inp)
+        ep = torch.export.export(m, inp)
+        path = torch._inductor.aoti_compile_and_package(ep, "here.pt2")
+        m = torch._inductor.aoti_load_package(path)
+        res = m(*inp)
+        assert torch.allclose(res, res2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

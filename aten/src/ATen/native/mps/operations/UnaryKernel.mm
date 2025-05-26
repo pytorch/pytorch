@@ -3,7 +3,6 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
-
 #include <fmt/format.h>
 
 namespace at::native {
@@ -30,18 +29,68 @@ static void tanh_kernel(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "tanh");
 }
 
+static void sin_kernel(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "sin");
+}
+
+static void cos_kernel(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "cos");
+}
+
+static void tan_kernel(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "tan");
+}
+
 static void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
   lib.exec_unary_kernel(iter, "round_decimals", decimals);
+}
+
+static void exp2_kernel_mps(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "exp2");
 }
 
 static void sqrt_kernel_mps(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "sqrt");
 }
 
+static void rsqrt_kernel_mps(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "rsqrt");
+}
+
+static void neg_kernel_mps(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "neg");
+}
+
+static void bitwise_not_kernel_mps(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "bitwise_not");
+}
+
+static void log10_kernel_mps(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "log10");
+}
+
+static void log2_kernel_mps(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "log2");
+}
+
+static void log_kernel_mps(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "log");
+}
+
 REGISTER_DISPATCH(exp_stub, exp_kernel);
 REGISTER_DISPATCH(erfinv_stub, erfinv_kernel);
 REGISTER_DISPATCH(sinc_stub, sinc_kernel);
 REGISTER_DISPATCH(tanh_stub, tanh_kernel);
+REGISTER_DISPATCH(sin_stub, sin_kernel);
+REGISTER_DISPATCH(cos_stub, cos_kernel);
+REGISTER_DISPATCH(tan_stub, tan_kernel);
 REGISTER_DISPATCH(round_decimals_stub, round_decimals_kernel);
 REGISTER_DISPATCH(sqrt_stub, sqrt_kernel_mps);
+REGISTER_DISPATCH(rsqrt_stub, rsqrt_kernel_mps);
+REGISTER_DISPATCH(exp2_stub, exp2_kernel_mps);
+REGISTER_DISPATCH(neg_stub, neg_kernel_mps);
+REGISTER_DISPATCH(bitwise_not_stub, bitwise_not_kernel_mps);
+REGISTER_DISPATCH(log10_stub, log10_kernel_mps);
+REGISTER_DISPATCH(log2_stub, log2_kernel_mps);
+REGISTER_DISPATCH(log_stub, log_kernel_mps);
 } // namespace at::native
