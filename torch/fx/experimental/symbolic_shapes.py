@@ -1365,6 +1365,9 @@ def _log_suppressed_dde(a: SymBool, assumed_value: bool) -> None:
 #      assuming expand/reshape inputs are not -1. or assuming the non-broadcasting path.
 #
 def _guard_or(a: BoolLikeType, default: bool) -> bool:
+    """
+    Try to guard a, if data dependent error encountered just return default.
+    """
     if not isinstance(a, SymBool):
         assert isinstance(a, bool)
         return a
