@@ -65,19 +65,13 @@ class Wishart(ExponentialFamily):
     [5] Ku, Y.-C. & Bloomfield, P., 2010. `Generating Random Wishart Matrices with Fractional Degrees of Freedom in OX`.
     """
 
-    arg_constraints: dict[str, Constraint] = {
-        "covariance_matrix": constraints.positive_definite,
-        "precision_matrix": constraints.positive_definite,
-        "scale_tril": constraints.lower_cholesky,
-        "df": constraints.greater_than(0),
-    }
     support = constraints.positive_definite
     has_rsample: bool = True
     _mean_carrier_measure: float = 0
     df: Tensor
 
     @property
-    def arg_constraints(self):
+    def arg_constraints(self) -> dict[str, Constraint]:
         return {
             "covariance_matrix": constraints.positive_definite,
             "precision_matrix": constraints.positive_definite,

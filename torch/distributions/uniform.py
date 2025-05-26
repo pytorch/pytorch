@@ -35,7 +35,7 @@ class Uniform(Distribution):
     high: Tensor
 
     @property
-    def arg_constraints(self):
+    def arg_constraints(self) -> dict[str, Constraint]:
         # TODO allow (loc,scale) parameterization to allow independent constraints.
         return {
             "low": constraints.less_than(self.high),
@@ -72,7 +72,7 @@ class Uniform(Distribution):
             batch_shape = self.low.size()
         super().__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(Uniform, _instance)
         batch_shape = torch.Size(batch_shape)
         new.low = self.low.expand(batch_shape)
