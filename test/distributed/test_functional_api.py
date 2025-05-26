@@ -7,8 +7,8 @@ from functools import partial, wraps
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
-import torch.distributed._tensor as dt
 import torch.distributed.distributed_c10d as c10d
+import torch.distributed.tensor as dt
 from functorch import make_fx
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck

@@ -1067,7 +1067,7 @@ def micro_pipeline_tp_pass(graph: torch.fx.Graph):
         ]
 
     if not all_gathers and not reduce_scatters:
-        raise AssertionError(
+        log.warning(
             "async TP found no matching all-gather/reduce-scatter patterns for fusion"
         )
 
