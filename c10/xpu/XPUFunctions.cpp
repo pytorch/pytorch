@@ -134,7 +134,11 @@ inline void initGlobalDevicePoolState() {
   // The default context is utilized for each Intel GPU device, allowing the
   // retrieval of the context from any GPU device.
   gDevicePool.context = std::make_unique<sycl::context>(
+#if SYCL_COMPILER_VERSION >= 20250200
+      gDevicePool.devices[0]->get_platform().khr_get_default_context(),
+#else
       gDevicePool.devices[0]->get_platform().ext_oneapi_get_default_context());
+#endif
 #endif
 }
 
