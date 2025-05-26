@@ -7037,24 +7037,10 @@ class FallbackKernel(ExternKernelAlloc):
                 kernel not in config.aot_inductor.custom_ops_to_c_shims
             )
 
-        def do_runtime_dispatch(args: list[Any]) -> None:
-            exported_args = self.export_extern_kernel_node()
-            wrapper.generate_fallback_kernel_with_runtime_lookup(
-                self.get_name(),
-                self.python_kernel_name,
-                self.cpp_kernel_name,
-                args,
-                self.op_overload,
-                exported_args,
-                # NOTE: [special handling of all_reduce_coalesced_'s return value]
-                self.outputs if self.outputs else self.mutation_outputs,
-            )
-
         def is_number(t: torch.JitType) -> bool:
-            return isinstance(t, torch.NumberType) or (
-                isinstance(t, torch.OptionalType)
-                and isinstance(t.getElementType(), torch.NumberType)
-            )
+            if isinstance(t, torch.OptionalType):
+                return is_number(t.getElementType())
+            return isinstance(t, torch.NumberType)
 
         self.codegen_comment(wrapper)
         args = [*self.codegen_args(), *self.codegen_kwargs()]
@@ -7071,7 +7057,16 @@ class FallbackKernel(ExternKernelAlloc):
                 for arg_str, op_arg in zip(args, kernel._schema.arguments)
             )
         ):
-            do_runtime_dispatch(args)
+            exported_args = self.export_extern_kernel_node()
+            wrapper.generate_fallback_kernel_with_runtime_lookup(
+                self.get_name(),
+                self.python_kernel_name,
+                args,
+                self.op_overload,
+                exported_args,
+                # NOTE: [special handling of all_reduce_coalesced_'s return value]
+                self.outputs if self.outputs else self.mutation_outputs,
+            )
         else:
             wrapper.generate_fallback_kernel(self)
             if isinstance(self.layout, Layout):

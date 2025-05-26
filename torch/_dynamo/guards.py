@@ -1702,6 +1702,7 @@ class GuardBuilder(GuardBuilderBase):
         if torch.distributed.is_available():
             from torch.distributed.device_mesh import DeviceMesh
             from torch.distributed.tensor.placement_types import (
+                _StridedShard,
                 Partial,
                 Replicate,
                 Shard,
@@ -1712,6 +1713,7 @@ class GuardBuilder(GuardBuilderBase):
                 Replicate,
                 Partial,
                 DeviceMesh,
+                _StridedShard,
             )
 
         from torch.export.dynamic_shapes import _IntWrapper
@@ -3207,10 +3209,16 @@ def build_guard_function(code_parts, closure_args) -> tuple[str, str]:
     from torch._inductor.utils import IndentedBuffer
 
     csepass = PyExprCSEPass()
-    csepass.count(code_parts)
+    try:
+        csepass.count(code_parts)
 
-    def replace(expr: str) -> tuple[list[str], str]:
-        return csepass.replace(expr)
+        def replace(expr: str) -> tuple[list[str], str]:
+            return csepass.replace(expr)
+    except RecursionError:
+        # If we hit recursion limits during CSE analysis, fall back to a no-op replace function
+        # This can happen with extremely complex guard expressions
+        def replace(expr: str) -> tuple[list[str], str]:
+            return [], expr
 
     # Generate the inner body of the guard function.
     # i.e. if-chain of the guard expressions.

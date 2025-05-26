@@ -1486,7 +1486,7 @@ class OutputGraph(OutputGraphGuardsState):
 
             self.run_compiler_collective(tx)
 
-            name = unique_id("__compiled_fn")
+            name = unique_id("__compiled_fn", with_uuid=True)
 
             assert isinstance(rv, list)
             assert isinstance(root, FakeRootModule)
