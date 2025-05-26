@@ -58,6 +58,7 @@ class Dirichlet(ExponentialFamily):
     }
     support: ClassVar[constraints.Simplex] = constraints.simplex
     has_rsample: bool = True
+
     concentration: Tensor
 
     def __init__(

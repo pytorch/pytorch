@@ -38,6 +38,7 @@ class Weibull(TransformedDistribution):
         "concentration": constraints.positive,
     }
     support: ClassVar[constraints.Positive] = constraints.positive  # type: ignore[assignment]
+
     scale: Tensor
     concentration: Tensor
     concentration_reciprocal: Tensor

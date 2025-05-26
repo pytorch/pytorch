@@ -39,6 +39,7 @@ class LogNormal(TransformedDistribution):
     }
     support: ClassVar[constraints.Positive] = constraints.positive  # type: ignore[assignment]
     has_rsample: bool = True
+
     base_dist: Normal
 
     def __init__(

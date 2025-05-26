@@ -66,6 +66,7 @@ class LKJCholesky(Distribution):
         "concentration": constraints.positive,
     }
     support: ClassVar[constraints.CorrCholesky] = constraints.corr_cholesky
+
     dim: int
     concentration: Tensor
 

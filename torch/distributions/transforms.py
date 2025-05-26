@@ -93,6 +93,7 @@ class Transform:
     """
 
     bijective: bool = False
+
     domain: Constraint
     codomain: Constraint
     _cached_x_y: tuple[Optional[Tensor], Optional[Tensor]]

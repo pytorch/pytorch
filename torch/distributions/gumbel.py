@@ -38,6 +38,9 @@ class Gumbel(TransformedDistribution):
     }
     support: ClassVar[constraints.Real] = constraints.real  # type: ignore[assignment]
 
+    loc: Tensor
+    scale: Tensor
+
     def __init__(
         self,
         loc: Union[Tensor, float],

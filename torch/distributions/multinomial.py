@@ -56,6 +56,7 @@ class Multinomial(Distribution):
         "probs": constraints.simplex,
         "logits": constraints.real_vector,
     }
+
     total_count: int
 
     @property

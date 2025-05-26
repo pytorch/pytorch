@@ -47,6 +47,7 @@ class Independent(Distribution, Generic[D]):
     """
 
     arg_constraints: ClassVar[dict[str, Constraint]] = {}
+
     base_dist: D
 
     def __init__(

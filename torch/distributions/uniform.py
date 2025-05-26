@@ -31,6 +31,7 @@ class Uniform(Distribution):
     """
 
     has_rsample: bool = True
+
     low: Tensor
     high: Tensor
 

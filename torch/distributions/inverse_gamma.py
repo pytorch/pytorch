@@ -42,6 +42,7 @@ class InverseGamma(TransformedDistribution):
     }
     support: ClassVar[constraints.Positive] = constraints.positive  # type: ignore[assignment]
     has_rsample: bool = True
+
     base_dist: Gamma
 
     def __init__(

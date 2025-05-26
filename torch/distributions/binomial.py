@@ -54,6 +54,8 @@ class Binomial(Distribution):
     }
     has_enumerate_support: bool = True
 
+    total_count: Tensor
+
     def __init__(
         self,
         total_count: Union[Tensor, int] = 1,

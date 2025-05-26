@@ -135,6 +135,7 @@ class RelaxedOneHotCategorical(TransformedDistribution):
     }
     support: ClassVar[constraints.Simplex] = constraints.simplex  # type: ignore[assignment]
     has_rsample: bool = True
+
     base_dist: ExpRelaxedCategorical
 
     def __init__(

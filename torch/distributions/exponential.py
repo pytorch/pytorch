@@ -34,6 +34,7 @@ class Exponential(ExponentialFamily):
     support: ClassVar[constraints.NonNegative] = constraints.nonnegative
     has_rsample: bool = True
     _mean_carrier_measure: float = 0
+
     rate: Tensor
 
     @property

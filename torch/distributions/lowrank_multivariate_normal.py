@@ -96,6 +96,7 @@ class LowRankMultivariateNormal(Distribution):
     }
     support: ClassVar[constraints.RealVector] = constraints.real_vector
     has_rsample: bool = True
+
     loc: Tensor
     cov_factor: Tensor
     cov_diag: Tensor

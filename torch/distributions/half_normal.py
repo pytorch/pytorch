@@ -38,6 +38,7 @@ class HalfNormal(TransformedDistribution):
     }
     support: ClassVar[constraints.NonNegative] = constraints.nonnegative  # type: ignore[assignment]
     has_rsample: bool = True
+
     base_dist: Normal
 
     def __init__(

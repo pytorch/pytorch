@@ -43,6 +43,7 @@ class LogisticNormal(TransformedDistribution):
     }
     support: ClassVar[constraints.Simplex] = constraints.simplex  # type: ignore[assignment]
     has_rsample: bool = True
+
     base_dist: Independent[Normal]
 
     def __init__(

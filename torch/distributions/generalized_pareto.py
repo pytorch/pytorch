@@ -44,6 +44,10 @@ class GeneralizedPareto(Distribution):
     }
     has_rsample: bool = True
 
+    loc: Tensor
+    scale: Tensor
+    concentration: Tensor
+
     def __init__(
         self,
         loc: Union[float, Tensor],

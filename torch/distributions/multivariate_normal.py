@@ -132,6 +132,7 @@ class MultivariateNormal(Distribution):
     }
     support: ClassVar[constraints.RealVector] = constraints.real_vector
     has_rsample: bool = True
+
     loc: Tensor
 
     def __init__(

@@ -150,6 +150,7 @@ class RelaxedBernoulli(TransformedDistribution):
     }
     support: ClassVar[constraints.UnitInterval] = constraints.unit_interval  # type: ignore[assignment]
     has_rsample: bool = True
+
     base_dist: LogitRelaxedBernoulli
 
     def __init__(

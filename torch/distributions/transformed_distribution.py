@@ -51,6 +51,7 @@ class TransformedDistribution(Distribution):
     """
 
     arg_constraints: ClassVar[dict[str, Constraint]] = {}
+
     base_dist: Distribution
     transforms: Sequence[Transform]
 

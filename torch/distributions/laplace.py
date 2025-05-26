@@ -35,6 +35,7 @@ class Laplace(Distribution):
     }
     support: ClassVar[constraints.Real] = constraints.real
     has_rsample: bool = True
+
     loc: Tensor
     scale: Tensor
 
