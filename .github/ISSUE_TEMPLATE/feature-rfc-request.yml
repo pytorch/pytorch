@@ -4,10 +4,6 @@ labels: ["feature-rfc-request"]
 # todo: Stable and Unstable as labels
 
 body:
-- type: markdown
-  attributes:
-    value: >
-      #### Note: Please write your RFC request in English to ensure it can be understood and addressed by the development team.
 - type: textarea
   attributes:
     label: Release highlight for Feature proposed
@@ -65,7 +61,7 @@ body:
     options:
       - Tutorial exists
       - Will submit a PR to pytorch/tutorials
-      - Will submit a PR to out-of-tree repo
+      - Will submit a PR to a repo
       - Tutorial is not needed
   validations:
     required: true
@@ -73,7 +69,7 @@ body:
   attributes:
     label: Additional context for tutorials
     description: >
-      Please provide a link for existing tutorial or link to out-of-tree repo or context for why tutorial is not needed.
+      Please provide a link for existing tutorial or link to a repo or context for why tutorial is not needed.
   validations:
     required: false
 - type: dropdown
