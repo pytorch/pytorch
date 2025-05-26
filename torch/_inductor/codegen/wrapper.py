@@ -1402,8 +1402,8 @@ class PythonWrapperCodegen(CodeGen):
         codegen_args: Sequence[str],
         op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
         raw_args: Sequence[Any],
-        outputs: Sequence[Any],
-    ):
+        outputs: Sequence[ir.Buffer],
+    ) -> None:
         self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(codegen_args)})")
 
     def generate(self, is_inference):

@@ -12,7 +12,6 @@ from typing import Any, Callable, Optional, Protocol, TYPE_CHECKING, Union
 import sympy
 
 import torch
-import torch._higher_order_ops
 import torch._higher_order_ops.torchbind
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
@@ -39,6 +38,9 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from ..graph import GraphLowering
+
+    # At most, the list nesting can go one layer deep.
+    _OUTPUT_ARGS_TYPE = list[Union[Optional[str], list[Optional[str]]]]
 
 
 class HasWriteLine(Protocol):
@@ -1885,7 +1887,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self,
         op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
         raw_args: Sequence[Any],
-        output_args: Optional[list[Optional[str]]],
+        output_args: _OUTPUT_ARGS_TYPE,
         raw_outputs: Sequence[ir.Buffer],
     ):
         schema = None
@@ -1990,7 +1992,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 else:
                     fill_args(arg, arg_type)
 
-        def fill_output_arg(arg, return_type, is_mutated_output: bool):
+        def fill_output_arg(
+            arg: str, return_type: torch.JitType, is_mutated_output: bool
+        ) -> None:
             if isinstance(return_type, torch.TensorType):
                 if not is_mutated_output:
                     self.writeline(f"AtenTensorHandle {arg}_handle;  // output buffer")
@@ -2025,8 +2029,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # None output is supported, but Optional return types are not yet supported
             if output_arg is None:
                 continue
-            elif isinstance(output_arg, (list, tuple)):
+            elif isinstance(output_arg, list):
                 for out in output_arg:
+                    assert out is not None, out
                     fill_output_arg(
                         out,
                         torch.TensorType.get(),
@@ -2073,10 +2078,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
         raw_args: Sequence[Any],
         outputs: Sequence[ir.Buffer],
-    ):
+    ) -> None:
+        """Generate a call to a kernel not contained in the C-shim.  This results in
+        different code paths for AOT Inductor vs cpp_wrapper Inductor mode."""
+
         def extract_output_name(
             out: Optional[Union[ir.Buffer, Sequence[ir.Buffer]]],
-        ) -> Union[Optional[str], list[Optional[str]]]:
+        ) -> Union[Optional[str], _OUTPUT_ARGS_TYPE]:
             if out is None:
                 return None
             if isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
@@ -2106,44 +2114,53 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # output_args has the same pytree structure as outputs
         if not return_schema:
             # kernel does not return a value
-            output_args: Optional[list[Optional[str]]] = []
+            output_args: _OUTPUT_ARGS_TYPE = []
         elif isinstance(output_name := extract_output_name(outputs), str):
             output_args = [output_name]
         else:
+            # If the schema indicates a return value, we should have a non-None value by
+            # this point.
+            assert isinstance(output_name, list), type(output_name)
             output_args = output_name
 
         # In AOT mode, we use a ProxyExecutor to run fallback kernels.
         if V.graph.aot_mode:
-            assert output_args is not None
-            return self.generate_fallback_kernel_with_runtime_lookup_aot(
+            self.generate_fallback_kernel_with_runtime_lookup_aot(
                 op_overload,
                 raw_args,
                 output_args,
                 outputs,
             )
+            return
 
         assert isinstance(op_overload, torch._ops.OpOverload), type(op_overload)
-        assert output_args is not None
+        for output in output_args:
+            assert output is None or isinstance(output, str), (
+                "fallback kernels with runtime lookup currently only support tensor "
+                "returns, not more complicated types (such as list-of-list-of-tensor)"
+            )
+
         # In non-AOT mode, we use aoti_torch_call_dispatcher if all the inputs and
         # outputs of the op can be represented with StableIValue.  This avoids the
         # overhead of calling back into Python, and covers most remaining fallback ops.
         if self._compatible_with_stableivalue(op_overload):
-            return self.generate_fallback_kernel_with_runtime_lookup_nopython(
+            self.generate_fallback_kernel_with_runtime_lookup_nopython(
                 codegen_args,
                 op_overload,
-                output_args,
+                output_args,  # type: ignore[arg-type]
                 outputs,
             )
+            return
 
         # Otherwise, we call back into Python, which has some extra runtime overhead,
         # but handles situations like list[Tensor] (currently unrepresentable via
         # StableIValue).
-        return self.generate_fallback_kernel_with_runtime_lookup_python(
+        self.generate_fallback_kernel_with_runtime_lookup_python(
             buf_name,
             python_kernel_name,
             op_overload,
             raw_args,
-            output_args,
+            output_args,  # type: ignore[arg-type]
             outputs,
         )
 
@@ -2294,9 +2311,9 @@ if (!custom_op_wrapper) {
         self,
         codegen_args: Sequence[str],
         op_overload: torch._ops.OpOverload,
-        output_args: list[Optional[str]],
+        output_args: Sequence[Optional[str]],
         raw_outputs: Sequence[ir.Buffer],
-    ):
+    ) -> None:
         """Generate fallback kernel calls with runtime (non-AOT) dispatch.  This can
         only be called in cpp_wrapper mode, and assumes that the input is a non-None
         OpOverload."""
@@ -2408,9 +2425,9 @@ if (!custom_op_wrapper) {
         python_kernel_name: str,
         op_overload: torch._ops.OpOverload,
         raw_args: Sequence[Any],
-        output_args: list[Optional[str]],
+        output_args: Sequence[Optional[str]],
         raw_outputs: Sequence[ir.Buffer],
-    ):
+    ) -> None:
         """Generate fallback kernel calls with runtime (non-AOT) dispatch.  This can
         only be called in cpp_wrapper mode, and assumes that the input is a non-None
         OpOverload.
@@ -2484,9 +2501,9 @@ if (!custom_op_wrapper) {
         self,
         op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
         raw_args: Sequence[Any],
-        output_args: Optional[list[Optional[str]]],
+        output_args: _OUTPUT_ARGS_TYPE,
         raw_outputs: Sequence[ir.Buffer],
-    ):
+    ) -> None:
         (
             tensor_call_args,
             int_call_args,
