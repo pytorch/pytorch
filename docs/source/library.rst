@@ -65,7 +65,7 @@ operator registration APIs.
    The low-level operator registration APIs and the PyTorch Dispatcher are a
    complicated PyTorch concept. We recommend you use the higher level APIs above
    (that do not require a torch.library.Library object) when possible.
-   This blog post <http://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/>`_
+   `This blog post <http://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/>`_
    is a good starting point to learn about the PyTorch Dispatcher.
 
 A tutorial that walks you through some examples on how to use this API is available on `Google Colab <https://colab.research.google.com/drive/1RRhSfk7So3Cn02itzLWE9K4Fam-8U011?usp=sharing>`_.

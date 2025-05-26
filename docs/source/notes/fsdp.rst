@@ -96,7 +96,7 @@ First, let's cover the buffers allocated for communications:
 ``forward`` currently requires 2x all-gather buffer size. Here is why:
 
 As explained in :ref:`fsdp_prefetch` in the case of explicit ``forward`` prefetching
-(``forward_prefetch=True`) case of layer 0 all-gather -> layer 0 forward compute -> layer 1
+(``forward_prefetch=True``) case of layer 0 all-gather -> layer 0 forward compute -> layer 1
 all-gather there is a need for 2 all-gather-sized buffers, because one buffer is used in the current ``forward`` while the other is used to do the prefetching.
 
 While the implicit ``forward`` prefetching (``forward_prefetch=False``, default) case of the same sequence in theory should need only 1 buffer, in reality it's still 2x all-gather-sized buffers. The reason is that in the flat-parameter FSDP design, we do not copy-out of the all-gather buffer. The parameters used for compute are directly viewed into the all-gather buffer (in fact, the main benefit of the "flat parameter" is exactly this reason). In that case, while 'layer 1 all-gather' is overlapping with 'layer 0 forward compute', the 'layer 0 forward compute' is using the parameters viewed into the 'layer 0 all-gather' buffer.
