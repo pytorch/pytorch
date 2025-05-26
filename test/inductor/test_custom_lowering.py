@@ -153,7 +153,7 @@ class TestCustomLowering(InductorTestCase):
         def foo_lowering(x):
             return x
 
-        assert torch.ops.helion_test.foo in custom_lowering_dict
+        assert torch.ops.helion_test.foo in custom_lowering_dict, f"Expected custom lowering for helion_test::foo to be registered, but it was not found in {custom_lowering_dict.keys()}"
         assert torch.ops.helion_test.foo not in torch._inductor.lowering.lowerings
 
     @requires_gpu()
