@@ -1,7 +1,7 @@
 ARG CUDA_VERSION=12.4
 ARG BASE_TARGET=cuda${CUDA_VERSION}
 ARG ROCM_IMAGE=rocm/dev-almalinux-8:6.3-complete
-FROM amd64/almalinux:8.10 as base
+FROM amd64/almalinux:8.10-20250519 as base
 
 ENV LC_ALL en_US.UTF-8
 ENV LANG en_US.UTF-8
