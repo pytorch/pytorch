@@ -472,7 +472,7 @@ def register_lowering(
         broadcast=broadcast,
         type_promotion_kind=type_promotion_kind,
         convert_input_to_bool=convert_input_to_bool,
-        lowering_dict=lowerings,
+        lowering_dict=lowering_dict,
     )
 
 
