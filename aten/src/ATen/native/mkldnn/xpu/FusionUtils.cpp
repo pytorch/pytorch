@@ -4,62 +4,69 @@ using namespace at::native::onednn;
 
 namespace at::native::xpu {
 
-onednn::Attr& unary_attr_with_arg(
-    onednn::Attr& attr,
-    std::string_view unary,
-    torch::List<std::optional<at::Scalar>> scalars,
-    std::optional<std::string_view> algorithm) {
-  if (unary == "hardswish") {
-    return attr.append_post_eltwise(
-        1.0f, 1.0f / 6.0f, 1.0f / 2.0f, attr.kind_with_hardswish);
-  } else if (unary == "silu") {
-    return attr.append_post_eltwise(1.0f, 1.0f, 0.0f, attr.kind_with_swish);
-  } else if (unary == "leaky_relu") {
-    auto alpha = scalars[0].get().toOptional<at::Scalar>().value().to<float>();
-    return attr.append_post_eltwise(1.0f, alpha, 0.f, attr.kind_with_relu);
-  } else if (unary == "hardtanh") {
-    auto alpha = scalars[0].get().toOptional<at::Scalar>().value().to<float>();
-    auto beta = scalars[1].get().toOptional<at::Scalar>().value().to<float>();
-    return attr.append_post_eltwise(1.0f, alpha, beta, attr.kind_with_clip);
-  } else if (unary == "gelu") {
-    TORCH_CHECK(algorithm.has_value(), "GELU algorithm is not specified");
-    enum dnnl::algorithm gelu_type;
-    if (algorithm.value() == "none") {
-      gelu_type = attr.kind_with_gelu_erf;
-    } else {
-      gelu_type = attr.kind_with_gelu_tanh;
-    }
-    return attr.append_post_eltwise(1.0f, 0.0f, 0.0f, gelu_type);
-  } else if (unary == "hardsigmoid") {
-    return attr.append_post_eltwise(
-        1.0f, 1.0f / 6.0f, 1.0f / 2.0f, attr.kind_with_hardsigmoid);
+onednn::Attr& handle_argument_less(std::string_view unary, onednn::Attr& attr){
+  std::unordered_map<std::string_view, std::function<onednn::Attr&(onednn::Attr&)>> unary_map = {
+    {"relu", [](onednn::Attr& attr) -> onednn::Attr& { return attr.append_post_eltwise(1.0f, 0.0f, 0.0f, attr.kind_with_relu); }},
+    {"sigmoid", [](onednn::Attr& attr) -> onednn::Attr& { return attr.append_post_eltwise(1.0f, 0.0f, 0.0f, attr.kind_with_sigmoid); }},
+    {"tanh", [](onednn::Attr& attr) -> onednn::Attr& { return attr.append_post_eltwise(1.0f, 0.0f, 0.0f, attr.kind_with_tanh); }},
+    {"hardswish", [](onednn::Attr& attr) -> onednn::Attr& { return attr.append_post_eltwise(1.0f, 1.0f / 6.0f, 1.0f / 2.0f, attr.kind_with_hardswish); }},
+    {"swish", [](onednn::Attr& attr) -> onednn::Attr& {return attr.append_post_eltwise(1.0f, 1.0f, 0.0f, attr.kind_with_swish); }},
+    {"hardsigmoid", [](onednn::Attr& attr) -> onednn::Attr& {
+      return attr.append_post_eltwise(1.0f, 1.0f / 6.0f, 1.0f / 2.0f, attr.kind_with_hardsigmoid);
+    }},
+    {"none", [](onednn::Attr& attr) -> onednn::Attr& { return attr; }}
+  };
+
+  if (unary_map.find(unary) != unary_map.end()) {
+    return unary_map[unary](attr);
   }
   TORCH_CHECK(
-      unary == "none",
+      false,
       "Unary attr ",
       unary,
-      "is not supported for conv/linear post unary fusion");
-  return attr;
+      " is not supported for conv/linear post unary fusion");
 }
 
-onednn::Attr& string_to_unary_attr(onednn::Attr& attr, std::string_view unary) {
-  if (unary == "relu") {
-    return attr.append_post_eltwise(1.0f, 0.0f, 0.0f, attr.kind_with_relu);
-  } else if (unary == "sigmoid") {
-    return attr.append_post_eltwise(1.0f, 0.0f, 0.0f, attr.kind_with_sigmoid);
-  } else if (unary == "tanh") {
-    return attr.append_post_eltwise(1.0f, 0.0f, 0.0f, attr.kind_with_tanh);
-  } else if (unary == "hardswish") {
-    return unary_attr_with_arg(
-        attr,
-        "hardswish",
-        torch::List<std::optional<at::Scalar>>(),
-        std::nullopt);
-  } else if (unary == "swish") {
-    return unary_attr_with_arg(
-        attr, "silu", torch::List<std::optional<at::Scalar>>(), std::nullopt);
+onednn::Attr& handle_need_sclars(std::string_view unary, onednn::Attr& attr, torch::List<std::optional<at::Scalar>> scalars){
+  std::unordered_map<std::string_view, std::function<onednn::Attr&(onednn::Attr&, torch::List<std::optional<at::Scalar>>)>> unary_map = {
+    {"leaky_relu", [](onednn::Attr& attr, torch::List<std::optional<at::Scalar>> scalars) -> onednn::Attr& {
+      auto alpha = scalars[0].get().toOptional<at::Scalar>().value().to<float>();
+      return attr.append_post_eltwise(1.0f, alpha, 0.f, attr.kind_with_relu);
+    }},
+    {"hardtanh", [](onednn::Attr& attr, torch::List<std::optional<at::Scalar>> scalars) -> onednn::Attr& {
+      auto alpha = scalars[0].get().toOptional<at::Scalar>().value().to<float>();
+      auto beta = scalars[1].get().toOptional<at::Scalar>().value().to<float>();
+      return attr.append_post_eltwise(1.0f, alpha, beta, attr.kind_with_clip);
+    }}
+  };
+
+  if (unary_map.find(unary) != unary_map.end()) {
+    return unary_map[unary](attr, scalars);
   }
-  return attr;
+  TORCH_CHECK(
+      false,
+      "Unary attr ",
+      unary,
+      " is not supported for conv/linear post unary fusion");
+}
+
+onednn::Attr& handle_need_algorithm(
+    std::string_view unary,
+    onednn::Attr& attr,
+    std::optional<std::string_view> algorithm) {
+  TORCH_CHECK(unary == "gelu", "GELU is the only unary operation that requires an algorithm currently");
+  if (!algorithm.has_value()) {
+    TORCH_CHECK(
+        false,
+        "GELU algorithm is not specified, please specify it as 'none' or 'tanh'");
+  }
+  enum dnnl::algorithm gelu_type;
+  if (algorithm.value() == "none") {
+    gelu_type = attr.kind_with_gelu_erf;
+  } else {
+    gelu_type = attr.kind_with_gelu_tanh;
+  }
+  return attr.append_post_eltwise(1.0f, 0.0f, 0.0f, gelu_type);
 }
 
 onednn::Attr& construct_unary_attr(
@@ -67,12 +74,29 @@ onednn::Attr& construct_unary_attr(
     std::string_view unary,
     torch::List<std::optional<at::Scalar>> scalars,
     std::optional<std::string_view> algorithm) {
-  static const std::set<std::string_view> simple_unary = {
-      "relu", "sigmoid", "tanh", "hardswish", "swish"};
-  if (simple_unary.find(unary) != simple_unary.end()) {
-    return string_to_unary_attr(attr, unary);
+
+  // Define sets for unary operations based on their argument requirements.
+  // Category `argument_less`: stateless operations
+  // Category `need_scalars`: require alpha/beta
+  // Category `need_algorithm`: require algorithm specification, only gelu now.
+  // If further unary operations required, they can be added to these sets or add new
+  // sets according to their new categories.
+  static const std::set<std::string_view> argument_less = {"relu", "sigmoid", "tanh", "hardswish", "swish", "hardsigmoid"};
+  static const std::set<std::string_view> need_scalars = {"leaky_relu", "hardtanh"};
+  static const std::set<std::string_view> need_algorithm = {"gelu"};
+
+  if (argument_less.find(unary) != argument_less.end()) {
+    return handle_argument_less(unary, attr);
+  } else if (need_scalars.find(unary) != need_scalars.end()) {
+    return handle_need_sclars(unary, attr, scalars);
+  } else if (need_algorithm.find(unary) != need_algorithm.end()) {
+    return handle_need_algorithm(unary, attr, algorithm);
   } else {
-    return unary_attr_with_arg(attr, unary, scalars, algorithm);
+    TORCH_CHECK(
+        false,
+        "Unary attr ",
+        unary,
+        " is not supported for conv/linear post unary fusion");
   }
 }
 
