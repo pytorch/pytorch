@@ -6,6 +6,7 @@
 #include <ATen/EmptyTensor.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <c10/util/flat_hash_map.h>
+#include <fmt/format.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/dynamo/guards.h>
@@ -4187,14 +4188,14 @@ class SetGetItemGuardAccessor : public GuardAccessor {
     if (x == nullptr) {
       PyErr_Clear();
       return GuardDebugInfo(
-          false, std::string("IndexError on ") + get_source(), 0);
+          false, fmt::format("IndexError on {}", get_source()), 0);
     }
     GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
     return result;
   }
 
   std::string repr() const override {
-    return "SetGetItemGuardAccessor(" + std::to_string(_index) + ")";
+    return fmt::format("SetGetItemGuardAccessor(index={})", _index);
   }
 
  public: // cloning functions
