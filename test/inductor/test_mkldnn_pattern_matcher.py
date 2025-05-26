@@ -4211,9 +4211,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @parametrize("has_bias", [True, False])
     @parametrize("dtype", [torch.float32, torch.bfloat16])
     @parametrize("input_dim_exceeds_two", [True, False])
-    def test_scaled_mm(
-        self, has_bias, dtype, input_dim_exceeds_two
-    ):
+    def test_scaled_mm(self, has_bias, dtype, input_dim_exceeds_two):
         class FP8QDQLinear(torch.nn.Module):
             def __init__(self, in_features, out_features):
                 super().__init__()
@@ -4278,10 +4276,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
         v = v.to(dtype)
 
         def matcher_check_fn():
-            print("scaled_mm_matcher_count: ", counters["inductor"]["scaled_mm_matcher_count"])
-            self.assertEqual(
-                counters["inductor"]["scaled_mm_matcher_count"], 1
+            print(
+                "scaled_mm_matcher_count: ",
+                counters["inductor"]["scaled_mm_matcher_count"],
             )
+            self.assertEqual(counters["inductor"]["scaled_mm_matcher_count"], 1)
+
         self._test_common(mod, (v,), matcher_check_fn)
 
 

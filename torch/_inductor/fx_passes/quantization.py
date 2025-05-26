@@ -335,7 +335,9 @@ def generate_pattern_with_output_quant(computation_call, with_dtype_convert=Fals
     return quantized_op_output_pattern_pt2e
 
 
-def generate_pattern_with_output_quant_tensor(computation_call, with_dtype_convert=False):
+def generate_pattern_with_output_quant_tensor(
+    computation_call, with_dtype_convert=False
+):
     quantized_op_output_pattern_pt2e = CallFunction(
         quantized_decomposed.quantize_per_tensor.tensor,
         _may_generate_pattern_with_dtype_convert(
@@ -2143,27 +2145,30 @@ def _register_qconv_weight_prepack():
                 weight_prepack_pattern, pass_number=1, dtype=dtype
             )
 
+
 def _generate_dequant_fp8_linear_node_pattern(dtype, input_dim_exceeds_two):
-    #   + - - - - | - - - - - - | - - - - - +
-   #   |    dq_per_tensor  dq_per_tensor   |
-   #   |         |              |          |
-   #   |    OPT(to_bf16)    OPT(to_bf16)   |
-   #   |          \             |          |
-   #   |                     permute       |
-   #   |                     /             |
-   #   |             addmm/mm              |
-   #   |                |                  |
-   #   |      OPT(quant_per_tensor)        |
+    #   + - - - - | - - - - - -  | - - - -  +
+    #   |    dq_per_tensor  dq_per_tensor   |
+    #   |         |              |          |
+    #   |    OPT(to_bf16)    OPT(to_bf16)   |
+    #   |         |             |           |
+    #   |    OPT(reshape)     permute       |
+    #   |          \           /            |
+    #   |             addmm/mm              |
+    #   |                |                  |
+    #   |      OPT(quant_per_tensor)        |
+    #   |                |                  |
+    #   |          OPT(reshape)             |
     assert dtype in [torch.float32, torch.bfloat16]
     is_tensor_overload = True
     dequant_wgt_pattern = CallFunction(
         quantized_decomposed.dequantize_per_tensor.tensor,
-        KeywordArg('q_weight'),
-        KeywordArg('w_scale'),
-        KeywordArg('w_zp'),
-        KeywordArg('w_quant_min'),
-        KeywordArg('w_quant_max'),
-        KeywordArg('w_dtype'),
+        KeywordArg("q_weight"),
+        KeywordArg("w_scale"),
+        KeywordArg("w_zp"),
+        KeywordArg("w_quant_min"),
+        KeywordArg("w_quant_max"),
+        KeywordArg("w_dtype"),
     )
     t_pattern = CallFunction(
         aten.permute.default,
@@ -2172,7 +2177,7 @@ def _generate_dequant_fp8_linear_node_pattern(dtype, input_dim_exceeds_two):
             KeywordArg("autocast_wgt_dtype"),
             dtype == torch.bfloat16,
         ),
-        KeywordArg('permute_axes')
+        KeywordArg("permute_axes"),
     )
 
     dequant_fp8_linear_bias_pattern = _may_generate_pattern_with_reshape(
@@ -2212,6 +2217,7 @@ def _generate_dequant_fp8_linear_node_pattern(dtype, input_dim_exceeds_two):
     )
     return dequant_fp8_linear_bias_pattern, dequant_fp8_linear_no_bias_pattern
 
+
 def _is_valid_scaled_mm_pattern(dtype, input_dim_exceeds_two):
     def _inner(match):
         input_contiguous = True
@@ -2245,6 +2251,7 @@ def _is_valid_scaled_mm_pattern(dtype, input_dim_exceeds_two):
         return True
 
     return _inner
+
 
 def _register_scaled_mm_pass(pattern, dtype, input_dim_exceeds_two):
     @register_freezing_graph_pattern(
@@ -2313,10 +2320,7 @@ def _register_scaled_mm_pass(pattern, dtype, input_dim_exceeds_two):
         with graph.inserting_before(linear_node):
             scaled_mm_input_node = qx
             if input_dim_exceeds_two:
-                new_reshape_args: tuple[Any, ...] = (
-                    qx,
-                    act_reshape_node.args[1]
-                )
+                new_reshape_args: tuple[Any, ...] = (qx, act_reshape_node.args[1])
                 new_act_reshape_node = graph.call_function(
                     torch.ops.aten.reshape.default, args=new_reshape_args
                 )
@@ -2362,9 +2366,7 @@ def _register_scaled_mm_pass(pattern, dtype, input_dim_exceeds_two):
             graph.erase_node(dequant_per_tensor)
 
             counters["inductor"]["scaled_mm_matcher_count"] += 1
-            counters["inductor"]["scaled_mm_matcher_nodes"] += len(
-                match.nodes
-            )
+            counters["inductor"]["scaled_mm_matcher_nodes"] += len(match.nodes)
 
 
 def _register_scaled_mm():
@@ -2372,7 +2374,9 @@ def _register_scaled_mm():
         [torch.float32, torch.bfloat16], [False, True]
     )
     for dtype, input_dim_exceeds_two in fp8_linear_weight_prepack_cases:
-        patterns = _generate_dequant_fp8_linear_node_pattern(dtype, input_dim_exceeds_two)
+        patterns = _generate_dequant_fp8_linear_node_pattern(
+            dtype, input_dim_exceeds_two
+        )
         for pattern in patterns:
             _register_scaled_mm_pass(pattern, dtype, input_dim_exceeds_two)
 
