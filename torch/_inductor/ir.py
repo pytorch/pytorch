@@ -4320,7 +4320,6 @@ class ComputedBuffer(OperationBuffer):
             else:
                 self.freeze_layout()
 
-    @cache_on_self
     def get_default_sizes_body(
         self,
     ) -> tuple[

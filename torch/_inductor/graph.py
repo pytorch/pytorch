@@ -879,6 +879,7 @@ class GraphLowering(torch.fx.Interpreter):
         buf = self.try_get_buffer(buffer_name)
         if buf is not None:
             return buf
+        import pdb; pdb.set_trace()
         raise RuntimeError(f"Failed to find buffer matching name {buffer_name}")
 
     def get_dtype(self, buffer_name: str) -> torch.dtype:

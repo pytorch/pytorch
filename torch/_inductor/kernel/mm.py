@@ -637,6 +637,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     choices = (
         [aten_mm.bind((mat1, mat2), aten_layout)] if use_aten_gemm_kernels() else []
     )
+
     static_shape, is_nonzero = _is_static_problem(layout)
 
     mm_configs = V.choices.get_base_mm_configs(device_type)
@@ -644,37 +645,37 @@ def tuned_mm(mat1, mat2, *, layout=None):
     extra_mm_configs = V.choices.get_extra_mm_configs(device_type)
 
     if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(
-            m,
-            n,
-            k,
-            **mm_config_kwargs(device_type, _is_large_block_for_cpu),
-        ):
-            mm_template.maybe_append_choice(
-                choices,
-                input_nodes=(mat1, mat2),
-                layout=layout,
-                **mm_options(config, m, n, k, layout),
-            )
+        # for config in mm_configs(
+        #     m,
+        #     n,
+        #     k,
+        #     **mm_config_kwargs(device_type, _is_large_block_for_cpu),
+        # ):
+        #     mm_template.maybe_append_choice(
+        #         choices,
+        #         input_nodes=(mat1, mat2),
+        #         layout=layout,
+        #         **mm_options(config, m, n, k, layout),
+        #     )
 
-        if use_triton_tma_template(mat1, mat2):
-            for config in persistent_mm_configs(
-                m,
-                n,
-                k,
-                **mm_config_kwargs(device_type, _is_large_block_for_cpu),
-            ):
-                persistent_tma_mm_template.maybe_append_choice(
-                    choices,
-                    input_nodes=(mat1, mat2),
-                    layout=layout,
-                    workspace_arg=get_tma_workspace_arg(
-                        num_tma_descriptors=2,
-                        device=mat1.get_device(),
-                    ),
-                    **mm_options(config, m, n, k, layout),
-                    **persistent_mm_options(mat1, mat2),
-                )
+        # if use_triton_tma_template(mat1, mat2):
+        #     for config in persistent_mm_configs(
+        #         m,
+        #         n,
+        #         k,
+        #         **mm_config_kwargs(device_type, _is_large_block_for_cpu),
+        #     ):
+        #         persistent_tma_mm_template.maybe_append_choice(
+        #             choices,
+        #             input_nodes=(mat1, mat2),
+        #             layout=layout,
+        #             workspace_arg=get_tma_workspace_arg(
+        #                 num_tma_descriptors=2,
+        #                 device=mat1.get_device(),
+        #             ),
+        #             **mm_options(config, m, n, k, layout),
+        #             **persistent_mm_options(mat1, mat2),
+        #         )
 
         from torch._inductor.ir import get_free_symbols
 

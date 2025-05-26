@@ -68,7 +68,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             extern_node_serializer=V.graph.extern_node_serializer,
             is_inference=V.graph.is_inference,
             is_backward=V.graph.is_backward,
-            name=f"benchmark_{self.name}",
+            name=self.name,
         )
 
         sym_inputs = add_symbolic_shapes_for_inputs_to_subgraph(
@@ -113,6 +113,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 bm_func = mod.call
 
                 bm_func([*sym_inputs, *args])
+
+        self.graph_lowering = bm_graph_lowering
         return benchmarker.benchmark_gpu(lambda: bm_func([*sym_inputs, *args]))
 
     def hash_key(self) -> str:
