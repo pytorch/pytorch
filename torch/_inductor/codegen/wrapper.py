@@ -1899,6 +1899,8 @@ class PythonWrapperCodegen(CodeGen):
         gpu: bool = True,
         cpp_definition: Optional[str] = None,
     ):
+        # if kernel_name == "triton_poi_fused_add_relu_1":
+        #     import pdb; pdb.set_trace()
         self.writeline(
             KernelDefinitionLine(
                 self,
@@ -2457,6 +2459,9 @@ class PythonWrapperCodegen(CodeGen):
         )
 
         device = device or V.graph.get_current_device_or_throw()
+        
+        if kernel_name == "triton_red_fused_add_relu_0":
+            import pdb; pdb.set_trace()
         self.writeline(
             KernelCallLine(
                 self,
@@ -2577,6 +2582,8 @@ class PythonWrapperCodegen(CodeGen):
                     arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg)
                 all_args.append(arg_str if key is None else f"{key}={arg_str}")
 
+            if ", buf0" in call_args_str:
+                import pdb; pdb.set_trace()
             self.kernel_autotune_calls.writeline(
                 f"{kernel_name}.run({', '.join(all_args)}, stream={stream_name})"
             )
@@ -2592,6 +2599,8 @@ class PythonWrapperCodegen(CodeGen):
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(call_args, kernel_name, arg_types, None)
         with debug_printer_manager:
+            if ", buf0" in call_args_str:
+                import pdb; pdb.set_trace()
             self.writeline(f"{kernel_name}.run({call_args_str}, stream={stream_name})")
         self.write_triton_header_once()
 

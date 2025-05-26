@@ -36,6 +36,7 @@ from torch.utils._triton import has_triton
 from . import comms, config, dependencies, ir, metrics
 from .analyze_preserves_zero_mask import can_codegen_without_upcasts
 from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
+from .codegen.subgraph import SubgraphChoiceCaller
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .exc import GPUTooOldForTriton, TritonMissing
@@ -2079,6 +2080,8 @@ class Scheduler:
             self.name_to_fused_node,
         )
 
+        self.debug_after_fusion = False
+
         self.compute_dependencies()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.dead_node_elimination()
@@ -2608,6 +2611,7 @@ class Scheduler:
         ):
             for i in range(10):
                 old_len = len(nodes)
+                
                 fusion_log.debug(
                     "===== attempting fusion (%d/10): %d nodes =====",
                     i + 1,
@@ -2879,8 +2883,10 @@ class Scheduler:
             for choice, unfused_time in sorted(
                 choice_timings.items(), key=lambda x: x[1]
             ):
-                if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
+    
+                if not isinstance(choice, SubgraphChoiceCaller):
                     continue
+
 
                 # For prologue fusion we check if the underlying template of the choice
                 # supports all allowed prologue inputs. If not, we skip this choice in
@@ -2900,9 +2906,127 @@ class Scheduler:
                 triton_choices += 1
                 if triton_choices > config.max_epilogue_benchmarked_choices:
                     break
+                
 
-                with multi_node.swap_as_triton_caller(choice):
-                    future_choices.append((choice, *compile_kernel(node_list_fused)))
+                # TRYING TO HACK DecomposeK + Relu
+                ### node1 is decomposeK, which is aten::bmm + sum + .to()
+                ### last two (sum + .to()) are fused
+                #
+                ### node2 is relu + le
+                ### by default fused
+                #
+                ### I try to unwrap both and replace the MultiTemplate buffer of decomposeK
+                ### and try to just fuse the reduction + pointwise ops
+                subgraph_choice = node1.node.get_min_choice()[0]
+                graph_lowering = subgraph_choice.graph_lowering
+                subgraph_nodes = graph_lowering.scheduler.nodes
+
+                subgraph_input_names = graph_lowering.graph_input_names
+                original_names = [inp.get_name() for inp in subgraph_choice.input_nodes]
+
+                subgraph_name_to_orig = {subgraph_name: buf_name for buf_name, subgraph_name in zip(original_names, subgraph_input_names)}
+                subgraph_name_to_orig.update({graph_lowering.graph_outputs[0].get_name(): node2.get_outputs()[0].node.name})
+
+                dep_mapping = {dep.name: dep for dep in node1.read_writes.reads}
+                dep_mapping.update({dep.name: dep for dep in node1.read_writes.writes})
+
+
+                # TODO: Hack with decomposeK, cannot assume first node has the same inputs as the MultiTemplateBuffer
+                # First node in subgraph nodes
+                subgraph_nodes[0].read_writes.reads = node1.read_writes.reads
+                for inp in subgraph_nodes[0].node.inputs:
+                    inp.data.data.name = subgraph_name_to_orig[inp.get_name()]
+                
+
+                # TODO: Assume last node in subgraph node is output
+                subgraph_nodes[-1].read_writes.writes = node1.read_writes.writes
+                if isinstance(subgraph_nodes[-1], FusedSchedulerNode):
+                    subgraph_nodes[-1].snodes[-1].read_writes.writes = node1.read_writes.writes
+                    subgraph_nodes[-1].snodes[-1].node.users = [NodeUser(
+                        node2,
+                        False,
+                        False
+                    )]
+                    subgraph_nodes[-1].used_buffer_names.clear_cache(subgraph_nodes[-1])
+                else:
+                    subgraph_nodes[-1].node.users = [NodeUser(
+                        node2,
+                        False,
+                        False
+                    )]
+
+
+
+                # Set other attributes
+                for subgraph_node in subgraph_nodes:
+                    subgraph_node.scheduler = self
+                    
+                
+                # Add intermediary buffers from subgraph
+                self.name_to_buf.update(graph_lowering.scheduler.name_to_buf)
+                self.name_to_fused_node.update(graph_lowering.scheduler.name_to_fused_node)
+                
+                for buffer in graph_lowering.buffers:
+                    V.graph.name_to_buffer[buffer.name] = buffer
+
+
+
+                # for node in subgraph_nodes:
+                #     for buf in node.get_outputs():
+                #         self.name_to_buf[buf.get_name()] = buf
+
+                # self.name_to_buf.update(graph_lowering.scheduler.name_to_buf)
+                # self.name_to_fused_node.update(graph_lowering.scheduler.name_to_fused_node)
+                
+                # aten.bmm.dtype
+                # extern_bmm = subgraph_nodes[0]
+                # multi_template_node = self.nodes[0]
+                # extern_bmm.read_writes.reads = multi_template_node.read_writes.reads
+
+                # Make sure underlying buffer node has input buffer names changed as well
+                # for codegen
+                # for inp in extern_bmm.node.inputs:
+                #     inp_name = inp.data.data.name
+                #     inp.data.data.name = "_".join(inp_name.split("_")[-2:])
+
+                # Fused sum + .to()
+                # fuse_node_1 = subgraph_nodes[-1]
+                # fuse_node_1.scheduler = self
+                # fuse_node_1.get_outputs()[1].users.pop(0)
+                # fuse_node_1.get_outputs()[1].users.append(NodeUser(
+                #     node2,
+                #     False,
+                #     False
+                # ))
+                # fuse_node_1.get_outputs()[1].node.name = node2.get_outputs()[0].node.name
+
+                # Get rid of MultiTemplateBuffer
+                self.nodes.pop(0)
+                self.nodes = subgraph_nodes + self.nodes
+
+                # node2 is relu
+                # new_buf_name = "benchmark_decompose_k_mm_128_split_6_buf2"
+                # read_dep = node2.read_writes.reads.pop()
+                # new_read_dep = MemoryDep(
+                #     name=new_buf_name,
+                #     index=read_dep.index,
+                #     var_names=read_dep.var_names,
+                #     size=read_dep.size,
+                #     mode=read_dep.mode
+                # )
+                # node2.read_writes.reads.add(new_read_dep)
+                # node2_input = node2.get_outputs()[0].node
+                # old_name = node2_input.name
+                # node2_input.name = new_buf_name
+                # self.name_to_buf.pop(old_name)
+                import pdb; pdb.set_trace()
+                
+                self.debug_after_fusion=True
+                # Almost need to merge the schedulers here
+                self.nodes = self.fuse_nodes(self.nodes)
+                return "done"
+                # with multi_node.swap_as_triton_caller(choice):
+                future_choices.append((choice, *compile_kernel(node_list_fused)))
 
             if len(future_choices) == 0:
                 return False
@@ -2928,19 +3052,19 @@ class Scheduler:
                                 str(e),
                             )
                         continue
-                    with multi_node.swap_as_triton_caller(choice):
-                        ms_fused, path = self.benchmark_codegened_module(
-                            mod_fused, device
-                        )
-                        new_timings[choice] = ms_fused
-                        if ms_fused < min_ms_fused:
-                            min_ms_fused = ms_fused
-                            ms_fused_choice = choice
+                    # with multi_node.swap_as_triton_caller(choice):
+                    ms_fused, path = self.benchmark_codegened_module(
+                        mod_fused, device
+                    )
+                    new_timings[choice] = ms_fused
+                    if ms_fused < min_ms_fused:
+                        min_ms_fused = ms_fused
+                        ms_fused_choice = choice
 
                 log_fusion(min_ms_fused, ms1, ms2)
 
                 if min_ms_fused < (ms1 + ms2) and ms_fused_choice is not None:
-                    multi_node.finalize_as_triton_caller(ms_fused_choice)
+                    # multi_node.finalize_as_triton_caller(ms_fused_choice)
                     multi_node._choice_timings = new_timings
                     return True
                 else:
@@ -3090,6 +3214,7 @@ class Scheduler:
 
                 fuse_two_nodes(node_key1, node_key2)
 
+        skip_rest = False
         for node1, node2 in self.get_possible_fusions(nodes):
             # if either node is in a pending fusion, resolve it.
             # since we iterate on potential fusions based on profitability
@@ -3102,6 +3227,10 @@ class Scheduler:
                 node1, node2
             ):
                 speedup = self.speedup_by_fusion(node1, node2)
+                if speedup == "done":
+                    fused_nodes = self.nodes
+                    skip_rest = True
+                    break
                 if callable(speedup):
                     pending_fusions[node1] = (speedup, node1, node2)
                     pending_fusions[node2] = (speedup, node1, node2)
@@ -3113,19 +3242,21 @@ class Scheduler:
                 fuse_two_nodes(node1, node2)
 
         seen_pair_speedup_fn: OrderedSet[Callable[[], bool]] = OrderedSet()
-        for is_speedup_fn, node_key1, node_key2 in pending_fusions.values():
-            if is_speedup_fn in seen_pair_speedup_fn:
-                continue
+        if not skip_rest:
+            for is_speedup_fn, node_key1, node_key2 in pending_fusions.values():
+                if is_speedup_fn in seen_pair_speedup_fn:
+                    continue
 
-            seen_pair_speedup_fn.add(is_speedup_fn)
+                seen_pair_speedup_fn.add(is_speedup_fn)
 
-            assert self.get_fused_node(node_key1) is node_key1
-            assert self.get_fused_node(node_key2) is node_key2
+                assert self.get_fused_node(node_key1) is node_key1
+                assert self.get_fused_node(node_key2) is node_key2
 
-            if is_speedup_fn() and not self.will_fusion_create_cycle(
-                node_key1, node_key2
-            ):
-                fuse_two_nodes(node_key1, node_key2)
+                if is_speedup_fn() and not self.will_fusion_create_cycle(
+                    node_key1, node_key2
+                ):
+                    fuse_two_nodes(node_key1, node_key2)
+
 
         nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         nodes = self.topological_sort_schedule(nodes)
@@ -4597,6 +4728,7 @@ class Scheduler:
                 prologue, template_node, epilogue = node.get_prologue_template_epilogue(
                     list(node.get_nodes())
                 )
+
                 self.get_backend(device).codegen_template(
                     template_node, epilogue, prologue
                 )
@@ -4615,6 +4747,8 @@ class Scheduler:
                     raise AssertionError(f"{type(self)=}")
                 backend.codegen_combo_kernel(node)
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
+                if self.debug_after_fusion:
+                    import pdb; pdb.set_trace()
                 self.get_backend(device).codegen_node(node)
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
@@ -4732,6 +4866,8 @@ class Scheduler:
         return ms2 - ms2_clone < ms1 or small_kernel
 
     def get_buffer_layout(self, buf_name: str) -> ir.Layout:
+        if buf_name not in self.name_to_buf:
+            import pdb; pdb.set_trace()
         buf = self.name_to_buf[buf_name]
         assert buf.node is not None
         return buf.node.get_layout()

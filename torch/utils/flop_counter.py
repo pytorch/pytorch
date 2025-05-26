@@ -29,7 +29,11 @@ def shape_wrapper(f):
     @wraps(f)
     def nf(*args, out_val=None, **kwargs):
         args, kwargs, out_shape = tree_map(get_shape, (args, kwargs, out_val))
-        return f(*args, out_shape=out_shape, **kwargs)
+
+        try:
+            return f(*args, out_shape=out_shape, **kwargs)
+        except:
+            import pdb; pdb.set_trace()
     return nf
 
 def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
@@ -71,7 +75,7 @@ def addmm_flop(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
     return mm_flop(a_shape, b_shape)
 
 @register_flop_formula(aten.bmm)
-def bmm_flop(a_shape, b_shape, out_shape=None, **kwargs) -> int:
+def bmm_flop(a_shape, b_shape, dtype=None, out_shape=None, **kwargs) -> int:
     """Count flops for the bmm operation."""
     # Inputs should be a list of length 2.
     # Inputs contains the shapes of two tensor.
