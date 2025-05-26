@@ -3791,8 +3791,15 @@ def _compute_stride(old_shape, old_stride, new_shape):
     return new_stride
 
 
-# if a is contiguous, we can always reshape with as_strided and contiguous_strides.
-# if a is not contiguous and _compute_stride succeed we also use as_strided without clone.
+# This function is called to trace through view operation during fake tensor tracing.
+# It will be called when the exisiting path throws a data dependent error. It's much
+# simpler that reshape_view_helper, if it fails it will throw the original data_dependent_error
+# that was passed to it.
+# The function does the following:
+# (1) if _compute_stride succeeds, the requested shape is valid, the output strides are those
+# returned by _compute_stride.
+# (2) if a contiguous, we know the requested shape is valid, the output strides can be computed using
+# make_contiguous_strides_for.
 def _view_simple(a: TensorLikeType, shape, data_dependent_error) -> TensorLikeType:
     from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 
@@ -3813,12 +3820,10 @@ def _view_simple(a: TensorLikeType, shape, data_dependent_error) -> TensorLikeTy
     if len(shape) == len(a.shape) and statically_known_true(sym_eq(shape, a.shape)):
         return prims.view_of(a)
 
-    # if a is not contiguous and _compute_stride succeed we also use as_strided.
     new_strides = _compute_stride(a.size(), a.stride(), shape)
     if new_strides is not None:
         return a.as_strided(shape, new_strides)
 
-    # if a is contiguous, we can always reshape with as_strided.
     if a.is_contiguous():
         return a.as_strided(shape, utils.make_contiguous_strides_for(shape))
 
@@ -3992,14 +3997,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
         return _reshape_view_helper_core_alg(a, shape, allow_copy)
     except GuardOnDataDependentSymNode as e:
-        # dynamic shapes do not show up in eager. For compile this function is on
-        if not allow_copy:
-            return _view_simple(a, shape, e)
-        else:
-            # this should not be reachable since reshape_symint, will do the clone and compose to view
-            # before calling this for compile stack. and GuardOnDataDependentSymNode should now show up
-            # for eager.
-            raise
+        # For compile this function is only called on view operations since reshape_symint will do a clone and
+        # compose to view before calling this. GuardOnDataDependentSymNode does not show up for eager.
+        assert not allow_copy
+        return _view_simple(a, shape, e)
 
 
 # CompositeImplicitAutograd - don't register decomp
