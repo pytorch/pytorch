@@ -8,14 +8,13 @@ import torch
 from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, OffloadPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
-from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TEST_HPU
+from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TEST_HPU, TEST_XPU
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
     TransformerBlock,
 )
 
-device_type = torch.accelerator.current_accelerator().type
 
 device_type = torch.device(get_devtype())
 
@@ -245,7 +244,7 @@ class TestFullyShardMemory(FSDPTest):
 
     def _get_curr_active_memory_mb(self) -> int:
         mem_stats = torch.get_device_module(device_type).memory_stats()
-        if TEST_CUDA:
+        if TEST_CUDA or TEST_XPU:
             return round(mem_stats["active_bytes.all.current"] / 1e6)
         if TEST_HPU:
             return round(mem_stats["InUse"] / 1e6)
