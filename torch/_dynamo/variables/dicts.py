@@ -880,6 +880,24 @@ class SetVariable(ConstDictVariable):
             return variables.BuiltinVariable(op.get(name)).call_function(
                 tx, [self, other], {}
             )
+        elif name in ("__and__", "__or__", "__xor__", "__sub__"):
+            m = {
+                "__and__": "intersection",
+                "__or__": "union",
+                "__xor__": "symmetric_difference",
+                "__sub__": "difference",
+            }.get(name)
+            if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        ConstantVariable.create(
+                            f"unsupported operand type(s) for {name}: '{self.python_type_name()}' and '{args[0].python_type_name()}'"
+                        )
+                    ],
+                )
+            return self.call_method(tx, m, args, kwargs)
         elif name in ("__iand__", "__ior__", "__ixor__", "__isub__"):
             if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
                 msg = ConstantVariable.create(
