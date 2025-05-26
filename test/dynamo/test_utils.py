@@ -244,7 +244,6 @@ class TestDynamoTimed(TestCase):
         utils.reset_frame_count()
         torch._logging._internal.structured_logging_overhead.clear()
 
-    @xfailIfS390X
     @dynamo_config.patch(
         {
             "log_compilation_metrics": True,
