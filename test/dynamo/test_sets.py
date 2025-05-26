@@ -4,8 +4,8 @@
 
 
 import torch
-import torch._dynamo.config
 import torch._dynamo.test_case
+from torch._dynamo.testing import CompileCounter
 
 
 class SetGuardsSet(torch._dynamo.test_case.TestCase):
@@ -16,7 +16,7 @@ class SetGuardsSet(torch._dynamo.test_case.TestCase):
             torch.amp._exit_autocast,
         }
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = CompileCounter()
 
         def fn(x, s):
             if torch.amp._exit_autocast in s:
@@ -46,7 +46,7 @@ class SetGuardsSet(torch._dynamo.test_case.TestCase):
             torch.amp._exit_autocast,
         }
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = CompileCounter()
 
         def fn(x, s):
             if torch.amp._exit_autocast in s:
@@ -80,7 +80,7 @@ class SetGuardsSet(torch._dynamo.test_case.TestCase):
             torch.amp._exit_autocast,
         }
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = CompileCounter()
 
         def fn(x, s):
             for e in s:
