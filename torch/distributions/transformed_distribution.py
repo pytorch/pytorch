@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -50,7 +50,7 @@ class TransformedDistribution(Distribution):
     :class:`~torch.distributions.relaxed_categorical.RelaxedOneHotCategorical`
     """
 
-    arg_constraints: dict[str, Constraint] = {}
+    arg_constraints: ClassVar[dict[str, Constraint]] = {}
     base_dist: Distribution
     transforms: Sequence[Transform]
 

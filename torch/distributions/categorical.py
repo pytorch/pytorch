@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, ClassVar, Optional
 from typing_extensions import Self
 
 import torch
@@ -52,7 +52,7 @@ class Categorical(Distribution):
         logits (Tensor): event log probabilities (unnormalized)
     """
 
-    arg_constraints: dict[str, Constraint] = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "probs": constraints.simplex,
         "logits": constraints.real_vector,
     }

@@ -1,5 +1,5 @@
 import math
-from typing import Any, Optional, Union
+from typing import Any, ClassVar, Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -48,7 +48,7 @@ class ContinuousBernoulli(ExponentialFamily):
     https://arxiv.org/abs/1907.06845
     """
 
-    arg_constraints: dict[str, Constraint] = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "probs": constraints.unit_interval,
         "logits": constraints.real,
     }

@@ -8,7 +8,7 @@ Original copyright notice:
 """
 
 import math
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -62,7 +62,9 @@ class LKJCholesky(Distribution):
     Journal of Multivariate Analysis. 100. 10.1016/j.jmva.2009.04.008
     """
 
-    arg_constraints: dict[str, Constraint] = {"concentration": constraints.positive}
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
+        "concentration": constraints.positive,
+    }
     support = constraints.corr_cholesky
     dim: int
     concentration: Tensor

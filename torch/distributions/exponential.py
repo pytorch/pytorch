@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -28,7 +28,9 @@ class Exponential(ExponentialFamily):
         rate (float or Tensor): rate = 1 / scale of the distribution
     """
 
-    arg_constraints: dict[str, Constraint] = {"rate": constraints.positive}
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
+        "rate": constraints.positive,
+    }
     support = constraints.nonnegative
     has_rsample: bool = True
     _mean_carrier_measure: float = 0

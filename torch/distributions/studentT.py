@@ -1,5 +1,5 @@
 import math
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -32,7 +32,7 @@ class StudentT(Distribution):
         scale (float or Tensor): scale of the distribution
     """
 
-    arg_constraints: dict[str, Constraint] = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "df": constraints.positive,
         "loc": constraints.real,
         "scale": constraints.positive,

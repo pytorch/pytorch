@@ -1,4 +1,4 @@
-from typing import Any, Optional, Union
+from typing import Any, ClassVar, Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -41,7 +41,7 @@ class LogitRelaxedBernoulli(Distribution):
     (Jang et al., 2017)
     """
 
-    arg_constraints: dict[str, Constraint] = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "probs": constraints.unit_interval,
         "logits": constraints.real,
     }
@@ -144,7 +144,7 @@ class RelaxedBernoulli(TransformedDistribution):
         logits (Number, Tensor): the log-odds of sampling `1`
     """
 
-    arg_constraints: dict[str, Constraint] = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "probs": constraints.unit_interval,
         "logits": constraints.real,
     }

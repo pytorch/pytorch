@@ -1,5 +1,5 @@
 import math
-from typing import Optional
+from typing import ClassVar, Optional
 from typing_extensions import Self
 
 import torch
@@ -89,7 +89,7 @@ class LowRankMultivariateNormal(Distribution):
             capacitance = I + cov_factor.T @ inv(cov_diag) @ cov_factor
     """
 
-    arg_constraints: dict[str, Constraint] = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "loc": constraints.real_vector,
         "cov_factor": constraints.independent(constraints.real, 2),
         "cov_diag": constraints.independent(constraints.positive, 1),

@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -45,7 +45,7 @@ class Geometric(Distribution):
         logits (Number, Tensor): the log-odds of sampling `1`.
     """
 
-    arg_constraints: dict[str, Constraint] = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "probs": constraints.unit_interval,
         "logits": constraints.real,
     }

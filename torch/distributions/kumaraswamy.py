@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -42,7 +42,7 @@ class Kumaraswamy(TransformedDistribution):
             (often referred to as beta)
     """
 
-    arg_constraints: dict[str, Constraint] = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "concentration1": constraints.positive,
         "concentration0": constraints.positive,
     }

@@ -1,5 +1,5 @@
 import math
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -33,7 +33,9 @@ class HalfNormal(TransformedDistribution):
         scale (float or Tensor): scale of the full Normal distribution
     """
 
-    arg_constraints: dict[str, Constraint] = {"scale": constraints.positive}
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
+        "scale": constraints.positive,
+    }
     support = constraints.nonnegative  # type: ignore[assignment]
     has_rsample: bool = True
     base_dist: Normal

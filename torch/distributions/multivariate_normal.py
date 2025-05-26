@@ -1,5 +1,5 @@
 import math
-from typing import Optional
+from typing import ClassVar, Optional
 from typing_extensions import Self
 
 import torch
@@ -124,7 +124,7 @@ class MultivariateNormal(Distribution):
         the corresponding lower triangular matrices using a Cholesky decomposition.
     """
 
-    arg_constraints: dict[str, Constraint] = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "loc": constraints.real_vector,
         "covariance_matrix": constraints.positive_definite,
         "precision_matrix": constraints.positive_definite,

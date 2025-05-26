@@ -1,4 +1,4 @@
-from typing import Any, Optional, Union
+from typing import Any, ClassVar, Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -35,7 +35,7 @@ class NegativeBinomial(Distribution):
         logits (Tensor): Event log-odds for probabilities of success
     """
 
-    arg_constraints: dict[str, Constraint] = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "total_count": constraints.greater_than_eq(0),
         "probs": constraints.half_open_interval(0.0, 1.0),
         "logits": constraints.real,

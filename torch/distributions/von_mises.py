@@ -1,5 +1,5 @@
 import math
-from typing import Final, Optional, Union
+from typing import ClassVar, Final, Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -128,7 +128,7 @@ class VonMises(Distribution):
         concentration (float or Tensor): concentration parameter
     """
 
-    arg_constraints: dict[str, Constraint] = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "loc": constraints.real,
         "concentration": constraints.positive,
     }

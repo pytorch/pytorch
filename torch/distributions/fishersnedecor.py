@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -30,7 +30,7 @@ class FisherSnedecor(Distribution):
         df2 (float or Tensor): degrees of freedom parameter 2
     """
 
-    arg_constraints: dict[str, Constraint] = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "df1": constraints.positive,
         "df2": constraints.positive,
     }

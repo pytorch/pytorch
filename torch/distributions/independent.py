@@ -1,4 +1,4 @@
-from typing import Generic, Optional, TypeVar
+from typing import ClassVar, Generic, Optional, TypeVar
 from typing_extensions import Self
 
 import torch
@@ -46,7 +46,7 @@ class Independent(Distribution, Generic[D]):
             reinterpret as event dims
     """
 
-    arg_constraints: dict[str, Constraint] = {}
+    arg_constraints: ClassVar[dict[str, Constraint]] = {}
     base_dist: D
 
     def __init__(

@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, ClassVar, Optional
 from typing_extensions import Self
 
 import torch
@@ -53,7 +53,7 @@ class Dirichlet(ExponentialFamily):
             (often referred to as alpha)
     """
 
-    arg_constraints: dict[str, Constraint] = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "concentration": constraints.independent(constraints.positive, 1)
     }
     support = constraints.simplex

@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -33,7 +33,7 @@ class Weibull(TransformedDistribution):
         validate_args (bool, optional): Whether to validate arguments. Default: None.
     """
 
-    arg_constraints: dict[str, Constraint] = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "scale": constraints.positive,
         "concentration": constraints.positive,
     }

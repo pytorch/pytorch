@@ -1,4 +1,4 @@
-from typing import Any, Optional, Union
+from typing import Any, ClassVar, Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -39,7 +39,7 @@ class ExpRelaxedCategorical(Distribution):
     (Jang et al., 2017)
     """
 
-    arg_constraints: dict[str, Constraint] = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "probs": constraints.simplex,
         "logits": constraints.real_vector,
     }
@@ -130,7 +130,7 @@ class RelaxedOneHotCategorical(TransformedDistribution):
         logits (Tensor): unnormalized log probability for each event
     """
 
-    arg_constraints: dict[str, Constraint] = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "probs": constraints.simplex,
         "logits": constraints.real_vector,
     }

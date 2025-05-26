@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 from typing_extensions import Self
 
 from torch import Tensor
@@ -30,7 +30,7 @@ class Pareto(TransformedDistribution):
         alpha (float or Tensor): Shape parameter of the distribution
     """
 
-    arg_constraints: dict[str, Constraint] = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "alpha": constraints.positive,
         "scale": constraints.positive,
     }

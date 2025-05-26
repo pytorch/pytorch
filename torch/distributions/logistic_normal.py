@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 from typing_extensions import Self
 
 from torch import Tensor
@@ -37,7 +37,7 @@ class LogisticNormal(TransformedDistribution):
 
     """
 
-    arg_constraints: dict[str, Constraint] = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "loc": constraints.real,
         "scale": constraints.positive,
     }

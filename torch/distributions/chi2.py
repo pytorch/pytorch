@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 from typing_extensions import Self
 
 from torch import Tensor
@@ -27,7 +27,9 @@ class Chi2(Gamma):
         df (float or Tensor): shape parameter of the distribution
     """
 
-    arg_constraints: dict[str, Constraint] = {"df": constraints.positive}
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
+        "df": constraints.positive,
+    }
 
     def __init__(
         self,

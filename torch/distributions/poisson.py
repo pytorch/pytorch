@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -33,7 +33,9 @@ class Poisson(ExponentialFamily):
         rate (Number, Tensor): the rate parameter
     """
 
-    arg_constraints: dict[str, Constraint] = {"rate": constraints.nonnegative}
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
+        "rate": constraints.nonnegative,
+    }
     support = constraints.nonnegative_integer
     rate: Tensor
 

@@ -1,5 +1,5 @@
 import math
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -37,7 +37,7 @@ class GeneralizedPareto(Distribution):
         concentration (float or Tensor): Concentration parameter of the distribution
     """
 
-    arg_constraints: dict[str, Constraint] = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "loc": constraints.real,
         "scale": constraints.positive,
         "concentration": constraints.real,

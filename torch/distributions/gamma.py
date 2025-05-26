@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -35,7 +35,7 @@ class Gamma(ExponentialFamily):
             (often referred to as beta), rate = 1 / scale
     """
 
-    arg_constraints: dict[str, Constraint] = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "concentration": constraints.positive,
         "rate": constraints.positive,
     }

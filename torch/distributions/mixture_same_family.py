@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import ClassVar, Optional
 from typing_extensions import Self
 
 import torch
@@ -55,7 +55,7 @@ class MixtureSameFamily(Distribution):
             instance. Right-most batch dimension indexes component.
     """
 
-    arg_constraints: dict[str, Constraint] = {}
+    arg_constraints: ClassVar[dict[str, Constraint]] = {}
     has_rsample: bool = False
 
     def __init__(
