@@ -1922,6 +1922,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if config.triton.use_tma_api:
                 # Also see Note: TMA API Restrictions for the below
 
+                if V.graph.get_current_device_or_throw().type == "cuda" and torch.cuda.get_device_capability()[0] < 9:
+                    return False
+
                 # `no_x_dim` with use_tma_api => XBLOCK=1, but the TMA API requires that
                 # atleast 16 bytes of data can be loaded / stored
                 if self.no_x_dim:

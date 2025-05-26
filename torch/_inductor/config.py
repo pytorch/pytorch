@@ -1286,11 +1286,12 @@ class triton:
     # (Experimental)
     # Generate code using the tl.make_tensor_descriptor() API for loads/store
     # [Note: TMA API Restrictions] Currently the TMA API requires the following:
+    # - For Nvidia GPUs, the compute capability should be >= 9.0
     # - The innermost stride of a descriptor should be 1
     # - The size of the block shape in the innermost dimension should load / store
-    # atleast 16 bytes. Therefore TMA descriptors are only going to be generated
-    # if the above conditions can be satisfied, along with any existing requirements
-    # for index expressions
+    # atleast 16 bytes.
+    # Therefore TMA descriptors are only going to be generated if the above conditions
+    # can be satisfied, along with any existing requirements for index expressions
     use_tma_api = False
 
     # Inject a bug into our relu implementation; useful for testing our repro
