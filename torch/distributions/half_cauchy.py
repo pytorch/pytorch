@@ -36,8 +36,9 @@ class HalfCauchy(TransformedDistribution):
     arg_constraints: ClassVar[dict[str, Constraint]] = {
         "scale": constraints.positive,
     }
-    support = constraints.nonnegative  # type: ignore[assignment]
+    support: ClassVar[constraints.NonNegative] = constraints.nonnegative  # type: ignore[assignment]
     has_rsample: bool = True
+
     base_dist: Cauchy
 
     def __init__(

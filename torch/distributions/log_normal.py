@@ -37,7 +37,7 @@ class LogNormal(TransformedDistribution):
         "loc": constraints.real,
         "scale": constraints.positive,
     }
-    support = constraints.positive  # type: ignore[assignment]
+    support: ClassVar[constraints.Positive] = constraints.positive  # type: ignore[assignment]
     has_rsample: bool = True
     base_dist: Normal
 

@@ -36,9 +36,10 @@ class Normal(ExponentialFamily):
         "loc": constraints.real,
         "scale": constraints.positive,
     }
-    support = constraints.real
+    support: ClassVar[constraints.Real] = constraints.real
     has_rsample: bool = True
     _mean_carrier_measure: float = 0
+
     loc: Tensor
     scale: Tensor
 

@@ -49,7 +49,7 @@ class Geometric(Distribution):
         "probs": constraints.unit_interval,
         "logits": constraints.real,
     }
-    support = constraints.nonnegative_integer
+    support: ClassVar[constraints.NonNegativeInteger] = constraints.nonnegative_integer
 
     def __init__(
         self,

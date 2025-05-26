@@ -45,7 +45,7 @@ class LogitRelaxedBernoulli(Distribution):
         "probs": constraints.unit_interval,
         "logits": constraints.real,
     }
-    support = constraints.real
+    support: ClassVar[constraints.Real] = constraints.real
 
     temperature: Tensor
 
@@ -148,7 +148,7 @@ class RelaxedBernoulli(TransformedDistribution):
         "probs": constraints.unit_interval,
         "logits": constraints.real,
     }
-    support = constraints.unit_interval  # type: ignore[assignment]
+    support: ClassVar[constraints.UnitInterval] = constraints.unit_interval  # type: ignore[assignment]
     has_rsample: bool = True
     base_dist: LogitRelaxedBernoulli
 

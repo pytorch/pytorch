@@ -31,7 +31,7 @@ class Exponential(ExponentialFamily):
     arg_constraints: ClassVar[dict[str, Constraint]] = {
         "rate": constraints.positive,
     }
-    support = constraints.nonnegative
+    support: ClassVar[constraints.NonNegative] = constraints.nonnegative
     has_rsample: bool = True
     _mean_carrier_measure: float = 0
     rate: Tensor

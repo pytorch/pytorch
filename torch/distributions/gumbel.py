@@ -36,7 +36,7 @@ class Gumbel(TransformedDistribution):
         "loc": constraints.real,
         "scale": constraints.positive,
     }
-    support = constraints.real  # type: ignore[assignment]
+    support: ClassVar[constraints.Real] = constraints.real  # type: ignore[assignment]
 
     def __init__(
         self,

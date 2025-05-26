@@ -46,8 +46,9 @@ class Kumaraswamy(TransformedDistribution):
         "concentration1": constraints.positive,
         "concentration0": constraints.positive,
     }
-    support = constraints.unit_interval  # type: ignore[assignment]
+    support: ClassVar[constraints.UnitInterval] = constraints.unit_interval  # type: ignore[assignment]
     has_rsample: bool = True
+
     concentration0: Tensor
     concentration1: Tensor
 

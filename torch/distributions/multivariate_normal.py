@@ -130,7 +130,7 @@ class MultivariateNormal(Distribution):
         "precision_matrix": constraints.positive_definite,
         "scale_tril": constraints.lower_cholesky,
     }
-    support = constraints.real_vector
+    support: ClassVar[constraints.RealVector] = constraints.real_vector
     has_rsample: bool = True
     loc: Tensor
 

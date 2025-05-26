@@ -1,6 +1,6 @@
 import math
 import warnings
-from typing import Final, Optional, Union
+from typing import ClassVar, Final, Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -65,9 +65,10 @@ class Wishart(ExponentialFamily):
     [5] Ku, Y.-C. & Bloomfield, P., 2010. `Generating Random Wishart Matrices with Fractional Degrees of Freedom in OX`.
     """
 
-    support = constraints.positive_definite
+    support: ClassVar[constraints.PositiveDefinite] = constraints.positive_definite
     has_rsample: bool = True
     _mean_carrier_measure: float = 0
+
     df: Tensor
 
     @property

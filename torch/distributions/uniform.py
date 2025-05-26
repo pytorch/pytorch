@@ -82,7 +82,7 @@ class Uniform(Distribution):
         return new
 
     @constraints.dependent_property(is_discrete=False, event_dim=0)
-    def support(self) -> Constraint:
+    def support(self) -> constraints.Interval:
         return constraints.interval(self.low, self.high)
 
     def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:

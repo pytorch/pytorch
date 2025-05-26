@@ -44,7 +44,7 @@ class Bernoulli(ExponentialFamily):
         "probs": constraints.unit_interval,
         "logits": constraints.real,
     }
-    support = constraints.boolean
+    support: ClassVar[constraints.Boolean] = constraints.boolean
     has_enumerate_support: bool = True
     _mean_carrier_measure: float = 0
 

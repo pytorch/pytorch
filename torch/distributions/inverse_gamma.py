@@ -40,7 +40,7 @@ class InverseGamma(TransformedDistribution):
         "concentration": constraints.positive,
         "rate": constraints.positive,
     }
-    support = constraints.positive  # type: ignore[assignment]
+    support: ClassVar[constraints.Positive] = constraints.positive  # type: ignore[assignment]
     has_rsample: bool = True
     base_dist: Gamma
 

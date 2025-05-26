@@ -125,7 +125,7 @@ class MixtureSameFamily(Distribution):
         return new
 
     @constraints.dependent_property
-    def support(self) -> Constraint:
+    def support(self) -> constraints.MixtureSameFamilyConstraint:
         return MixtureSameFamilyConstraint(self._component_distribution.support)
 
     @property

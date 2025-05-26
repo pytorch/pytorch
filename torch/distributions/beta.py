@@ -36,7 +36,7 @@ class Beta(ExponentialFamily):
         "concentration1": constraints.positive,
         "concentration0": constraints.positive,
     }
-    support = constraints.unit_interval
+    support: ClassVar[constraints.UnitInterval] = constraints.unit_interval
     has_rsample: bool = True
 
     def __init__(

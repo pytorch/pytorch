@@ -132,8 +132,9 @@ class VonMises(Distribution):
         "loc": constraints.real,
         "concentration": constraints.positive,
     }
-    support = constraints.real
+    support: ClassVar[constraints.Real] = constraints.real
     has_rsample: bool = False
+
     loc: Tensor
     concentration: Tensor
 

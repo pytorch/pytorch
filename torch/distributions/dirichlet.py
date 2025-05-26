@@ -56,7 +56,7 @@ class Dirichlet(ExponentialFamily):
     arg_constraints: ClassVar[dict[str, Constraint]] = {
         "concentration": constraints.independent(constraints.positive, 1)
     }
-    support = constraints.simplex
+    support: ClassVar[constraints.Simplex] = constraints.simplex
     has_rsample: bool = True
     concentration: Tensor
 

@@ -34,7 +34,7 @@ class FisherSnedecor(Distribution):
         "df1": constraints.positive,
         "df2": constraints.positive,
     }
-    support = constraints.positive
+    support: ClassVar[constraints.Positive] = constraints.positive
     has_rsample: bool = True
     df1: Tensor
     df2: Tensor

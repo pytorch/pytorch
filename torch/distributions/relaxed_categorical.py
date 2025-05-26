@@ -43,9 +43,8 @@ class ExpRelaxedCategorical(Distribution):
         "probs": constraints.simplex,
         "logits": constraints.real_vector,
     }
-    support = (
-        constraints.real_vector
-    )  # The true support is actually a submanifold of this.
+    # The true support is actually a submanifold of this.
+    support: ClassVar[constraints.RealVector] = constraints.real_vector
     has_rsample: bool = True
 
     def __init__(
@@ -134,7 +133,7 @@ class RelaxedOneHotCategorical(TransformedDistribution):
         "probs": constraints.simplex,
         "logits": constraints.real_vector,
     }
-    support = constraints.simplex  # type: ignore[assignment]
+    support: ClassVar[constraints.Simplex] = constraints.simplex  # type: ignore[assignment]
     has_rsample: bool = True
     base_dist: ExpRelaxedCategorical
 

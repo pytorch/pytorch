@@ -40,7 +40,8 @@ class NegativeBinomial(Distribution):
         "probs": constraints.half_open_interval(0.0, 1.0),
         "logits": constraints.real,
     }
-    support = constraints.nonnegative_integer
+    support: ClassVar[constraints.NonNegativeInteger] = constraints.nonnegative_integer
+
     total_count: Tensor
 
     def __init__(

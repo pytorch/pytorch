@@ -47,7 +47,7 @@ class OneHotCategorical(Distribution):
         "probs": constraints.simplex,
         "logits": constraints.real_vector,
     }
-    support = constraints.one_hot
+    support: ClassVar[constraints.OneHot] = constraints.one_hot
     has_enumerate_support: bool = True
 
     def __init__(

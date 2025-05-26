@@ -94,7 +94,7 @@ class LowRankMultivariateNormal(Distribution):
         "cov_factor": constraints.independent(constraints.real, 2),
         "cov_diag": constraints.independent(constraints.positive, 1),
     }
-    support = constraints.real_vector
+    support: ClassVar[constraints.RealVector] = constraints.real_vector
     has_rsample: bool = True
     loc: Tensor
     cov_factor: Tensor

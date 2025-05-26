@@ -36,7 +36,8 @@ class Poisson(ExponentialFamily):
     arg_constraints: ClassVar[dict[str, Constraint]] = {
         "rate": constraints.nonnegative,
     }
-    support = constraints.nonnegative_integer
+    support: ClassVar[constraints.NonNegativeInteger] = constraints.nonnegative_integer
+
     rate: Tensor
 
     @property

@@ -105,7 +105,7 @@ class Categorical(Distribution):
         return self._param.new(*args, **kwargs)
 
     @constraints.dependent_property(is_discrete=True, event_dim=0)
-    def support(self) -> Constraint:
+    def support(self) -> constraints.IntegerInterval:
         return constraints.integer_interval(0, self._num_events - 1)
 
     @lazy_property

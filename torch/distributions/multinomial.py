@@ -97,7 +97,7 @@ class Multinomial(Distribution):
         return self._categorical._new(*args, **kwargs)
 
     @constraints.dependent_property(is_discrete=True, event_dim=1)
-    def support(self) -> Constraint:
+    def support(self) -> constraints.Multinomial:
         return constraints.multinomial(self.total_count)
 
     @property
