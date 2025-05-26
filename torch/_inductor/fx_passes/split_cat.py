@@ -867,7 +867,8 @@ class SplitCatSimplifier:
                 elif isinstance(user_input, tuple):  # Split being simplified
                     # Verify equal split
                     subset_split_sections = split_sections[  # type: ignore[index]
-                        user_input[0] : user_input[1] + 1
+                        user_input[0] : user_input[1]
+                        + 1  # type: ignore[index]
                     ]
                     # All sections should be equal
                     if len(OrderedSet(subset_split_sections)) != 1:  # type: ignore[arg-type]
@@ -1448,7 +1449,7 @@ def has_same_parent_node(node: torch.fx.Node):
         if prev_node is None:
             prev_node = getitem.args[0]  # type: ignore[union-attr]
         else:
-            if getitem.args[0] != prev_node:
+            if getitem.args[0] != prev_node:  # type: ignore[union-attr]
                 return False
     return True
 
