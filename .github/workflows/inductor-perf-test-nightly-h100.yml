@@ -150,7 +150,7 @@ jobs:
     needs: build
     if: github.event_name == 'workflow_dispatch'
     with:
-      build-environment: linux-focal-cuda12.8-py3.10-gcc9-sm90
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm90
       dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}-cudagraphs_low_precision-${{ inputs.cudagraphs }}
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}

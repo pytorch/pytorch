@@ -48,7 +48,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: build
     with:
-      build-environment: linux-focal-cuda12.8-py3.10-gcc9-sm80
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm80
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       # disable monitor in perf tests for more investigation
