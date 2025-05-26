@@ -140,19 +140,19 @@ inline void {{kernel_name}}_mul_scale_kernel(
   }
 }
 
-// out = a * scale
+// out <- fill_val
 template <typename scalar_t>
 inline void {{kernel_name}}_fill_kernel(
-    scalar_t* a,
-    scalar_t scale,
+    scalar_t* out,
+    scalar_t fill_val,
     int64_t size) {
   auto vec_size = at::vec::Vectorized<scalar_t>::size();
-  auto vec_scale = at::vec::Vectorized<scalar_t>(scale);
+  auto vec_fill_val = at::vec::Vectorized<scalar_t>(fill_val);
   for (int64_t i = 0; i < vec_size * (size / vec_size); i += vec_size) {
-    at::native::_store(a + i, vec_scale);
+    at::native::_store(out + i, vec_fill_val);
   }
   for (int64_t i = vec_size * (size / vec_size); i < size; i++) {
-    a[i] = scale;
+    out[i] = fill_val;
   }
 }
 """
@@ -477,12 +477,18 @@ extern "C"
         int64_t cur_ekvSplitSize = (need_pack && cur_kvSplitSize % 2 != 0) ? cur_kvSplitSize + 1 : cur_kvSplitSize;
 {%- if has_full_kv_block %}
         if ( (std::find(kv_ind_mask_list.begin(), kv_ind_mask_list.end(), cur_n) == kv_ind_mask_list.end())
-             and (std::find(full_kv_ind_mask_list.begin(), full_kv_ind_mask_list.end(), cur_n) == full_kv_ind_mask_list.end()) ){
-            continue;
+             and (std::find(full_kv_ind_mask_list.begin(), full_kv_ind_mask_list.end(), cur_n) == full_kv_ind_mask_list.end()) ) {
+              if ( kv_ind_mask_list.size() == 0 and full_kv_ind_mask_list.size() == 0) {
+                {{kernel.kernel_name}}_fill_kernel<accum_t>(dst_data, 0.0, qSplitSize * headSize_v);
+              }
+              continue;
         }
 {%- else %}
         if ( std::find(kv_ind_mask_list.begin(), kv_ind_mask_list.end(), cur_n) == kv_ind_mask_list.end() ){
-            continue;
+              if ( kv_ind_mask_list.size() == 0 ) {
+                {{kernel.kernel_name}}_fill_kernel<accum_t>(dst_data, 0.0, qSplitSize * headSize_v);
+              }
+              continue;
         }
 {%- endif %}
 
