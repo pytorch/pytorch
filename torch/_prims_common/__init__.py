@@ -259,7 +259,7 @@ def check_all_strides(
 
 
 # This function is equivalent to compute_contiguous() from TensorImpl.cpp
-def is_contiguous(a: TensorLikeType, false_if_unknown=False) -> bool:
+def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
     """
     Tests whether a tensor is contiguous or not.
 
@@ -272,8 +272,8 @@ def is_contiguous(a: TensorLikeType, false_if_unknown=False) -> bool:
         guard_size_oblivious,
     )
 
-    maybe_guard_or_false = guard_or_false if false_if_unknown else guard_size_oblivious
-    maybe_guard_or_true = guard_or_true if false_if_unknown else guard_size_oblivious
+    maybe_guard_or_false = guard_or_false if false_if_dde else guard_size_oblivious
+    maybe_guard_or_true = guard_or_true if false_if_dde else guard_size_oblivious
 
     if maybe_guard_or_false(a.numel() == 0):
         return True
@@ -292,7 +292,7 @@ def is_contiguous(a: TensorLikeType, false_if_unknown=False) -> bool:
 
 
 # This function is equivalent to compute_channels_last_contiguous_2d() in TensorImpl.cpp
-def is_channels_last_contiguous_2d(a: Tensor, false_if_unknown=False) -> bool:
+def is_channels_last_contiguous_2d(a: Tensor, false_if_dde=False) -> bool:
     # NHWC or not channels last 2D contiguous
     if a.ndim != 4:
         return False
@@ -303,8 +303,8 @@ def is_channels_last_contiguous_2d(a: Tensor, false_if_unknown=False) -> bool:
         guard_size_oblivious,
     )
 
-    maybe_guard_or_false = guard_or_false if false_if_unknown else guard_size_oblivious
-    maybe_guard_or_true = guard_or_true if false_if_unknown else guard_size_oblivious
+    maybe_guard_or_false = guard_or_false if false_if_dde else guard_size_oblivious
+    maybe_guard_or_true = guard_or_true if false_if_dde else guard_size_oblivious
 
     expected_stride = 1
     for idx in (1, 3, 2, 0):
@@ -321,7 +321,7 @@ def is_channels_last_contiguous_2d(a: Tensor, false_if_unknown=False) -> bool:
     return True
 
 
-def is_channels_last_contiguous_3d(a: Tensor, false_if_unknown=False) -> bool:
+def is_channels_last_contiguous_3d(a: Tensor, false_if_dde=False) -> bool:
     # NDHWC or not channels last 3D contiguous
     if a.ndim != 5:
         return False
@@ -332,8 +332,8 @@ def is_channels_last_contiguous_3d(a: Tensor, false_if_unknown=False) -> bool:
         guard_size_oblivious,
     )
 
-    maybe_guard_or_false = guard_or_false if false_if_unknown else guard_size_oblivious
-    maybe_guard_or_true = guard_or_true if false_if_unknown else guard_size_oblivious
+    maybe_guard_or_false = guard_or_false if false_if_dde else guard_size_oblivious
+    maybe_guard_or_true = guard_or_true if false_if_dde else guard_size_oblivious
 
     expected_stride = 1
     for idx in (1, 4, 3, 2, 0):
@@ -366,16 +366,16 @@ def validate_memory_format(memory_format: torch.memory_format):
 
 
 def is_contiguous_for_memory_format(  # type: ignore[return]
-    a: Tensor, *, memory_format: torch.memory_format, false_if_unknown=False
+    a: Tensor, *, memory_format: torch.memory_format, false_if_dde=False
 ) -> bool:
     validate_memory_format(memory_format)
 
     if memory_format == torch.contiguous_format:
-        return is_contiguous(a, false_if_unknown)
+        return is_contiguous(a, false_if_dde)
     if memory_format == torch.channels_last:
-        return is_channels_last_contiguous_2d(a, false_if_unknown)
+        return is_channels_last_contiguous_2d(a, false_if_dde)
     if memory_format == torch.channels_last_3d:
-        return is_channels_last_contiguous_3d(a, false_if_unknown)
+        return is_channels_last_contiguous_3d(a, false_if_dde)
 
     torch._check(
         False,
@@ -383,26 +383,26 @@ def is_contiguous_for_memory_format(  # type: ignore[return]
     )
 
 
-def is_known_contiguous(a: TensorLikeType) -> bool:
-    return is_contiguous(a, false_if_unknown=True)
+def definitely_contiguous(a: TensorLikeType) -> bool:
+    return is_contiguous(a, false_if_dde=True)
 
 
 # similar to is_channels_last_contiguous_2d but return false on data dependency.
 def is_known_channels_last_contiguous_2d(a: Tensor) -> bool:
-    return is_channels_last_contiguous_2d(a, false_if_unknown=True)
+    return is_channels_last_contiguous_2d(a, false_if_dde=True)
 
 
 # similar to is_channels_last_contiguous_3d but return false on data dependency.
 def is_known_channels_last_contiguous_3d(a: Tensor) -> bool:
-    return is_channels_last_contiguous_3d(a, false_if_unknown=True)
+    return is_channels_last_contiguous_3d(a, false_if_dde=True)
 
 
 # similar to is_contiguous_for_memory_format but return false on data dependency.
-def is_known_contiguous_for_memory_format(  # type: ignore[return]
+def definitely_contiguous_for_memory_format(  # type: ignore[return]
     a: Tensor, *, memory_format: torch.memory_format
 ) -> bool:
     return is_contiguous_for_memory_format(
-        a, memory_format=memory_format, false_if_unknown=True
+        a, memory_format=memory_format, false_if_dde=True
     )
 
 
@@ -539,10 +539,10 @@ def compute_elementwise_output_logical_to_physical_perm(
     is_contiguous = True
     is_channels_last = True
     for t in tensors:
-        is_contiguous = is_contiguous and is_known_contiguous_for_memory_format(
+        is_contiguous = is_contiguous and definitely_contiguous_for_memory_format(
             t, memory_format=torch.contiguous_format
         )
-        is_channels_last = is_channels_last and is_known_contiguous_for_memory_format(
+        is_channels_last = is_channels_last and definitely_contiguous_for_memory_format(
             t, memory_format=torch.channels_last
         )
 

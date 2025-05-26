@@ -1997,7 +1997,7 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   auto sym_sizes = self.sym_sizes();
   auto sym_strides = self.sym_strides();
   auto sym_numel = self.sym_numel();
-  if (is_known_contiguous(sym_sizes, sym_strides, sym_numel) &&
+  if (definitely_contiguous(sym_sizes, sym_strides, sym_numel) &&
       !self.is_mkldnn()) {
     return self.view_symint(proposed_shape);
   }
