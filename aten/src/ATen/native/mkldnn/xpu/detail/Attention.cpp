@@ -318,8 +318,8 @@ partition& find_or_create_graph_partition(
 }
 
 void alloc_with_matching_layout(
-    const Tensor& q,
-    Tensor& output,
+    const at::Tensor& q,
+    at::Tensor& output,
     const std::vector<int64_t>& shape) {
   TORCH_INTERNAL_ASSERT(
       shape.size() == q.sizes().size(),
