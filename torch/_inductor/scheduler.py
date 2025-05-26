@@ -2944,9 +2944,16 @@ class Scheduler:
                         False,
                         False
                     )]
-                    subgraph_nodes[-1].snodes[-1].node.name = "buf0"
+                    subgraph_nodes[-1].snodes[-1].node.name = node1.node.name
+                    subgraph_nodes[-1].snodes[-1].node.layout = node1.node.layout
                     subgraph_nodes[-1].snodes[-1].outputs_by_name["buf0"] = subgraph_nodes[-1].snodes[-1].outputs_by_name["decompose_k_mm_128_split_6_buf2"]
                     del subgraph_nodes[-1].snodes[-1].outputs_by_name["decompose_k_mm_128_split_6_buf2"]
+
+                    subgraph_nodes[-1].snodes[0].node.name = node1.node.name
+                    subgraph_nodes[-1].snodes[0].node.layout = node1.node.layout
+                    subgraph_nodes[-1].snodes[0].outputs_by_name["buf0"] = subgraph_nodes[-1].snodes[0].outputs_by_name["decompose_k_mm_128_split_6_buf1"]
+                    del subgraph_nodes[-1].snodes[0].outputs_by_name["decompose_k_mm_128_split_6_buf1"]
+
                 else:
                     subgraph_nodes[-1].node.users = [NodeUser(
                         node2,
@@ -2955,6 +2962,7 @@ class Scheduler:
                     )]
 
                 subgraph_nodes[-1].snodes[-1]._compute_attrs()
+                subgraph_nodes[-1].snodes[0]._compute_attrs()
 
                 # Set other attributes
                 for subgraph_node in subgraph_nodes:
@@ -3022,6 +3030,7 @@ class Scheduler:
                 self.debug_after_fusion=True
                 # Almost need to merge the schedulers here
                 self.nodes = self.fuse_nodes(self.nodes)
+                import pdb; pdb.set_trace()
                 return "done"
                 # with multi_node.swap_as_triton_caller(choice):
                 future_choices.append((choice, *compile_kernel(node_list_fused)))
