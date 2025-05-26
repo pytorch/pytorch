@@ -450,24 +450,24 @@ extern "C"
           qStrideM
         );
       }
-      auto i_kvi_kk = is_broadcast_bs_kvi ? i/bs_shards_kvi : i;
-      auto j_kvi_kk = is_broadcast_head_kvi ? j/gqa_shards_kvi : j;
-      auto kv_logical_kk_data = kv_num_blocks_data + i_kvi_kk * num_kviStrideB +
-                              j_kvi_kk * num_kviStrideH + k;
+      auto i_kvi = is_broadcast_bs_kvi ? i/bs_shards_kvi : i;
+      auto j_kvi = is_broadcast_head_kvi ? j/gqa_shards_kvi : j;
+      auto kv_logical_num_data = kv_num_blocks_data + i_kvi * num_kviStrideB +
+                              j_kvi * num_kviStrideH + k;
 
       std::vector<int> kv_ind_mask_list;
-      for(int kk = 0; kk < *kv_logical_kk_data; kk++){
-        auto kv_logical_data = kv_indices_data + i_kvi_kk * kviStrideB +
-                                  j_kvi_kk * kviStrideH + k*kviStrideQ + kk;
+      for(int kv_i = 0; kv_i < *kv_logical_num_data; kv_i++){
+        auto kv_logical_data = kv_indices_data + i_kvi * kviStrideB +
+                                  j_kvi * kviStrideH + k*kviStrideQ + kv_i;
         kv_ind_mask_list.push_back(*kv_logical_data);
       }
 {%- if has_full_kv_block %}
-      auto full_kv_logical_kk_data = full_kv_num_blocks_data + i_kvi_kk * num_kviStrideB +
-                              j_kvi_kk * num_kviStrideH + k;
+      auto full_kv_logical_num_data = full_kv_num_blocks_data + i_kvi * num_kviStrideB +
+                              j_kvi * num_kviStrideH + k;
       std::vector<int> full_kv_ind_mask_list;
-      for(int kk = 0; kk < *full_kv_logical_kk_data; kk++){
-        auto full_kv_logical_data = full_kv_indices_data + i_kvi_kk * full_kviStrideB +
-                                  j_kvi_kk * full_kviStrideH + k*full_kviStrideQ + kk;
+      for(int kv_i = 0; kv_i < *full_kv_logical_num_data; kv_i++){
+        auto full_kv_logical_data = full_kv_indices_data + i_kvi * full_kviStrideB +
+                                  j_kvi * full_kviStrideH + k*full_kviStrideQ + kv_i;
         full_kv_ind_mask_list.push_back(*full_kv_logical_data);
       }
 {%- endif %}
