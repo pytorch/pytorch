@@ -696,7 +696,6 @@ Tensor convolution_pointwise(
   Attr att;
   att = construct_unary_attr(att, attr, scalars, algorithm);
   const Tensor bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
-  std::vector<int64_t> output_padding = {0};
 
   return _convolution(
       input_t,
@@ -706,7 +705,7 @@ Tensor convolution_pointwise(
       padding,
       dilation,
       /*transposed*/ false,
-      output_padding,
+      /*output_padding*/ {0},
       groups,
       att);
 }
@@ -745,7 +744,7 @@ Tensor convolution_pointwise_binary(
       padding,
       dilation,
       /*transposed*/ false,
-      {{0, 0}},
+      /*output_padding*/ {0},
       groups,
       attr);
 
@@ -787,7 +786,7 @@ Tensor& convolution_pointwise_binary_(
       padding,
       dilation,
       /*transposed*/ false,
-      {{0, 0}},
+      /*output_padding*/ {0},
       groups,
       attr);
 
