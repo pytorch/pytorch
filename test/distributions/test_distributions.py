@@ -1482,15 +1482,18 @@ class TestDistributions(DistributionsTestCase):
         for Dist, params in _get_examples():
             for param in params:
                 d = Dist(**param)
+
                 event_dim = len(d.event_shape)
                 self.assertEqual(d.support.event_dim, event_dim)
                 try:
-                    self.assertEqual(Dist.support.event_dim, event_dim)
+                    self.assertEqual(Dist.support.event_dim, event_dim)  # type: ignore[attr-defined]
                 except NotImplementedError:
                     pass
+
                 is_discrete = d.support.is_discrete
+                self.assertEqual(d.support.is_discrete, is_discrete)
                 try:
-                    self.assertEqual(Dist.support.is_discrete, is_discrete)
+                    self.assertEqual(Dist.support.is_discrete, is_discrete)  # type: ignore[attr-defined]
                 except NotImplementedError:
                     pass
 
