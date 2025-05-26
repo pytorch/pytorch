@@ -244,7 +244,7 @@ class SymIntEqByExpr:
 
 
 def _nested_int_aware_sort(
-    tup: tuple[IntLikeType, int],
+    tup: tuple[IntLikeType, int]
 ) -> tuple[int, IntLikeType, int]:
     return (
         # Order nested ints by their coefficients.
@@ -1380,7 +1380,7 @@ def sym_or(x: BoolLikeType, *others: BoolLikeType) -> BoolLikeType:
 
 
 def guard_scalar(
-    a: Union[SymBool, SymInt, SymFloat, int, bool, float],
+    a: Union[SymBool, SymInt, SymFloat, int, bool, float]
 ) -> Union[bool, int, float]:
     if isinstance(a, (SymBool, bool)):
         return guard_bool(a)
@@ -2036,7 +2036,7 @@ class TrackedFake:
 
 
 def is_symbolic(
-    val: Union[int, SymInt, float, SymFloat, bool, SymBool],
+    val: Union[int, SymInt, float, SymFloat, bool, SymBool]
 ) -> TypeGuard[Union[SymInt, SymFloat, SymBool]]:
     if isinstance(val, (int, float, bool)):
         return False
@@ -2272,7 +2272,7 @@ def _sympy_cast_symbool_to_symint_guardless(x: SympyBoolean) -> sympy.Expr:
 
 
 def cast_symbool_to_symint_guardless(
-    symbool: Union[bool, torch.SymBool],
+    symbool: Union[bool, torch.SymBool]
 ) -> Union[int, torch.SymInt]:
     if isinstance(symbool, bool):
         return 1 if symbool else 0
@@ -6927,6 +6927,8 @@ class ShapeEnv:
             },
         )
 
+    @lru_cache(256)
+    @record_shapeenv_event(save_tracked_fakes=True)
     def evaluate_expr(
         self,
         orig_expr: sympy.Basic,
@@ -7016,8 +7018,7 @@ class ShapeEnv:
         ):
             return orig_expr
 
-        # Don't track this one. (Because this cache is inside this function the
-        # cache only lasts for the invocation of this function call)
+        # Don't track this one
         @functools.lru_cache(None)
         def compute_concrete_val() -> sympy.Basic:
             if hint is None:
@@ -7098,11 +7099,9 @@ class ShapeEnv:
             if static_expr is not None:
                 self.log.debug(
                     "eval %s == %s [statically known]",
-                    (
-                        f"size_oblivious({orig_expr})"
-                        if size_oblivious
-                        else size_oblivious
-                    ),
+                    f"size_oblivious({orig_expr})"
+                    if size_oblivious
+                    else size_oblivious,
                     static_expr,
                 )
                 if (
