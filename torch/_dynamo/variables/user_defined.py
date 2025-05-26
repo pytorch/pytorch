@@ -1616,11 +1616,15 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
             assert self.source is None, (
                 "set_vt must be constructed by builder.py when source is present"
             )
-            init_args = kwargs.get("init_args", {})
-            tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
-            self._set_vt = variables.BuiltinVariable(python_type).call_function(
-                tx, init_args, {}
-            )
+            if python_type is set:
+                # set is initialized later
+                self._set_vt = variables.SetVariable({}, mutation_type=ValueMutationNew())
+            else:
+                init_args = kwargs.get("init_args", {})
+                tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
+                self._set_vt = variables.BuiltinVariable(python_type).call_function(
+                    tx, init_args, {}
+                )
 
     def call_method(
         self,
