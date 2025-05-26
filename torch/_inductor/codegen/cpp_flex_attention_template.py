@@ -454,21 +454,22 @@ extern "C"
       auto j_kvi = is_broadcast_head_kvi ? j/gqa_shards_kvi : j;
       auto kv_logical_num_data = kv_num_blocks_data + i_kvi * num_kviStrideB +
                               j_kvi * num_kviStrideH + k;
-
-      std::vector<int> kv_ind_mask_list;
-      for(int kv_i = 0; kv_i < *kv_logical_num_data; kv_i++){
+      auto kv_indice_num = *kv_logical_num_data;
+      std::vector<int> kv_indice_list(kv_indice_num);
+      for(int kv_i = 0; kv_i < kv_indice_num; kv_i++){
         auto kv_logical_data = kv_indices_data + i_kvi * kviStrideB +
                                   j_kvi * kviStrideH + k*kviStrideQ + kv_i;
-        kv_ind_mask_list.push_back(*kv_logical_data);
+        kv_indice_list[kv_i] = *kv_logical_data;
       }
 {%- if has_full_kv_block %}
       auto full_kv_logical_num_data = full_kv_num_blocks_data + i_kvi * num_kviStrideB +
                               j_kvi * num_kviStrideH + k;
-      std::vector<int> full_kv_ind_mask_list;
-      for(int kv_i = 0; kv_i < *full_kv_logical_num_data; kv_i++){
+      auto full_kv_indice_num = *full_kv_logical_num_data;
+      std::vector<int> full_kv_indice_list;
+      for(int kv_i = 0; kv_i < full_kv_indice_num; kv_i++){
         auto full_kv_logical_data = full_kv_indices_data + i_kvi * full_kviStrideB +
                                   j_kvi * full_kviStrideH + k*full_kviStrideQ + kv_i;
-        full_kv_ind_mask_list.push_back(*full_kv_logical_data);
+        full_kv_indice_list[kv_i] = *full_kv_logical_data;
       }
 {%- endif %}
       for (int64_t n = 0; n < kvSize; n += kvSplitSize) {
@@ -476,16 +477,16 @@ extern "C"
         int64_t cur_kvSplitSize = std::min(kvSplitSize, kvSize - n);
         int64_t cur_ekvSplitSize = (need_pack && cur_kvSplitSize % 2 != 0) ? cur_kvSplitSize + 1 : cur_kvSplitSize;
 {%- if has_full_kv_block %}
-        if ( (std::find(kv_ind_mask_list.begin(), kv_ind_mask_list.end(), cur_n) == kv_ind_mask_list.end())
-             and (std::find(full_kv_ind_mask_list.begin(), full_kv_ind_mask_list.end(), cur_n) == full_kv_ind_mask_list.end()) ) {
-              if ( kv_ind_mask_list.size() == 0 and full_kv_ind_mask_list.size() == 0) {
+        if ( (std::find(kv_indice_list.begin(), kv_indice_list.end(), cur_n) == kv_indice_list.end())
+             and (std::find(full_kv_indice_list.begin(), full_kv_indice_list.end(), cur_n) == full_kv_indice_list.end()) ) {
+              if ( kv_indice_list.size() == 0 and full_kv_indice_list.size() == 0) {
                 {{kernel.kernel_name}}_fill_kernel<accum_t>(dst_data, 0.0, qSplitSize * headSize_v);
               }
               continue;
         }
 {%- else %}
-        if ( std::find(kv_ind_mask_list.begin(), kv_ind_mask_list.end(), cur_n) == kv_ind_mask_list.end() ){
-              if ( kv_ind_mask_list.size() == 0 ) {
+        if ( std::find(kv_indice_list.begin(), kv_indice_list.end(), cur_n) == kv_indice_list.end() ){
+              if ( kv_indice_list.size() == 0 ) {
                 {{kernel.kernel_name}}_fill_kernel<accum_t>(dst_data, 0.0, qSplitSize * headSize_v);
               }
               continue;
@@ -562,7 +563,7 @@ extern "C"
             {{ template.modification(score_mod, score_buf_name, score_buf_idx)|indent(12, false) }}
         }
 
-        if ((std::find(kv_ind_mask_list.begin(), kv_ind_mask_list.end(), cur_n) != kv_ind_mask_list.end()) ){
+        if ((std::find(kv_indice_list.begin(), kv_indice_list.end(), cur_n) != kv_indice_list.end()) ){
           // Apply block mask, fill unused with -inf
           {
               {{ template.generate_other_buffer("mask_others", -1, "len_mask_other", kernel.args) }}
