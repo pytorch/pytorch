@@ -36,7 +36,7 @@ bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
 // its not or if we can't determine if it is contiguous due to unbacked symbols
 // (it could be either in that case based on the actual runtime data).
 template <typename T>
-bool is_known_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
+bool definitely_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
   if (TORCH_GUARD_OR_FALSE(sym_eq(numel, 0))) {
     return true;
   }

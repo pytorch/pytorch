@@ -58,6 +58,9 @@ struct BlendHalfRegs<index, false> {
   }
 };
 
+template <>
+struct is_vec_specialized_for<c10::Half> : std::bool_constant<true> {};
+
 // On ARM, Half type supports float16_t->Half constructor and Half->float16_t
 // conversion
 template <>
