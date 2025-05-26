@@ -704,10 +704,10 @@ class TestMaxAutotune(TestCase):
             diag = torch.diagonal(mul)
             diag.copy_(other)
             x = torch.mm(mul, z)
-            y = torch.diagonal(x).add_(torch.tensor(1, device="cuda"))
+            y = torch.diagonal(x).add_(torch.tensor(1, device=GPU_TYPE))
             return y
 
-        t = functools.partial(torch.randn, device="cuda")
+        t = functools.partial(torch.randn, device=GPU_TYPE)
         inps = (t(3, 3), t(3, 3), t(3, 3), t(3))
         fn = torch.compile(f, mode="max-autotune-no-cudagraphs")
         (
@@ -1239,14 +1239,14 @@ class TestMaxAutotune(TestCase):
                 self.assertExpectedInline(
                     remove_white_space(cache_key),
                     remove_white_space(
-                        """
-                    {'input_nodes': ["[[10, 22], [22, 1], torch.float32, device(type='cuda', index=0), 0]",
-                                    "[[22, 30], [30, 1], torch.float32, device(type='cuda', index=0), 0]"],
+                        f"""
+                    {{'input_nodes': ["[[10, 22], [22, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]",
+                                    "[[22, 30], [30, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]"],
                     'num_stages': 1, 'num_warps': 2, 'prefix_args': 0, 'suffix_args': 0,
-                    'call_sizes': [10, 30], 'layout': "[[10, 30], [30, 1], torch.float32, device(type='cuda', index=0), 0]",
+                    'call_sizes': [10, 30], 'layout': "[[10, 30], [30, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]",
                     'num_consumer_groups': 0, 'num_buffers_warp_spec': 0,
-                    'kwargs': {'EVEN_K': False, 'ALLOW_TF32': True, 'USE_FAST_ACCUM': False, 'ACC_TYPE': 'tl.float32',
-                    'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 16, 'GROUP_M': 8}}"""
+                    'kwargs': {{'EVEN_K': False, 'ALLOW_TF32': True, 'USE_FAST_ACCUM': False, 'ACC_TYPE': 'tl.float32',
+                    'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 16, 'GROUP_M': 8}}}}"""
                     ),
                 )
 
@@ -1277,13 +1277,13 @@ class TestMaxAutotune(TestCase):
                 self.assertExpectedInline(
                     remove_white_space(cache_key),
                     remove_white_space(
-                        """{'input_nodes': ["[[s77, s17], [s17, 1], torch.float32, device(type='cuda', index=0), 0]",
-                                            "[[s17, s94], [s94, 1], torch.float32, device(type='cuda', index=0), 0]"],
+                        f"""{{'input_nodes': ["[[s77, s17], [s17, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]",
+                                            "[[s17, s94], [s94, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]"],
                             'num_stages': 1, 'num_warps': 2, 'prefix_args': 0, 'suffix_args': 0, 'call_sizes': [s77, s94],
-                            'layout': "[[s77, s94], [s94, 1], torch.float32, device(type='cuda', index=0), 0]",
-                            'num_consumer_groups': 0, 'num_buffers_warp_spec': 0, 'kwargs': {'EVEN_K': False,
+                            'layout': "[[s77, s94], [s94, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]",
+                            'num_consumer_groups': 0, 'num_buffers_warp_spec': 0, 'kwargs': {{'EVEN_K': False,
                             'ALLOW_TF32': True, 'USE_FAST_ACCUM': False,
-                            'ACC_TYPE': 'tl.float32', 'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 16, 'GROUP_M': 8}}"""
+                            'ACC_TYPE': 'tl.float32', 'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 16, 'GROUP_M': 8}}}}"""
                     ),
                 )
 
