@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     skipIfNoXPU,
     skipIfRocm,
     skipIfRocmArch,
+    skipIfXpu,
     TEST_ACL,
     TEST_MKL,
     xfailIfACL,
@@ -133,8 +134,16 @@ def cal_conv_generated_kernel_number(mod, input, dtype, dim=4, device="cpu"):
     return input_kernel + output_kernel
 
 
-@config.patch({"freezing": True})
 class TestPatternMatcherBase(TestCase):
+    def setUp(self):
+        TestCase.setUp(self)
+        self.ctx_stack = contextlib.ExitStack()
+        self.ctx_stack.enter_context(config.patch({"freezing": True}))
+
+    def tearDown(self):
+        TestCase.tearDown(self)
+        self.ctx_stack.close()
+
     def _check_unary_is_decomposed(self, unary_fn):
         return not any(
             isinstance(unary_fn, fn)
@@ -4223,8 +4232,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
 class TestDynamicPatternMatcherGeneric(TestPatternMatcherBase):
     def setUp(self):
-        TestCase.setUp(self)
-        self.ctx_stack = contextlib.ExitStack()
+        super().setUp()
         self.ctx_stack.enter_context(
             # When testing kernel counts, unspecializing float causes wobbling of our tests because
             # we end up reusing the same compiled region across tests. Thus we purposely specialize floats
@@ -4238,10 +4246,6 @@ class TestDynamicPatternMatcherGeneric(TestPatternMatcherBase):
                 }
             )
         )
-
-    def tearDown(self):
-        TestCase.tearDown(self)
-        self.ctx_stack.close()
 
     _test_conv_unary_base = TestPatternMatcherGeneric._test_conv_unary_base
     test_conv2d_unary_dynamic_shapes = TestPatternMatcherGeneric.test_conv2d_unary
@@ -4326,14 +4330,23 @@ class TestDynamicPatternMatcherGeneric(TestPatternMatcherBase):
             self._test_common(mod, (v,), matcher_check_fn, rtol=1e-2, atol=1e-2)
 
 
-@dynamo_config.patch(
-    {
-        "dynamic_shapes": True,
-        "assume_static_by_default": False,
-        "specialize_float": True,
-    }
-)
 class TestDynamicPatternMatcher(TestPatternMatcherBase):
+    def setUp(self):
+        super().setUp()
+        self.ctx_stack.enter_context(
+            # When testing kernel counts, unspecializing float causes wobbling of our tests because
+            # we end up reusing the same compiled region across tests. Thus we purposely specialize floats
+            # here since we primarily care about number of kernels generated in the absence of compile
+            # caching.
+            dynamo_config.patch(
+                {
+                    "dynamic_shapes": True,
+                    "assume_static_by_default": False,
+                    "specialize_float": True,
+                }
+            )
+        )
+
     @xfailIfACL
     def test_qconv2d_maxpool2d_linear_dynamic_cpu(self, include_ops=None):
         r"""

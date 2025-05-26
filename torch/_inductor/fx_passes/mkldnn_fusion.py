@@ -1327,7 +1327,7 @@ if torch._C._has_mkldnn:
                     if has_free_symbols(batch_size)
                     else batch_size,
                 )
-                packed_linear_inputs: Tuple[Any, ...]
+                packed_linear_inputs: tuple[Any, ...]
                 if is_xpu:
                     packed_linear_inputs = (input, transpose_weight_node)
                 else:
