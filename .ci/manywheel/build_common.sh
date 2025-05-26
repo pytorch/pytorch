@@ -34,6 +34,9 @@ elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
 
     retry apt-get update
     retry apt-get -y install zip openssl
+else
+    echo "Unknown OS: '$OS_NAME'"
+    exit 1
 fi
 
 # We use the package name to test the package by passing this to 'pip install'

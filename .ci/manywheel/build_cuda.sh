@@ -91,6 +91,9 @@ elif [[ "$OS_NAME" == *"Red Hat Enterprise Linux"* ]]; then
     LIBGOMP_PATH="/usr/lib64/libgomp.so.1"
 elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
     LIBGOMP_PATH="/usr/lib/x86_64-linux-gnu/libgomp.so.1"
+else
+    echo "Unknown OS: '$OS_NAME'"
+    exit 1
 fi
 
 DEPS_LIST=(
@@ -100,16 +103,6 @@ DEPS_SONAME=(
     "libgomp.so.1"
 )
 
-# CUDA 11.8 have to ship the libcusparseLt.so.0 with the binary
-# since nvidia-cusparselt-cu11 is not available in PYPI
-if [[ $USE_CUSPARSELT == "1" && $CUDA_VERSION == "11.8" ]]; then
-        DEPS_SONAME+=(
-            "libcusparseLt.so.0"
-        )
-        DEPS_LIST+=(
-            "/usr/local/cuda/lib64/libcusparseLt.so.0"
-        )
-fi
 
 # CUDA_VERSION 12.6, 12.8
 if [[ $CUDA_VERSION == 12* ]]; then
@@ -195,6 +188,17 @@ elif [[ $CUDA_VERSION == "11.8" ]]; then
     export TORCH_NVCC_FLAGS="-Xfatbin -compress-all --threads 2"
     # Bundle ptxas into the wheel, see https://github.com/pytorch/pytorch/pull/119750
     export BUILD_BUNDLE_PTXAS=1
+
+    # CUDA 11.8 have to ship the libcusparseLt.so.0 with the binary
+    # since nvidia-cusparselt-cu11 is not available in PYPI
+    if [[ $USE_CUSPARSELT == "1" ]]; then
+        DEPS_SONAME+=(
+            "libcusparseLt.so.0"
+        )
+        DEPS_LIST+=(
+            "/usr/local/cuda/lib64/libcusparseLt.so.0"
+        )
+    fi
 
     if [[ -z "$PYTORCH_EXTRA_INSTALL_REQUIREMENTS" ]]; then
         echo "Bundling with cudnn and cublas."
