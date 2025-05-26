@@ -189,7 +189,6 @@ torchbench_setup_macos() {
 
 conda_benchmark_deps() {
   conda install -y astunparse numpy scipy ninja pyyaml setuptools cmake typing-extensions requests protobuf numba cython scikit-learn
-  conda install -y -c conda-forge librosa
 }
 
 
