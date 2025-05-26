@@ -692,6 +692,7 @@ Tensor convolution_pointwise(
     std::string_view attr,
     torch::List<std::optional<at::Scalar>> scalars,
     std::optional<std::string_view> algorithm) {
+  c10::DeviceGuard device_guard(input_t.device());
   Attr att;
   att = construct_unary_attr(att, attr, scalars, algorithm);
   const Tensor bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
@@ -724,6 +725,7 @@ Tensor convolution_pointwise_binary(
     std::optional<std::string_view> unary_attr,
     torch::List<std::optional<at::Scalar>> unary_scalars,
     std::optional<std::string_view> unary_algorithm) {
+  c10::DeviceGuard device_guard(input_t.device());
   Tensor output;
   Tensor bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
   // Step1: Construct binary attr
@@ -765,6 +767,7 @@ Tensor& convolution_pointwise_binary_(
     std::optional<std::string_view> unary_attr,
     torch::List<std::optional<at::Scalar>> unary_scalars,
     std::optional<std::string_view> unary_algorithm) {
+  c10::DeviceGuard device_guard(input_t.device());
   Tensor bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
   // Step1: Construct binary attr
   Attr attr;
