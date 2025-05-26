@@ -1,0 +1,2 @@
+def empty_float_list_test(y: Tensor) -> List[float]:
+  return [1., 2., 3.]

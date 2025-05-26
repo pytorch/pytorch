@@ -1,0 +1,55 @@
+name: Nightly Upload to s3
+
+on:
+  schedule:
+    # Choose a random time near midnight PST because it may be delayed if there are high loads
+    - cron:  37 7 * * *
+  pull_request:
+    paths:
+      - 'tools/stats/upload_external_contrib_stats.py'
+      - '.github/workflows/nightly-s3-uploads.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+
+jobs:
+  upload-stats-to-s3:
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-22.04
+    environment: upload-stats
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - run: |
+          pip3 install requests==2.32.2 boto3==1.35.42
+
+      - name: Authenticate with AWS
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_upload_external_contrib_stats
+          aws-region: us-east-1
+
+      - name: Upload external contribution stats
+        uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          timeout_minutes: 10
+          max_attempts: 10
+          retry_wait_seconds: 90
+          command: |
+            echo "Uploading external contribution stats for 10 days starting on" "$(date -d '10 days ago' '+%Y-%m-%d')"
+            python3 -m tools.stats.upload_external_contrib_stats --startDate "$(date -d '10 days ago' '+%Y-%m-%d')" --length 10

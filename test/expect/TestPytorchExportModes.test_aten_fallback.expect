@@ -1,0 +1,18 @@
+ModelProto {
+  producer_name: "pytorch"
+  domain: ""
+  doc_string: ""
+  graph:
+    GraphProto {
+      name: "torch-jit-export"
+      inputs: [{name: "0", type:Tensor dims: 3 4},{name: "1", type:Tensor dims: 3 4}]
+      outputs: [{name: "4", type:Tensor dims: 3 3},{name: "5", type:Tensor dims: 3 4}]
+      initializers: []
+      nodes: [
+        Node {type: "Add", inputs: [0,1], outputs: [2], attributes: []},
+        Node {type: "Constant", inputs: [], outputs: [3], attributes: [{ name: 'value', type: tensor, value:TensorProto shape: []}]},
+        Node {type: "ATen", domain: "org.pytorch.aten", inputs: [2,3], outputs: [4,5], attributes: [{ name: 'operator', type: string, value: 'qr'}, { name: 'overload_name', type: string, value: ''}]}
+      ]
+    }
+  opset_import: [OperatorSetIdProto { domain: }OperatorSetIdProto { domain: org.pytorch.aten}],
+}
