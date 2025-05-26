@@ -9,7 +9,7 @@ Python polyfills for common builtins.
 # mypy: allow-untyped-defs
 
 import types
-from collections.abc import Iterable, MutableMapping, Sequence
+from collections.abc import Hashable, Iterable, MutableMapping, Sequence
 from itertools import repeat as _repeat
 from typing import Any, Callable, TYPE_CHECKING
 
@@ -119,9 +119,15 @@ def set_symmetric_difference_update(set1, set2):
 
 
 def set_isdisjoint(set1, set2):
+    if not isinstance(set2, Iterable):
+        raise TypeError(f"'{type(set2)}' object is not iterable")
+
     for x in set1:
-        if x in set2:
-            return False
+        for y in set2:
+            if not isinstance(y, Hashable):
+                raise TypeError(f"unhashable type: '{type(y)}'")
+            if x == y:
+                return False
     return True
 
 
@@ -129,10 +135,18 @@ def set_intersection(set1, *others):
     if len(others) == 0:
         return set1.copy()
 
+    if not all(isinstance(s, Iterable) for s in others):
+        raise TypeError(f"set.difference expected an iterable, got {type(others)}")
+
+    for s in others:
+        if any(not isinstance(x, Hashable) for x in s):
+            raise TypeError("unhashable type")
+
+    # return a new set with elements common in all sets
     intersection_set = set()
     for x in set1:
         for set2 in others:
-            if x not in set2:
+            if not any(x == y for y in set2):
                 break
         else:
             intersection_set.add(x)
@@ -147,9 +161,21 @@ def set_intersection_update(set1, *others):
 
 def set_union(set1, *others):
     # frozenset also uses this function
+    if len(others) == 0:
+        return set1.copy()
+
+    if not all(isinstance(s, Iterable) for s in others):
+        raise TypeError(f"set.union expected an iterable, got {type(others)}")
+
+    for s in others:
+        if any(not isinstance(x, Hashable) for x in s):
+            raise TypeError("unhashable type")
+
     union_set = set(set1.copy())
     for set2 in others:
         set_update(union_set, set2)
+
+    # frozenset also uses this function
     return type(set1)(union_set)
 
 
@@ -169,6 +195,10 @@ def set_difference(set1, *others):
 
     if not all(isinstance(s, Iterable) for s in others):
         raise TypeError(f"set.difference expected an iterable, got {type(others)}")
+
+    for s in others:
+        if any(not isinstance(x, Hashable) for x in s):
+            raise TypeError("unhashable type")
 
     difference_set = set()
     for x in set1:
