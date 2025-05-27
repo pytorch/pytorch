@@ -21,6 +21,7 @@ from contextlib import nullcontext
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
+import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dynamo.utils import detect_fake_mode, dynamo_timed, lazy_format_graph_code
@@ -34,16 +35,12 @@ from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.types import py_sym_types
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torchgen.utils import dataclass_repr
 
 from .. import config
-from .autograd_cache import (
-    AOTAutogradCache,
-    AOTAutogradCacheEntry,
-    CompiledBackward,
-    CompiledForward,
-    should_use_remote_autograd_cache,
-)
+from .autograd_cache import AOTAutogradCache, should_use_remote_autograd_cache
 from .dispatch_and_compile_graph import (
     aot_dispatch_autograd_graph,
     aot_dispatch_base_graph,
@@ -259,13 +256,12 @@ def aot_dispatch_base(
     )
     cache_info = aot_config.cache_info
     if cache_info is not None:
-        if fw_key := getattr(compiled_fw, "_fx_graph_cache_key", None):
-            debug_lines = getattr(compiled_fw, "_fx_graph_cache_debug_lines", [])
+        if hasattr(compiled_fw, "_fx_graph_cache_key"):
             time_taken_ns = time.time_ns() - cache_info.start_time_ns
             guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
-            entry = AOTAutogradCacheEntry(
-                compiled_fw=CompiledForward((fw_key, debug_lines), getattr(compiled_fw, "guards_expr", None)),  # type: ignore[arg-type]
-                compiled_bw=None,
+            entry = AOTAutogradCache.make_entry(
+                compiled_fw_func=compiled_fw,  # type: ignore[arg-type]
+                compiled_bw_func=None,
                 aot_joint_graph_str=None,
                 aot_forward_graph_str=aot_forward_graph_str,
                 aot_backward_graph_str=None,
@@ -278,6 +274,8 @@ def aot_dispatch_base(
                 backward_time_taken_ns=0,
                 sanitized_aot_config=sanitize_aot_config(aot_config),
                 guards_expr=guards_expr,
+                backward_state_indices=None,
+                num_symints_saved_for_bw=None,
             )
             AOTAutogradCache.save(
                 cache_info.cache_key, entry, remote=should_use_remote_autograd_cache()
@@ -771,6 +769,463 @@ def run_joint_graph_passes_on_hops(
     return joint_gm
 
 
+def maybe_log_graph(
+    gm,
+    graph_name,
+    aot_config,
+    structured_log_prefix_fn,
+    out_structured_logs: Optional[list[str]] = None,
+):
+    if not aot_config.enable_log:
+        return
+    aot_graphs_log.debug(
+        "%s",
+        lazy_format_graph_code(
+            f"{graph_name}",
+            gm,
+            aot_config.aot_id,
+            include_stride=True,
+            include_device=True,
+            colored=True,
+        ),
+    )
+
+    def gm_str_fn() -> str:
+        return gm.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        )
+
+    if out_structured_logs is not None:
+        out_structured_logs.append(f"{structured_log_prefix_fn()}:{gm_str_fn()}")
+    else:
+        trace_structured(
+            f"{structured_log_prefix_fn()}",
+            payload_fn=lambda: gm_str_fn(),
+        )
+
+
+def create_wrap_fn(fn, args):
+    from functools import wraps
+
+    from torch.fx.experimental.proxy_tensor import maybe_enable_thunkify
+
+    from .functional_utils import from_fun, has_data_mutation, to_fun
+
+    def assert_no_mutation(t):
+        assert not has_data_mutation(
+            t
+        ), "Saved tensors hooks with inputs mutations are not allowed"
+
+    @wraps(fn)
+    def _wrapper(*args):
+        with maybe_enable_thunkify():
+            disable_above = torch._C._ExcludeDispatchKeyGuard(
+                torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+            )
+
+            with disable_above:
+                f_args = pytree.tree_map(to_fun, args)
+                f_outs = fn(*f_args)
+                pytree.tree_map(assert_no_mutation, f_args)
+                return pytree.tree_map(from_fun, f_outs)
+
+    return _wrapper, args
+
+
+def prepare_hook_gm(aot_config, fn, args):
+    from torch._functorch._aot_autograd.dispatch_and_compile_graph import _create_graph
+
+    fn, args = create_wrap_fn(fn, args)
+    gm = _create_graph(fn, args, aot_config=aot_config)
+    return gm
+
+
+# Inline Autograd saved_tensors_hooks into epilogue of forward graph
+# and prologue of backward graph.
+# This changes forward graph outputs and inputs.
+# Pack hook can return tensors, sym scalars, constants.
+# All tensors to save for backward will be grouped together at front.
+# Sym scalars grouped on another end. Constants are inlined in the graph.
+def maybe_inline_graph_saved_tensors_hooks(
+    fw_module,
+    bw_module,
+    num_inner_fwd_outputs,
+    inner_meta,
+    aot_config,
+    static_input_indices,
+):
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+        return
+
+    get_hooks = torch._functorch._aot_autograd.utils.top_saved_tensors_hooks
+    are_inline_hooks = (
+        torch._functorch._aot_autograd.utils.saved_tensors_hooks_are_inlineable
+    )
+
+    hooks = get_hooks()
+    if not are_inline_hooks(hooks):
+        return
+
+    pack_hook_gm, unpack_hook_gm = hooks
+
+    structured_logs: list[str] = []
+    maybe_log_graph(
+        fw_module,
+        "Forward graph pre saved_tensors_hooks inlining",
+        aot_config,
+        lambda: "aot_forward_graph_pre_saved_tensors_hooks",
+        structured_logs,
+    )
+    maybe_log_graph(
+        bw_module,
+        "Backward graph pre saved_tensors_hooks inlining",
+        aot_config,
+        lambda: "aot_backward_graph_pre_saved_tensors_hooks",
+        structured_logs,
+    )
+    fw_g = fw_module.graph
+    bw_g = bw_module.graph
+
+    fw_g_names = {node.name for node in fw_g.nodes}
+    bw_g_names = {node.name for node in bw_g.nodes}
+
+    def _gen_unused_name(candidate: str):
+        c = candidate
+        i = 0
+        while c in fw_g_names or c in bw_g_names:
+            c = f"{candidate}_{i}"
+            i = i + 1
+        return c
+
+    bw_g_inputs = bw_g.find_nodes(op="placeholder")
+
+    fw_out_n = fw_g.output_node()
+    fw_outs = fw_out_n.args[0]  # type: ignore[var-annotated]
+    fw_outs_inner_set = set(fw_outs[:num_inner_fwd_outputs])
+    fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
+    fw_outs_packed_tensors = []  # type: ignore[var-annotated]
+    fw_outs_packed_syms = []  # type: ignore[var-annotated]
+
+    # The main use case for saved_tensors_hooks is activation quantization,
+    # for memory usage optimization.
+    # Desired behavior is to quantize saved activations to free the original saved tensor.
+    # Saved nodes may include forward inputs, outputs, parameters.
+    # They may be held by something else and will not be deallocated after quantization.
+    # Donated buffers are intermediates in the graph invisible for the user,
+    # this guarantees that they can be deallocated.
+    # Using this as a default behavior to select saved nodes to apply hooks.
+    # There is also a config to apply hooks for all saved nodes without any filtering.
+    # The plan is to propagate meta about the source of the saved node to the user hook function.
+    mode = torch._functorch.config.saved_tensors_hooks_filtering_mode
+    allow_set = None
+    exclude_set = None
+
+    if mode == "donated":
+        # collect_bw_donated_buffer_idxs requires inner_meta to have num_symints_saved_for_bw
+        inner_meta.num_symints_saved_for_bw = len(
+            [n for n in fw_outs_saved_for_bw if is_sym_node(n)]
+        )
+        bw_donated_idxs = collect_bw_donated_buffer_idxs(
+            fw_module,
+            bw_module,
+            inner_meta,
+        )
+        fw_donated_idxs = [
+            i - inner_meta.num_symints_saved_for_bw for i in bw_donated_idxs
+        ]
+        allow_set = {fw_outs_saved_for_bw[i].name for i in fw_donated_idxs}
+    elif mode == "no_static":
+        fw_g_inputs = fw_g.find_nodes(op="placeholder")
+        exclude_set = {fw_g_inputs[i].name for i in static_input_indices}
+
+    if (allow_set is not None) and (not allow_set):
+        # This means we have empty whitelist,
+        # No donated (intermediate) saved.
+        # Do not do anything in this case
+        return
+
+    if aot_config.enable_log:
+        structured_logs.append(f"fw_outs_saved_for_bw:{fw_outs_saved_for_bw}")
+        structured_logs.append(f"mode:{mode}")
+        structured_logs.append(f"allow_set:{allow_set}")
+        structured_logs.append(f"exclude_set:{exclude_set}")
+
+    for saved in fw_outs_saved_for_bw:
+        if ((allow_set is not None) and (saved.name not in allow_set)) or (
+            (exclude_set is not None) and (saved.name in exclude_set)
+        ):
+            if isinstance(saved.meta["val"], torch.Tensor):
+                fw_outs_packed_tensors.append(saved)
+            continue
+
+        val = saved.meta["val"]
+        if not isinstance(val, torch.Tensor):
+            continue
+
+        pack_out_val = pack_hook_gm(val)
+
+        requires_sc_handling = any(
+            is_traceable_wrapper_subclass(x) for x in pytree.tree_leaves(pack_out_val)
+        )
+        if requires_sc_handling:
+            raise NotImplementedError(
+                "Tensor subclasses in GraphModule saved tensors hooks are not supported"
+                "You can workaround it by manually returning subclass's inner tensors"
+                " in the pack hook, and reconstructing the subclass in the unpack hook"
+            )
+
+        pack_gm = prepare_hook_gm(aot_config, pack_hook_gm, (val,))
+        pack_g = pack_gm.graph
+        maybe_log_graph(
+            pack_gm,
+            f"saved_tensors_pack_hook {saved.name}",
+            aot_config,
+            lambda: f"aot_saved_tensors_hooks_pack {saved.name}",
+            structured_logs,
+        )
+        pack_out_val = pack_gm(val)
+
+        # Install pack hook graph as eiplogue of fw_module.
+        # Saved tensor output becomes input of pack hook graph.
+        # Replace saved tensor output with pack hook graph output.
+        # Outputs symbolic scalars, tensors  are accumulated separately.
+        # Then in forward outputs and backward inputs installed in order
+        # sym_scalars, packed_saved_tensors.
+        # Keeping all tensors together allows to preserve
+        # the same identification at runtime,
+        # updating only number of saved sym_scalars and tensors.
+        pack_g_inputs = pack_g.find_nodes(op="placeholder")
+        assert len(pack_g_inputs) == 1
+        env = {pack_g_inputs[0]: saved}
+        fw_pack_out_args = None
+        with fw_g.inserting_before(fw_out_n):
+            for node in pack_g.nodes:
+                if node.op == "placeholder":
+                    continue
+                new_n = fw_g.node_copy(node, lambda n: env[n])
+                fw_g_names.add(new_n.name)
+                env[node] = new_n
+                # Output node is temporarily copied to have remapped arguments.
+                # Removed in the end.
+                if node.op == "output":
+                    fw_pack_out_args = new_n.args[0]
+                    fw_g.erase_node(new_n)
+
+        env.clear()
+        assert fw_pack_out_args
+        fw_outs_bw_ins_node_names = []
+        for out_idx, _n in enumerate(pytree.tree_leaves(fw_pack_out_args)):
+            if not isinstance(_n, torch.fx.Node):
+                fw_outs_bw_ins_node_names.append("")
+                continue
+
+            # This happens when hook is noop and it is either user input or user output.
+            # Do not do anything with this node.
+            if _n.op == "placeholder" or _n in fw_outs_inner_set:
+                # This means the hook returned input primals unchanged
+                # Do not rename in this case.
+                n = _n
+                new_node_name = _n.name
+                fw_outs_bw_ins_node_names.append(new_node_name)
+            else:
+                # We can not specify desired name in node_copy.
+                # Copying node manually to set specifc name,
+                # to have matching fw_outs, bw_inputs names.
+                new_node_name = _gen_unused_name(f"{saved.name}_hook_{out_idx}")
+                with fw_g.inserting_before(_n):
+                    n = fw_g.create_node(
+                        _n.op,
+                        _n.target,
+                        _n.args,
+                        _n.kwargs,
+                        name=new_node_name,
+                    )
+                assert n.name == new_node_name
+                fw_outs_bw_ins_node_names.append(new_node_name)
+                n.meta = copy.copy(_n.meta)
+                _n.replace_all_uses_with(n)
+                fw_g.erase_node(_n)
+            if isinstance(n.meta["val"], torch.Tensor):
+                fw_outs_packed_tensors.append(n)
+            elif is_sym_node(n):
+                fw_outs_packed_syms.append(n)
+
+        # Install unpack hook graph as a prologue of backward graph
+        # Saved tensors inputs are replaced with packed tensors and packed sym scalars.
+        # The saved tensors inputs usages in the graph are replaced with unpack hook graph outputs.
+        unpack_gm = prepare_hook_gm(aot_config, unpack_hook_gm, (pack_out_val,))
+        unpack_g = unpack_gm.graph
+        maybe_log_graph(
+            unpack_gm,
+            f"saved_tensors_unpack_hook {saved.name}",
+            aot_config,
+            lambda: f"aot_saved_tensors_hooks_unpack {saved.name}",
+            structured_logs,
+        )
+
+        def find_saved_in_bw_inputs(bw_inputs):
+            for n in bw_inputs:
+                if n.name == saved.name:
+                    return n
+
+        bw_g_input = find_saved_in_bw_inputs(bw_g_inputs)
+        assert bw_g_input
+        original_bw_g_input_users = list(bw_g_input.users.keys())
+        bw_g_input_used_directly = False
+
+        # Replace backward graph saved tensor input with copy of pack graph outputs
+        # All non-Tensor, non-symscalars outputs are constanted.
+
+        unpack_g_inputs = unpack_g.find_nodes(op="placeholder")
+        env = {}
+        for out_idx, (unp_in_n, out_n, val) in enumerate(
+            zip(
+                unpack_g_inputs,
+                pytree.tree_leaves(fw_pack_out_args),
+                pytree.tree_leaves(pack_out_val),
+            )
+        ):
+            is_sym = isinstance(val, py_sym_types)
+            if isinstance(val, torch.Tensor) or is_sym:
+                # We want forward_outputs names to match backward_inputs,
+                # Potentially backward may already have "{saved.name}_hook_{idx}",
+                # In this case fx.Graph will add suffix.
+                new_node_name = fw_outs_bw_ins_node_names[out_idx]
+                if bw_g_input.name == new_node_name:
+                    env[unp_in_n] = bw_g_input
+                    bw_g_input_used_directly = True
+                else:
+                    # Backward calling convention: ctx_symints,ctx_saved_tensors
+                    # Inserting packed sym scalars before first saved tensor input.
+                    # Inserting packed tensors before last saved tensor input.
+                    # Saved tensor inputs between them will be removed.
+                    with bw_g.inserting_before(
+                        bw_g_inputs[0]
+                    ) if is_sym else bw_g.inserting_before(bw_g_input):
+                        new_n = bw_g.placeholder(new_node_name)
+                        assert new_n.name == new_node_name
+                    new_n.meta = copy.copy(out_n.meta)
+                    env[unp_in_n] = new_n
+            else:
+                # Inline values of non-Tensor, non-SymScalars
+                env[unp_in_n] = val
+
+        # Inserting unpack hook after placeholders.
+        bw_unpack_out_n = None
+        with bw_g.inserting_before(bw_g_inputs[-1].next):
+            for node in unpack_g.nodes:
+                if node.op == "placeholder":
+                    continue
+                new_n = bw_g.node_copy(node, lambda n: env[n])
+                bw_g_names.add(new_n.name)
+                env[node] = new_n
+                # Temporary insert output, to have remapped by node_copy args.
+                # Removed in the end.
+                if node.op == "output":
+                    bw_unpack_out_n = new_n
+
+        assert bw_unpack_out_n
+        _leaves = pytree.tree_leaves(bw_unpack_out_n.args)
+        assert len(_leaves) == 1
+        unpack_saved_tensor_n = _leaves[0]
+
+        if not bw_g_input_used_directly:
+            bw_g_input.replace_all_uses_with(unpack_saved_tensor_n)
+            bw_g.erase_node(bw_g_input)
+        else:
+            # Keep usages of bw_g_input in inserted unpacked hook graph.
+            # Replace other usages of bw_g_input with unpack_saved_tensor_n.
+            from torch._C import _fx_map_arg
+
+            def maybe_replace_node(n):
+                return unpack_saved_tensor_n if n == bw_g_input else n
+
+            for use_node in original_bw_g_input_users:
+                new_args = _fx_map_arg(use_node.args, maybe_replace_node)
+                new_kwargs = _fx_map_arg(use_node.kwargs, maybe_replace_node)
+                assert isinstance(new_args, tuple)
+                assert isinstance(new_kwargs, dict)
+                use_node._update_args_kwargs(new_args, new_kwargs)
+        bw_g.erase_node(bw_unpack_out_n)
+
+    # Changing forward graph outputs,
+    # Inserting packed_tensors and packed_syms on the place of saved tensors.
+    # Packed sym_scalars are together with saved symints
+    symint_outs_saved_for_bw = [n for n in fw_outs_saved_for_bw if is_sym_node(n)]
+    fw_new_outs = pytree.tree_leaves(
+        (
+            fw_outs[:num_inner_fwd_outputs],
+            fw_outs_packed_tensors,
+            fw_outs_packed_syms,
+            symint_outs_saved_for_bw,
+        )
+    )
+    fw_out_n.args = (tuple(fw_new_outs),)
+
+    # Assert that saved tensors and symints in forward outputs are aligned with backward inputs
+    _fw_n = num_inner_fwd_outputs
+    _fw_num_t = len(fw_outs_packed_tensors)
+    _fw_num_s = len(fw_outs_packed_syms) + len(symint_outs_saved_for_bw)
+    fw_outs_saved_tensors = fw_new_outs[_fw_n : _fw_n + _fw_num_t]
+    fw_outs_saved_syms = fw_new_outs[_fw_n + _fw_num_t :]
+    bw_new_ins = list(bw_g.find_nodes(op="placeholder"))
+    bw_ins_saved_syms = bw_new_ins[:_fw_num_s]
+    bw_ins_saved_tensors = bw_new_ins[_fw_num_s : _fw_num_s + _fw_num_t]
+
+    fw_t_names = [n.name for n in fw_outs_saved_tensors]
+    bw_t_names = [n.name for n in bw_ins_saved_tensors]
+    fw_s_names = [n.name for n in fw_outs_saved_syms]
+    bw_s_names = [n.name for n in bw_ins_saved_syms]
+
+    def _log_structured_logs():
+        if not aot_config.enable_log:
+            return
+
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "aot_saved_tensors_hooks_graphs",
+                "encoding": "string",
+            },
+            payload_fn=lambda: "\n".join(structured_logs),
+        )
+
+    if aot_config.enable_log:
+        structured_logs.append(
+            f"fw_outs[:num_inner_fwd_outputs]:{fw_outs[:num_inner_fwd_outputs]}"
+        )
+        structured_logs.append(f"fw_outs_packed_tensors:{fw_outs_packed_tensors}")
+        structured_logs.append(f"fw_t_names:{fw_t_names}")
+        structured_logs.append(f"bw_t_names:{bw_t_names}")
+        structured_logs.append(f"fw_s_names:{fw_s_names}")
+        structured_logs.append(f"bw_s_names:{bw_s_names}")
+        structured_logs.append(f"\nfw_g_pre_assert:{fw_g}")
+        structured_logs.append(f"\nbw_g_pre_assert:{bw_g}")
+        maybe_log_graph(
+            fw_module,
+            "Forward graph after transform pre-assert",
+            aot_config,
+            lambda: "aot_forward_graph_pre_assert_saved_tensors_hooks",
+            structured_logs,
+        )
+        maybe_log_graph(
+            bw_module,
+            "Backward graph after transform pre-assert",
+            aot_config,
+            lambda: "aot_backward_graph_pre_assert_saved_tensors_hooks",
+            structured_logs,
+        )
+        _log_structured_logs()
+
+    assert fw_t_names == bw_t_names
+    assert fw_s_names == bw_s_names
+
+    fw_g.lint()
+    bw_g.lint()
+    fw_module.recompile()
+    bw_module.recompile()
+
+
 def aot_dispatch_autograd(
     flat_fn,
     flat_args: list[Any],
@@ -879,6 +1334,16 @@ def aot_dispatch_autograd(
                     joint_inputs[0][num_tokens:],
                     joint_inputs[1],
                 )
+
+            maybe_inline_graph_saved_tensors_hooks(
+                fw_module,
+                bw_module,
+                num_inner_fwd_outputs,
+                inner_meta,
+                aot_config,
+                fw_metadata.static_input_indices,
+            )
+            static_lifetime_input_indices = fw_metadata.static_input_indices
 
             fw_outs = next(iter(fw_module.graph.find_nodes(op="output"))).args[0]
             # we only need to bookkeep the symints that are saved for bw, not any symints
@@ -1216,9 +1681,15 @@ def aot_dispatch_autograd(
             if num_symints_saved_for_bw > 0:
                 try:
                     # See Note: [Backward graph lazy lowering]
+                    with torch._subclasses.fake_tensor.unset_fake_temporarily():
+                        # If bw_module contains lifted constants, they will be real tensors stored as
+                        # GraphModule. Deepcopying tensors under fake mode is not supported and will
+                        # raise when attempting to set storage.
+                        bw_module_copy = copy.deepcopy(bw_module)
                     compiled_bw_func = aot_config.bw_compiler(
-                        copy.deepcopy(bw_module), placeholder_list
+                        bw_module_copy, placeholder_list
                     )
+                    del bw_module_copy
                 except Exception as e:
                     exc = e
                     trace_structured(
@@ -1285,15 +1756,7 @@ def aot_dispatch_autograd(
             compiled_bw_func, _fw_metadata, aot_config
         ):
             fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
-            fw_debug_lines = getattr(
-                compiled_fw_func, "_fx_graph_cache_debug_lines", []
-            )
             bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
-            bw_debug_lines = getattr(
-                compiled_bw_func, "_fx_graph_cache_debug_lines", []
-            )
-            fw_info = (fw_key, fw_debug_lines)
-            bw_info = (bw_key, bw_debug_lines)
             cache_info = aot_config.cache_info
             if cache_info is not None and fw_key and bw_key:
                 assert forward_time_taken_ns is not None
@@ -1309,14 +1772,10 @@ def aot_dispatch_autograd(
                 aot_backward_graph_str: Optional[str] = bw_module_str
                 aot_joint_graph_str: Optional[str] = joint_graph_str
                 guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
-                entry = AOTAutogradCacheEntry(
-                    CompiledForward(fw_info, getattr(compiled_fw_func, "guards_expr", None)),  # type: ignore[arg-type]
-                    CompiledBackward(
-                        bw_info,  # type: ignore[arg-type]
-                        getattr(compiled_bw_func, "guards_expr", None),
-                        backward_state_indices,
-                        num_symints_saved_for_bw,
-                    ),
+
+                entry = AOTAutogradCache.make_entry(
+                    compiled_fw_func,  # type: ignore[arg-type]
+                    compiled_bw_func,
                     aot_joint_graph_str,
                     aot_forward_graph_str,
                     aot_backward_graph_str,
@@ -1329,6 +1788,8 @@ def aot_dispatch_autograd(
                     backward_time_taken_ns,
                     sanitized_aot_config=sanitize_aot_config(aot_config),
                     guards_expr=guards_expr,
+                    backward_state_indices=backward_state_indices,
+                    num_symints_saved_for_bw=num_symints_saved_for_bw,
                 )
                 remote = should_use_remote_autograd_cache()
                 AOTAutogradCache.save(cache_info.cache_key, entry, remote)

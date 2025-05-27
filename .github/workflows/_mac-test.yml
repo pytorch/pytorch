@@ -21,7 +21,7 @@ on:
       python-version:
         required: false
         type: string
-        default: "3.9"
+        default: "3.12"
         description: |
           The python version to be used. Will be 3.9 by default
       timeout-minutes:
@@ -144,8 +144,8 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: ${{ inputs.python-version }}
-          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
-          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
+          environment-file: .github/requirements/conda-env-macOS-ARM64
+          pip-requirements-file: .github/requirements/pip-requirements-macOS.txt
 
       - name: Parse ref
         id: parse-ref
@@ -278,6 +278,7 @@ jobs:
           workflow_name: ${{ github.workflow }}
           workflow_run_id: ${{github.run_id}}
           workflow_attempt: ${{github.run_attempt}}
+          local_path: usage_log.txt
 
       - name: Clean up disk space
         if: always()
