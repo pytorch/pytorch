@@ -632,12 +632,19 @@ def analyze_memory_coalescing(
     uncoalesced_addrs: dict[sympy.Expr, int] = Counter()
 
     for memory_expr, buf_names in itertools.chain(reads.items(), writes.items()):
+        # skip memory deps with indirect vars - todo: better handling
+        indirect_expr = bool(memory_expr.free_symbols - norm_read_writes.var_ranges.keys())
+
+        if indirect_expr:
+            continue
+
         size = get_score(memory_expr, var_ranges)
-        # TODO - handle indirect
         if size == 0:
             continue
 
+
         maybe_coalesced_var = find_coalesced_var(memory_expr, var_ranges)
+
         byte_multipler = 0
         for buf_name in buf_names:
             if buf := V.graph.try_get_buffer(buf_name):
