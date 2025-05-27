@@ -1,7 +1,9 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import functools
 import inspect
 import json
+import logging
 import math
 import os
 import random
@@ -9,6 +11,8 @@ import re
 import tempfile
 import unittest
 from typing import Callable, Optional
+from unittest import mock
+from unittest.mock import MagicMock
 
 import torch
 from torch import multiprocessing as mp, nn
@@ -38,6 +42,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TEST_WITH_ROCM,
 )
+from torch.testing._internal.logging_utils import multiple_logs_to_string
 from torch.utils._triton import has_triton_tma_device
 
 
@@ -689,6 +694,51 @@ class TestMaxAutotune(TestCase):
         f_c = torch.compile(mode="max-autotune-no-cudagraphs")(f)
         self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
 
+    @config.patch("trace.enabled", True)
+    @config.patch({"test_configs.force_extern_kernel_in_multi_template": True})
+    def test_mutation_rename(self):
+        torch._logging.set_logs(ir_post_fusion=True)
+
+        def f(x, y, z, other):
+            mul = x * y
+            diag = torch.diagonal(mul)
+            diag.copy_(other)
+            x = torch.mm(mul, z)
+            y = torch.diagonal(x).add_(torch.tensor(1, device=GPU_TYPE))
+            return y
+
+        t = functools.partial(torch.randn, device=GPU_TYPE)
+        inps = (t(3, 3), t(3, 3), t(3, 3), t(3))
+        fn = torch.compile(f, mode="max-autotune-no-cudagraphs")
+        (
+            pre_fusion_tream,
+            post_fusion_stream,
+        ), ctx = multiple_logs_to_string(
+            "torch._inductor.debug", "ir_pre_fusion", "ir_post_fusion"
+        )
+
+        with config.patch({"trace.debug_dir": tempfile.mkdtemp()}):
+            with self.assertLogs(
+                logging.getLogger("torch._inductor.debug"), level=logging.INFO
+            ) as cm, ctx():
+                out = fn(*inps)
+
+        self.assertEqual(f(*inps), out)
+
+        pre_fusion_stream = cm.output[0]
+        post_fusion_stream = cm.output[1]
+
+        # before and after finalizing multi template buffer, deps should have the same normalization
+        # wrt writes
+        FileCheck().check("MultiTemplateBuffer").check("unmet").check_same("buf1").run(
+            pre_fusion_stream
+        )
+        FileCheck().check("ExternKernelSchedulerNode").check("unmet").check_same(
+            "buf1"
+        ).run(post_fusion_stream)
+
+        torch._logging.set_logs()
+
     @config.patch({"test_configs.force_extern_kernel_in_multi_template": True})
     def test_cat_max_autotune_extern(self):
         self._test_cat_max_autotune_impl(using_triton_mm=False)
@@ -1000,6 +1050,97 @@ class TestMaxAutotune(TestCase):
             bf16_red_setting
         )
 
+    @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        autotune_fallback_to_aten=False,
+    )
+    def test_max_autotune_decompose_k_dynamic_input(self):
+        def f(a, b):
+            a_in = torch.stack((a, a), dim=0)
+            return (a_in @ b).relu()
+
+        a = torch.randn(
+            32, 32768, dtype=torch.bfloat16, device="cuda", requires_grad=True
+        )
+        b = torch.randn(
+            32768, 64, dtype=torch.bfloat16, device="cuda", requires_grad=True
+        )
+
+        torch._dynamo.reset()
+        torch._dynamo.maybe_mark_dynamic(a, 0)
+        compiled_func = torch.compile(f)
+
+        with mock.patch(
+            "torch._inductor.kernel.mm.use_decompose_k_choice"
+        ) as decomp_mock:
+            decomp_mock.return_value = True
+
+            out, code = run_and_get_code(compiled_func, a, b)
+            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                "triton_.*_fused_0.run"
+            ).check("decompose_k").check_regex("s[0-9]+ = primals_1").check_regex(
+                "2*s[0-9]+"
+            ).check(
+                "primals_1 = 32"
+            ).run(
+                code[0]
+            )
+            torch.testing.assert_close(
+                out,
+                f(a, b),
+                atol=1e-2,
+                rtol=1e-2,
+            )
+
+    @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        autotune_fallback_to_aten=False,
+    )
+    def test_max_autotune_decompose_k_output_stride(self):
+        def f(a, b):
+            a = a.transpose(0, 1)
+            return a @ b
+
+        a = torch.randn((32768, 256), device="cuda", dtype=torch.bfloat16)
+        b = torch.randn((32768, 1152), device="cuda", dtype=torch.bfloat16)
+
+        b = b[:, :1096]
+
+        # Force only decomposeK choice
+        with mock.patch(
+            "torch._inductor.kernel.mm.V.choices.get_base_mm_configs"
+        ) as base_mm_mock, mock.patch(
+            "torch._inductor.kernel.mm.use_decompose_k_choice"
+        ) as decompose_mock:
+            mm_configs_mock = MagicMock()
+            mm_configs_mock.return_value = []
+            base_mm_mock.return_value = mm_configs_mock
+            decompose_mock.return_value = True
+            compiled_f = torch.compile(f)
+            out, code = run_and_get_code(compiled_f, a, b)
+
+            # Output stride equal to original gm output stride
+            # If output stride is not correctly checked, this will be (1152, 1) which can cause nans
+            self.assertEqual(out.stride(), (1096, 1))
+
+            FileCheck().check_not("extern_kernels.bmm_dtype").check(
+                "decompose_k"
+            ).check(" empty_strided_cuda((256, 1096), (1096, 1), torch.bfloat16)").run(
+                code[0]
+            )
+
     def test_triton_template_generated_code_cache_key(self):
         generate_and_load_args = len(
             inspect.signature(
@@ -1094,30 +1235,25 @@ class TestMaxAutotune(TestCase):
 
             cache_key, events = get_cache_key_and_events()
 
-            self.assertEqual(
-                remove_white_space(cache_key),
-                remove_white_space(
-                    """
-                {'input_nodes': ["[[10, 22], [22, 1], torch.float32, device(type='cuda', index=0), 0]",
-                                "[[22, 30], [30, 1], torch.float32, device(type='cuda', index=0), 0]"],
-                  'num_stages': 1, 'num_warps': 2, 'prefix_args': 0, 'suffix_args': 0,
-                  'call_sizes': [10, 30], 'layout': "[[10, 30], [30, 1], torch.float32, device(type='cuda', index=0), 0]",
-                  'num_consumer_groups': 0, 'num_buffers_warp_spec': 0,
-                  'kwargs': {'EVEN_K': False, 'ALLOW_TF32': True, 'USE_FAST_ACCUM': False, 'ACC_TYPE': 'tl.float32',
-                  'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 16, 'GROUP_M': 8}}"""
-                ),
-            )
+            if not TEST_WITH_ROCM:
+                self.assertExpectedInline(
+                    remove_white_space(cache_key),
+                    remove_white_space(
+                        f"""
+                    {{'input_nodes': ["[[10, 22], [22, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]",
+                                    "[[22, 30], [30, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]"],
+                    'num_stages': 1, 'num_warps': 2, 'prefix_args': 0, 'suffix_args': 0,
+                    'call_sizes': [10, 30], 'layout': "[[10, 30], [30, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]",
+                    'num_consumer_groups': 0, 'num_buffers_warp_spec': 0,
+                    'kwargs': {{'EVEN_K': False, 'ALLOW_TF32': True, 'USE_FAST_ACCUM': False, 'ACC_TYPE': 'tl.float32',
+                    'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 16, 'GROUP_M': 8}}}}"""
+                    ),
+                )
 
-            self.assertEqual(
-                remove_white_space(events),
-                remove_white_space(
-                    """[
-                    ('def_kernel', ['A', 'B'], {}),
-                    ('load_input', ['A', 'a', ('idx_m', 'idx_n')], {'mask': 'a_mask', 'indent_width': 8}),
-                    ('load_input', ['B', 'b', ('idx_m', 'idx_n')], {'mask': 'b_mask', 'indent_width': 8})]
-                  """
-                ),
-            )
+                self.assertEqual(
+                    remove_white_space(events),
+                    remove_white_space("""[('def_kernel', ['A', 'B'], {})]"""),
+                )
 
         # Test symbolic shapes with different symbols. Will cache miss due to different symbols in inputs.
         with fresh_inductor_cache():
@@ -1137,31 +1273,37 @@ class TestMaxAutotune(TestCase):
 
             cache_key, events = get_cache_key_and_events()
 
-            self.assertEqual(
-                remove_white_space(cache_key),
-                remove_white_space(
-                    """{'input_nodes': ["[[s77, s17], [s17, 1], torch.float32, device(type='cuda', index=0), 0]",
-                                        "[[s17, s94], [s94, 1], torch.float32, device(type='cuda', index=0), 0]"],
-                        'num_stages': 1, 'num_warps': 2, 'prefix_args': 0, 'suffix_args': 0, 'call_sizes': [s77, s94],
-                        'layout': "[[s77, s94], [s94, 1], torch.float32, device(type='cuda', index=0), 0]",
-                        'num_consumer_groups': 0, 'num_buffers_warp_spec': 0, 'kwargs': {'EVEN_K': False,
-                        'ALLOW_TF32': True, 'USE_FAST_ACCUM': False,
-                        'ACC_TYPE': 'tl.float32', 'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 16, 'GROUP_M': 8}}"""
-                ),
-            )
+            if not TEST_WITH_ROCM:
+                self.assertExpectedInline(
+                    remove_white_space(cache_key),
+                    remove_white_space(
+                        f"""{{'input_nodes': ["[[s77, s17], [s17, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]",
+                                            "[[s17, s94], [s94, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]"],
+                            'num_stages': 1, 'num_warps': 2, 'prefix_args': 0, 'suffix_args': 0, 'call_sizes': [s77, s94],
+                            'layout': "[[s77, s94], [s94, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]",
+                            'num_consumer_groups': 0, 'num_buffers_warp_spec': 0, 'kwargs': {{'EVEN_K': False,
+                            'ALLOW_TF32': True, 'USE_FAST_ACCUM': False,
+                            'ACC_TYPE': 'tl.float32', 'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 16, 'GROUP_M': 8}}}}"""
+                    ),
+                )
 
-            self.assertEqual(
-                remove_white_space(events),
-                remove_white_space(
-                    """[
-                    ('def_kernel', ['A', 'B'], {}),
-                    ('size', ['A', 0], {}), ('size', ['B', 1], {}),
-                    ('size', ['A', 1], {}),
-                    ('load_input', ['A', 'a', ('idx_m', 'idx_n')], {'mask': 'a_mask', 'indent_width': 8}),
-                    ('load_input', ['B', 'b', ('idx_m', 'idx_n')], {'mask': 'b_mask', 'indent_width': 8})]
-                  """
-                ),
-            )
+                self.assertExpectedInline(
+                    remove_white_space(events),
+                    remove_white_space(
+                        """[('def_kernel',['A','B'],{}),('size',['A',0],{}),('size',['B',1],{}),('size',['A',1],{})]"""
+                    ),
+                )
+                self.assertExpectedInline(
+                    remove_white_space(events),
+                    remove_white_space(
+                        """[
+                            ('def_kernel', ['A', 'B'], {}),
+                            ('size', ['A', 0], {}),
+                            ('size', ['B', 1], {}),
+                            ('size', ['A', 1], {})]
+                        """
+                    ),
+                )
 
         # Test duck typing.
         with fresh_inductor_cache():

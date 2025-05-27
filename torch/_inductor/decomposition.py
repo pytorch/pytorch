@@ -107,7 +107,7 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 
 # Remove unwanted decompositions included via the core ATen decompositions from
 # the Inductor decomp table.
-decomps_to_exclude: list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]] = [
+decomps_to_exclude = [
     aten._unsafe_index,
     aten._unsafe_masked_index,
     aten._unsafe_masked_index_put_accumulate,
@@ -522,7 +522,7 @@ def fmax(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
     return torch.where(torch.isnan(other) | (other < self), self, other)
 
 
-@register_decomposition([aten.amax])
+@register_decomposition(aten.amax)
 def amax(
     self: torch.Tensor,
     dim: Optional[int] = None,
@@ -533,7 +533,7 @@ def amax(
     return NotImplemented
 
 
-@register_decomposition([aten.amin])
+@register_decomposition(aten.amin)
 def amin(
     self: torch.Tensor,
     dim: Optional[int] = None,
@@ -581,7 +581,7 @@ def get_like_layout(
         return memory_format
 
 
-@register_decomposition([aten.rand_like])
+@register_decomposition(aten.rand_like)
 def rand_like(
     self: torch.Tensor,
     *,
@@ -598,7 +598,7 @@ def rand_like(
     ).to(memory_format=get_like_layout(self, memory_format))
 
 
-@register_decomposition([aten.randn_like])
+@register_decomposition(aten.randn_like)
 def randn_like(
     self: torch.Tensor,
     *,
@@ -615,7 +615,7 @@ def randn_like(
     ).to(memory_format=get_like_layout(self, memory_format))
 
 
-@register_decomposition([aten.full_like])
+@register_decomposition(aten.full_like)
 def full_like(
     self: torch.Tensor,
     fill_value: Union[int, float],
@@ -637,7 +637,7 @@ def full_like(
     ).to(memory_format=get_like_layout(self, memory_format))
 
 
-@register_decomposition([aten.randint_like.default])
+@register_decomposition(aten.randint_like.default)
 def randint_like(
     self: torch.Tensor,
     high: int,
@@ -657,7 +657,7 @@ def randint_like(
     ).to(memory_format=get_like_layout(self, memory_format))
 
 
-@register_decomposition([aten.randint_like.low_dtype])
+@register_decomposition(aten.randint_like.low_dtype)
 def randint_like_low(
     self: torch.Tensor,
     low: int,
@@ -678,7 +678,7 @@ def randint_like_low(
     ).to(memory_format=get_like_layout(self, memory_format))
 
 
-@register_decomposition([aten.randint.default])
+@register_decomposition(aten.randint.default)
 def randint(
     high: int,
     size: list[Union[int, torch.SymInt]],
@@ -687,7 +687,7 @@ def randint(
     return aten.randint.low(0, high, size, **kwargs)
 
 
-@register_decomposition([quantized.linear_dynamic_fp16_unpacked_weight.default])
+@register_decomposition(quantized.linear_dynamic_fp16_unpacked_weight.default)
 def linear_dynamic_fp16_unpacked_weight(
     input: torch.Tensor,
     weight: torch.Tensor,
@@ -699,7 +699,7 @@ def linear_dynamic_fp16_unpacked_weight(
     )
 
 
-@register_decomposition([_quantized.wrapped_quantized_linear.default])
+@register_decomposition(_quantized.wrapped_quantized_linear.default)
 def wrapped_quantized_linear(
     input: torch.Tensor,
     input_scale: torch.Tensor,
@@ -726,7 +726,7 @@ def wrapped_quantized_linear(
     )
 
 
-@register_decomposition([torch.ops.quantized.embedding_bag_byte_unpack])
+@register_decomposition(torch.ops.quantized.embedding_bag_byte_unpack)
 def q_embedding_bag_byte_unpack_decomp(packed: torch.Tensor) -> torch.Tensor:
     def bitcast_u8_to_f32(u8: torch.Tensor) -> torch.Tensor:
         x, y, z, w = (u8[..., n].to(torch.int32) for n in (0, 1, 2, 3))
@@ -771,7 +771,7 @@ def grid_sampler_2d(
     return output
 
 
-@register_decomposition([aten._foreach_addcmul.Scalar])
+@register_decomposition(aten._foreach_addcmul.Scalar)
 def _foreach_addcmul_scalar(
     self: list[torch.Tensor],
     left_tensors: list[torch.Tensor],
@@ -783,7 +783,7 @@ def _foreach_addcmul_scalar(
     )
 
 
-@register_decomposition([aten._foreach_addcdiv.Scalar])
+@register_decomposition(aten._foreach_addcdiv.Scalar)
 def _foreach_addcdiv_scalar(
     self: list[torch.Tensor],
     left_tensors: list[torch.Tensor],
@@ -795,7 +795,7 @@ def _foreach_addcdiv_scalar(
     )
 
 
-@register_decomposition([aten._foreach_lerp.Scalar])
+@register_decomposition(aten._foreach_lerp.Scalar)
 def _foreach_lerp_scalar(
     start_tensors: list[torch.Tensor],
     end_tensors: list[torch.Tensor],
@@ -809,7 +809,7 @@ def _foreach_lerp_scalar(
     )
 
 
-@register_decomposition([aten._foreach_lerp.ScalarList])
+@register_decomposition(aten._foreach_lerp.ScalarList)
 def _foreach_lerp_scalarlist(
     start_tensors: list[torch.Tensor],
     end_tensors: list[torch.Tensor],
@@ -824,7 +824,7 @@ def _foreach_lerp_scalarlist(
 
 
 @aten.miopen_batch_norm.default.py_impl(torch._C.DispatchKey.Autograd)
-@register_decomposition([aten.miopen_batch_norm])
+@register_decomposition(aten.miopen_batch_norm)
 def miopen_batch_norm(
     input: torch.Tensor,
     weight: torch.Tensor,
@@ -869,7 +869,7 @@ def select_decomp_table() -> dict[Any, Callable[..., Any]]:
     return fast_random_decomps()
 
 
-@register_decomposition([aten.masked_scatter])
+@register_decomposition(aten.masked_scatter)
 def masked_scatter(
     self: torch.Tensor,
     mask: torch.Tensor,
@@ -888,7 +888,7 @@ def masked_scatter(
     return NotImplemented
 
 
-@register_decomposition([quantized_decomposed.choose_qparams.tensor])
+@register_decomposition(quantized_decomposed.choose_qparams.tensor)
 def choose_qparams_tensor(
     input: torch.Tensor,
     quant_min: int,
@@ -904,7 +904,7 @@ def choose_qparams_tensor(
     return scale.to(torch.float64), zero_point.to(torch.int64)
 
 
-@register_decomposition([aten.put])
+@register_decomposition(aten.put)
 def put(
     self: torch.Tensor,
     index: torch.Tensor,
@@ -918,7 +918,7 @@ def put(
     return flattened.reshape(self.shape)
 
 
-@register_decomposition([aten.put_])
+@register_decomposition(aten.put_)
 def put_(
     self: torch.Tensor,
     index: torch.Tensor,
@@ -929,7 +929,7 @@ def put_(
     return self.copy_(out)
 
 
-@register_decomposition([aten._softmax_backward_data.default])
+@register_decomposition(aten._softmax_backward_data.default)
 @pw_cast_for_opmath
 def _softmax_backward_data(
     grad_output: torch.Tensor,
@@ -951,7 +951,7 @@ def _softmax_backward_data(
     return grad_input.contiguous()
 
 
-@register_decomposition([aten.index_reduce])
+@register_decomposition(aten.index_reduce)
 def index_reduce(
     self: torch.Tensor,
     dim: int,
@@ -1056,7 +1056,7 @@ def _max_pool_with_indices(
     return vals, indices
 
 
-@register_decomposition([aten.max_pool2d_with_indices])
+@register_decomposition(aten.max_pool2d_with_indices)
 def max_pool2d_with_indices(
     x: torch.Tensor,
     kernel_size: list[int],
@@ -1070,7 +1070,7 @@ def max_pool2d_with_indices(
     )
 
 
-@register_decomposition([aten.max_pool3d_with_indices])
+@register_decomposition(aten.max_pool3d_with_indices)
 def max_pool3d_with_indices(
     x: torch.Tensor,
     kernel_size: list[int],
@@ -1084,7 +1084,7 @@ def max_pool3d_with_indices(
     )
 
 
-@register_decomposition([aten.adaptive_max_pool2d])
+@register_decomposition(aten.adaptive_max_pool2d)
 def adaptive_max_pool2d(
     x: torch.Tensor, output_size: list[int]
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -1102,7 +1102,7 @@ def adaptive_max_pool2d(
     return NotImplemented
 
 
-@register_decomposition([aten.searchsorted.Scalar])
+@register_decomposition(aten.searchsorted.Scalar)
 def searchsorted_scalar(
     sorted_sequence: torch.Tensor,
     self: torch.types.Number,
@@ -1122,7 +1122,7 @@ def searchsorted_scalar(
     )[0]
 
 
-@register_decomposition([aten.rrelu_with_noise_functional])
+@register_decomposition(aten.rrelu_with_noise_functional)
 def rrelu_with_noise_functional(
     self: torch.Tensor,
     noise: torch.Tensor,
