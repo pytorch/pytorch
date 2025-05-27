@@ -21,6 +21,7 @@ from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Uni
 from typing_extensions import override
 
 import torch
+from torch._dynamo.precompile import PrecompileCacheArtifact, PrecompileContext
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
 from torch._dynamo.utils import (
     chromium_event_log_active,
@@ -50,7 +51,6 @@ from torch._inductor.output_code import (
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
-from torch._precompile.interfaces import PrecompileContext, PrecompileCacheArtifact
 from torch._utils_internal import log_cache_bypass
 from torch.compiler._cache import (
     CacheArtifact,
@@ -902,11 +902,18 @@ class AOTAutogradCacheArtifact(CacheArtifact):
 
 
 @CacheArtifactFactory.register
-class BundledAOTAutogradCacheArtifact(PrecompileCacheArtifact):
+class BundledAOTAutogradCacheArtifact(
+    PrecompileCacheArtifact[BundledAOTAutogradCacheEntry]
+):
     @override
     @staticmethod
     def type():
         return "precompile_aot_autograd"
+
+    @override
+    def after_deserialization(self) -> BundledAOTAutogradCacheEntry:
+        entry = pickle.loads(self.content)
+        return entry
 
 
 class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
@@ -1193,6 +1200,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
             CacheArtifactManager.record_artifact(
                 AOTAutogradCacheArtifact.type(), key, content
             )
+            if config.bundled_autograd_cache:
+                PrecompileContext.record_artifact(
+                    BundledAOTAutogradCacheArtifact.type(), key, content
+                )
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1
         except BypassAOTAutogradCache as e:
