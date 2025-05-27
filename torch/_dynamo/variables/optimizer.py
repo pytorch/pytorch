@@ -266,7 +266,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # We need to realize the top level state dict to populate
         # the guard locals
         state_vt.realize()
-        tx.output.guard_on_key_order.add(state_source.name())
+        tx.output.guard_on_key_order.add(state_source)
 
         # Populate self.grad_to_source and self.tensor_to_source so that we can
         # manually update_list_args
@@ -334,7 +334,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             p_state_source = DictGetItemSource(
                 state_source, ConstDictKeySource(state_source, idx)
             )
-            tx.output.guard_on_key_order.add(p_state_source.name())
+            tx.output.guard_on_key_order.add(p_state_source)
             for inner_idx, (k, v) in enumerate(value.items()):
                 if (
                     isinstance(v, torch.Tensor)

@@ -8,7 +8,7 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
-from torch._dynamo.utils import detect_fake_mode
+from torch._dynamo.utils import counters, detect_fake_mode
 from torch._logging import trace_structured
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
@@ -63,6 +63,21 @@ mutate_cat_pass_aten = PatternMatcherPass(pass_name="mutate_cat_pass_aten")
 remove_split_with_size_one_pass_aten = PatternMatcherPass(
     pass_name="remove_split_with_size_one_pass_aten"
 )
+
+
+def save_inductor_dict(pass_to_compare=None):
+    if not pass_to_compare:
+        pass_to_compare = list(config.pre_grad_fusion_options.keys()) + list(
+            config.post_grad_fusion_options.keys()
+        )
+    return {p: dict(counters["inductor"]).get(p, 0) for p in pass_to_compare}
+
+
+def is_same_dict(inductor_dict, optimus_dict):
+    for pass_name, count in optimus_dict.items():
+        if count != dict(inductor_dict).get(pass_name, 0):
+            return False
+    return True
 
 
 def shape_prop(mod) -> None:
@@ -133,6 +148,14 @@ def use_triton_lce_replace_normal_LCE(graph):
     return use_triton_lce_replace_simple_LCE_helper(graph.owning_module, shape_prop)
 
 
+def use_matmul_lce_replace_normal_LCE(graph):
+    return None
+
+
+def use_matmul_fuse_lce_replace_first_LCE(graph):
+    return None
+
+
 @init_once_fakemode
 def lazy_init():
     from . import efficient_conv_bn_eval, split_cat  # noqa: F401
@@ -146,7 +169,7 @@ def _get_pass_name_func(p):
         pass_name = p.pass_name
         pass_func = p.apply
     elif isinstance(p, types.FunctionType):
-        pass_name = p.__name__
+        pass_name = p.__name__.lstrip("_")
         pass_func = p
     else:
         pass_name = None
@@ -186,6 +209,8 @@ def _run_pre_dispatch_passes(
         use_triton_dot_compress,
         use_triton_lce_replace_simple_LCE,
         use_triton_lce_replace_normal_LCE,
+        use_matmul_fuse_lce_replace_first_LCE,
+        use_matmul_lce_replace_normal_LCE,
     ]
 
     log.info(
@@ -272,60 +297,34 @@ def pre_grad_passes(
             if example_inputs is not None:
                 gm = fuse_fx(gm, example_inputs)
             numpy_compat_normalization(gm.graph)
-            trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": "before apply group_batch_fusion_pre_grad",
-                    "encoding": "string",
-                },
-                payload_fn=lambda: gm.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                ),
-            )
             # We should always do the normalization_pass first
             if "normalization_pass" in config.pre_grad_fusion_options:
                 pattern_matcher_pass = PRE_GRAD_PATTERNS["normalization_pass"]
                 pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
             group_batch_fusion_passes(gm.graph, pre_grad=True)
-            trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": "after apply group_batch_fusion_pre_grad",
-                    "encoding": "string",
-                },
-                payload_fn=lambda: gm.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                ),
-            )
             for pass_name in config.pre_grad_fusion_options:
                 # skip all patterns for group batch fusions
                 if pass_name in PRE_GRAD_FUSIONS or pass_name == "normalization_pass":
                     continue
                 pattern_matcher_pass = PRE_GRAD_PATTERNS[pass_name]
-                trace_structured(
-                    "artifact",
-                    metadata_fn=lambda: {
-                        "name": f"before apply {pattern_matcher_pass.pass_name}_pre_grad",
-                        "encoding": "string",
-                    },
-                    payload_fn=lambda: gm.print_readable(
-                        print_output=False, include_stride=True, include_device=True
-                    ),
+                inductor_before_change = save_inductor_dict(
+                    [pattern_matcher_pass.pass_name]
                 )
                 # we support run same pattern multiple times, the default is to run only once
                 counter = config.pre_grad_fusion_options[pass_name].get("counter", 1)
                 for _ in range(counter):
                     pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
-                trace_structured(
-                    "artifact",
-                    metadata_fn=lambda: {
-                        "name": f"after apply {pattern_matcher_pass.pass_name}_pre_grad",
-                        "encoding": "string",
-                    },
-                    payload_fn=lambda: gm.print_readable(
-                        print_output=False, include_stride=True, include_device=True
-                    ),
-                )
+                if not is_same_dict(counters["inductor"], inductor_before_change):
+                    trace_structured(
+                        "artifact",
+                        metadata_fn=lambda: {
+                            "name": f"{pattern_matcher_pass.pass_name}_pre_grad",
+                            "encoding": "string",
+                        },
+                        payload_fn=lambda: gm.print_readable(
+                            print_output=False, include_stride=True, include_device=True
+                        ),
+                    )
             # TODO: move efficient_conv_bn_eval_pass to the fusions dict too.
             efficient_conv_bn_eval_pass.apply(gm.graph)  # type: ignore[arg-type]
 
@@ -340,16 +339,6 @@ def pre_grad_passes(
 
     gm.graph.lint()
     gm.recompile()
-    trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "after_recompile_pre_grad",
-            "encoding": "string",
-        },
-        payload_fn=lambda: gm.print_readable(
-            print_output=False, include_stride=True, include_device=True
-        ),
-    )
 
     if (
         config.pattern_matcher
