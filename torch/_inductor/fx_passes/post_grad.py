@@ -891,8 +891,8 @@ def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
     val1 = node1.meta.get("val")
     val2 = node2.meta.get("val")
     return (
-        type(val1) is torch._subclasses.FakeTensor
-        and type(val2) is torch._subclasses.FakeTensor
+        issubclass(type(val1), torch.Tensor)
+        and issubclass(type(val2), torch.Tensor)
         and statically_known_true(sym_eq(val1.size(), val2.size()))
         and val1.layout == val2.layout
         and val1.dtype == val2.dtype
