@@ -1367,6 +1367,7 @@ class SkipFunctionVariable(VariableTracker):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        breakpoint()
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             msg = inspect.getattr_static(self.value, "_torchdynamo_disable_msg", None)
             unimplemented_v2(
@@ -1391,6 +1392,7 @@ class SkipFunctionVariable(VariableTracker):
                 ],
             )
         else:
+            breakpoint()
             if config.dont_skip_tracing:
                 from .builder import SourcelessBuilder
 
@@ -1403,6 +1405,7 @@ class SkipFunctionVariable(VariableTracker):
             module_or = getattr(self.value, "__module__", None)
             module_name = "<unknown module>" if module_or is None else str(module_or)
             try:
+                breakpoint()
                 path = inspect.getfile(self.value)
                 explanation = (
                     f"Dynamo developers have intentionally marked that the function `{qualname}` "

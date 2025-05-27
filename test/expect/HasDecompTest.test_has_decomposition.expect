@@ -1355,6 +1355,8 @@ aten::view_as_complex_copy.out
 aten::view_as_real
 aten::view_as_real_copy
 aten::view_as_real_copy.out
+aten::xor_sum
+aten::xor_sum.out
 aten::zeros.names
 aten::zeros.names_out
 aten::zeros.out

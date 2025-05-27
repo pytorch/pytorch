@@ -21361,6 +21361,17 @@ op_db: list[OpInfo] = [
             # xor_sum reduces all dimensions when dim=[] (as do sum, prod etc.)
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            # aten::xor_sum hit the vmap fallback which is currently disabled
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+            # Assertions in torch/_inductor/codegen/cpp.py preventing xor_sum with bool type
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                'TestInductorOpInfo',
+                'test_comprehensive',
+                device_type='cpu',
+                dtypes=(torch.bool,)
+            )
         )
     ),
     OpInfo(
