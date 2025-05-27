@@ -1314,7 +1314,10 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
                 # is codegenned anyway
                 raise CannotStaticallyLaunchKernel("Cpp wrapper enabled")
 
-            if heuristic_type == HeuristicType.USER_AUTOTUNE:
+            if (
+                heuristic_type == HeuristicType.USER_AUTOTUNE
+                and not torch._inductor.config.static_launch_user_defined_triton_kernels
+            ):
                 # Don't support user defined triton kernels yet
                 raise CannotStaticallyLaunchKernel("User defined triton kernel")
 
