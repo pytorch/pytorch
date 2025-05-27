@@ -1038,6 +1038,8 @@ class AOTAutogradCacheTests(InductorTestCase):
                 res2[0].sum().backward()
                 self.assertEqual(a.grad, a2.grad)
 
+            breakpoint()
+
     @inductor_config.patch("fx_graph_cache", True)
     @inductor_config.patch("fx_graph_remote_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})

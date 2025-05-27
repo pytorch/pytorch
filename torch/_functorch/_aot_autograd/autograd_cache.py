@@ -50,6 +50,7 @@ from torch._inductor.output_code import (
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
+from torch._precompile.interfaces import PrecompileContext, PrecompileCacheArtifact
 from torch._utils_internal import log_cache_bypass
 from torch.compiler._cache import (
     CacheArtifact,
@@ -900,6 +901,14 @@ class AOTAutogradCacheArtifact(CacheArtifact):
         return "aot_autograd"
 
 
+@CacheArtifactFactory.register
+class BundledAOTAutogradCacheArtifact(PrecompileCacheArtifact):
+    @override
+    @staticmethod
+    def type():
+        return "precompile_aot_autograd"
+
+
 class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
     """
     Caches the results of running AOTAutograd. This class mostly handles the save and load logic, whereas
@@ -1151,6 +1160,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 CacheArtifactManager.record_artifact(
                     AOTAutogradCacheArtifact.type(), key, pickled_content
                 )
+                if config.bundled_autograd_cache:
+                    PrecompileContext.record_artifact(
+                        BundledAOTAutogradCacheArtifact.type(), key, pickled_content
+                    )
         except Exception as e:
             log.info("AOTAutograd cache unable to load compiled graph: %s", e)
             if config.strict_autograd_cache:
