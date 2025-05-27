@@ -314,6 +314,10 @@ class TransformerEncoder(Module):
 
     Users can build the BERT(https://arxiv.org/abs/1810.04805) model with corresponding parameters.
 
+    .. warning::
+        All layers in the TransformerEncoder are initialized with the same parameters.
+        It is recommended to manually initialize the layers after creating the TransformerEncoder instance.
+
     Args:
         encoder_layer: an instance of the TransformerEncoderLayer() class (required).
         num_layers: the number of sub-encoder-layers in the encoder (required).
@@ -534,6 +538,10 @@ class TransformerDecoder(Module):
         See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
         for an in depth discussion of the performant building blocks PyTorch offers for building your own
         transformer layers.
+
+    .. warning::
+        All layers in the TransformerDecoder are initialized with the same parameters.
+        It is recommended to manually initialize the layers after creating the TransformerDecoder instance.
 
     Args:
         decoder_layer: an instance of the TransformerDecoderLayer() class (required).

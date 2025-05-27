@@ -8,6 +8,7 @@ import sympy
 import torch
 import torch.fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     rebind_unbacked,
@@ -17,6 +18,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
+from torch.utils.flop_counter import flop_registry
 
 from .virtualized import V
 
@@ -250,3 +252,34 @@ def is_node_realized(node: torch.fx.Node) -> bool:
 
     # Otherwise, assume node isn't realized
     return False
+
+
+def count_flops_fx(node: torch.fx.Node) -> Optional[int]:
+    if isinstance(node.target, str):
+        return None
+    with FakeTensorMode(allow_non_fake_inputs=True):
+        success, args, kwargs = get_fake_args_kwargs(node)
+
+        if success:
+            with torch.utils.flop_counter.FlopCounterMode(
+                display=False
+            ) as flop_counter_mode:
+                node.target(*args, **kwargs)
+
+            counted_flops = flop_counter_mode.get_total_flops()
+            return counted_flops
+    return None
+
+
+def countable_fx(node: torch.fx.Node) -> bool:
+    """
+    Whether or not we can count the flops of an FX node.
+    """
+    assert isinstance(node, torch.fx.Node)
+    if not hasattr(node, "target"):
+        return False
+    target = node.target
+    if not hasattr(target, "overloadpacket"):
+        return target in flop_registry
+    packet = target.overloadpacket
+    return packet in flop_registry

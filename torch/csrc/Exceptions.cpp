@@ -14,7 +14,7 @@
 PyObject *THPException_FatalError, *THPException_LinAlgError,
     *THPException_OutOfMemoryError, *THPException_DistError,
     *THPException_DistBackendError, *THPException_DistNetworkError,
-    *THPException_DistStoreError;
+    *THPException_DistStoreError, *THPException_DistQueueEmptyError;
 
 #define ASSERT_TRUE(cond) \
   if (!(cond))            \
@@ -112,6 +112,18 @@ could not be completed because the input matrix is singular.",
   ASSERT_TRUE(
       PyModule_AddObject(
           module, "_DistStoreError", THPException_DistStoreError) == 0);
+
+  // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
+  ASSERT_TRUE(
+      THPException_DistQueueEmptyError = PyErr_NewExceptionWithDoc(
+          "torch.distributed.QueueEmptyError",
+          "Exception raised when an error occurs in the distributed store",
+          THPException_DistStoreError,
+          nullptr));
+  ASSERT_TRUE(
+      PyModule_AddObject(
+          module, "_DistQueueEmptyError", THPException_DistQueueEmptyError) ==
+      0);
 
   return true;
 }

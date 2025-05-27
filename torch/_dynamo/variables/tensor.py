@@ -18,7 +18,6 @@ These classes work together to track tensor operations and properties during Dyn
 """
 
 import functools
-import inspect
 import logging
 import operator
 import textwrap
@@ -67,9 +66,10 @@ from ..utils import (
     set_example_value,
     tensortype_to_dtype,
 )
-from .base import VariableTracker
+from .base import AttributeMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
+from .user_defined import UserDefinedClassVariable
 
 
 try:
@@ -79,6 +79,7 @@ except ModuleNotFoundError:
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
@@ -122,6 +123,13 @@ def is_bound_tensor_method(value):
         and isinstance(value.__self__, torch.Tensor)
         and getattr(value.__self__, value.__name__, None)
     )
+
+
+# instead of using inspect.getattr_static, we directly lookup the appropriate
+# dicts. It is necessary to keep the torch._C.TensorBase first in the or
+# operation, because the second arg takes priority in or operation when there
+# are common keys.
+all_tensor_attrs = torch._C.TensorBase.__dict__ | torch.Tensor.__dict__
 
 
 class TensorVariable(VariableTracker):
@@ -392,6 +400,13 @@ class TensorVariable(VariableTracker):
         from . import GetAttrVariable
         from .builtin import BuiltinVariable
 
+        # TODO - This is not a good solution but solves an accuracy issue.
+        # Today, var_getattr returns GetAttrVariable for both non-existent
+        # attributes and existing attributes. This is a bug and requires more
+        # deep dive.
+        if name in ("size", "stride"):
+            return ConstantVariable(True)
+
         try:
             var = BuiltinVariable(getattr).call_function(
                 tx, [self, ConstantVariable(name)], {}
@@ -410,8 +425,6 @@ class TensorVariable(VariableTracker):
         return ConstantVariable(ret_val)
 
     def var_getattr(self, tx: "InstructionTranslator", name):
-        from . import UserDefinedClassVariable
-
         if self.is_strict_mode(tx):
             if name in self._strict_mode_banned_ops():
                 unimplemented(
@@ -466,9 +479,8 @@ class TensorVariable(VariableTracker):
                 from .builder import wrap_fx_proxy
                 from .misc import GetAttrVariable
 
-                try:
-                    static_attr = inspect.getattr_static(torch.Tensor, name)
-                except AttributeError:
+                static_attr = all_tensor_attrs.get(name, None)
+                if static_attr is None:
                     return None
 
                 # Make sure this is an attribute, not a method.
@@ -585,12 +597,8 @@ class TensorVariable(VariableTracker):
         # Only override builtin tensor methods
         # The user can manually add override handling
         # with a decorator for other methods (e.g. a dispatch subclass with other methods)
-        is_base_tensor_method = False
-        try:
-            inspect.getattr_static(torch.Tensor, name)
-            is_base_tensor_method = True
-        except AttributeError:
-            is_base_tensor_method = False
+        static_attr = all_tensor_attrs.get(name, None)
+        is_base_tensor_method = static_attr is not None
 
         if (
             can_dispatch_torch_function(tx, tuple([self] + list(args)), kwargs)
@@ -599,7 +607,7 @@ class TensorVariable(VariableTracker):
             if self.source:
                 func_var = VariableBuilder(
                     tx, AttrSource(AttrSource(self.source, "__class__"), name)
-                )(inspect.getattr_static(torch.Tensor, name))
+                )(static_attr)
             else:
                 func_var = SourcelessBuilder.create(tx, getattr(torch.Tensor, name))
 
@@ -614,7 +622,7 @@ class TensorVariable(VariableTracker):
         """
 
         # This is seen in inspect signature where we check if the value is a default value
-        if name == "__eq__" and isinstance(args[0], variables.UserDefinedClassVariable):
+        if name == "__eq__" and isinstance(args[0], UserDefinedClassVariable):
             return variables.ConstantVariable(False)
 
         try:
@@ -789,9 +797,23 @@ class TensorVariable(VariableTracker):
 
             tx = InstructionTranslator.current_tx()
             py_cls = cls.as_python_constant()
-            return TensorWithTFOverrideVariable.from_tensor_var(
+            var = TensorWithTFOverrideVariable.from_tensor_var(
                 tx, self, py_cls, cls.source
             )
+            # See NOTE [Side effect tracking for newly constructed tensor]
+            tx.output.side_effects._track_obj(
+                object(), var, mutation_type_cls=AttributeMutationNew
+            )
+            return var
+        unimplemented_v2(
+            gb_type="Argument of `as_subclass` must be a non-dispatcher-style tensor subclass",
+            context=f"{self}.as_subclass({cls})",
+            explanation="Currently not supported",
+            hints=[
+                "Avoid this call or move it outside `torch.compile` regione",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def method_get_device(self):
         if isinstance(self.device, torch.device):
@@ -808,7 +830,7 @@ class TensorVariable(VariableTracker):
             unimplemented("Tensor.numpy(). NumPy is not available")
         if self.layout != torch.strided:
             raise TypeError(
-                f"can't convert {self.layout} layout tensor to numpy. Use Tensor.dense() first"
+                f"can't convert {self.layout} layout tensor to numpy. Use Tensor.to_dense() first"
             )
         from ..symbolic_convert import InstructionTranslator
 
@@ -1432,25 +1454,58 @@ class FakeItemVariable(TensorVariable):
         return FakeItemVariable(**dict(tensor_variable.__dict__))
 
 
-class TensorSubclassVariable(VariableTracker):
-    def __init__(self, value, *args, **kwargs) -> None:
-        self.value = value
-        super().__init__(*args, **kwargs)
-
+class TensorSubclassVariable(UserDefinedClassVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if len(args) == 1 and isinstance(args[0], TensorVariable):
-            from .torch_function import TensorWithTFOverrideVariable
+        # Handle `Subclass(existing_tensor, ...)` calls.
+        from .torch_function import TensorWithTFOverrideVariable
 
-            return TensorWithTFOverrideVariable.from_tensor_var(
-                tx, args[0], self.value, self.source
+        new_func = self.value.__new__
+        if new_func is torch.Tensor.__new__:
+            if (
+                len(args) == 1
+                and isinstance(args[0], TensorVariable)
+                and len(kwargs) == 0
+            ):
+                data = args[0]
+                # Simulate `torch.Tensor.__new__` as shallow-copying the input
+                # tensor data with a new type. TODO polyfill?
+                var = TensorWithTFOverrideVariable.from_tensor_var(
+                    tx, data, self.value, self.source
+                )
+            else:
+                unimplemented_v2(
+                    gb_type="Calling subclass default constructor with more than tensor argument",
+                    context=f"{self.value}(args={args}, kwargs={kwargs})",
+                    explanation="Currently not supported",
+                    hints=[
+                        "Avoid this constructor call or move it outside "
+                        "`torch.compile` regione",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+        else:
+            # Let Dynamo trace through custom `__new__`
+            var = VariableTracker.build(tx, new_func).call_function(
+                tx, [self] + args, kwargs
             )
 
-        return super().call_function(tx, args, kwargs)
+        # Let Dynamo trace through custom `__init__`
+        init_func = self.value.__init__
+        # TODO builder should be able to handle `torch.Tensor.__init__`,
+        # which is `object.__init__`, so that we can remove this check.
+        if init_func is not torch.Tensor.__init__:
+            VariableTracker.build(tx, init_func).call_function(tx, [var], kwargs)
+
+        # See NOTE [Side effect tracking for newly constructed tensor]
+        tx.output.side_effects._track_obj(
+            object(), var, mutation_type_cls=AttributeMutationNew
+        )
+        return var
 
     def as_python_constant(self):
         return self.value
@@ -1512,7 +1567,7 @@ class UntypedStorageVariable(VariableTracker):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen(self.from_tensor)
         codegen.load_method("untyped_storage")
         codegen.call_method(0)
@@ -1527,7 +1582,7 @@ class DataPtrVariable(VariableTracker):
         super().__init__(**kwargs)
         self.from_tensor = from_tensor
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen(self.from_tensor)
         codegen.load_method("data_ptr")
         codegen.call_method(0)

@@ -217,6 +217,14 @@ else
 fi
 
 ###############################################################################
+# Check XPU configured correctly
+###############################################################################
+if [[ "$DESIRED_CUDA" == 'xpu' && "$PACKAGE_TYPE" != 'libtorch' ]]; then
+  echo "Checking that xpu is compiled"
+  python -c 'import torch; exit(0 if torch.xpu._is_compiled() else 1)'
+fi
+
+###############################################################################
 # Check CUDA configured correctly
 ###############################################################################
 # Skip these for Windows machines without GPUs
@@ -294,19 +302,22 @@ except RuntimeError as e:
 fi
 
 ###############################################################################
-# Check for C++ ABI compatibility to GCC-11
+# Check for C++ ABI compatibility to GCC-11 - GCC 13
 ###############################################################################
 if [[ "$(uname)" == 'Linux' &&  "$PACKAGE_TYPE" == 'manywheel' ]]; then
   pushd /tmp
-  # Per https://gcc.gnu.org/onlinedocs/gcc/C_002b_002b-Dialect-Options.html gcc-11 is ABI16
-  # Though manylinux_2.28 should have been build with gcc-14, per
-  # https://github.com/pypa/manylinux?tab=readme-ov-file#manylinux_2_28-almalinux-8-based
-  # On s390x gcc 14 is used because it contains fix for interaction
-  # between precompiled headers and vectorization builtins.
-  # This fix is not available in earlier gcc versions.
-  # gcc-14 uses ABI19.
-  if [[ "$(uname -m)" != "s390x" ]]; then
-    python -c "import torch; exit(0 if torch._C._PYBIND11_BUILD_ABI == '_cxxabi1016' else 1)"
+  # Per https://gcc.gnu.org/onlinedocs/gcc/C_002b_002b-Dialect-Options.html
+  # gcc-11 is ABI16, gcc-13 is ABI18, gcc-14 is ABI19
+  # gcc 11 - CUDA 11.8, xpu, rocm
+  # gcc 13 - CUDA 12.6, 12.8 and cpu
+  # Please see issue for reference: https://github.com/pytorch/pytorch/issues/152426
+  if [[ "$(uname -m)" == "s390x" ]]; then
+    cxx_abi="19"
+  elif [[ "$DESIRED_CUDA" != 'cu118' && "$DESIRED_CUDA" != 'xpu' && "$DESIRED_CUDA" != 'rocm'* ]]; then
+    cxx_abi="18"
+  else
+    cxx_abi="16"
   fi
+  python -c "import torch; exit(0 if torch._C._PYBIND11_BUILD_ABI == '_cxxabi10${cxx_abi}' else 1)"
   popd
 fi

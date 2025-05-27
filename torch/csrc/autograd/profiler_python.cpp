@@ -27,6 +27,7 @@
 #include <torch/csrc/profiler/util.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_compat.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <optional>
 
@@ -646,7 +647,13 @@ struct ThreadLocalResults {
   ThreadLocalResults& operator=(const ThreadLocalResults&&) = delete;
 
   ~ThreadLocalResults() {
+    // Currently, there is a bug in Profiler when using Python 3.12 that causes
+    // a segfault when decrementing the refcount of a TraceContext during
+    // on-demand. We are purposefully allowing for a small leak in this
+    // situation to avoid the segfault. This should be fixed in the future.
+#if PY_MAJOR_VERSION < 3 || (PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION < 12)
     Py_DECREF((PyObject*)ctx_);
+#endif
   }
 
   template <CallType C, EventType E, typename Ephemeral, typename... Args>
@@ -705,7 +712,8 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
   void recordCCall(
       ThreadLocalResults& tls,
       PyFrameObject* frame,
-      PyObject* arg);
+      PyObject* arg,
+      bool start_frame = false);
 
   const std::vector<PyThreadState*> interpreterThreads() const;
 
@@ -792,8 +800,11 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
       PyFrameObject* frame = it->get();
       PyObject* callable = get_callable_from_frame(frame);
       if (callable) {
-        // Call recordCCall with the callable and the frame
-        recordCCall(thread_local_results_.back(), it->get(), callable);
+        // If the frame has a callable, record it as a C call since
+        // PyEval_GetFrame only gets the python frame. We need to record this C
+        // call so that when exiting the profiler we don't have a mismatched C
+        // call.
+        recordCCall(thread_local_results_.back(), it->get(), callable, true);
       }
 
       auto frame_refcount = Py_REFCNT(it->get());
@@ -871,7 +882,14 @@ void PythonTracer::recordPyCall(
       // `PyFrame_FastToLocals` which forces the interpreter to materialize
       // the full dict of locals.
       auto locals = THPObjectPtr(PyFrame_GetLocals(frame));
+
+#if PY_MAJOR_VERSION < 3 || (PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION < 13)
       auto self = THPObjectPtr(PyDict_GetItemString(locals, "self"));
+#else
+      // In Python-3.13+ `PyFrame_GetLocals()` returns instance of
+      // PyFrameLocalsProxy_Type See PEP 667 for more info
+      auto self = THPObjectPtr(PyMapping_GetItemString(locals, "self"));
+#endif
       Py_INCREF(self.get());
       auto back = THPFrameObjectPtr(PyFrame_GetBack(frame));
       TORCH_INTERNAL_ASSERT(back != nullptr);
@@ -879,7 +897,11 @@ void PythonTracer::recordPyCall(
           frame, self.get(), back.get());
     } else if (code.get() == optimizer_hook_) {
       auto locals = THPObjectPtr(PyFrame_GetLocals(frame));
+#if PY_MAJOR_VERSION < 3 || (PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION < 13)
       auto self = THPObjectPtr(PyDict_GetItemString(locals, "self"));
+#else
+      auto self = THPObjectPtr(PyMapping_GetItemString(locals, "self"));
+#endif
       Py_INCREF(self.get());
       auto back = THPFrameObjectPtr(PyFrame_GetBack(frame));
       TORCH_INTERNAL_ASSERT(back != nullptr);
@@ -899,8 +921,13 @@ void PythonTracer::recordPyCall(
 void PythonTracer::recordCCall(
     ThreadLocalResults& tls,
     PyFrameObject* frame,
-    PyObject* arg) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(PyCFunction_Check(arg));
+    PyObject* arg,
+    bool start_frame) {
+  // for starting frames we duplicate callable python functions to avoid having
+  // empty C frames in trace when exiting
+  if (!start_frame) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(PyCFunction_Check(arg));
+  }
   auto fn = reinterpret_cast<PyCFunctionObject*>(arg);
 
   // NB: For C calls a new frame is not created, so we use `frame` rather than
@@ -1135,6 +1162,76 @@ std::vector<std::shared_ptr<Result>> PythonTracer::getEvents(
 
   return out;
 }
+// ============================================================================
+// == Memory Tracer ======================================================
+// ============================================================================
+
+// Assuming python_tracer::PythonMemoryTracerBase is defined elsewhere
+class PythonMemoryTracer final : public python_tracer::PythonMemoryTracerBase {
+ public:
+  explicit PythonMemoryTracer() = default;
+  ~PythonMemoryTracer() override = default;
+  void start() override;
+  void stop() override;
+  void export_memory_history(const std::string& path) override;
+};
+
+static void toggle_memory_tracing(bool enable) {
+  pybind11::gil_scoped_acquire gil;
+  THPObjectPtr torch_cuda_memory_module(
+      PyImport_ImportModule("torch.cuda.memory"));
+  if (!torch_cuda_memory_module) {
+    return;
+  }
+  THPObjectPtr snapshot_func(PyObject_GetAttrString(
+      torch_cuda_memory_module.get(), "_record_memory_history_impl"));
+  if (!snapshot_func) {
+    return;
+  }
+  // Call the function with arguments
+  PyObject* args = PyTuple_New(6);
+  PyTuple_SetItem(args, 0, enable ? PyUnicode_FromString("all") : Py_None);
+  PyTuple_SetItem(args, 1, PyUnicode_FromString("all")); // context
+  PyTuple_SetItem(args, 2, PyUnicode_FromString("all")); // stacks
+  PyTuple_SetItem(args, 3, THPUtils_packInt64(100000)); // max_entries
+  PyTuple_SetItem(args, 4, Py_None); // device (None)
+  PyTuple_SetItem(args, 5, PyBool_FromLong(0)); // clear_history (False)
+  PyObject* result = PyObject_Call(snapshot_func.get(), args, nullptr);
+  Py_DECREF(args);
+  if (result == nullptr) {
+    return;
+  }
+}
+
+void PythonMemoryTracer::start() {
+  toggle_memory_tracing(true);
+}
+
+void PythonMemoryTracer::export_memory_history(const std::string& path) {
+  pybind11::gil_scoped_acquire gil;
+  THPObjectPtr torch_cuda_memory_module(
+      PyImport_ImportModule("torch.cuda.memory"));
+  if (!torch_cuda_memory_module) {
+    return;
+  }
+  THPObjectPtr snapshot_func(
+      PyObject_GetAttrString(torch_cuda_memory_module.get(), "_dump_snapshot"));
+  if (!snapshot_func) {
+    return;
+  }
+  PyObject* py_filename = PyUnicode_FromString(path.c_str());
+  // Call the function with arguments (e.g., a file path)
+  PyObject* args = PyTuple_Pack(1, py_filename);
+  PyObject* result = PyObject_Call(snapshot_func.get(), args, nullptr);
+  Py_DECREF(args);
+  if (result == nullptr) {
+    return;
+  }
+}
+
+void PythonMemoryTracer::stop() {
+  toggle_memory_tracing(false);
+}
 
 // ============================================================================
 // == API =====================================================================
@@ -1172,6 +1269,11 @@ std::unique_ptr<python_tracer::PythonTracerBase> getTracer(
     torch::profiler::impl::RecordQueue* queue) {
   return std::make_unique<PythonTracer>(queue);
 }
+
+std::unique_ptr<python_tracer::PythonMemoryTracerBase> getMemoryTracer() {
+  return std::make_unique<PythonMemoryTracer>();
+}
+
 } // namespace
 } // namespace torch::profiler::impl
 
@@ -1182,5 +1284,7 @@ void init() {
   TORCH_CHECK(PyType_Ready(&torch::profiler::impl::TraceContextType) == 0);
   torch::profiler::impl::python_tracer::registerTracer(
       &torch::profiler::impl::getTracer);
+  torch::profiler::impl::python_tracer::registerMemoryTracer(
+      &torch::profiler::impl::getMemoryTracer);
 }
 } // namespace torch::autograd::profiler::python_tracer
