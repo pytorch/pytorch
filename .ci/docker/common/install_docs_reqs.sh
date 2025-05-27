@@ -9,7 +9,7 @@ install_ubuntu() {
   apt-get update
   apt-get install -y gpg-agent || :              # ignore if absent (16.04 quirk)
 
-  curl --retry 3 -sL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+  curl --retry 3 -sL https://deb.nodesource.com/setup_16.x | sudo -E bash -
   sudo apt-get install -y nodejs
 
   curl --retry 3 -sS https://dl.yarnpkg.com/debian/pubkey.gpg | sudo apt-key add -
@@ -22,7 +22,7 @@ install_ubuntu() {
 
   sudo apt-get -y install doxygen
 
-  apt-get autoclean -y && apt-get clean -y
+  apt-get autoclean && apt-get clean
   rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 }
 
