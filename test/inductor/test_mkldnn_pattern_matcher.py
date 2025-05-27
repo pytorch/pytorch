@@ -284,7 +284,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
         ]
         if torch.ops.mkldnn._is_mkldnn_bf16_supported() or self.device == "xpu":
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported() or self.devcie == "xpu":
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported() or self.device == "xpu":
             dtypes.append(torch.float16)
         cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
         options = itertools.product(
@@ -373,9 +373,9 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
                 return self.unary_fn(x)
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported() or self.devcie == "xpu":
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported() or self.device == "xpu":
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported() or self.devcie == "xpu":
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported() or self.device == "xpu":
             dtypes.append(torch.float16)
         options = itertools.product(unary_list, [True, False], dtypes)
         for unary_fn, bias, dtype in options:
@@ -827,13 +827,15 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_conv2d_binary_broadcast_shapes_cpu(self):
+    def test_conv2d_binary_broadcast_shapes(self, device):
+        self.device = device
         self._test_conv_binary_broadcast_shapes_base(dim=4)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_conv3d_binary_broadcast_shapes_cpu(self):
+    def test_conv3d_binary_broadcast_shapes(self, device):
+        self.device = device
         self._test_conv_binary_broadcast_shapes_base(dim=5)
 
     def test_linear_binary(self, device):
@@ -895,7 +897,9 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
             )
             self.assertEqual(metrics.generated_kernel_count, 2 if TEST_ACL else 1)
 
-    def test_linear_binary_broadcast_shapes_cpu(self):
+    def test_linear_binary_broadcast_shapes(self, device):
+        self.device = device
+
         class M(torch.nn.Module):
             def __init__(self, binary_fn, in_channels, out_channels, bias, **kwargs):
                 super().__init__()
@@ -962,7 +966,9 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoONEDNN
     @skipIfRocm
     @unittest.skipIf(IS_FBCODE, "Failing in fbcode")
-    def test_conv2d_linear_add_broadcast_shapes_cpu(self):
+    def test_conv2d_linear_add_broadcast_shapes(self, device):
+        self.device = device
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()

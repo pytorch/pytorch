@@ -29,6 +29,8 @@ from .quantization import (
 )
 
 
+mkldnn_supported_devices = ("cpu", "xpu")
+
 if torch._C._has_mkldnn:
     aten = torch.ops.aten
     mkldnn = torch.ops.mkldnn
@@ -1033,8 +1035,13 @@ if torch._C._has_mkldnn:
         if conv_node.args[1].op != "get_attr":
             return False
         for meta_value in [input_meta_value, weight_meta_value]:
-            if meta_value is None or (meta_value.dim() != 4 and meta_value.dim() != 5):
+            if (
+                meta_value is None
+                or meta_value.device.type not in mkldnn_supported_devices
+                or (meta_value.dim() != 4 and meta_value.dim() != 5)
+            ):
                 return False
+
         if (not is_xpu) and (
             input_meta_value.dtype == torch.bfloat16
             or weight_meta_value.dtype == torch.bfloat16
@@ -1113,12 +1120,17 @@ if torch._C._has_mkldnn:
         ):
             return False
         for meta_value in [input_meta_value, weight_meta_value]:
-            if meta_value is None or meta_value.dim() != 2:
+            if (
+                meta_value is None
+                or meta_value.device.type not in mkldnn_supported_devices
+                or meta_value.dim() != 2
+            ):
                 return False
         if weight_idx == 2:
             bias_meta_value = linear_node.args[0].meta.get("val")
             if (
                 bias_meta_value is None
+                or meta_value.device.type not in mkldnn_supported_devices
                 or bias_meta_value.dim() != 1
                 or bias_meta_value.size(0) != weight_meta_value.size(1)
             ):
