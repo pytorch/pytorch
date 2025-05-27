@@ -45,6 +45,13 @@ static bool isHipSparseLtSupported() {
     c10::call_once(g_hipSparseLtSupportInitFlag, initHipSparseLtSupport);
 
     // Return cached result (platform-wide)
+    if (!g_hipSparseLtSupported) {
+        TORCH_CHECK(
+            false,
+            "hipSparseLt not supported on this device, supported architectures: "
+            "gfx950, gfx942. "
+            "required ROCM version: 6.4.0 or later.");
+    }
     return g_hipSparseLtSupported;
 }
 #endif
@@ -60,11 +67,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
   auto compression_factor = 9;
 
   #ifdef USE_ROCM
-  TORCH_CHECK(
-      isHipSparseLtSupported(),
-      "hipSparseLt not supported on this device, supported architectures: "
-      "gfx950, gfx942."
-      "required ROCM version: 6.4.0 or later.");
+  TORCH_CHECK(isHipSparseLtSupported());
   #endif
 
   switch (sparse_input.scalar_type()) {
@@ -165,11 +168,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
   auto compression_factor = 9;
 
   #ifdef USE_ROCM
-  TORCH_CHECK(
-      isHipSparseLtSupported(),
-      "hipSparseLt not supported on this device, supported architectures: "
-      "gfx950, gfx942."
-      "required ROCM version: 6.4.0 or later.");
+  TORCH_CHECK(isHipSparseLtSupported());
   #endif
 
   switch (compressed_A.scalar_type()) {
