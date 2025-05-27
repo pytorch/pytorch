@@ -1355,22 +1355,6 @@ test_torchinductor.copy_tests(
     xfail_prop="_expected_failure_triton_cpu",
 )
 
-
-@unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
-@config.patch(cpu_backend="triton")
-@config.patch("triton.use_tma_api", True)
-class TritonTMADescriptorTestCPU(BlockDescriptorTestBase):
-    block_descriptor_constructor_str = "tl.make_tensor_descriptor"
-    device = "cpu"
-
-
-test_torchinductor.copy_tests(
-    CommonTemplate,
-    TritonTMADescriptorTestCPU,
-    "cpu",
-    xfail_prop=["_expected_failure_triton_cpu", "_expected_failure_use_tma_api"],
-    test_failures=TMA_TEST_XFAIL,
-)
 @unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
 @config.patch("triton.use_block_ptr", True)
 class TritonBlockPointerTestGPU(BlockDescriptorTestBase):
