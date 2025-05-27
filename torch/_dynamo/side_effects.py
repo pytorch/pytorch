@@ -256,6 +256,7 @@ class SideEffects:
             int.__getattribute__,
             str.__getattribute__,
             list.__getattribute__,
+            tuple.__getattribute__,
             BaseException.__getattribute__,
         )
 
