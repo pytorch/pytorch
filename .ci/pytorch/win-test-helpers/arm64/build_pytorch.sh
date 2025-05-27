@@ -56,6 +56,7 @@ which python
 
 # Install Python dependencies
 python -m pip install --upgrade pip
+pip install numpy==2.2.3
 pip install -r requirements.txt
 
 # Set DISTUTILS_USE_SDK after psutil install
