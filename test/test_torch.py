@@ -11007,32 +11007,41 @@ def test_ldexp_pow2_float16_cases():
         }
     ]
 
-    for case in test_cases:
-        a, b, expected = case["a"], case["b"], case["expected"]
-        print(f"\n[CASE] {case['desc']} — a={a.item()}, b={b.item()}")
+    devices = ["cpu"]
+    if torch.cuda.is_available():
+        devices.append("cuda")
 
-        # Functional
-        result_func = torch.ldexp(a, b)
-        print(f"  Functional: {result_func.item()} (expected: {expected.item()})")
-        assert torch.allclose(result_func, expected, atol=1e-8) or \
-               (torch.isinf(expected) and torch.isinf(result_func)), \
-               f"(functional) Expected {expected.item()}, got {result_func.item()}"
+    for device in devices:
+        print(f"\nRunning on device: {device}")
+        for case in test_cases:
+            a = case["a"].to(device)
+            b = case["b"].to(device)
+            expected = case["expected"].to(device)
 
-        # In-place
-        a_clone = a.clone()
-        a_clone.ldexp_(b)
-        print(f"  In-place: {a_clone.item()} (expected: {expected.item()})")
-        assert torch.allclose(a_clone, expected, atol=1e-8) or \
-               (torch.isinf(expected) and torch.isinf(a_clone)), \
-               f"(in-place) Expected {expected.item()}, got {a_clone.item()}"
+            print(f"[CASE] {case['desc']} — a={a.item()}, b={b.item()}")
 
-        # Out variant
-        out_tensor = torch.empty_like(a)
-        torch.ldexp(a, b, out=out_tensor)
-        print(f"  Out: {out_tensor.item()} (expected: {expected.item()})")
-        assert torch.allclose(out_tensor, expected, atol=1e-8) or \
-               (torch.isinf(expected) and torch.isinf(out_tensor)), \
-               f"(out) Expected {expected.item()}, got {out_tensor.item()}"
+            # Functional
+            result_func = torch.ldexp(a, b)
+            print(f"  Functional: {result_func.item()} (expected: {expected.item()})")
+            assert torch.allclose(result_func, expected, atol=1e-8) or \
+                   (torch.isinf(expected) and torch.isinf(result_func)), \
+                   f"(functional) Expected {expected.item()}, got {result_func.item()}"
+
+            # In-place
+            a_clone = a.clone()
+            a_clone.ldexp_(b)
+            print(f"  In-place: {a_clone.item()} (expected: {expected.item()})")
+            assert torch.allclose(a_clone, expected, atol=1e-8) or \
+                   (torch.isinf(expected) and torch.isinf(a_clone)), \
+                   f"(in-place) Expected {expected.item()}, got {a_clone.item()}"
+
+            # Out variant
+            out_tensor = torch.empty_like(a)
+            torch.ldexp(a, b, out=out_tensor)
+            print(f"  Out: {out_tensor.item()} (expected: {expected.item()})")
+            assert torch.allclose(out_tensor, expected, atol=1e-8) or \
+                   (torch.isinf(expected) and torch.isinf(out_tensor)), \
+                   f"(out) Expected {expected.item()}, got {out_tensor.item()}"
 
 # TODO: these empy classes are temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed

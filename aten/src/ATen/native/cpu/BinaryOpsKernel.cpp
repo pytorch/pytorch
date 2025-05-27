@@ -1360,6 +1360,23 @@ void shifted_chebyshev_polynomial_t_kernel(TensorIteratorBase& iterator) {
       });
 } // shifted_chebyshev_polynomial_t_kernel(TensorIteratorBase& iterator)
 
+// Note:
+// For low-precision dtypes like float16, results may overflow or underflow.
+// - For very small exponents (e.g., exp <= -25), the result will likely underflow to 0.0.
+//   The smallest positive subnormal representable float16 is ~2^-24 ≈ 5.96e-08.
+// - For very large exponents (e.g., exp >= 16), the result may overflow to inf.
+//   The largest finite float16 is 65504, approximately 2^15.999.
+//
+// These behaviors are expected and conform to IEEE 754 float16 specification.
+void ldexp_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(0), "ldexp_cpu", [&] {
+    using scalar_t_exp = int;
+    cpu_kernel(iter, [](scalar_t x, scalar_t_exp exp) -> scalar_t {
+      return static_cast<scalar_t>(std::ldexp(static_cast<double>(x), exp));
+    });
+  });
+} //ldexp implementation
+
 void shifted_chebyshev_polynomial_u_kernel(TensorIteratorBase& iterator) {
   AT_DISPATCH_FLOATING_TYPES(
       iterator.common_dtype(), "shifted_chebyshev_polynomial_u_cpu", [&]() {
@@ -1443,6 +1460,7 @@ REGISTER_DISPATCH(
 REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_kernel)
 REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_kernel)
 REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_kernel)
+REGISTER_DISPATCH(ldexp_stub, ldexp_kernel);
 
 ALSO_REGISTER_AVX512_DISPATCH(atan2_stub, &atan2_kernel)
 ALSO_REGISTER_AVX512_DISPATCH(smooth_l1_stub, &smooth_l1_kernel)
