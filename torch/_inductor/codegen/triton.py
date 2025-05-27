@@ -522,7 +522,7 @@ class TMADescriptorOptions(BlockDescriptorOptions):
                 if symbol_is_type(block_type, block_symt):
                     innermost_block_type = block_type
                     break
-        assert innermost_block_type
+        assert innermost_block_type, f"{innermost_block_shape} expr must contain a single block type from {TritonSymbols.block_types}"
 
         min_block_size = int(
             sympy.nsolve(
@@ -1925,13 +1925,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if V.graph.get_current_device_or_throw().type == "cuda" and torch.cuda.get_device_capability()[0] < 9:
                     return False
 
-                # `no_x_dim` with use_tma_api => XBLOCK=1, but the TMA API requires that
-                # atleast 16 bytes of data can be loaded / stored
+                # `no_x_dim` with use_tma_api => XBLOCK=1, and only one element
+                # is to be stored for the reduction. However the TMA API requires that
+                # the store will be 16 byte aligned, which is not attainable with a single
+                # element
                 if self.no_x_dim:
                     return False
 
-                # RN blocks for persistent reductions are static. So the nnermost rnumel
-                # must have atleast 16 bytes of data to be loaded / stored. The dtype is
+                # RN blocks for persistent reductions are static. So the innermost rnumel
+                # must have atleast 16 bytes of data to be loaded. The dtype is
                 # not known here so conservatively require 16 elements
                 if self.persistent_reduction:
                     reduction_prefix, innermost_rnumel = (None, None)
