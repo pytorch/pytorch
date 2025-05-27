@@ -535,9 +535,11 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         backend._set_enable_nan_check(False)
         # Note: using all-gather here bc some NCCL/SM version does not support
         # FP8 reduction
-        pg._allgather_base(output, nan_tensor)
-
+        # Note: temporarily skipping to workaround the following hang issue
+        # https://github.com/pytorch/pytorch/issues/153479
+        # pg._allgather_base(output, nan_tensor)
         backend._set_enable_nan_check(True)
+
         pg._allgather_base(output, nan_tensor)
         dist.destroy_process_group()
 
