@@ -1618,7 +1618,9 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
             )
             if python_type is set:
                 # set is initialized later
-                self._set_vt = variables.SetVariable({}, mutation_type=ValueMutationNew())
+                self._set_vt = variables.SetVariable(
+                    {}, mutation_type=ValueMutationNew()
+                )
             else:
                 init_args = kwargs.get("init_args", {})
                 tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()

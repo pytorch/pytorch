@@ -1263,7 +1263,8 @@ class BuiltinVariable(VariableTracker):
         if self.fn is frozenset:
             resolved_fn = getattr(self.fn, name)
             if resolved_fn in frozenset_methods:
-                return args[0].call_method(tx, name, args[1:], kwargs)
+                if isinstance(args[0], variables.FrozensetVariable):
+                    return args[0].call_method(tx, name, args[1:], kwargs)
 
         if self.fn is str and len(args) >= 1:
             resolved_fn = getattr(self.fn, name)
