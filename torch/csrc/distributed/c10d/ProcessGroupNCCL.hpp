@@ -621,9 +621,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // print out ENV settings for the heartbeat monitor thread.
     void printLogMsg();
 
-    // Wake up the heartbeat monitor thread.
-    void wakeUpMonitor();
-
     // Set the last update time of watchdog thread.
     void setLastWorkListUpdateTime(
         std::chrono::time_point<std::chrono::steady_clock> time);
@@ -665,7 +662,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::thread ncclHeartbeatMonitorThread_;
 
     // Whether or not we should terminate the heartbeat monitoring threads.
-    std::atomic<bool> terminateHeartbeatMonitorThread_;
+    std::atomic<bool> terminateHeartbeatMonitorThread_{false};
 
     // Condition Variable for monitor thread to wake up early
     std::condition_variable monitorWakeUpCV_;
@@ -742,6 +739,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     return false;
 #endif
   }
+
+  uint64_t getWatchdogHeartbt() const;
 
   void startCoalescing() override;
 
@@ -1244,7 +1243,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::mutex mutex_;
 
   // Heartbeat of watchdog thread.
-  static std::atomic_uint64_t heartbeat_;
+  std::atomic_uint64_t heartbeat_{};
 
   // timeout for the dump to finish.
   int waitTimeoutDumpInMilSec_;
@@ -1262,9 +1261,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether or not we should terminate the watchdog and workCleanup threads.
   std::atomic<bool> terminateProcessGroup_;
-
-  // Whether or not we should terminate the heartbeat monitoring threads.
-  static std::atomic<bool> terminateHeartbeatMonitorThread_;
 
   // Whether there are hooks pending to be fired
   std::atomic<bool> hasPendingHooks_{};

@@ -925,9 +925,6 @@ constexpr const char* MULTI_DEVICE_ERROR_MSG =
     "https://pytorch.org/docs/stable/distributed.html#multi-gpu-collective-functions. "
     "ProcessGroupNCCL continues supporting multi-process and multi-thread modes.";
 
-std::atomic<bool> ProcessGroupNCCL::terminateHeartbeatMonitorThread_{false};
-std::atomic_uint64_t ProcessGroupNCCL::heartbeat_{1ULL};
-
 ProcessGroupNCCL::ProcessGroupNCCL(
     c10::intrusive_ptr<Store> store,
     int rank,
@@ -960,6 +957,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   rethrowCUDAErrors_ = getCvarBool(TORCH_NCCL_RETHROW_CUDA_ERRORS, true);
   propagatePgError_ = getCvarBool(TORCH_NCCL_PROPAGATE_ERROR, false);
   enableNanCheck_ = getCvarBool(TORCH_NCCL_NAN_CHECK, false);
+  heartbeat_ = 1ULL;
   cudaEventCacheEnabled_.store(getCvarBool(TORCH_NCCL_CUDA_EVENT_CACHE, true));
   waitTimeoutDumpInMilSec_ =
       getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000 /*15 Sec*/);
@@ -1432,8 +1430,7 @@ void ProcessGroupNCCL::abort() {
 
   // We need to wait for abort to finish before we can safely shut down
   // heartbeat monitoring thread.
-  terminateHeartbeatMonitorThread_.store(true);
-  heartbeatMonitor_->wakeUpMonitor();
+  heartbeatMonitor_->stop();
 }
 
 // Difference between `abort()` and `shutdown()`:
@@ -1482,8 +1479,7 @@ void ProcessGroupNCCL::shutdown() {
   }
   // Watchdog thread exiting, retire heartbeat monitoring thread now to avoid
   // false alarm
-  terminateHeartbeatMonitorThread_.store(true);
-  heartbeatMonitor_->wakeUpMonitor();
+  heartbeatMonitor_->stop();
   // Destroy the communicator, reclaim resources
   LOG(INFO) << logPrefix() << "Watchdog joined, destroying NCCL communicators.";
   {
@@ -1619,10 +1615,6 @@ std::string ProcessGroupNCCL::HeartbeatMonitor::getNCCLWatchdogTimeoutExitMsg(
       "Terminating the process after attempting to dump debug info, due to ",
       exitReason,
       ".");
-}
-
-void ProcessGroupNCCL::HeartbeatMonitor::wakeUpMonitor() {
-  monitorWakeUpCV_.notify_one();
 }
 
 void ProcessGroupNCCL::HeartbeatMonitor::setLastWorkListUpdateTime(
@@ -1788,7 +1780,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
         heartbeatTimeoutInSec_ * 1000l) {
       // Check the heart beat of watchdog thread.
       lastTimeHeartBeatCheck = currentTime;
-      auto heartbeat = heartbeat_.load();
+      auto heartbeat = pg_->getWatchdogHeartbt();
       if (heartbeat != heartBeatCounter) {
         heartBeatCounter = heartbeat;
       } else {
@@ -1921,7 +1913,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     LOG(INFO)
         << pg_->logPrefix() << "slept for " << heartbeatTimeoutInSec_
         << " because we want to wait longer to verify there is indeed a watchdog hang.";
-    watchdogThreadHang = (heartbeat_.load() == heartBeatCounter);
+    watchdogThreadHang = (pg_->getWatchdogHeartbt() == heartBeatCounter);
   }
 
   // At this point, we either already sleep for another `heartbeatTimeoutInSec_`
@@ -3314,6 +3306,10 @@ ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
       is_high_priority_stream(is_high_priority_stream) {}
 
 static constexpr int CoalActive = 0x01, CoalColl = 0x02, CoalP2P = 0x04;
+
+uint64_t ProcessGroupNCCL::getWatchdogHeartbt() const {
+  return heartbeat_.load();
+}
 
 void ProcessGroupNCCL::startCoalescing() {
   // Other collective ops bump seq_ before creating a work. Thus, if coalesced
