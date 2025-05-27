@@ -6,17 +6,7 @@ import importlib
 import inspect
 import sys
 import types
-from functools import cached_property
-from typing import (
-    Any,
-    Callable,
-    ClassVar,
-    final,
-    Optional,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, final, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Concatenate, ParamSpec
 
 import torch
@@ -745,14 +735,7 @@ def get_cached_ops():
 # Each OpOverload object contains pointer to a specific operator overload, a pointer to the parent `OpOverloadPacket` object.
 # You can obtain an OpOverload object through attribute query on OpOverloadPacket.
 class OpOverload(OperatorBase):
-    def __init__(
-        self,
-        overloadpacket: "OpOverloadPacket",
-        op: Callable[_P, _T],
-        op_dk: Callable[Concatenate[DispatchKey, _P], _T],
-        schema: torch._C.FunctionSchema,
-        tags: list[Any],
-    ) -> None:
+    def __init__(self, overloadpacket, op, op_dk, schema, tags):
         super().__init__()
         self._op = op
         self._op_dk = op_dk
@@ -772,6 +755,9 @@ class OpOverload(OperatorBase):
         op.__module__ = overloadpacket.__module__
         self.__qualname__ = self._name
         self.__annotations__ = {}
+        # Only compute the OperatorHandle when we need it. Not all OpOverloads have
+        # OperatorHandles (the TorchScript ones don't...)
+        self._lazy_handle = None
 
         # If the OpOverload was constructed from a Library.def in Python.
         self._defined_in_python = self.__qualname__ in torch.library._defs
@@ -797,11 +783,13 @@ class OpOverload(OperatorBase):
     def _opname(self):
         return self._schema.name.split("::")[1]
 
-    @cached_property
-    def _handle(self) -> torch._C._DispatchOperatorHandle:
-        return torch._C._dispatch_find_schema_or_throw(
-            self._schema.name, self._schema.overload_name
-        )
+    @property
+    def _handle(self):
+        if self._lazy_handle is None:
+            self._lazy_handle = torch._C._dispatch_find_schema_or_throw(
+                self._schema.name, self._schema.overload_name
+            )
+        return self._lazy_handle
 
     # it's a no-op since OpOverload object is immutable and must be unique for a given op overload.
     def __deepcopy__(self, memo=None):
@@ -819,9 +807,7 @@ class OpOverload(OperatorBase):
 
     # Use positional-only argument to avoid naming collision with aten ops arguments
     # that are named "self". This way, all the aten ops can be called by kwargs.
-    def redispatch(
-        self, /, keyset: torch._C.DispatchKeySet, *args, **kwargs
-    ) -> "torch._C.Stack":
+    def redispatch(self, /, keyset, *args, **kwargs):
         return self._handle.redispatch_boxed(keyset, *args, **kwargs)
 
     def __hash__(self):
@@ -1112,22 +1098,14 @@ def _has_script_object_arg(schema: torch.FunctionSchema) -> bool:
 # OpOverloadPacket class contains pointer to a base unresolved operator that doesn't correspond to a specific operator
 # You can obtain an OpOverload object through attribute query.
 class OpOverloadPacket:
-    __file__: ClassVar[str] = "torch.ops"
-
-    def __init__(
-        self,
-        qualified_op_name: str,
-        op_name: str,
-        op: Callable[..., Any],
-        overload_names: list[str],
-    ) -> None:
+    def __init__(self, qualified_op_name, op_name, op, overload_names):
         # These attributes are accessible on the object through the properties
         # defined below but are immutable
         self._qualified_op_name = qualified_op_name
         self.__name__ = op_name
         self._op = op
         self._overload_names = overload_names
-        self._dir: list[str] = []
+        self._dir = []
         self._has_torchbind_op_overload = any(
             _has_script_object_arg(schema) for schema in self._schemas.values()
         )
@@ -1158,7 +1136,11 @@ class OpOverloadPacket:
             for overload_name in self._overload_names
         }
 
-    def __getattr__(self, key: str) -> OpOverload:
+    def __getattr__(self, key) -> Any:
+        # It is not a valid op_name when __file__ is passed in
+        if key == "__file__":
+            return "torch.ops"
+
         # ensure that query for dunder attributes that does not exist on
         # opoverloadpacket but instead exists on the self._op object does not unnecessarily call
         # `_get_operation_overload` (which is an expensive operation).
@@ -1306,18 +1288,19 @@ class _OpNamespace(types.ModuleType):
         operation will already exist).
     """
 
-    __file__ = "torch.ops"
-
-    def __init__(self, name: str) -> None:
+    def __init__(self, name):
         super().__init__("torch.ops." + name)
         self.name = name
-        self._dir: list[str] = []
+        self._dir = []
 
     def __iter__(self):
         return iter(self._dir)
 
-    def __getattr__(self, op_name: str) -> OpOverloadPacket:
-        if op_name in ("__origin__", "__self__"):
+    def __getattr__(self, op_name) -> Any:
+        # It is not a valid op_name when __file__ is passed in
+        if op_name == "__file__":
+            return "torch.ops"
+        elif op_name in ["__origin__", "__self__"]:
             raise AttributeError(
                 f"Invalid attribute '{op_name}' for '_OpNamespace' '{self.name}'"
             )
@@ -1370,25 +1353,19 @@ def _refresh_packet(packet):
     packet._overload_names = overload_names
 
 
-class _HigherOrderNamespace(types.ModuleType):
-    __file__ = "torch.ops"
+class _PyOpNamespace(_OpNamespace):
+    def __init__(self, name, ops):
+        super().__init__(name)
+        self._ops = ops
 
-    def __init__(self) -> None:
-        super().__init__("torch.ops.higher_order")
-        self._dir: list[str] = []
-
-    def __iter__(self):
-        return iter(self._dir)
-
-    def __getattr__(self, name) -> HigherOrderOperator:
-        # Following _OpNamespace.__getattr__, we cache the op on this object.
-        op = _higher_order_ops.get(name, None)
+    def __getattr__(self, name):
+        # Following _OpNamespace.__getattr__, we cache the op on the _PyOpNamespace object.
+        op = self._ops.get(name, None)
         if op is None:
             raise AttributeError(
-                f"'_HigherOrderNamespace' 'torch.ops.higher_order' object has no attribute '{name}'"
+                f"'_PyOpNamespace' '{self.name}' object has no attribute '{name}'"
             )
         setattr(self, name, op)
-        self._dir.append(name)
         return op
 
 
@@ -1398,10 +1375,16 @@ class _Ops(types.ModuleType):
     def __init__(self):
         super().__init__("torch.ops")
         self.loaded_libraries = set()
-        self.higher_order = _HigherOrderNamespace()
+        self._higher_order_op_namespace = _PyOpNamespace(
+            "torch.ops.higher_order", _higher_order_ops
+        )
         self._dir = []
 
-    def __getattr__(self, name) -> _OpNamespace:
+    def __getattr__(self, name):
+        # Check if the name is a HigherOrderOperator
+        if name == "higher_order":
+            return self._higher_order_op_namespace
+
         # Here we are creating `torch.ops.my_namespace`
         namespace = _OpNamespace(name)
         setattr(self, name, namespace)

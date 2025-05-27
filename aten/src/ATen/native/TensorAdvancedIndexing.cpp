@@ -994,7 +994,8 @@ Tensor& _index_put_impl_(
   }
   if ((self.device().type() == DeviceType::CUDA ||
        self.device().type() == DeviceType::XPU) &&
-      (accumulate || globalContext().deterministicAlgorithms())) {
+      (accumulate ||
+       (globalContext().deterministicAlgorithms() && value_.numel() > 1))) {
     TORCH_CHECK(
         value_.device() == self.device(),
         "expected device ",

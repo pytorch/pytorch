@@ -4717,6 +4717,29 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ):
             f_compiled(a)
 
+    # https://github.com/pytorch/pytorch/issues/146598
+    @unittest.expectedFailure
+    def test_lru_cache_tracing(self):
+        from functools import lru_cache
+
+        counter = 0
+
+        @lru_cache
+        def cached_fn(x):
+            nonlocal counter
+            counter += 1
+            return x + 1
+
+        compiled_fn = torch.compile(cached_fn, backend="eager")
+
+        t = torch.randn(2, 2)
+        result1 = compiled_fn(t)
+        self.assertEqual(counter, 1)
+
+        result2 = compiled_fn(t)
+        self.assertEqual(counter, 1)
+        self.assertEqual(result1, result2)
+
     def test_dont_aggressively_write_assert(self):
         record_graph = torch._dynamo.testing.EagerAndRecordGraphs()
 
@@ -5431,6 +5454,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         mod = Mod()
         opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
         x = torch.randn(4)
+
         self.assertEqual(mod(x), opt_mod(x))
 
     def test_enum(self):
@@ -7209,6 +7233,43 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         # Make sure we don't _print_ out the graph module.
         output = capturedOutput.getvalue()
         self.assertNotIn("class GraphModule", output)
+
+    def test_deepcopy_constant_tensor_in_aot_bwd(self):
+        class Fn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x + 1
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out * torch.tensor(2) * grad_out.shape[0]
+
+        def f(x):
+            return Fn.apply(x)
+
+        x = torch.randn(8, requires_grad=True)
+        out = f(x)  # should not raise
+        c_out = torch.compile(f, backend="aot_eager", dynamic=True)(x)
+        expected = torch.autograd.grad(out.sum(), inputs=(x,))
+        actual = torch.autograd.grad(c_out.sum(), inputs=(x,))
+        self.assertEqual(expected, actual)
+
+    def test_module_attribute_error(self):
+        @torch.compile(backend="eager")
+        def f1(x):
+            return torch._bar(x)
+
+        @torch.compile(backend="eager")
+        def f2(x):
+            try:
+                return torch._bar(x)
+            except AttributeError:
+                return x + 1
+
+        with self.assertRaises(AttributeError):
+            f1(torch.ones(3))
+
+        self.assertEqual(f2(torch.ones(3)), torch.ones(3) + 1)
 
 
 instantiate_parametrized_tests(ReproTests)

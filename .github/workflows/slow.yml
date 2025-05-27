@@ -148,6 +148,7 @@ jobs:
           { config: "slow", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
         ]}
       sync-tag: asan-build
+      allow-reuse-old-whl: true
     secrets: inherit
 
   linux-jammy-py3_10-clang15-asan-test:
