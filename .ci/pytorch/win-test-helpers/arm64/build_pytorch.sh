@@ -48,6 +48,9 @@ cd "$PYTORCH_ROOT"
 # Copy uv.dll equivalent (if building for Windows target)
 cp "$libuv_ROOT/lib/Release/uv.dll" torch/lib/uv.dll || true
 
+# Activate visual studio
+cmd.exe /c "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" arm64
+
 # Create Python virtual environment
 python -m venv .venv
 echo "*" > .venv/.gitignore
@@ -56,7 +59,6 @@ which python
 
 # Install Python dependencies
 python -m pip install --upgrade pip
-pip install numpy==2.2.3
 pip install -r requirements.txt
 
 # Set DISTUTILS_USE_SDK after psutil install
