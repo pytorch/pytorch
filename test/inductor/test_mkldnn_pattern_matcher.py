@@ -193,7 +193,7 @@ class TestPatternMatcherBase(TestCase):
             )
         counters.clear()
         torch._dynamo.reset()
-        if check_autocast == torch.bfloat16 and (is_mkldnn_bf16_supported(device)):
+        if check_autocast == torch.bfloat16 and is_mkldnn_bf16_supported(device):
             maybe_autocast = torch.amp.autocast(
                 device_type=device, dtype=torch.bfloat16
             )
