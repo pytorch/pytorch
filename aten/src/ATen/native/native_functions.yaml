@@ -942,7 +942,7 @@
 - func: as_strided(Tensor(a) self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor(a)
   variants: function, method
   dispatch:
-    ZeroTensor, CPU, CUDA: as_strided_tensorimpl
+    ZeroTensor, CPU, CUDA, MTIA: as_strided_tensorimpl
     Meta: as_strided_tensorimpl_meta_symint
     MPS: as_strided_tensorimpl_mps
     QuantizedCPU, QuantizedCUDA: as_strided_qtensorimpl
@@ -1548,7 +1548,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: clamp_out
+    CPU, CUDA, MTIA: clamp_out
     MPS: clamp_out_mps
   tags: pointwise
 
@@ -1588,7 +1588,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: clamp_max_out
+    CPU, CUDA, MTIA: clamp_max_out
     MPS: clamp_max_out_mps
   tags: pointwise
 
@@ -1628,7 +1628,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: clamp_min_out
+    CPU, CUDA, MTIA: clamp_min_out
     MPS: clamp_min_out_mps
   tags: pointwise
 
@@ -3180,7 +3180,7 @@
   variants: function
   structured: True
   dispatch:
-    CPU, CUDA: isin_Tensor_Scalar_out
+    CPU, CUDA, MPS: isin_Tensor_Scalar_out
 
 - func: isin.Tensor_Scalar(Tensor elements, Scalar test_element, *, bool assume_unique=False, bool invert=False) -> Tensor
   variants: function
@@ -3191,6 +3191,7 @@
   structured: True
   dispatch:
     CPU, CUDA: isin_Scalar_Tensor_out
+    MPS: isin_Scalar_Tensor_out_mps
 
 - func: isin.Scalar_Tensor(Scalar element, Tensor test_elements, *, bool assume_unique=False, bool invert=False) -> Tensor
   variants: function
@@ -8120,7 +8121,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    ZeroTensor, Meta, CPU, CUDA, QuantizedCPU, QuantizedCUDA, MPS: view
+    ZeroTensor, Meta, CPU, CUDA, QuantizedCPU, QuantizedCUDA, MPS, MTIA: view
     MkldnnCPU: mkldnn_view
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: view_nested
   tags: core
@@ -9861,8 +9862,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: fmod_out
-    MPS: fmod_mps_out
+    CPU, CUDA, MPS: fmod_out
   tags: pointwise
 
 - func: fmod.Tensor(Tensor self, Tensor other) -> Tensor
@@ -9968,8 +9968,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: remainder_out
-    MPS: remainder_out_mps
+    CPU, CUDA, MPS: remainder_out
   tags: pointwise
 
 - func: remainder.Tensor(Tensor self, Tensor other) -> Tensor
