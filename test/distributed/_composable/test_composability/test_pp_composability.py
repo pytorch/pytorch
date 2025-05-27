@@ -13,7 +13,7 @@ from torch.distributed.checkpoint.state_dict_loader import _load_state_dict
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
-from torch.distributed.pipelining import PipelineStage
+from torch.distributed.pipelining import pipeline, PipelineStage, SplitPoint
 from torch.distributed.pipelining.schedules import (
     PipelineScheduleSingle,
     Schedule1F1B,
@@ -27,6 +27,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -73,6 +74,17 @@ class MLPModuleEven(torch.nn.Module):
         x = F.relu(self.net1(x))
         x = F.relu(self.net2(x))
         x = F.relu(self.net3(x))
+        return x
+
+
+class MultiMLPModule(torch.nn.Module):
+    def __init__(self, d_hid: int, n_modules: int):
+        super().__init__()
+        self.layers = nn.ModuleList([MLPModule(d_hid) for _ in range(n_modules)])
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
         return x
 
 
@@ -358,6 +370,88 @@ class ComposabilityTest(MultiProcessTestCase):
                 optimizer.step()
 
         torch.distributed.destroy_process_group()
+
+    @skipIfRocm()
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
+    def test_pp_dp_split_model(self):
+        """
+        This tests creates a DDP model and a PP model and feeds the output of the DDP
+        model into a PP model (dimensionality changes halfway through forward). We test that
+        PP can still perform backward on the microbatches.
+
+        TODO TORCH_LOGS=+pp pytest test/distributed/_composable/test_composability/test_pp_composability.py -vsk test_pp_dp_split
+        """
+        torch.cuda.set_device(self.device)
+        store = torch.distributed.FileStore(self.file_name, self.world_size)
+        torch.distributed.init_process_group(
+            backend="nccl",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+
+        # Perform DDP
+        d_hid = 5
+        model = MultiMLPModule(d_hid, 4)
+        model.to(self.device)
+        ddp_model = DDP(model)
+        input_batch = torch.randn(2, d_hid).to(self.device)
+        dp_output = model(input_batch)
+
+        # gather all mini batches onto rank 0
+        # index 0 will still have a reference to the dp_output <CopyBackwards>
+        full_dp_output = [torch.empty_like(dp_output) for _ in range(self.world_size)]
+        if self.rank == 0:
+            torch.distributed.gather(dp_output, gather_list=full_dp_output)
+        else:
+            torch.distributed.gather(dp_output)
+        # Perform PP
+        pp_model = MultiMLPModule(d_hid, 4)
+        x = full_dp_output[0].clone().detach().cpu()
+
+        use_pipeline_split = True
+        device = torch.device(f"cuda:{self.device}")
+        if use_pipeline_split:
+            pipe = pipeline(
+                module=pp_model,
+                mb_args=(x,),
+                split_spec={
+                    "layers.1": SplitPoint.BEGINNING,
+                    "layers.2": SplitPoint.BEGINNING,
+                    "layers.3": SplitPoint.BEGINNING,
+                },
+            )
+            stage = pipe.build_stage(self.rank, device, torch.distributed.group.WORLD)
+            stage_module = pipe.get_stage_module(self.rank)
+        else:
+            model_part = MLPModule(d_hid).to(device)
+            stage = PipelineStage(model_part, self.rank, self.world_size, device)
+            stage_module = stage.submod
+        schedule = ScheduleGPipe(
+            stage, n_microbatches=self.world_size, loss_fn=nn.MSELoss()
+        )
+        if self.rank == 0:
+            print(full_dp_output)
+        all_microbatches = None
+        if self.rank == 0:
+            all_microbatches = torch.cat([t.clone() for t in full_dp_output], dim=0)
+            all_microbatches.requires_grad_(True)
+            all_microbatches.to(torch.device(f"cuda:{self.device}"))
+            schedule.step(all_microbatches)
+        else:
+            target = torch.randn(4, 5).to(device)
+            schedule.step(target=target)
+
+        # PP has already called .backward() as part of step(), so the models gradients are already populated
+        for param in stage_module.parameters():
+            assert param.grad is not None
+
+        if self.rank == 0:
+            # DDP gradients are now populated
+            for param in ddp_model.parameters():
+                assert param.grad is not None
 
 
 instantiate_parametrized_tests(ComposabilityTest)
