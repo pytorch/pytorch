@@ -4059,7 +4059,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         raise ReturnValueOp
 
     def get_globals_source_and_value(self, name):
-        if "__name__" in self.f_globals:
+        # NamedTuple's `__new__` has a fake global scope that's not an actual
+        # module. TODO generalize the check for other non-importable cases.
+        # https://github.com/python/cpython/blob/8421b03b16a4852a527256cb7cdce2ab2d318548/Lib/collections/__init__.py#L441-L447
+        if "__name__" in self.f_globals and not self.f_globals["__name__"].startswith(
+            "namedtuple_"
+        ):
             module_name = self.f_globals["__name__"]
             module_source = self.import_source(module_name)
             if "torch_package" in module_name:

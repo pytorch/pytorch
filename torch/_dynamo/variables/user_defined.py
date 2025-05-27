@@ -21,6 +21,7 @@ These classes help Dynamo track and handle arbitrary Python objects during traci
 maintaining proper semantics while enabling optimizations where possible.
 """
 
+import _collections
 import builtins
 import collections
 import contextlib
@@ -1046,7 +1047,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def _getattr_static(self, name):
         subobj = inspect.getattr_static(self.value, name, NO_SUCH_SUBOBJ)
-        import _collections
 
         # In some cases, we have to do dynamic lookup because getattr_static is not enough. For example, threading.local
         # has side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
@@ -1054,7 +1054,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # as Dynamo tracing is concerned.
         if not object_has_getattribute(self.value) and (
             subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
-            or isinstance(subobj, _collections._tuplegetter)  # namedtuple fields
             or inspect.ismemberdescriptor(subobj)  # e.g., __slots__
             or inspect.isgetsetdescriptor(subobj)  # e.g., __dict__
             or self._is_c_defined_property(subobj)
@@ -1213,6 +1212,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source
             ).call_function(tx, [], {})
+        elif isinstance(subobj, _collections._tuplegetter):
+            # namedtuple fields are represented by _tuplegetter, and here we
+            # emulate its `__get__`, which is implemented in C.
+            _, (idx, _) = subobj.__reduce__()
+            # Don't go through the `__getitem__` method anymore, see
+            # https://github.com/python/cpython/blob/470941782f74288823b445120f6383914b659f23/Modules/_collectionsmodule.c#L2690
+            assert isinstance(self, UserDefinedTupleVariable)
+            return self._tuple_vt.items[idx]
         elif isinstance(subobj, staticmethod):
             # Safe because `staticmethod.__get__` basically won't trigger user
             # code and just returns the underlying `__func__`:
@@ -1696,18 +1703,24 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
 
     _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
 
-    def __init__(self, value, **kwargs):
-        super().__init__(value, **kwargs)
-        self._tuple_vt = None
-
-    def set_underlying_tuple_vt(self, tuple_vt):
+    def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):
+        super().__init__(value, init_args=init_args, **kwargs)
         self._tuple_vt = tuple_vt
+        if self._tuple_vt is None:
+            assert self.source is None, (
+                "tuple_vt must be constructed by builder.py when source is present"
+            )
+            # Emulate `tuple.__new__`
+            # https://github.com/python/cpython/blob/3.11/Objects/tupleobject.c#L697-L710
+            #
+            # TODO this duplicates the logic in `BuiltinVariable(tuple)`
+            from torch._dynamo.symbolic_convert import InstructionTranslator
 
-    @staticmethod
-    def create(value, tuple_vt, **kwargs):
-        result = UserDefinedTupleVariable(value, **kwargs)
-        result.set_underlying_tuple_vt(tuple_vt)
-        return result
+            tx = InstructionTranslator.current_tx()
+            elems = init_args[0].unpack_var_sequence(tx)
+            self._tuple_vt = variables.TupleVariable(
+                elems, mutation_type=ValueMutationNew()
+            )
 
     def call_method(
         self,

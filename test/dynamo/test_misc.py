@@ -11706,6 +11706,30 @@ fn
         res = fn(x)
         self.assertEqual(ref, res)
 
+    def test_descriptor_side_effect(self):
+        # This pattern (readonly descriptor but writable value in `__dict__`) is
+        # from scipy `_make_tuple_bunch`:
+        # https://github.com/scipy/scipy/blob/maintenance/1.9.x/scipy/_lib/_bunch.py#L32-L226
+        def fget(obj):
+            return obj.__dict__["field"]
+
+        class MyClass:
+            def __init__(self, n):
+                self.__dict__["field"] = n
+
+            field = property(fget)
+
+        def fn(x):
+            obj = MyClass(42)
+            return x + obj.field, obj
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref_t, ref_obj = fn(x)
+        res_t, res_obj = opt_fn(x)
+        self.assertEqual(ref_t, res_t)
+        self.assertEqual(ref_obj.field, res_obj.field)
+
     def test_assert_size_stride(self):
         x = torch.randn(2, 3, 4)
         with self.assertRaisesRegex(
