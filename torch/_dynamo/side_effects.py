@@ -997,21 +997,12 @@ class SideEffects:
                             suffixes.append(
                                 [create_instruction("DELETE_ATTR", argval=name)]
                             )
-                    elif (
-                        isinstance(var, variables.UserDefinedObjectVariable)
-                        # member descriptor doesn't go through __dict__, and are
-                        # safe to do normal setattr.
-                        and not var.is_member_descriptor(name)
-                        # setattr would trigger the `__set__` method on
-                        # descriptor, Dynamo should've already traced that
-                        # descriptor logic at this point, so we don't want to
-                        # trigger it again.
-                        and var.attr_has_traceable_descriptor_setter(name)
-                    ):
-                        # `object.__getattribute__(obj, "__dict__")[key] = value`
+                    elif isinstance(
+                        var, variables.UserDefinedObjectVariable
+                    ) and var.should_skip_descriptor_setter(name):
                         cg.add_push_null(
                             lambda: cg.load_import_from(
-                                utils.__name__, "safe_setattr_via_dict"
+                                utils.__name__, "object_setattr_ignore_descriptor"
                             )
                         )
                         cg(var.source)  # type: ignore[attr-defined]
