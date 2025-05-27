@@ -1,6 +1,5 @@
 #include <ATen/core/Formatting.h>
 #include <c10/util/irange.h>
-#include <fmt/core.h>
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 
@@ -39,13 +38,13 @@ std::ostream& operator<<(std::ostream& out, const Scalar& s) {
 }
 
 std::string toString(const Scalar& s) {
-  return fmt::format("{}", s);
+  return fmt::format("{}", fmt::streamed(s));
 }
 } // namespace c10
 
 namespace at {
 
-// Format guard to preserve formatting options
+//saves/restores number formatting inside scope
 class FormatGuard {
  public:
   explicit FormatGuard(std::ostream& out) : out(out) {
