@@ -2529,6 +2529,19 @@ class SymExprPrinter(PythonPrinter):
 
 
 class _ShapeGuardPrinter(abc.ABC):
+    """
+    Abstract base class for printers that convert symbolic expressions to string representations.
+
+    This class provides common functionality for printing symbolic expressions with
+    special handling for symbols that represent tensor shapes, strides, etc.
+    Subclasses implement specific formatting for different output languages.
+
+    Args:
+        symbol_to_source: Mapping from sympy symbols to their source objects
+        source_ref: Function to convert a source to its string representation
+        var_to_sources: Mapping from sympy symbols to their source objects (for error reporting)
+    """
+
     def __init__(
         self,
         symbol_to_source: Mapping[sympy.Symbol, list[Source]],
@@ -2541,9 +2554,25 @@ class _ShapeGuardPrinter(abc.ABC):
         super().__init__()
 
     def _print_Float(self, expr: sympy.Float) -> str:
+        """Convert a sympy Float to a Python float string representation."""
         return str(float(expr))
 
     def _print_Symbol(self, expr: sympy.Symbol) -> str:
+        """
+        Convert a sympy Symbol to its source representation.
+
+        This method looks up the symbol in symbol_to_source mapping and returns
+        the string representation of its first source.
+
+        Args:
+            expr: The sympy Symbol to convert
+
+        Returns:
+            String representation of the symbol's source
+
+        Raises:
+            AssertionError: If the symbol is not found in symbol_to_source
+        """
         assert isinstance(expr, sympy.Symbol), str(type(expr))
 
         def repr_symbol_to_source() -> str:
@@ -2563,22 +2592,73 @@ class _ShapeGuardPrinter(abc.ABC):
 
     @abc.abstractmethod
     def print_source(self, source: Source) -> str:
+        """
+        Convert a source object to its string representation.
+
+        Args:
+            source: The source object to convert
+
+        Returns:
+            String representation of the source
+        """
         ...
 
     @abc.abstractmethod
     def doprint(self, expr: sympy.Expr) -> str:
+        """
+        Convert a sympy expression to its string representation.
+
+        Args:
+            expr: The sympy expression to convert
+
+        Returns:
+            String representation of the expression
+        """
         ...
 
 
 class ShapeGuardPythonPrinter(_ShapeGuardPrinter, PythonPrinter):
+    """
+    Python printer for shape guards that extends the base ShapeGuardPrinter.
+
+    This class provides functionality to print symbolic expressions as Python code,
+    with caching to improve performance when printing the same expressions multiple times.
+    It handles printing of sources and expressions according to Python syntax.
+
+    Args:
+        *args: Arguments passed to the parent classes.
+    """
+
     def __init__(self, *args: Any) -> None:
         super().__init__(*args)
         self._print_cache: dict[sympy.Expr, str] = {}
 
     def print_source(self, source: Source) -> str:
+        """
+        Convert a source object to its string representation using the source_ref function.
+
+        Args:
+            source: The source object to convert
+
+        Returns:
+            String representation of the source
+        """
         return self.source_ref(source)
 
     def doprint(self, expr: sympy.Expr) -> str:
+        """
+        Convert a sympy expression to its Python string representation with caching.
+
+        This method first checks if the expression is already in the cache.
+        If found, it returns the cached result; otherwise, it delegates to
+        PythonPrinter's doprint method and caches the result.
+
+        Args:
+            expr: The sympy expression to convert
+
+        Returns:
+            String representation of the expression in Python syntax
+        """
         val = self._print_cache.get(expr, None)
         if val is not None:
             return val
