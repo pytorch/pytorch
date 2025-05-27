@@ -335,6 +335,9 @@ at::BlasBackend Context::blasPreferredBackend() {
     static const bool hipblaslt_preferred = []() {
       static const std::vector<std::string> archs = {
           "gfx90a", "gfx942",
+#if ROCM_VERSION >= 60400
+          "gfx1200", "gfx1201",
+#endif
 #if ROCM_VERSION >= 60500
           "gfx950"
 #endif
@@ -698,4 +701,30 @@ void Context::setAllowFP16ReductionCPU(bool b) {
   }
   allow_fp16_reduction_cpu = b;
 }
+
+namespace {
+
+std::array<bool, at::COMPILE_TIME_MAX_DEVICE_TYPES> is_in_bad_fork{};
+std::array<c10::once_flag, at::COMPILE_TIME_MAX_DEVICE_TYPES>
+    at_fork_once_flags{};
+
+} // anonymous namespace
+
+  void Context::registerForkHandlerForDeviceInit(at::DeviceType device_type) {
+#ifndef WIN32
+  auto& flag = at_fork_once_flags[static_cast<int>(device_type)];
+  c10::call_once(flag, [device_type]() {
+    static at::DeviceType at_fork_device_type = device_type;
+    pthread_atfork(nullptr, nullptr, []() {
+      is_in_bad_fork[static_cast<int>(at_fork_device_type)] = true;
+    });
+  });
+#endif
+  }
+
+  bool Context::isDeviceInBadFork(at::DeviceType device_type) {
+    return is_in_bad_fork[static_cast<int>(device_type)];
+  }
+
+
 } // namespace at

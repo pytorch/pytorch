@@ -149,7 +149,7 @@ def grouped_gemm_lowering(
         has_bias=[bias is not None for bias in b],
         trans_w=True,
         epilogue_creator=None,
-        act_mapping={num: x for num in range(num_gemm)},
+        act_mapping=dict.fromkeys(range(num_gemm), x),
     )
 
     input_nodes = [x, *w]

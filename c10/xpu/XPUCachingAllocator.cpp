@@ -386,6 +386,13 @@ class DeviceCachingAllocator {
       stats.requested_bytes[stat_type].increase(block->requested_size);
     });
 
+    c10::reportMemoryUsageToProfiler(
+        block->ptr,
+        static_cast<int64_t>(block->size),
+        stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        c10::Device(c10::DeviceType::XPU, device));
+
     return block;
   }
 
@@ -431,6 +438,13 @@ class DeviceCachingAllocator {
       auto reserved_bytes =
           stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
               .current;
+
+      c10::reportOutOfMemoryToProfiler(
+          static_cast<int64_t>(size),
+          allocated_bytes,
+          reserved_bytes,
+          c10::Device(c10::DeviceType::XPU, device));
+
       TORCH_CHECK_WITH(
           OutOfMemoryError,
           false,
@@ -455,6 +469,9 @@ class DeviceCachingAllocator {
     std::scoped_lock<std::recursive_mutex> lock(mutex);
     block->allocated = false;
 
+    auto orig_block_ptr = block->ptr;
+    auto orig_block_size = block->size;
+
     StatTypes stat_types = get_stat_types_for_pool(*block->pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       stats.allocated_bytes[stat_type].decrease(block->size);
@@ -465,6 +482,13 @@ class DeviceCachingAllocator {
     } else {
       free_block(block);
     }
+
+    c10::reportMemoryUsageToProfiler(
+        orig_block_ptr,
+        -static_cast<int64_t>(orig_block_size),
+        stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        c10::Device(c10::DeviceType::XPU, block->device));
   }
 
   void recordStream(Block* block, xpu::XPUStream stream) {
