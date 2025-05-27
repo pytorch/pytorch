@@ -286,7 +286,10 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
 
         if maybe_guard_or_true(y != expected_stride):
             return False
-        expected_stride = expected_stride * x
+
+        # if x is 0 then a is contiguous anyway. So in the check above for non-contiguity condition we can
+        # can assume x is not 0 in expected_stride equation. This is also consistent with make_contiguous_strides_for.
+        expected_stride = expected_stride * sym_max(x, 1)
 
     return True
 
