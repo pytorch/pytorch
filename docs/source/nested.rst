@@ -487,3 +487,7 @@ Detailed Docs for Construction and Conversion Functions
 .. autofunction:: to_padded_tensor
 .. autofunction:: masked_select
 .. autofunction:: narrow
+
+.. seealso::
+
+   `Accelerating PyTorch Transformers by replacing nn.Transformer with Nested Tensors and torch.compile <https://docs.pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
