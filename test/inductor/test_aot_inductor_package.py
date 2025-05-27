@@ -207,7 +207,7 @@ class TestAOTInductorPackage(TestCase):
             options = {
                 "aot_inductor.package_cpp_only": self.package_cpp_only,
                 # Require kernels to be compiled into .o files
-                "aot_inductor.embed_cubin": True,
+                "aot_inductor.embed_kernel_binary": True,
             }
             ep = torch.export.export(model, example_inputs, strict=True)
             package_path = torch._inductor.aoti_compile_and_package(
