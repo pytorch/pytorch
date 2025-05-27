@@ -1414,12 +1414,6 @@ def guard_scalar(
         raise AssertionError(f"unrecognized scalar {a}")
 
 
-def _constrain_symbol_range(
-    shape_env: ShapeEnv, s: sympy.Symbol, compiler_min: int, compiler_max: int
-) -> None:
-    shape_env.constrain_symbol_range(s, compiler_min, compiler_max)
-
-
 def _advise_is_size(a: SymInt) -> None:
     """
     Don't use this directly; use torch._check_is_size instead.
