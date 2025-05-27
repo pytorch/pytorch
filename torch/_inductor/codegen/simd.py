@@ -34,7 +34,11 @@ from .. import config, ir, scheduler
 from ..analyze_preserves_zero_mask import prologue_preserves_zero_mask
 from ..codecache import code_hash
 from ..dependencies import MemoryDep, StarDep, WeakDep
-from ..ir import IRNode, TritonTemplateBuffer
+
+
+if TYPE_CHECKING:
+    from ..ir import IRNode
+
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.runtime_utils import green_text, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
@@ -1155,16 +1159,9 @@ class SIMDScheduling(BaseScheduling):
                             )
                             return False
 
-            for n, node_name in zip((node1, node2), ("node1", "node2")):
+            for n in (node1, node2):
                 if n.is_template():
-                    # Only allow fusion for TritonTemplates for now.
-                    # Fusion for CUDATemplates are not supported.
-                    is_triton_template = isinstance(
-                        n.get_template_node(), TritonTemplateBuffer
-                    )
-                    if not is_triton_template:
-                        why(f"{node_name} is not TritonTemplateBuffer")
-                    return is_triton_template
+                    return True
 
             # check for a bad combined tiling
             tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)

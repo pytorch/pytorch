@@ -70,7 +70,9 @@ class LeftRight final {
 
   ~LeftRight() {
     // wait until any potentially running writers are finished
-    { std::unique_lock<std::mutex> lock(_writeMutex); }
+    {
+      std::unique_lock<std::mutex> lock(_writeMutex);
+    }
 
     // wait until any potentially running readers are finished
     while (_counters[0].load() != 0 || _counters[1].load() != 0) {

@@ -6,9 +6,5 @@ void binary_op_kernel(
     const Tensor& input,
     const Tensor& other,
     const Tensor& output,
-    const std::optional<MPSScalar>& alpha = std::nullopt);
-void complex_mul_out(
-    const Tensor& input,
-    const Tensor& other,
-    const Tensor& output);
+    const std::optional<Scalar> alpha = std::nullopt);
 } // namespace at::native::mps
