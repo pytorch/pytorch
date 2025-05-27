@@ -140,21 +140,6 @@ inline void {{kernel_name}}_mul_scale_kernel(
   }
 }
 
-// out <- fill_val
-template <typename scalar_t>
-inline void {{kernel_name}}_fill_kernel(
-    scalar_t* out,
-    scalar_t fill_val,
-    int64_t size) {
-  auto vec_size = at::vec::Vectorized<scalar_t>::size();
-  auto vec_fill_val = at::vec::Vectorized<scalar_t>(fill_val);
-  for (int64_t i = 0; i < vec_size * (size / vec_size); i += vec_size) {
-    at::native::_store(out + i, vec_fill_val);
-  }
-  for (int64_t i = vec_size * (size / vec_size); i < size; i++) {
-    out[i] = fill_val;
-  }
-}
 """
 
 BRGEMM_PACK_FUNCTIONS = r"""
@@ -420,7 +405,7 @@ extern "C"
     accum_t* qk_max_data = qk_data + qSplitSize * kvSplitSize;
     accum_t* qk_sum_data = qk_max_data + qSplitSize;
     accum_t* dst_data = qk_sum_data + qSplitSize;
-    {{kernel.kernel_name}}_fill_kernel<accum_t>(dst_data, 0.0, qSplitSize * headSize_v);
+    {{kernel.kernel_name}}_fill_stub<accum_t>(dst_data, 0.0, qSplitSize * headSize_v);
     scalar_t *qk_reduced_data =
         is_reduced_type
             ? buf_reduced_data + ompIdx * qSplitSize * ekvSplitSize
@@ -480,14 +465,14 @@ extern "C"
         if ( (std::find(kv_indice_list.begin(), kv_indice_list.end(), cur_n) == kv_indice_list.end())
              and (std::find(full_kv_indice_list.begin(), full_kv_indice_list.end(), cur_n) == full_kv_indice_list.end()) ) {
               if ( kv_indice_list.size() == 0 and full_kv_indice_list.size() == 0) {
-                {{kernel.kernel_name}}_fill_kernel<accum_t>(dst_data, 0.0, qSplitSize * headSize_v);
+                {{kernel.kernel_name}}_fill_stub<accum_t>(dst_data, 0.0, qSplitSize * headSize_v);
               }
               continue;
         }
 {%- else %}
         if ( std::find(kv_indice_list.begin(), kv_indice_list.end(), cur_n) == kv_indice_list.end() ){
               if ( kv_indice_list.size() == 0 ) {
-                {{kernel.kernel_name}}_fill_kernel<accum_t>(dst_data, 0.0, qSplitSize * headSize_v);
+                {{kernel.kernel_name}}_fill_stub<accum_t>(dst_data, 0.0, qSplitSize * headSize_v);
               }
               continue;
         }
