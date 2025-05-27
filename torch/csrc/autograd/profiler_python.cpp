@@ -647,7 +647,13 @@ struct ThreadLocalResults {
   ThreadLocalResults& operator=(const ThreadLocalResults&&) = delete;
 
   ~ThreadLocalResults() {
+    // Currently, there is a bug in Profiler when using Python 3.12 that causes
+    // a segfault when decrementing the refcount of a TraceContext during
+    // on-demand. We are purposefully allowing for a small leak in this
+    // situation to avoid the segfault. This should be fixed in the future.
+#if PY_MAJOR_VERSION < 3 || (PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION < 12)
     Py_DECREF((PyObject*)ctx_);
+#endif
   }
 
   template <CallType C, EventType E, typename Ephemeral, typename... Args>
@@ -876,7 +882,14 @@ void PythonTracer::recordPyCall(
       // `PyFrame_FastToLocals` which forces the interpreter to materialize
       // the full dict of locals.
       auto locals = THPObjectPtr(PyFrame_GetLocals(frame));
+
+#if PY_MAJOR_VERSION < 3 || (PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION < 13)
       auto self = THPObjectPtr(PyDict_GetItemString(locals, "self"));
+#else
+      // In Python-3.13+ `PyFrame_GetLocals()` returns instance of
+      // PyFrameLocalsProxy_Type See PEP 667 for more info
+      auto self = THPObjectPtr(PyMapping_GetItemString(locals, "self"));
+#endif
       Py_INCREF(self.get());
       auto back = THPFrameObjectPtr(PyFrame_GetBack(frame));
       TORCH_INTERNAL_ASSERT(back != nullptr);
@@ -884,7 +897,11 @@ void PythonTracer::recordPyCall(
           frame, self.get(), back.get());
     } else if (code.get() == optimizer_hook_) {
       auto locals = THPObjectPtr(PyFrame_GetLocals(frame));
+#if PY_MAJOR_VERSION < 3 || (PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION < 13)
       auto self = THPObjectPtr(PyDict_GetItemString(locals, "self"));
+#else
+      auto self = THPObjectPtr(PyMapping_GetItemString(locals, "self"));
+#endif
       Py_INCREF(self.get());
       auto back = THPFrameObjectPtr(PyFrame_GetBack(frame));
       TORCH_INTERNAL_ASSERT(back != nullptr);
@@ -1156,11 +1173,11 @@ class PythonMemoryTracer final : public python_tracer::PythonMemoryTracerBase {
   ~PythonMemoryTracer() override = default;
   void start() override;
   void stop() override;
-  void export_memory_history(const std::string path) override;
+  void export_memory_history(const std::string& path) override;
 };
 
 static void toggle_memory_tracing(bool enable) {
-  PyGILState_STATE gil_state = PyGILState_Ensure();
+  pybind11::gil_scoped_acquire gil;
   THPObjectPtr torch_cuda_memory_module(
       PyImport_ImportModule("torch.cuda.memory"));
   if (!torch_cuda_memory_module) {
@@ -1184,15 +1201,14 @@ static void toggle_memory_tracing(bool enable) {
   if (result == nullptr) {
     return;
   }
-  PyGILState_Release(gil_state);
 }
 
 void PythonMemoryTracer::start() {
   toggle_memory_tracing(true);
 }
 
-void PythonMemoryTracer::export_memory_history(const std::string path) {
-  PyGILState_STATE gil_state = PyGILState_Ensure();
+void PythonMemoryTracer::export_memory_history(const std::string& path) {
+  pybind11::gil_scoped_acquire gil;
   THPObjectPtr torch_cuda_memory_module(
       PyImport_ImportModule("torch.cuda.memory"));
   if (!torch_cuda_memory_module) {
@@ -1211,7 +1227,6 @@ void PythonMemoryTracer::export_memory_history(const std::string path) {
   if (result == nullptr) {
     return;
   }
-  PyGILState_Release(gil_state);
 }
 
 void PythonMemoryTracer::stop() {

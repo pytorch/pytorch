@@ -275,10 +275,6 @@ class HalideOverrides(OpOverrides):
         return f"hl.fast_exp(hl.cast(hl.Float(32), {x})) if {x.name}.type().bits() <= 32 else hl.exp({x})"
 
     @staticmethod
-    def libdevice_exp(x):
-        return f"hl.exp({x})"  # higher precision that ops.exp
-
-    @staticmethod
     def sqrt(x):
         return f"hl.sqrt({x})"
 
@@ -943,7 +939,7 @@ class HalideKernel(SIMDKernel):
 
         # group the expression by variables used
         offset = sympy.S.Zero
-        split_expr = {s: sympy.S.Zero for s in symbols}
+        split_expr = dict.fromkeys(symbols, sympy.S.Zero)
         split_failed: list[tuple[list[sympy.Symbol], sympy.Expr]] = []
         index = sympy.expand(self.rename_indexing(index))
         for part in index.args if isinstance(index, sympy.Add) else [index]:

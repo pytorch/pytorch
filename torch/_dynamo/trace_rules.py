@@ -28,6 +28,7 @@ import torch.utils._content_store
 from torch._environment import is_fbcode
 from torch.utils import _config_module
 
+from . import config
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
 from .variables import (
@@ -306,11 +307,16 @@ manual_torch_name_rule_map: dict[str, Any] = {
     "torch._tensor._convert": UserFunctionVariable,
     "torch.jit._unwrap_optional": UserFunctionVariable,
     "torch.backends.mha.get_fastpath_enabled": UserFunctionVariable,
+    "torch._dynamo.dont_skip_tracing": UserFunctionVariable,
     "torch._dynamo.mark_static": UserFunctionVariable,
     "torch._dynamo.nonstrict_trace": UserFunctionVariable,
+    "torch._dynamo.patch_dynamo_config": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_or_true": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_or_false": TorchInGraphFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.statically_known_true": TorchInGraphFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.statically_known_false": TorchInGraphFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.has_static_value": TorchInGraphFunctionVariable,
     "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
     "torch.utils.hooks.BackwardHook": TorchInGraphFunctionVariable,
     "torch.set_default_device": UserFunctionVariable,
@@ -455,7 +461,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cuda_cudaHostAllocator",
         "torch._C._cuda_customAllocator",
         "torch._C._cuda_emptyCache",
-        "torch._C._cuda_endAllocateCurrentStreamToPool",
+        "torch._C._cuda_endAllocateToPool",
         "torch._C._cuda_exchangeDevice",
         "torch._C._cuda_get_conv_benchmark_empty_cache",
         "torch._C._cuda_get_cudnn_benchmark_limit",
@@ -3261,7 +3267,7 @@ if torch.distributed.is_available():
         # the forward_hook won't be ignored.
         "torch.distributed._composable.replicate",
     }
-    if not torch._dynamo.config.skip_fsdp_hooks:
+    if not config.skip_fsdp_hooks:
         LEGACY_MOD_INLINELIST.add("torch.distributed.fsdp._fully_shard")
 
 # Force inline functions under these modules, even they are in *_SKIPLIST.
@@ -3293,6 +3299,7 @@ MOD_INLINELIST = [
     "torch._tensor",
     "torch.amp.autocast_mode",
     "torch.ao.nn",
+    "torch.ao.quantization.fake_quantize",
     "torch.autograd.function",
     "torch.backends.cuda",
     "torch.cuda.amp.autocast_mode",
@@ -3324,7 +3331,7 @@ MOD_INLINELIST = set(MOD_INLINELIST)
 
 if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
-    if not torch._dynamo.config.skip_fsdp_hooks:
+    if not config.skip_fsdp_hooks:
         MOD_INLINELIST.add("torch.distributed.fsdp._fully_shard")
 
 
@@ -3359,7 +3366,6 @@ MOD_SKIPLIST = [
     "torch._functorch",
     "torch._guards",
     "torch._higher_order_ops.effects",
-    "torch._higher_order_ops.map",
     "torch._higher_order_ops.torchbind",
     "torch._higher_order_ops.wrap",
     "torch._inductor",
@@ -3575,7 +3581,7 @@ def check_file(filename, is_inlined_call=False):
 
     if (
         is_fbcode()
-        and torch._dynamo.config.skip_torchrec
+        and config.skip_torchrec
         and FBCODE_SKIP_TORCHREC_DIRS
         and bool(FBCODE_SKIP_TORCHREC_DIRS_RE.match(filename))
         and not bool(FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE.match(filename))
@@ -3752,7 +3758,43 @@ def lookup(obj):
     return lookup_inner(obj)
 
 
+# also takes config.dont_skip_tracing into account
 def lookup_inner(
+    obj,
+    name=None,
+    filename=None,
+    is_direct_call=True,
+    reasons: Union[None, set[str]] = None,
+):
+    result = _lookup_inner(
+        obj,
+        name=name,
+        filename=filename,
+        is_direct_call=is_direct_call,
+        reasons=reasons,
+    )
+    # There are still some modules we should absolutely NOT trace into - e.g. most of torch._dynamo,
+    # as this can result in really weird tracing behaviors.
+    # Note that if a torch._dynamo function is already not skipped (e.g. functions in external_utils.py),
+    # then this branch does not apply.
+    if config.dont_skip_tracing and result is SkipFunctionVariable:
+        if filename is None:
+            filename = getfile(obj)
+        filename = _as_posix_path(filename)
+        dynamo_path = _as_posix_path(_module_dir(torch)) + "_dynamo"
+        if filename.startswith(dynamo_path) and not filename.endswith(
+            "test_dont_skip_tracing_functions.py"
+        ):
+            return SkipFunctionVariable
+        if reasons is not None:
+            reasons.add(
+                "Attempted skip but we are ignoring skips due to torch._dynamo.config.dont_skip_tracing"
+            )
+        return UserFunctionVariable
+    return result
+
+
+def _lookup_inner(
     obj,
     name=None,
     filename=None,

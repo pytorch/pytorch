@@ -130,15 +130,15 @@ inline int getCvarInt(const std::vector<std::string>& env, int def) {
    * versions of a variable get higher priority than the latter
    * versions of the same variable */
   for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
-    char* val = std::getenv(env[i].c_str());
-    if (val == nullptr) {
+    const auto val = c10::utils::get_env(env[i].c_str());
+    if (!val.has_value()) {
       continue;
     } else if (i) {
       WARN_ENV_VAR_ONCE(env[i], env[0]);
     }
 
     try {
-      ret = std::stoi(val);
+      ret = std::stoi(val.value());
     } catch (std::exception&) {
       TORCH_CHECK(false, "Invalid value for environment variable: " + env[i]);
     }
@@ -653,7 +653,11 @@ void sendBytes(
     SYSCHECK_ERR_RETURN_NEG1(
         bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
-      C10_THROW_ERROR(DistNetworkError, "failed to send, sent 0 bytes");
+      C10_THROW_ERROR(
+          DistNetworkError,
+          "Failed to send, sent 0 bytes. "
+          "Connection was likely closed. "
+          "Did the remote server shutdown or crash?");
     }
 
     bytesToSend -= bytesSent;
@@ -675,7 +679,11 @@ void recvBytes(int socket, T* buffer, size_t length) {
     SYSCHECK_ERR_RETURN_NEG1(
         bytesReceived = recv(socket, currentBytes, bytesToReceive, 0))
     if (bytesReceived == 0) {
-      C10_THROW_ERROR(DistNetworkError, "failed to recv, got 0 bytes");
+      C10_THROW_ERROR(
+          DistNetworkError,
+          "Failed to recv, got 0 bytes. "
+          "Connection was likely closed. "
+          "Did the remote server shutdown or crash?");
     }
 
     bytesToReceive -= bytesReceived;
