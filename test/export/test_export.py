@@ -14986,18 +14986,18 @@ class TestExportCustomClass(TorchTestCase):
         class MyModel(torch.nn.Module):
             def forward(self, x, ranks):
                 first_k = ranks.max().item()
-                narrow = x.narrow(dim = 1, start = 0, length = first_k)
+                narrow = x.narrow(dim=1, start=0, length=first_k)
                 lt = narrow < narrow.size(1)
                 return lt
-        inps = (
-            torch.randn((8, 16), device="cuda"),
-            torch.arange(8, device="cuda", dtype=torch.int8)
-        )
+
+        inps = (torch.randn((8, 16)), torch.arange(8, dtype=torch.int8))
         spec = {
             "x": (Dim.AUTO, Dim.AUTO),
             "ranks": (Dim.AUTO,),
         }
-        traced = export(MyModel(), inps, dynamic_shapes=spec, strict=True).run_decompositions({})
+        traced = export(
+            MyModel(), inps, dynamic_shapes=spec, strict=True
+        ).run_decompositions({})
 
 
 if __name__ == "__main__":
