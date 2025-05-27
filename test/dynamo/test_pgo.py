@@ -1,7 +1,9 @@
 # Owner(s): ["module: dynamo"]
 
 import contextlib
+import importlib.util
 import os
+import tempfile
 
 import torch._dynamo.config
 import torch._dynamo.test_case
@@ -155,6 +157,48 @@ class PgoTest(torch._dynamo.test_case.TestCase):
                 self.assertEqual(
                     mock_cache.global_stats.dynamo_pgo, mock_cache.Stats(4, 1, 2)
                 )
+
+    # Test that if the same file appears in two different paths for two different compilations PGO still works.
+    def test_different_file_paths_local_pgo(self):
+        content = """
+import torch
+def run(cnt):
+    @torch.compile(backend=cnt, fullgraph=True)
+    def func(x):
+        return x*10
+    func(torch.rand(10))
+    func(torch.rand(20))
+    func(torch.rand(30))
+"""
+        temp_dir1 = tempfile.TemporaryDirectory()
+        temp_dir2 = tempfile.TemporaryDirectory()
+
+        path1 = os.path.join(temp_dir1.name, "example.py")
+        path2 = os.path.join(temp_dir2.name, "example.py")
+        cnts = CompileCounter()
+
+        assert path1 != path2
+
+        def write_load_and_run(path):
+            with open(path, "w") as file:
+                file.write(content)
+            spec = importlib.util.spec_from_file_location("example", path1)
+            assert spec is not None
+            module = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(module)
+            module.run(cnts)
+
+        write_load_and_run(path1)
+        self.assertEqual(cnts.frame_count, 2)
+        state = torch._dynamo.pgo.render_code_state(torch._dynamo.pgo.get_code_state())
+        self.assertTrue("hash(390fe689)" in state)
+        self.assertTrue("/example.py:4:func:" in state)
+        self.assertTrue(" L['x']: tensor size=[?] stride=[1]" in state)
+        # We should compile this only once due to PGO.
+        cnts.clear()
+        write_load_and_run(path2)
+        self.assertEqual(cnts.frame_count, 1)
 
 
 if __name__ == "__main__":

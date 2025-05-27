@@ -408,11 +408,16 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
             f"/tmp/{func.__name__}_{str(trace_id).replace('/', '_')}.profile"
         )
         prof = cProfile.Profile()
-        prof.enable()
-        start_ts = time.time()
-        retval = prof.runcall(func, *args, **kwargs)
-        profile_latency = time.time() - start_ts
-        prof.disable()
+        try:
+            prof.enable()
+            start_ts = time.time()
+            retval = prof.runcall(func, *args, **kwargs)
+            profile_latency = time.time() - start_ts
+            prof.disable()
+        except ValueError:
+            log.exception("failed to enable cProfile")
+            profile_latency = 0
+            retval = func(*args, **kwargs)
         log.warning(
             "### Cprofile for %s trace id [%s] took %.3f seconds ###",
             func.__name__,
@@ -732,6 +737,7 @@ def _compile(
         )
 
         try:
+            tracer.output.mark_bytecode_tracing_start()
             with tracing(tracer.output.tracing_context), tracer.set_current_tx():
                 tracer.run()
         except exc.UnspecializeRestartAnalysis:
@@ -767,13 +773,6 @@ def _compile(
         transform: Callable[[list[Instruction], dict[str, Any]], Any],
     ) -> ConvertFrameReturn:
         with contextlib.ExitStack() as stack:
-            stack.enter_context(
-                dynamo_timed(
-                    "_compile.compile_inner",
-                    phase_name="entire_frame_compile",
-                    dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
-                )
-            )
             stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
             stack.enter_context(CompileTimeInstructionCounter.record())
             return _compile_inner(code, one_graph, hooks, transform)
@@ -812,7 +811,10 @@ def _compile(
         for attempt in itertools.count():
             CompileContext.get().attempt = attempt
             try:
-                out_code = transform_code_object(code, transform)
+                with dynamo_timed(
+                    f"compile_attempt_{attempt}", log_pt2_compile_event=True
+                ):
+                    out_code = transform_code_object(code, transform)
                 break
             except exc.RestartAnalysis as e:
                 if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
@@ -921,13 +923,14 @@ def _compile(
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
         nonlocal cache_entry
-        check_fn = CheckFunctionManager(
-            code,
-            output,
-            cache_entry,
-            hooks.guard_fail_fn if hooks else None,
-            hooks.guard_filter_fn if hooks else None,
-        )
+        with dynamo_timed("build_guards", log_pt2_compile_event=True):
+            check_fn = CheckFunctionManager(
+                code,
+                output,
+                cache_entry,
+                hooks.guard_fail_fn if hooks else None,
+                hooks.guard_filter_fn if hooks else None,
+            )
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
         annotation_str = "Torch-Compiled Region: " + compile_id_str
@@ -957,7 +960,11 @@ def _compile(
         ),
         _WaitCounter("pytorch.wait_counter.entire_forward_compile").guard(),
         metrics_context,
-        _WaitCounter("pytorch.wait_counter.dynamo_compile").guard(),
+        dynamo_timed(
+            "_compile.compile_inner",
+            phase_name="entire_frame_compile",
+            dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
+        ),
     ):
         restart_reasons: set[str] = set()
         # This is shared across restarts
@@ -1229,6 +1236,7 @@ class ConvertFrame:
         frame_state: dict[str, Union[int, FrameStateSizeEntry]],
         skip: int = 0,
     ) -> ConvertFrameReturn:
+        input_codes.add(frame.f_code)
         counters["frames"]["total"] += 1
         try:
             result = self._inner_convert(
@@ -1387,6 +1395,8 @@ class CatchErrorsWrapper:
         frame_state: dict[str, Union[int, FrameStateSizeEntry]],
     ) -> ConvertFrameReturn:
         assert frame_state is not None
+
+        input_codes.add(frame.f_code)
 
         is_skipfile = trace_rules.check(frame.f_code)
         if sys.version_info >= (3, 13):

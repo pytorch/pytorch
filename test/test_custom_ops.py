@@ -2,16 +2,20 @@
 # ruff: noqa: F841
 
 import collections
+import io
 import itertools
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import typing
 import unittest
+from pathlib import Path
 from typing import *  # noqa: F403
 
 import numpy as np
+import yaml
 
 import torch._custom_ops as custom_ops
 import torch.testing._internal.optests as optests
@@ -20,7 +24,15 @@ import torch.utils.cpp_extension
 from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import CustomOp, infer_schema
-from torch._library.fake_profile import MissingOpProfile, OpProfile, TensorMetadata
+from torch._library.fake_profile import (
+    generate_yaml_from_profiles,
+    load_op_profiles,
+    MissingOpProfile,
+    OpProfile,
+    read_profiles_from_yaml,
+    save_op_profiles,
+    TensorMetadata,
+)
 from torch._library.infer_schema import tuple_to_list
 from torch._utils_internal import get_file_path_2  # @manual
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -39,6 +51,7 @@ from torch.testing._internal.common_utils import (
     scoped_load_inline,
     skipIfTorchDynamo,
     subtest,
+    TemporaryFileName,
     TestCase,
 )
 from torch.testing._internal.custom_op_db import numpy_nonzero
@@ -3825,6 +3838,7 @@ Please use `add.register_fake` to add an fake impl.""",
             self.assertEqual(result, w * 2 * 3 * 42)
 
     def test_layout_constraint_tags(self):
+        needs_exact_strides = torch._C.Tag.needs_exact_strides
         needs_fixed_stride_order = torch._C.Tag.needs_fixed_stride_order
         flexible_layout = torch._C.Tag.flexible_layout
         # (tags, the result of the tag inference)
@@ -3832,11 +3846,11 @@ Please use `add.register_fake` to add an fake impl.""",
             ({needs_fixed_stride_order}, needs_fixed_stride_order),
             ({flexible_layout}, flexible_layout),
             # If no tags are provided, then the following is the default
-            (set(), needs_fixed_stride_order),
+            (set(), needs_exact_strides),
             # If multiple tags are provided, then we use the most constrained tag.
             ({flexible_layout, needs_fixed_stride_order}, needs_fixed_stride_order),
         ]
-        from torch._inductor.lowering import get_layout_constraint_tag
+        from torch._library.utils import get_layout_constraint_tag
 
         for tags, expected in tests:
             with torch.library._scoped_library("mylib", "FRAGMENT") as m:
@@ -4517,7 +4531,10 @@ class TestOpProfiles(TestCase):
             ):
                 torch.ops.mylib.foo(t1, t2)
 
-            with torch._library.fake_profile.register_fake_profile(op_profiles), fm:
+            with (
+                torch._library.fake_profile.unsafe_generate_fake_kernels(op_profiles),
+                fm,
+            ):
                 torch.ops.mylib.foo(t1, t2)
 
                 with self.assertRaisesRegex(MissingOpProfile, "mylib::foo"):
@@ -4560,7 +4577,7 @@ class TestOpProfiles(TestCase):
             with fm:
                 self.assertEqual(torch.ops.mylib.foo(t1, t2).dtype, torch.bfloat16)
 
-            with torch._library.fake_profile.register_fake_profile(op_profiles):
+            with torch._library.fake_profile.unsafe_generate_fake_kernels(op_profiles):
                 with fm:
                     self.assertEqual(torch.ops.mylib.foo(t1, t2).dtype, torch.float32)
 
@@ -4591,12 +4608,52 @@ class TestOpProfiles(TestCase):
             "mylib.foo1.default": self.get_sample_op_profile()["mylib.foo.default"]
         }
 
-        with torch._library.fake_profile.register_fake_profile(op_profiles):
+        with torch._library.fake_profile.unsafe_generate_fake_kernels(op_profiles):
             with fm:
                 self.assertEqual(torch.ops.mylib.foo1(t1, t2).dtype, torch.float32)
 
         with fm:
             self.assertEqual(torch.ops.mylib.foo1(t1, t2).dtype, torch.bfloat16)
+
+    def test_yaml(self):
+        op_profiles = self.get_sample_op_profile()
+        yaml_str = generate_yaml_from_profiles(op_profiles)
+        loaded = read_profiles_from_yaml(yaml_str)
+        self.assertEqual(op_profiles, loaded)
+
+    @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+    def test_save_to_file(self):
+        op_profile = self.get_sample_op_profile()
+
+        # Saving with buffer
+        buffer = io.BytesIO()
+        save_op_profiles(op_profile, buffer)
+        buffer.seek(0)
+        loaded = load_op_profiles(buffer)
+        self.assertEqual(op_profile, loaded)
+
+        # Saving with file
+        with tempfile.NamedTemporaryFile() as f:
+            save_op_profiles(op_profile, f.name)
+            f.seek(0)
+            loaded = load_op_profiles(f.name)
+            self.assertEqual(op_profile, loaded)
+
+        # Saving with Path
+        with TemporaryFileName() as fname:
+            path = Path(fname)
+            save_op_profiles(op_profile, path)
+            loaded = load_op_profiles(path)
+            self.assertEqual(op_profile, loaded)
+
+    def test_version(self):
+        op_profiles = self.get_sample_op_profile()
+        yaml_str = generate_yaml_from_profiles(op_profiles)
+        loaded = yaml.safe_load(yaml_str)
+        loaded["torch_version"] = "2.7"
+        yaml_str = yaml.dump(loaded, sort_keys=False)
+        with self.assertRaisesRegex(RuntimeError, "Unable to load outdated profile"):
+            loaded = read_profiles_from_yaml(yaml_str)
 
 
 only_for = ("cpu", "cuda")

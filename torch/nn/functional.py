@@ -350,6 +350,9 @@ avg_pool1d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_in
 Applies a 1D average pooling over an input signal composed of several
 input planes.
 
+.. note::
+    pad should be at most half of effective kernel size.
+
 See :class:`~torch.nn.AvgPool1d` for details and output shape.
 
 Args:
@@ -385,6 +388,9 @@ Applies 2D average-pooling operation in :math:`kH \times kW` regions by step siz
 :math:`sH \times sW` steps. The number of output features is equal to the number of
 input planes.
 
+.. note::
+    pad should be at most half of effective kernel size.
+
 See :class:`~torch.nn.AvgPool2d` for details and output shape.
 
 Args:
@@ -412,6 +418,9 @@ avg_pool3d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_in
 Applies 3D average-pooling operation in :math:`kT \times kH \times kW` regions by step
 size :math:`sT \times sH \times sW` steps. The number of output features is equal to
 :math:`\lfloor\frac{\text{input planes}}{sT}\rfloor`.
+
+.. note::
+    pad should be at most half of effective kernel size.
 
 See :class:`~torch.nn.AvgPool3d` for details and output shape.
 
@@ -4593,10 +4602,10 @@ def interpolate(  # noqa: F811
             result for downsampling operation. Supported modes: ``'bilinear'``, ``'bicubic'``.
 
     .. note::
-        With ``mode='bicubic'``, it's possible to cause overshoot, in other words it can produce
-        negative values or values greater than 255 for images.
-        Explicitly call ``result.clamp(min=0, max=255)`` if you want to reduce the overshoot
-        when displaying the image.
+        With ``mode='bicubic'``, it's possible to cause overshoot. For some dtypes, it can produce
+        negative values or values greater than 255 for images. Explicitly call ``result.clamp(min=0,max=255)``
+        if you want to reduce the overshoot when displaying the image.
+        For ``uint8`` inputs, it already performs saturating cast operation. So, no manual `clamp` operation is needed.
 
     .. note::
         Mode ``mode='nearest-exact'`` matches Scikit-Image and PIL nearest neighbours interpolation
