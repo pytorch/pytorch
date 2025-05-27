@@ -4,13 +4,15 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._functorch
-from torch._dynamo.precompile import PrecompileCacheArtifact, PrecompileContext
+from torch._dynamo.precompile import PrecompileContext
 from torch._functorch import config as functorch_config
 from torch._inductor.test_case import TestCase as InductorTestCase
 
 
 @functorch_config.patch({"enable_autograd_cache": True})
-@functorch_config.patch({"bundled_autograd_cache": True}) # Requires bundledaotautograd cache for now
+@functorch_config.patch(
+    {"bundled_autograd_cache": True}
+)  # Requires bundledaotautograd cache for now
 class PrecompileContextTests(InductorTestCase):
     def setUp(self):
         """
@@ -24,6 +26,7 @@ class PrecompileContextTests(InductorTestCase):
         """
         Test that after torch.compile, PrecompileContext._new_cache_artifacts length is 1
         """
+
         def simple_function(x):
             return x.sin() + x.cos()
 
@@ -46,12 +49,18 @@ class PrecompileContextTests(InductorTestCase):
         deserialized = artifacts["precompile_aot_autograd"]
         assert len(deserialized) == 1
         entry = deserialized[0]
-        assert isinstance(entry, torch._functorch._aot_autograd.autograd_cache.BundledAOTAutogradCacheEntry)
+        assert isinstance(
+            entry,
+            torch._functorch._aot_autograd.autograd_cache.BundledAOTAutogradCacheEntry,
+        )
 
         # Now that we've serialized, there should be no new cache artifacts
-        self.assertEqual(len(PrecompileContext._new_cache_artifacts["precompile_aot_autograd"]), 0)
+        self.assertEqual(
+            len(PrecompileContext._new_cache_artifacts["precompile_aot_autograd"]), 0
+        )
 
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
+
     run_tests()

@@ -1,15 +1,26 @@
-from collections import defaultdict
 from abc import abstractmethod
+from collections import defaultdict
+from typing import Any, Generic, Optional, TypeVar
 from typing_extensions import override
-from torch.utils._ordered_set import OrderedSet
-from typing import Any, Callable, Optional, Generic, TypeVar
-from torch.compiler._cache import CacheArtifact, CacheArtifactManager, CacheArtifactsResult,  CacheInfo, _serialize_single_cache
+
+from torch.compiler._cache import (
+    _serialize_single_cache,
+    CacheArtifact,
+    CacheArtifactManager,
+    CacheArtifactsResult,
+    CacheInfo,
+)
 from torch.utils._appending_byte_serializer import AppendingByteSerializer
+from torch.utils._ordered_set import OrderedSet
+
+
 """
 Classes and implementations related to precompile
 """
 
 T = TypeVar("T")
+
+
 class PrecompileCacheArtifact(CacheArtifact, Generic[T]):
     """
     Data for each cache artifact that will be serialized and deserialized by
@@ -52,9 +63,11 @@ class PrecompileContext(CacheArtifactManager):
     """
     PrecompileContext is a special CacheArtifactManager for handling precompilation
     It uses the same interface as CacheArtifactManager, but handles deserialization differently:
-    specifically, it returns a full Callable object instead of populating caches.
+    specifically, it returns a full Callable object instead of populating caches. The goal of PrecompileContext
+    is to provide a way for torch.compile to record and serialize various artifacts
+    that are needed for precompile as it is compiling.
 
-    Only the following artifact types are supported by PrecompileContext:
+    The following artifact types are supported by PrecompileContext:
      - BundledAOTAutogradCacheArtifact
 
     In order to add new artifacts that are needed to return a callable from precompile,
@@ -71,20 +84,25 @@ class PrecompileContext(CacheArtifactManager):
     # When serialize() is called, artifacts are transferred from _cache_artifacts to
     # internal data structure of the _serializer
     # This allows us to only pay the cost of serialization if serialize() is called
-    _serializer: AppendingByteSerializer[
-        tuple[str, list[CacheArtifact]]
-    ] = AppendingByteSerializer(serialize_fn=_serialize_single_cache)
+    _serializer: AppendingByteSerializer[tuple[str, list[CacheArtifact]]] = (
+        AppendingByteSerializer(serialize_fn=_serialize_single_cache)
+    )
     _cache_info: CacheInfo = CacheInfo()
-
 
     @staticmethod
     # TODO: return a Callable here instead of the dict of artifacts
-    def deserialize_into_callable(serialized_artifacts: bytes) -> Optional[dict[str, Any]]:
+    def deserialize_into_callable(
+        serialized_artifacts: bytes,
+    ) -> Optional[dict[str, Any]]:
         """
         Similar to CacheArtifactManager.serialize, but instead of populating caches,
-        we want to return a full Callable object
+        we want to return a full Callable object.
+
+        TODO: Add dynamo specific logic to convert dict[str, Any] into a Callable
         """
-        artifacts : Optional[CacheArtifactsResult] = PrecompileContext.deserialize(serialized_artifacts)
+        artifacts: Optional[CacheArtifactsResult] = PrecompileContext.deserialize(
+            serialized_artifacts
+        )
         if not artifacts:
             return None
         results = {}
@@ -92,7 +110,9 @@ class PrecompileContext(CacheArtifactManager):
             result_artifacts = []
             for artifact in deserialized_artifacts:
                 if not artifact.precompile_compatible():
-                    raise RuntimeError(f"Unsupported precompile artifact type: {artifact.__class__.type()}")
+                    raise RuntimeError(
+                        f"Unsupported precompile artifact type: {artifact.__class__.type()}"
+                    )
                 assert isinstance(artifact, PrecompileCacheArtifact)
                 result_artifacts.append(artifact.after_deserialization())
             results[artifact_type] = result_artifacts
@@ -100,9 +120,8 @@ class PrecompileContext(CacheArtifactManager):
         return results
 
     @staticmethod
-    def populate_caches(artifacts) -> CacheInfo:
+    def populate_caches(artifacts: CacheArtifactsResult) -> CacheInfo:
         raise RuntimeError("Precompile Contexts do not directly populate any caches")
-
 
     @classmethod
     def _ensure_cache_artifacts_registered(cls) -> None:
