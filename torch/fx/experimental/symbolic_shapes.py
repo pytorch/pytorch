@@ -160,6 +160,7 @@ __all__ = [
     "SymIntSymbolicContext",
     "TrackedFake",
     "statically_known_true",
+    "statically_known_false",
     "guard_size_oblivious",
     "check_consistent",
     "compute_unbacked_bindings",
@@ -470,21 +471,6 @@ def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
         return expr
 
 
-def _guard_sizes_oblivious(
-    lhs_sizes: Sequence[Union[torch.SymInt, bool]],
-    rhs_sizes: Sequence[Union[torch.SymInt, bool]],
-) -> bool:
-    """
-    Leverage guard_size_oblivious to compare if two lists of int/symint are equal.
-    Useful to compare sizes, strides etc.
-    """
-
-    return len(lhs_sizes) == len(rhs_sizes) and all(
-        guard_size_oblivious(lhs_item == rhs_item)
-        for lhs_item, rhs_item in zip(lhs_sizes, rhs_sizes)
-    )
-
-
 def check_consistent(new: _T, old: _T) -> None:
     """
     Test that two "meta" values (typically either Tensor or SymInt) have
@@ -518,6 +504,14 @@ def resolve_unbacked_bindings(
     shape_env: Optional[ShapeEnv],
     bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]],
 ) -> Optional[dict[sympy.Symbol, pytree.KeyPath]]:
+    """
+    When we do fake tensor prop, we oftentimes will allocate new unbacked symints.
+    We then run proxy tensor mode, which populates node.meta["unbacked_bindings"]
+    with these new symints. To ensure consistency we use PropagateUnbackedSymInts
+    to rename unbacked bindings to their old ones. But all of the node metas are
+    still using the old bindings from before the renaming. This function helps to
+    post facto apply any renamings discovered in the PropogateUnbackedSymInts pass.
+    """
     if bindings is None:
         return None
     assert shape_env is not None
@@ -649,6 +643,12 @@ def rebind_unbacked(
 # dangerous in case someone adds a function that returns an int but is
 # mutating.  So manually whitelist for now.
 def is_accessor_node(node: torch.fx.Node) -> bool:
+    """
+    Helper function to determine if a node is trying to access
+    a symbolic integer such as size, stride, offset or item. Currently
+    primarily only used in a DCE pass to figure out purity.
+    """
+
     # Dynamo only exercised condition
     if (
         node.op == "call_method"
@@ -657,6 +657,7 @@ def is_accessor_node(node: torch.fx.Node) -> bool:
         and node.target in ["size", "stride", "storage_offset", "item"]
     ):
         return True
+
     if node.op == "call_function" and node.target in [
         torch.ops.aten.sym_size,
         torch.ops.aten.sym_size.default,
@@ -669,6 +670,7 @@ def is_accessor_node(node: torch.fx.Node) -> bool:
         torch.ops.aten.sym_numel.default,
     ]:
         return True
+
     return False
 
 
@@ -1290,6 +1292,29 @@ def _static_eval_sym_bool(x: SymBool) -> Optional[bool]:
     except Exception:
         log.debug("Could not simplify %s", expr)
         return None
+
+
+def statically_known_false(x: BoolLikeType) -> bool:
+    """
+    Returns True if x can be simplified to a constant and is False.
+    If x cannot be evaluated from static, we return False
+
+    .. note::
+        This function doesn't introduce new guards, so the expression may end
+        up evaluating to False at runtime even if this function returns False.
+
+    Args:
+        x (bool, SymBool): The expression to try statically evaluating
+    """
+    if not isinstance(x, SymBool):
+        assert isinstance(x, bool)
+        return not x
+
+    result = _static_eval_sym_bool(x)
+    if result is None:
+        return False
+
+    return not result
 
 
 def statically_known_true(x: BoolLikeType) -> bool:
@@ -6745,6 +6770,9 @@ class ShapeEnv:
 
         # store LOC
         locs = co_lines[frame.f_lineno - offset : last_lineno + 1 - offset]
+        if not locs:
+            return _FrameLocalResult()
+
         indent = len(locs[0]) - len(locs[0].lstrip())
         frame_loc = "".join([loc[indent:] for loc in locs]).strip()  # type: ignore[assignment]
         return _FrameLocalResult(

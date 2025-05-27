@@ -1462,7 +1462,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
 
         from .cutlass_lib_extensions import gemm_operation_extensions as gemm_extensions
 
-        emitter = gemm_extensions.EmitGemmUniversal3xInstanceWithEVT(evt_name=evt_name)
+        emitter = gemm_extensions.EmitGemmUniversal3xInstanceWithEVT(evt_name=evt_name)  # type: ignore[call-arg]
 
         if not hasattr(op, "epilogue_functor") or not isinstance(
             op.epilogue_functor, enum.Enum
