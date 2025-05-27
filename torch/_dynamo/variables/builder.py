@@ -3406,6 +3406,12 @@ class SourcelessBuilder:
                 for name in namedtuple_fields(type(value))
             ]
             return NamedTupleVariable(output, tuple_cls=type(value))
+        elif (
+            isinstance(value, torch.SymInt)
+            and value.node.expr in tx.output.bound_symbols
+        ):
+            proxy = tx.output.bound_symbols[value.node.expr]
+            return SymNodeVariable.create(tx, proxy)
         unimplemented_v2(
             gb_type="Unexpected type in sourceless builder",
             context=f"{value_type.__module__}.{value_type.__qualname__}",
