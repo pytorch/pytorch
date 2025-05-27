@@ -73,7 +73,7 @@ class MetalExprPrinter(ExprPrinter_):
         x = self.doprint(x)
         div = self.doprint(div)
         if expr.is_integer:
-            return f"({x}) / ({div})"
+            return f"c10::metal::floor_divide({x}, {div})"
         return f"metal::floor({x}) / ({div})"
 
     def _print_ModularIndexing(self, expr: sympy.Expr) -> str:
@@ -142,7 +142,9 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_FloorToInt(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
         x = self.doprint(expr.args[0])
-        return f"static_cast<int>(metal::floor({x}))"
+        return f"static_cast<int>(metal::floor(static_cast<float>({x})))"
+
+    _print_floor = _print_FloorToInt
 
     def _print_TruncToInt(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
@@ -326,10 +328,8 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def floordiv(a: CSEVariable, b: CSEVariable) -> str:
-        # a and b are integer type
-        quot = f"{a} / {b}"
-        rem = f"{a} % {b}"
-        return f"(({a} < 0) != ({b} < 0) ? ({rem} != 0 ? {quot} - 1 : {quot}) : {quot})"
+        # a and b must be of integer type
+        return f"c10::metal::floor_divide({a}, {b})"
 
     @staticmethod
     def floor(x: CSEVariable) -> str:
@@ -472,6 +472,7 @@ class MetalKernel(SIMDKernel):
     sexpr = MetalExprPrinter().doprint
     kexpr = sexpr
     headers: OrderedSet[str] = OrderedSet(["utils"])
+    multistage_reduction_entry: Optional[IterationRangesEntry] = None
 
     def __init__(
         self,
@@ -480,7 +481,6 @@ class MetalKernel(SIMDKernel):
     ) -> None:
         super().__init__(tiling, **kwargs)
         self.acc_var_ids = itertools.count()
-        self.multistage_reduction = False
 
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         return DTYPE_TO_METAL[dtype]
@@ -617,7 +617,7 @@ class MetalKernel(SIMDKernel):
             acc_buf = self._new_idxvar(
                 acc_dtype, ceildiv(acc_buf_size, self.simd_group_size)
             )
-            if not self.multistage_reduction:
+            if not self.multistage_reduction_entry:
                 val = value
             else:
                 default_val, reduction_op = (
@@ -636,7 +636,7 @@ class MetalKernel(SIMDKernel):
             acc_buf = self._new_idxvar(src_dtype, acc_buf_size)
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             src_metal_type = DTYPE_TO_METAL[src_dtype]
-            if not self.multistage_reduction:
+            if not self.multistage_reduction_entry:
                 self.compute.splice(
                     f"{acc_thread_var} = static_cast<{src_metal_type}>({value});"
                 )
@@ -677,7 +677,7 @@ class MetalKernel(SIMDKernel):
                 dtype=dtype,
             )
         if reduction_type == "welford_reduce":
-            if not self.multistage_reduction:
+            if not self.multistage_reduction_entry:
                 acc_buf = self._new_idxvar(src_dtype, acc_buf_size)
                 self.compute.splice(f"{acc_buf}[{reduction_idx}] = {value};")
                 wf_res = self.cse.generate(
@@ -702,7 +702,7 @@ class MetalKernel(SIMDKernel):
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             inp_value = f"float3({value[0]}, {value[1]}, {value[2]})"
             self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
-            if self.multistage_reduction:
+            if self.multistage_reduction_entry:
                 self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
                 self.compute.writeline(
                     f"{acc_thread_var} = ::c10::metal::welford_combine({acc_thread_var}, {inp_value});"
@@ -710,7 +710,7 @@ class MetalKernel(SIMDKernel):
             else:
                 self.compute.writeline(f"{acc_thread_var} = {inp_value};")
             wf_res = self.cse.generate(
-                self.stores if self.multistage_reduction else self.compute,
+                self.stores if self.multistage_reduction_entry else self.compute,
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
             )
             return OpsWrapper._unwrap((f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z"))
@@ -719,9 +719,9 @@ class MetalKernel(SIMDKernel):
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
         index_expr = self.rename_indexing(entry.expr)
         index_str = self.sexpr(index_expr)  # type: ignore[misc]
-        if entry.is_reduction:
-            self.multistage_reduction = entry.root.numel > self.max_threadgroup_size
-        if not entry.is_reduction or not self.multistage_reduction:
+        if entry.is_reduction and entry.root.numel > self.max_threadgroup_size:
+            self.multistage_reduction_entry = entry
+        if not entry.is_reduction or self.multistage_reduction_entry is None:
             self.indexing_code.writeline(
                 f"{self.index_dtype} {entry.name} = {index_str};"
             )
@@ -753,12 +753,16 @@ class MetalKernel(SIMDKernel):
         For reduction kernels, this generates a loop over the reduction
         axis.
         """
-        if self.multistage_reduction:
+        if self.multistage_reduction_entry:
             with self.body.indent():
                 self.body.splice(self.loads)
                 self.body.splice(self.compute)
             self.body.writeline("}")
-            self.multistage_reduction = False
+            # Invalidate variables instantiated inside loop
+            self.cse.invalidate(OrderedSet(self.cse.reduction_cache.values()))
+            # And loop codegen
+            self.multistage_reduction_entry.cache_clear()
+            self.multistage_reduction_entry = None
         else:
             self.body.splice(self.loads)
             self.body.splice(self.compute)
@@ -771,11 +775,17 @@ class MetalKernel(SIMDKernel):
         """Called at the end to generate a final kernel string"""
         self.codegen_body()
         code = IndentedBuffer()
-        code.writeline('compile_mps_shader("""')
+
+        if V.graph.cpp_wrapper:
+            code.writeline('(R"MTL(')
+        else:
+            code.writeline("compile_mps_shader('''")
+
         idx_vars = self.active_range_trees()
         with code.indent():
-            for header in self.headers:
-                code.writeline(f"#include <c10/metal/{header}.h>")
+            if not V.graph.cpp_wrapper:
+                for header in self.headers:
+                    code.writeline(f"#include <c10/metal/{header}.h>")
             if self.inside_reduction:
                 total_reduction_size = math.prod(
                     t.numel for t in self.range_trees if t.is_reduction
@@ -792,7 +802,15 @@ class MetalKernel(SIMDKernel):
                     dtype_str = self.dtype_to_str(V.graph.get_dtype(outer))
                     code.writeline(f"device {dtype_str}* {inner},")
                 for outer, inner in self.args.input_buffers.items():
-                    dtype_str = self.dtype_to_str(V.graph.get_dtype(outer))
+                    dtype = V.graph.get_dtype(outer)
+                    # MPS does not support float64, but scalar inputs are fine
+                    if dtype == torch.float64:
+                        outer_buf = V.graph.try_get_buffer(outer)
+                        if outer_buf is None or outer_buf.get_size() != []:
+                            raise RuntimeError("float64 is not supported by MPS")
+                        dtype_str = "float"
+                    else:
+                        dtype_str = self.dtype_to_str(dtype)
                     code.writeline(f"constant {dtype_str}* {inner},")
                 for outer, inner in self.args.sizevars.items():
                     code.writeline(f"constant long& {inner},")
@@ -821,7 +839,11 @@ class MetalKernel(SIMDKernel):
                 code.splice(self.indexing_code)
                 code.splice(self.body)
             code.writeline("}")
-        code.writeline('""")')
+
+        if V.graph.cpp_wrapper:
+            code.writeline(')MTL");')
+        else:
+            code.writeline("''')")
 
         return code.getvalue()
 
@@ -846,7 +868,15 @@ class MetalKernel(SIMDKernel):
                 )
                 for v in self.active_range_trees()
             ]
-            args += [f"threads=[{', '.join(threads)}]"]
+
+            if V.graph.cpp_wrapper:
+                args += [f"{', '.join(threads)}"]
+            else:
+                args += [f"threads=[{', '.join(threads)}]"]
+        else:
+            if V.graph.cpp_wrapper:
+                raise RuntimeError("We should always have threads?")
+
         if self.inside_reduction:
             threads = [
                 self.pexpr(sympy.Min(v.numel, self.max_threadgroup_size))  # type: ignore[misc]
@@ -854,7 +884,15 @@ class MetalKernel(SIMDKernel):
                 else "1"
                 for v in self.active_range_trees()
             ]
-            args += [f"group_size=[{', '.join(threads)}]"]
+            if V.graph.cpp_wrapper:
+                args += [f"{{{', '.join(threads)}}}"]
+            else:
+                args += [f"group_size=[{', '.join(threads)}]"]
+        else:
+            if V.graph.cpp_wrapper:
+                # Add a None so that we always have a group_size in the
+                # arguments. We won't use it if the value is None.
+                args += [None]  # type: ignore[list-item]
 
         wrapper.generate_kernel_call(
             name,
@@ -888,9 +926,10 @@ class MetalScheduling(SIMDScheduling):
         super().__init__(scheduler)
         wrapper = V.graph.wrapper_code
         if wrapper is not None:
-            wrapper.header.splice(
-                "from torch._inductor.runtime.runtime_utils import compile_mps_shader"
-            )
+            if not V.graph.cpp_wrapper:
+                wrapper.header.splice(
+                    "from torch._inductor.runtime.runtime_utils import compile_mps_shader"
+                )
 
     def define_kernel(
         self, src_code: str, node_schedule: list[SchedulerNode], kernel: MetalKernel
@@ -902,10 +941,19 @@ class MetalScheduling(SIMDScheduling):
             # TODO: Merge multiple kernels into a single library
             # Either using MultiKernel concept or overriding SIMDScheduling.codegen_node_scheduling
             mps_lib_name = f"mps_lib_{wrapper.next_kernel_suffix()}"
-            kernel_name = f"{mps_lib_name}.generated_kernel"
+
+            if V.graph.cpp_wrapper:
+                src_code = (
+                    f"at::native::mps::DynamicMetalShaderLibrary {mps_lib_name}"
+                    + src_code
+                )
+                kernel_name = f"{mps_lib_name}_func"
+            else:
+                kernel_name = f"{mps_lib_name}.generated_kernel"
+
             wrapper.src_to_kernel[src_code] = kernel_name
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
             metadata_comment = f"{origins}\n{detailed_origins}"
-            wrapper.define_kernel(mps_lib_name, src_code, metadata_comment)
+            wrapper.define_kernel(mps_lib_name, src_code, metadata_comment, gpu=False)
 
         return kernel_name

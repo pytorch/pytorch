@@ -2,6 +2,7 @@
 
 import copy
 import functools
+import unittest
 from typing import Callable
 
 import torch
@@ -12,10 +13,15 @@ from torch.distributed.tensor.experimental import implicit_replication
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
+    get_devtype,
     patch_all_gather,
     patch_reduce_scatter,
 )
-from torch.testing._internal.common_utils import get_cycles_per_ms, run_tests
+from torch.testing._internal.common_utils import get_cycles_per_ms, run_tests, TEST_HPU
+
+
+device_type = torch.device(get_devtype())
+device_module = torch.get_device_module(device_type)
 
 
 class TestFullyShardOverlap(FSDPTest):
@@ -35,9 +41,10 @@ class TestFullyShardOverlap(FSDPTest):
 
     @property
     def world_size(self) -> int:
-        return min(2, torch.cuda.device_count())
+        return min(2, torch.get_device_module(device_type).device_count())
 
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(TEST_HPU, "Sleep is not supported on HPU")
     def test_fully_shard_training_overlap(self):
         torch.manual_seed(42)
 
@@ -46,7 +53,7 @@ class TestFullyShardOverlap(FSDPTest):
         model = nn.Sequential(
             *[LinearWithSleep(dim, compute_sleep_ms) for _ in range(num_linears)]
         )
-        ref_model = copy.deepcopy(model).cuda()
+        ref_model = copy.deepcopy(model).to(device_type)
         for lin in model:
             assert len(list(lin.parameters())) == 1, "Expects only one weight"
             fully_shard(lin, reshard_after_forward=True)
@@ -54,15 +61,21 @@ class TestFullyShardOverlap(FSDPTest):
 
         orig_all_gather_into_tensor = dist.all_gather_into_tensor
         orig_reduce_scatter_tensor = dist.reduce_scatter_tensor
-        comm_stream = torch.cuda.Stream()
+        comm_stream = torch.get_device_module(device_type).Stream()
 
         def delay_collective():
             # Share a stream so that all-gather and reduce-scatter block each
             # other like in `ProcessGroupNCCL`
-            comm_stream.wait_stream(torch.cuda.current_stream())
-            with torch.cuda.stream(comm_stream):
-                torch.cuda._sleep(int(comm_sleep_ms * get_cycles_per_ms()))
-            torch.cuda.current_stream().wait_stream(comm_stream)
+            comm_stream.wait_stream(
+                torch.get_device_module(device_type).current_stream()
+            )
+            with torch.get_device_module(device_type).stream(comm_stream):
+                torch.get_device_module(device_type)._sleep(
+                    int(comm_sleep_ms * get_cycles_per_ms())
+                )
+            torch.get_device_module(device_type).current_stream().wait_stream(
+                comm_stream
+            )
 
         def delayed_all_gather(*args, **kwargs):
             delay_collective()
@@ -72,7 +85,7 @@ class TestFullyShardOverlap(FSDPTest):
             delay_collective()
             return orig_reduce_scatter_tensor(*args, **kwargs)
 
-        inp = torch.randn((2, dim), device="cuda")
+        inp = torch.randn((2, dim), device=device_type.type)
         loss = model(inp).sum()  # warmup CUDA and allocator
         loss.backward()
 
@@ -144,6 +157,7 @@ class TestFullyShardOverlap(FSDPTest):
         self.assertLessEqual(fwd_bwd_time, ref_fwd_bwd_time)
 
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(TEST_HPU, "Sleep is not supported on HPU")
     def test_fully_shard_post_optim_event_overlap(self):
         torch.manual_seed(42)
 
@@ -153,17 +167,19 @@ class TestFullyShardOverlap(FSDPTest):
         # low-compute linear, where only the low-compute linear uses FSDP
         model = nn.Sequential(
             LinearWithSleep(dim, compute_sleep_ms), nn.Linear(dim, dim)
-        ).cuda()
+        ).to(device_type)
         fully_shard(model[1], reshard_after_forward=False)
         optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
 
         orig_all_gather_into_tensor = dist.all_gather_into_tensor
 
         def delayed_all_gather(*args, **kwargs):
-            torch.cuda._sleep(int(comm_sleep_ms * get_cycles_per_ms()))
+            torch.get_device_module(device_type)._sleep(
+                int(comm_sleep_ms * get_cycles_per_ms())
+            )
             return orig_all_gather_into_tensor(*args, **kwargs)
 
-        inp = torch.randn((2, dim), device="cuda")
+        inp = torch.randn((2, dim), device=device_type)
 
         def run_train_steps(num_iters: int, use_post_optim_event: bool):
             for _ in range(num_iters):
@@ -174,7 +190,11 @@ class TestFullyShardOverlap(FSDPTest):
                 with implicit_replication():
                     optim.step()
                 if use_post_optim_event:
-                    post_optim_event = torch.cuda.current_stream().record_event()
+                    post_optim_event = (
+                        torch.get_device_module(device_type)
+                        .current_stream()
+                        .record_event()
+                    )
                     model[1].set_post_optim_event(post_optim_event)
 
         run_train_steps(1, False)  # warmup CUDA and allocator
@@ -205,14 +225,14 @@ class TestFullyShardOverlap(FSDPTest):
         self.assertGreater(baseline_time, test_time)
 
     def _time_fn(self, fn: Callable):
-        start_event = torch.cuda.Event(enable_timing=True)
-        end_event = torch.cuda.Event(enable_timing=True)
+        start_event = device_module.Event(enable_timing=True)
+        end_event = device_module.Event(enable_timing=True)
         dist.barrier()
-        torch.cuda.synchronize()
+        device_module.synchronize()
         start_event.record()
         fn()
         end_event.record()
-        torch.cuda.synchronize()
+        device_module.synchronize()
         elapsed_time = start_event.elapsed_time(end_event)
         return elapsed_time
 
@@ -223,13 +243,15 @@ class Matmul(torch.autograd.Function):
     def forward(ctx, input: torch.Tensor, weight: torch.Tensor, sleep_ms: int):
         ctx.save_for_backward(input, weight)
         ctx.sleep_ms = sleep_ms
-        torch.cuda._sleep(int(sleep_ms * get_cycles_per_ms()))
+        torch.get_device_module(device_type)._sleep(int(sleep_ms * get_cycles_per_ms()))
         return input @ weight
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):
         (input, weight) = ctx.saved_tensors
-        torch.cuda._sleep(int(2 * ctx.sleep_ms * get_cycles_per_ms()))
+        torch.get_device_module(device_type)._sleep(
+            int(2 * ctx.sleep_ms * get_cycles_per_ms())
+        )
         grad_input = grad_output @ weight.T
         grad_weight = input.T @ grad_output
         return grad_input, grad_weight, None

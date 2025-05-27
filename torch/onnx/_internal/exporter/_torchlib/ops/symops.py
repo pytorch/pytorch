@@ -2,7 +2,6 @@
 
 # mypy: disable-error-code="misc,arg-type,type-arg,valid-type,assignment,return-value,type-var,operator,no-untyped-def,index"
 # ruff: noqa: TCH001,TCH002
-# flake8: noqa
 
 from __future__ import annotations
 
@@ -12,7 +11,6 @@ import torch
 from torch.onnx._internal.exporter._torchlib._tensor_typing import (
     BOOL,
     FLOAT,
-    INT64,
     IntType,
     TensorType,
 )
