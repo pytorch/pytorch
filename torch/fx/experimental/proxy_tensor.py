@@ -2266,6 +2266,7 @@ def make_fx(
     record_module_stack: bool = False,
     _allow_fake_constant: bool = False,
     _error_on_data_dependent_ops: bool = True,
+    _disable_compiled_autograd: bool = True,
 ) -> Callable[..., GraphModule]:
     """
     Given a function f, return a new function which when executed with valid
@@ -2285,9 +2286,18 @@ def make_fx(
         _error_on_data_dependent_ops,
     )
 
-    @functools.wraps(f)
-    def wrapped(*args: object) -> GraphModule:
-        return make_fx_tracer.trace(f, *args)
+    if _disable_compiled_autograd:
+
+        @functools.wraps(f)
+        def wrapped(*args: object) -> GraphModule:
+            with torch._dynamo.compiled_autograd._disable():
+                return make_fx_tracer.trace(f, *args)
+
+    else:
+
+        @functools.wraps(f)
+        def wrapped(*args: object) -> GraphModule:
+            return make_fx_tracer.trace(f, *args)
 
     return wrapped
 

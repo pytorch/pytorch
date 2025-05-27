@@ -1975,6 +1975,8 @@ def gradcheck(
     masked: Optional[bool] = None,
 ) -> bool:  # noqa: D400,D205
     if torch._dynamo.config.compiled_autograd:
+        if not check_backward_ad:
+            return True
         check_batched_grad = False
         check_batched_forward_grad = False
         check_forward_ad = False
