@@ -26,9 +26,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
-#ifndef WIN32
-#include <torch/csrc/utils/device_lazy_init.h>
-#endif
 
 #include <cstdint>
 #include <mutex>
@@ -84,6 +81,9 @@ class TORCH_API Context {
     }
   }
 
+  void registerForkHandlerForDeviceInit(at::DeviceType device_type);
+  bool isDeviceInBadFork(at::DeviceType device_type);
+
   Device getDeviceFromPtr(void* data, c10::DeviceType device_type) {
     lazyInitDevice(device_type);
 
@@ -109,7 +109,7 @@ class TORCH_API Context {
       return false;
     }
 #ifndef WIN32
-    if (torch::utils::is_device_in_bad_fork(opt_device_type.value())) {
+    if (isDeviceInBadFork(opt_device_type.value())) {
       // If the device is initialized in fork's parent, CUDA API calls
       // within fork will fail.
       return false;
@@ -131,6 +131,7 @@ class TORCH_API Context {
   void lazyInitDevice(c10::DeviceType device_type) {
     if (device_type != at::kCPU) {
       c10::call_once(init_[static_cast<int8_t>(device_type)], [&] {
+        registerForkHandlerForDeviceInit(device_type);
         getAcceleratorHooksInterface(device_type).init();
       });
     }
