@@ -14,6 +14,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._subclasses.fake_tensor import get_plain_tensors
+from torch.types import IntLikeType
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .schemas import (
@@ -166,9 +167,9 @@ def create_subclass_meta(
     return infos
 
 
-def filter_symints(lst: Iterable[Union[int, SymInt]]):
+def filter_symints(lst: Iterable[IntLikeType]):
     # Capture all SymInts from the iterable.
-    def symint_check(s: Union[int, SymInt]) -> bool:
+    def symint_check(s: IntLikeType) -> bool:
         return isinstance(s, SymInt) and not s.node.is_nested_int()
 
     return [s for s in lst if symint_check(s)]
