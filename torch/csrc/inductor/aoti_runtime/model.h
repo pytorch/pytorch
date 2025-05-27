@@ -100,7 +100,7 @@ inline void parse_device_str(
     const std::string& device_str,
     int32_t& device_type,
     int32_t& device_idx) {
-  std::regex re("(cpu|cuda|xpu)(:([0-9]+))?");
+  std::regex re("(cpu|cuda|xpu|mps)(:([0-9]+))?");
   std::smatch sm;
   bool matched = std::regex_match(device_str, sm, re);
   AOTI_RUNTIME_CHECK(matched, "Invalid device: " + device_str);
@@ -112,6 +112,10 @@ inline void parse_device_str(
 #ifdef USE_XPU
   } else if (sm[1].str() == "xpu") {
     device_type = aoti_torch_device_type_xpu();
+#endif
+#ifdef __APPLE__
+  } else if (sm[1].str() == "mps") {
+    device_type = aoti_torch_device_type_mps();
 #endif
   } else {
     AOTI_RUNTIME_CHECK(false, "Invalid device: " + device_str);

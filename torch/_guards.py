@@ -359,7 +359,7 @@ class Guard:
         except Exception:
             log.exception("Error while creating guard:\n%s", str(self).rstrip())
             if self.stack:
-                log.error("Created at:\n%s", "".join(self.stack.format()[-4:]).rstrip())  # noqa: TRY400
+                log.error("Created at:\n%s", "".join(self.stack.format()[-4:]).rstrip())
             raise
 
     def is_specialized_nn_module(self):
