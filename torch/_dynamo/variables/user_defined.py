@@ -736,7 +736,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     Mostly objects of defined type.  Catch-all for something where we only know the type.
     """
 
-    _nonvar_fields = {"value", "value_type", *UserDefinedVariable._nonvar_fields}
+    _nonvar_fields = {
+        "value",
+        "value_type",
+        "attrs_directly_modifed_on_dict",
+        *UserDefinedVariable._nonvar_fields,
+    }
 
     def __init__(
         self,
@@ -763,6 +768,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         #   obj = base_cls.__new__(user_cls, *args)
         self.base_cls_vt = base_cls_vt
         self.init_args = init_args
+
+        # This records names of the attributes that were modifed via instance
+        # `__dict__` directly, rather than the normal setattr path.
+        #
+        # TODO consider emulating `obj.__dict__` as a `ConstDictVariable` to get
+        # rid of these workarounds here and in `GetAttrVariable`.
+        self.attrs_directly_modifed_on_dict = set()
 
     def __str__(self) -> str:
         inner = self.value_type.__name__
@@ -899,7 +911,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def method_setattr_standard(
-        self, tx: "InstructionTranslator", name, value, bypass_descriptor=False
+        self, tx: "InstructionTranslator", name, value, directly_update_dict=False
     ):
         try:
             name = name.as_python_constant()
@@ -908,27 +920,26 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if not tx.output.side_effects.is_attribute_mutation(self):
             unimplemented(f"setattr({self}, {name}, ...)")
 
-        if not bypass_descriptor:
+        if directly_update_dict:
+            self.attrs_directly_modifed_on_dict.add(name)
+        else:
             tmp = self.try_get_descritor_and_setter_py_func(name)
             if tmp:
                 descriptor, setter = tmp
                 # Emulate
                 # https://github.com/python/cpython/blob/3.11/Objects/object.c#L1371-L1452
-                # NOTE we use `type(...)` to ignore instance attrs.
-                # member descriptors have `__set__` impls that are safe to ignore.
-                if setter is not NO_SUCH_SUBOBJ and not (
-                    inspect.ismemberdescriptor(descriptor)
-                    or inspect.isgetsetdescriptor(descriptor)
-                ):
-                    desc_source = None
-                    func_source = None
-                    if self.cls_source:
-                        desc_source = self.get_source_by_walking_mro(name)
-                        func_source = AttrSource(TypeSource(desc_source), "__set__")
-                    desc_var = VariableTracker.build(tx, descriptor, desc_source)
-                    func_var = VariableTracker.build(tx, setter, func_source)
-                    args = [desc_var, self, value]
-                    return func_var.call_function(tx, args, {})
+                desc_source = None
+                func_source = None
+                if self.cls_source:
+                    desc_source = self.get_source_by_walking_mro(name)
+                    # use `type(...)` to ignore instance attrs.
+                    func_source = AttrSource(TypeSource(desc_source), "__set__")
+                desc_var = VariableTracker.build(tx, descriptor, desc_source)
+                func_var = VariableTracker.build(tx, setter, func_source)
+                args = [desc_var, self, value]
+                return func_var.call_function(tx, args, {})
+            # NOTE: else we assume the descriptor (if any) has a
+            # side-effect-free `__set__` as far as Dynamo tracing is concerned.
 
         # Emulate the standard setattr on instance dict.
         tx.output.side_effects.store_attr(self, name, value)
@@ -1061,19 +1072,25 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return subobj
 
-    def is_member_descriptor(self, attr_name):
-        attr = inspect.getattr_static(type(self.value), attr_name, NO_SUCH_SUBOBJ)
-        return inspect.ismemberdescriptor(attr)
-
-    def attr_has_traceable_descriptor_setter(self, attr_name):
-        return self.try_get_descritor_and_setter_py_func(attr_name) is not None
+    def should_skip_descriptor_setter(self, attr_name):
+        # Check if `attr_name` corresponds to a descriptor.
+        descriptor = inspect.getattr_static(type(self.value), attr_name, None)
+        setter = inspect.getattr_static(type(descriptor), "__set__", None)
+        if setter:
+            # Skip if `__set__` was traceable (no need to redo the side effect).
+            if inspect.isfunction(setter):
+                return True
+            # For untraceable `__set__` we should still skip if the attribute
+            # was mutated via instance `__dict__`.
+            elif attr_name in self.attrs_directly_modifed_on_dict:
+                return True
+        return False
 
     def try_get_descritor_and_setter_py_func(self, attr_name):
         descriptor = inspect.getattr_static(type(self.value), attr_name, None)
-        if descriptor:
-            setter = inspect.getattr_static(type(descriptor), "__set__", None)
-            if inspect.isfunction(setter):
-                return (descriptor, setter)
+        setter = inspect.getattr_static(type(descriptor), "__set__", None)
+        if inspect.isfunction(setter):
+            return (descriptor, setter)
         return None
 
     def has_key_in_generic_dict(self, tx: "InstructionTranslator", key):
@@ -1205,11 +1222,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             assert isinstance(self, UserDefinedTupleVariable)
             return self._tuple_vt.items[idx]
         elif isinstance(subobj, staticmethod):
+            # Safe because `staticmethod.__get__` basically won't trigger user
+            # code and just returns the underlying `__func__`:
+            # https://github.com/python/cpython/blob/3.11/Objects/funcobject.c#L1088-L1100
             func = subobj.__get__(self.value)
-            if source is not None:
-                return trace_rules.lookup(func).create_with_source(func, source=source)
-            else:
-                return trace_rules.lookup(func)(func)
+            return VariableTracker.build(tx, func, source)
         elif isinstance(subobj, classmethod):
             return variables.UserMethodVariable(
                 subobj.__func__, self.var_getattr(tx, "__class__"), source=source
