@@ -343,7 +343,7 @@ def load_model_from_path(path_and_class_str):
     return model, inputs
 
 
-def write_outputs(filename, headers, row):
+def write_outputs(filename, headers, row, upload_to_benchmark_db: bool = True):
     """
     Write both CSV and JSON outputs using the original CSV output interface
     """
@@ -352,7 +352,8 @@ def write_outputs(filename, headers, row):
         return
 
     output_csv(filename, headers, row)
-    output_json(filename, headers, row)
+    if upload_to_benchmark_db:
+        output_json(filename, headers, row)
 
 
 def output_csv(filename, headers, row):
@@ -2847,10 +2848,15 @@ class BenchmarkRunner:
                 user_stack = add_double_quotes(
                     ", ".join([str(x) for x in graph_break.user_stack])
                 )
+
+                # NB: Don't upload them to the benchmark database as they are debugging
+                # infomation. There are also around a million records a day which is
+                # wasteful to store
                 write_outputs(
                     filename,
                     ["model", "reason", "user_stack"],
                     [current_name, reason, user_stack],
+                    False,
                 )
 
         if self.args.stats:
@@ -3603,16 +3609,15 @@ def run(runner, args, original_dir=None):
         if args.devices == ["xpu"]:
             torch.use_deterministic_algorithms(True, warn_only=True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-        # TODO(eqy): revisit when cuBLASLt workspace size is bumped
-        # if args.only is not None and args.only in {
-        #     "DebertaForQuestionAnswering",
-        #     "RobertaForQuestionAnswering",
-        #     "nvidia_deeprecommender",
-        #     "volo_d1_224",
-        # }:
-        #     # These seem unhappy with numerics of larger cuBLASLt workspace
-        #     # sizes following #145130 (due to enabling split-k?)
-        #     torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+        if args.only is not None and args.only in {
+            "DebertaForQuestionAnswering",
+            "nvidia_deeprecommender",
+            "crossvit_9_240",
+        }:
+            # These seem unhappy with numerics of larger cuBLASLt workspace
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
         torch.backends.cudnn.benchmark = False
