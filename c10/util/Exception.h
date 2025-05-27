@@ -295,16 +295,12 @@ class C10_API SyntaxError : public Error {
   using Error::Error;
 };
 
-// Raised when accelerator assert is hit asynchronously.
-// They would turn into AssertionError when the cross into Python
-class C10_API DeviceAssertError : public Error {
+// Raised when accelerator API call hits an error.
+// These turn into DeviceError when the cross into Python
+class C10_API DeviceError : public Error {
   using Error::Error;
-};
-
-// Raised when accelerator hits IMA
-// They would turn into MemoryError when the cross into Python
-class C10_API DeviceIllegalMemoryAccessError : public Error {
-  using Error::Error;
+  int64_t error_code = -1;
+  bool is_async = true;
 };
 
 // Base error type for all distributed errors.

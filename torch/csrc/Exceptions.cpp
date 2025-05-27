@@ -14,7 +14,8 @@
 PyObject *THPException_FatalError, *THPException_LinAlgError,
     *THPException_OutOfMemoryError, *THPException_DistError,
     *THPException_DistBackendError, *THPException_DistNetworkError,
-    *THPException_DistStoreError, *THPException_DistQueueEmptyError;
+    *THPException_DistStoreError, *THPException_DistQueueEmptyError,
+    *THPException_DeviceError;
 
 #define ASSERT_TRUE(cond) \
   if (!(cond))            \
@@ -124,6 +125,19 @@ could not be completed because the input matrix is singular.",
       PyModule_AddObject(
           module, "_DistQueueEmptyError", THPException_DistQueueEmptyError) ==
       0);
+
+  // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
+  ASSERT_TRUE(
+      THPException_DeviceError = PyErr_NewExceptionWithDoc(
+          "torch.DeviceError",
+          "Exception raised while executing on device",
+          PyExc_RuntimeError,
+          nullptr));
+  type = (PyTypeObject*)THPException_DeviceError;
+  type->tp_name = "torch.DeviceError";
+  ASSERT_TRUE(
+      PyModule_AddObject(
+          module, "DeviceError", THPException_DeviceError) == 0);
 
   return true;
 }

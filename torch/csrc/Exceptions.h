@@ -75,7 +75,7 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
   _CATCH_GENERIC_ERROR(                                                       \
       NotImplementedError, PyExc_NotImplementedError, retstmnt)               \
   _CATCH_GENERIC_ERROR(SyntaxError, PyExc_SyntaxError, retstmnt)              \
-  _CATCH_GENERIC_ERROR(DeviceAssertError, PyExc_AssertionError, retstmnt)     \
+  _CATCH_GENERIC_ERROR(DeviceError, THPException_DeviceError, retstmnt)       \
   _CATCH_GENERIC_ERROR(                                                       \
       DeviceIllegalMemoryAccessError, PyExc_MemoryError, retstmnt)            \
   _CATCH_GENERIC_ERROR(LinAlgError, THPException_LinAlgError, retstmnt)       \
@@ -144,7 +144,8 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
 extern PyObject *THPException_FatalError, *THPException_LinAlgError,
     *THPException_OutOfMemoryError, *THPException_DistError,
     *THPException_DistBackendError, *THPException_DistNetworkError,
-    *THPException_DistStoreError, *THPException_DistQueueEmptyError;
+    *THPException_DistStoreError, *THPException_DistQueueEmptyError,
+    *THPException_DeviceError;
 
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.
