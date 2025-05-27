@@ -30,10 +30,7 @@
 #include <ATen/ops/expm1_native.h>
 #include <ATen/ops/frac_native.h>
 #include <ATen/ops/imag.h>
-#include <ATen/ops/log10_native.h>
 #include <ATen/ops/log1p_native.h>
-#include <ATen/ops/log2_native.h>
-#include <ATen/ops/log_native.h>
 #include <ATen/ops/logical_not_native.h>
 #include <ATen/ops/logit_backward_native.h>
 #include <ATen/ops/logit_native.h>
@@ -202,9 +199,6 @@ REGISTER_MPS_UNARY_STUB(trunc, truncate);
   }
 
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(reciprocal_out_mps, reciprocal)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(log_out_mps, logarithm)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(log10_out_mps, logarithmBase10)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(log2_out_mps, logarithmBase2)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(erf_out_mps, erf)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(asin_out_mps, asin)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acos_out_mps, acos)

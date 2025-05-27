@@ -1419,7 +1419,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 # do the communication
                 _wait_batch_p2p(_batch_p2p(ops))
             except Exception as e:
-                logger.error(  # noqa: TRY400
+                logger.error(
                     "[Rank %s] pipeline schedule %s caught the following exception \
                      at time_step %s when running action %s",
                     self.rank,
@@ -1427,7 +1427,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
                     time_step,
                     action,
                 )
-                logger.error(  # noqa: TRY400
+                logger.error(
                     "%s",
                     _format_pipeline_order(
                         self.pipeline_order, error_step_number=time_step
@@ -1739,7 +1739,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 else:
                     raise ValueError(f"{action=} is unknown or unsupported")
             except Exception as e:
-                logger.error(  # noqa: TRY400
+                logger.error(
                     "_PipelineScheduleRuntime caught exception at step %s when running action %s.  Full Schedule:",
                     time_step,
                     action,
