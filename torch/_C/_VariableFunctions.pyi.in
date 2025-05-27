@@ -1,11 +1,20 @@
 # ${generated_comment}
 # mypy: disable-error-code="type-arg"
 # mypy: allow-untyped-defs
-# ruff: noqa: F401,PYI054
 
-from collections.abc import Sequence
+import builtins
 from types import EllipsisType
-from typing import Any, Callable, Literal, overload, TypeVar
+from typing import (
+    Any,
+    Callable,
+    ContextManager,
+    Iterator,
+    Literal,
+    NamedTuple,
+    overload,
+    Sequence,
+    TypeVar,
+)
 
 import torch
 from torch import (
