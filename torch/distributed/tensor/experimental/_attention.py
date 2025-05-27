@@ -1620,12 +1620,6 @@ def context_parallel(
 
     for buffer, original_buffer in zip(buffers, original_buffers):
         if original_buffer is not None:
-            # tensor cannot resize if requires_grad is True
-            # key and value's requires_grad has been set to False in manual comm calls
-            # unless via DTensor.
-            if buffer.requires_grad:
-                buffer.requires_grad = False
-
             buffer.resize_(original_buffer.shape)
             buffer.copy_(original_buffer)
 
@@ -1830,7 +1824,8 @@ def cp_flex_attention_backward_dispatch_mode(
 
     # TODO: save global KV in forward
     # all-gather KV
-    sharding = Shard(2)
+    seq_dim = 2
+    sharding = Shard(seq_dim)
     k_dist = DTensor.from_local(key, device_mesh, [sharding])
     v_dist = DTensor.from_local(value, device_mesh, [sharding])
     k_global = k_dist.full_tensor()
@@ -1862,10 +1857,10 @@ def cp_flex_attention_backward_dispatch_mode(
 
     # reduce-scatter KV grads
     grad_key = ft_c.reduce_scatter_tensor(
-        grad_key, reduceOp="sum", scatter_dim=2, group=device_mesh
+        grad_key, reduceOp="sum", scatter_dim=seq_dim, group=device_mesh
     )
     grad_value = ft_c.reduce_scatter_tensor(
-        grad_value, reduceOp="sum", scatter_dim=2, group=device_mesh
+        grad_value, reduceOp="sum", scatter_dim=seq_dim, group=device_mesh
     )
 
     return grad_query, grad_key, grad_value, grad_score_mod_captured
