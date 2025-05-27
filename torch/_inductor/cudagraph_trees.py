@@ -386,7 +386,7 @@ def cudagraphify_impl(
 
         fn, out = cudagraphify(model, inputs, new_static_input_idxs, *args, **kwargs)
         # cudagraph will already clones input locally, no need to copy back
-        mutated_input_idxs = OrderedSet()
+        mutated_input_idxs: OrderedSet[int] = OrderedSet()
         fn = align_inputs_from_check_idxs(
             fn, inputs_to_check=check_input_idxs, mutated_input_idxs=mutated_input_idxs
         )

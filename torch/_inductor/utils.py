@@ -2652,7 +2652,7 @@ def shape_env_from_inputs(inputs: Sequence[InputType]) -> Optional[ShapeEnv]:
 def align_inputs_from_check_idxs(
     model: Callable[[list[InputType]], _T],
     inputs_to_check: Sequence[int],
-    mutated_input_idxs: Optional[OrderedSet[int]],
+    mutated_input_idxs: OrderedSet[int],
 ) -> Callable[[list[InputType]], _T]:
     if len(inputs_to_check) == 0:
         return model
@@ -2698,6 +2698,7 @@ def copy_misaligned_inputs(
     old_tensors: list[torch.Tensor] = []
     new_tensors: list[torch.Tensor] = []
 
+    # hoist above loop because this is on the hot path
     ret_pair_defined = return_pair_idxs is not None
     for i in check_inputs_idxs:
         _inp = new_inputs[i]
@@ -2705,9 +2706,9 @@ def copy_misaligned_inputs(
         if _inp.data_ptr() % ALIGNMENT:
             new_inputs[i] = clone_preserve_strides(_inp)
 
-            if ret_pair_defined and i in return_pair_idxs:
+            if ret_pair_defined and i in return_pair_idxs:  # type: ignore[operator]
                 old_tensors.append(_inp)
-                new_tensors.append(new_inputs[i])
+                new_tensors.append(new_inputs[i])  # type: ignore[arg-type]
 
     return old_tensors, new_tensors
 
