@@ -2566,14 +2566,47 @@ class _ShapeGuardPrinter(abc.ABC):
 
 
 class ShapeGuardPythonPrinter(_ShapeGuardPrinter, PythonPrinter):
+    """
+    Python printer for shape guards that extends the base ShapeGuardPrinter.
+
+    This class provides functionality to print symbolic expressions as Python code,
+    with caching to improve performance when printing the same expressions multiple times.
+    It handles printing of sources and expressions according to Python syntax.
+
+    Args:
+        *args: Arguments passed to the parent classes.
+    """
+
     def __init__(self, *args: Any) -> None:
         super().__init__(*args)
         self._print_cache: dict[sympy.Expr, str] = {}
 
     def print_source(self, source: Source) -> str:
+        """
+        Convert a source object to its string representation using the source_ref function.
+
+        Args:
+            source: The source object to convert
+
+        Returns:
+            String representation of the source
+        """
         return self.source_ref(source)
 
     def doprint(self, expr: sympy.Expr) -> str:
+        """
+        Convert a sympy expression to its Python string representation with caching.
+
+        This method first checks if the expression is already in the cache.
+        If found, it returns the cached result; otherwise, it delegates to
+        PythonPrinter's doprint method and caches the result.
+
+        Args:
+            expr: The sympy expression to convert
+
+        Returns:
+            String representation of the expression in Python syntax
+        """
         val = self._print_cache.get(expr, None)
         if val is not None:
             return val
