@@ -49,13 +49,11 @@ jobs:
       matrix:
         runner: [linux.12xlarge]
         docker-image-name: [
-          pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks,
-          pytorch-linux-focal-cuda12.4-cudnn9-py3.12-gcc9-inductor-benchmarks,
-          pytorch-linux-focal-cuda12.4-cudnn9-py3.13-gcc9-inductor-benchmarks,
           pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11,
-          pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9-inductor-benchmarks,
-          pytorch-linux-focal-cuda12.6-cudnn9-py3.12-gcc9-inductor-benchmarks,
-          pytorch-linux-focal-cuda12.6-cudnn9-py3.13-gcc9-inductor-benchmarks,
+          pytorch-linux-jammy-cuda12.6-cudnn9-py3-gcc9-inductor-benchmarks,
+          pytorch-linux-jammy-cuda12.6-cudnn9-py3.12-gcc9-inductor-benchmarks,
+          pytorch-linux-jammy-cuda12.6-cudnn9-py3.13-gcc9-inductor-benchmarks,
+          pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks,
           pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9,
           pytorch-linux-focal-py3.9-clang10,
           pytorch-linux-focal-py3.11-clang10,
@@ -109,18 +107,6 @@ jobs:
           docker-image-name: ci-image:${{ matrix.docker-image-name }}
           always-rebuild: true
           push: true
-
-      - name: Push docker image to old name
-        shell: bash
-        env:
-          ECR_DOCKER_IMAGE: ${{ steps.build-docker-image.outputs.docker-image }}
-        run: |
-          # This can be deleted after people have rebased their PRs/the new name has been in main for a while
-          set -euox pipefail
-          docker_image_name="308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ matrix.docker-image-name }}"
-          foldersha=${ECR_DOCKER_IMAGE##*-}
-          docker tag "${ECR_DOCKER_IMAGE}" "${docker_image_name}:${foldersha}"
-          docker push "${docker_image_name}:${foldersha}"
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
