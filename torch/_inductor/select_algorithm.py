@@ -311,6 +311,7 @@ class TritonTemplateKernel(TritonKernel):
         epilogue_fn=identity,
         subgraphs: Optional[list[ir.ComputedBuffer]] = None,
         workspace_arg: Optional[WorkspaceArg] = None,
+        prologue_loads_all_inputs=False,
     ) -> None:
         numel = sympy_product(output_node.get_size())
         super().__init__(
@@ -387,6 +388,10 @@ class TritonTemplateKernel(TritonKernel):
         # Update each time an input is marked frozen, used to replay the freezing of inputs on a cache hit.
         self.frozen_layouts_cnt = 0
 
+        # When prologue_loads_all_inputs is true, prologue_supported_inputs is populated during def_kernel
+        # by adding all inputs.
+        self.prologue_loads_all_inputs = prologue_loads_all_inputs
+
     def input_dependent_preserved_state(self) -> str:
         # Not adding self.args.output_buffers on purpose. But we do not need to reproduce it on a cache hit.
         # (never accessed).
@@ -428,6 +433,7 @@ class TritonTemplateKernel(TritonKernel):
             key.name: getattr(self, key.name)
             for key in dataclasses.fields(SubgraphInfo)
         }
+
         assert body_name in self.subgraph_bodies, body_name
 
         subgraph = self.subgraph_bodies[body_name]
@@ -585,10 +591,13 @@ class TritonTemplateKernel(TritonKernel):
         # The args may be duplicated, so renaming must be after args are de-duplicated.
         for name in argnames:
             input_node = self.named_input_nodes[name]
+            if self.prologue_loads_all_inputs:
+                self.prologue_supported_inputs.add(input_node.get_name())
             if input_node.get_name() in V.graph.removed_buffers:
                 continue
             if input_node.get_name() in self.prologue_fused_inputs:
                 continue
+
             arg_name = self.args.input_buffers[input_node.get_name()]
             if input_node.get_layout().offset == 0:
                 renames.writeline(f"{name} = {arg_name}")
@@ -756,7 +765,9 @@ class TritonTemplateKernel(TritonKernel):
         """
 
         input_node = self.named_input_nodes[input_name]
-        self.prologue_supported_inputs.add(input_node.get_name())
+        if not self.prologue_loads_all_inputs:
+            self.prologue_supported_inputs.add(input_node.get_name())
+
         tilings = (sympy_product(input_node.get_size()), sympy.Integer(1))
         groups = {
             "x": tilings[0],
@@ -1261,6 +1272,7 @@ class TritonTemplate(KernelTemplate):
         source: str,
         debug=False,
         cache_codegen_enabled_for_template=False,
+        prologue_loads_all_inputs=False,
     ) -> None:
         super().__init__(name)
         self.grid = grid
@@ -1271,6 +1283,9 @@ class TritonTemplate(KernelTemplate):
         self._cache_codegen_enabled_for_template = cache_codegen_enabled_for_template
         self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
         clear_on_fresh_inductor_cache(self._generated_code_cache)
+        # When prologue_loads_all_inputs is true, prologue_supported_inputs is populated during def_kernel
+        # by adding all inputs.
+        self.prologue_loads_all_inputs = prologue_loads_all_inputs
 
     # When this flag is on, we ensure that the cached results and the generated result if cache
     # was not used are the same.
@@ -1370,6 +1385,7 @@ class TritonTemplate(KernelTemplate):
             "suffix_args": suffix_args,
             "epilogue_fn": epilogue_fn,
             "subgraphs": subgraphs,
+            "prologue_loads_all_inputs": self.prologue_loads_all_inputs,
         }
 
         if HAS_WARP_SPEC:
@@ -1526,7 +1542,7 @@ class TritonTemplate(KernelTemplate):
         # capability doesn't support them.  This is a bug in Triton, but for now we'll
         # patch around it here.  See https://github.com/triton-lang/triton/issues/3011
         # for one example issue with this problem.
-        if not torch.cuda.is_tf32_supported():
+        if torch.cuda.is_available() and not torch.cuda.is_tf32_supported():
             kwargs["ALLOW_TF32"] = "False"
 
         if call_sizes is None:
@@ -2050,6 +2066,16 @@ def create_precompile_key(
 
 
 class AlgorithmSelectorCache(PersistentCache):
+    """
+    A persistent cache for algorithm selection results used in autotuning of GEMMs
+    and convolutions.
+
+    This classes includes precompilation and benchmarking of the kernels.
+
+    The cache is keyed by input characteristics (sizes, strides, dtypes, etc.) but
+    doesn't depend on the output layout.
+    """
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
@@ -2158,7 +2184,7 @@ class AlgorithmSelectorCache(PersistentCache):
             # Initialize the suprocess pool so it will warmup early.
             torch._inductor.autotune_process.get_tuning_process_pool()
 
-        def do_autotuning(precompile_fn):
+        def do_autotuning(choices, precompile_fn):
             precompile_start_ts = time.time()
             with dynamo_timed(
                 f"{name}_template_precompiling",
@@ -2169,6 +2195,19 @@ class AlgorithmSelectorCache(PersistentCache):
             precompile_elapse = time.time() - precompile_start_ts
             log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
 
+            candidates = self.prescreen_choices(choices)
+            if candidates:
+                prescreening_start_ts = time.time()
+                timings = self.lookup(
+                    candidates,
+                    name,
+                    inputs_key,
+                    autotune,
+                )
+                choices = self.prune_choices_postscreen(choices, timings)
+                prescreening_elapse = time.time() - prescreening_start_ts
+                log.debug("Prescreening elapsed time: %.02fs", prescreening_elapse)
+
             autotune_start_ts = time.time()
             timings = self.lookup(
                 choices,
@@ -2176,6 +2215,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 inputs_key,
                 autotune,
             )
+
             autotune_elapse = time.time() - autotune_start_ts
             log.debug("Autotuning elapsed time: %.02fs", autotune_elapse)
 
@@ -2211,7 +2251,7 @@ class AlgorithmSelectorCache(PersistentCache):
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
 
             def get_timings():
-                timings = do_autotuning(precompile_fn)
+                timings = do_autotuning(choices, precompile_fn)
                 min_extern_choice = float("inf")
                 for choice, timing in timings.items():
                     if isinstance(choice, ExternKernelCaller):
@@ -2246,8 +2286,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 )
             )
 
-        # TODO - dont want to precompile if we have a cache hit
-        timings = do_autotuning(precompile_fn)
+        timings = do_autotuning(choices, precompile_fn)
         if timings == {} or choices[0] not in timings:
             return choices[0].output_node()
 
@@ -2526,16 +2565,26 @@ class AlgorithmSelectorCache(PersistentCache):
                 log.warning("Not yet implemented: %s", e)
                 timing = float("inf")
             except RuntimeError as e:
+                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+
                 msg = str(e)
                 if "invalid argument" in msg:
                     msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
                 else:
                     if "illegal memory access" in msg:
                         msg += "\n\nEither error in template or triton bug.\n"
-                log.error(
-                    "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
-                    msg,
-                )
+
+                if isinstance(choice, CUDATemplateCaller):
+                    log.debug(
+                        "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
+                        msg,
+                        exc_info=True,
+                    )
+                else:
+                    log.error(
+                        "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
+                        msg,
+                    )
                 timing = float("inf")
             except AssertionError as e:
                 raise AssertionError(  # noqa: B904
@@ -2614,6 +2663,77 @@ class AlgorithmSelectorCache(PersistentCache):
                 layout=layout,
                 input_gen_fns=input_gen_fns,
             )
+
+    @staticmethod
+    def prescreen_choices(
+        choices: list[ChoiceCaller],
+    ) -> list[ChoiceCaller]:
+        """
+        Add prescreening phase. Motivation is to reduce the number of autotuning needed,
+        for example, when there are runtime params.
+        """
+        # prescreen cutlass
+        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+
+        candidates = []
+        if (
+            config.cuda.cutlass_prescreening
+            and len(config.cuda.cutlass_max_profiling_swizzle_options) > 1
+        ):
+            candidates.extend(
+                [
+                    c
+                    for c in choices
+                    if isinstance(c, CUDATemplateCaller)
+                    # hardcoded to only look at swizzle=2
+                    if c.info_dict().get("swizzle") == "2"
+                ]
+            )
+
+        # skip prescreening if the number of candidates is too small
+        if len(candidates) < 10:
+            return []
+
+        return candidates  # type: ignore[return-value]
+
+    @staticmethod
+    def prune_choices_postscreen(
+        choices: list[ChoiceCaller],
+        candidate_timings: dict[ChoiceCaller, float],
+    ) -> list[ChoiceCaller]:
+        """
+        Prune the choices after prescreening.
+        """
+        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+
+        if len(candidate_timings) < 10:
+            return []
+
+        log.debug("Before pruning using prescreening timings, %d choices", len(choices))
+        sorted_candidates = sorted(
+            candidate_timings.keys(), key=lambda choice: candidate_timings[choice]
+        )
+        num_to_keep = max(int(math.sqrt(len(choices)) / 4), 8)
+
+        # prune choices based on prescreening timings
+        candidates_to_prune = OrderedSet(
+            candidate.hash_key() for candidate in sorted_candidates[num_to_keep:]
+        )
+        for candidate in sorted_candidates[:num_to_keep]:
+            if candidate_timings[candidate] == float("inf"):
+                candidates_to_prune.add(candidate.hash_key())
+            else:
+                if isinstance(candidate, CUDATemplateCaller):
+                    candidate.bmreq.ensure_dll_loaded()
+
+        choices = [
+            choice
+            for choice in choices
+            if choice.hash_key() not in candidates_to_prune  # type: ignore[attr-defined]
+        ]
+
+        log.debug("After pruning using prescreening timings, %d choices", len(choices))
+        return choices
 
     @staticmethod
     def log_results(
@@ -2818,6 +2938,9 @@ def autotune_select_algorithm(*args, **kwargs):
         kwargs["return_multi_template"] = (
             torch._inductor.config.benchmark_epilogue_fusion
         )
+
+    if "precompilation_timeout_seconds" not in kwargs:
+        kwargs["precompilation_timeout_seconds"] = config.precompilation_timeout_seconds
 
     return _ALGORITHM_SELECTOR_CACHE(*args, **kwargs)
 

@@ -77,6 +77,24 @@ _cp_options = _ContextParallelOptions()
 
 
 class _Sharder(ABC):
+    """
+    This base class is an interface for defining the tensor sharding in
+    Context Parallel. The tensor sharding logic can be described using
+    two functions: shard and unshard.
+
+    The ``shard`` function is called when entering the ``context_parallel``
+    context which distributes the tensor ``buffer`` over the tensor dimension
+    ``shard_dim`` among the ``mesh``.
+
+    The ``unshard`` function will not be automatically called and we
+    leave it to users' decision on when to use it. It's the opposite of
+    ``shard`` function and it will all-gather the tensor ``buffer`` along
+    the ``shard_dim`` within the ``mesh``.
+
+    To define a custom tensor sharding logic, users can inherit this class
+    and override these two functions.
+    """
+
     @classmethod
     @abstractmethod
     def shard(
@@ -726,7 +744,7 @@ def _templated_ring_attention(
     softmax_lse:
         The logsumexp of the merged attention output
     """
-    if is_causal and (query.size(2) != key.size(2)):
+    if is_causal and (query.size(seq_dim) != key.size(seq_dim)):
         raise NotImplementedError(
             "is_causal requires the same query and context sequence lengths"
         )
@@ -1557,12 +1575,20 @@ def context_parallel(
             of ``buffers``. If the buffers won't be used after the context exits,
             these buffers can be put in this list to avoid extra restore time.
         sharder (Optional[Union[:class:`_Sharder`, type[:class:`_Sharder`]]]):
-            the sharder to be used for sharding the buffers. If not specified,
-            `_RoundRobinSharder` will be used if ``_cp_options.enable_load_balance``
-            is ``True``, otherwise `_SequentialSharder` will be used. This argument
-            is required if users want to use ``flex_attention`` with context parallel.
-            To use context parallel for flex_attention, please pass a
-            :class:`_FlexAttentionSharder` object to this argument.
+            the sharder to be used for sharding the buffers. The ``sharder`` must
+            have a defined ``shard`` method. If not specified,
+            :class:`_RoundRobinSharder` or :class:`_SequentialSharder` will be used
+            depending on ``_cp_options.enable_load_balance``.
+            If ``_cp_options.enable_load_balance`` is ``True``,
+            :class:`_RoundRobinSharder` will be used. Otherwise, it's
+            :class:`_SequentialSharder`. Note that ``flex_attention`` with context
+            parallel requires a :class:`_FlexAttentionSharder` sharder. Context
+            Parallel currently supports two types of attention:
+            PyTorch scaled_dot_product_attention (SDPA) and flex_attention.
+            To use SDPA, the ``sharder`` argument should be a Python class
+            (i.e. :class:`_RoundRobinSharder` or :class:`_SequentialSharder`).
+            To use flex_attention, the ``sharder`` argument should be an instance of
+            :class:`_FlexAttentionSharder`.
 
     .. warning::
         `torch.distributed.tensor.experimental.context_parallel` is a
@@ -1604,7 +1630,6 @@ def context_parallel(
             buffer.copy_(original_buffer)
 
 
-# TODO: add sharder comment
 @torch.no_grad()
 def context_parallel_unshard(
     mesh: DeviceMesh,
@@ -1620,6 +1645,21 @@ def context_parallel_unshard(
         buffers (List[torch.Tensor]): the buffers to be unsharded.
         seq_dims (List[int]): the sequence dimensions of ``buffers``. This list
             must have the same length as ``buffers``.
+        sharder (Optional[Union[:class:`_Sharder`, type[:class:`_Sharder`]]]):
+            the sharder to be used for sharding the buffers. The ``sharder`` must
+            have a defined ``unshard`` method. If not specified,
+            :class:`_RoundRobinSharder` or :class:`_SequentialSharder` will be used
+            depending on ``_cp_options.enable_load_balance``.
+            If ``_cp_options.enable_load_balance`` is ``True``,
+            :class:`_RoundRobinSharder` will be used. Otherwise, it's
+            :class:`_SequentialSharder`. Note that ``flex_attention`` with context
+            parallel requires a :class:`_FlexAttentionSharder` sharder. Context
+            Parallel currently supports two types of attention:
+            PyTorch scaled_dot_product_attention (SDPA) and flex_attention.
+            To use SDPA, the ``sharder`` argument should be a Python class
+            (i.e. :class:`_RoundRobinSharder` or :class:`_SequentialSharder`).
+            To use flex_attention, the ``sharder`` argument should be an instance of
+            :class:`_FlexAttentionSharder`.
 
     Returns:
         List[torch.Tensor]: the unsharded buffers.
@@ -1735,7 +1775,8 @@ def cp_flex_attention_dispatch_mode(
     # memorize this cp_block_mask in the context instead of hitting cache every time
     cp_block_mask = mode._sharder.get_cp_block_mask(mode._sharder._block_mask)
 
-    sharding = Shard(2)
+    seq_dim = 2
+    sharding = Shard(seq_dim)
     k_dist = DTensor.from_local(key, mode._sharder._mesh, [sharding])
     v_dist = DTensor.from_local(value, mode._sharder._mesh, [sharding])
     k_global = k_dist.full_tensor()

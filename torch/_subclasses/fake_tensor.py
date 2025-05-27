@@ -3115,6 +3115,9 @@ _DISPATCH_HANDLE_DIRECTLY = ordered_set(
     torch.ops.aten.is_coalesced.default,
     torch.ops.aten.dense_dim.default,
     torch.ops.aten.sparse_dim.default,
+    # _RecordFunction doesn't support __eq__ so make sure not to attempt to
+    # cache it.
+    torch.ops.profiler._record_function_exit._RecordFunction,
 )
 
 from torch._subclasses.fake_impls import (  # noqa: F401
