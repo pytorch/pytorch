@@ -86,7 +86,7 @@ jobs:
       runner-type: macos-m1-stable
       build-generates-artifacts: true
       # To match the one pre-installed in the m1 runners
-      python-version: 3.9.12
+      python-version: 3.12.7
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 3, runner: "macos-m1-stable" },
@@ -107,7 +107,7 @@ jobs:
     with:
       build-environment: macos-py3-arm64
       # Same as the build job
-      python-version: 3.9.12
+      python-version: 3.12.7
       test-matrix: ${{ needs.macos-py3-arm64-build.outputs.test-matrix }}
       disable-monitor: false
     secrets: inherit
@@ -119,7 +119,6 @@ jobs:
     with:
       build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
-      sync-tag: win-cpu-build
       runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
       test-matrix: |
         { include: [

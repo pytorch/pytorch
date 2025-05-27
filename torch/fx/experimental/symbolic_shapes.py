@@ -17,7 +17,6 @@ need to make use of these APIs to setup dynamic shapes support appropriately.
 import abc
 import atexit
 import collections
-import contextlib
 import dis
 import functools
 import hashlib
@@ -161,6 +160,7 @@ __all__ = [
     "SymIntSymbolicContext",
     "TrackedFake",
     "statically_known_true",
+    "statically_known_false",
     "guard_size_oblivious",
     "check_consistent",
     "compute_unbacked_bindings",
@@ -469,21 +469,6 @@ def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
     else:
         assert isinstance(expr, bool), expr
         return expr
-
-
-def _guard_sizes_oblivious(
-    lhs_sizes: Sequence[Union[torch.SymInt, bool]],
-    rhs_sizes: Sequence[Union[torch.SymInt, bool]],
-) -> bool:
-    """
-    Leverage guard_size_oblivious to compare if two lists of int/symint are equal.
-    Useful to compare sizes, strides etc.
-    """
-
-    return len(lhs_sizes) == len(rhs_sizes) and all(
-        guard_size_oblivious(lhs_item == rhs_item)
-        for lhs_item, rhs_item in zip(lhs_sizes, rhs_sizes)
-    )
 
 
 def check_consistent(new: _T, old: _T) -> None:
@@ -1218,17 +1203,6 @@ def compute_unbacked_bindings(
     return symbol_to_path
 
 
-def _log_suppressed_dde(a: SymBool, assumed_value: bool) -> None:
-    sloc, extra = a.node.shape_env._get_stack_summary(True)
-    log.info(
-        "could not evaluate %s due to data dependency, it was assumed to be %s with no runtime assertions %s %s",
-        a,
-        assumed_value,
-        sloc,
-        extra,
-    )
-
-
 # The following two functions are common utilities used while defining unbacked semantics
 # of various framework code. Those would be used in situations you prefer to guard and know
 # the result of the expression over not guarding, but in case you hit a data dependent error
@@ -1265,12 +1239,11 @@ def _guard_or(a: BoolLikeType, default: bool) -> bool:
     if shape_env is None:
         return guard_bool(a)
 
-    with a.node.shape_env.dde_suppressed():
-        try:
-            return guard_bool(a)
-        except GuardOnDataDependentSymNode:
-            _log_suppressed_dde(a, default)
-            return default
+    sym_node = a.node
+    r = sym_node.shape_env.evaluate_sym_node(
+        sym_node, size_oblivious=False, fallback_value=default
+    )
+    return bool(r)
 
 
 def guard_or_false(a: BoolLikeType) -> bool:
@@ -1303,6 +1276,29 @@ def _static_eval_sym_bool(x: SymBool) -> Optional[bool]:
     except Exception:
         log.debug("Could not simplify %s", expr)
         return None
+
+
+def statically_known_false(x: BoolLikeType) -> bool:
+    """
+    Returns True if x can be simplified to a constant and is False.
+    If x cannot be evaluated from static, we return False
+
+    .. note::
+        This function doesn't introduce new guards, so the expression may end
+        up evaluating to False at runtime even if this function returns False.
+
+    Args:
+        x (bool, SymBool): The expression to try statically evaluating
+    """
+    if not isinstance(x, SymBool):
+        assert isinstance(x, bool)
+        return not x
+
+    result = _static_eval_sym_bool(x)
+    if result is None:
+        return False
+
+    return not result
 
 
 def statically_known_true(x: BoolLikeType) -> bool:
@@ -1345,9 +1341,7 @@ def sym_eq(x: _T, y: _T) -> BoolLikeType:
     Like ==, but when run on list/tuple, it will recursively test equality
     and use sym_and to join the results together, without guarding.
     """
-    if (isinstance(x, tuple) and isinstance(y, tuple)) or (
-        isinstance(x, list) and isinstance(y, list)
-    ):
+    if isinstance(x, (tuple, list)) and isinstance(y, (list, tuple)):
         if len(x) != len(y):
             return False
         return functools.reduce(operator.and_, map(sym_eq, x, y), True)
@@ -3316,10 +3310,6 @@ class ShapeEnv:
             else []
         )
 
-        # Set true when data dependent errors are handled by caller side and not thrown. Ex: guard_or_false
-        # and guard_or_true. When its true, a different error message is produced.
-        self._dde_suppressed = False
-
         # FakeTensor per-ShapeEnv operation cache. This is used for caching
         # operations that contain symbolic shapes which have guards on the
         # ShapeEnv (so are ShapeEnv-dependent).
@@ -3331,18 +3321,6 @@ class ShapeEnv:
             torch._subclasses.fake_tensor._DispatchCacheKey,
             torch._subclasses.fake_tensor._DispatchCacheEntry,
         ] = {}
-
-    @contextlib.contextmanager
-    def dde_suppressed(self) -> Iterator[None]:
-        """Suppressed GuardOnDataDependent error logs"""
-
-        # We do not expect this to be called recursively.
-        assert not self._dde_suppressed, "not expected value for _dde_suppressed"
-        self._dde_suppressed = True
-        try:
-            yield
-        finally:
-            self._dde_suppressed = False
 
     # Pro-tip: if you add new field to ShapeEnv, this affects some accept
     # tests.  Accept their output with:
@@ -3645,7 +3623,6 @@ class ShapeEnv:
             "replacements_slocs",
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
-            "_dde_suppressed",
             "specialization_stacks",
         )
 
@@ -6154,12 +6131,6 @@ class ShapeEnv:
         size_oblivious_result: Optional[sympy.Basic] = None,
         expr_sym_node_id: Optional[int] = None,
     ) -> GuardOnDataDependentSymNode:
-        if self._dde_suppressed:
-            return GuardOnDataDependentSymNode(
-                expr,
-                "This data dependent error is suppressed and handled by the caller",
-            )
-
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
         size_like_symbols = []
@@ -6783,6 +6754,9 @@ class ShapeEnv:
 
         # store LOC
         locs = co_lines[frame.f_lineno - offset : last_lineno + 1 - offset]
+        if not locs:
+            return _FrameLocalResult()
+
         indent = len(locs[0]) - len(locs[0].lstrip())
         frame_loc = "".join([loc[indent:] for loc in locs]).strip()  # type: ignore[assignment]
         return _FrameLocalResult(
@@ -6848,6 +6822,7 @@ class ShapeEnv:
         self,
         sym_node: SymNode,
         size_oblivious: bool = False,
+        fallback_value: Optional[bool] = None,
     ) -> sympy.Basic:
         """
         Given a a SymNode, evaluates sym_node.expr, adding guards if necessary.
@@ -6855,7 +6830,11 @@ class ShapeEnv:
 
         self._expr_sym_node_id = id(sym_node)
         return self.evaluate_expr(
-            sym_node.expr, sym_node.hint, sym_node.fx_node, size_oblivious
+            sym_node.expr,
+            sym_node.hint,
+            sym_node.fx_node,
+            size_oblivious,
+            fallback_value=fallback_value,
         )
 
     def _is_python_assert(self) -> bool:
@@ -6941,17 +6920,25 @@ class ShapeEnv:
         hint: Optional[Union[int, bool, float]] = None,
         fx_node: Optional[torch.fx.Node] = None,
         size_oblivious: bool = False,
+        fallback_value: Optional[bool] = None,
         *,
         forcing_spec: bool = False,
     ) -> sympy.Basic:
         """
         Given an expression, evaluates it, adding guards if necessary
+        When fallback_value is not None the function return fallback_value instead of failing with data dependent error.
         """
 
         # Add extra state that evaluate_expr() depends on.
         suppress_guards_tls = ShapeEnv._suppress_guards_tls()
         return self._inner_evaluate_expr(
-            orig_expr, hint, fx_node, size_oblivious, forcing_spec, suppress_guards_tls
+            orig_expr,
+            hint,
+            fx_node,
+            size_oblivious,
+            forcing_spec,
+            suppress_guards_tls,
+            fallback_value,
         )
 
     @lru_cache(256)
@@ -6964,6 +6951,7 @@ class ShapeEnv:
         size_oblivious: bool,
         forcing_spec: bool,
         _suppress_guards_tls: bool,
+        fallback_value: Optional[bool] = None,
     ) -> sympy.Basic:
         try:
             return self._evaluate_expr(
@@ -6971,10 +6959,11 @@ class ShapeEnv:
                 hint,
                 fx_node,
                 size_oblivious,
+                fallback_value,
                 forcing_spec=forcing_spec,
             )
         except Exception as e:
-            if isinstance(e, GuardOnDataDependentSymNode) and self._dde_suppressed:
+            if isinstance(e, GuardOnDataDependentSymNode):
                 pass
             else:
                 self.log.warning(
@@ -6986,12 +6975,23 @@ class ShapeEnv:
                 )
             raise
 
+    def _log_suppressed_dde(self, a: SymBool, assumed_value: bool) -> None:
+        sloc, extra = self._get_stack_summary(True)
+        log.info(
+            "could not evaluate %s due to data dependency, it was assumed to be %s with no runtime assertions %s %s",
+            a,
+            assumed_value,
+            sloc,
+            extra,
+        )
+
     def _evaluate_expr(
         self,
         orig_expr: sympy.Basic,
         hint: Optional[Union[bool, int, float]] = None,
         fx_node: Optional[torch.fx.Node] = None,
         size_oblivious: bool = False,
+        fallback_value: Optional[bool] = None,
         *,
         forcing_spec: bool = False,
     ) -> sympy.Basic:
@@ -7023,7 +7023,7 @@ class ShapeEnv:
         #   3. the guard should not be suppressed
         #   4. the guard doesn't contain backed symfloat symbols
         #      since z3 can't handle floats
-        #
+        #   5. fallback_value is none.
         # If all of the above check, we create an FX node representing the
         # actual expression to be guarded.
         node = None
@@ -7034,6 +7034,7 @@ class ShapeEnv:
             and not self._suppress_guards_tls()
             and not size_oblivious
             and not any(symbol_is_type(s, SymT.FLOAT) for s in orig_expr.free_symbols)
+            and fallback_value is None
         ):
             # TODO: does this even worked with unbacked :think:
             concrete_val = compute_concrete_val()
@@ -7115,7 +7116,7 @@ class ShapeEnv:
                     # Those are backed dimentions that are treated as unbacked to avoid specializations, but if
                     # we fail to bypass with size oblivious reasoning we compute using the actual hint and guard.
                     if (
-                        not self._dde_suppressed
+                        fallback_value is None  # do not do this under guard_or
                         and self.oblivious_var_to_val
                         and not (
                             correct_hint := orig_expr.xreplace(
@@ -7145,8 +7146,9 @@ class ShapeEnv:
                     # unbacked_var_to_val is not None iff propagate_real_tensors is on.
                     # if propagate_real_tensors is on, we check the example values to generate (unsound_result)
                     # and if they pass we add a runtime assertions and continue.
+
                     if (
-                        not self._dde_suppressed
+                        fallback_value is None  # do not do this under guard_or
                         and not ok
                         and self.unbacked_var_to_val
                         and not (
@@ -7167,10 +7169,16 @@ class ShapeEnv:
                         transmute_into_runtime_assert = True
                         ok = True
 
+                    # fallback value is set when guard_or_true, gaurd_or_false are used.
+                    # whe we fail to evaluate soundly, we use the default value set by it.
+                    if not ok and fallback_value is not None:
+                        self._log_suppressed_dde(orig_expr, fallback_value)
+                        return fallback_value
+
                     if not ok:
                         size_oblivious_result = None
                         # compute size_oblivious_result to suggest it as a fix for the user if it works.
-                        if not size_oblivious and not self._dde_suppressed:
+                        if not size_oblivious:
                             size_oblivious_result = self._maybe_evaluate_static(
                                 expr, size_oblivious=True
                             )
