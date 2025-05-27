@@ -1054,7 +1054,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # as Dynamo tracing is concerned.
         if not object_has_getattribute(self.value) and (
             subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
-            or isinstance(subobj, _collections._tuplegetter)  # namedtuple fields
             or inspect.ismemberdescriptor(subobj)  # e.g., __slots__
             or inspect.isgetsetdescriptor(subobj)  # e.g., __dict__
             or self._is_c_defined_property(subobj)
