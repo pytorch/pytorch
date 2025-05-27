@@ -31,6 +31,7 @@
 
 ```
 
+(tensor-creation-ops)=
 ### Creation Ops
 
 ```{note}
@@ -89,6 +90,7 @@ Random sampling creation ops are listed under {ref}`random-sampling` and
 
 ```
 
+(indexing-slicing-joining)=
 ### Indexing, Slicing, Joining, Mutating Ops
 ```{eval-rst}
 .. autosummary::
@@ -148,6 +150,7 @@ Random sampling creation ops are listed under {ref}`random-sampling` and
 
 ```
 
+(accelerators)=
 ## Accelerators
 Within the PyTorch repo, we define an "Accelerator" as a :class:`torch.device` that is being used
 alongside a CPU to speed up computation. These device use an asynchronous execution scheme,
@@ -181,6 +184,7 @@ used for example.
 
 ```
 
+(generators)=
 ## Generators
 ```{eval-rst}
 .. autosummary::
@@ -191,6 +195,7 @@ used for example.
 
 ```
 
+(random-sampling)=
 ## Random sampling
 ```{eval-rst}
 .. autosummary::
@@ -233,6 +238,7 @@ used for example.
 
 ```
 
+(inplace-random-sampling)=
 ### In-place random sampling
 
 There are a few more in-place random sampling functions defined on Tensors as well. Click through to refer to their documentation:
@@ -281,6 +287,7 @@ There are a few more in-place random sampling functions defined on Tensors as we
 
 ```
 
+(torch-rst-local-disable-grad)=
 ## Locally disabling gradient computation
 The context managers :func:`torch.no_grad`, :func:`torch.enable_grad`, and
 :func:`torch.set_grad_enabled` are helpful for locally disabling and enabling
