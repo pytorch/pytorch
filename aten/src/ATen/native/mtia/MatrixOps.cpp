@@ -1,6 +1,6 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorMeta.h>
-#include <ATen/native/mtia/MTIAOps.h>
+#include <ATen/native/mtia/MatrixOps.h>
 #include <c10/core/DeviceType.h>
 
 namespace at::native {
