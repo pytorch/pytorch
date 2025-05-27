@@ -3505,6 +3505,12 @@ def object_has_getattribute(value: Any):
     return class_has_getattribute(type(value))
 
 
+def object_setattr_ignore_descriptor(obj, name, value):
+    # https://github.com/python/cpython/blob/3.11/Objects/object.c#L1286-L1335
+    d = object.__getattribute__(obj, "__dict__")
+    d[name] = value
+
+
 def class_has_getattribute(cls: type):
     try:
         if isinstance(
