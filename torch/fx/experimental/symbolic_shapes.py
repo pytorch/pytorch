@@ -2199,6 +2199,20 @@ def _expandsums(args: list[sympy.Expr]) -> tuple[sympy.Expr, bool]:
 
 
 def _fast_expand(expr: _SympyT) -> _SympyT:
+    """
+    A faster implementation of sympy's expand function for common cases.
+
+    This function expands expressions like (a+b)^n or (a+b)*(c+d) into sums of products,
+    but avoids the expensive checks and features of sympy's full expand implementation.
+    It only recreates objects when necessary to avoid expensive operations.
+
+    Args:
+        expr: A sympy expression to expand
+
+    Returns:
+        The expanded expression
+    """
+
     # The expand algorithm in sympy is slow due to all the features is supports
     # For eg: e^(-x)*(x-1)/(x+1) is expanded to (x-1)/(e^x + e^x*x) if x is
     # positive and (e^(-x)*x-e^(-x))/(x+1) if x is negative. We do not implement
