@@ -507,7 +507,10 @@ class TMADescriptorOptions(BlockDescriptorOptions):
             f"strides={f(self.strides)}",
             f"block_shape={f(self.block_shape)}",
         ]
-        return f"tl.make_tensor_descriptor({', '.join(args)})"
+        import triton.language as tl
+        if hasattr(tl, "make_tensor_descriptor"):
+            return f"tl.make_tensor_descriptor({', '.join(args)})"
+        return f"tl._experimental_make_tensor_descriptor({', '.join(args)})"
 
     def min_innermost_block_size(self, dtype: torch.dtype) -> (str, int):
         # see Note: TMA API Restrictions
@@ -2301,7 +2304,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         value = f"{value}.to({triton_store_type(V.graph.get_dtype(name))})"
         if isinstance(indexing, BlockPtrOptions):
             return f"tl.store({block_ptr}, {value}{other})"
-        return f"tl.store_tensor_descriptor({block_ptr}, {V.kernel.index_to_str(indexing.offsets)}, {value})"
+        return f"{block_ptr}.store_tensor_descriptor({V.kernel.index_to_str(indexing.offsets)}, {value})"
 
     def check_bounds(
         self,
@@ -2433,7 +2436,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if isinstance(indexing, BlockPtrOptions):
                     line = f"tl.load({block_descriptor}{other}{ep}{cachemod})"
                 else:
-                    line = f"tl.load_tensor_descriptor({block_descriptor}, {V.kernel.index_to_str(indexing.offsets)})"
+                    line = f"{block_descriptor}.load_tensor_descriptor({V.kernel.index_to_str(indexing.offsets)})"
                 line = indexing.codegen_broadcast_and_reshape(
                     line, indexing.block_shape, indexing.final_shape, True
                 )
