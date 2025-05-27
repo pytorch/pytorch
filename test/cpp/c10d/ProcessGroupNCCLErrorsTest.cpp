@@ -179,7 +179,12 @@ class ProcessGroupNCCLNoHeartbeatCaught
       int rank,
       int size,
       c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts)
-      : ProcessGroupNCCLTimedOutErrors(store, rank, size, std::move(opts)) {}
+      : ProcessGroupNCCLTimedOutErrors(store, rank, size, std::move(opts)) {
+    // Override the heartbeat monitor function to make sure that we capture
+    // the exception in the monitor thread because we cannot try-catch it in
+    // the main thread and we set a flag for the main thread to check.
+    heartbeatMonitor_ = std::make_unique<TestHeartbeatMonitor>(this);
+  }
 
   std::mutex& getWatchdogMutex() {
     return workMetaListMutex_;
@@ -196,9 +201,9 @@ class ProcessGroupNCCLNoHeartbeatCaught
   }
 
   class TestHeartbeatMonitor : public c10d::ProcessGroupNCCL::HeartbeatMonitor {
-    // Override the heartbeat monitor function to make sure that we capture
-    // the exception in the monitor thread because we cannot try-catch it in
-    // the main thread and we set a flag for the main thread to check.
+   public:
+    using HeartbeatMonitor::HeartbeatMonitor;
+
     void runLoop() override {
       try {
         c10d::ProcessGroupNCCL::HeartbeatMonitor::runLoop();
@@ -211,13 +216,6 @@ class ProcessGroupNCCLNoHeartbeatCaught
   };
 
  protected:
-  // Override the heartbeat monitor function to make sure that we capture
-  // the exception in the monitor thread because we cannot try-catch it in
-  // the main thread and we set a flag for the main thread to check.
-  HeartbeatMonitor* getHeartbeatMonitor() override {
-    return TestHeartbeatMonitor::get();
-  }
-
   // It's really hard to unit test std::abort. So we override it instead.
   // Commented this override, we do see process aborted with core dump without
   // this override.

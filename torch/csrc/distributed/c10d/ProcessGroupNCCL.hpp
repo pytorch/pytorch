@@ -596,22 +596,15 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::string traceKeyEnd_;
   };
 
-  // Class that runs as part of a separate thread aside from watchdog
+  // Class that runs as a separate thread aside from watchdog
   // thread because we need to check the heartbeat from watchdog thread
   // so that when we get stuck in some NCCL/CUDA calls,
   // we can dump the debugging information and abort the process./
   // The thread is per class not per instance.
   class HeartbeatMonitor {
    public:
-    // Return the singleton instance of HeartbeatMonitor.
-    static HeartbeatMonitor* get() {
-      static HeartbeatMonitor instance;
-      return &instance;
-    }
+    HeartbeatMonitor(ProcessGroupNCCL* pg);
     virtual ~HeartbeatMonitor() = default;
-
-    // Initialize the heartbeat monitor related variables.
-    static void init(int rank, ProcessGroupNCCL* pg);
 
     // Start the heartbeat monitor thread.
     void start();
@@ -631,15 +624,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Wake up the heartbeat monitor thread.
     void wakeUpMonitor();
 
-    // Dump the debugging information.
-    bool dumpDebuggingInfo(bool includeStackTrace = true);
-
     // Set the last update time of watchdog thread.
     void setLastWorkListUpdateTime(
         std::chrono::time_point<std::chrono::steady_clock> time);
-
-    // Returns the global log prefix, which is the same for all process groups
-    const std::string& logPrefix();
 
     // Util function to get the timeout error message
     std::string getNCCLWatchdogTimeoutErrorMsg(const std::string& extraMsg);
@@ -653,9 +640,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     ProcessGroupNCCL* pg_;
 
    private:
-    HeartbeatMonitor() = default; // default constructor
-    void doInit(int rank, ProcessGroupNCCL* pg);
-
     // Whether or not to print C++ stack traces to logs on unclean shutdown.
     bool logCppStackOnUncleanShutdown_;
 
@@ -693,17 +677,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Mutex to Guard monitorWakeUpCV_
     std::mutex monitorMutex_;
 
-    // Global log prefix, which is the same for all process groups.
-    std::string globalLogPrefix_;
-
     // The last update time of watchdog thread.
     std::chrono::time_point<std::chrono::steady_clock> lastWorkListUpdateTime_;
-
-    // Global rank of the process.
-    int rank_;
-
-    // World size of the default process.
-    int size_;
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -972,8 +947,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void setEnableNanCheck(bool enableNanCheck);
 
  protected:
-  // Get the singleton instance of the heartbeat monitor.
-  virtual HeartbeatMonitor* getHeartbeatMonitor();
+  // Instance of the heartbeat monitor thread.
+  std::unique_ptr<HeartbeatMonitor> heartbeatMonitor_;
 
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(
