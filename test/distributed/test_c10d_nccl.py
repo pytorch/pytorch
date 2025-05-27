@@ -49,6 +49,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     skip_if_lt_x_gpu,
     skip_if_rocm_multiprocess,
+    skip_sandcastle,
     sm_is_or_higher_than,
     TEST_SKIPS,
     with_dist_debug_levels,
@@ -479,6 +480,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12
     )
 
+    # This test checks for specific return code (-6).  Have to use
+    # `skip_sandcastle` to return a TEST_SKIP code to avoid a return code check.
+    @skip_sandcastle
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(
         # skip for cu126 as well due to https://github.com/pytorch/pytorch/issues/153479

@@ -86,6 +86,9 @@ TEST_SKIPS = {
     ),
     "importerror": TestSkip(88, "Test skipped due to missing import"),
     "no_accelerator": TestSkip(89, "accelerator is not available."),
+    "skip_sandcastle": TestSkip(
+        90, "Skip test in Sandcastle returning skip code instead of pass."
+    ),
 }
 
 
@@ -126,6 +129,23 @@ def skip_if_no_gpu(func):
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
         if TEST_XPU and torch.xpu.device_count < world_size:
             sys.exit(TEST_SKIPS[f"multi-xpu-{world_size}"].exit_code)
+
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+def skip_sandcastle(func):
+    """Skips if run in sandcastle, returning skip code 90 instead of pass. This
+    is different from `skip_but_pass_in_sandcastle` which returns pass code 0.
+    Note: for most cases, you should use `skip_but_pass_in_sandcastle`
+    instead"""
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if IS_SANDCASTLE:
+            print("Skip test in Sandcastle returning skip code instead of pass.")
+            sys.exit(TEST_SKIPS["skip_sandcastle"].exit_code)
 
         return func(*args, **kwargs)
 
