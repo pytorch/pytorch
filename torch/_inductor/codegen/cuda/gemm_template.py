@@ -31,7 +31,7 @@ from . import cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
 from .cuda_template import CUTLASSTemplate
 from .cutlass_presets import gen_cutlass_presets
-from .cutlass_python_evt import CutlassEVTCodegen
+from .cutlass_python_evt import CutlassEVTCodegen, scaled_mm_evt
 from .cutlass_utils import torch_dtype_to_cutlass_type
 
 
@@ -435,7 +435,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         )
         self.alpha = alpha
         self.beta = beta
-        assert len(input_nodes) == 2 or len(input_nodes) == 3
+        assert len(input_nodes) == 2 or len(input_nodes) == 3 or len(input_nodes) == 4
         assert self._are_inputs_layout_compatible(
             [node.get_layout() for node in input_nodes]
         )
@@ -1064,28 +1064,54 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 op = self.swap_XW(op)
                 should_swap_xw = True
 
-        if epilogue_nodes:
-            (
-                evt_read_names,
-                evt_write_names,
-                var_name_to_buffer_name,
-                evt_py_code,
-            ) = CutlassEVTCodegen.ir_to_evt_python_code(
-                Y.get_name(), epilogue_nodes, V.kernel.removed_buffers
-            )
-            read_names = OrderedSet(evt_read_names) - OrderedSet(evt_write_names)
-            write_names = OrderedSet(evt_write_names)
-            assert write_names, "There should be at least one write"
-            D_output_name = var_name_to_buffer_name["D"]
-            name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
-            D_output_buffer = name_to_buffer[D_output_name]
-            Y = D_output_buffer  # type: ignore[assignment]
-            # Interestingly, I don't think the rest of the layout matters here since we
-            # use the properties of the Y buffer to fill in D's properties in the epilogue
-            # args. This is needed though because it defines types expected in the epilogue args.
-            op.D.element = cutlass_utils.torch_dtype_to_cutlass_type(
-                D_output_buffer.get_layout().dtype
-            )
+        is_scaled_mm = len(self.input_nodes) == 4
+        if epilogue_nodes or is_scaled_mm:
+            if epilogue_nodes:
+                (
+                    evt_read_names,
+                    evt_write_names,
+                    var_name_to_buffer_name,
+                    evt_py_code,
+                ) = CutlassEVTCodegen.ir_to_evt_python_code(
+                    Y.get_name(), epilogue_nodes, V.kernel.removed_buffers
+                )
+                D_output_name = var_name_to_buffer_name["D"]
+                name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
+                D_output_buffer = name_to_buffer[D_output_name]
+                D_dtype = D_output_buffer.get_dtype()
+                Y = D_output_buffer  # type: ignore[assignment]
+                # Interestingly, I don't think the rest of the layout matters here since we
+                # use the properties of the Y buffer to fill in D's properties in the epilogue
+                # args. This is needed though because it defines types expected in the epilogue args.
+                op.D.element = cutlass_utils.torch_dtype_to_cutlass_type(
+                    D_output_buffer.get_layout().dtype
+                )
+
+                read_names = OrderedSet(evt_read_names) - OrderedSet(evt_write_names)
+                write_names = OrderedSet(evt_write_names)
+                assert write_names, "There should be at least one write"
+
+                input_names = list(read_names)
+                output_names = list(write_names)
+                epilogue_inputs = [name_to_buffer[name] for name in input_names]
+                epilogue_outputs = [name_to_buffer[name] for name in output_names]
+            else:  # Scaled MM, we read the two scale matrices and write a single output
+                (
+                    evt_read_names,
+                    var_name_to_buffer_name,
+                    evt_py_code,
+                ) = scaled_mm_evt(
+                    self.input_nodes[2].get_name(),
+                    self.input_nodes[3].get_name(),
+                    Y.get_name(),
+                )
+
+                input_names = list(evt_read_names)
+                output_names = []  # We only need Y
+                D_dtype = Y.get_layout().dtype
+                epilogue_inputs = [self.input_nodes[2], self.input_nodes[3]]
+                epilogue_outputs = []
+
             acc_dtype = cutlass_utils.get_accumulator_dtype(
                 [X.get_dtype(), W.get_dtype()]
             )
@@ -1095,24 +1121,20 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 op,
                 evt_py_code,
                 var_name_to_buffer_name,
-                D_output_buffer.get_dtype(),
+                D_dtype,
                 acc_dtype,
             )
 
-            input_names = list(read_names)
-            output_names = list(write_names)
-            epilogue_inputs = [name_to_buffer[name] for name in input_names]
-            epilogue_outputs = [name_to_buffer[name] for name in output_names]
             inputs = [
                 X,
                 W,
                 Bias,
-                Y,
                 *epilogue_inputs,  # type: ignore[list-item]
+                Y,
                 *extra_inputs,
             ]
             names_str = ",".join(
-                ["X", "W", "Bias", "Y", *input_names, *output_names, *extra_names]
+                ["X", "W", "Bias", *input_names, "Y", *output_names, *extra_names]
             )
         else:
             evt_name = None
@@ -1286,7 +1308,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         Returns:
             bool: True if layouts are GEMM compatible, otherwise False.
         """
-        assert len(layouts) == 2 or len(layouts) == 3
+        assert len(layouts) == 2 or len(layouts) == 3 or len(layouts) == 4
         # Check if A and B are compatible
         A_layout, B_layout = layouts[:2]
         if len(A_layout.size) < 1:
@@ -1354,6 +1376,8 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         from .cutlass_lib_extensions.evt_extensions import create_example_tensors, trace
 
         name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
+        # handle the fake output buffer during lowering
+        name_to_buffer[self.output_node.get_name()] = self.output_node  # type: ignore[assignment]
 
         acc_dtype = torch_dtype_to_cutlass_type(accumulator_dtype)
         output_dtype = torch_dtype_to_cutlass_type(output_dtype)
@@ -1395,7 +1419,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
     ) -> bool:
         import cutlass_library.library as cutlass_lib
 
-        has_bias = len(self.input_nodes) >= 3 and self.input_nodes[2] is not None
+        has_bias = len(self.input_nodes) == 3 and self.input_nodes[2] is not None
         if has_bias:
             Bias = self.input_nodes[2]
             # bias dtype
@@ -1438,7 +1462,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
 
         from .cutlass_lib_extensions import gemm_operation_extensions as gemm_extensions
 
-        emitter = gemm_extensions.EmitGemmUniversal3xInstanceWithEVT(evt_name=evt_name)
+        emitter = gemm_extensions.EmitGemmUniversal3xInstanceWithEVT(evt_name=evt_name)  # type: ignore[call-arg]
 
         if not hasattr(op, "epilogue_functor") or not isinstance(
             op.epilogue_functor, enum.Enum
@@ -1464,7 +1488,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         self,
         op: "cutlass_gemm_op.GemmOperation" = None,  # type: ignore[name-defined]  # noqa: F821
     ) -> tuple[Optional[Buffer], list[Optional[Buffer]], list[str]]:
-        Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
+        Bias = None if len(self.input_nodes) in (2, 4) else self.input_nodes[2]
         inputs: list[Optional[Buffer]] = []
         names: list[str] = []
         return (Bias, inputs, names)
