@@ -1,7 +1,6 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10/util/intrusive_ptr.h>
-#include <c10/util/string_view.h>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 #include <torch/csrc/distributed/c10d/Functional.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
@@ -10,6 +9,7 @@
 #include <torch/csrc/distributed/c10d/control_collectives/ControlCollectives.hpp>
 #include <torch/csrc/distributed/c10d/control_collectives/StoreCollectives.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
+#include <string_view>
 #include <utility>
 #include <vector>
 #ifndef _WIN32
@@ -560,7 +560,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
                  bool gradient_as_bucket_view,
                  std::unordered_map<size_t, std::string> param_to_name_mapping,
                  int64_t first_bucket_bytes_cap,
-                 bool skip_all_reduce_unused_params) {
+                 bool skip_all_reduce_unused_params,
+                 bool use_python_reducer) {
                 // gil_scoped_release is not safe as a call_guard in init.
                 // https://github.com/pybind/pybind11/issues/5473
                 py::gil_scoped_release nogil{};
@@ -575,7 +576,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
                     gradient_as_bucket_view,
                     std::move(param_to_name_mapping),
                     first_bucket_bytes_cap,
-                    skip_all_reduce_unused_params);
+                    skip_all_reduce_unused_params,
+                    use_python_reducer);
               }),
           py::arg("params"),
           py::arg("bucket_indices"),
@@ -588,7 +590,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("param_to_name_mapping") =
               std::unordered_map<size_t, std::string>(),
           py::arg("first_bucket_bytes_cap") = ::c10d::kDefaultFirstBucketBytes,
-          py::arg("skip_all_reduce_unused_params") = false)
+          py::arg("skip_all_reduce_unused_params") = false,
+          py::arg("use_python_reducer") = false)
       .def(
           "prepare_for_forward",
           &::c10d::Reducer::prepare_for_forward,
@@ -2987,9 +2990,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             bool lazyInit = ::c10d::getDefaultGlooLazyInit();
 
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
-            char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV.c_str());
-            if (ifnameEnv && strlen(ifnameEnv) > 1) {
-              for (const auto& iface : ::c10d::split(',', ifnameEnv)) {
+            auto ifnameEnv =
+                c10::utils::get_env(GLOO_SOCKET_IFNAME_ENV.c_str());
+            if (ifnameEnv && ifnameEnv->size() > 1) {
+              for (const auto& iface : ::c10d::split(',', ifnameEnv->c_str())) {
                 options->devices.push_back(
                     ::c10d::ProcessGroupGloo::createDeviceForInterface(
                         iface, lazyInit));
@@ -3090,6 +3094,20 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("size"),
               py::arg("timeout") = ::c10d::kProcessGroupNCCLDefaultTimeout,
               R"(Create a new ProcessGroupNCCL instance.)")
+          .def(
+              "_comm_ptr",
+              &::c10d::ProcessGroupNCCL::getCommPtr,
+              R"(
+            Get the communicator of the current device.
+
+            .. warning ::
+                Unsafe to use. The collectives launched into the communicator
+                externally outside ProcessGroupNCCL are not monitored by the
+                watchdog. Please do not modify or free the communicator as the
+                communicator is managed by the ProcessGroupNCCL. Please also
+                check the readiness of the communicator before launching any
+                collectives into the communicator.
+            )")
           .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
           .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
           .def(
@@ -3178,6 +3196,9 @@ for details.
       .def_readwrite("max_ctas", &ncclConfig_t::maxCTAs)
 #ifdef NCCL_HAS_COMM_SPLIT
       .def_readwrite("split_share", &ncclConfig_t::splitShare)
+#endif
+#ifdef NCCL_HAS_QOS
+      .def_readwrite("traffic_class", &ncclConfig_t::trafficClass)
 #endif
       .def_property(
           "net_name",

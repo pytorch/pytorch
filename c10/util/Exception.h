@@ -116,8 +116,8 @@ class C10_API Error : public std::exception {
 
 class C10_API Warning {
  public:
-  class C10_API UserWarning {};
-  class C10_API DeprecationWarning {};
+  class C10_API UserWarning{};
+  class C10_API DeprecationWarning{};
 
   using warning_variant_t = std::variant<UserWarning, DeprecationWarning>;
 
@@ -289,8 +289,8 @@ class C10_API OutOfMemoryError : public Error {
   using Error::Error;
 };
 
-// Used for handling syntacitc errors in input arguments.
-// They should turn into SytnaxError when the cross into Python
+// Used for handling syntactic errors in input arguments.
+// These turn into SyntaxError when the cross into Python.
 class C10_API SyntaxError : public Error {
   using Error::Error;
 };

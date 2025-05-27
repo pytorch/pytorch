@@ -309,7 +309,7 @@ from user code:
 Attempted to call function marked as skipped
   Explanation: Dynamo developers have intentionally marked that the function `skip` in file `case.py` should not be traced.
   Hint: Avoid calling the function `skip`.
-  Hint: Remove the function `skip` or the file `case.py` from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of attempting to trace into the function.
+  Hint: Apply `@torch._dynamo.dont_skip_tracing` to the function `skip` to force tracing into the function. More graph breaks may occur as a result of attempting to trace into the function.
   Hint: Please file an issue to PyTorch.
 
   Developer debug context: module: unittest.case, qualname: skip, skip reason: <missing reason>
@@ -358,7 +358,7 @@ from user code:
 Attempted to inline function marked as skipped
   Explanation: Dynamo developers have intentionally marked that the function `skip` should not be traced.
   Hint: Avoid calling the function `skip`.
-  Hint: Remove the function `case.py` from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of attempting to trace into the function.
+  Hint: Apply `@torch._dynamo.dont_skip_tracing` to the function `skip` to force tracing into the function. More graph breaks may occur as a result of attempting to trace into the function.
   Hint: Please file an issue to PyTorch.
 
   Developer debug context: qualname: skip, name: skip, filename: `case.py`, skip reason: skipped according trace_rules.lookup unittest
@@ -956,8 +956,8 @@ from user code:
 Traceback (most recent call last):
   File "test_error_messages.py", line N, in test_no_internal_compiler_stacktrace
     torch.compile(fn, backend="eager", fullgraph=True)()
-  File "eval_frame.py", line N, in _fn
-    raise e.with_traceback(None) from e.__cause__
+  File "eval_frame.py", line N, in compile_wrapper
+    raise e.with_traceback(None) from e.__cause__  # User compiler error
 torch._dynamo.exc.Unsupported: Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.

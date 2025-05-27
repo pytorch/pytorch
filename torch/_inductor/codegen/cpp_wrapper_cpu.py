@@ -1,12 +1,13 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import functools
 import math
 import os
 import sys
 import textwrap
-from collections.abc import Sequence
-from itertools import count
-from typing import Callable, Optional, Protocol, Union
+from itertools import chain, count
+from typing import Callable, Optional, Protocol, TYPE_CHECKING, Union
 
 import sympy
 
@@ -30,6 +31,12 @@ from .wrapper import (
     PythonWrapperCodegen,
     SymbolicCallArg,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from ..graph import GraphLowering
 
 
 class HasWriteLine(Protocol):
@@ -124,7 +131,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 Only valid when cuda == True.
         """
         assert arg_types is not None and len(call_args) == len(arg_types), (
-            "Mismatch call_args and arg_types in generate_kernel_call"
+            "Mismatch call_args and arg_types in generate_kernel_call:\n"
+            f"call_args: {call_args}\n"
+            f"arg_types: {arg_types}"
         )
         new_args = []
         for idx, arg in enumerate(call_args):
@@ -230,6 +239,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if V.graph.is_const_graph:
             # We do not write prefix for constant graph, it will be written by main module.
             return
+        if config.aot_inductor.custom_ops_to_c_shims:
+            # custom_ops_to_c_shims contains declaration of custom ops with C shim.
+            # TODO: this could be auto-generated from a passed-in custom op schema
+            custom_c_shims = list(
+                chain(*config.aot_inductor.custom_ops_to_c_shims.values())
+            )
+            declarations = "\n".join(
+                [f"extern {textwrap.dedent(shim)};" for shim in custom_c_shims]
+            )
+            self.prefix.splice(
+                f"""
+                extern "C" {{
+                    {declarations}
+                }}
+                """
+            )
         if V.graph.aot_mode:
             self.prefix.writeline("namespace torch::aot_inductor {")
 
@@ -271,21 +296,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 code.writeline(f"int64_t {sym_or_exp} = {name_fn(base_name)}[{dim}];")
                 bound_vars.add(sym_or_exp)
             elif isinstance(sym_or_exp, sympy.Expr):
-                free_symbol = None
-                for sym in sym_or_exp.free_symbols:
-                    if sym not in bound_vars:
-                        if free_symbol is None:
-                            free_symbol = sym
-                        else:
-                            raise AssertionError(
-                                str(sym_or_exp)
-                                + " contains more than one undefined symbols"
-                            )
-                if free_symbol is None:
+                undefined_symbols = [
+                    sym for sym in sym_or_exp.free_symbols if sym not in bound_vars
+                ]
+                if len(undefined_symbols) != 1:
+                    # Skip if expression contains no symbols or if multiple
+                    # symbols exists since we assume each base symbol is defined
+                    # by other codegen_symbol calls.
                     return
 
                 from torch.utils._sympy.solve import try_solve
 
+                free_symbol = undefined_symbols.pop()
                 base_name = name_fn(base_name)
                 # Use a size symbol to solve the free symbol
                 size_symbol = sympy.Symbol(f"{base_name}_{dim}", integer=True)
@@ -445,7 +467,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # inline done by the host compiler
         self.prefix.splice(
             """
-            bool _check_aoti_runtime_check_inputs_env() {
+            static bool _check_aoti_runtime_check_inputs_env() {
                 const static char* env_var_value = getenv("AOTI_RUNTIME_CHECK_INPUTS");
                 const static bool result = env_var_value != nullptr && env_var_value[0] != '0';
                 return result;
@@ -602,7 +624,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 if not V.graph.is_const_graph:
                     self.prefix.writeline("inputs.clear();")
                 self.prefix.writeline(
-                    "auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
+                    "[[maybe_unused]] auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
                 )
 
     def codegen_tensor_dtype_var_decl(self, code: IndentedBuffer, name):
@@ -662,7 +684,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
             signature = kernel.get_signature().replace(name, kernel_ptr)
             self.prefix.writeline(f"    {signature} = torch::aot_inductor::{name};")
         self.prefix.writeline("};")
-        self.prefix.writeline("}  // namespace")
+        self.prefix.writeline("}  // namespace\n\n")
+
+        if config.aot_inductor.embed_cubin:
+            self.prefix.writeline('extern "C" {')
+            for name in sorted(declare_kernel):
+                self.prefix.writeline(
+                    f"    extern const unsigned char __{name}_start[];"
+                )
+                if torch.xpu.is_available():
+                    self.prefix.writeline(
+                        f"    extern const unsigned char __{name}_end[];"
+                    )
+            self.prefix.writeline("}")
 
     def codegen_model_constructor(self):
         """
@@ -697,7 +731,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                                const std::string& device_str,
                                                std::optional<std::string> cubin_dir,
                                                bool include_weights)
-                : AOTInductorModelBase({num_inputs}, {num_outputs}, {num_constants}, device_str, cubin_dir, {include_weights}) {{
+                : AOTInductorModelBase({num_inputs},
+                                       {num_outputs},
+                                       {num_constants},
+                                       device_str,
+                                       std::move(cubin_dir),
+                                       {include_weights}) {{
             """
         )
 
@@ -747,12 +786,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     constant_type_str = "TensorConstant"
                 elif any(
                     name == normalize_name(parameter_name)
-                    for parameter_name, _ in V.graph.orig_gm.named_parameters()
+                    for parameter_name in V.graph.named_parameters
                 ):
                     constant_type_str = "Parameter"
                 elif any(
                     name == normalize_name(buffer_name)
-                    for buffer_name, _ in V.graph.orig_gm.named_buffers()
+                    for buffer_name in V.graph.named_buffers
                 ):
                     constant_type_str = "Buffer"
                 else:
@@ -808,10 +847,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 )
 
             self.prefix.writeline(
-                f'in_spec_ = "{escape_string(config.aot_inductor.serialized_in_spec)}";'
+                f'in_spec_ = R"({config.aot_inductor.serialized_in_spec})";'
             )
             self.prefix.writeline(
-                f'out_spec_ = "{escape_string(config.aot_inductor.serialized_out_spec)}";'
+                f'out_spec_ = R"({config.aot_inductor.serialized_out_spec})";'
             )
 
             for idx, output in enumerate(V.graph.graph_outputs):
@@ -1037,6 +1076,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 result.writeline("} // inductor_entry_impl")
 
     def generate_end(self, result):
+        """Generates the end of the code block, and any code needed to call it."""
         if V.graph.aot_mode:
             if V.graph.is_const_graph:
                 result.writeline("} // AOTInductorModel::_const_run_impl")
@@ -1044,19 +1084,29 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 result.writeline("} // namespace torch::aot_inductor\n\n\n")
             return
 
-        # Add any kernel definitions into the wrapped code.  We currently only build
-        # them in separate files in AOT mode.
-        result.splice(self.kernel_declarations.getvalue())
-        self.kernel_declarations.clear()
+        # Close the wrapper code block, then write any kernel definitions.
+        result.splice("'''\n)")
+        if self.kernel_declarations:
+            result.splice("\nkernel_src = (\nr'''")
+            result.splice(self.kernel_declarations.getvalue())
+            result.splice("'''\n)")
+        else:
+            result.splice(
+                """
+                kernel_src = ''
+                """
+            )
 
         # cpp entry function for JIT with cpp wrapper
         result.splice(
             f"""
-            '''
-            )
-
             inductor_entry = CppWrapperCodeCache.load_pybinding(
-                ["std::vector<AtenTensorHandle>"], cpp_wrapper_src, "{self.device}", {len(V.graph.graph_outputs)})
+                argtypes=["std::vector<AtenTensorHandle>"],
+                main_code=cpp_wrapper_src,
+                device_type="{self.device}",
+                num_outputs={len(V.graph.graph_outputs)},
+                kernel_code=kernel_src,
+            )
             """
         )
 
@@ -1336,24 +1386,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
             expr = V.graph.sizevars.inv_precomputed_replacements[sym]
             self.writeline(f"int64_t {sym} = {cexpr(expr)};")
 
-    def generate_numel_expr(self, kernel_name: str, tree, suffix: Optional[str] = None):
-        expr = f"{kernel_name}_{tree.prefix}numel"
-        if suffix is not None:
-            expr += f"_{suffix}"
-        if (expr, V.graph) not in self.kernel_numel_expr:
+    def _generate_symbolic_call_arg_helper(
+        self, arg: SymbolicCallArg, graph: GraphLowering
+    ) -> None:
+        if (arg.inner, graph) not in self.kernel_numel_expr:
             # declare expr once in each graph (scope)
-            self.kernel_numel_expr.add((expr, V.graph))
-            self.writeline(f"int64_t {expr} = {cexpr(tree.numel)};")
+            self.kernel_numel_expr.add((arg.inner, graph))
+            self.writeline(f"int64_t {arg.inner} = {cexpr(arg.inner_expr)};")
         else:
-            self.writeline(f"{expr} = {cexpr(tree.numel)};")
-        # We can get symbolic expressions here, like s0*64
-        # It is fine to have them here, but we need to handle them correctly as their own type
-        # This is tricky to do, so we wrap in a custom type, distinct from scalars, but also from sympy*
-        # scalars as well.
-        # This is handled in `generate_args_decl` which has a correct comment of: TODO: only works for
-        # constant now, need type info. I agree, this needs type info, and while this is not true type info
-        # it suffices as a type hint for the purposes of producing the correct code for this type.
-        return SymbolicCallArg(expr, tree.numel)
+            self.writeline(f"{arg.inner} = {cexpr(arg.inner_expr)};")
 
     def codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
