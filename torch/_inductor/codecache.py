@@ -2009,7 +2009,7 @@ class AotCodeCompiler:
             ]
 
             cubins_o = []
-            if config.aot_inductor.embed_cubin:
+            if config.aot_inductor.embed_kernel_binary:
                 # Embed cubin files into .so using objcopy
                 ld, objcopy = get_ld_and_objcopy(use_relative_path)
                 for kernel_name, value in CudaKernelParamCache.cache.items():
