@@ -1067,10 +1067,17 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 supports_aliasing=self.supports_aliasing,
             )
 
-            if not only_consist_of(ret_val, (TensorVariable,)):
+            if not only_consist_of(ret_val, (TensorVariable, ConstantVariable)):
                 unimplemented(
-                    "Expected branches to return a possibly nested list/tuple/dict of tensors but it consists of non tensors.",
+                    "Expected branches to return a possibly nested pytree of tensors "
+                    "or constant ints but it consists of others.",
                 )
+            for ret in ret_val.unpack_var_sequence(tx):
+                if isinstance(ret, ConstantVariable) and ret.python_type() is not int:
+                    unimplemented(
+                        "Expected branches to return a possibly nested pytree of tensors "
+                        f"or constant ints but it consists of others {ret.python_type()}.",
+                    )
             return ret_val, ret_treespec, ret_graph, ret_lifted_freevars
 
         (true_r, true_treespec, true_graph, true_lifted_freevars) = speculate_branch(
