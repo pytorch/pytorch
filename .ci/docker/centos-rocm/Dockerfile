@@ -38,6 +38,11 @@ RUN rm install_glibc.sh
 COPY ./common/install_user.sh install_user.sh
 RUN bash ./install_user.sh && rm install_user.sh
 
+# Install katex
+ARG KATEX
+COPY ./common/install_docs_reqs.sh install_docs_reqs.sh
+RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
+
 # Install conda and other packages (e.g., numpy, pytest)
 ARG ANACONDA_PYTHON_VERSION
 ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
