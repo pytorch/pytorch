@@ -9526,6 +9526,8 @@ Out-of-place version of :meth:`torch.Tensor.scatter_reduce_`
 add_docstr(
     torch.segment_reduce,
     r"""
+segment_reduce(data: Tensor, reduce: str, *, lengths: Tensor | None = None, indices: Tensor | None = None, offsets: Tensor | None = None, axis: _int = 0, unsafe: _bool = False, initial: Number | _complex | None = None) -> Tensor # noqa: B950
+
 Perform a segment reduction operation on the input tensor along the specified axis.
 
 Args:
