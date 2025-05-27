@@ -1385,7 +1385,9 @@ class cuda:
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4, 8]
 
     # Whether to use CUTLASS EVT for epilogue fusion
-    cutlass_epilogue_fusion_enabled = False
+    cutlass_epilogue_fusion_enabled = (
+        os.environ.get("CUTLASS_EPILOGUE_FUSION", "0") == "1"
+    )
 
     # Whether to only use TMA-compatible kernels in CUTLASS
     cutlass_tma_only = False
