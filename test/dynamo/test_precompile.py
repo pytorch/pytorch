@@ -7,6 +7,7 @@ import torch._functorch
 from torch._dynamo.precompile import PrecompileContext
 from torch._functorch import config as functorch_config
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch.testing._internal.inductor_utils import requires_triton
 
 
 @functorch_config.patch({"enable_autograd_cache": True})
@@ -22,6 +23,8 @@ class PrecompileContextTests(InductorTestCase):
         # Clear PrecompileContext cache artifacts
         PrecompileContext.clear()
 
+
+    @requires_triton()
     def test_basic(self):
         """
         Test that after torch.compile, PrecompileContext._new_cache_artifacts length is 1
