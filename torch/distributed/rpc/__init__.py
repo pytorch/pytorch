@@ -30,9 +30,9 @@ if is_available() and not torch._C._rpc_init():
 
 
 if is_available():
-
-    def is_tensorpipe_available() -> bool:
-        return hasattr(torch._C._distributed_rpc, "_TensorPipeRpcBackendOptionsBase")
+    _is_tensorpipe_available = hasattr(
+        torch._C._distributed_rpc, "_TensorPipeRpcBackendOptionsBase"
+    )
 
     import numbers
 
@@ -71,7 +71,7 @@ if is_available():
         WorkerInfo,
     )
 
-    if is_tensorpipe_available():
+    if _is_tensorpipe_available:
         from torch._C._distributed_rpc import (  # noqa: F401
             _DEFAULT_NUM_WORKER_THREADS,
             _TensorPipeRpcBackendOptionsBase,
