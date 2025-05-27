@@ -620,7 +620,7 @@ PickleOpCode Unpickler::readInstruction() {
             "supported devices include CPU, CUDA, HPU and ",
             c10::get_privateuse1_backend(),
             " however got ",
-            DeviceTypeName(device.type(), false));
+            c10::DeviceTypeName(device.type(), false));
       }
       stack_.emplace_back(std::move(tensor));
     } break;

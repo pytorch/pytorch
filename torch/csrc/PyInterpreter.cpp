@@ -20,24 +20,25 @@ namespace {
 // because passing in constexpr char* as template argument breaks some
 // versions of MSVC that are being used internally at Meta.
 // MSVC 14.16.27023 (vs2017_15.9)
-#define CONCRETE_GPU_TRACE(device_type, func_name, ...)                       \
-  at::impl::MaybeSetTLSOnEntryGuard guard;                                    \
-  if (Py_IsInitialized()) {                                                   \
-    pybind11::gil_scoped_acquire gil;                                         \
-    try {                                                                     \
-      /* Masquerade hip as cuda because hip uses `torch.cuda` module. */      \
-      if (device_type == at::kHIP) {                                          \
-        device_type = at::kCUDA;                                              \
-      }                                                                       \
-      std::string module_name = "torch." + DeviceTypeName(device_type, true); \
-      py::module mod = py::module::import(module_name.c_str());               \
-      py::object hook =                                                       \
-          mod.attr("_gpu_trace").attr(func_name).attr("fire_callbacks");      \
-      hook(__VA_ARGS__);                                                      \
-    } catch (const std::exception& e) {                                       \
-      LOG(ERROR) << device_type                                               \
-                 << " trace hook execution failed: " << e.what();             \
-    }                                                                         \
+#define CONCRETE_GPU_TRACE(device_type, func_name, ...)                  \
+  at::impl::MaybeSetTLSOnEntryGuard guard;                               \
+  if (Py_IsInitialized()) {                                              \
+    pybind11::gil_scoped_acquire gil;                                    \
+    try {                                                                \
+      /* Masquerade hip as cuda because hip uses `torch.cuda` module. */ \
+      if (device_type == at::kHIP) {                                     \
+        device_type = at::kCUDA;                                         \
+      }                                                                  \
+      std::string module_name =                                          \
+          "torch." + c10::DeviceTypeName(device_type, true);             \
+      py::module mod = py::module::import(module_name.c_str());          \
+      py::object hook =                                                  \
+          mod.attr("_gpu_trace").attr(func_name).attr("fire_callbacks"); \
+      hook(__VA_ARGS__);                                                 \
+    } catch (const std::exception& e) {                                  \
+      LOG(ERROR) << device_type                                          \
+                 << " trace hook execution failed: " << e.what();        \
+    }                                                                    \
   }
 
 struct ConcretePyInterpreterVTable final
