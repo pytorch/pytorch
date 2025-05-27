@@ -42,22 +42,25 @@ std::string toString(const Scalar& s) {
 }
 } // namespace c10
 
-
 namespace at {
 
 std::ostream& operator<<(std::ostream & out, const DeprecatedTypeProperties& t) {
   return out << t.toString();
 }
 
+enum class FormatType {
+  Default,     // 'g' format (defaultfloat equivalent)
+  Scientific,  // 'e' format
+  Fixed        // 'f' format
+};
+
 struct PrintFormat {
   double scale;
   int width;
-  bool scientific;
-  bool fixed;
-  int precision;
+  FormatType type;
 
-  PrintFormat(double s, int w, bool sci = false, bool fix = false, int prec = 4)
-    : scale(s), width(w), scientific(sci), fixed(fix), precision(prec) {}
+  PrintFormat(double s, int w, FormatType t = FormatType::Default)
+    : scale(s), width(w), type(t) {}
 };
 
 static PrintFormat __printFormat(const Tensor& self) {
@@ -79,11 +82,8 @@ static PrintFormat __printFormat(const Tensor& self) {
   }
 
   int64_t offset = 0;
-  while(!std::isfinite(self_p[offset])) {
+  while(offset < size && !std::isfinite(self_p[offset])) {
     offset = offset + 1;
-    if(offset == size) {
-      break;
-    }
   }
 
   double expMin = 1;
@@ -97,7 +97,7 @@ static PrintFormat __printFormat(const Tensor& self) {
         if(z < expMin) {
           expMin = z;
         }
-        if(self_p[i] > expMax) {
+        if(z > expMax) {
           expMax = z;
         }
       }
@@ -120,10 +120,10 @@ static PrintFormat __printFormat(const Tensor& self) {
   if(intMode) {
     if(expMax > 9) {
       sz = 11;
-      return PrintFormat(scale, sz, true, false, 4);  // scientific
+      return PrintFormat(scale, sz, FormatType::Scientific);
     } else {
       sz = static_cast<int>(expMax) + 1;
-      return PrintFormat(scale, sz);  // default float
+      return PrintFormat(scale, sz, FormatType::Default);
     }
   } else {
     if(expMax-expMin > 4) {
@@ -131,19 +131,19 @@ static PrintFormat __printFormat(const Tensor& self) {
       if(std::fabs(expMax) > 99 || std::fabs(expMin) > 99) {
         sz = sz + 1;
       }
-      return PrintFormat(scale, sz, true, false, 4);  // scientific
+      return PrintFormat(scale, sz, FormatType::Scientific);
     } else {
       if(expMax > 5 || expMax < 0) {
         sz = 7;
         scale = std::pow(10, expMax-1);
-        return PrintFormat(scale, sz, false, true, 4);  // fixed
+        return PrintFormat(scale, sz, FormatType::Fixed);
       } else {
         if(expMax == 0) {
           sz = 7;
         } else {
           sz = static_cast<int>(expMax) + 6;
         }
-        return PrintFormat(scale, sz, false, true, 4);  // fixed
+        return PrintFormat(scale, sz, FormatType::Fixed);
       }
     }
   }
@@ -152,13 +152,16 @@ static PrintFormat __printFormat(const Tensor& self) {
 static std::string formatValue(double value, const PrintFormat& fmt) {
   double scaledValue = value / fmt.scale;
 
-  if (fmt.scientific) {
-    return fmt::format("{:>{}.{}e}", scaledValue, fmt.width, fmt.precision);
-  } else if (fmt.fixed) {
-    return fmt::format("{:>{}.{}f}", scaledValue, fmt.width, fmt.precision);
-  } else {
-    return fmt::format("{:>{}g}", scaledValue, fmt.width);
+  switch (fmt.type) {
+    case FormatType::Default:
+      return fmt::format("{:>{}g}", scaledValue, fmt.width);
+    case FormatType::Scientific:
+      return fmt::format("{:>{}.4e}", scaledValue, fmt.width);
+    case FormatType::Fixed:
+      return fmt::format("{:>{}.4f}", scaledValue, fmt.width);
   }
+  // Should never reach here, but needed for some compilers
+  return fmt::format("{:>{}g}", scaledValue, fmt.width);
 }
 
 static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t linesize, int64_t indent) {
@@ -266,7 +269,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
   }
 
   if (tensor_.is_sparse()) {
-    fmt::print(stream, "[ {}{{\nindices:\n", tensor_.toString());
+    fmt::print(stream, "[ {}{{}}\nindices:\n", tensor_.toString());
     print(stream, tensor_._indices(), linesize);
     fmt::print(stream, "\nvalues:\n");
     print(stream, tensor_._values(), linesize);
@@ -290,7 +293,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
 
   if(tensor.ndimension() == 0) {
     fmt::print(stream, "{}\n", tensor.const_data_ptr<double>()[0]);
-    fmt::print(stream, "[ {}{{", tensor_.toString());
+    fmt::print(stream, "[ {}{{}}", tensor_.toString());
   } else if(tensor.ndimension() == 1) {
     if (tensor.numel() > 0) {
       auto printFmt = __printFormat(tensor);
