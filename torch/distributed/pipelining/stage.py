@@ -477,7 +477,16 @@ class _PipelineStageBase(ABC):
 
         ops: list[dist.P2POp] = []
         grads_input = self.bwd_cache.pop(bwd_chunk_id)
-        for grad, grad_recv_stage in zip(grads_input, self.grad_send_info):
+        for idx, (grad, grad_recv_stage) in enumerate(
+            zip(grads_input, self.grad_send_info)
+        ):
+            if grad is None and grad_recv_stage is not None:
+                # TODO: create 0s of the same shape and send, this sends extra data but is a workaround for
+                # having an input in forward that is unused
+                recv_info = self.args_recv_info[bwd_chunk_id][idx]
+                assert isinstance(recv_info, _RecvInfo)
+                grad = torch.zeros_like(recv_info.buffer)
+
             if isinstance(grad, torch.Tensor) and grad_recv_stage is not None:
                 logger.debug(
                     "%s Sending gradient to Stage %s: %s",
@@ -495,7 +504,7 @@ class _PipelineStageBase(ABC):
             else:
                 if not (grad is None and grad_recv_stage is None):
                     raise RuntimeError(
-                        f"[{self.stage_index}] for chunk {bwd_chunk_id} has gradients {grad} "
+                        f"[Stage {self.stage_index}] for chunk {bwd_chunk_id} has gradients {grad} "
                         f"and is expecting to send gradients to stage {grad_recv_stage}"
                     )
         return ops
