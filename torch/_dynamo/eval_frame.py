@@ -1064,14 +1064,6 @@ def _optimize(
     ):
         return _NullDecorator()
 
-    if nopython:
-        return optimize_assert(
-            backend,
-            dynamic=dynamic,
-            hooks=hooks,
-            rebuild_ctx=rebuild_ctx,
-        )
-
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
