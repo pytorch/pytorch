@@ -1,5 +1,6 @@
 #include <c10/metal/indexing.h>
 #include <c10/metal/special_math.h>
+#include <c10/metal/utils.h>
 #include <metal_stdlib>
 using namespace metal;
 using namespace c10::metal;
@@ -127,6 +128,29 @@ struct tanh_functor {
     auto tanh_x = precise::tanh(x.x);
     auto tan_y = precise::tan(x.y);
     return div(T(tanh_x, tan_y), T(1.0, tanh_x * tan_y));
+  }
+};
+
+struct atan_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(precise::atan(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return precise::atan(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // atan(z) = (1/2i)ln((i-z)/(i+z))
+    auto coef = div(T(1, 0), T(0, 2));
+    auto log_arg = div(T(-1 * x.x, 1 - x.y), T(x.x, 1 + x.y));
+    // Calculate log using method from log_functor
+    auto magnitude = ::precise::sqrt(log_arg.x * log_arg.x + log_arg.y * log_arg.y);
+    auto real = ::precise::log(magnitude);
+    auto imag = (log_arg.x == 0 && log_arg.y == 0) ? 0 : ::precise::atan2(log_arg.y, log_arg.x);
+    // return coefficient * log value
+    return c10::metal::mul(coef, T(real, imag));
   }
 };
 
@@ -365,7 +389,8 @@ REGISTER_UNARY_OP(abs, half, half);
   REGISTER_UNARY_OP(tanh, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sin, DTYPE1, DTYPE0);          \
   REGISTER_UNARY_OP(cos, DTYPE1, DTYPE0);          \
-  REGISTER_UNARY_OP(tan, DTYPE1, DTYPE0)
+  REGISTER_UNARY_OP(tan, DTYPE1, DTYPE0);          \
+  REGISTER_UNARY_OP(atan, DTYPE1, DTYPE0)
 
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_UNARY_KERNELS2(bfloat, bfloat);
@@ -398,7 +423,8 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
   REGISTER_UNARY_OP(sinc, DTYPE##2, DTYPE##2);    \
   REGISTER_UNARY_OP(sin, DTYPE##2, DTYPE##2);     \
   REGISTER_UNARY_OP(cos, DTYPE##2, DTYPE##2);     \
-  REGISTER_UNARY_OP(tan, DTYPE##2, DTYPE##2)
+  REGISTER_UNARY_OP(tan, DTYPE##2, DTYPE##2);     \
+  REGISTER_UNARY_OP(atan, DTYPE##2, DTYPE##2)
 
 INSTANTIATE_UNARY_KERNELS_VEC2(half);
 INSTANTIATE_UNARY_KERNELS_VEC2(float);

@@ -20,6 +20,10 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
   }                                                         \
   REGISTER_DISPATCH(NAME##_stub, NAME##_kernel_mps)
 
+static void atan_kernel(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "atan");
+}
+
 static void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
   lib.exec_unary_kernel(iter, "round_decimals", Scalar(decimals), ScalarType::Long);
 }
@@ -34,6 +38,7 @@ REGISTER_UNARY_TI_DISPATCH(abs);
 REGISTER_UNARY_TI_DISPATCH(sin);
 REGISTER_UNARY_TI_DISPATCH(cos);
 REGISTER_UNARY_TI_DISPATCH(tan);
+REGISTER_UNARY_TI_DISPATCH(atan);
 REGISTER_UNARY_TI_DISPATCH(sqrt);
 REGISTER_UNARY_TI_DISPATCH(rsqrt);
 REGISTER_UNARY_TI_DISPATCH(neg);
