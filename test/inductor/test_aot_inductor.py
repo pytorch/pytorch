@@ -156,6 +156,10 @@ class AOTInductorTestsTemplate:
                 model, example_inputs, "AOTInductorModelRunMinimalArrayrefInterface(", 1
             )
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "toolchain doesn't support ptx to fatbin",
+    )
     @skipIfRocm
     @skipIfXpu
     @common_utils.parametrize("embed_kernel_binary", [True, False])

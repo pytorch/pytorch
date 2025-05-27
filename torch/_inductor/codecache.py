@@ -66,7 +66,6 @@ from torch._inductor.cpp_builder import (
     CppBuilder,
     CppOptions,
     CppTorchDeviceOptions,
-    get_cmd_to_compile_fatbin,
     get_compiler_version_info,
     get_ld_and_objcopy,
     get_name_and_dir_from_output_file_path,
@@ -2044,6 +2043,10 @@ class AotCodeCompiler:
                 for entry in gpu_codecache.cache.values()
                 if entry.output_path.endswith(".o")
             ]
+            if gpu_kernels_o:
+                assert not config.aot_inductor.multi_arch_kernel_binary, (
+                    "TODO: add multi_arch_kernel_binary support for cutlass kernels"
+                )
 
             cubins_o = []
             asm_files = []
@@ -2055,7 +2058,12 @@ class AotCodeCompiler:
                 cubin_file = value[get_cpp_wrapper_cubin_path_name()]
                 if config.aot_inductor.multi_arch_kernel_binary:
                     # Compile .ptx into .fatbin
-                    cmd = get_cmd_to_compile_fatbin(asm_file, cubin_file)
+                    archs = OrderedSet(
+                        [cuda_env.get_cuda_arch(), "80", "86", "89", "90"]
+                    )
+                    cmd = f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file}"
+                    for arch in archs:
+                        cmd += f" -gencode arch=compute_{arch},code=compute_{arch}"
                     subprocess.run(
                         cmd.split(), capture_output=True, text=True, check=True
                     )
@@ -3459,17 +3467,14 @@ def cuda_compile_command(
     src_file = " ".join(src_files)
     res = ""
     if dst_file_ext == "o":
-        options.append("-c")
+        res = f"{_cuda_compiler()} {' '.join(options)} -c -o {dst_file} {src_file}"
     elif dst_file_ext == "so":
         options.append("-shared")
-    elif dst_file_ext == "fatbin":
-        options.append("-fatbin")
+        res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
     elif dst_file_ext == "exe":
-        pass
+        res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
     else:
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
-
-    res = f"{_cuda_compiler()} {' '.join(options)} -c -o {dst_file} {src_file}"
     log.debug("CUDA command: %s", res)
     return res
 
