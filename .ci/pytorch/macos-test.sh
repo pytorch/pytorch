@@ -165,6 +165,7 @@ test_jit_hooks() {
 torchbench_setup_macos() {
   git clone --recursive https://github.com/pytorch/vision torchvision
   git clone --recursive https://github.com/pytorch/audio torchaudio
+  brew install jpeg-turbo libpng
 
   pushd torchvision
   git fetch
