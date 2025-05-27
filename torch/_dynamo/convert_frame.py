@@ -847,8 +847,8 @@ def _compile(
                     code.co_filename,
                     code.co_firstlineno,
                 )
-                if one_graph:
-                    log.debug("No graph captured with one_graph=True")
+                if one_graph or config.error_on_graph_break:
+                    log.debug("No graph captured with one_graph=True or torch._dynamo.config.error_on_graph_break=True")
                 return ConvertFrameReturn()
 
         assert (
@@ -1005,9 +1005,10 @@ def _compile(
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached, because fail_on_recompile_limit_hit = True this is a HARD failure"
                 )
-            elif one_graph:
+            elif one_graph or config.error_on_graph_break:
                 raise FailOnRecompileLimitHit(
-                    f"{limit_type} reached with one_graph=True. Excessive recompilations can degrade "
+                    f"{limit_type} reached with one_graph=True or torch._dynamo.config.error_on_graph_break=True. "
+                    "Excessive recompilations can degrade "
                     "performance due to the compilation overhead of each recompilation. To monitor "
                     "recompilations, enable TORCH_LOGS=recompiles. If recompilations are expected, consider "
                     "increasing torch._dynamo.config.cache_size_limit to an appropriate value."
