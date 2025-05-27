@@ -394,7 +394,7 @@ class DispatchKeySet final {
   bool empty() const {
     return repr_ == 0;
   }
-  uint64_t raw_repr() {
+  uint64_t raw_repr() const {
     return repr_;
   }
 

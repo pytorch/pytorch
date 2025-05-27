@@ -175,9 +175,10 @@ TORCH_META_FUNC(gather)
   auto is_index_empty = index.numel() == 0;
   if (!is_index_empty) {
     TORCH_CHECK(
-        index.scalar_type() == at::ScalarType::Long,
+        index.scalar_type() == ScalarType::Long ||
+            index.scalar_type() == ScalarType::Int,
         "gather",
-        "(): Expected dtype int64 for index");
+        "(): Expected dtype int32/int64 for index");
   }
   if (is_index_empty)
     return;
@@ -993,7 +994,8 @@ Tensor& _index_put_impl_(
   }
   if ((self.device().type() == DeviceType::CUDA ||
        self.device().type() == DeviceType::XPU) &&
-      (accumulate || globalContext().deterministicAlgorithms())) {
+      (accumulate ||
+       (globalContext().deterministicAlgorithms() && value_.numel() > 1))) {
     TORCH_CHECK(
         value_.device() == self.device(),
         "expected device ",

@@ -173,7 +173,9 @@ class TritonBundler:
             # for FXGraphCache
             old_values = kernel.prepare_for_pickle()
             new_kernel = copy.deepcopy(kernel)
+            new_kernel.prepare_for_caching()
             new_kernel._reload_kernel = None
+
             entries.append(
                 StaticallyLaunchedAutotuner(
                     key,
@@ -223,6 +225,17 @@ class TritonBundler:
         kernel_names = []
         with dynamo_timed("TritonBundler.load_cached_static_autotuners"):
             for result in static_autotuners:
+                try:
+                    # Make sure the cubin path exists and is valid
+                    for compile_result in result.kernel.compile_results:
+                        compile_result.reload_cubin_path()
+                except RuntimeError as e:
+                    log.warning(
+                        "Failed to reload cubin file statically launchable autotuner %s: %s",
+                        result.kernel_name,
+                        e,
+                    )
+                    continue
                 # We make a future instead of returning the kernel here so that
                 # kernels that are not statically launchable (i.e. cache miss)
                 # can launch a worker without waiting on the blocking step of

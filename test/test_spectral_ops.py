@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import \
      make_tensor, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
-     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, OpDTypes, skipIf, toleranceOverride, tol)
+     skipCPUIfNoFFT, deviceCountAtLeast, expectedFailureCPU, onlyCUDA, OpDTypes, skipIf, toleranceOverride, tol)
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncType)
 from torch.testing._internal.common_cuda import SM53OrLater
@@ -818,6 +818,8 @@ class TestFFT(TestCase):
         _test_complex((40, 60, 3, 80), 3, lambda x: x.transpose(2, 0).select(0, 2)[5:55, :, 10:])
         _test_complex((30, 55, 50, 22), 3, lambda x: x[:, 3:53, 15:40, 1:21])
 
+    # MKL 2024.2.0 has regression in FFT
+    @expectedFailureCPU
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
     @dtypes(torch.double)

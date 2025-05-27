@@ -10,7 +10,8 @@ import os
 import warnings
 from itertools import chain
 from types import CodeType, FunctionType, ModuleType
-from typing import Any, Callable, NamedTuple, Optional, Union
+from typing import Any, Callable, get_args, NamedTuple, Optional, Union
+from typing_extensions import TypeAlias
 
 import torch
 import torch.utils._pytree as pytree
@@ -34,6 +35,12 @@ _orig_module_getattr: Callable = torch.nn.Module.__getattr__
 _proxyable_classes: dict[type, None] = {}
 
 _is_fx_tracing_flag = False
+
+_ConstantAttributeType: TypeAlias = Union[
+    torch.Tensor, torch.ScriptObject, FakeScriptObject, pytree.TreeSpec
+]
+
+_constant_attribute_types = get_args(_ConstantAttributeType)
 
 
 def is_fx_tracing():
@@ -395,17 +402,22 @@ class Tracer(TracerBase):
         # a get_attr to retrieve that tensor. Otherwise, we'll store away the
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
-        if isinstance(a, (torch.Tensor, ScriptObject, FakeScriptObject)):
+        if isinstance(a, _constant_attribute_types):
             qualname: Optional[str] = self.tensor_attrs.get(a)
 
             # Tensor was not found in the Module hierarchy, stow it away in a
             # special attribute and set the qualname to refer to that
             if not qualname:
-                base_name = (
-                    "_tensor_constant"
-                    if isinstance(a, torch.Tensor)
-                    else "_torchbind_obj"
-                )
+                if isinstance(a, torch.Tensor):
+                    base_name = "_tensor_constant"
+                elif isinstance(a, (FakeScriptObject, ScriptObject)):
+                    base_name = "_torchbind_obj"
+                elif isinstance(a, pytree.TreeSpec):
+                    base_name = "_tree_spec_constant"
+                else:
+                    raise RuntimeError(
+                        f"cannot create constant arg for {a} of type {type(a)}."
+                    )
                 qualname = self.get_fresh_qualname(base_name)
                 assert isinstance(qualname, str)
                 self.tensor_attrs[a] = qualname
@@ -769,12 +781,13 @@ class Tracer(TracerBase):
             # values to the qualified name here for efficiency. This is used downstream
             # in create_arg
             self.tensor_attrs: dict[
-                Union[torch.Tensor, ScriptObject, FakeScriptObject], str
+                _ConstantAttributeType,
+                str,
             ] = {}
 
             def collect_tensor_attrs(m: torch.nn.Module, prefix_atoms: list[str]):
                 for k, v in m.__dict__.items():
-                    if isinstance(v, (torch.Tensor, ScriptObject, FakeScriptObject)):
+                    if isinstance(v, _constant_attribute_types):
                         self.tensor_attrs[v] = ".".join(prefix_atoms + [k])
                 for k, v in m.named_children():
                     collect_tensor_attrs(v, prefix_atoms + [k])
