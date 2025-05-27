@@ -1515,12 +1515,6 @@ def guard_scalar(
         raise AssertionError(f"unrecognized scalar {a}")
 
 
-def _constrain_symbol_range(
-    shape_env: ShapeEnv, s: sympy.Symbol, compiler_min: int, compiler_max: int
-) -> None:
-    shape_env.constrain_symbol_range(s, compiler_min, compiler_max)
-
-
 def _advise_is_size(a: SymInt) -> None:
     """
     Don't use this directly; use torch._check_is_size instead.
@@ -2468,12 +2462,15 @@ def _lru_cache(
     return wrapper  # type: ignore[return-value]
 
 
-# This is pretty similar to ShapeGuard but it also comes with a message,
-# and is exclusively used for things that MUST be true (unlike guards,
-# which can evaluate False, in which case you just choose not to use
-# a particular specialization)
 @dataclass(frozen=True)
 class RuntimeAssert:
+    """
+    This is pretty similar to ShapeGuard but it also comes with a message,
+    and is exclusively used for things that MUST be true (unlike guards,
+    which can evaluate False, in which case you just choose not to use
+    a particular specialization)
+    """
+
     expr: SympyBoolean
     msg: str = field(repr=False)
     stack: CapturedTraceback = field(repr=False)
@@ -7653,6 +7650,20 @@ def _is_non_negative_check(cond: sympy.Basic) -> Optional[str]:
 def _suggest_torch_checks(
     e: GuardOnDataDependentSymNode, src_map: defaultdict[str, list[str]]
 ) -> None:
+    """
+    Enhances a GuardOnDataDependentSymNode error with suggested fixes using torch._check.
+
+    This function analyzes the condition that caused the data-dependent error and generates
+    user-friendly suggestions for fixing it by adding appropriate torch._check calls.
+    It handles special cases like non-negative checks with specific recommendations.
+
+    Args:
+        e: The GuardOnDataDependentSymNode error to enhance with suggestions
+        src_map: A mapping from symbol names to their corresponding source-level variable names
+
+    Returns:
+        None. Modifies the error message in-place by updating e.args[0].
+    """
     # extract the unresolved condition on unbacked symints in the error
     cond = e.cond
     diff = ", ".join(s.name for s in cond.free_symbols if s.name not in src_map)
@@ -7742,6 +7753,20 @@ def _suggest_fixes_for_data_dependent_error_non_strict(
 def _remove_effect_token_unbacked_bindings(
     node: torch.fx.Node,
 ) -> Generator[None, None, None]:
+    """
+    Temporarily modifies unbacked_bindings in a node's metadata by removing the first element
+    of each path, which corresponds to an effect token.
+
+    This is used when processing nodes that have effect tokens as the first element in their
+    unbacked_bindings paths. The context manager ensures that the original bindings are
+    restored after the operation is complete.
+
+    Args:
+        node: The FX node whose unbacked_bindings will be temporarily modified
+
+    Yields:
+        None
+    """
     old_bindings = node.meta.get("unbacked_bindings", {})
 
     # Remove the extra layer for effect token
