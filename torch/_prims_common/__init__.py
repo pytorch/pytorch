@@ -275,7 +275,7 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
     maybe_guard_or_false = guard_or_false if false_if_dde else guard_size_oblivious
     maybe_guard_or_true = guard_or_true if false_if_dde else guard_size_oblivious
 
-    if maybe_guard_or_false(a.numel() == 0):
+    if maybe_guard_or_false(a.numel() < 2):
         return True
 
     expected_stride = 1

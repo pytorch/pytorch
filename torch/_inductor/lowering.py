@@ -405,6 +405,7 @@ def _register_lowering(
     broadcast,
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
     convert_input_to_bool,
+    lowering_dict,
 ):
     """
     Add a lowering to lowerings dict
@@ -449,7 +450,7 @@ def _register_lowering(
 
     aten_fn = get_overloads(aten_fn)
 
-    lowerings.update(dict.fromkeys(aten_fn, wrapped))
+    lowering_dict.update(dict.fromkeys(aten_fn, wrapped))
     return wrapped
 
 
@@ -460,6 +461,7 @@ def register_lowering(
         ELEMENTWISE_TYPE_PROMOTION_KIND
     ] = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     convert_input_to_bool=False,
+    lowering_dict=lowerings,
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     Shim to support decorator syntax.
@@ -470,6 +472,7 @@ def register_lowering(
         broadcast=broadcast,
         type_promotion_kind=type_promotion_kind,
         convert_input_to_bool=convert_input_to_bool,
+        lowering_dict=lowering_dict,
     )
 
 
