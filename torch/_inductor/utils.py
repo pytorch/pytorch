@@ -3074,6 +3074,9 @@ def get_ld_library_path() -> str:
     return path
 
 
+SUPPORTED_MKLDNN_DEVICES = ("cpu", "xpu")
+
+
 def is_mkldnn_bf16_supported(device_type: str) -> bool:
     """
     Returns True if the device supports MKL-DNN BF16.

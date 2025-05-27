@@ -19,7 +19,11 @@ from ..pattern_matcher import (
     KeywordArg,
     MULTIPLE,
 )
-from ..utils import is_mkldnn_bf16_supported, is_mkldnn_fp16_supported
+from ..utils import (
+    is_mkldnn_bf16_supported,
+    is_mkldnn_fp16_supported,
+    SUPPORTED_MKLDNN_DEVICES,
+)
 from ..virtualized import ops, V
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
@@ -29,8 +33,6 @@ from .quantization import (
     _register_woq_lowerings,
 )
 
-
-mkldnn_supported_devices = ("cpu", "xpu")
 
 if torch._C._has_mkldnn:
     aten = torch.ops.aten
@@ -1039,7 +1041,7 @@ if torch._C._has_mkldnn:
         for meta_value in [input_meta_value, weight_meta_value]:
             if (
                 meta_value is None
-                or meta_value.device.type not in mkldnn_supported_devices
+                or meta_value.device.type not in SUPPORTED_MKLDNN_DEVICES
                 or (meta_value.dim() != 4 and meta_value.dim() != 5)
             ):
                 return False
@@ -1124,7 +1126,7 @@ if torch._C._has_mkldnn:
         for meta_value in [input_meta_value, weight_meta_value]:
             if (
                 meta_value is None
-                or meta_value.device.type not in mkldnn_supported_devices
+                or meta_value.device.type not in SUPPORTED_MKLDNN_DEVICES
                 or meta_value.dim() != 2
             ):
                 return False
@@ -1132,7 +1134,7 @@ if torch._C._has_mkldnn:
             bias_meta_value = linear_node.args[0].meta.get("val")
             if (
                 bias_meta_value is None
-                or meta_value.device.type not in mkldnn_supported_devices
+                or meta_value.device.type not in SUPPORTED_MKLDNN_DEVICES
                 or bias_meta_value.dim() != 1
                 or bias_meta_value.size(0) != weight_meta_value.size(1)
             ):
