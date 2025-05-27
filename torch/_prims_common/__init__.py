@@ -454,7 +454,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 def compute_elementwise_output_logical_to_physical_perm(
     *tensors, _skip_checks=False
 ) -> list[int]:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, GuardOnDataDependentSymNode
 
     if not _skip_checks and len(tensors) == 0:
         msg = "Can't compute elementwise output strides for zero tensors!"
@@ -488,12 +488,18 @@ def compute_elementwise_output_logical_to_physical_perm(
     is_contiguous = True
     is_channels_last = True
     for t in tensors:
-        is_contiguous = is_contiguous and t.is_contiguous(
-            memory_format=torch.contiguous_format
-        )
-        is_channels_last = is_channels_last and t.is_contiguous(
-            memory_format=torch.channels_last
-        )
+        try:
+            is_contiguous = is_contiguous and t.is_contiguous(
+                memory_format=torch.contiguous_format
+            )
+        except GuardOnDataDependentSymNode:
+            is_contiguous = False
+        try:
+            is_channels_last = is_channels_last and t.is_contiguous(
+                memory_format=torch.channels_last
+            )
+        except GuardOnDataDependentSymNode:
+            is_channels_last = False
 
     if is_contiguous and not is_channels_last:
         return list(range(ndim))
@@ -504,23 +510,29 @@ def compute_elementwise_output_logical_to_physical_perm(
     shape = tensors[0].shape
 
     def should_swap(idx_a, idx_b):
+        def gte(a, b):
+            if guard_or_false(a == 0):
+                return False
+            if guard_or_false(b == 0):
+                return True
+            return guard_or_false(a % b == 0)
+
         for tensor in tensors:
             stride_a = tensor.stride()[idx_a]
             stride_b = tensor.stride()[idx_b]
 
-            if guard_size_oblivious(stride_a == 0) or guard_size_oblivious(
-                stride_b == 0
-            ):
+            if guard_or_false(stride_a == 0) or guard_or_false(stride_b == 0):
                 continue
 
-            if guard_size_oblivious(stride_a < stride_b):
-                return -1
-
-            if guard_size_oblivious(stride_a > stride_b):
+            elif guard_or_false(stride_a == stride_b):
+                if gte(shape[idx_b], shape[idx_a]):
+                    continue
                 return 1
 
-            # stride_a == stride_b
-            if guard_size_oblivious(shape[idx_a] > shape[idx_b]):
+            if gte(stride_b, stride_a):
+                return -1
+
+            if gte(stride_a, stride_b):
                 return 1
 
         # Note: this case is hit if all strides are zero,

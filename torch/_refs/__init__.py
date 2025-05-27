@@ -383,7 +383,7 @@ def handle_noncontiguous_outputs(input_tlist, output):
 
 
 def _broadcast_shapes(*_shapes):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
 
     shapes = tuple(
         (x,) if isinstance(x, IntLike) else x
@@ -405,13 +405,13 @@ def _broadcast_shapes(*_shapes):
     ] * reduce(max, (len(shape) for shape in shapes))
     for arg_idx, shape in enumerate(shapes):
         for idx in range(-1, -1 - len(shape), -1):
-            if guard_size_oblivious(common_shape[idx] == 1):
+            if guard_or_false(common_shape[idx] == 1):
                 if shape[idx] < 0:
                     raise ValueError(
                         "Attempting to broadcast a dimension with negative length!"
                     )
                 common_shape[idx] = shape[idx]
-            elif guard_size_oblivious(shape[idx] != 1):
+            elif guard_or_true(shape[idx] != 1):
                 torch._check(
                     common_shape[idx] == shape[idx],
                     lambda: f"Attempting to broadcast a dimension of length {shape[idx]} at {idx}! "
