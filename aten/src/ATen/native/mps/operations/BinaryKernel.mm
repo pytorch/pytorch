@@ -159,6 +159,14 @@ static void div_trunc_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "div_trunc");
 }
 
+static void remainder_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "remainder");
+}
+
+static void fmod_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "fmod");
+}
+
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
 REGISTER_DISPATCH(copysign_stub, &copysign_mps_kernel)
@@ -178,4 +186,6 @@ REGISTER_DISPATCH(mul_stub, &mul_mps_kernel)
 REGISTER_DISPATCH(div_true_stub, &div_true_mps_kernel)
 REGISTER_DISPATCH(div_floor_stub, &div_floor_mps_kernel)
 REGISTER_DISPATCH(div_trunc_stub, &div_trunc_mps_kernel)
+REGISTER_DISPATCH(fmod_stub, &fmod_mps_kernel)
+REGISTER_DISPATCH(remainder_stub, &remainder_mps_kernel)
 } // namespace at::native
