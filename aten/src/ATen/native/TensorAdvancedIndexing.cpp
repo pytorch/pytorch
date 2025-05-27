@@ -133,10 +133,6 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
-#ifdef USE_FBGEMM
-#include <fbgemm/Utils.h>
-#endif
-
 #include <c10/util/Unroll.h>
 #include <c10/util/irange.h>
 
@@ -1997,6 +1993,14 @@ Tensor index_fill(
   return self.clone(at::MemoryFormat::Preserve).index_fill_(dim, index, source);
 }
 
+bool is_radix_sort_accelerated_with_openmp() {
+  #ifdef _OPENMP
+    return true;
+  #else
+    return false;
+  #endif
+}
+
 // fast paths for GNN usage
 static bool can_use_expanded_index_path(
     const Tensor& self,
@@ -2004,13 +2008,6 @@ static bool can_use_expanded_index_path(
     const Tensor& index,
     const Tensor& src,
     bool is_scatter_like) {
-#ifdef USE_FBGEMM
-  if (!fbgemm::is_radix_sort_accelerated_with_openmp()) {
-    return false;
-  }
-#else
-  return false;
-#endif
 
   if (!self.device().is_cpu()) {
     return false;
