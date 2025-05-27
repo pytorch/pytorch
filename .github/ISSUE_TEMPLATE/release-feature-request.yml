@@ -1,7 +1,6 @@
-name: 🚀 RFC Release highlight for Feature proposed
-description: Submit an RFC for a new PyTorch feature
-labels: ["feature-rfc-request"]
-# todo: Stable and Unstable as labels
+name: 🚀 Release highlight for Feature proposed
+description: Submit an Release highlight for Feature proposed
+labels: ["release-feature-request"]
 
 body:
 - type: textarea
