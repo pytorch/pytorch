@@ -42,7 +42,6 @@ import weakref
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
 from typing import Any, Callable, Optional, TypeVar, Union
-from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
 import torch
@@ -71,6 +70,7 @@ from torch.utils._python_dispatch import (
     is_in_torch_dispatch_mode,
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
+from typing_extensions import ParamSpec
 
 from . import config, decorators, exc, graph_break_hints, trace_rules
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
@@ -264,9 +264,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 return fn(*args, **kwargs)
             finally:
                 cleanup.close()
-                assert torch._C._len_torch_function_stack() == 0, (
-                    "Torch function mode stack state changed while dynamo tracing, please report a bug"
-                )
+                assert (
+                    torch._C._len_torch_function_stack() == 0
+                ), "Torch function mode stack state changed while dynamo tracing, please report a bug"
                 exit_stack.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
@@ -285,9 +285,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                     torch.cuda.set_rng_state(cuda_rng_state)
                 torch._C._set_cublas_allow_tf32(allow_tf32)
                 torch.fx.graph_module._forward_from_src = prior_fwd_from_src
-                assert guards.check(), (
-                    f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
-                )
+                assert (
+                    guards.check()
+                ), f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
 
     _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
     return _fn
@@ -473,12 +473,14 @@ class ConvertFrameAssert:
     def __init__(
         self,
         compiler_fn: CompilerFn,
+        one_graph: bool = True,
         export: bool = False,
         export_constraints: Optional[typing.Never] = None,
     ) -> None:
         # assert export_constraints is None
         reset_graph_break_dup_checker()
         self._torchdynamo_orig_callable = compiler_fn
+        self._one_graph = one_graph
         self._export = export
         self._export_constraints = export_constraints
 
@@ -486,6 +488,7 @@ class ConvertFrameAssert:
     def _clone_with_backend(self) -> Callable[[CompilerFn], ConvertFrameAssert]:
         return lambda backend: convert_frame_assert(
             backend,
+            self._one_graph,
             self._export,
             self._export_constraints,
         )
@@ -625,6 +628,7 @@ class ConvertFrameAssert:
                 frame.f_builtins,
                 frame.closure,
                 self._torchdynamo_orig_callable,
+                self._one_graph,
                 self._export,
                 self._export_constraints,
                 hooks,
@@ -639,11 +643,12 @@ class ConvertFrameAssert:
 
 def convert_frame_assert(
     compiler_fn: CompilerFn,
+    one_graph: bool = True,
     export: bool = False,
     export_constraints: Optional[typing.Never] = None,
 ) -> ConvertFrameAssert:
     """Fully convert a frame into an FX graph, raising an exception if we fail."""
-    return ConvertFrameAssert(compiler_fn, export, export_constraints)
+    return ConvertFrameAssert(compiler_fn, one_graph, export, export_constraints)
 
 
 from collections import OrderedDict
@@ -675,6 +680,7 @@ def _compile(
     builtins: dict[str, object],
     closure: tuple[CellType],
     compiler_fn: CompilerFn,
+    one_graph: bool,
     export: bool,
     export_constraints: Optional[typing.Never],
     hooks: Hooks,
@@ -721,6 +727,7 @@ def _compile(
             tf_mode_stack,
             code_options,
             compiler_fn,
+            one_graph,
             export,
             export_constraints,
             frame_state=frame_state,
@@ -761,13 +768,14 @@ def _compile(
     @compile_time_strobelight_meta(phase_name="compile_inner")
     def compile_inner(
         code: CodeType,
+        one_graph: bool,
         hooks: Hooks,
         transform: Callable[[list[Instruction], dict[str, Any]], Any],
     ) -> ConvertFrameReturn:
         with contextlib.ExitStack() as stack:
             stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
             stack.enter_context(CompileTimeInstructionCounter.record())
-            return _compile_inner(code, hooks, transform)
+            return _compile_inner(code, one_graph, hooks, transform)
 
         return (
             ConvertFrameReturn()
@@ -776,6 +784,7 @@ def _compile(
     @maybe_cprofile
     def _compile_inner(
         code: CodeType,
+        one_graph: bool,
         hooks: Hooks,
         transform: Callable[[list[Instruction], dict[str, Any]], Any],
     ) -> ConvertFrameReturn:
@@ -838,15 +847,13 @@ def _compile(
                     code.co_filename,
                     code.co_firstlineno,
                 )
-                if export or config.error_on_graph_break:
-                    log.debug(
-                        "No graph captured when expecting one graph (export=True or _dynamo.config.error_on_graph_break=True)"
-                    )
+                if one_graph:
+                    log.debug("No graph captured with one_graph=True")
                 return ConvertFrameReturn()
 
-        assert distributed_state is None or distributed_state.all_states is not None, (
-            "compiler collective wasn't run before compilation completed"
-        )
+        assert (
+            distributed_state is None or distributed_state.all_states is not None
+        ), "compiler collective wasn't run before compilation completed"
 
         assert out_code is not None
         log_bytecode(
@@ -998,10 +1005,9 @@ def _compile(
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached, because fail_on_recompile_limit_hit = True this is a HARD failure"
                 )
-            elif export or config.error_on_graph_break:
+            elif one_graph:
                 raise FailOnRecompileLimitHit(
-                    f"{limit_type} reached when expecting 1 graph (export=True or _dynamo.config.error_on_graph_break=True). "
-                    "Excessive recompilations can degrade "
+                    f"{limit_type} reached with one_graph=True. Excessive recompilations can degrade "
                     "performance due to the compilation overhead of each recompilation. To monitor "
                     "recompilations, enable TORCH_LOGS=recompiles. If recompilations are expected, consider "
                     "increasing torch._dynamo.config.cache_size_limit to an appropriate value."
@@ -1078,7 +1084,7 @@ def _compile(
         torch._dynamo.utils.ReinplaceCounters.clear()
         guarded_code = None
         try:
-            guarded_code = compile_inner(code, hooks, transform)
+            guarded_code = compile_inner(code, one_graph, hooks, transform)
 
             # NB: We only put_code_state in success case.  Success case here
             # does include graph breaks; specifically, if a graph break still
@@ -1213,16 +1219,18 @@ class ConvertFrame:
         self,
         compiler_fn: CompilerFn,
         hooks: Hooks,
-        nopython: bool,
+        error_on_graph_break: bool,
     ) -> None:
         self._torchdynamo_orig_callable = compiler_fn
-        self._inner_convert = convert_frame_assert(compiler_fn)
+        self._inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
         self._hooks = hooks
-        self._nopython = nopython
+        self._error_on_graph_break = error_on_graph_break
 
     @property
     def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
-        return lambda backend: convert_frame(backend, self._hooks, self._nopython)
+        return lambda backend: convert_frame(
+            backend, self._hooks, self._error_on_graph_break
+        )
 
     def __call__(
         self,
@@ -1234,7 +1242,7 @@ class ConvertFrame:
     ) -> ConvertFrameReturn:
         input_codes.add(frame.f_code)
         counters["frames"]["total"] += 1
-        with decorators.set_fullgraph(fullgraph=self._nopython):
+        with decorators.set_fullgraph(fullgraph=self._error_on_graph_break):
             try:
                 result = self._inner_convert(
                     frame, cache_entry, hooks, frame_state, skip=skip + 1
@@ -1325,14 +1333,14 @@ class ConvertFrame:
 
 
 def convert_frame(
-    compiler_fn: CompilerFn, hooks: Hooks, nopython: bool
+    compiler_fn: CompilerFn, hooks: Hooks, error_on_graph_break: bool
 ) -> ConvertFrame:
-    """Try to convert a frame into an FX graph, if error leave frame unmodified.
+    """Try to convert a frame into an FX graph, if error leave frame unmodified
 
-    If nopython=True, graph breaks become errors (resulting in an unmodified frame).
-    If nopython=False, we will attempt to generate optimized and resume functions.
+    If error_on_graph_break=True, graph breaks become errors (resulting in an unmodified frame).
+    If error_on_graph_break=False, we will attempt to generate optimized and resume functions.
     """
-    return ConvertFrame(compiler_fn, hooks, nopython)
+    return ConvertFrame(compiler_fn, hooks, error_on_graph_break)
 
 
 # TODO mlazos: add support for same args, or record them
@@ -1354,6 +1362,7 @@ def replay(filename: str) -> None:
                 record.builtins,
                 record.closure,
                 compiler_fn=eager,
+                one_graph=False,
                 export=False,
                 export_constraints=None,
                 hooks=Hooks(),
@@ -1452,9 +1461,7 @@ class CatchErrorsWrapper:
                     )
                     assert hasattr(
                         self._torchdynamo_orig_callable, "_clone_with_backend"
-                    ), (
-                        "DDPOptimizer only supports callback fns that know how to clone themselves."
-                    )
+                    ), "DDPOptimizer only supports callback fns that know how to clone themselves."
                     hijacked_callback = (
                         self._torchdynamo_orig_callable._clone_with_backend(
                             ddp_optimizer.compile_fn,
