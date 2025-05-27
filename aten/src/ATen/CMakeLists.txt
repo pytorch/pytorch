@@ -84,6 +84,9 @@ file(GLOB mkldnn_xpu_h "native/mkldnn/xpu/*.h" "native/mkldnn/xpu/detail/*.h")
 file(GLOB mkldnn_xpu_cpp "native/mkldnn/xpu/*.cpp" "native/mkldnn/xpu/detail/*.cpp")
 
 file(GLOB native_cpp "native/*.cpp")
+# Exclude MTIA files from native_cpp
+file(GLOB native_mtia_cpp "native/mtia/*.cpp")
+list(REMOVE_ITEM native_cpp ${native_mtia_cpp})
 file(GLOB native_mkl_cpp "native/mkl/*.cpp")
 file(GLOB native_mkldnn_cpp "native/mkldnn/*.cpp")
 file(GLOB vulkan_cpp "vulkan/*.cpp")
@@ -121,6 +124,9 @@ file(GLOB native_nested_cpp "native/nested/*.cpp")
 file(GLOB native_transformers_cpp "native/transformers/*.cpp")
 
 file(GLOB native_h "native/*.h")
+# Exclude MTIA files from native_h
+file(GLOB native_mtia_h "native/mtia/*.h")
+list(REMOVE_ITEM nativnative_he_cpp ${native_mtia_h})
 file(GLOB native_ao_sparse_h
             "native/ao_sparse/*.h"
             "native/ao_sparse/cpu/*.h"
