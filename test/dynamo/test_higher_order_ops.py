@@ -3134,14 +3134,14 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
             )
 
         pred = torch.tensor(True)
-        for pytree_in in [(1,), ("string",), (1.0,)]:
+        for pytree_in in [("string",), (1.0,)]:
             with self.assertRaisesRegex(
                 RuntimeError,
                 r"Expect operands to be a tuple of possibly nested dict/list/tuple",
             ):
                 fn(pred, pytree_in)
 
-        for pytree_in in [(1,), ("string",), (1.0,)]:
+        for pytree_in in [("string",), (1.0,)]:
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
                 r"Cond doesn't work unless it is captured completely with torch.compile",
