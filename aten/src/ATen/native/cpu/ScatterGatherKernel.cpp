@@ -649,7 +649,6 @@ struct cpu_scatter_gather_base_kernel {
 
 #ifndef USE_FBGEMM
 namespace fbgemm {
-
 template <typename K, typename V>
 std::pair<K*, V*> radix_sort_parallel(
     K* const inp_key_buf,
@@ -661,9 +660,230 @@ std::pair<K*, V*> radix_sort_parallel(
   TORCH_INTERNAL_ASSERT(false, "radix_sort_parallel: ATen not compiled with FBGEMM support");
   return std::make_pair(nullptr, nullptr);
 }
-
 }
 #endif
+
+// implementation taken from FBGEMM/src/Utils.cc
+namespace {
+
+// implementation taken from pytorch/c10/util/llvmMathExtras.h
+template <typename T>
+size_t count_leading_zeros(T val) {
+  if (!val)
+    return std::numeric_limits<T>::digits;
+
+  // Use bisection method
+  size_t zero_bits = 0;
+  for (auto shift = std::numeric_limits<T>::digits >> 1; shift; shift >>= 1) {
+    const auto tmp = val >> shift;
+    if (tmp)
+      val = tmp;
+    else
+      zero_bits |= shift;
+  }
+  return zero_bits;
+}
+
+// histogram size per thread
+constexpr int RDX_HIST_SIZE = 256;
+
+void update_prefsum_and_offset_in_range(
+    int64_t& offset,
+    const int bins_beg,
+    const int bins_end,
+    const int nthreads,
+    const int64_t* const histogram,
+    int64_t* const histogram_ps) {
+  for (int bins = bins_beg; bins < bins_end; ++bins) {
+    for (int t = 0; t < nthreads; ++t) {
+      histogram_ps[t * RDX_HIST_SIZE + bins] = offset;
+      offset += histogram[t * RDX_HIST_SIZE + bins];
+    }
+  }
+}
+
+void combine_prefix_sum(
+    const int nthreads,
+    const int64_t elements_count,
+    const int64_t* const histogram,
+    int64_t* const histogram_ps) {
+  int64_t offset = 0;
+  update_prefsum_and_offset_in_range(
+      offset, 0, RDX_HIST_SIZE, nthreads, histogram, histogram_ps);
+  // TODO(DamianSzwichtenberg): Is assert sufficient? In most cases, it will
+  // work only in debug build.
+  assert(offset == elements_count);
+  // Suppress unused variable warning
+  (void)elements_count;
+}
+
+void combine_prefix_sum_for_msb(
+    const int nthreads,
+    const int64_t elements_count,
+    const int64_t* const histogram,
+    int64_t* const histogram_ps) {
+  int64_t offset = 0;
+  update_prefsum_and_offset_in_range(
+      offset, 128, RDX_HIST_SIZE, nthreads, histogram, histogram_ps);
+  update_prefsum_and_offset_in_range(
+      offset, 0, 128, nthreads, histogram, histogram_ps);
+  // TODO(DamianSzwichtenberg): Is assert sufficient? In most cases, it will
+  // work only in debug build.
+  assert(offset == elements_count);
+  // Suppress unused variable warning
+  (void)elements_count;
+}
+
+template <typename K, typename V>
+void radix_sort_kernel(
+    const K* const input_keys,
+    const V* const input_values,
+    K* const output_keys,
+    V* const output_values,
+    const int64_t elements_count,
+    int64_t* const histogram,
+    int64_t* const histogram_ps,
+    const int pass,
+    const bool pass_with_sign_bit = false) {
+  const auto tid = omp_get_thread_num();
+  const auto nthreads = omp_get_num_threads();
+  const auto elements_count_4 = elements_count / 4 * 4;
+
+  auto* const local_histogram = &histogram[RDX_HIST_SIZE * tid];
+  auto* const local_histogram_ps = &histogram_ps[RDX_HIST_SIZE * tid];
+  // Step 1: compute histogram
+  for (int i = 0; i < RDX_HIST_SIZE; i++) {
+    local_histogram[i] = 0;
+  }
+
+#pragma omp for schedule(static)
+  for (int64_t i = 0; i < elements_count_4; i += 4) {
+    const auto key_1 = input_keys[i];
+    const auto key_2 = input_keys[i + 1];
+    const auto key_3 = input_keys[i + 2];
+    const auto key_4 = input_keys[i + 3];
+
+    local_histogram[(key_1 >> (pass * 8)) & 0xFF]++;
+    local_histogram[(key_2 >> (pass * 8)) & 0xFF]++;
+    local_histogram[(key_3 >> (pass * 8)) & 0xFF]++;
+    local_histogram[(key_4 >> (pass * 8)) & 0xFF]++;
+  }
+  if (tid == (nthreads - 1)) {
+    for (int64_t i = elements_count_4; i < elements_count; ++i) {
+      const auto key = input_keys[i];
+      local_histogram[(key >> (pass * 8)) & 0xFF]++;
+    }
+  }
+#pragma omp barrier
+  // Step 2: prefix sum
+  if (tid == 0) {
+    if (pass_with_sign_bit) {
+      combine_prefix_sum_for_msb(
+          nthreads, elements_count, histogram, histogram_ps);
+
+    } else {
+      combine_prefix_sum(nthreads, elements_count, histogram, histogram_ps);
+    }
+  }
+#pragma omp barrier
+
+  // Step 3: scatter
+#pragma omp for schedule(static)
+  for (int64_t i = 0; i < elements_count_4; i += 4) {
+    const auto key_1 = input_keys[i];
+    const auto key_2 = input_keys[i + 1];
+    const auto key_3 = input_keys[i + 2];
+    const auto key_4 = input_keys[i + 3];
+
+    const int bin_1 = (key_1 >> (pass * 8)) & 0xFF;
+    const int bin_2 = (key_2 >> (pass * 8)) & 0xFF;
+    const int bin_3 = (key_3 >> (pass * 8)) & 0xFF;
+    const int bin_4 = (key_4 >> (pass * 8)) & 0xFF;
+
+    const auto pos_1 = local_histogram_ps[bin_1]++;
+    const auto pos_2 = local_histogram_ps[bin_2]++;
+    const auto pos_3 = local_histogram_ps[bin_3]++;
+    const auto pos_4 = local_histogram_ps[bin_4]++;
+
+    output_keys[pos_1] = key_1;
+    output_values[pos_1] = input_values[i];
+    output_keys[pos_2] = key_2;
+    output_values[pos_2] = input_values[i + 1];
+    output_keys[pos_3] = key_3;
+    output_values[pos_3] = input_values[i + 2];
+    output_keys[pos_4] = key_4;
+    output_values[pos_4] = input_values[i + 3];
+  }
+  if (tid == (nthreads - 1)) {
+    for (int64_t i = elements_count_4; i < elements_count; ++i) {
+      const auto key = input_keys[i];
+      const auto pos = local_histogram_ps[(key >> (pass * 8)) & 0xFF]++;
+      output_keys[pos] = key;
+      output_values[pos] = input_values[i];
+    }
+  }
+}
+
+template <typename K, typename V>
+std::pair<K*, V*> radix_sort_parallel(
+    K* const inp_key_buf,
+    V* const inp_value_buf,
+    K* const tmp_key_buf,
+    V* const tmp_value_buf,
+    const int64_t elements_count,
+    const int64_t max_value,
+    const bool maybe_with_neg_vals = false) {
+  if (max_value == 0) {
+    return {inp_key_buf, inp_value_buf};
+  }
+
+  const auto maxthreads = omp_get_max_threads();
+
+  alignas(64) int64_t histogram[RDX_HIST_SIZE * maxthreads];
+  alignas(64) int64_t histogram_ps[RDX_HIST_SIZE * maxthreads];
+
+  // If negative values are present, we want to perform all passes
+  // up to a sign bit
+  int num_bits = sizeof(K) * 8;
+  if (!maybe_with_neg_vals)
+    // __builtin_clz is not portable, std::countl_zero is available in C++20
+    num_bits -= count_leading_zeros(
+        static_cast<typename std::make_unsigned<K>::type>(max_value));
+
+  const unsigned int num_passes = (num_bits + 7) / 8;
+
+#pragma omp parallel
+  {
+    K* input_keys = inp_key_buf;
+    V* input_values = inp_value_buf;
+    K* output_keys = tmp_key_buf;
+    V* output_values = tmp_value_buf;
+
+    for (unsigned int pass = 0; pass < num_passes; pass++) {
+      radix_sort_kernel(
+          input_keys,
+          input_values,
+          output_keys,
+          output_values,
+          elements_count,
+          histogram,
+          histogram_ps,
+          pass,
+          maybe_with_neg_vals && pass == num_passes - 1);
+
+      std::swap(input_keys, output_keys);
+      std::swap(input_values, output_values);
+#pragma omp barrier
+      {}
+    }
+  }
+
+  return (
+      num_passes % 2 == 0 ? std::make_pair(inp_key_buf, inp_value_buf)
+                          : std::make_pair(tmp_key_buf, tmp_value_buf));
+}
+
+} // namespace
 
 // Note [scatter reduce optimization]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -719,6 +939,8 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
 
   int64_t* sorted_col_index_keys = nullptr;
   int64_t* sorted_col_index_values = nullptr;
+  
+#if defined(USE_FBGEMM) && (defined(__x86_64__) || defined(_M_X64))
   std::tie(sorted_col_index_keys, sorted_col_index_values) = fbgemm::radix_sort_parallel(
       keys.get(),
       values.get(),
@@ -726,6 +948,15 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
       values_tmp.get(),
       nnz,
       M);
+#else
+  std::tie(sorted_col_index_keys, sorted_col_index_values) = radix_sort_parallel(
+      keys.get(),
+      values.get(),
+      keys_tmp.get(),
+      values_tmp.get(),
+      nnz,
+      M);
+#endif
 
   int num_threads = at::get_num_threads();
   std::vector<int64_t> num_uniq(num_threads, 0);
