@@ -1975,7 +1975,7 @@ class AotCodeCompiler:
                 )
                 wrapper_build_options.save_flags_to_json(compile_flags)
                 generated_files.append(compile_flags)
-                wrapper_builder.save_compile_cmd_to_cmake(cmake_path)
+                wrapper_builder.save_compile_cmd_to_cmake(cmake_path, device_type)
                 wrapper_builder.save_src_to_cmake(cmake_path, wrapper_path)
                 generated_files.append(cmake_path)
             else:
@@ -2125,8 +2125,8 @@ class AotCodeCompiler:
                     so_builder.save_src_to_cmake(cmake_path, consts_o)
 
                 if config.aot_inductor.multi_arch_kernel_binary:
-                    # TODO: support multi-arch when package_cpp_only
-                    pass
+                    so_builder.save_kernel_asm_to_cmake(cmake_path, asm_files)
+                    generated_files.extend(asm_files)
                 else:
                     obj_srcs = [*gpu_kernels_o, *cubins_o]
                     generated_files.extend(obj_srcs)
