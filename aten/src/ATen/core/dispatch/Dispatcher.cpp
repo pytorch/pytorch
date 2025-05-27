@@ -543,13 +543,13 @@ int64_t Dispatcher::sequenceNumberForRunningRecordFunction(DispatchKey dispatchK
 }
 
 void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, DispatchKeySet dispatchKeySet, c10::ArrayRef<const c10::IValue> args) {
-  guard.before(schema_ref, args, sequenceNumberForRunningRecordFunction(dispatchKey, dispatchKeySet));
+  guard.before(at::RecordFunction::extractName(schema_ref), args, sequenceNumberForRunningRecordFunction(dispatchKey, dispatchKeySet));
 }
 
 void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, DispatchKeySet dispatchKeySet) {
   // Setting sequence number in the Autograd case to associate
   // the forward range with the corresponding Autograd's node
-  guard.before(schema_ref, sequenceNumberForRunningRecordFunction(dispatchKey, dispatchKeySet));
+  guard.before(at::RecordFunction::extractName(schema_ref), sequenceNumberForRunningRecordFunction(dispatchKey, dispatchKeySet));
 }
 #ifdef FBCODE_CAFFE2
 bool Dispatcher::profilingOperatorEvents() {
