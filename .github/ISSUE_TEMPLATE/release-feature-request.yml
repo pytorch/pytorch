@@ -1,11 +1,11 @@
-name: 🚀 Release highlight for Feature proposed
-description: Submit an Release highlight for Feature proposed
+name: 🚀 Release highlight for proposed Feature
+description: Submit a Release highlight for proposed Feature
 labels: ["release-feature-request"]
 
 body:
 - type: textarea
   attributes:
-    label: Release highlight for Feature proposed
+    label: Release highlight for proposed Feature
     description: >
       Example: “A torch.special module, analogous to SciPy's special module.”
 - type: input
