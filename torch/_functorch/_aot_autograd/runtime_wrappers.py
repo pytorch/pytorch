@@ -8,6 +8,7 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 """
 import builtins
 import collections
+import contextlib
 import copy
 import itertools
 import pprint
@@ -256,6 +257,23 @@ def maybe_mark_dynamic_helper(t: torch.Tensor, dims: set[int]):
         t._dynamo_weak_dynamic_indices = dims.copy()  # type: ignore[attr-defined]
 
 
+def _should_disable_saved_tensors_hooks():
+    # Compiled autograd is not supported yet, to be added in future.
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+        return False
+
+    get_hooks = torch._functorch._aot_autograd.utils.top_saved_tensors_hooks
+    are_inline_hooks = (
+        torch._functorch._aot_autograd.utils.saved_tensors_hooks_are_inlineable
+    )
+
+    hooks = get_hooks()
+    if are_inline_hooks(hooks):
+        return True
+
+    return False
+
+
 def _create_runtime_wrapper(
     compiled_fn,
     *,
@@ -446,7 +464,15 @@ def _create_runtime_wrapper(
             torch._C._set_grad_enabled(runtime_metadata.grad_enabled_mutation)
         return ret_outs
 
-    return runtime_wrapper
+    if not (trace_joint and _should_disable_saved_tensors_hooks()):
+        return runtime_wrapper
+
+    # Disabling saved tensors hooks
+    def _runtime_wrapper(*args, **kwargs):
+        with _disable_saved_tensors_hooks():
+            return runtime_wrapper(*args, **kwargs)
+
+    return _runtime_wrapper
 
 
 @dataclass
@@ -1807,6 +1833,35 @@ def coerce_to_expected_memory_format(x: torch.Tensor, memory_format: MemoryForma
     )
     restrided.copy_(x)
     return restrided
+
+
+@contextlib.contextmanager
+def _disable_saved_tensors_hooks():
+    error_message = (
+        "Saved tensors hooks were specialized as GraphModules."
+        "In this case aot_autograd inlines them in forward and backward graph "
+        "and disables them during runtime of aot_autograd compiled region."
+        "If you see this error, that means that there is some unexpected push or pop manipulation "
+        "during aot_autograd compiled region runtime."
+        "Compilation with different hooks must result in recompilation."
+    )
+    fail_if_non_empty = False
+    maybe_prev_message = None
+    try:
+        maybe_prev_message = (
+            torch._C._autograd._saved_tensors_hooks_get_disabled_error_message()
+        )
+        torch._C._autograd._saved_tensors_hooks_disable(
+            error_message, fail_if_non_empty
+        )
+        yield
+    finally:
+        if maybe_prev_message is None:
+            torch._C._autograd._saved_tensors_hooks_enable()
+        else:
+            torch._C._autograd._saved_tensors_hooks_disable(
+                maybe_prev_message, fail_if_non_empty
+            )
 
 
 # This is wrapped in a class just for namespacing purposes
