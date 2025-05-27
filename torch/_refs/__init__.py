@@ -5722,18 +5722,14 @@ def full(
 
 
 def _get_shape_stride_like(
-    a: TensorLikeType,
-    layout: torch.layout,
-    memory_format: torch.memory_format
+    a: TensorLikeType, layout: torch.layout, memory_format: torch.memory_format
 ) -> tuple[ShapeType, StrideType]:
     assert layout == torch.strided
 
     if memory_format != torch.preserve_format:
         return (a.shape, strides())
 
-    physical_layout = (
-        utils.compute_elementwise_output_logical_to_physical_perm(a)
-    )
+    physical_layout = utils.compute_elementwise_output_logical_to_physical_perm(a)
     shape = a.shape
 
     p_strides = utils.make_contiguous_strides_for([shape[l] for l in physical_layout])
@@ -5743,7 +5739,6 @@ def _get_shape_stride_like(
         strides[l] = p_strides[p]
 
     return (a.shape, strides)
-
 
 
 @register_decomposition(aten.full_like)
@@ -5763,7 +5758,9 @@ def full_like(
     layout = a.layout if layout is None else layout
     device = a.device if device is None else device
     shape, stride = _get_shape_stride_like(a, layout, memory_format)
-    return prims.full(a.shape, fill_value, dtype=dtype, device=device, requires_grad=requires_grad).as_strided(shape, stride)
+    return prims.full(
+        a.shape, fill_value, dtype=dtype, device=device, requires_grad=requires_grad
+    ).as_strided(shape, stride)
 
 
 @register_decomposition(aten.zeros_like)
