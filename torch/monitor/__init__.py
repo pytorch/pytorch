@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
 
 from torch._C._monitor import *  # noqa: F403
-from torch._C._monitor import _WaitCounter, _WaitCounterTracker
+from torch.monitor.waitcounter import _WaitCounter, _WaitCounterTracker  # noqa: F403
 
 
 if TYPE_CHECKING:
