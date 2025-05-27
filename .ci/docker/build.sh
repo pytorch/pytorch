@@ -109,34 +109,10 @@ case "$tag" in
     UCC_COMMIT=${_UCC_COMMIT}
     TRITON=yes
     ;;
-  pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks)
-    CUDA_VERSION=12.4.1
+  pytorch-linux-focal-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks)
+    CUDA_VERSION=12.8.0
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    TRITON=yes
-    INDUCTOR_BENCHMARKS=yes
-    ;;
-  pytorch-linux-focal-cuda12.4-cudnn9-py3.12-gcc9-inductor-benchmarks)
-    CUDA_VERSION=12.4.1
-    CUDNN_VERSION=9
-    ANACONDA_PYTHON_VERSION=3.12
-    GCC_VERSION=9
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    TRITON=yes
-    INDUCTOR_BENCHMARKS=yes
-    ;;
-  pytorch-linux-focal-cuda12.4-cudnn9-py3.13-gcc9-inductor-benchmarks)
-    CUDA_VERSION=12.4.1
-    CUDNN_VERSION=9
-    ANACONDA_PYTHON_VERSION=3.13
     GCC_VERSION=9
     VISION=yes
     KATEX=yes
@@ -251,19 +227,19 @@ case "$tag" in
     UCC_COMMIT=${_UCC_COMMIT}
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-xpu-2024.0-py3)
-    ANACONDA_PYTHON_VERSION=3.9
-    GCC_VERSION=11
-    VISION=yes
-    XPU_VERSION=0.5
-    NINJA_VERSION=1.9.0
-    TRITON=yes
-    ;;
   pytorch-linux-jammy-xpu-2025.0-py3)
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     VISION=yes
     XPU_VERSION=2025.0
+    NINJA_VERSION=1.9.0
+    TRITON=yes
+    ;;
+  pytorch-linux-jammy-xpu-2025.1-py3)
+    ANACONDA_PYTHON_VERSION=3.9
+    GCC_VERSION=11
+    VISION=yes
+    XPU_VERSION=2025.1
     NINJA_VERSION=1.9.0
     TRITON=yes
     ;;
