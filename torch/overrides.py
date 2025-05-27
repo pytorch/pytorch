@@ -1263,6 +1263,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch._wrapped_quantized_linear_prepacked: (
             lambda input, input_scale, input_zero_point, prepacked, out_scale, out_zero_point, out_channel : -1  # noqa: B950
         ),
+        torch.xor_sum: lambda input, dim=None, keepdim=False, out=None: -1,
         torch.zeros_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch._fw_primal_copy: lambda self, level: -1,
         torch._make_dual_copy: lambda primal, tangent, level: -1,

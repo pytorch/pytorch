@@ -2232,6 +2232,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.where",
         "torch.xlogy_",
         "torch.xlogy",
+        "torch.xor_sum",
         "torch.zero_",
         "torch.zeros",
         "torch.zeros_like",

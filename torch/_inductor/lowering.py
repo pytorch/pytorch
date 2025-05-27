@@ -6381,6 +6381,7 @@ def reduce_min(x, dim=None, keepdim=False):
 
 
 register_lowering(prims.xor_sum)(make_reduction("xor_sum"))
+register_lowering(aten.xor_sum)(make_reduction("xor_sum"))
 reduce_amax = register_lowering(aten.amax)(make_reduction("max"))
 reduce_amin = register_lowering(aten.amin)(make_reduction("min"))
 reduce_argmax = register_lowering(aten.argmax)(

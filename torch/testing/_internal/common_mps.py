@@ -478,6 +478,7 @@ if torch.backends.mps.is_available():
             "to_sparse": None,
             "unique": None,
             "vdot": None,
+            "xor_sum": None,
             "segment_reduce_": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
