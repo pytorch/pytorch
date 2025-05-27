@@ -822,6 +822,15 @@ graph():
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
 
+    def test_unused_constant(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = torch.tensor(3)
+                return x * x
+
+        ep = export(M(), (torch.ones(3),))
+        self.assertEqual(len(ep.constants), 0)
+
     def test_unbacked_bincount(self):
         class Foo(torch.nn.Module):
             def forward(self, xs):
@@ -1345,6 +1354,98 @@ graph():
 
         M()(torch.randn(7))
         torch.export.export(M(), (torch.randn(7),), strict=strict)
+
+    def test_cond_branches_return_constant_int(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                idx = torch.cond(x.sum() > 3, lambda: 0, lambda: 1, tuple())
+                return x[idx]
+
+        args = (torch.randn(3, 3),)
+        m = M()
+        ep = export(M(), args)
+        if self._testMethodName == "test_cond_branches_return_constant_int":
+            self.assertExpectedInline(
+                normalize_gm(ep.module().print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, x):
+        x: "f32[3, 3]";
+
+        x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+        sum_1: "f32[]" = torch.ops.aten.sum.default(x)
+        gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 3);  sum_1 = None
+
+        true_graph_0 = self.true_graph_0
+        false_graph_0 = self.false_graph_0
+        cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, ());  gt = true_graph_0 = false_graph_0 = None
+
+        getitem_1: "Sym(u0)" = cond[0];  cond = None
+
+        ge_1: "Sym(u0 >= 0)" = getitem_1 >= 0
+        _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
+        le_1: "Sym(u0 <= 1)" = getitem_1 <= 1
+        _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le_1, "Runtime assertion failed for expression u0 <= 1 on node 'le_1'");  le_1 = _assert_scalar_default_1 = None
+
+        select: "f32[3]" = torch.ops.aten.select.int(x, 0, getitem_1);  x = getitem_1 = None
+        return pytree.tree_unflatten((select,), self._out_spec)
+
+    class true_graph_0(torch.nn.Module):
+        def forward(self):
+            return (0,)
+
+    class false_graph_0(torch.nn.Module):
+        def forward(self):
+            return (1,)
+""",  # noqa: B950
+            )
+        self.assertEqual(m(*args), ep.module()(*args))
+
+    def test_cond_branches_return_same_int(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                idx = torch.cond(x.sum() > 3, lambda: 0, lambda: 0, tuple())
+                return x[idx]
+
+        args = (torch.randn(3, 3),)
+        m = M()
+        ep = export(M(), args)
+        # Ideally, we could remove the cond at the front end directly
+        # since it's not used anyway. But we can only do this early
+        # optimization if all the outputs are the same constants, which
+        # will complicates the output check so just keep it in the graph.
+        # let downstream to dce it.
+        if self._testMethodName == "test_cond_branches_return_same_int":
+            self.assertExpectedInline(
+                normalize_gm(ep.module().print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, x):
+        x: "f32[3, 3]";
+
+        x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+        sum_1: "f32[]" = torch.ops.aten.sum.default(x)
+        gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 3);  sum_1 = None
+
+        true_graph_0 = self.true_graph_0
+        false_graph_0 = self.false_graph_0
+        cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, ());  gt = true_graph_0 = false_graph_0 = None
+        getitem = cond[0];  cond = getitem = None
+
+        select: "f32[3]" = torch.ops.aten.select.int(x, 0, 0);  x = None
+        return pytree.tree_unflatten((select,), self._out_spec)
+
+    class true_graph_0(torch.nn.Module):
+        def forward(self):
+            return (0,)
+
+    class false_graph_0(torch.nn.Module):
+        def forward(self):
+            return (0,)
+""",  # noqa: B950
+            )
+
+        self.assertEqual(m(*args), ep.module()(*args))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_cond_contains_unbacked_no_escape(self):
@@ -4469,32 +4570,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, t):
                 items = [t[i].item() for i in range(t.numel())]
                 r = torch.randn([items[0], items[1]])
-                # Could not guard on data-dependent expression Ne(Mod(u1, u2), 0)
                 return r.view(items[0], items[2])
 
         M = M_v0
-        with self.assertRaisesRegex(
-            error_type,
-            "The following call raised this error(.*\n)+"
-            f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
-            "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('torch._check((items[1] % items[2]) == 0)')}.*\n"
-            f".*{re.escape('torch._check((items[1] % items[2]) != 0)')}(.*\n)+"
-            f".*{re.escape('(These suggested fixes were derived by replacing `u1` with items[1]')}"
-            f".*{re.escape('or r.shape[1], `u2` with items[2] in Eq(Mod(u1, u2), 0) and its negation.')}",
-        ):
-            export(N(), (t,), strict=strict)
-
-        class M_v1(torch.nn.Module):
-            def forward(self, t):
-                items = [t[i].item() for i in range(t.numel())]
-                r = torch.randn([items[0], items[1]])
-                # TODO(pianpwk): this isn't the suggested fixes.
-                # fix issue with % being interpreted as PythonMod instead of Mod
-                torch._check(items[1] == items[2])
-                return r.view(items[0], items[2])
-
-        M = M_v1
         export(N(), (t,), strict=strict)
 
     def test_suggested_fixes_for_data_dependent_errors_puzzlers(self):

@@ -2,7 +2,7 @@
 import functools
 import operator
 from functools import reduce
-from typing import Any, Callable
+from typing import Any
 
 import torch
 from torch._dynamo.utils import counters
@@ -1345,9 +1345,7 @@ if torch._C._has_mkldnn:
                     or V.aot_compilation
                 ):
                     packed_linear_inputs += (bias, "none", [], "")
-                    packed_linear_op: Callable[..., Any] = (
-                        mkldnn._linear_pointwise.default
-                    )
+                    packed_linear_op = mkldnn._linear_pointwise.default
                 else:
                     packed_linear_inputs += (transpose_weight_node, bias, batch_size)
                     packed_linear_op = torch.ops.mkl._mkl_linear
