@@ -69,14 +69,16 @@ void xlog1py_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
-// Note:
-// For low-precision dtypes like float16, results may overflow or underflow.
-// - For very small exponents (e.g., exp <= -25), the result will likely underflow to 0.0.
+
+//Note:
+// For low-precision dtypes like float16, results may overflow or underflow depending on both the value of x and the exponent.
+// - For very negative exponents (e.g., exp <= -25) and small values of x, the result may underflow to 0.0.
 //   The smallest positive subnormal representable float16 is ~2^-24 ≈ 5.96e-08.
-// - For very large exponents (e.g., exp >= 16), the result may overflow to inf.
+//   However, if x is large enough, the result may still be representable and not underflow.
+// - For very large exponents (e.g., exp >= 16) and large values of x, the result may overflow to inf.
 //   The largest finite float16 is 65504, approximately 2^15.999.
 //
-// These behaviors are expected and conform to IEEE 754 float16 specification.
+// These behaviors are expected and conform to the IEEE 754 float16 specification.
 //
 // The CUDA implementation uses ::ldexp from CUDA device math, which matches the behavior of std::ldexp.
 // Results for float16/bfloat16 are computed in device code and follow the same underflow/overflow semantics as on CPU.

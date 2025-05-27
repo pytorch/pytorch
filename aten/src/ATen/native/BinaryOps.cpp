@@ -11,6 +11,9 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorMeta.h>
+#include <ATen/TypeDefault.h> 
+#include <ATen/core/ScalarType.h>
+#include <ATen/ops/result_type.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1564,8 +1567,9 @@ Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
 }
 
 Tensor ldexp(const Tensor& self, const Tensor& other) {
-  Tensor result = at::empty_like(self);
-  return at::native::ldexp_out(self, other, result);
+    auto result_dtype = at::result_type(self, other);
+    Tensor result = at::empty(self.sizes(), self.options().dtype(result_dtype));
+    return at::native::ldexp_out(self.to(result_dtype), other, result);
 }
 
 Tensor& ldexp_(Tensor& self, const Tensor& other) {
