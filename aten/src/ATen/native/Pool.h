@@ -292,7 +292,7 @@ pool3d_shape_check(
   int effectiveKH = (kH - 1) * dilationH + 1;
 
   TORCH_CHECK(
-      kT / 2 >= pT && kW / 2 >= pW && kH / 2 >= pH,
+      effectiveKT / 2 >= pT && effectiveKW / 2 >= pW && effectiveKH / 2 >= pH,
       "pad should be smaller than or equal to half of effective kernel size, but got "
       "padT: ",
       pT,
