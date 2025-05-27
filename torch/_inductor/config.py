@@ -1147,8 +1147,8 @@ class triton:
     tile_reductions: bool = False
 
     # should we stop a fusion to allow better tiling?
-    tiling_prevents_pointwise_fusion = True
-    tiling_prevents_reduction_fusion = True
+    tiling_prevents_pointwise_fusion = False
+    tiling_prevents_reduction_fusion = False
 
     # should we give different names to kernels
     # Note: This is orthogonal to descriptive_names - this is deciding whether
