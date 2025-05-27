@@ -1450,6 +1450,11 @@ class cuda:
         os.environ.get("TORCHINDUCTOR_CUTLASS_PRESCREENING", "1") == "1"
     )
 
+    # fbcode specific. On whether to force compile locally instead of use re
+    cutlass_force_compile_locally: bool = (
+        os.environ.get("TORCHINDUCTOR_CUTLASS_FORCE_COMPILE_LOCALLY", "0") == "1"
+    )
+
 
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx90a", "gfx942"].
