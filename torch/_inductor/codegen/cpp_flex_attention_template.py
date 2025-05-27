@@ -405,7 +405,6 @@ extern "C"
     accum_t* qk_max_data = qk_data + qSplitSize * kvSplitSize;
     accum_t* qk_sum_data = qk_max_data + qSplitSize;
     accum_t* dst_data = qk_sum_data + qSplitSize;
-    {{kernel.kernel_name}}_fill_stub<accum_t>(dst_data, 0.0, qSplitSize * headSize_v);
     scalar_t *qk_reduced_data =
         is_reduced_type
             ? buf_reduced_data + ompIdx * qSplitSize * ekvSplitSize
@@ -415,26 +414,6 @@ extern "C"
             : nullptr;
 
     for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
-      int64_t m = k * qSplitSize;
-      int64_t cur_qSplitSize = std::min(qSplitSize, qSize - m);
-      // Initialize max and sum
-      {{kernel.kernel_name}}_fill_stub(qk_max_data,
-          -std::numeric_limits<accum_t>::infinity(), cur_qSplitSize);
-      {{kernel.kernel_name}}_fill_stub(qk_sum_data,
-          static_cast<accum_t>(0), cur_qSplitSize);
-
-      if (!headSize_even && need_pack) {
-        // Pad query if headSize is not even
-        {{kernel.kernel_name}}_copy_value_with_pad<scalar_t>(
-          q_data + i * qStrideB + j * qStrideH + m * qStrideM,
-          query_t_padding_ptr,
-          cur_qSplitSize,
-          headSize,
-          cur_qSplitSize,
-          eheadSize,
-          qStrideM
-        );
-      }
       auto i_kvi = is_broadcast_bs_kvi ? i/bs_shards_kvi : i;
       auto j_kvi = is_broadcast_head_kvi ? j/gqa_shards_kvi : j;
       auto kv_logical_num_data = kv_num_blocks_data + i_kvi * num_kviStrideB +
@@ -446,6 +425,7 @@ extern "C"
                                   j_kvi * kviStrideH + k*kviStrideQ + kv_i;
         kv_indice_list[kv_i] = *kv_logical_data;
       }
+      bool is_skip_kv = kv_indice_num > 0 ? false : true;
 {%- if has_full_kv_block %}
       auto full_kv_logical_num_data = full_kv_num_blocks_data + i_kvi * num_kviStrideB +
                               j_kvi * num_kviStrideH + k;
@@ -456,28 +436,42 @@ extern "C"
                                   j_kvi * full_kviStrideH + k*full_kviStrideQ + kv_i;
         full_kv_indice_list[kv_i] = *full_kv_logical_data;
       }
+      is_skip_kv = kv_indice_num + full_kv_indice_num > 0 ? false : true;
 {%- endif %}
-      for (int64_t n = 0; n < kvSize; n += kvSplitSize) {
+      int64_t m = k * qSplitSize;
+      int64_t cur_qSplitSize = std::min(qSplitSize, qSize - m);
+      if (!is_skip_kv){
+        // Initialize max and sum
+        {{kernel.kernel_name}}_fill_stub(qk_max_data,
+            -std::numeric_limits<accum_t>::infinity(), cur_qSplitSize);
+        {{kernel.kernel_name}}_fill_stub(qk_sum_data,
+            static_cast<accum_t>(0), cur_qSplitSize);
+
+        if (!headSize_even && need_pack) {
+          // Pad query if headSize is not even
+          {{kernel.kernel_name}}_copy_value_with_pad<scalar_t>(
+            q_data + i * qStrideB + j * qStrideH + m * qStrideM,
+            query_t_padding_ptr,
+            cur_qSplitSize,
+            headSize,
+            cur_qSplitSize,
+            eheadSize,
+            qStrideM
+          );
+        }
+      }
+
+{%- if has_full_kv_block %}
+      for (int64_t n_idx = 0; n_idx < kv_indice_num + full_kv_indice_num ; n_idx += 1) {
+        auto n = n_idx < kv_indice_num ? kv_indice_list[n_idx]*kvSplitSize : full_kv_indice_list[n_idx - kv_indice_num]*kvSplitSize;
+{%- else %}
+      for (int64_t n_idx = 0; n_idx < kv_indice_num ; n_idx += 1) {
+        auto n = kv_indice_list[n_idx]*kvSplitSize;
+{%- endif %}
+
         auto cur_n = n/kvSplitSize;
         int64_t cur_kvSplitSize = std::min(kvSplitSize, kvSize - n);
         int64_t cur_ekvSplitSize = (need_pack && cur_kvSplitSize % 2 != 0) ? cur_kvSplitSize + 1 : cur_kvSplitSize;
-{%- if has_full_kv_block %}
-        if ( (std::find(kv_indice_list.begin(), kv_indice_list.end(), cur_n) == kv_indice_list.end())
-             and (std::find(full_kv_indice_list.begin(), full_kv_indice_list.end(), cur_n) == full_kv_indice_list.end()) ) {
-              if ( kv_indice_list.size() == 0 and full_kv_indice_list.size() == 0) {
-                {{kernel.kernel_name}}_fill_stub<accum_t>(dst_data, 0.0, qSplitSize * headSize_v);
-              }
-              continue;
-        }
-{%- else %}
-        if ( std::find(kv_indice_list.begin(), kv_indice_list.end(), cur_n) == kv_indice_list.end() ){
-              if ( kv_indice_list.size() == 0 ) {
-                {{kernel.kernel_name}}_fill_stub<accum_t>(dst_data, 0.0, qSplitSize * headSize_v);
-              }
-              continue;
-        }
-{%- endif %}
-
 
         // Calculate scale * q @ k.T
         auto i_kv = is_broadcast_bs_kv ? i/bs_shards : i;
@@ -588,7 +582,7 @@ extern "C"
             // max[row] <- max
             qk_max_data[row] = tmp_max;
             // dst <- dst * exp_tmp
-            if (n > 0) {
+            if (n_idx > 0) {
               at::vec::map<accum_t>(
               [exp_tmp](Vec x) { return x * Vec(exp_tmp); },
               dst_data + row * headSize_v,
@@ -614,13 +608,13 @@ extern "C"
                   cur_ekvSplitSize,
                   vStrideN,
                   headSize_v,
-                  n > 0,
+                  n_idx > 0,
                   {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
                   v_addr,
                   dst_data,
                   need_pack);
           } else {
-            if (n > 0) {
+            if (n_idx > 0) {
               {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(true)>(
                 {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
                 v_addr,
@@ -653,7 +647,7 @@ extern "C"
               cur_ekvSplitSize,
               headSize_v,
               headSize_v,
-              n > 0,
+              n_idx > 0,
               qk_reduced_data,
               value_reorder_ptr +
                   i_kv * num_head_k * kv_padding_size * headSize_v +
@@ -662,6 +656,7 @@ extern "C"
               need_pack);
         }
       }
+
       // dst <- dst / sum[row]
       // reorder MHA output with strides
       for (int64_t row = 0; row < cur_qSplitSize; ++row) {
@@ -672,11 +667,12 @@ extern "C"
         qk_sum_data[row] = qk_sum_data[row] == 0 ? 1 : qk_sum_data[row];
         accum_t sum_reciprocal = 1 / qk_sum_data[row];
         at::vec::map<scalar_t>(
-            [sum_reciprocal](Vec x) { return x * Vec(sum_reciprocal); },
+            [sum_reciprocal, is_skip_kv](Vec x) { return  is_skip_kv ? Vec(0.0) : x * Vec(sum_reciprocal); },
             out_data + i * oStrideB + j * oStrideH + m * oStrideM + row * oStrideM,
             dst_data + row * headSize_v,
             headSize_v);
       }
+
       // Move to the next query
       at::native::data_index_step(i, batchSize, j, num_head, k, qSlice);
     }
