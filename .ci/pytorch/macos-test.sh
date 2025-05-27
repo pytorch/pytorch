@@ -179,7 +179,8 @@ torchbench_setup_macos() {
   git checkout "$(cat ../.github/ci_commit_pins/audio.txt)"
   git submodule update --init --recursive
   python setup.py clean
-  python setup.py develop
+  #TODO: Remove me, when figure out how to make TorchAudio find brew installed openmp
+  USE_OPENMP=0 python setup.py develop
   popd
 
   # Shellcheck doesn't like it when you pass no arguments to a function that can take args. See https://www.shellcheck.net/wiki/SC2120
