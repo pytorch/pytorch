@@ -84,8 +84,8 @@ class RingAttentionTest(DTensorTestBase):
                 "rotater": [_RotateMethod.ALL_TO_ALL, _RotateMethod.ALL_GATHER],
                 "test_forward_only": [True, False],
                 "dispatch_mode": [
-                    _DispatchMode.MONKEY_PATCH,
-                    _DispatchMode.TORCH_FUNCTION,
+                    "monkey_patch",
+                    "torch_function",
                 ],
             },
             self._test_ring_attention_sdpa,
@@ -99,9 +99,11 @@ class RingAttentionTest(DTensorTestBase):
         load_balance: bool,
         rotater: _RotateMethod,
         test_forward_only: bool,
-        dispatch_mode: _DispatchMode,
+        dispatch_mode: str,
     ) -> None:
-        torch.distributed.tensor.experimental._attention._dispatch_mode = dispatch_mode
+        torch.distributed.tensor.experimental._attention._set_dispatch_mode(
+            dispatch_mode
+        )
 
         def fn_eval(fn, *args, **kwargs):
             if test_forward_only:
@@ -234,8 +236,9 @@ class RingAttentionTest(DTensorTestBase):
             cp_k.requires_grad = False
             cp_v.requires_grad = False
 
-        torch.distributed.tensor.experimental._attention._dispatch_mode = (
-            _DispatchMode.MONKEY_PATCH
+        # reset to the default mode
+        torch.distributed.tensor.experimental._attention._set_dispatch_mode(
+            "monkey_patch"
         )
 
     def test_is_causal_behavior(self) -> None:
@@ -568,6 +571,9 @@ class RingFlexAttentionTest(DTensorTestBase):
         )
         torch.testing.assert_close(cp_out, expect_out, atol=1e-6, rtol=1e-2)
         torch.testing.assert_close(cp_lse, expect_lse, atol=1e-6, rtol=1e-2)
+
+        # reset to the default mode
+        _set_dispatch_mode("monkey_patch")
 
 
 if __name__ == "__main__":
