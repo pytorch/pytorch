@@ -558,7 +558,7 @@ class DebugFormatter:
         shutil.copy(filename, self.filename(f"output_code.{extension}"))
 
     def log_inductor_triton_kernel_to_post_grad_node_info(
-        self, filename: str = "inductor_triton_kernel_to_post_grad_nodes.json"
+        self, filename: str = "inductor_generated_kernel_to_post_grad_nodes.json"
     ) -> tuple[dict[str, list[str]], dict[str, Any]]:
         debug_info = {}
         with self.fopen(filename, "w") as fd:
@@ -796,13 +796,13 @@ def create_node_mapping(
     except Exception as e:
         # Since this is just logging code, it should never interfere with regular
         # program execution, so we use this try-except to guard against any error
-        log.error("Unexpected error in create_node_mapping: %s", e)  # noqa: TRY400
-        log.error("post_to_pre_grad_nodes_json:  %s", post_to_pre_grad_nodes_json)  # noqa: TRY400
-        log.error(  # noqa: TRY400
+        log.error("Unexpected error in create_node_mapping: %s", e)
+        log.error("post_to_pre_grad_nodes_json:  %s", post_to_pre_grad_nodes_json)
+        log.error(
             "triton_kernel_to_post_grad_json:  %s", triton_kernel_to_post_grad_json
         )
-        log.error("pre_grad_graph_id:  %s", pre_grad_graph_id)  # noqa: TRY400
-        log.error(traceback.format_exc())  # noqa: TRY400
+        log.error("pre_grad_graph_id:  %s", pre_grad_graph_id)
+        log.error(traceback.format_exc())
         return empty_return
 
 

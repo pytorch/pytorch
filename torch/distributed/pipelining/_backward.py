@@ -203,7 +203,6 @@ def stage_backward_input(
         inputs=input_values,
         grad_outputs=output_grads,
         retain_graph=True,
-        allow_unused=True,
     )
     # Update the gradients for inputs
     for inp, dinput in zip(input_values, dinputs):
