@@ -156,6 +156,43 @@ class AOTInductorTestsTemplate:
                 model, example_inputs, "AOTInductorModelRunMinimalArrayrefInterface(", 1
             )
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "toolchain doesn't support ptx to fatbin",
+    )
+    @skipIfRocm
+    @skipIfXpu
+    @common_utils.parametrize("embed_kernel_binary", [True, False])
+    def test_simple_multi_arch(self, embed_kernel_binary):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU_TYPE")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 16)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(10, 16, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        model = Model()
+        with config.patch(
+            {
+                "aot_inductor.embed_kernel_binary": embed_kernel_binary,
+                "aot_inductor.multi_arch_kernel_binary": True,
+            }
+        ):
+            self.check_model(model, example_inputs)
+            if not embed_kernel_binary:
+                _, code = run_and_get_cpp_code(
+                    AOTIRunnerUtil.compile, model, example_inputs
+                )
+                FileCheck().check(".fatbin").run(code)
+
     def test_small_constant(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
