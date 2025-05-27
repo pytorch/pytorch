@@ -5,6 +5,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from typing import Any, Callable, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
@@ -1337,6 +1338,57 @@ def view_to_reshape(gm):
         op="call_function", target=torch.ops.aten.view.default
     ):
         nd.target = torch.ops.aten.reshape.default
+
+
+def find_gpu_device(args: Sequence[Any]) -> Optional[torch.device]:
+    for arg in args:
+        if not isinstance(arg, torch.fx.Node):
+            continue
+
+        val = arg.meta["val"]
+        if isinstance(val, torch.Tensor) and is_gpu(val.device.type):
+            return val.device
+
+    return None
+
+
+def move_cpu_scalar_tensor_to_cuda(gm: torch.fx.GraphModule):
+    """
+    TODO: Doc
+    """
+    graph = gm.graph
+    cpu_to_gpu: dict[torch.fx.Node, torch.fx.Node] = {}
+
+    def get_gpu_arg(arg: torch.fx.Node):
+        if arg in cpu_to_gpu:
+            arg_gpu = cpu_to_gpu[arg]
+        else:
+            with graph.inserting_after(arg):
+                arg_gpu = graph.call_function(
+                    torch.ops.prims.device_put.default, (arg, gpu_device)
+                )
+            cpu_to_gpu[arg] = arg_gpu
+        return arg_gpu
+
+    for node in graph.nodes:
+        if node.op == "call_function":
+            gpu_device = find_gpu_device(node.args)
+            if gpu_device is None:
+                continue
+
+            new_args = []
+            for arg in node.args:
+                if (
+                    isinstance(arg, torch.fx.Node)
+                    and (val := arg.meta["val"]) is not None
+                    and isinstance(val, torch.Tensor)
+                    and val.is_cpu
+                ):
+                    new_args.append(get_gpu_arg(arg))
+                else:
+                    new_args.append(arg)
+            node.args = tuple(new_args)
+    gm.recompile()
 
 
 def should_prefer_unfused_addmm(match):
