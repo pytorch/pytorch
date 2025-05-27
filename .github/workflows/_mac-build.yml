@@ -30,7 +30,7 @@ on:
       python-version:
         required: false
         type: string
-        default: "3.9"
+        default: "3.12"
         description: |
           The python version to be used. Will be 3.9 by default
       test-matrix:
@@ -85,8 +85,8 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: ${{ inputs.python-version }}
-          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
-          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
+          environment-file: .github/requirements/conda-env-macOS-ARM64
+          pip-requirements-file: .github/requirements/pip-requirements-macOS.txt
 
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
         uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
