@@ -26,9 +26,11 @@ from typing import Any, Optional, Union
 import torch
 from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config, exc
+from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.torch_version import TorchVersion
+from torch.utils._ordered_set import OrderedSet
 
 
 if config.is_fbcode():
@@ -182,11 +184,11 @@ def convert_cubin_to_obj(
     obj_file = cubin_file + ".o"
     # Convert .cubin to .o
     cmd = f"{ld} -r -b binary -z noexecstack -o {obj_file} {cubin_file}"
-    subprocess.run(cmd.split(), capture_output=True, text=True)
+    subprocess.run(cmd.split(), capture_output=True, text=True, check=True)
     os.remove(cubin_file)
     # Rename .data to .rodata
     cmd = f"{objcopy} --rename-section .data=.rodata,alloc,load,readonly,data,contents {obj_file}"
-    subprocess.run(cmd.split(), capture_output=True, text=True)
+    subprocess.run(cmd.split(), capture_output=True, text=True, check=True)
     # By default objcopy will create *_start, *_size, *_end symbols using the full path
     # Rename to use the unique kernel name
     file_name = re.sub(r"[\W]", "_", cubin_file)
@@ -197,8 +199,17 @@ def convert_cubin_to_obj(
         + f"--redefine-sym _binary_{file_name}_end=__{kernel_name}_end "
         + obj_file
     )
-    subprocess.run(cmd.split(), capture_output=True, text=True)
+    subprocess.run(cmd.split(), capture_output=True, text=True, check=True)
     return obj_file
+
+
+def get_cmd_to_compile_fatbin(asm_file: str, fatbin_file: str) -> str:
+    assert asm_file and asm_file.endswith(".ptx")
+    archs = OrderedSet([cuda_env.get_cuda_arch(), "80", "86", "89", "90"])
+    cmd = f"nvcc -fatbin {asm_file} -o {fatbin_file}"
+    for arch in archs:
+        cmd += f" -gencode arch=compute_{arch},code=compute_{arch}"
+    return cmd
 
 
 @functools.lru_cache(None)

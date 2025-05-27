@@ -1330,6 +1330,9 @@ class aot_inductor:
     # Embed generated kernel binary files into model.so
     embed_kernel_binary: bool = False
 
+    # Generate kernel binary files that support multiple archs
+    multi_arch_kernel_binary: bool = False
+
     # Custom ops that have implemented C shim wrappers, defined as an op to C shim declaration dict
     custom_ops_to_c_shims: dict[torch._ops.OpOverload, list[str]] = {}
     # custom op libs that have implemented C shim wrappers
