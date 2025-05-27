@@ -1234,12 +1234,7 @@ class ConvertFrame:
     ) -> ConvertFrameReturn:
         input_codes.add(frame.f_code)
         counters["frames"]["total"] += 1
-        nopython_ctx = (
-            decorators.set_fullgraph(fullgraph=True)
-            if self._nopython
-            else contextlib.nullcontext()
-        )
-        with nopython_ctx:
+        with decorators.set_fullgraph(fullgraph=self._nopython):
             try:
                 result = self._inner_convert(
                     frame, cache_entry, hooks, frame_state, skip=skip + 1

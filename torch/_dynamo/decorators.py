@@ -10,7 +10,7 @@ import inspect
 import sys
 import weakref
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -845,7 +845,19 @@ def dont_skip_tracing(fn=None):
     return ctx
 
 
-def set_fullgraph(fn=None, fullgraph=True):
+@overload
+def set_fullgraph(
+    fn: None = None, fullgraph: bool = True
+) -> DynamoConfigPatchProxy: ...
+
+
+@overload
+def set_fullgraph(fn: Callable[_P, _R], fullgraph: bool = True) -> Callable[_P, _R]: ...
+
+
+def set_fullgraph(
+    fn: Optional[Callable[_P, _R]] = None, fullgraph: bool = True
+) -> Union[Callable[_P, _R], DynamoConfigPatchProxy]:
     """
     Context manager/decorator to toggle fullgraph setting.
     """

@@ -8,7 +8,7 @@ from unittest.mock import patch
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.exc import IncorrectUsage
+from torch._dynamo.exc import IncorrectUsage, Unsupported
 from torch._dynamo.utils import counters
 
 
@@ -1673,6 +1673,27 @@ If the above doesn't work, please subtmit an issue to GitHub.
             Exception, "Cannot convert patch_dynamo_config args/kwargs to constants."
         ):
             f4(torch.randn(3))
+
+    def test_set_fullgraph(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f1(x):
+            x = x + 1
+            with torch._dynamo.set_fullgraph(fullgraph=False):
+                torch._dynamo.graph_break()
+            return x + 2
+
+        inp = torch.ones(3)
+        # self.assertEqual(f1(inp), inp + 3)
+
+        @torch.compile(backend="eager")
+        def f2(x):
+            x = x + 1
+            with torch._dynamo.set_fullgraph(fullgraph=True):
+                torch._dynamo.graph_break()
+            return x + 2
+
+        with self.assertRaises(Unsupported):
+            f2(inp)
 
 
 if __name__ == "__main__":
