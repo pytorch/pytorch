@@ -146,9 +146,12 @@ struct atan_functor {
     auto coef = div(T(1, 0), T(0, 2));
     auto log_arg = div(T(-1 * x.x, 1 - x.y), T(x.x, 1 + x.y));
     // Calculate log using method from log_functor
-    auto magnitude = ::precise::sqrt(log_arg.x * log_arg.x + log_arg.y * log_arg.y);
+    auto magnitude =
+        ::precise::sqrt(log_arg.x * log_arg.x + log_arg.y * log_arg.y);
     auto real = ::precise::log(magnitude);
-    auto imag = (log_arg.x == 0 && log_arg.y == 0) ? 0 : ::precise::atan2(log_arg.y, log_arg.x);
+    auto imag = (log_arg.x == 0 && log_arg.y == 0)
+        ? 0
+        : ::precise::atan2(log_arg.y, log_arg.x);
     // return coefficient * log value
     return c10::metal::mul(coef, T(real, imag));
   }
