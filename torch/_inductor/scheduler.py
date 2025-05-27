@@ -4078,10 +4078,7 @@ class Scheduler:
         """Return True if we should partition the inductor graph on this node"""
 
         def is_non_gpu_tensor(buf: Any) -> bool:
-            if isinstance(buf, torch.Tensor) and not is_gpu(buf.device.type):
-                return True
-
-            return False
+            return isinstance(buf, torch.Tensor) and not is_gpu(buf.device.type)
 
         def is_non_gpu_tensor_box(buf: Any) -> bool:
             if (
