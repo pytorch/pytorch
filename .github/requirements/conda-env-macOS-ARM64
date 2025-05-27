@@ -1,18 +1,12 @@
-numpy=1.26.4
-pyyaml=6.0.2
-setuptools=72.1.0
-cmake=3.22.*
-typing-extensions=4.11.0
-dataclasses=0.8
-pip=23.2.1
-pillow=10.0.1
-pkg-config=0.29.2
-wheel=0.37.1
-expecttest=0.3.0
-
 # Not pinning certifi so that we can always get the latest certificates
 certifi
-
-# Cross-compiling arm64 from x86-64 picks up 1.40.0 while testing on arm64
-# itself only has up to 1.39.0 from upstream conda. Both work though
-libuv>=1.39.0,<=1.40.0
+cmake=3.22.*
+expecttest=0.3.0
+numpy=1.26.4
+pillow=10.0.1
+pip=23.2.1
+pkg-config=0.29.2
+pyyaml=6.0.2
+setuptools=72.1.0
+typing-extensions=4.11.0
+wheel=0.37.1
