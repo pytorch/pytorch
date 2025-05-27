@@ -2390,6 +2390,19 @@ def eval_is_non_overlapping_and_dense(
 def _eval_is_non_overlapping_and_dense(
     sizes: Sequence[int], strides: Sequence[int]
 ) -> bool:
+    """
+    Evaluates whether a tensor with the given sizes and strides is non-overlapping and dense.
+
+    A tensor is non-overlapping if there's no memory location that belongs to more than one element.
+    A tensor is dense if all elements are stored contiguously in memory without gaps.
+
+    Args:
+        sizes: Sequence of dimension sizes for the tensor
+        strides: Sequence of strides for the tensor
+
+    Returns:
+        True if the tensor is non-overlapping and dense, False otherwise
+    """
     dim = len(sizes)
 
     # Short-circuits for tensors of rank one, which are
