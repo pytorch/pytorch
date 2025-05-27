@@ -23,7 +23,6 @@ class PrecompileContextTests(InductorTestCase):
         # Clear PrecompileContext cache artifacts
         PrecompileContext.clear()
 
-
     @requires_triton()
     def test_basic(self):
         """
