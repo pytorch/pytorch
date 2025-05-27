@@ -206,9 +206,9 @@ class DistributedWeightedRandomSampler(Sampler[_T_co]):
         self.weights = torch.as_tensor(weights, dtype=torch.double)
         self.num_samples = num_samples  # total
         self.num_replicas = num_replicas
-        self.num_samples_per_proc = int(math.ceil(self.num_samples * 1.0 / self.num_replicas))  # per process
-        self.replacement = replacement
         self.rank = rank
+        self.num_samples_per_proc = self._compute_num_samples_per_rank()
+        self.replacement = replacement
         self.shuffle = shuffle
         self.seed = seed
         self.epoch = 0
@@ -235,7 +235,13 @@ class DistributedWeightedRandomSampler(Sampler[_T_co]):
         sampled_indices = indices[sampled_indices]
 
         # Distribute samples across processes
-        sampled_indices = sampled_indices[self.rank:self.num_samples_per_proc * self.num_replicas:self.num_replicas]
+        # sampled_indices = sampled_indices[self.rank:self.num_samples_per_proc * self.num_replicas:self.num_replicas]
+        start_index = sum(
+            self.num_samples // self.num_replicas + (1 if r < self.num_samples % self.num_replicas else 0)
+            for r in range(self.rank)
+        )
+        end_index = start_index + self.num_samples_per_proc
+        sampled_indices = sampled_indices[start_index:end_index]
         if len(sampled_indices) != self.num_samples_per_proc:
             raise RuntimeError(
                 f"Expected {self.num_samples_per_proc} samples per process, "
@@ -246,6 +252,12 @@ class DistributedWeightedRandomSampler(Sampler[_T_co]):
 
     def __len__(self) -> int:
         return self.num_samples_per_proc
+    
+    def _compute_num_samples_per_rank(self):
+        # Distribute samples as evenly as possible
+        base = self.num_samples // self.num_replicas
+        extras = self.num_samples % self.num_replicas
+        return base + (1 if self.rank < extras else 0)
 
     def set_epoch(self, epoch: int) -> None:
         """Sets the epoch for deterministic shuffling."""
