@@ -2135,10 +2135,13 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
             self.inner_contexts = {}
 
 
-# Tracks the sources of all fake tensors we wrap in Dynamo.
-# Used by shape guard computation.
 @dataclass
 class TrackedFake:
+    """
+    Tracks the sources of all fake tensors we wrap in Dynamo.
+    Used by shape guard computation.
+    """
+
     fake: Union[FakeTensor, SymInt]
     source: Source
     symbolic_context: Optional[SymbolicContext]
