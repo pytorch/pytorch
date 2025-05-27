@@ -84,7 +84,7 @@ __global__ void RowwiseMomentsCUDAKernel(
     T_ACC m1;
     T_ACC m2;
     thrust::tie(m2, m1) = welford_op.project(val);
-    if(!rms_norm){
+    if constexpr (!rms_norm){
       mean[i] = m1;
       rstd[i] = c10::cuda::compat::rsqrt(m2 + eps);
     } else {
@@ -109,7 +109,7 @@ __global__ void LayerNormForwardCUDAKernel(
     const int64_t index = i * N + j;
     const T_ACC gamma_v =
         gamma == nullptr ? T_ACC(1) : static_cast<T_ACC>(gamma[j]);
-    if(!rms_norm){
+    if constexpr (!rms_norm){
       const T_ACC beta_v =
           beta == nullptr ? T_ACC(0) : static_cast<T_ACC>(beta[j]);
       Y[index] = (static_cast<T_ACC>(X[index]) - static_cast<T_ACC>(mean[i])) *
@@ -197,7 +197,7 @@ __device__ WelfordDataLN compute_stats(
       vec_t data = X_vec[i];
       #pragma unroll
       for (int ii=0; ii < vec_size; ii++){
-        if(!rms_norm){
+        if constexpr (!rms_norm){
           wd = cuWelfordOnlineSum(static_cast<acc_t>(data.val[ii]), wd);
         } else{
           wd = cuRMSOnlineSum(static_cast<acc_t>(data.val[ii]), wd);
@@ -207,7 +207,7 @@ __device__ WelfordDataLN compute_stats(
     // intra-warp reduction
     for (int offset = (C10_WARP_SIZE >> 1); offset > 0; offset >>= 1) {
         WelfordDataLN wdB{WARP_SHFL_DOWN(wd.mean, offset), WARP_SHFL_DOWN(wd.sigma2, offset), WARP_SHFL_DOWN(wd.count, offset)};
-        if(!rms_norm){
+        if constexpr (!rms_norm){
           wd = cuWelfordCombine(wd, wdB);
         } else {
           wd = cuRMSCombine(wd, wdB);
@@ -232,7 +232,7 @@ __device__ WelfordDataLN compute_stats(
           WelfordDataLN wdB{meansigmabuf[2*threadIdx.y],
                           meansigmabuf[2*threadIdx.y+1],
                           countbuf[threadIdx.y]};
-          if(!rms_norm){
+          if constexpr (!rms_norm){
             wd = cuWelfordCombine(wd, wdB);
           } else {
             wd = cuRMSCombine(wd, wdB);
@@ -291,7 +291,7 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
       if (gamma_vec != nullptr && beta_vec != nullptr) {
         #pragma unroll
         for (int ii=0; ii < vec_size; ii++){
-          if(!rms_norm){
+          if constexpr (!rms_norm){
             out.val[ii] = static_cast<T_ACC>(gamma_vec[i].val[ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean))
               + static_cast<T_ACC>(beta_vec[i].val[ii]);
           } else {
@@ -301,7 +301,7 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
       } else if (gamma_vec != nullptr) {
         #pragma unroll
         for (int ii=0; ii < vec_size; ii++){
-          if(!rms_norm){
+          if constexpr (!rms_norm){
             out.val[ii] = static_cast<T_ACC>(gamma_vec[i].val[ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean));
           } else {
             out.val[ii] = static_cast<T_ACC>(gamma_vec[i].val[ii]) * (rstd_val * static_cast<T_ACC>(data.val[ii]));
@@ -315,7 +315,7 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
       } else {
         #pragma unroll
         for (int ii=0; ii < vec_size; ii++){
-          if(!rms_norm){
+          if constexpr (!rms_norm){
             out.val[ii] = rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean);
           } else {
             out.val[ii] = rstd_val * static_cast<T_ACC>(data.val[ii]);
@@ -325,7 +325,7 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
       Y_vec[i] = out;
     }
     if (thrx == 0) {
-      if(!rms_norm){
+      if constexpr (!rms_norm){
         mean[i1] = wd.mean;
       }
       rstd[i1] = rstd_val;
@@ -373,7 +373,7 @@ __device__ __inline__ void compute_gI(
   T_ACC * buf){
     const auto i1 = blockIdx.x;
     T_ACC mean_val = 0;
-    if(!rms_norm){
+    if constexpr (!rms_norm){
       mean_val = mean[i1];
     }
     const T_ACC rstd_val = rstd[i1];
@@ -391,7 +391,7 @@ __device__ __inline__ void compute_gI(
           const auto gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l+k]) : T_ACC(1);
           const auto c_h = static_cast<T_ACC>(X_i[l+k]);
           const auto c_loss = static_cast<T_ACC>(dY_i[l+k]);
-          if(!rms_norm){
+          if constexpr (!rms_norm){
             stats_x1 += c_loss * gamma_val;
             stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
           } else {
@@ -403,25 +403,25 @@ __device__ __inline__ void compute_gI(
           const auto gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
           const auto c_h = static_cast<T_ACC>(X_i[l]);
           const auto c_loss = static_cast<T_ACC>(dY_i[l]);
-          if(!rms_norm){
+          if constexpr (!rms_norm){
             stats_x1 += c_loss * gamma_val;
             stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
           } else {
             stats_x2 += c_loss * gamma_val * (c_h) * rstd_val;
           }
     }
-    if(!rms_norm){
+    if constexpr (!rms_norm){
       stats_x1 = cuda_utils::BlockReduceSum(stats_x1, buf);
     }
     stats_x2 = cuda_utils::BlockReduceSum(stats_x2, buf);
     if (threadIdx.x == 0) {
-      if(!rms_norm){
+      if constexpr (!rms_norm){
         buf[0] = stats_x1;
       }
       buf[1] = stats_x2;
     }
     __syncthreads();
-    if(!rms_norm){
+    if constexpr (!rms_norm){
       stats_x1 = buf[0];
     }
     stats_x2 = buf[1];
@@ -434,7 +434,7 @@ __device__ __inline__ void compute_gI(
         const auto gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
 
         T_ACC f_grad_input = fH * gamma_val * dy;
-        if(!rms_norm){
+        if constexpr (!rms_norm){
           f_grad_input -= (x - mean_val) * rstd_val * stats_x2;
           f_grad_input -= stats_x1;
         } else {
@@ -482,7 +482,7 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
 
   const auto bIdx = blockIdx.x;
   T_ACC mean_val = 0;
-  if(!rms_norm){
+  if constexpr (!rms_norm){
     mean_val = mean[bIdx];
   }
   const T_ACC rstd_val = rstd[bIdx];
@@ -516,7 +516,7 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
       const auto gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
       const auto c_h = static_cast<T_ACC>(X_i_vec_reg.val[k]);
       const auto c_loss = static_cast<T_ACC>(dY_i_vec_reg.val[k]);
-      if(!rms_norm){
+      if constexpr (!rms_norm){
         stats_x1 += c_loss * gamma_val;
         stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
       } else {
@@ -530,7 +530,7 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
     const auto gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
     const auto c_h = static_cast<T_ACC>(X_i[l]);
     const auto c_loss = static_cast<T_ACC>(dY_i[l]);
-    if(!rms_norm){
+    if constexpr (!rms_norm){
       stats_x1 += c_loss * gamma_val;
       stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
     } else{
@@ -539,18 +539,18 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
   }
 
   // Reduction in Shared Memory
-  if(!rms_norm){
+  if constexpr (!rms_norm){
     stats_x1 = cuda_utils::BlockReduceSum(stats_x1, reduce_buf);
   }
   stats_x2 = cuda_utils::BlockReduceSum(stats_x2, reduce_buf);
   if (threadIdx.x == 0) {
-    if(!rms_norm){
+    if constexpr (!rms_norm){
       reduce_buf[0] = stats_x1;
     }
     reduce_buf[1] = stats_x2;
   }
   __syncthreads();
-  if(!rms_norm){
+  if constexpr (!rms_norm){
     stats_x1 = reduce_buf[0];
   }
   stats_x2 = reduce_buf[1];
@@ -574,7 +574,7 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
       const auto dy = static_cast<T_ACC>(dY_i_vec_reg.val[k]);
 
       T_ACC f_grad_input = fH * gamma_val * dy;
-      if(!rms_norm){
+      if constexpr (!rms_norm){
         f_grad_input -= (x - mean_val) * rstd_val * stats_x2;
         f_grad_input -= stats_x1;
       } else {
@@ -594,7 +594,7 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
     const auto gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
 
     T_ACC f_grad_input = fH * gamma_val * dy;
-    if(!rms_norm){
+    if constexpr (!rms_norm){
       f_grad_input -= (x - mean_val) * rstd_val * stats_x2;
       f_grad_input -= stats_x1;
     } else {
@@ -667,7 +667,7 @@ blockReduceGammaBetaBackwardsHelper(
     int64_t mean_index = M_start + threadIdx.y * rows_per_thread_y;
     T_ACC warp_mean = 0, warp_rstd = 0;
     if (lane_id < rows_per_thread_y && mean_index + lane_id < M) {
-      if(!rms_norm){
+      if constexpr (!rms_norm){
         warp_mean = mean[mean_index + lane_id];
       }
       warp_rstd = rstd[mean_index + lane_id];
@@ -697,7 +697,7 @@ blockReduceGammaBetaBackwardsHelper(
     #pragma unroll
     for (int i = 0; i < rows_per_thread_y; ++i) {
       T_ACC rstd_reg = WARP_SHFL(warp_rstd, i, kWarpSize);
-      if(!rms_norm){
+      if constexpr (!rms_norm){
         T_ACC mean_reg = WARP_SHFL(warp_mean, i, kWarpSize);
         dg_sum += dY_regs[i] * (X_regs[i] - mean_reg) * rstd_reg;
         db_sum += dY_regs[i];
@@ -992,7 +992,7 @@ void LaunchGammaBetaBackwardCUDAKernel(
       aligned_grid, blocks, threads, 0, cuda_stream, dY_data, X_data, mean_data, rstd_data, M, N, dgamma_blocks_ptr, dbeta_blocks_ptr);
 
     *dgamma = dgamma_blocks.sum(0);
-    if(!rms_norm){
+    if constexpr (!rms_norm){
       *dbeta = dbeta_blocks.sum(0);
     }
   } else {
@@ -1382,7 +1382,7 @@ void cuComputeGradInput(
     T_ACC sum_loss1 = T_ACC(0);
     T_ACC sum_loss2 = T_ACC(0);
     T_ACC c_mean = 0;
-    if(!rms_norm){
+    if constexpr (!rms_norm){
       c_mean = mean[i1];
     }
     const T_ACC c_rstd = rstd[i1];
@@ -1397,7 +1397,7 @@ void cuComputeGradInput(
         const T_ACC gamma_idx = static_cast<T_ACC>((idx<N) ? gamma[idx] : T(0));
         const T_ACC c_h = static_cast<T_ACC>((idx<N) ? k_input[idx] : T(0));
         const T_ACC c_loss = static_cast<T_ACC>((idx<N) ? k_dout[idx] : T(0));
-        if(!rms_norm){
+        if constexpr (!rms_norm){
           sum_loss1 += c_loss * gamma_idx;
           sum_loss2 += c_loss * gamma_idx * (c_h - c_mean) * c_rstd;
         } else{
@@ -1409,7 +1409,7 @@ void cuComputeGradInput(
         int idx = l + thrx;
         const T_ACC c_h = static_cast<T_ACC>((idx<N) ? k_input[idx] : T(0));
         const T_ACC c_loss = static_cast<T_ACC>((idx<N) ? k_dout[idx] : T(0));
-        if(!rms_norm){
+        if constexpr (!rms_norm){
           sum_loss1 += c_loss;
           sum_loss2 += c_loss * (c_h - c_mean) * c_rstd;
         } else {
@@ -1419,7 +1419,7 @@ void cuComputeGradInput(
     }
     // intra-warp reductions
     for (int mask = blockDim.x/2;  mask > 0;  mask /= 2) {
-      if(!rms_norm){
+      if constexpr (!rms_norm){
         sum_loss1 += WARP_SHFL_XOR(sum_loss1, mask);
       }
       sum_loss2 += WARP_SHFL_XOR(sum_loss2, mask);
@@ -1432,7 +1432,7 @@ void cuComputeGradInput(
         // upper half of warps write to shared
         if (threadIdx.y >= offset && threadIdx.y < 2*offset) {
           const int wrt_i = (threadIdx.y - offset) * blockDim.x + threadIdx.x;
-          if(!rms_norm){
+          if constexpr (!rms_norm){
             buf[2*wrt_i] = sum_loss1;
           }
           buf[2*wrt_i+1] = sum_loss2;
@@ -1441,7 +1441,7 @@ void cuComputeGradInput(
         // lower half merges
         if (threadIdx.y < offset) {
           const int read_i = threadIdx.y * blockDim.x + threadIdx.x;
-          if(!rms_norm){
+          if constexpr (!rms_norm){
             sum_loss1 += buf[2*read_i];
           }
           sum_loss2 += buf[2*read_i+1];
@@ -1449,14 +1449,14 @@ void cuComputeGradInput(
         __syncthreads();
       }
       if (threadIdx.y == 0) {
-        if(!rms_norm){
+        if constexpr (!rms_norm){
           buf[2*threadIdx.x] = sum_loss1;
         }
         buf[2*threadIdx.x+1] = sum_loss2;
       }
       __syncthreads();
       if (threadIdx.y !=0) {
-        if(!rms_norm){
+        if constexpr (!rms_norm){
           sum_loss1 = buf[2*threadIdx.x];
         }
         sum_loss2 = buf[2*threadIdx.x+1];
@@ -1471,7 +1471,7 @@ void cuComputeGradInput(
         const T_ACC c_h = static_cast<T_ACC>(k_input[l]);
         const T_ACC c_loss = static_cast<T_ACC>(k_dout[l]);
         T_ACC f_grad_input = fH * c_loss * gamma[l];
-        if(!rms_norm){
+        if constexpr (!rms_norm){
           f_grad_input -= sum_loss1;
           f_grad_input -= (c_h - c_mean) * c_rstd * sum_loss2;
         } else {
@@ -1485,7 +1485,7 @@ void cuComputeGradInput(
         const T_ACC c_h = static_cast<T_ACC>(k_input[l]);
         const T_ACC c_loss = static_cast<T_ACC>(k_dout[l]);
         T_ACC f_grad_input = fH * c_loss;
-        if(!rms_norm){
+        if constexpr (!rms_norm){
           f_grad_input -= sum_loss1;
           f_grad_input -= (c_h - c_mean) * c_rstd * sum_loss2;
         } else {
@@ -1514,7 +1514,7 @@ void LayerNormBackwardKernelImplInternal(
     Tensor* dbeta) {
   using T_ACC = acc_type<T, true>;
   TORCH_CHECK(dY.numel() == M * N);
-  if(!rms_norm){
+  if constexpr (!rms_norm){
     TORCH_CHECK(mean.numel() == M);
   }
   TORCH_CHECK(rstd.numel() == M);
