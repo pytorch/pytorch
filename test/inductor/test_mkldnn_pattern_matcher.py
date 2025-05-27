@@ -10,7 +10,11 @@ from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import (
+    is_mkldnn_bf16_supported,
+    is_mkldnn_fp16_supported,
+    run_and_get_code,
+)
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.nn import functional as F
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -189,16 +193,12 @@ class TestPatternMatcherBase(TestCase):
             )
         counters.clear()
         torch._dynamo.reset()
-        if check_autocast == torch.bfloat16 and (
-            torch.ops.mkldnn._is_mkldnn_bf16_supported() or device == "xpu"
-        ):
+        if check_autocast == torch.bfloat16 and (is_mkldnn_bf16_supported(device)):
             maybe_autocast = torch.amp.autocast(
                 device_type=device, dtype=torch.bfloat16
             )
             atol, rtol = 1e-2, 1e-2
-        elif check_autocast == torch.float16 and (
-            torch.ops.mkldnn._is_mkldnn_fp16_supported() or device == "xpu"
-        ):
+        elif check_autocast == torch.float16 and (is_mkldnn_fp16_supported(device)):
             maybe_autocast = torch.amp.autocast(device_type=device, dtype=torch.float16)
             atol, rtol = 1e-2, 1e-2
         else:
@@ -282,9 +282,9 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
         dtypes = [
             torch.float,
         ]
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported() or self.device == "xpu":
+        if is_mkldnn_bf16_supported(self.device):
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported() or self.device == "xpu":
+        if is_mkldnn_fp16_supported(self.device):
             dtypes.append(torch.float16)
         cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
         options = itertools.product(
@@ -373,9 +373,9 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
                 return self.unary_fn(x)
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported() or self.device == "xpu":
+        if is_mkldnn_bf16_supported(self.device):
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported() or self.device == "xpu":
+        if is_mkldnn_fp16_supported(self.device):
             dtypes.append(torch.float16)
         options = itertools.product(unary_list, [True, False], dtypes)
         for unary_fn, bias, dtype in options:
@@ -445,9 +445,9 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
         v = torch.randn(4, 32, 1, 128)
 
         dtypes = [torch.float]
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported() or self.device == "xpu":
+        if is_mkldnn_bf16_supported(self.device):
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported() or self.device == "xpu":
+        if is_mkldnn_fp16_supported(self.device):
             dtypes.append(torch.float16)
 
         for dtype in dtypes:
@@ -495,9 +495,9 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
                 return self.unary_fn(a), self.unary_fn(b)
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported() or self.device == "xpu":
+        if is_mkldnn_bf16_supported(self.device):
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported() or self.device == "xpu":
+        if is_mkldnn_fp16_supported(self.device):
             dtypes.append(torch.float16)
         options = itertools.product(unary_list, dtypes)
         for unary_fn, dtype in options:
@@ -571,9 +571,9 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
         dtypes = [
             torch.float,
         ]
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported() or self.device == "xpu":
+        if is_mkldnn_bf16_supported(self.device):
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported() or self.device == "xpu":
+        if is_mkldnn_fp16_supported(self.device):
             dtypes.append(torch.float16)
 
         cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
@@ -668,9 +668,9 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
         dtypes = [
             torch.float,
         ]
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported() or self.device == "xpu":
+        if is_mkldnn_bf16_supported(self.device):
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported() or self.device == "xpu":
+        if is_mkldnn_fp16_supported(self.device):
             dtypes.append(torch.float16)
         cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
         test_memory_format = [torch.contiguous_format, cl_format]
@@ -761,9 +761,9 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
         dtypes = [
             torch.float,
         ]
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported() or self.device == "xpu":
+        if is_mkldnn_bf16_supported(self.device):
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported() or self.device == "xpu":
+        if is_mkldnn_fp16_supported(self.device):
             dtypes.append(torch.float16)
         cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
         test_memory_format = [torch.contiguous_format, cl_format]
@@ -855,9 +855,9 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
                 return x
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported() or self.device == "xpu":
+        if is_mkldnn_bf16_supported(self.device):
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported() or self.device == "xpu":
+        if is_mkldnn_fp16_supported(self.device):
             dtypes.append(torch.float16)
         options = itertools.product(
             binary_list, [[2, 3, 10], [2, 10]], [True, False], dtypes
@@ -914,9 +914,9 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
                 return x
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported() or self.device == "xpu":
+        if is_mkldnn_bf16_supported(self.device):
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported() or self.device == "xpu":
+        if is_mkldnn_fp16_supported(self.device):
             dtypes.append(torch.float16)
         options = itertools.product(
             binary_list,
@@ -1014,9 +1014,9 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
                 return F.silu(self.w1(x)) * F.relu(self.w2(x))
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported() or self.device == "xpu":
+        if is_mkldnn_bf16_supported(self.device):
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported() or self.device == "xpu":
+        if is_mkldnn_fp16_supported(self.device):
             dtypes.append(torch.float16)
 
         def matcher_check_fn():
@@ -4306,9 +4306,9 @@ class TestDynamicPatternMatcherGeneric(TestPatternMatcherBase):
                 return F.silu(self.w1(x)) * F.relu(self.w2(x))
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported() or self.device == "xpu":
+        if is_mkldnn_bf16_supported(self.device):
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported() or self.device == "xpu":
+        if is_mkldnn_fp16_supported(self.device):
             dtypes.append(torch.float16)
 
         def matcher_check_fn():

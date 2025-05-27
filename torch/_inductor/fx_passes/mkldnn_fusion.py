@@ -19,6 +19,7 @@ from ..pattern_matcher import (
     KeywordArg,
     MULTIPLE,
 )
+from ..utils import is_mkldnn_bf16_supported, is_mkldnn_fp16_supported
 from ..virtualized import ops, V
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
@@ -1004,13 +1005,13 @@ if torch._C._has_mkldnn:
         # Check dtype
         if any(
             lstm_node.args[POS_ARG].meta.get("val").dtype == torch.bfloat16
-            and not mkldnn._is_mkldnn_bf16_supported()
+            and not is_mkldnn_bf16_supported("cpu")
             for POS_ARG in POS_ARGS
         ):
             return False
         if any(
             lstm_node.args[POS_ARG].meta.get("val").dtype == torch.float16
-            and not mkldnn._is_mkldnn_fp16_supported()
+            and not is_mkldnn_fp16_supported("cpu")
             for POS_ARG in POS_ARGS
         ):
             return False
@@ -1023,6 +1024,7 @@ if torch._C._has_mkldnn:
         """
         conv_node = match.output_node()
         is_xpu = conv_node.meta.get("val").is_xpu
+        device_type = conv_node.meta.get("val").device.type
         # The operator 'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device.
         if match.kwargs["is_transposed"] and is_xpu:
             return False
@@ -1042,17 +1044,17 @@ if torch._C._has_mkldnn:
             ):
                 return False
 
-        if (not is_xpu) and (
+        if (
             input_meta_value.dtype == torch.bfloat16
             or weight_meta_value.dtype == torch.bfloat16
         ):
-            if not mkldnn._is_mkldnn_bf16_supported():
+            if not is_mkldnn_bf16_supported(device_type):
                 return False
-        if (not is_xpu) and (
+        if (
             input_meta_value.dtype == torch.float16
             or weight_meta_value.dtype == torch.float16
         ):
-            if not mkldnn._is_mkldnn_fp16_supported():
+            if not is_mkldnn_fp16_supported(device_type):
                 return False
         is_transposed = conv_node.args[-3]
         if is_transposed:
@@ -1136,17 +1138,18 @@ if torch._C._has_mkldnn:
             ):
                 return False
 
-        if (input_meta_value.device.type == "cpu") and (
+        device_type = input_meta_value.device.type
+        if (
             input_meta_value.dtype == torch.bfloat16
             or weight_meta_value.dtype == torch.bfloat16
         ):
-            if not mkldnn._is_mkldnn_bf16_supported():
+            if not is_mkldnn_bf16_supported(device_type):
                 return False
-        if (input_meta_value.device.type == "cpu") and (
+        if (
             input_meta_value.dtype == torch.float16
             or weight_meta_value.dtype == torch.float16
         ):
-            if not mkldnn._is_mkldnn_fp16_supported():
+            if not is_mkldnn_fp16_supported(device_type):
                 return False
         return True
 
