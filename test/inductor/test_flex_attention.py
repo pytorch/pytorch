@@ -92,12 +92,23 @@ def temp_float32_matmul_precision(precision: str):
     Args:
     precision (str): The precision to set ('highest', 'high', or 'medium').
     """
+
+    def set_float32_matmul_precision_xpu(precision: str):
+        if precision == "highest":
+            torch._C._set_onednn_allow_tf32(False)
+        if precision == "high":
+            torch._C._set_onednn_allow_tf32(True)
+
     original_precision = torch.get_float32_matmul_precision()
     try:
         torch.set_float32_matmul_precision(precision)
+        if TEST_ON_XPU:
+            set_float32_matmul_precision_xpu(precision)
         yield
     finally:
         torch.set_float32_matmul_precision(original_precision)
+        if TEST_ON_XPU:
+            set_float32_matmul_precision_xpu(original_precision)
 
 
 def skip_on_cpu(test_func):
@@ -3021,7 +3032,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_non_contiguous_last_dim(self, device):
         """Test flex_attention with tensors having non contiguous last dimension."""
         B, H, D = 4, 8, 64
-        dtype = torch.float16 if device == "cuda" else torch.float32
+        dtype = torch.float16 if device in DEVICE_SUPPORTS_BACKWARDS else torch.float32
         for S in [16, 64]:
 
             def column_major_tensor():
