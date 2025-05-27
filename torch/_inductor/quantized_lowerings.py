@@ -4,7 +4,7 @@ from typing import Any
 import torch
 from torch._inductor.kernel.mm_common import mm_args
 
-from . import config as inductor_config, lowering
+from . import config as lowering
 from .codegen.cpp_gemm_template import CppGemmTemplate, CppWoqInt4GemmTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
 from .lowering import expand, register_lowering
@@ -93,7 +93,6 @@ def register_woq_mm_ops() -> None:
         return autotune_select_algorithm(
             "_weight_int8pack_mm", choices, [mat1, mat2, scale], aten_layout
         )
-
 
     @register_lowering(aten._weight_int4pack_mm_for_cpu, type_promotion_kind=None)  # type: ignore[misc]
     def int4pack_mm_cpu(

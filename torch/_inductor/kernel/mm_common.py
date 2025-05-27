@@ -12,8 +12,8 @@ from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import _IntLike, ChoiceCaller, Layout, TensorBox
-from ..utils import get_num_sms, TMA_DESCRIPTOR_SIZE, use_aten_gemm_kernels
+from ..ir import _IntLike, Layout, TensorBox
+from ..utils import get_num_sms, TMA_DESCRIPTOR_SIZE
 
 
 log = logging.getLogger(__name__)
