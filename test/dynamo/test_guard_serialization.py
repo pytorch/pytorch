@@ -305,6 +305,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                 torch.overrides._get_current_function_mode_stack(),
                 code_options,
                 torch._dynamo.lookup_backend("eager"),
+                one_graph=False,
                 export=False,
                 export_constraints=None,
                 frame_state=None,
