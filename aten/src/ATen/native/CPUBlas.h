@@ -259,6 +259,19 @@ TORCH_API void brgemm(
     int32_t* C,
     bool is_vnni = true);
 
+TORCH_API void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const signed char* A,
+    const signed char* B,
+    int32_t* C,
+    bool is_vnni = true);
+
 // Release brgemm hardware context
 TORCH_API void brgemm_release(bool is_vnni = true);
 
