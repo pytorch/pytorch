@@ -1479,7 +1479,7 @@ class Reduction(Loops):
             isinstance(reduction_numel, Integer)
             and V.graph.sizevars.size_hint(reduction_numel)
             < config.unroll_reductions_threshold
-            and (sympy_product(ranges) != 1 or is_gpu(device.type))
+            and (sympy_product(ranges) != 1)
         ):
             # NB: This works around https://github.com/pytorch/pytorch/issues/140457
             # since turning reductions into pointwise ops can exacerbate this problem
