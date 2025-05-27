@@ -693,7 +693,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                         )
                     )
                 else:
-                    if current_group<len(remaining):
+                    if current_group < len(remaining):
                         return_getters.append(
                             operator.itemgetter(add_range(current_group, size))
                         )
