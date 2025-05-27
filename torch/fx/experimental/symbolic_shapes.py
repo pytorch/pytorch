@@ -160,6 +160,7 @@ __all__ = [
     "SymIntSymbolicContext",
     "TrackedFake",
     "statically_known_true",
+    "statically_known_false",
     "guard_size_oblivious",
     "check_consistent",
     "compute_unbacked_bindings",
@@ -468,21 +469,6 @@ def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
     else:
         assert isinstance(expr, bool), expr
         return expr
-
-
-def _guard_sizes_oblivious(
-    lhs_sizes: Sequence[Union[torch.SymInt, bool]],
-    rhs_sizes: Sequence[Union[torch.SymInt, bool]],
-) -> bool:
-    """
-    Leverage guard_size_oblivious to compare if two lists of int/symint are equal.
-    Useful to compare sizes, strides etc.
-    """
-
-    return len(lhs_sizes) == len(rhs_sizes) and all(
-        guard_size_oblivious(lhs_item == rhs_item)
-        for lhs_item, rhs_item in zip(lhs_sizes, rhs_sizes)
-    )
 
 
 def check_consistent(new: _T, old: _T) -> None:
@@ -1290,6 +1276,29 @@ def _static_eval_sym_bool(x: SymBool) -> Optional[bool]:
     except Exception:
         log.debug("Could not simplify %s", expr)
         return None
+
+
+def statically_known_false(x: BoolLikeType) -> bool:
+    """
+    Returns True if x can be simplified to a constant and is False.
+    If x cannot be evaluated from static, we return False
+
+    .. note::
+        This function doesn't introduce new guards, so the expression may end
+        up evaluating to False at runtime even if this function returns False.
+
+    Args:
+        x (bool, SymBool): The expression to try statically evaluating
+    """
+    if not isinstance(x, SymBool):
+        assert isinstance(x, bool)
+        return not x
+
+    result = _static_eval_sym_bool(x)
+    if result is None:
+        return False
+
+    return not result
 
 
 def statically_known_true(x: BoolLikeType) -> bool:
@@ -6745,6 +6754,9 @@ class ShapeEnv:
 
         # store LOC
         locs = co_lines[frame.f_lineno - offset : last_lineno + 1 - offset]
+        if not locs:
+            return _FrameLocalResult()
+
         indent = len(locs[0]) - len(locs[0].lstrip())
         frame_loc = "".join([loc[indent:] for loc in locs]).strip()  # type: ignore[assignment]
         return _FrameLocalResult(
