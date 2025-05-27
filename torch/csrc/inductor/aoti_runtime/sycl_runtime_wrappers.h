@@ -70,8 +70,6 @@ static std::unique_ptr<sycl::kernel> _createKernel(
   kernelDescription.pKernelName = kernelName;
   ZE_CHECK(zeKernelCreate(module, &kernelDescription, &kernel));
 
-  sycl::device& syclDevice =
-      c10::xpu::get_raw_device(c10::xpu::current_device());
   auto& syclContext = c10::xpu::get_device_context();
   auto mod = sycl::make_kernel_bundle<
       sycl::backend::ext_oneapi_level_zero,
