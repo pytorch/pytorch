@@ -33,8 +33,6 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-device_type = torch.accelerator.current_accelerator().type
-
 class C(nn.Module):
     def __init__(self, dim: int) -> None:
         super().__init__()
