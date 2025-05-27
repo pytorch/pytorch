@@ -1601,6 +1601,11 @@ std::string ProcessGroupNCCL::HeartbeatMonitor::getNCCLWatchdogTimeoutErrorMsg(
       "Received a dump signal due to a collective timeout from ",
       extraMsg,
       " and we will try our best to dump the debug info. ",
+      "Last enqueued NCCL work: ",
+      pg_->pgStatus_->lastEnqueuedSeq,
+      ", last completed NCCL work: ",
+      pg_->pgStatus_->lastCompletedSeq,
+      ".",
       "This is most likely caused by incorrect usages of collectives, e.g., wrong ",
       "sizes used across ranks, the order of collectives is not same for all ranks ",
       "or the scheduled collective, for some reason, didn't run. Additionally, ",
@@ -1644,7 +1649,7 @@ ProcessGroupNCCL::HeartbeatMonitor::HeartbeatMonitor(ProcessGroupNCCL* pg) {
 
 void ProcessGroupNCCL::HeartbeatMonitor::printLogMsg() {
   LOG(INFO)
-      << pg_->logPrefix()
+      << pg_->logPrefix() << "HeartbeatMonitor environments: "
       << "TORCH_NCCL_ENABLE_MONITORING (Whether to kill program when no watchdog heartbeat detected): "
       << watchdogHeartbeatMonitorEnabled_.load()
       << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeoutOrEx_
@@ -1677,21 +1682,28 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
   c10::setThreadName("pt_nccl_heartbt");
 
   uint64_t heartBeatCounter = 0ULL;
-  bool watchdogThreadHang = false;
   std::string errorMsg;
   std::string exitReason;
+  bool checkDumpSignal = (dumpOnTimeoutOrEx_ && pg_->getUid() == 0);
+  int monitorPollInterval = checkDumpSignal ? coordCheckIntervalMilSec_
+                                            : heartbeatTimeoutInSec_ * 1000;
   auto lastTimePollStore = std::chrono::steady_clock::now();
   auto lastTimeHeartBeatCheck = std::chrono::steady_clock::now();
   std::optional<DumpPipe> dumpPipe = std::nullopt;
-  // To use the pipe correctly, one needs to initiate the default PG first.
-  dumpPipe.emplace(pg_->globalRank());
+
+  if (pg_->getUid() == 0) {
+    // DumpPipe is one per-trainer process, and its convenient to name them
+    // after 'global' ranks in the system, So we assume processgroup (uid)==0 is
+    // the global PG and has globally unique rank ids across trainers.
+    dumpPipe.emplace(pg_->globalRank());
+  }
   while (true) {
     // This won't have any lock since this lock is only used here.
     // Please be aware that mutex `monitorMutex_` should not be used
     // somewhere else to avoid the deadlock.
     std::unique_lock<std::mutex> lock(monitorMutex_);
     if (monitorWakeUpCV_.wait_for(
-            lock, std::chrono::milliseconds(coordCheckIntervalMilSec_), [&] {
+            lock, std::chrono::milliseconds(monitorPollInterval), [&] {
               return terminateHeartbeatMonitorThread_.load();
             })) {
       // For the normal complete or user interception, monitorWakeUpCV_
@@ -1707,7 +1719,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     // TCPStore periodically to see if any PG on any rank observed a timeout and
     // signaled peers to dump debugging info, and we avoid hammering the
     // TCPStore from all PGs on the same rank.
-    if (dumpOnTimeoutOrEx_) {
+    if (checkDumpSignal) {
       // There are two scenarios where monitor thread will dump on timeout:
       // 1. The current rank is the first to observe a timeout in watchdog.
       // (shouldDump_ was set to true by the watchdog thread).
@@ -1824,12 +1836,12 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
   //    TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN=0).
 
   // Dump the nccl trace (flight recorder).
-  if (dumpOnTimeoutOrEx_ && shouldDump_.load()) {
+  if (checkDumpSignal && shouldDump_.load()) {
     // Store debug info to storage if no other thread does it. (By default to
     // local disk)
     bool dumpStackTrace = true;
     ::c10d::C10dLoggingData debugLog;
-    debugLog.integers["pg_id"] = 0;
+    debugLog.integers["pg_id"] = static_cast<int64_t>(pg_->getUid());
     debugLog.integers["rank"] = pg_->getRank();
     debugLog.integers["global_rank"] = pg_->globalRank();
     debugLog.integers["world_size"] = pg_->getSize();
@@ -1899,21 +1911,20 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
 
   // There are two possible cases for the watchdog thread exit:
   // Case one: desync report runs quickly, and it follows the step:
-  // collective timeout -> desync -> exception handling -> destructors
-  // -> set terminateHeartbeatMonitorThread_ -> notify monitorWakeUpCV_.
-  // So the code either early returns above or will skip the sleep below.
-  // Case two: desync might be slow or get stuck. Or we get stuck in
-  // destructors, we will sleep for some time before calling std::abort() to
-  // kill the whole process.
-  auto currentTime = std::chrono::steady_clock::now();
-  if (!watchdogThreadHang && !terminateHeartbeatMonitorThread_.load() &&
-      (computeDeltaMS(lastTimeHeartBeatCheck, currentTime) <
-       heartbeatTimeoutInSec_ * 1000l)) {
+  // collective timeout -> desync -> exception handling -> throwing exception.
+  // The program will exit because of exception thrown and the code below will
+  // not be run.
+  //
+  // Case two: desync might be slow or get stuck and we need to wait
+  // extra time to avoid we kill the program too early.
+  //
+  // Or we get stuck in destructors, we will sleep for some time before calling
+  // std::abort() to kill the whole process.
+  if (shouldDump_.load() && !terminateHeartbeatMonitorThread_.load()) {
     std::this_thread::sleep_for(std::chrono::seconds(heartbeatTimeoutInSec_));
     LOG(INFO)
         << pg_->logPrefix() << "slept for " << heartbeatTimeoutInSec_
         << " because we want to wait longer to verify there is indeed a watchdog hang.";
-    watchdogThreadHang = (pg_->getWatchdogHeartbt() == heartBeatCounter);
   }
 
   // At this point, we either already sleep for another `heartbeatTimeoutInSec_`
@@ -1925,8 +1936,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
   // We already log completion inside the thread, so it may not be necessary to
   // check the return value here.  We mainly use a future so we can exit early
   // if done.
-
-  if (!terminateHeartbeatMonitorThread_.load() && watchdogThreadHang) {
+  if (!terminateHeartbeatMonitorThread_.load()) {
     // Create a error message reported from MonitorThread, so
     // we throw exception and make the whole process to be killed.
     // TODO(fduwjj): After having a hang debug wiki, we need to update the wiki
