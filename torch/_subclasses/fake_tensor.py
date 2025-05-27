@@ -1970,8 +1970,8 @@ class FakeTensorMode(TorchDispatchMode):
                 assert isinstance(b, int) and a == b
             elif a is None:
                 assert b is None
-            elif isinstance(a, torch.SymInt):
-                assert a is b
+            elif isinstance(a, py_sym_types):
+                assert type(a) == type(b) and a.node is b.node
             elif isinstance(a, torch.Tensor):
                 assert isinstance(b, torch.Tensor)
                 assert_metadata_eq(assert_eq, a, b)
