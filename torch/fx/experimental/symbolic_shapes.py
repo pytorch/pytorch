@@ -874,24 +874,6 @@ IterateExprs: TypeAlias = Union[IterateExprsAtom, Sequence[IterateExprsAtom]]
 
 
 def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
-    """
-    Recursively iterate through a value and yield all sympy expressions contained within it.
-
-    This function traverses various data structures (tensors, lists, tuples, etc.) and extracts
-    any symbolic expressions they contain. It's used for operations like finding free symbols
-    in complex nested structures.
-
-    Args:
-        val: The value to extract sympy expressions from. Can be a symbolic type (SymInt, SymFloat, SymBool),
-             a sympy expression, a primitive type (int, float, bool), a container (tuple, list),
-             a sparse tensor, a regular tensor, None, or a torch.Generator.
-
-    Yields:
-        sympy.Basic: Each sympy expression found in the value.
-
-    Raises:
-        AssertionError: If the value is of an unsupported type.
-    """
     if isinstance(val, SymTypes):
         # This allow applies to the jagged layout NestedTensor case as
         # nested ints are not symbolic
@@ -920,25 +902,9 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
 
 
 def free_symbols(val: IterateExprs) -> OrderedSet[sympy.Symbol]:
-    """
-    Recursively collect all free symbols from a value.
-
-    This function traverses various data structures (tensors, lists, tuples, etc.) and extracts
-    all sympy symbols contained within them. It's useful for finding all symbolic variables
-    that a complex nested structure depends on.
-
-    Args:
-        val: The value to extract symbols from. Can be a symbolic type (SymInt, SymFloat, SymBool),
-             a container (tuple, list), a tensor, or None.
-
-    Returns:
-        OrderedSet[sympy.Symbol]: An ordered set of all free symbols found in the value.
-    """
     if val is None:
         return OrderedSet()
-
     itr = _iterate_exprs(val)
-
     # we need at least 1 to call union, so we hand code the identity
     try:
         first_expr = next(itr)
@@ -968,9 +934,8 @@ def has_free_unbacked_symbols(x: IterateExprs) -> bool:
     return False
 
 
+# Like free_symbols, but filtered to only report unbacked symbols
 def free_unbacked_symbols(x: IterateExprs) -> OrderedSet[sympy.Symbol]:
-    """Like free_symbols, but filtered to only report unbacked symbols"""
-
     # NB: keep synced with is_unbacked_symint
     return OrderedSet(
         s
@@ -982,18 +947,6 @@ def free_unbacked_symbols(x: IterateExprs) -> OrderedSet[sympy.Symbol]:
 # WARNING: Don't use this on Dynamo produced graphs, they don't have meta
 # setup!
 def is_symbol_binding_fx_node(node: torch.fx.Node) -> Optional[sympy.Symbol]:
-    """
-    Check if a given FX node is a symbol binding node.
-
-    A symbol binding node is one that has a SymInt value in its meta that contains
-    a sympy Symbol expression, and is either a placeholder node or contains unbacked symbols.
-
-    Args:
-        node (torch.fx.Node): The FX node to check
-
-    Returns:
-        Optional[sympy.Symbol]: The sympy Symbol if the node is a symbol binding node, None otherwise
-    """
     if (
         "val" in node.meta
         and isinstance(node.meta["val"], torch.SymInt)
@@ -1010,19 +963,6 @@ def is_symbol_binding_fx_node(node: torch.fx.Node) -> Optional[sympy.Symbol]:
 def find_symbol_binding_fx_nodes(
     graph: torch.fx.Graph,
 ) -> dict[sympy.Symbol, torch.fx.Node]:
-    """
-    Find all nodes in an FX graph that bind sympy Symbols.
-
-    This function scans through all nodes in the given FX graph and identifies
-    nodes that bind sympy Symbols (typically placeholder nodes with SymInt values).
-    When multiple nodes bind the same symbol, only the first occurrence is kept.
-
-    Args:
-        graph: The FX graph to search for symbol binding nodes
-
-    Returns:
-        A dictionary mapping from sympy Symbols to their binding FX nodes
-    """
     r = {}
     # NB: Prefer first occurrence of symbol
     for node in graph.nodes:
@@ -1086,24 +1026,6 @@ def _free_unbacked_symbols_with_path(
     pending: Optional[set[sympy.Symbol]] = None,
     simplify: bool = False,
 ) -> dict[sympy.Symbol, pytree.KeyPath]:
-    """
-    Recursively traverses a structure to find unbacked symbols and their access paths.
-
-    This function walks through tensors, lists, tuples, and symbolic values to locate
-    unbacked symbols that are in the pending set, and returns a mapping from those
-    symbols to their access paths in the structure.
-
-    Args:
-        a: The object to traverse (tensor, list, tuple, SymInt, etc.)
-        path: The current path in the object tree
-        real: Optional real tensor corresponding to the fake tensor being traversed
-        shape_env: Optional ShapeEnv to register unbacked values with
-        pending: Set of unbacked symbols to look for (will be modified in-place)
-        simplify: Whether to use simplified expressions
-
-    Returns:
-        A dictionary mapping unbacked symbols to their access paths
-    """
     go = functools.partial(
         _free_unbacked_symbols_with_path,
         shape_env=shape_env,
@@ -1365,9 +1287,6 @@ def _log_suppressed_dde(a: SymBool, assumed_value: bool) -> None:
 #      assuming expand/reshape inputs are not -1. or assuming the non-broadcasting path.
 #
 def _guard_or(a: BoolLikeType, default: bool) -> bool:
-    """
-    Try to guard a, if data dependent error encountered just return default.
-    """
     if not isinstance(a, SymBool):
         assert isinstance(a, bool)
         return a
@@ -1491,20 +1410,6 @@ def sym_or(x: BoolLikeType, *others: BoolLikeType) -> BoolLikeType:
 def guard_scalar(
     a: Union[SymBool, SymInt, SymFloat, int, bool, float]
 ) -> Union[bool, int, float]:
-    """
-    Guard a scalar value, which can be a symbolic or concrete boolean, integer, or float.
-
-    This function dispatches to the appropriate guard function based on the type of the input.
-
-    Args:
-        a: A symbolic or concrete scalar value (bool, int, or float)
-
-    Returns:
-        The concrete value after guarding
-
-    Raises:
-        AssertionError: If the input is not a recognized scalar type
-    """
     if isinstance(a, (SymBool, bool)):
         return guard_bool(a)
     elif isinstance(a, (SymInt, int)):
