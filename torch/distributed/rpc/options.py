@@ -42,7 +42,7 @@ def _to_device_list(devices: list[DeviceType]) -> list[torch.device]:
     return list(map(_to_device, devices))
 
 
-if _is_tensorpipe_available:
+if _is_tensorpipe_available:  # type: ignore[has-type]
     from torch._C._distributed_rpc import _TensorPipeRpcBackendOptionsBase
 else:
     _TensorPipeRpcBackendOptionsBase = object  # type: ignore[assignment, misc]
