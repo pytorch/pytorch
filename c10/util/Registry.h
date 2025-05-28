@@ -22,7 +22,6 @@
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Type.h>
-#include <fmt/printf.h>
 
 namespace c10 {
 
@@ -77,14 +76,14 @@ class Registry {
 #ifdef DEBUG
         std::string warn_msg =
             "Overwriting already registered item for key " + KeyStrRepr(key);
-        fmt::fprintf(stderr, "%s\n", warn_msg.c_str());
+        fprintf(stderr, "%s\n", warn_msg.c_str());
 #endif
         registry_[key] = creator;
         priority_[key] = priority;
       } else if (priority == cur_priority) {
         std::string err_msg =
             "Key already registered with the same priority: " + KeyStrRepr(key);
-        fmt::fprintf(stderr, "%s\n", err_msg.c_str());
+        fprintf(stderr, "%s\n", err_msg.c_str());
         if (terminate_) {
           std::exit(1);
         } else {
@@ -94,7 +93,7 @@ class Registry {
         std::string warn_msg =
             "Higher priority item already registered, skipping registration of " +
             KeyStrRepr(key);
-        fmt::fprintf(stderr, "%s\n", warn_msg.c_str());
+        fprintf(stderr, "%s\n", warn_msg.c_str());
       }
     } else {
       registry_[key] = creator;
