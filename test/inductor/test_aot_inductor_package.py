@@ -286,7 +286,7 @@ class TestAOTInductorPackage(TestCase):
                 "aot_inductor.package_cpp_only": self.package_cpp_only,
                 # Expect kernel to be embeded in the final binary.
                 # We will make it the default behavior for the standalone mode.
-                "aot_inductor.emit_multi_arch_kernel_binary": True,
+                "aot_inductor.emit_multi_arch_kernel": True,
                 "aot_inductor.embed_kernel_binary": True,
             }
             ep = torch.export.export(model, example_inputs)

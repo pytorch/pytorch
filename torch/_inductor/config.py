@@ -1330,11 +1330,11 @@ class aot_inductor:
     # Embed generated kernel binary files into model.so
     embed_kernel_binary: bool = False
 
-    # Generate kernel binary files that support multiple archs
-    emit_multi_arch_kernel_binary: bool = False
-    # Generate multi-arch kernel binary files with asm only, e.g. PTX for CUDA.
-    # This only takes effect when emit_multi_arch_kernel_binary is True.
-    emit_kernel_asm_only: bool = False
+    # Generate kernel files that support multiple archs
+    # Default it will emit multi arch kernels as asm files, e.g. PTX for CUDA.
+    emit_multi_arch_kernel: bool = False
+    # In addition to emit asm files, also emit binary files for current arch
+    emit_current_arch_binary: bool = False
 
     # Custom ops that have implemented C shim wrappers, defined as an op to C shim declaration dict
     custom_ops_to_c_shims: dict[torch._ops.OpOverload, list[str]] = {}

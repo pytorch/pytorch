@@ -163,8 +163,8 @@ class AOTInductorTestsTemplate:
     @skipIfRocm
     @skipIfXpu
     @common_utils.parametrize("embed_kernel_binary", [True, False])
-    @common_utils.parametrize("emit_kernel_asm_only", [True, False])
-    def test_simple_multi_arch(self, embed_kernel_binary, emit_kernel_asm_only):
+    @common_utils.parametrize("emit_current_arch_binary", [True, False])
+    def test_simple_multi_arch(self, embed_kernel_binary, emit_current_arch_binary):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU_TYPE")
 
@@ -184,8 +184,8 @@ class AOTInductorTestsTemplate:
         with config.patch(
             {
                 "aot_inductor.embed_kernel_binary": embed_kernel_binary,
-                "aot_inductor.emit_multi_arch_kernel_binary": True,
-                "aot_inductor.emit_kernel_asm_only": emit_kernel_asm_only,
+                "aot_inductor.emit_multi_arch_kernel": True,
+                "aot_inductor.emit_current_arch_binary": emit_current_arch_binary,
             }
         ):
             self.check_model(model, example_inputs)

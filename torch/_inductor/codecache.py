@@ -1575,16 +1575,14 @@ class CudaKernelParamCache:
         # Retrieve the basename again in case it is a generated hashcode
         basename, _ = get_name_and_dir_from_output_file_path(bin_path)
 
-        if config.aot_inductor.emit_multi_arch_kernel_binary:
-            assert bin_type == "cubin", (
-                "emit_multi_arch_kernel_binary only supported in CUDA"
-            )
+        if config.aot_inductor.emit_multi_arch_kernel:
+            assert bin_type == "cubin", "emit_multi_arch_kernel only supported in CUDA"
             base_path, _ = os.path.splitext(bin_path)
             bin_path = base_path + ".fatbin"
 
         asm_path: str = ""
         if (
-            config.aot_inductor.emit_multi_arch_kernel_binary
+            config.aot_inductor.emit_multi_arch_kernel
             or config.aot_inductor.package_cpp_only
         ):
             assert asm, "Missing kernel assembly code"
@@ -2044,8 +2042,8 @@ class AotCodeCompiler:
                 if entry.output_path.endswith(".o")
             ]
             if gpu_kernels_o:
-                assert not config.aot_inductor.emit_multi_arch_kernel_binary, (
-                    "TODO: add emit_multi_arch_kernel_binary support for cutlass kernels"
+                assert not config.aot_inductor.emit_multi_arch_kernel, (
+                    "TODO: add emit_multi_arch_kernel support for cutlass kernels"
                 )
 
             cubins_o = []
@@ -2056,14 +2054,14 @@ class AotCodeCompiler:
                     asm_files.append(asm_file)
 
                 cubin_file = value[get_cpp_wrapper_cubin_path_name()]
-                if config.aot_inductor.emit_multi_arch_kernel_binary:
+                if config.aot_inductor.emit_multi_arch_kernel:
                     current_arch = _nvcc_arch_as_compile_option()
                     cmd = (
                         f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
                         # Include PTX with the minimum arch as SM80
                         "-gencode arch=compute_80,code=compute_80 "
                     )
-                    if not config.aot_inductor.emit_kernel_asm_only:
+                    if config.aot_inductor.emit_current_arch_binary:
                         # Include SASS for the current specific arch, to avoid
                         # CUDA JIT compilation overhead. In theory, we could do
                         # this for all archs that are newer than the current arch.
@@ -2137,7 +2135,7 @@ class AotCodeCompiler:
                     generated_files.append(consts_o)
                     so_builder.save_src_to_cmake(cmake_path, consts_o)
 
-                if config.aot_inductor.emit_multi_arch_kernel_binary:
+                if config.aot_inductor.emit_multi_arch_kernel:
                     so_builder.save_kernel_asm_to_cmake(cmake_path, asm_files)
                     generated_files.extend(asm_files)
                 else:
