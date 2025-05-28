@@ -29,7 +29,7 @@ class CUTLASSOperationSerializer:
     ]
 
     @classmethod
-    def serialize(cls, operation: "GemmOperation", indent: int = 2):  # type: ignore[name-defined]  # noqa: F821
+    def serialize(cls, operation: "GemmOperation"):  # type: ignore[name-defined]  # noqa: F821
         """Serialize a GEMM operation to JSON string.
 
         Args:
@@ -42,8 +42,7 @@ class CUTLASSOperationSerializer:
         assert operation.__class__.__qualname__ == "GemmOperation", (
             "Only GemmOperation objects are supported via the main API"
         )
-        ret = json.dumps(cls._gemm_operation_to_json(operation), indent=indent)
-        return ret
+        return json.dumps(cls._gemm_operation_to_json(operation))
 
     @classmethod
     def deserialize(cls, json_str: str) -> "GemmOperation":  # type: ignore[name-defined]  # noqa: F821
