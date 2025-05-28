@@ -686,7 +686,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace\n\n")
 
-        if config.aot_inductor.embed_cubin:
+        if config.aot_inductor.embed_kernel_binary:
             self.prefix.writeline('extern "C" {')
             for name in sorted(declare_kernel):
                 self.prefix.writeline(
@@ -729,8 +729,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             AOTInductorModel::AOTInductorModel(std::shared_ptr<ConstantMap> constants_map,
                                                std::shared_ptr<std::vector<ConstantHandle>> constants_array,
                                                const std::string& device_str,
-                                               std::optional<std::string> cubin_dir,
-                                               bool include_weights)
+                                               std::optional<std::string> cubin_dir)
                 : AOTInductorModelBase({num_inputs},
                                        {num_outputs},
                                        {num_constants},

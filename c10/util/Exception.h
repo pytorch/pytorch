@@ -289,8 +289,8 @@ class C10_API OutOfMemoryError : public Error {
   using Error::Error;
 };
 
-// Used for handling syntacitc erros in input arguments.
-// They shuld turn into SytnaxError when the cross into Python
+// Used for handling syntactic errors in input arguments.
+// These turn into SyntaxError when the cross into Python.
 class C10_API SyntaxError : public Error {
   using Error::Error;
 };
