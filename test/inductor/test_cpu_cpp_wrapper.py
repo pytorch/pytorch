@@ -19,6 +19,23 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 
+def load_test_module(name):
+    import sys
+    from importlib.machinery import SourceFileLoader
+    from pathlib import Path
+    from unittest import mock
+
+    testdir = Path(__file__).absolute().parent.parent
+    with mock.patch("sys.path", [*sys.path, str(testdir)]):
+        return SourceFileLoader(
+            name, str(testdir / f"{name.replace('.', '/')}.py")
+        ).load_module()
+
+
+test_c10d_functional_native = load_test_module(
+    "distributed.test_c10d_functional_native"
+)
+
 try:
     try:
         from . import (
@@ -374,6 +391,11 @@ if RUN_CPU:
             "test_woq_int4",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
+        ),
+        BaseTest(
+            "test_inductor_all_reduce",
+            "cpu",
+            test_c10d_functional_native.CompileTestCPU(),
         ),
     ]:
         make_test_case(
