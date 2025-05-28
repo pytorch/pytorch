@@ -20,6 +20,20 @@ from ...virtualized import V
 _ACCUMULATOR_ARG_NAME = "accum"
 
 
+def scaled_mm_evt(
+    scale_A_name: str, scale_B_name: str, output_name: str
+) -> tuple[list[str], dict[str, Any], str]:
+    evt_read_names = [scale_A_name, scale_B_name]
+    var_name_to_buffer_name = {n: n for n in [scale_A_name, scale_B_name]}
+    var_name_to_buffer_name["D"] = output_name
+    var_name_to_buffer_name[_ACCUMULATOR_ARG_NAME] = output_name
+    evt_py_code = f"def fn(accum, {scale_A_name}, {scale_B_name}):{linesep}\
+    D = accum * {scale_A_name} * {scale_B_name}{linesep}\
+    return D{linesep}"
+
+    return evt_read_names, var_name_to_buffer_name, evt_py_code
+
+
 class CutlassEVTOpsMixIn:
     @staticmethod
     def _infix_bin_op(op: str, a: str, b: str) -> str:
