@@ -1427,7 +1427,7 @@ class InstructionTranslatorBase(
                 )
 
         # for continuation functions
-        if name.startswith("___stack"):
+        if name.startswith("__stack"):
             self.symbolic_locals.pop(name)
 
     def LOAD_DEREF(self, inst):
