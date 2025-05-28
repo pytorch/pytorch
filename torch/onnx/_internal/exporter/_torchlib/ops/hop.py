@@ -107,7 +107,7 @@ def higher_order_scan(
             # inputs are clone to make sure they have different names
             # from additional inputs which could be the same:
             # one input can be a scanned input and an additional input
-            ir.Node("", "Identity", [i], num_outputs=1).outputs[0]
+            ir.Node("", "Identity", [i]).outputs[0]
             for i in [*scan_inits, *scan_inputs]
         ],
         *(additional_inputs or []),
