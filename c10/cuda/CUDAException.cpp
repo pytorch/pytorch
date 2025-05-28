@@ -38,7 +38,7 @@ void c10_cuda_check_implementation(
         "Device-side assertions were explicitly omitted for this error check; the error probably arose while initializing the DSA handlers.");
   }
 #endif
- throw c10::DeviceError(err, check_message);
+  throw c10::DeviceError(err, check_message);
 }
 
 } // namespace c10::cuda

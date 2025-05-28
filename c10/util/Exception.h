@@ -116,8 +116,8 @@ class C10_API Error : public std::exception {
 
 class C10_API Warning {
  public:
-  class C10_API UserWarning{};
-  class C10_API DeprecationWarning{};
+  class C10_API UserWarning {};
+  class C10_API DeprecationWarning {};
 
   using warning_variant_t = std::variant<UserWarning, DeprecationWarning>;
 
@@ -298,9 +298,13 @@ class C10_API SyntaxError : public Error {
 // Raised when accelerator API call hits an error.
 // These turn into DeviceError when the cross into Python
 class C10_API DeviceError : public Error {
-  using Error::Error;
-  int64_t error_code = -1;
-  bool is_async = true;
+  int32_t error_code;
+
+ public:
+  DeviceError(int32_t code, std::string msg) : Error(msg), error_code(code) {}
+  int32_t get_error_code() const {
+    return error_code;
+  }
 };
 
 // Base error type for all distributed errors.

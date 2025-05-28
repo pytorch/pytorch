@@ -136,8 +136,7 @@ could not be completed because the input matrix is singular.",
   type = (PyTypeObject*)THPException_DeviceError;
   type->tp_name = "torch.DeviceError";
   ASSERT_TRUE(
-      PyModule_AddObject(
-          module, "DeviceError", THPException_DeviceError) == 0);
+      PyModule_AddObject(module, "DeviceError", THPException_DeviceError) == 0);
 
   return true;
 }
@@ -355,4 +354,18 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
   }
 }
 
+namespace detail {
+PyObject* _new_device_error_object(const c10::DeviceError& e) {
+  auto msg = torch::get_cpp_stacktraces_enabled() ? e.what()
+                                                  : e.what_without_backtrace();
+
+  auto py_msg = PyUnicode_FromString(msg);
+  auto rc = PyObject_Call(THPException_DeviceError, py_msg, NULL);
+  auto error_code = PyInt_FromLong(e.get_error_code());
+  PyObject_SetAttrString(rc, "error_code", error_code);
+  Py_DECREF(py_msg);
+  Py_DECREF(error_code);
+  return rc;
+}
+} // namespace detail
 } // namespace torch

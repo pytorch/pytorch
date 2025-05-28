@@ -75,9 +75,6 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
   _CATCH_GENERIC_ERROR(                                                       \
       NotImplementedError, PyExc_NotImplementedError, retstmnt)               \
   _CATCH_GENERIC_ERROR(SyntaxError, PyExc_SyntaxError, retstmnt)              \
-  _CATCH_GENERIC_ERROR(DeviceError, THPException_DeviceError, retstmnt)       \
-  _CATCH_GENERIC_ERROR(                                                       \
-      DeviceIllegalMemoryAccessError, PyExc_MemoryError, retstmnt)            \
   _CATCH_GENERIC_ERROR(LinAlgError, THPException_LinAlgError, retstmnt)       \
   _CATCH_GENERIC_ERROR(                                                       \
       OutOfMemoryError, THPException_OutOfMemoryError, retstmnt)              \
@@ -93,6 +90,12 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
   catch (torch::PyTorchError & e) {                                           \
     auto msg = torch::processErrorMsg(e.what());                              \
     PyErr_SetString(e.python_type(), msg);                                    \
+    retstmnt;                                                                 \
+  }                                                                           \
+  catch (c10::DeviceError & e) {                                              \
+    auto exc = torch::details::_new_device_error_object(e);                   \
+    \ 
+	  PyErr_SetObject(THPException_DeviceError, exc);                     \
     retstmnt;                                                                 \
   }
 
@@ -373,6 +376,8 @@ auto wrap_pybind_function_impl_(
     END_HANDLE_TH_ERRORS_PYBIND
   };
 }
+
+PyObject* _new_device_error_object(const c10::DeviceError&);
 } // namespace detail
 
 // Wrap a function with TH error and warning handling.
