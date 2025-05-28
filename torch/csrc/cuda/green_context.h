@@ -43,6 +43,8 @@ public:
 
         // Convert to regular context
         C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuCtxFromGreenCtx_(&context_, green_ctx_));
+        TORCH_INTERNAL_ASSERT(context_, "Green ctx conversion to regular ctx failed!");
+        TORCH_WARN("FINISH CONVERT");
     }
 
     static std::unique_ptr<GreenContext> create(int device_id, unsigned int num_sms) {
@@ -103,7 +105,15 @@ public:
         cudaEvent_t ev;
         C10_CUDA_CHECK(cudaEventCreate(&ev));
         C10_CUDA_CHECK(cudaEventRecord(ev, current_stream));
-        C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuCtxPushCurrent_(context_));
+        TORCH_WARN("STARTING PUSH");
+        CUcontext current;
+        C10_CUDA_DRIVER_CHECK(cuCtxGetCurrent(&current));
+        if (!current) {
+          C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuCtxSetCurrent_(context_));
+        } else {
+          C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuCtxPushCurrent_(context_));
+        }
+        TORCH_WARN("FINISH PUSH");
         // currently hardcoes the new green context to use the default stream
         // TODO(eqy): consider creating a new stream if e.g., it allows interop
         // with CUDA Graph captures etc.

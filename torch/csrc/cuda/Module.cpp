@@ -1496,7 +1496,8 @@ static void initGreenContext(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   py::class_<GreenContext>(m, "GreenContext")
       .def_static("create", &GreenContext::create)
-      .def("make_current", &GreenContext::makeCurrent);
+      .def("make_current", &GreenContext::makeCurrent)
+      .def("pop_current", &GreenContext::popCurrent);
 }
 
 static void bindGetDeviceProperties(PyObject* module) {
