@@ -851,7 +851,7 @@ def _record_memory_history_legacy(
     clear_history=False,
     compile_context=False,
 ):
-    _C._cuda_record_memory_history_legacy(
+    _C._cuda_record_memory_history_legacy(  # type: ignore[call-arg]
         enabled,
         record_context,
         trace_alloc_max_entries,
@@ -916,7 +916,7 @@ def _record_memory_history_impl(
     clear_history: bool = False,
     compile_context: bool = False,
 ):
-    _C._cuda_record_memory_history(
+    _C._cuda_record_memory_history(  # type: ignore[call-arg]
         enabled, context, stacks, max_entries, clear_history, compile_context
     )
 
