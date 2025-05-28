@@ -838,24 +838,30 @@ This feature is a prototype and may have compatibility breaking changes in the f
 .. autoclass:: Tag
     :members:
 
-<!-- Empty submodules added only for tracking. -->
-<!-- py:module:: torch.contrib -->
-<!-- py:module:: torch.utils.backcompat -->
+```{eval-rst}
+.. Empty submodules added only for tracking.
+.. py:module:: torch.contrib
+.. py:module:: torch.utils.backcompat
+```
 
 <!-- This module is only used internally for ROCm builds. -->
-<!-- py:module:: torch.utils.hipify -->
+```{eval-rst}
+.. py:module:: torch.utils.hipify
+```
 
-<!-- This module needs to be documented. Adding here in the meantime -->
-<!-- for tracking purposes -->
-<!-- py:module:: torch.utils.model_dump -->
-<!-- py:module:: torch.utils.viz -->
-<!-- py:module:: torch.functional -->
-<!-- py:module:: torch.quasirandom -->
-<!-- py:module:: torch.return_types -->
-<!-- py:module:: torch.serialization -->
-<!-- py:module:: torch.signal.windows.windows -->
-<!-- py:module:: torch.sparse.semi_structured -->
-<!-- py:module:: torch.storage -->
-<!-- py:module:: torch.torch_version -->
-<!-- py:module:: torch.types -->
-<!-- py:module:: torch.version -->
+<!-- This module needs to be documented. Adding here in the meantime
+for tracking purposes -->
+```{eval-rst}
+.. py:module:: torch.utils.model_dump
+.. py:module:: torch.utils.viz
+.. py:module:: torch.functional
+.. py:module:: torch.quasirandom
+.. py:module:: torch.return_types
+.. py:module:: torch.serialization
+.. py:module:: torch.signal.windows.windows
+.. py:module:: torch.sparse.semi_structured
+.. py:module:: torch.storage
+.. py:module:: torch.torch_version
+.. py:module:: torch.types
+.. py:module:: torch.version
+```
