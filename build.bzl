@@ -72,7 +72,7 @@ def define_targets(rules):
         "--install_dir=$(RULEDIR)",
         "--source-path aten/src/ATen",
         "--aoti_install_dir=$(RULEDIR)/torch/csrc/inductor/aoti_torch/generated"
-    ] + (["--static_dispatch_backend CPU"] if rules.is_cpu_static_dispatch_build() else []))
+    ] + (["--static_dispatch_backend CPU"] if rules.is_cpu_static_dispatch_build() else []) + ["--mtia"])
 
     gen_aten_outs_cuda = (
         GENERATED_H_CUDA + GENERATED_CPP_CUDA + GENERATED_AOTI_CUDA_CPP +
