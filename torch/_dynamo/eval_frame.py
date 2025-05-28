@@ -313,12 +313,23 @@ class OptimizedModule(torch.nn.Module):
         "_forward",
         "__dict__",
         "named_children_walk",
+        "_super_module_initialized",
     }
 
     def __init__(self, mod: torch.nn.Module, dynamo_ctx) -> None:
+        # NOTE: this must go first, because attribute reads/writes of `self`
+        # uses `_orig_mod`, and sometimes users override `Module.__init__` to
+        # do attribute reads/writes on `self`.
+        #
+        # We also can't use regular setattr because `super().__setattr__` will
+        # complain for module value before `super().__init__()`
+        object.__setattr__(self, "_orig_mod", mod)
+        self._super_module_initialized = False
         super().__init__()
+        self._super_module_initialized = True
+
         # Installs the params/buffer
-        self._orig_mod = mod
+        self._orig_mod = mod  # `super().__setattr__` will register this module
         self.dynamo_ctx = dynamo_ctx
         self._initialize()
         self.training = self._orig_mod.training
@@ -379,12 +390,11 @@ class OptimizedModule(torch.nn.Module):
 
     @training.setter
     def training(self, value):
-        try:
-            super().__getattr__("_orig_mod")
+        # Ignore the `training` mutation in `super().__init__()`, since that's
+        # setting the default on `nn.Module`, but we are mirroring the
+        # `training` attr in `self._orig_mod`.
+        if self._super_module_initialized:
             self._orig_mod.training = value
-        except AttributeError:
-            # still initializing
-            pass
 
     def __getattr__(self, name):
         if name == "_orig_mod":
@@ -651,7 +661,7 @@ class _TorchDynamoContext:
         is_fx_tracing = torch.fx._symbolic_trace.is_fx_tracing
 
         @functools.wraps(fn)
-        def _fn(*args, **kwargs):
+        def compile_wrapper(*args, **kwargs):
             prior = set_eval_frame(None)
             try:
                 if is_fx_tracing():
@@ -695,7 +705,7 @@ class _TorchDynamoContext:
                     while cur_exn.__cause__ is not None:
                         cur_exn.__cause__.with_traceback(None)
                         cur_exn = cur_exn.__cause__
-                    raise e.with_traceback(None) from e.__cause__
+                    raise e.with_traceback(None) from e.__cause__  # User compiler error
                 except ShortenTraceback as e:
                     # Failures in the backend likely don't have useful
                     # data in the TorchDynamo frames, so we strip them out.
@@ -714,16 +724,16 @@ class _TorchDynamoContext:
                 _maybe_set_eval_frame(prior)
 
         # hooks to properly handle inlining
-        _fn._torchdynamo_inline = fn  # type: ignore[attr-defined]
+        compile_wrapper._torchdynamo_inline = fn  # type: ignore[attr-defined]
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
-        _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+        compile_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
 
         # when compiling user function instead of nn.Module
         # provide public api _fn.get_compiler_config()
-        assert not hasattr(_fn, "get_compiler_config")
-        _fn.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
+        assert not hasattr(compile_wrapper, "get_compiler_config")
+        compile_wrapper.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
 
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
@@ -764,7 +774,7 @@ class _TorchDynamoContext:
                 )
             always_optimize_code_objects[fn.__code__] = True
 
-        return _fn
+        return compile_wrapper
 
 
 class OptimizeContext(_TorchDynamoContext):
