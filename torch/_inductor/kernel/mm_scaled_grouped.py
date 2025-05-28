@@ -16,7 +16,12 @@ from ..select_algorithm import (
     realize_inputs,
     TritonTemplate,
 )
-from ..utils import get_gpu_shared_memory, get_num_sms, use_aten_gemm_kernels
+from ..utils import (
+    get_gpu_shared_memory,
+    get_num_sms,
+    has_free_symbols,
+    use_aten_gemm_kernels,
+)
 from .mm_common import (
     _is_static_problem,
     check_supported_striding,
@@ -46,7 +51,7 @@ _NV_CONFIGS = [
         num_stages=num_stages,
         num_warps=num_warps,
     )
-    for block_size_m in [64, 128]
+    for block_size_m in [16, 32, 64, 128]
     for block_size_n in [64, 128, 256]
     for block_size_k in [64, 128, 256]
     for num_stages in [3, 4]
@@ -79,7 +84,7 @@ def grouped_mm_configs():
     return _AMD_CONFIGS if torch.version.hip else _NV_CONFIGS
 
 
-def early_config_prune(configs, named_args):
+def early_config_prune(g, m, configs, named_args):
     dtsize = 1
     pruned_configs = []
     for config in configs:
@@ -93,7 +98,25 @@ def early_config_prune(configs, named_args):
             getattr(config, "num_consumer_groups", 0),
         )
 
-        # 1. make sure we have enough smem
+        # 1. Prune NV configs depending on g and m.
+        if not torch.version.hip:
+            if not has_free_symbols((m,)):
+                a_is_2d, b_is_2d = named_args["A_IS_2D"], named_args["B_IS_2D"]
+                m_avg = m // g if a_is_2d and not b_is_2d else m
+                if m_avg <= 16:
+                    if BLOCK_M > 32:
+                        continue
+                elif m_avg <= 32:
+                    if BLOCK_M > 64:
+                        continue
+                elif m_avg <= 64:
+                    if BLOCK_M <= 16:
+                        continue
+                else:
+                    if BLOCK_M <= 32:
+                        continue
+
+        # 2. make sure we have enough smem
         max_shared_memory = get_gpu_shared_memory()
 
         if torch.version.hip:
@@ -105,7 +128,7 @@ def early_config_prune(configs, named_args):
 
         use_warp_specialization = num_consumer_groups >= 1
 
-        # 2. make sure we can partition for ws
+        # 3. make sure we can partition for ws
         if use_warp_specialization:
             if num_warps != 4:
                 continue
@@ -589,29 +612,30 @@ def _tuned_grouped_mm_common(
         scaled = scale_a is not None
         if len(m1_size) == 2:
             if len(m2_size) == 2:
-                _, k1 = m1_size
+                m, k1 = m1_size
                 k2, _ = m2_size
+                g = offs.get_size()[0]
                 V.graph.sizevars.guard_equals(k1, k2)
                 a_is_2d, b_is_2d = True, True
             else:
                 g1 = offs.layout.size[0]
-                _, k1 = m1_size
+                m, k1 = m1_size
                 g2, k2, _ = m2_size
-                V.graph.sizevars.guard_equals(g1, g2)
+                g = V.graph.sizevars.guard_equals(g1, g2)
                 V.graph.sizevars.guard_equals(k1, k2)
                 a_is_2d, b_is_2d = True, False
         else:
             if len(m2_size) == 2:
                 g1 = offs.layout.size[0]
-                g2, _, k1 = m1_size
+                g2, m, k1 = m1_size
                 k2, _ = m2_size
-                V.graph.sizevars.guard_equals(g1, g2)
+                g = V.graph.sizevars.guard_equals(g1, g2)
                 V.graph.sizevars.guard_equals(k1, k2)
                 a_is_2d, b_is_2d = False, True
             else:
-                g1, _, k1 = m1_size
+                g1, m, k1 = m1_size
                 g2, k2, _ = m2_size
-                V.graph.sizevars.guard_equals(g1, g2)
+                g = V.graph.sizevars.guard_equals(g1, g2)
                 V.graph.sizevars.guard_equals(k1, k2)
                 a_is_2d, b_is_2d = False, False
 
@@ -627,7 +651,7 @@ def _tuned_grouped_mm_common(
             "USE_TMA_LOAD": use_tma_load,
         }
 
-        for config in early_config_prune(grouped_mm_configs(), kwargs):
+        for config in early_config_prune(g, m, grouped_mm_configs(), kwargs):
             kernel_template.maybe_append_choice(
                 choices,
                 input_nodes=input_nodes,
