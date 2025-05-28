@@ -1327,8 +1327,11 @@ class aot_inductor:
     # Experimental.  Controls automatic precompiling of common AOTI include files.
     precompile_headers: bool = not is_fbcode()
 
-    # Embed generated .cubin files into the .so
-    embed_cubin: bool = False
+    # Embed generated kernel binary files into model.so
+    embed_kernel_binary: bool = False
+
+    # Generate kernel binary files that support multiple archs
+    multi_arch_kernel_binary: bool = False
 
     # Custom ops that have implemented C shim wrappers, defined as an op to C shim declaration dict
     custom_ops_to_c_shims: dict[torch._ops.OpOverload, list[str]] = {}
