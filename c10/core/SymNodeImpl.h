@@ -188,24 +188,18 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
     return guard_bool(file, line);
   }
   virtual bool guard_or_false(const char* file, int64_t line) {
-    // Default implementation for unbacked symbolic booleans provides no optimization.
-    // This should be overridden with a more efficient implementation in derived classes.
     // Note: PT2 primarily uses PythonSymNodeImpl for this functionality.
     // XLA is currently the main consumer of this fallback path since it uses
     // ahead-of-time compilation and cannot depend on Python runtime.
     return guard_bool(file, line);
   }
   virtual bool statically_known_true(const char* file, int64_t line) {
-    // Default implementation for unbacked symbolic booleans provides no optimization.
-    // This should be overridden with a more efficient implementation in derived classes.
     // Note: PT2 primarily uses PythonSymNodeImpl for this functionality.
     // XLA is currently the main consumer of this fallback path since it uses
     // ahead-of-time compilation and cannot depend on Python runtime.
     return guard_bool(file, line);
   }
   virtual bool guard_or_true(const char* file, int64_t line) {
-    // Default implementation for unbacked symbolic booleans provides no optimization.
-    // This should be overridden with a more efficient implementation in derived classes.
     // Note: PT2 primarily uses PythonSymNodeImpl for this functionality.
     // XLA is currently the main consumer of this fallback path since it uses
     // ahead-of-time compilation and cannot depend on Python runtime.
