@@ -1320,8 +1320,6 @@ exclude_patterns = [
     'torch/_export/serde/__init__.py',
     'torch/_export/serde/schema.py',
     'torch/_export/serde/serialize.py',
-    'torch/_export/serde/upgrade.py',
-    'torch/_export/trace.py',
     'torch/testing/_internal/__init__.py',
     'torch/testing/_internal/autocast_test_lists.py',
     'torch/testing/_internal/autograd_function_db.py',
