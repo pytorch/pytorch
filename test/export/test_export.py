@@ -2647,7 +2647,7 @@ graph():
         with self.assertRaisesRegex(
             ValueError,
             r"Received user-specified .* \[None, 5\], conflicting with the inferred .*"
-            r"\[6, int_oo\],.* for inputs\['xs'\]\['data'\]\[0\]\[0\]\.shape\[0\]",
+            r"\[8, int_oo\],.* for inputs\['xs'\]\['data'\]\[0\]\[0\]\.shape\[0\]",
         ):
             export(Foo(), ({"data": [[x, y]]},), dynamic_shapes=shapes)
 
@@ -14981,6 +14981,23 @@ class TestExportCustomClass(TorchTestCase):
         FileCheck().check_count(
             "torch.ops.aten.upsample_trilinear3d.vec", 1, exactly=True
         ).run(ep.graph_module.code)
+
+    def test_export_unbacked_lt(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x, ranks):
+                first_k = ranks.max().item()
+                narrow = x.narrow(dim=1, start=0, length=first_k)
+                lt = narrow < narrow.size(1)
+                return lt
+
+        inps = (torch.randn((8, 16)), torch.arange(8, dtype=torch.int8))
+        spec = {
+            "x": (Dim.AUTO, Dim.AUTO),
+            "ranks": (Dim.AUTO,),
+        }
+        traced = export(
+            MyModel(), inps, dynamic_shapes=spec, strict=True
+        ).run_decompositions({})
 
 
 if __name__ == "__main__":
