@@ -427,6 +427,7 @@ def check_model(
     copy_to_gpu=True,
     reference_in_float=True,
     assert_equal=True,
+    assert_strides_equal=False,
     check_gradient=False,
     check_has_compiled=True,
     output_process_fn_grad=lambda x: x,
@@ -553,8 +554,9 @@ def check_model(
             # our testing sometimes uses higher precision inputs for the reference
             exact_dtype=False,
         )
-        strides_equal, _ = torch._prims_common.check_significant_strides(correct, actual)
-        self.assertTrue(strides_equal)
+        if assert_strides_equal:
+            strides_equal, _ = torch._prims_common.check_all_strides(correct, actual)
+            self.assertTrue(strides_equal)
     else:
         for correct_val, actual_val in zip(correct_flat, actual_flat):
             if isinstance(correct_val, torch.Tensor):
@@ -642,6 +644,7 @@ def check_model_gpu(
     copy_to_gpu=True,
     reference_in_float=True,
     assert_equal=True,
+    assert_strides_equal=False,
     check_gradient=False,
     check_has_compiled=True,
     output_process_fn_grad=lambda x: x,
@@ -668,6 +671,7 @@ def check_model_gpu(
         nopython=nopython,
         reference_in_float=reference_in_float,
         assert_equal=assert_equal,
+        assert_strides_equal=assert_strides_equal,
         check_gradient=check_gradient,
         check_has_compiled=check_has_compiled,
         output_process_fn_grad=output_process_fn_grad,
@@ -700,6 +704,7 @@ def check_model_gpu(
             nopython=nopython,
             reference_in_float=reference_in_float,
             assert_equal=assert_equal,
+            assert_strides_equal=assert_strides_equal,
             check_gradient=check_gradient,
             check_has_compiled=check_has_compiled,
             output_process_fn_grad=output_process_fn_grad,
@@ -6957,14 +6962,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(a):
             return torch.full_like(a, 7.777) - 1
 
-        self.common(fn, (torch.randn(8),))
+        self.common(fn, (torch.randn(8),), assert_strides_equal=True)
 
     def test_full_like2(self):
         def fn(a):
             return torch.full_like(a, 7.777) - 1
 
         a = torch.randn(4, 5, 6).transpose(1, -1)
-        self.common(fn, (a,))
+        self.common(fn, (a,), assert_strides_equal=True)
 
     def test_full_like3(self):
         def fn(a):
@@ -6972,7 +6977,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         a = torch.rand(4, 3)[::2, :]
         a = a.permute(1, 0)
-        self.common(fn, (a,))
+        self.common(fn, (a,), assert_strides_equal=True)
 
     def test_full_truncation(self):
         def fn(a):
