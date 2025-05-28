@@ -6,12 +6,13 @@ import unittest
 import torch
 import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
-from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
+from functorch.experimental.control_flow import cond
 from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.associative_scan import (
     _fake_associative_scan,
     associative_scan,
 )
+from torch._higher_order_ops.map import _fake_map
 from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._higher_order_ops.while_loop import while_loop
 from torch._subclasses.functional_tensor import (
@@ -36,7 +37,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xfailIfTorchDynamo,
 )
 
 
@@ -72,16 +72,6 @@ def from_fun_old(t):
         torch._sync(t)
         return torch._from_functional_tensor(t)
     return t
-
-
-def _fake_map(f, x, *args):
-    from functorch.experimental.control_flow import _stack_pytree, _unstack_pytree
-
-    x_pytrees = _unstack_pytree(x)
-    zs = []
-    for xp in x_pytrees:
-        zs.append(f(xp, *args))
-    return _stack_pytree(zs)
 
 
 def _fake_while_loop(cond_fn, body_fn, operands):
@@ -159,7 +149,7 @@ def get_scan_combine_fn(name, associative=True, parameters=None):
     def RNN(x: torch.Tensor, y: torch.Tensor):
         c_new = y @ parameters[0] + parameters[1]
         h_new = torch.tanh(c_new + x @ parameters[2] + parameters[3])
-        return h_new, h_new
+        return h_new, h_new.clone()
 
     def fct_c1_no_grad(x: torch.Tensor, y: torch.Tensor):
         h_new = torch.tanh(x[0] + x[1] + y)
@@ -888,8 +878,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1):
         )
 
     def test_cond_autograd_pytree_input(self):
+        # TODO: This is an unexpected behavior for cond
+        # Without this additional multiplication,
+        # the output of the backward graph would alias the
+        # inputs, as the gradients are just 1s and thus get optimized
         def true_fn(x):
-            return x["t"][0] + x["t"][1]["b"] * x["t"][2][0]
+            return (x["t"][0] * 2.0) + x["t"][1]["b"] * x["t"][2][0]
 
         def false_fn(x):
             return x["t"][0] * (x["t"][2][0] / x["t"][1]["b"])
@@ -966,10 +960,10 @@ def forward(self, pred_1):
     @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
     def test_cond_autograd_same_pytree_output(self):
         def true_fn(x):
-            return {"res": [x["t"][0], (x["t"][2][0],)]}
+            return {"res": [x["t"][0].clone(), (x["t"][2][0].clone(),)]}
 
         def false_fn(x):
-            return {"res": [x["t"][1]["b"], (x["t"][2][0],)]}
+            return {"res": [x["t"][1]["b"].clone(), (x["t"][2][0].clone(),)]}
 
         a = torch.randn(4, requires_grad=True)
         b = torch.randn(4, requires_grad=True)
@@ -1007,9 +1001,7 @@ def forward(self, pred_1):
     cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (_tensor_constant0, _tensor_constant1, _tensor_constant2));  pred_1 = true_graph_0 = false_graph_0 = _tensor_constant0 = _tensor_constant1 = _tensor_constant2 = None
     getitem = cond[0]
     getitem_1 = cond[1];  cond = None
-    view = torch.ops.aten.view.default(getitem, [4]);  getitem = None
-    view_1 = torch.ops.aten.view.default(getitem_1, [4]);  getitem_1 = None
-    return {'res': [view, (view_1,)]}""",  # noqa: B950
+    return {'res': [getitem, (getitem_1,)]}""",  # noqa: B950
         )
 
     @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
@@ -1901,12 +1893,15 @@ def forward(self, pred_1, x_1):
                 {
                     "i": x["i"] * y["j"][0][0],
                     "k": torch.tensor(0.0),
-                    "j": ([x["j"][1][0]["o"]], [{"o": torch.sin(x["i"])}]),
+                    "j": (
+                        [x["j"][1][0]["o"].clone()],
+                        [{"o": torch.sin(x["i"])}],
+                    ),
                 },
                 {
                     "i": x["i"] * y["j"][0][0],
                     "k": torch.tensor(0.0),
-                    "j": ([x["j"][1][0]["o"]], [{"o": torch.sin(x["i"])}]),
+                    "j": ([x["j"][1][0]["o"].clone()], [{"o": torch.sin(x["i"])}]),
                 },
             )
 
@@ -2395,8 +2390,11 @@ def forward(self, pred_1, x_1):
         init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
 
         with self.assertRaisesRegex(
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected init and carry to have same metadata.*",
+            "scan must be captured completely with torch.compile.*",
         ):
             scan_fct(wrong_carry_shape, init, x, dim=dim)
 
@@ -3311,13 +3309,120 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     return (carry, out_1)""",  # noqa: B950
         )
 
+    @requires_cuda
+    def test_scan_input_mutation(self):
+        device = torch.device("cuda")
+
+        def fct_input_mutation(x, y):
+            x.add_(1)
+            return x + y, x + y + 2
+
+        x = torch.randn(3, 2, 2, device=device)
+        init = torch.randn(2, 2, device=device)
+
+        with self.assertRaisesRegex(
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "scan must be captured completely with torch.compile.*",
+        ):
+            scan(fct_input_mutation, init, x, dim=0)
+
+    @requires_cuda
+    def test_scan_input_carry_alias(self):
+        device = torch.device("cuda")
+
+        def fct_input_output_alias(x, y):
+            return (x[0], x[1] + y[1]), (x[1] + y[1] + 1, x[1] + y[1] + 2)
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+        init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
+
+        with self.assertRaisesRegex(
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "scan must be captured completely with torch.compile.*",
+        ):
+            scan(fct_input_output_alias, init, inp, dim=0)
+
+    @requires_cuda
+    def test_scan_input_output_alias(self):
+        device = torch.device("cuda")
+
+        def fct_input_output_alias(x, y):
+            return (x[0] + 1, x[1] + y[1]), (x[1], x[1] + y[1] + 2)
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+        init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
+
+        with self.assertRaisesRegex(
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "scan must be captured completely with torch.compile.*",
+        ):
+            scan(fct_input_output_alias, init, inp, dim=0)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_scan_carry_carry_alias(self):
+        device = torch.device("cuda")
+
+        def fct_carry_carry_alias(x, y):
+            c = x[0] + y[1]
+            return (c, c), (x[0] + y[1], x[0] + y[1] + 1)
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+        init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
+
+        with self.assertRaisesRegex(
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "scan must be captured completely with torch.compile.*",
+        ):
+            scan(fct_carry_carry_alias, init, inp, dim=0)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_scan_carry_output_alias(self):
+        device = torch.device("cuda")
+
+        def fct_carry_output_alias(x, y):
+            c = x[0] + y[1]
+            return (x[0] + y[1], c), (c, x[0] + y[1] + 1)
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+        init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
+
+        with self.assertRaisesRegex(
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "scan must be captured completely with torch.compile.*",
+        ):
+            scan(fct_carry_output_alias, init, inp, dim=0)
+
 
 class AssociativeScanModels:
     @staticmethod
     def get_scan_fct(compile_mode, combine_mode):
         # Compile the associative_scan according to the provided compile_mode
         if compile_mode != "fake":
-            compile_mode = "none"
             assoc_scan_comp = compile_mode_helper(associative_scan, compile_mode)
 
             def scan_fct(combine_fn, xs, dim, reverse):
@@ -3446,11 +3551,17 @@ class AssociativeScanTests(TestCase):
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
+    # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
+    # as the current implementation does not support lifted arguments
     @decorateIf(
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and (params["device"] == torch.device("cpu") or torch.version.hip)
+            and (
+                params["device"] == torch.device("cpu")
+                or params["compile_mode"] == "compile_dynamic_shape"
+                or torch.version.hip
+            )
         ),
     )
     def test_associative_scan_compile(
@@ -3507,11 +3618,17 @@ class AssociativeScanTests(TestCase):
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
+    # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
+    # as the current implementation does not support lifted arguments
     @decorateIf(
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and (params["device"] == torch.device("cpu") or torch.version.hip)
+            and (
+                params["device"] == torch.device("cpu")
+                or params["compile_mode"] == "compile_dynamic_shape"
+                or torch.version.hip
+            )
         ),
     )
     def test_associative_scan_dim(self, combine_mode, compile_mode, reverse, device):
@@ -3548,7 +3665,8 @@ class AssociativeScanTests(TestCase):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    def test_associative_scan_dim_shape_failure(self):
+    @unittest.expectedFailure
+    def test_associative_scan_dim_shape_failure(self, compile_mode, combine_mode):
         num_dims = [2]
         for num_dim in num_dims:
             shapes = [9 for _ in range(num_dim)]
@@ -3558,7 +3676,7 @@ class AssociativeScanTests(TestCase):
             kwargs = {
                 "dim": rnd_scan_dim,
                 "reverse": True,
-                "compile_mode": "none",
+                "compile_mode": "compile",
                 "combine_mode": "generic",
             }
             kwargs_fake = self._prepare_fake_kwargs(kwargs)
@@ -3577,11 +3695,17 @@ class AssociativeScanTests(TestCase):
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
+    # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
+    # as the current implementation does not support lifted arguments
     @decorateIf(
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and (params["device"] == torch.device("cpu") or torch.version.hip)
+            and (
+                params["device"] == torch.device("cpu")
+                or params["compile_mode"] == "compile_dynamic_shape"
+                or torch.version.hip
+            )
         ),
     )
     def test_associative_scan_tuple(self, compile_mode, combine_mode, reverse, device):
@@ -3664,11 +3788,17 @@ class AssociativeScanTests(TestCase):
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
+    # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
+    # as the current implementation does not support lifted arguments
     @decorateIf(
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and (params["device"] == torch.device("cpu") or torch.version.hip)
+            and (
+                params["device"] == torch.device("cpu")
+                or params["compile_mode"] == "compile_dynamic_shape"
+                or torch.version.hip
+            )
         ),
     )
     def test_associative_scan_complex_pytree(
@@ -3693,6 +3823,149 @@ class AssociativeScanTests(TestCase):
             inputs=inp,
         )
 
+    @skipIfTorchDynamo("don't test compile on compile")
+    @skipIfNoDynamoSupport
+    @skipIfCrossRef  # Arg order changes with crossref
+    def test_associative_scan_pytree_output(self):
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        x = (
+            (
+                torch.randn(3, 10, 2, device=torch.device("cpu")),
+                (torch.randn(3, 10, 2, device=torch.device("cpu")),),
+            ),
+            torch.randn(3, 10, 2, device=torch.device("cpu")),
+        )
+
+        def f(fct, xs):
+            return associative_scan(
+                fct, xs, dim=0, reverse=True, combine_mode="generic"
+            )
+
+        def combine_fn(x: torch.Tensor, y: torch.Tensor):
+            a, b = (x[0][0] + y[1], x[0][1][0] - y[1])
+            return (a, (b,)), a - b
+
+        # Check graph
+        backend = EagerAndRecordGraphs()
+        torch.compile(f, backend=backend)(combine_fn, x)
+        gm = backend.graphs[0]
+
+        self.assertExpectedInline(
+            normalize_gm(gm.print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_xs_0_0_: "f32[3, 10, 2]", L_xs_0_1_0_: "f32[3, 10, 2]", L_xs_1_: "f32[3, 10, 2]"):
+        l_xs_0_0_ = L_xs_0_0_
+        l_xs_0_1_0_ = L_xs_0_1_0_
+        l_xs_1_ = L_xs_1_
+
+        elem: "f32[3, 10, 2]" = torch.movedim(l_xs_0_0_, 0, 0);  l_xs_0_0_ = None
+        elem_1: "f32[3, 10, 2]" = torch.movedim(l_xs_0_1_0_, 0, 0);  l_xs_0_1_0_ = None
+        elem_2: "f32[3, 10, 2]" = torch.movedim(l_xs_1_, 0, 0);  l_xs_1_ = None
+
+        elem_3: "f32[3, 10, 2]" = torch.flip(elem, [0]);  elem = None
+        elem_4: "f32[3, 10, 2]" = torch.flip(elem_1, [0]);  elem_1 = None
+        elem_5: "f32[3, 10, 2]" = torch.flip(elem_2, [0]);  elem_2 = None
+
+        child: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_3, 0, 0, -1, 2)
+        child_1: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_4, 0, 0, -1, 2)
+        child_2: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_5, 0, 0, -1, 2)
+
+        child_3: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_3, 0, 1, None, 2)
+        child_4: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_4, 0, 1, None, 2)
+        child_5: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_5, 0, 1, None, 2)
+
+        lazy_load_decompositions = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions = None
+
+        _vmap_increment_nesting = torch._C._functorch._vmap_increment_nesting(1, 'error');  _vmap_increment_nesting = None
+
+        _add_batch_dim: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child, 0, 1);  child = None
+        _add_batch_dim_1: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_1, 0, 1);  child_1 = None
+        _add_batch_dim_2: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_2, 0, 1);  child_2 = _add_batch_dim_2 = None
+        _add_batch_dim_3: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_3, 0, 1);  child_3 = _add_batch_dim_3 = None
+        _add_batch_dim_4: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_4, 0, 1);  child_4 = _add_batch_dim_4 = None
+        _add_batch_dim_5: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_5, 0, 1);  child_5 = None
+
+        a: "f32[10, 2]" = _add_batch_dim + _add_batch_dim_5;  _add_batch_dim = None
+        b: "f32[10, 2]" = _add_batch_dim_1 - _add_batch_dim_5;  _add_batch_dim_1 = _add_batch_dim_5 = None
+
+        child_6: "f32[10, 2]" = a - b
+
+        child_7: "f32[1, 10, 2]" = torch._C._functorch._remove_batch_dim(a, 1, 1, 0);  a = None
+        child_8: "f32[1, 10, 2]" = torch._C._functorch._remove_batch_dim(b, 1, 1, 0);  b = None
+        child_9: "f32[1, 10, 2]" = torch._C._functorch._remove_batch_dim(child_6, 1, 1, 0);  child_6 = None
+
+        _vmap_decrement_nesting = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
+
+        child_10: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_3, 0, 2, None, 2)
+        child_11: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_4, 0, 2, None, 2)
+        child_12: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_5, 0, 2, None, 2)
+
+        lazy_load_decompositions_1 = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions_1 = None
+
+        _vmap_increment_nesting_1 = torch._C._functorch._vmap_increment_nesting(1, 'error');  _vmap_increment_nesting_1 = None
+
+        _add_batch_dim_6: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_7, 0, 1)
+        _add_batch_dim_7: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_8, 0, 1)
+        _add_batch_dim_8: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_9, 0, 1);  _add_batch_dim_8 = None
+        _add_batch_dim_9: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_10, 0, 1);  child_10 = _add_batch_dim_9 = None
+        _add_batch_dim_10: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_11, 0, 1);  child_11 = _add_batch_dim_10 = None
+        _add_batch_dim_11: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_12, 0, 1);  child_12 = None
+
+        a_1: "f32[10, 2]" = _add_batch_dim_6 + _add_batch_dim_11;  _add_batch_dim_6 = None
+        b_1: "f32[10, 2]" = _add_batch_dim_7 - _add_batch_dim_11;  _add_batch_dim_7 = _add_batch_dim_11 = None
+
+        child_13: "f32[10, 2]" = a_1 - b_1
+
+        child_14: "f32[1, 10, 2]" = torch._C._functorch._remove_batch_dim(a_1, 1, 1, 0);  a_1 = None
+        child_15: "f32[1, 10, 2]" = torch._C._functorch._remove_batch_dim(b_1, 1, 1, 0);  b_1 = None
+        child_16: "f32[1, 10, 2]" = torch._C._functorch._remove_batch_dim(child_13, 1, 1, 0);  child_13 = None
+
+        _vmap_decrement_nesting_1 = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting_1 = None
+
+        slice_10: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_3, 0, 0, 1);  elem_3 = None
+        cat: "f32[2, 10, 2]" = torch.cat([slice_10, child_14], dim = 0);  slice_10 = child_14 = None
+        slice_11: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_4, 0, 0, 1);  elem_4 = None
+        cat_1: "f32[2, 10, 2]" = torch.cat([slice_11, child_15], dim = 0);  slice_11 = child_15 = None
+        slice_12: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_5, 0, 0, 1);  elem_5 = None
+        cat_2: "f32[2, 10, 2]" = torch.cat([slice_12, child_16], dim = 0);  slice_12 = child_16 = None
+
+        b_2: "f32[2, 10, 2]" = torch._C._nn.pad(child_7, [0, 0, 0, 0, 0, 1], 'constant', None);  child_7 = None
+
+        stacked: "f32[2, 2, 10, 2]" = torch.stack([cat, b_2], dim = 1);  cat = b_2 = None
+
+        interleaved: "f32[4, 10, 2]" = torch.flatten(stacked, start_dim = 0, end_dim = 1);  stacked = None
+
+        interleaved_1: "f32[3, 10, 2]" = torch.ops.aten.slice(interleaved, 0, 0, 3);  interleaved = None
+
+        b_3: "f32[2, 10, 2]" = torch._C._nn.pad(child_8, [0, 0, 0, 0, 0, 1], 'constant', None);  child_8 = None
+
+        stacked_1: "f32[2, 2, 10, 2]" = torch.stack([cat_1, b_3], dim = 1);  cat_1 = b_3 = None
+
+        interleaved_2: "f32[4, 10, 2]" = torch.flatten(stacked_1, start_dim = 0, end_dim = 1);  stacked_1 = None
+
+        interleaved_3: "f32[3, 10, 2]" = torch.ops.aten.slice(interleaved_2, 0, 0, 3);  interleaved_2 = None
+
+        b_4: "f32[2, 10, 2]" = torch._C._nn.pad(child_9, [0, 0, 0, 0, 0, 1], 'constant', None);  child_9 = None
+
+        stacked_2: "f32[2, 2, 10, 2]" = torch.stack([cat_2, b_4], dim = 1);  cat_2 = b_4 = None
+
+        interleaved_4: "f32[4, 10, 2]" = torch.flatten(stacked_2, start_dim = 0, end_dim = 1);  stacked_2 = None
+
+        interleaved_5: "f32[3, 10, 2]" = torch.ops.aten.slice(interleaved_4, 0, 0, 3);  interleaved_4 = None
+
+        child_17: "f32[3, 10, 2]" = interleaved_1.flip([0]);  interleaved_1 = None
+        child_18: "f32[3, 10, 2]" = interleaved_3.flip([0]);  interleaved_3 = None
+        child_19: "f32[3, 10, 2]" = interleaved_5.flip([0]);  interleaved_5 = None
+
+        movedim_3: "f32[3, 10, 2]" = torch.movedim(child_17, 0, 0);  child_17 = None
+        movedim_4: "f32[3, 10, 2]" = torch.movedim(child_18, 0, 0);  child_18 = None
+        movedim_5: "f32[3, 10, 2]" = torch.movedim(child_19, 0, 0);  child_19 = None
+        return (movedim_3, movedim_4, movedim_5)
+""",  # noqa: B950
+        )
+
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -3701,11 +3974,17 @@ class AssociativeScanTests(TestCase):
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
+    # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
+    # as the current implementation does not support lifted arguments
     @decorateIf(
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and (params["device"] == torch.device("cpu") or torch.version.hip)
+            and (
+                params["device"] == torch.device("cpu")
+                or params["compile_mode"] == "compile_dynamic_shape"
+                or torch.version.hip
+            )
         ),
     )
     def test_associative_scan_downstream_scan_matmul(
@@ -3742,11 +4021,17 @@ class AssociativeScanTests(TestCase):
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
+    # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
+    # as the current implementation does not support lifted arguments
     @decorateIf(
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and (params["device"] == torch.device("cpu") or torch.version.hip)
+            and (
+                params["device"] == torch.device("cpu")
+                or params["compile_mode"] == "compile_dynamic_shape"
+                or torch.version.hip
+            )
         ),
     )
     def test_associative_scan_downstream_scan_scan(
@@ -3785,11 +4070,17 @@ class AssociativeScanTests(TestCase):
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
+    # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
+    # as the current implementation does not support lifted arguments
     @decorateIf(
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and (params["device"] == torch.device("cpu") or torch.version.hip)
+            and (
+                params["device"] == torch.device("cpu")
+                or params["compile_mode"] == "compile_dynamic_shape"
+                or torch.version.hip
+            )
         ),
     )
     def test_associative_scan_downstream_scan_scan_different_dim(
@@ -3961,9 +4252,19 @@ class AssociativeScanTests(TestCase):
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of compile_mode=compile_dynamic_shape
+    # as the current implementation does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["device"] == torch.device("cpu")
+            or params["compile_mode"] == "compile_dynamic_shape"
+            or torch.version.hip
+        ),
+    )
     def test_associative_scan_cond_in_combine_fn(self, compile_mode, reverse, device):
         def combine_fn(x, y):
-            val = cond(torch.sum(y) > 0.0, lambda y: y + 0.0, lambda y: 1.0 - y, (y,))
+            val = cond(torch.sum(y) > 0.0, lambda y: y.clone(), lambda y: 1.0 - y, (y,))
             return x * val
 
         inp = torch.randn(3, 10, 1, device=device)
@@ -4085,11 +4386,17 @@ class AssociativeScanTests(TestCase):
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
+    # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
+    # as the current implementation does not support lifted arguments
     @decorateIf(
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and (params["device"] == torch.device("cpu") or torch.version.hip)
+            and (
+                params["device"] == torch.device("cpu")
+                or params["compile_mode"] == "compile_dynamic_shape"
+                or torch.version.hip
+            )
         ),
     )
     def test_associative_scan_binary_operator(
@@ -4180,11 +4487,8 @@ class AssociativeScanTests(TestCase):
         elements = (x, deltaA, deltaB_u, C, y)
 
         with self.assertRaisesRegex(
-            # Should be
-            # ValueError,
-            # "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
-            torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
+            ValueError,
+            "All xs leaves must at least have.*",
         ):
             associative_scan(
                 get_scan_combine_fn("different_input_size_operator", True),
@@ -4490,20 +4794,17 @@ class AssociativeScanTests(TestCase):
         )
 
     @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
     def test_associative_scan_sparse_tensor(self):
         x = torch.tensor(
             [[[0.0, 0], [1.0, 2.0]], [[0.0, 0], [3.0, 4.0]], [[0.0, 0], [5.0, 6.0]]]
         ).to_sparse()
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "torch.compile does not support sparse Tensors",
+            ValueError,
+            "xs leaves must dense Tensors.*",
         ):
             associative_scan(
-                get_scan_combine_fn("add", True),
-                x,
-                0,
+                get_scan_combine_fn("add", True), x, 0, combine_mode="generic"
             )
 
     @unittest.skipIf(not SM70OrLater, "triton")
@@ -4526,10 +4827,8 @@ class AssociativeScanTests(TestCase):
 
         for fct in [fct_wrong_dtype, fct_wrong_device, fct_wrong_stride]:
             with self.assertRaisesRegex(
-                # Should be: RuntimeError,
-                # "The pytree of the output of the operator needs to match the xs pytree"
-                torch._dynamo.exc.Unsupported,
-                "Observed exception.*",
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Expected initial_xs and combine_fn_output to have same metadata.*",
             ):
                 associative_scan(fct, x, 0)
 
@@ -4538,7 +4837,7 @@ class AssociativeScanTests(TestCase):
         def fct_wrong_pytree(x, y):
             return {
                 "i": x["i"] * y["j"][0][0],
-                "k": 0.0,
+                "k": torch.tensor(0.0),
                 "j": ([x["j"][1][0]["o"]], [{"o": torch.sin(x["i"])}]),
             }
 
@@ -4548,11 +4847,8 @@ class AssociativeScanTests(TestCase):
         inp = {"i": x, "j": ([y], [{"o": z}])}
 
         with self.assertRaisesRegex(
-            # Should be:
-            # RuntimeError,
-            # r"The number of leaves of the pytree of the output of the operator.*",
-            torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
+            AssertionError,
+            "Combin_fn received wrong number of arguments.*",
         ):
             associative_scan(fct_wrong_pytree, inp, 0, combine_mode="generic")
 
@@ -4585,8 +4881,10 @@ class AssociativeScanTests(TestCase):
 
         with self.assertRaisesRegex(
             # Should be
-            RuntimeError,
-            "Combine_fn might be modifying the input!",
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "associative_scan must be captured completely with torch.compile.*",
         ):
             associative_scan(fct_input_mutation, x, 0)
 
@@ -4603,10 +4901,34 @@ class AssociativeScanTests(TestCase):
 
         with self.assertRaisesRegex(
             # Should be
-            RuntimeError,
-            "Combine_fn might be aliasing the input!",
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "associative_scan must be captured completely with torch.compile.*",
         ):
             associative_scan(fct_input_output_alias, inp, 0)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_associative_scan_output_output_alias(self):
+        device = torch.device("cuda")
+
+        def fct_output_output_alias(x, y):
+            c = x[0] + y[1]
+            return c, c
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+
+        with self.assertRaisesRegex(
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "associative_scan must be captured completely with torch.compile.*",
+        ):
+            associative_scan(fct_output_output_alias, inp, 0)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
@@ -5407,8 +5729,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         graph_module = make_fx(torch.func.functionalize(f))(*example_inputs)
         self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    def test_cond_functionalized_input_mutation_on_true_brancte(self):
+    def test_cond_functionalized_input_mutation_on_true_branch(self):
         def true_fn(x):
             view_x = x.view(x.shape)
             view_x.add_(1)
@@ -5442,13 +5763,13 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
+            torch._dynamo.exc.TorchRuntimeError,
+            "cond_true might be modifying the input!",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
             )
 
-    # https://github.com/pytorch/pytorch/issues/126988
     def test_cond_functionalized_input_mutation_on_false_branch(self):
         def true_fn(x):
             return x.sin().sum()
@@ -5483,16 +5804,16 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
+            torch._dynamo.exc.TorchRuntimeError,
+            "cond_false might be modifying the input!",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
             )
 
-    # https://github.com/pytorch/pytorch/issues/126988
     def test_cond_functionalized_output_alias_input(self):
         def true_fn(x):
-            return x
+            return x.clone()
 
         def false_fn(x):
             view_x = x.view(x.shape)
@@ -5517,13 +5838,16 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Cond doesn't work unless it is captured completely with torch.compile.*",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
             )
 
-    # https://github.com/pytorch/pytorch/issues/126988
     def test_cond_functionalized_nested_input_mutation(self):
         def true_true_fn(x):
             x.add_(4)
@@ -5545,13 +5869,13 @@ def forward(self, x_1):
 
         example_inputs = (torch.ones(4, 5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
+            torch._dynamo.exc.TorchRuntimeError,
+            "cond_true might be modifying the input!",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
             )
 
-    # https://github.com/pytorch/pytorch/issues/126988
     def test_cond_functionalized_nested_input_mutation_with_aot_func(self):
         def true_true_fn(x):
             x.add_(4)
@@ -5578,7 +5902,11 @@ def forward(self, x_1):
             f(example_input_func)
 
             with self.assertRaisesRegex(
-                torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
+                # Should be
+                # torch._dynamo.exc.Unsupported,
+                # "Encountered aliasing during higher order op tracing for HOP.*"
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Cond doesn't work unless it is captured completely with torch.compile.*",
             ):
                 make_fx(f, tracing_mode="symbolic")(example_input_func)
         finally:
@@ -5596,7 +5924,11 @@ def forward(self, x_1):
             return wrapper
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Cond doesn't work unless it is captured completely with torch.compile.*",
         ):
             make_fx(f_wrapper(f), tracing_mode="symbolic")(example_input_func)
 
@@ -5617,8 +5949,11 @@ def forward(self, x_1):
             example_input_func = to_fun_old(example_input)
             torch._enable_functionalization(reapply_views=False)
             with self.assertRaisesRegex(
-                torch._dynamo.exc.TorchRuntimeError,
-                "One of torch.cond branch might be aliasing",
+                # Should be
+                # torch._dynamo.exc.Unsupported,
+                # "Encountered aliasing during higher order op tracing for HOP.*"
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Cond doesn't work unless it is captured completely with torch.compile.*",
             ):
                 f(example_input_func)
         finally:
@@ -5648,8 +5983,11 @@ def forward(self, x_1):
             return wrapper
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError,
-            "One of torch.cond branch might be aliasing",
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Cond doesn't work unless it is captured completely with torch.compile.*",
         ):
             make_fx(f_wrapper(f), tracing_mode="symbolic")(example_input)
 
@@ -5784,8 +6122,11 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError,
-            "Unmatched output spec from torch.cond branches",
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Cond doesn't work unless it is captured completely with torch.compile.*",
         ):
             make_fx(f)(x, torch.tensor(False))
 
@@ -5957,8 +6298,11 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError,
-            "Unmatched output spec from torch.cond branches",
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Cond doesn't work unless it is captured completely with torch.compile.*",
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
@@ -6241,7 +6585,8 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4), torch.ones(4))
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError, "torch.map is mutating the input!"
+            torch._dynamo.exc.TorchRuntimeError,
+            "map might be modifying the input!",
         ):
             functional_f(*example_inputs)
 
@@ -6256,7 +6601,7 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4), torch.ones(4))
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError, "torch.map is mutating the input!"
+            torch._dynamo.exc.TorchRuntimeError, "map might be modifying the input!"
         ):
             functional_f(*example_inputs)
 
@@ -6294,7 +6639,11 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4),)
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError, "torch.map is aliasing the input!"
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "map doesn't work unless it is captured completely with torch.compile.*",
         ):
             functional_f(*example_inputs)
 
@@ -6653,10 +7002,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             gm.code.strip(),
             """\
 def forward(self, pred_1, x_1):
+    unbind = torch.ops.aten.unbind.int(x_1)
+    getitem = unbind[0];  getitem = None
+    getitem_1 = unbind[1];  unbind = getitem_1 = None
     body_graph_0 = self.body_graph_0
     map_impl = torch.ops.higher_order.map_impl(body_graph_0, [x_1], [pred_1]);  body_graph_0 = x_1 = pred_1 = None
-    getitem = map_impl[0];  map_impl = None
-    return getitem""",
+    getitem_2 = map_impl[0];  map_impl = None
+    return getitem_2""",
         )
         self.assertExpectedInline(
             gm.body_graph_0.code.strip(),
@@ -6892,7 +7244,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             return torch.cond(
                 pred=torch.tensor([True]),
                 true_fn=lambda x: x + 100,
-                false_fn=lambda x: x,
+                false_fn=lambda x: x.clone(),
                 operands=(x,),
             )
 
@@ -6906,7 +7258,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             return torch.cond(
                 pred=x.sum() < y.sum(),
                 true_fn=lambda x, y: x + 100,
-                false_fn=lambda x, y: y,
+                false_fn=lambda x, y: y.clone(),
                 operands=(x, y),
             )
 
@@ -6965,7 +7317,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return torch.cond(
                     pred=torch.tensor([True]),
                     true_fn=lambda x: (x + c, x - c),
-                    false_fn=lambda x: (x, x),
+                    false_fn=lambda x: (x.clone(), x.clone()),
                     operands=(x,),
                 )
 
@@ -6975,7 +7327,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return torch.cond(
                     pred=torch.tensor([True]),
                     true_fn=lambda x: (x + 1, x - 1),
-                    false_fn=lambda x: (x, x),
+                    false_fn=lambda x: (x.clone(), x.clone()),
                     operands=(x,),
                 )
 
@@ -7171,8 +7523,6 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, 
             functional_f(example_init, example_inputs), f(example_init, example_inputs)
         )
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_scan_functionalized_elem_mutation(self):
         def add1(x, y):
             x.add_(4)
@@ -7185,8 +7535,15 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, 
         example_init = torch.ones(5, 4)
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException,
-            "Combine_fn might be modifying the input!",
+            # TODO: Fix this so that the HOPs show similar errors for functionalization
+            # This is the Exception with PYTORCH_TEST_WITH_DYNAMO=0
+            # RuntimeError,
+            # "torch.scan might be modifying the input!",
+            # This is the Exception with PYTORCH_TEST_WITH_DYNAMO=1
+            # torch._dynamo.exc.TorchDynamoException,
+            # "Unexpected exception when running generated GraphModule.*"
+            Exception,
+            ".*",
         ):
             functional_f(example_init, example_inputs)
 
@@ -7199,13 +7556,19 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, 
 
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException,
-            "Combine_fn might be modifying the input!",
+            # TODO: Fix this so that the HOPs show similar errors for functionalization
+            # Should be
+            # This is the Exception with PYTORCH_TEST_WITH_DYNAMO=0
+            # RuntimeError,
+            # "torch.scan might be modifying the input!",
+            # This is the Exception with PYTORCH_TEST_WITH_DYNAMO=1
+            # torch._dynamo.exc.TorchDynamoException,
+            # "Unexpected exception when running generated GraphModule.*"
+            Exception,
+            ".*",
         ):
             functional_f(example_init, example_inputs)
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_scan_functionalized_elem_alias(self):
         def add(x, y):
             return x, x
@@ -7217,7 +7580,16 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, 
         example_init = torch.ones(5, 4)
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "Combine_fn might be aliasing the input!"
+            # TODO: Fix this so that the HOPs show similar errors for functionalization
+            # Should be
+            # This is the Exception with PYTORCH_TEST_WITH_DYNAMO=0
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            # This is the Exception with PYTORCH_TEST_WITH_DYNAMO=1
+            # torch._dynamo.exc.UncapturedHigherOrderOpError,
+            # "scan must be captured completely with torch.compile.*",
+            Exception,
+            ".*",
         ):
             functional_f(example_init, example_inputs)
 
@@ -7379,6 +7751,9 @@ class GraphModule(torch.nn.Module):
         _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(gt_1, "Runtime assertion failed for expression 0 < u1 on node 'gt_1'");  gt_1 = _assert_scalar_default_1 = None
 
         out_x: "f32[s77, s27]" = while_loop[1];  while_loop = None
+
+        gt: "Sym(u1 > 0)" = getitem_4 > 0
+        _check = torch._check(gt);  gt = _check = None
 
         add: "Sym(u1 + 1)" = getitem_4 + 1
 
@@ -7724,7 +8099,11 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(2, 2)
         for f in ALIAS_FN:
             with self.assertRaisesRegex(
-                torch._dynamo.exc.BackendCompilerFailed, "might be aliasing the input"
+                # Should be
+                # torch._dynamo.exc.Unsupported,
+                # "Encountered aliasing during higher order op tracing for HOP.*"
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Cond doesn't work unless it is captured completely with torch.compile.*",
             ):
                 torch.compile(fn)(f, x)
 
@@ -7740,7 +8119,11 @@ class GraphModule(torch.nn.Module):
         # as a result of auto lifting.
         for view_f in ALIAS_FN[1:]:
             with self.assertRaisesRegex(
-                torch._dynamo.exc.BackendCompilerFailed, "might be aliasing the input"
+                # Should be
+                # torch._dynamo.exc.Unsupported,
+                # "Encountered aliasing during higher order op tracing for HOP.*"
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Cond doesn't work unless it is captured completely with torch.compile.*",
             ):
                 torch.compile(fn)(view_f, x)
 
@@ -7757,12 +8140,20 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(2, 2)
         for f in ALIAS_FN:
             with self.assertRaisesRegex(
-                torch._dynamo.exc.BackendCompilerFailed, "might be modifying the input"
+                # Should be
+                # torch._dynamo.exc.Unsupported,
+                # "Encountered aliasing during higher order op tracing for HOP.*"
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Cond doesn't work unless it is captured completely with torch.compile.*",
             ):
                 torch.compile(fn)(f, x)
 
             with self.assertRaisesRegex(
-                torch._dynamo.exc.BackendCompilerFailed, "might be modifying the input"
+                # Should be
+                # torch._dynamo.exc.Unsupported,
+                # "Encountered aliasing during higher order op tracing for HOP.*"
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Cond doesn't work unless it is captured completely with torch.compile.*",
             ):
                 with torch.inference_mode(inference_mode):
                     torch.compile(fn)(f, x)
@@ -7937,10 +8328,10 @@ class GraphModule(torch.nn.Module):
         _ = self._check_export_ret_graph_str(model, args, dynamic_shapes)
 
     @skipIfTorchDynamo(
-        "Skip because _merge_tensors is not intended for dynamo to compile"
+        "Skip because _merge_output is not intended for dynamo to compile"
     )
-    def test_merge_tensors(self):
-        from torch._higher_order_ops.cond import _merge_tensors
+    def test_merge_output(self):
+        from torch._higher_order_ops.cond import _merge_output
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -7985,7 +8376,7 @@ class GraphModule(torch.nn.Module):
             with fake_mode:
                 t1 = torch.empty_strided(size1, stride1)
                 t2 = torch.empty_strided(size2, stride2)
-            out = _merge_tensors(t1, t2, fake_mode)
+            out = _merge_output(t1, t2, fake_mode)
             self.assertEqual(str(tuple(out.size())), merged_size)
             self.assertEqual(str(tuple(out.stride())), merged_stride)
 

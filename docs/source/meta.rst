@@ -68,7 +68,7 @@ Use a factory function like :func:`torch.empty_like` to explicitly specify how
 you would like the missing data to be filled in.
 
 NN modules have a convenience method :meth:`torch.nn.Module.to_empty` that
-allow you to the module to another device, leaving all parameters
+allows you to move the module to another device, leaving all parameters
 uninitialized.  You are expected to explicitly reinitialize the parameters
 manually::
 

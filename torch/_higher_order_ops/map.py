@@ -1,19 +1,13 @@
 # mypy: allow-untyped-defs
 import functools
 from typing import Callable, Union
+from typing_extensions import TypeVarTuple
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._higher_order_ops.utils import (
-    _has_potential_branch_input_alias,
-    _has_potential_branch_input_mutation,
-    _maybe_compile_and_run_fn,
-    _maybe_run_with_interpreter,
-    reenter_make_fx,
-    UnsupportedAliasMutationException,
-)
+from torch._higher_order_ops.utils import _maybe_run_with_interpreter, reenter_make_fx
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
@@ -47,18 +41,6 @@ map_impl = MapImpl()
 
 
 def create_fw_bw_graph(f, num_mapped_args, *args):
-    from torch._functorch.aot_autograd import AOTConfig, create_joint
-
-    dummy_aot_config = AOTConfig(
-        fw_compiler=None,  # type: ignore[arg-type]
-        bw_compiler=None,  # type: ignore[arg-type]
-        partition_fn=None,  # type: ignore[arg-type]
-        decompositions={},
-        num_params_buffers=0,
-        aot_id=0,
-        keep_inference_input_mutations=False,
-    )
-
     mapped_xs = args[:num_mapped_args]
     pos_args = args[num_mapped_args:]
 
@@ -88,6 +70,18 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
             example_grad = [_from_fun(out) for out in example_flat_out]
 
             fw_graph = make_fx(f)(*example_xs, *example_pos_args)
+
+        from torch._functorch.aot_autograd import AOTConfig, create_joint
+
+        dummy_aot_config = AOTConfig(
+            fw_compiler=None,  # type: ignore[arg-type]
+            bw_compiler=None,  # type: ignore[arg-type]
+            partition_fn=None,  # type: ignore[arg-type]
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+        )
 
         def joint_f(*example_args):
             joint_mapped_args = example_args[:joint_num_mapped]
@@ -120,7 +114,7 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
 def map(
     f: Callable[[pytree.PyTree, tuple[pytree.PyTree, ...]], pytree.PyTree],
     xs: Union[pytree.PyTree, torch.Tensor],
-    *args,
+    *args: TypeVarTuple,
 ):
     r"""
     Perfoms a map of f with xs. Intuitively, you can think of the semantic being:
@@ -192,6 +186,8 @@ def map(
         )
         return map_impl(inner_f, flat_xs, flat_args)
 
+    from torch._higher_order_ops.utils import _maybe_compile_and_run_fn
+
     return _maybe_compile_and_run_fn(run_flattened_map, f, flat_xs, flat_args)
 
 
@@ -250,6 +246,7 @@ def map_dense(f, xs, pos_args):
     return _stack_pytree(pytrees)
 
 
+# TODO: Rework DispatchKey.Autograd to py_autograd_impl
 @map_impl.py_impl(DispatchKey.Autograd)
 def map_autograd(f, xs, pos_args):
     num_mapped_args = len(xs)
@@ -271,23 +268,25 @@ def map_fake_tensor_mode(mode, f, xs, args):
 
 @map_impl.py_functionalize_impl
 def map_functionalize(ctx, f, xs, pos_args):
+    from torch._higher_order_ops.utils import _check_alias_and_mutation
+
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_args = ctx.unwrap_tensors(pos_args)
     wrapped_fn = ctx.functionalize(_maybe_run_with_interpreter(f))
 
     with ctx.redispatch_to_next():
-        with disable_proxy_modes_tracing():
-            example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
+        example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        if _has_potential_branch_input_mutation(
-            f, example_inputs, pre_dispatch=pre_dispatch
-        ):
-            raise UnsupportedAliasMutationException("torch.map is mutating the input!")
-
-        if _has_potential_branch_input_alias(
-            f, example_inputs, pre_dispatch=pre_dispatch
-        ):
-            raise UnsupportedAliasMutationException("torch.map is aliasing the input!")
-
+        _check_alias_and_mutation(f, example_inputs, "map", pre_dispatch)
         map_return = map_impl(wrapped_fn, unwrapped_xs, unwrapped_args)
         return ctx.wrap_tensors(map_return)
+
+
+def _fake_map(f, x, *args):
+    from functorch.experimental.control_flow import _stack_pytree, _unstack_pytree
+
+    x_pytrees = _unstack_pytree(x)
+    zs = []
+    for xp in x_pytrees:
+        zs.append(f(xp, *args))
+    return _stack_pytree(zs)

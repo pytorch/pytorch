@@ -282,18 +282,16 @@ class BlockPtrOptions:
         # We need an explicit broadcast for stores, or if the final reshape does more
         # than add singletons.
         sizevars = V.graph.sizevars
-        require_broadcast = any(self.broadcasting_dims) and (
-            len(pre_broadcast_shape) != len(final_shape)
-            or any(
-                not (
-                    sizevars.statically_known_equals(pre_dim, 1)
-                    or sizevars.statically_known_equals(pre_dim, post_dim)
-                )
+        supports_implicit_broadcast = allow_implicit and (
+            len(pre_broadcast_shape) == len(final_shape)
+            and all(
+                sizevars.statically_known_equals(pre_dim, 1)
+                or sizevars.statically_known_equals(pre_dim, post_dim)
                 for pre_dim, post_dim in zip(pre_broadcast_shape, final_shape)
             )
         )
 
-        if not allow_implicit or require_broadcast:
+        if any(self.broadcasting_dims) and not supports_implicit_broadcast:
             value = f"tl.broadcast_to({value}, {V.kernel.index_to_str(self.broadcast_shape)})"
 
         # Reshape to the final shape.
@@ -506,7 +504,7 @@ class BlockPtrOptions:
 def triton_reshape(
     value: str, old_shape: Sequence[sympy.Expr], new_shape: Sequence[sympy.Expr]
 ) -> str:
-    """Workaround https://github.com/openai/triton/issues/2836"""
+    """Workaround https://github.com/triton-lang/triton/issues/2836"""
     assert isinstance(old_shape, list) and isinstance(new_shape, list)
 
     old_shape_str = [V.kernel.index_to_str(shape) for shape in old_shape]
@@ -715,16 +713,6 @@ def triton_compute_type(dtype: torch.dtype) -> str:
     return triton_type(upcast_compute_type(dtype))
 
 
-def _get_primitive_bitwidth(dtype: torch.dtype) -> int:
-    """Number of bits of triton_compute_type()"""
-    dtype = upcast_compute_type(dtype)
-    itemsize = getattr(dtype, "itemsize", None)
-    if itemsize:
-        return itemsize * 8
-    else:
-        return -1
-
-
 def triton_store_type(dtype: torch.dtype) -> str:
     """Convert torch.dtype to triton type, with fix for storing tl.bool"""
     if dtype == torch.bool:
@@ -853,7 +841,7 @@ class TritonOverrides(OpOverrides):
 
             # fp8 data type conversions has min_elem_per_thread requirements.
             # Refer to Triton implementations here:
-            # https://github.com/openai/triton/blob/10f59d8ce04052521c1bc0cb3a3f8b98918fc7e3/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp#L10.
+            # https://github.com/triton-lang/triton/blob/10f59d8ce04052521c1bc0cb3a3f8b98918fc7e3/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp#L10.
             fp8_dtypes = (
                 torch.float8_e4m3fn,
                 torch.float8_e5m2,
@@ -896,30 +884,20 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def to_dtype_bitcast(x, dtype: torch.dtype, src_dtype: torch.dtype):
-        triton_dtype = triton_compute_type(dtype)
+        assert src_dtype.itemsize == dtype.itemsize
         # We may promote float16 or bfloat16 to float32 and cause the
         # bitwidth of dtype to be different from the input tensor (i.e. float32).
         # In such as case, we will have to convert the input tensor to
         # its src_type, perform bitcast, and then convert the bit-casted
         # tensor back to float to ensure we use values with the right precision.
-        if (
-            src_dtype in (torch.float16, torch.bfloat16)
-            and config.triton.codegen_upcast_to_fp32
-        ):
-            triton_src_dtype = str(src_dtype).split(".")[-1]
-            cast_x = f"{x}.to(tl.{triton_src_dtype})"
-            if dtype in (torch.float16, torch.bfloat16):
-                triton_type_name = str(dtype).split(".")[-1]
-                triton_dtype = f"tl.{triton_type_name}"
-            cast_x = f"{cast_x}.to({triton_dtype}, bitcast=True)"
-            if dtype in (torch.float16, torch.bfloat16):
-                return f"{cast_x}.to(tl.float32)"
-            return cast_x
-        else:
-            src_dtype_bitwidth = _get_primitive_bitwidth(src_dtype)
-            target_dtype_bitwidth = _get_primitive_bitwidth(dtype)
-            bitcast = "True" if src_dtype_bitwidth == target_dtype_bitwidth else "False"
-            return f"{x}.to({triton_dtype}, bitcast={bitcast})"
+        if x.dtype != src_dtype:
+            x = f"{x}.to({triton_type(src_dtype)})"
+
+        out = f"{x}.to({triton_type(dtype)}, bitcast=True)"
+        if upcast_compute_type(dtype) != dtype:
+            out = f"{out}.to({triton_type(upcast_compute_type(dtype))})"
+
+        return out
 
     @staticmethod
     def _shaped_constant(value, dtype, shape):
@@ -972,11 +950,6 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
-    def libdevice_abs(x):
-        return f"libdevice.abs({x})"
-
-    @staticmethod
-    @maybe_upcast_float32()
     def exp(x):
         """
         When use_fast_math, use the ftz (flushing to zero) variant
@@ -992,11 +965,6 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
-    def libdevice_exp(x):
-        return f"libdevice.exp({x})"
-
-    @staticmethod
-    @maybe_upcast_float32()
     def exp2(x):
         return f"libdevice.exp2({x})"
 
@@ -1008,11 +976,6 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def sqrt(x):
-        return f"libdevice.sqrt({x})"
-
-    @staticmethod
-    @maybe_upcast_float32()
-    def libdevice_sqrt(x):
         return f"libdevice.sqrt({x})"
 
     @staticmethod
@@ -1062,18 +1025,8 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
-    def libdevice_cos(x):
-        return f"libdevice.cos({x})"
-
-    @staticmethod
-    @maybe_upcast_float32()
     def sin(x):
         return f"tl_math.sin({x})"
-
-    @staticmethod
-    @maybe_upcast_float32()
-    def libdevice_sin(x):
-        return f"libdevice.sin({x})"
 
     @classmethod
     def index_expr(cls, expr, dtype):
@@ -1280,11 +1233,6 @@ class TritonOverrides(OpOverrides):
         return f"tl_math.log({x})"
 
     @staticmethod
-    @maybe_upcast_float32()
-    def libdevice_log(x):
-        return f"libdevice.log({x})"
-
-    @staticmethod
     @maybe_upcast_float32(convert_output=False)
     def isinf(x):
         return f"libdevice.isinf({x}).to(tl.int1)"
@@ -1348,6 +1296,51 @@ class TritonKernelOverrides(TritonOverrides):
     the body of the main triton kernel and so it may use indexing and mask
     variables which are assumed to already be defined in the current scope.
     """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # happens in __init__ unlike _initialize_pointwise_overrides
+        # because the libdevice registrations are populated during lowerings
+        self._setup_libdevice_routing()
+
+    @classmethod
+    @functools.lru_cache(None)
+    def _setup_libdevice_routing(cls):
+        """Set up routing to libdevice implementations for fp64 inputs."""
+
+        from torch._inductor.codegen.common import OpDecompositions
+
+        for fn_name in torch._inductor.utils.op_requires_libdevice_fp64:
+            assert hasattr(cls, fn_name)
+            original_impl = getattr(cls, fn_name)
+
+            def decomposition_router(x, _original_impl, _fn_name):
+                if x.dtype != torch.float64:
+                    return _original_impl(x)
+                else:
+                    return getattr(OpDecompositions, _fn_name)(x).value
+
+            if fn_name == "sigmoid":
+                assert hasattr(OpDecompositions, "sigmoid")
+                fn = functools.partial(
+                    decomposition_router, _original_impl=original_impl, _fn_name=fn_name
+                )
+                fn.__name__ = fn_name  # type: ignore[attr-defined]
+                setattr(cls, fn_name, staticmethod(fn))
+                continue
+
+            def dtype_router(x, _original_impl, _fn_name):
+                if x.dtype == torch.float64:
+                    return f"libdevice.{_fn_name}({x})"
+                else:
+                    return _original_impl(x)
+
+            fn = functools.partial(
+                dtype_router, _original_impl=original_impl, _fn_name=fn_name
+            )
+            fn.__name__ = fn_name  # type: ignore[attr-defined]
+            setattr(cls, fn_name, staticmethod(fn))
 
     @classmethod
     def constant(cls, value, dtype):
@@ -1835,7 +1828,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             and len(mask_vars - dense_mask_vars) == 0
             and not self.is_indirect_indexing(index)
             and have_loop_vars
-            # workaround https://github.com/openai/triton/issues/2821
+            # workaround https://github.com/triton-lang/triton/issues/2821
             and self.index_dtype == "tl.int32"
         ):
 
@@ -2060,7 +2053,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ) -> tuple[str, str]:
         check = indexing.boundary_check()
         if not check:
-            # workaround https://github.com/openai/triton/issues/2813
+            # workaround https://github.com/triton-lang/triton/issues/2813
             other = ""
         elif other:
             assert other == ", other=0.0"
@@ -2103,12 +2096,25 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return block_ptr, other
 
     def codegen_block_ptr_store_line(self, name, indexing, block_ptr, value, other=""):
-        # Stores require an explicit broadcast.
+        # Stores require an explicit broadcast. We do this in two phases:
+        #  1. Broadcast the operand to the final shape of the range trees, e.g. [ZBLOCK,
+        #     YBLOCK, XBLOCK]. This protects against implicit broadcasting from loads.
+        #  2. In case the block pointer has different dimensionality, broadcast/reshape the
+        #     result to the shape of the pointer.
+        value = f"tl.broadcast_to({value}, {indexing.final_shape})"
+
+        # These dims no longer need broadcasting.
+        for idx, (dim, broadcast_dim) in enumerate(
+            zip(indexing.final_shape, indexing.broadcast_shape)
+        ):
+            if V.graph.sizevars.statically_known_equals(dim, broadcast_dim):
+                indexing.broadcasting_dims[idx] = False
+
         value = indexing.codegen_broadcast_and_reshape(
             value, indexing.final_shape, indexing.block_shape, False
         )
 
-        # workaround https://github.com/openai/triton/issues/2814
+        # workaround https://github.com/triton-lang/triton/issues/2814
         value = f"{value}.to({triton_store_type(V.graph.get_dtype(name))})"
         return f"tl.store({block_ptr}, {value}{other})"
 
@@ -2254,7 +2260,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 line += ".to(tl.float32)"
                 dtype = torch.float32
             if dtype == torch.bool and torch.version.hip is None:
-                # Workaround for https://github.com/openai/triton/issues/2151
+                # Workaround for https://github.com/triton-lang/triton/issues/2151
                 # tl.load returns int8 when loading from pointer to int1
                 # NOTE: Currently causes hangs on bool UTs for ROCm
                 line += ".to(tl.int1)"
@@ -2296,7 +2302,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         indexing = self.indexing(index, dense_indexing=True, block_ptr=mode is None)
 
         # Guard against write-after-read corruption in triton.
-        # See # https://github.com/openai/triton/issues/1615
+        # See # https://github.com/triton-lang/triton/issues/1615
         # This triton bug means that a load which is broadcasted over multiple
         # warps may see the result of a store that happens later in the triton
         # program. The workaround is to add a barrier before storing, which
@@ -3649,7 +3655,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # when they are not constexpr. otherwise there may be a segfault
         # during launching the Inductor-compiled Triton kernel.
         # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
-        # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
+        # https://github.com/triton-lang/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
         for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
@@ -4089,7 +4095,7 @@ class TritonScheduling(SIMDScheduling):
         wrapper = V.graph.wrapper_code
         origins, _detailed_origins = get_kernel_metadata(node_schedule, wrapper)
         if origins:
-            wrapper.writeline(origins)
+            wrapper.make_comment(origins)
 
         if config.debug_fusion:
             from torch._inductor.scheduler import (
@@ -4107,7 +4113,7 @@ class TritonScheduling(SIMDScheduling):
                     for n in node_schedule
                     if isinstance(n, BaseSchedulerNode)
                 ]
-                wrapper.writeline(
+                wrapper.make_comment(
                     f"{wrapper.comment} Fused node name list: {', '.join(node_names)}"
                 )
 

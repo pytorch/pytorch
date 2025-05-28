@@ -1,96 +1,94 @@
 # mypy: allow-untyped-defs
 
 import copy
-import json
 import itertools
+import json
 import math
+import operator
 import os
 import random
+import re
 import sys
 import tempfile
 import time
-from collections import namedtuple, OrderedDict, defaultdict
+import unittest
+from collections import defaultdict, namedtuple, OrderedDict
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import reduce
-from typing import Union, NamedTuple, Callable, Any
-import unittest
+from typing import Any, Callable, NamedTuple, Union
+
 import numpy as np
+
 import torch
 import torch.cuda
 import torch.distributed as dist
 import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.hierarchical_model_averager as hierarchicalSGD
 import torch.distributed.algorithms.model_averaging.utils as model_averaging_utils
+import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
 import torch.nn as nn
 import torch.nn.functional as F
-from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
-from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
-from torch.utils._python_dispatch import TorchDispatchMode
+from torch._utils_internal import (
+    TEST_MASTER_ADDR as MASTER_ADDR,
+    TEST_MASTER_PORT as MASTER_PORT,
+)
 from torch.autograd import DeviceType
-from torch.cuda.amp import GradScaler, autocast
-
+from torch.cuda.amp import autocast, GradScaler
 from torch.distributed.algorithms.ddp_comm_hooks import (
+    default_hooks as default,
     post_localSGD_hook as post_localSGD,
     powerSGD_hook as powerSGD,
-    default_hooks as default,
     quantization as quantization_hooks,
 )
-from torch.distributed.optim import _apply_optimizer_in_backward
-
 from torch.distributed.distributed_c10d import (
-    get_world_size,
     _get_default_group,
     _get_pg_config,
+    get_world_size,
 )
+from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.distributed.utils import (
-    _verify_param_shape_across_processes,
     _sync_module_states,
+    _verify_param_shape_across_processes,
 )
-from torch.profiler import (
-    ExecutionTraceObserver,
-    ProfilerActivity,
-)
-
 from torch.nn.parallel import DistributedDataParallel
 from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars, _MixedPrecision
+from torch.profiler import ExecutionTraceObserver, ProfilerActivity
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
-    TEST_SKIPS,
+    captured_output,
+    cleanup_temp_dir,
+    DistTestCases,
     init_multigpu_helper,
     initialize_temp_directories,
-    cleanup_temp_dir,
-    simple_sparse_reduce_tests,
-    skip_if_rocm_multiprocess,
-    skip_if_small_worldsize,
-    skip_if_odd_worldsize,
-    skip_if_lt_x_gpu,
+    MultiProcessTestCase,
     nccl_skip_if_lt_x_gpu,
-    skip_if_no_gpu,
     require_n_gpus_for_nccl_backend,
     requires_nccl_version,
-    captured_output,
-    with_nccl_blocking_wait,
-    with_dist_debug_levels,
+    simple_sparse_reduce_tests,
+    skip_if_lt_x_gpu,
+    skip_if_no_gpu,
+    skip_if_odd_worldsize,
+    skip_if_rocm_multiprocess,
+    skip_if_small_worldsize,
+    TEST_SKIPS,
     verify_ddp_error_logged,
-    DistTestCases,
+    with_dist_debug_levels,
+    with_nccl_blocking_wait,
 )
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    IS_MACOS,
-    IS_WINDOWS,
     FILE_SCHEMA,
+    instantiate_parametrized_tests,
     IS_FBCODE,
+    IS_MACOS,
     IS_SANDCASTLE,
+    IS_WINDOWS,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
 )
-
-import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
-
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.data.distributed import DistributedSampler
-import operator
+
 
 try:
     import torchvision
@@ -201,19 +199,19 @@ def get_profiling_event(event_name, profiler, dedup_gpu_user_annotation=False):
         else profiler.function_events
     )
     return [
-        event for event in event_list
+        event
+        for event in event_list
         if (
             (event.name.endswith(event_name) or event.name.startswith(event_name))
             and (not dedup_gpu_user_annotation or event.device_type != DeviceType.CUDA)
         )
     ]
 
+
 def get_profiler_nccl_meta(prof):
     """Torch profiler includes nccl metadata in an inserted operator called "record_param_comms"
     We will need to test metadata obtained from profiler here"""
-    tf = tempfile.NamedTemporaryFile(
-        mode="w+t", suffix=".json", delete=False
-    )
+    tf = tempfile.NamedTemporaryFile(mode="w+t", suffix=".json", delete=False)
     tf.close()
     trace_file = tf.name
 
@@ -226,6 +224,7 @@ def get_profiler_nccl_meta(prof):
     os.remove(trace_file)
 
     return [e for e in events if e.get("name") == "record_param_comms"]
+
 
 # Base error message substring on unfinished reductions.
 ddp_prev_reduction_unfinished_str = (
@@ -423,6 +422,7 @@ CUSTOM_PG_TIMEOUT = {
     # TORCH_NCCL_ASYNC_ERROR_HANDLING which we want to happen quickly.
     "test_ddp_has_finalized": 5,
 }
+
 
 def require_backend_is_available(backends):
     def check(backend):
@@ -672,7 +672,7 @@ class DistributedTest:
             # Verify buffers across ranks.
             m1_buffers = list(m1.buffers())
             m2_buffers = list(m2.buffers())
-            for (buf1, buf2) in zip(m1_buffers, m2_buffers):
+            for buf1, buf2 in zip(m1_buffers, m2_buffers):
                 gathered_bufs = [
                     torch.empty_like(buf1) for _ in range(dist.get_world_size())
                 ]
@@ -920,6 +920,40 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["subgroup"],
             f"The {BACKEND} backend does not support creating subgroups on CUDA devices",
         )
+        @require_world_size(4)
+        @skip_if_lt_x_gpu(4)
+        def test_new_subgroups_with_group_param(self):
+            # Initialize global test environment
+            self._init_global_test()
+            # Set up GPU devices for each rank
+            init_multigpu_helper(dist.get_world_size(), BACKEND)
+            # Create two subgroups: one with ranks [0,2] and another with ranks [1,3]
+            cur_subgroup, subgroups = dist.new_subgroups_by_enumeration(
+                ranks_per_subgroup_list=[[0, 2], [1, 3]]
+            )
+
+            # Further divide the current subgroup into sub-subgroups of size 1
+            cur_sub_subgroup, sub_subgroups = dist.new_subgroups(
+                group_size=1, group=cur_subgroup
+            )
+            # Verify we have 2 sub-subgroups (one for each rank in the original subgroup)
+            self.assertEqual(len(sub_subgroups), 2)
+            # Verify the current process's sub-subgroup has size 1
+            self.assertEqual(cur_sub_subgroup.size(), 1)
+            # Verify the current process is in its assigned sub-subgroup
+            self.assertFalse(dist._rank_not_in_group(group=cur_sub_subgroup))
+
+            # Clean up by destroying all created process groups
+            for sub_subgroup in sub_subgroups:
+                dist.destroy_process_group(sub_subgroup)
+
+            for subgroup in subgroups:
+                dist.destroy_process_group(subgroup)
+
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["subgroup"],
+            f"The {BACKEND} backend does not support creating subgroups on CUDA devices",
+        )
         @skip_if_no_gpu
         def test_new_subgroups_group_size_exceeds_world_size(self):
             with self.assertRaisesRegex(ValueError, "must not exceed"):
@@ -933,7 +967,8 @@ class DistributedTest:
         @skip_if_lt_x_gpu(4)
         def test_new_subgroups_world_size_not_divisible_by_group_size(self):
             with self.assertRaisesRegex(
-                ValueError, "The world size must be divisible by 'group_size'"
+                ValueError,
+                re.escape("The world size (4) must be divisible by 'group_size=3'"),
             ):
                 dist.new_subgroups(3)
 
@@ -1218,8 +1253,8 @@ class DistributedTest:
 
             subgroup1 = averager.period_process_group_dict[subgroup_avg_period1]
             subgroup2 = averager.period_process_group_dict[subgroup_avg_period2]
-            real_group_ranks_res1 = _get_pg_config(subgroup1)['ranks']
-            real_group_ranks_res2 = _get_pg_config(subgroup2)['ranks']
+            real_group_ranks_res1 = _get_pg_config(subgroup1)["ranks"]
+            real_group_ranks_res2 = _get_pg_config(subgroup2)["ranks"]
 
             expect_group_ranks_res1 = (
                 rank // subgroup_size1 * subgroup_size1
@@ -1269,7 +1304,7 @@ class DistributedTest:
         @skip_if_no_gpu
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" or IS_FBCODE or IS_SANDCASTLE,
-            "Coalescing manager currently tests with NCCL only; internal test flaky"
+            "Coalescing manager currently tests with NCCL only; internal test flaky",
         )
         def test_coalescing_manager(self):
             self._barrier()
@@ -1294,7 +1329,7 @@ class DistributedTest:
             for i in range(num_colls):
                 self.assertEqual(
                     small_tensors[i],
-                    big_tensor[i * size_per_coll : (i + 1) * size_per_coll]
+                    big_tensor[i * size_per_coll : (i + 1) * size_per_coll],
                 )
 
             self._barrier()
@@ -1303,7 +1338,7 @@ class DistributedTest:
         @skip_if_no_gpu
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" or IS_FBCODE or IS_SANDCASTLE,
-            "Coalescing manager currently tests with NCCL only; internal test flaky"
+            "Coalescing manager currently tests with NCCL only; internal test flaky",
         )
         def test_coalescing_manager_async(self):
             self._barrier()
@@ -1329,7 +1364,7 @@ class DistributedTest:
             for i in range(num_colls):
                 self.assertEqual(
                     small_tensors[i],
-                    big_tensor[i * size_per_coll : (i + 1) * size_per_coll]
+                    big_tensor[i * size_per_coll : (i + 1) * size_per_coll],
                 )
 
             self._barrier()
@@ -1585,7 +1620,9 @@ class DistributedTest:
                 backend = dist.get_backend()
                 if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
                     for event_name in [f"{backend}:send", f"{backend}:recv"]:
-                        events = get_profiling_event(event_name, prof, dedup_gpu_user_annotation=True)
+                        events = get_profiling_event(
+                            event_name, prof, dedup_gpu_user_annotation=True
+                        )
                         self.assertTrue(events)
                         # Event order is not deterministic, so simply assert their shape
                         # is found in the following list.
@@ -1594,7 +1631,6 @@ class DistributedTest:
                         ]
                         for event in events:
                             self.assertTrue(event.input_shapes in expected_shapes)
-
 
         @skip_if_no_gpu
         @skip_but_pass_in_sandcastle_if(BACKEND != "nccl", "NCCL Send Recv Only")
@@ -2745,9 +2781,7 @@ class DistributedTest:
             ]
             _group, group_id, _rank = self._init_global_test()
             for unsupported_op in unsupported_ops:
-                with self.assertRaisesRegex(
-                    ValueError, "all_reduce does not support"
-                ):
+                with self.assertRaisesRegex(ValueError, "all_reduce does not support"):
                     dist.all_reduce(
                         _build_tensor(1, dtype=torch.cfloat), unsupported_op, group_id
                     )
@@ -4373,9 +4407,7 @@ class DistributedTest:
                     self.net2 = nn.Linear(10, 0)
 
             model = ToyModel().to(self.rank)
-            nn.parallel.DistributedDataParallel(
-                model, device_ids=[self.rank]
-            )
+            nn.parallel.DistributedDataParallel(model, device_ids=[self.rank])
 
         @skip_but_pass_in_sandcastle_if(BACKEND == "nccl", "Gloo-only test")
         def test_ddp_create_graph(self):
@@ -4521,7 +4553,7 @@ class DistributedTest:
                 models_to_test.append(
                     (torchvision.models.resnet50(), torch.randn(1, 3, 3, 1000).cuda())
                 )
-            for (model, inp) in models_to_test:
+            for model, inp in models_to_test:
                 # Enable determinism in cudnn operators
                 with torch.backends.cudnn.flags(
                     enabled=True, deterministic=True, benchmark=False
@@ -4721,11 +4753,11 @@ class DistributedTest:
             torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
                 model, params_to_ignore
             )
-            torch.nn.parallel.DistributedDataParallel(
-                model, device_ids=[self.rank]
-            )
-            dp_params = torch.nn.parallel.DistributedDataParallel._get_data_parallel_params(
-                model, named_params=True
+            torch.nn.parallel.DistributedDataParallel(model, device_ids=[self.rank])
+            dp_params = (
+                torch.nn.parallel.DistributedDataParallel._get_data_parallel_params(
+                    model, named_params=True
+                )
             )
             for name, _ in dp_params:
                 self.assertNotEqual(f"module.{params_to_ignore[0]}", name)
@@ -4734,7 +4766,11 @@ class DistributedTest:
             # no of parameters.
             num_ddp_params = len(list(model.parameters())) - 1
             count = 0
-            dp_params = torch.nn.parallel.DistributedDataParallel._get_data_parallel_params(model, named_params=False)
+            dp_params = (
+                torch.nn.parallel.DistributedDataParallel._get_data_parallel_params(
+                    model, named_params=False
+                )
+            )
             for _ in dp_params:
                 count += 1
             self.assertEqual(count, num_ddp_params)
@@ -4902,7 +4938,8 @@ class DistributedTest:
             # Parameters to ignore are in the format {module_name}.{param_name}
             to_ignore = ["a.weight", "buffer"]
             torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
-                model, to_ignore,
+                model,
+                to_ignore,
             )
             mp_config = self._get_fp16_config()
             net = torch.nn.parallel.DistributedDataParallel(
@@ -4915,11 +4952,11 @@ class DistributedTest:
             expected_ignored = len(to_ignore)
             n_ignored = 0
             # ignored params should not have _mp_param or _fp_param fields.
-            for (n, p) in itertools.chain(net.named_parameters(), net.named_buffers()):
+            for n, p in itertools.chain(net.named_parameters(), net.named_buffers()):
                 if n in to_ignore:
                     n_ignored += 1
-                    self.assertFalse(hasattr(p, '_mp_param'))
-                    self.assertFalse(hasattr(p, '_fp_param'))
+                    self.assertFalse(hasattr(p, "_mp_param"))
+                    self.assertFalse(hasattr(p, "_fp_param"))
                 else:
                     self.assertEqual(mp_config.param_dtype, p._mp_param.dtype)
                     self.assertEqual(torch.float32, p._fp_param.dtype)
@@ -4940,10 +4977,8 @@ class DistributedTest:
                 def __init__(self) -> None:
                     super().__init__()
                     self.m = torch.nn.Linear(1, 5)
-                    self.register_buffer('buffer', torch.randn(1, 2))
-                    self.p = torch.nn.Parameter(
-                        torch.randn(10, 5), requires_grad=False
-                    )
+                    self.register_buffer("buffer", torch.randn(1, 2))
+                    self.p = torch.nn.Parameter(torch.randn(10, 5), requires_grad=False)
 
                 def forward(self_, x):  # noqa: B902
                     params = self_.m.parameters()
@@ -4978,7 +5013,7 @@ class DistributedTest:
                 for n, param in net.named_parameters():
                     self.assertEqual(param.dtype, torch.float32)
                     if param.grad is None:
-                        assert n == 'module.p'  # Only param that doesn't require grad
+                        assert n == "module.p"  # Only param that doesn't require grad
                     else:
                         self.assertEqual(param.grad.dtype, torch.float32)
                         tensor_list = [
@@ -4994,7 +5029,9 @@ class DistributedTest:
                 net.zero_grad(set_to_none=set_grad_to_none)
 
         @skip_if_lt_x_gpu(2)
-        def test_ddp_native_mixed_precision_no_grad_as_bucket_view_no_set_grad_none(self):
+        def test_ddp_native_mixed_precision_no_grad_as_bucket_view_no_set_grad_none(
+            self,
+        ):
             self._test_ddp_native_mixed_precision(
                 gradient_as_bucket_view=False,
                 set_grad_to_none=False,
@@ -5014,7 +5051,9 @@ class DistributedTest:
             )
 
         @skip_if_lt_x_gpu(2)
-        def test_ddp_native_mixed_precision_no_grad_as_bucket_view_set_grad_to_none(self):
+        def test_ddp_native_mixed_precision_no_grad_as_bucket_view_set_grad_to_none(
+            self,
+        ):
             self._test_ddp_native_mixed_precision(
                 gradient_as_bucket_view=True, set_grad_to_none=True
             )
@@ -6079,7 +6118,9 @@ class DistributedTest:
             model = copy.deepcopy(BN_NET)
             model = model.half()
             model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
-            model = nn.parallel.DistributedDataParallel(model.cuda(rank), device_ids=[rank])
+            model = nn.parallel.DistributedDataParallel(
+                model.cuda(rank), device_ids=[rank]
+            )
             inp = torch.randn(2, 2, dtype=torch.float16, device=torch.device(rank))
             # Check that forward/backward do not error with dtype mismatch
             out = model(inp)
@@ -6858,7 +6899,9 @@ class DistributedTest:
                     loss.backward()
 
             all_reduce_event_name = f"{dist.get_backend()}:all_reduce"
-            events = get_profiling_event(all_reduce_event_name, prof, dedup_gpu_user_annotation=True)
+            events = get_profiling_event(
+                all_reduce_event_name, prof, dedup_gpu_user_annotation=True
+            )
             event_count = sum(e.count for e in events)
             self.assertEqual(event_count, num_iters)
             for event in events:
@@ -6866,7 +6909,9 @@ class DistributedTest:
                 self.assertEqual(event.name, all_reduce_event_name)
 
             broadcast_event_name = f"{dist.get_backend()}:broadcast"
-            broadcast_events = get_profiling_event(broadcast_event_name, prof, dedup_gpu_user_annotation=True)
+            broadcast_events = get_profiling_event(
+                broadcast_event_name, prof, dedup_gpu_user_annotation=True
+            )
             event_count = sum(e.count for e in broadcast_events)
             # Broadcast is called during rebuild_buckets
             self.assertGreaterEqual(event_count, 1)
@@ -6889,7 +6934,9 @@ class DistributedTest:
                 loss = net(inp).sum()
                 loss.backward()
 
-            events = get_profiling_event(all_reduce_event_name, prof, dedup_gpu_user_annotation=True)
+            events = get_profiling_event(
+                all_reduce_event_name, prof, dedup_gpu_user_annotation=True
+            )
             self.assertGreaterEqual(len(events), 1)
             self.assertGreaterEqual(events[0].count, 1)
             self.assertEqual(events[0].name, all_reduce_event_name)
@@ -6949,9 +6996,13 @@ class DistributedTest:
             """
             with open(et_file) as f:
                 et = json.load(f)
-            pg_cfg_node = [n for n in et["nodes"] if n["name"] == "## process_group:init ##"]
+            pg_cfg_node = [
+                n for n in et["nodes"] if n["name"] == "## process_group:init ##"
+            ]
             self.assertGreaterEqual(len(pg_cfg_node), 1)
-            nccl_meta_nodes = [n for n in et["nodes"] if n["name"] == "record_param_comms"]
+            nccl_meta_nodes = [
+                n for n in et["nodes"] if n["name"] == "record_param_comms"
+            ]
             self.assertEqual(len(nccl_meta_nodes), 3)
             per_coll_meta = defaultdict(list)
 
@@ -6969,7 +7020,7 @@ class DistributedTest:
                 if collname in {"wait"}:
                     continue
 
-                self.assertEqual(attrs["pg_name"], "0")   # yes this is a string
+                self.assertEqual(attrs["pg_name"], "0")  # yes this is a string
                 self.assertEqual(attrs["pg_desc"], "default_pg")
                 self.assertEqual(attrs["pg_size"], 2)
 
@@ -6991,7 +7042,6 @@ class DistributedTest:
             a1 = per_coll_meta["allreduce"][1]
             self.assertEqual(a1["out_msg_nelems"], 1, msg=f"{a1}")
             self.assertEqual(a1["dtype"], "Int", msg=f"{a1}")
-
 
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
@@ -7016,7 +7066,7 @@ class DistributedTest:
             # collect ET in second profiler pass
             torch_profiler_ctx2 = torch.profiler.profile(
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                execution_trace_observer=et
+                execution_trace_observer=et,
             )
             self._test_ddp_profiling(
                 profiler_ctx=torch_profiler_ctx1,
@@ -7025,7 +7075,6 @@ class DistributedTest:
 
             print(f"Execution trace saved at {fp.name}")
             self._validate_execution_trace_nccl(et_file)
-
 
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
@@ -7404,7 +7453,9 @@ class DistributedTest:
             for num_early_join_ranks in num_uneven_ranks:
                 for baseline_iter in baseline_num_iters:
                     for offset in iteration_offsets:
-                        mapping = dict.fromkeys(range(0, num_early_join_ranks), baseline_iter)
+                        mapping = dict.fromkeys(
+                            range(0, num_early_join_ranks), baseline_iter
+                        )
                         # if num_early_join_ranks > 1, ranks > 0 that will join early
                         # iterate offset//2 more times than rank 0, to test nodes
                         # depleting inputs at different times.
@@ -7413,11 +7464,14 @@ class DistributedTest:
                                 if rank > 0:
                                     mapping[rank] += offset // 2
                         mapping.update(
-                            dict.fromkeys(range(num_early_join_ranks, dist.get_world_size()), baseline_iter + offset)
+                            dict.fromkeys(
+                                range(num_early_join_ranks, dist.get_world_size()),
+                                baseline_iter + offset,
+                            )
                         )
                         iteration_mappings.append(mapping)
 
-            for (test_case, iteration_mapping) in itertools.product(
+            for test_case, iteration_mapping in itertools.product(
                 models_to_test, iteration_mappings
             ):
                 if self.rank == 0:
@@ -7570,7 +7624,9 @@ class DistributedTest:
             int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"]
         )
         @with_dist_debug_levels(levels=["DETAIL"])
-        @unittest.skip("Test is failing, see https://github.com/pytorch/pytorch/pull/113620")
+        @unittest.skip(
+            "Test is failing, see https://github.com/pytorch/pytorch/pull/113620"
+        )
         def test_broadcast_object_list(self):
             return self._test_broadcast_object_list()
 
@@ -7605,7 +7661,7 @@ class DistributedTest:
 
             device_id = self.rank
             # Ensure the test works for both find_unused_parameter and broadcast_buffer settings.
-            for (find_unused, broadcast_buffers) in itertools.product(
+            for find_unused, broadcast_buffers in itertools.product(
                 [False, True], [False, True]
             ):
                 model = TestModel(self.rank).float().to(device_id)
@@ -7954,16 +8010,16 @@ class DistributedTest:
                     context = nullcontext
 
                 with context():
-                    input = torch.rand((1, ))
+                    input = torch.rand((1,))
                     output = model.forward(input)
-                    target = torch.rand((1, ))
+                    target = torch.rand((1,))
 
                     loss = mse_loss(output, target)
                     loss.backward()
 
             self.assertTrue(
                 not any(p.grad is None for p in model.parameters()),
-                "Gradients can't be None for any model parameter."
+                "Gradients can't be None for any model parameter.",
             )
             grads = torch.cat([p.grad.view(-1) for p in model.parameters()])
 
@@ -7978,7 +8034,7 @@ class DistributedTest:
                 for g in gathered_grads[1:]:
                     self.assertTrue(
                         torch.allclose(gathered_grads[0], g),
-                        "Gradients are not the same for all ranks."
+                        "Gradients are not the same for all ranks.",
                     )
 
         @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
@@ -8290,9 +8346,7 @@ class DistributedTest:
                         tensors_sparse, [400], logger=net.logger
                     )
                 else:
-                    dist._compute_bucket_assignment_by_size(
-                        tensors_sparse, [400]
-                    )
+                    dist._compute_bucket_assignment_by_size(tensors_sparse, [400])
             if use_logger:
                 verify_ddp_error_logged(net, expected_err)
 
@@ -8399,9 +8453,7 @@ class DistributedTest:
             # Creates network with different sized embedding table on different
             # ranks. This should throw an error during DDP init.
             net = EmbeddingNetDifferentParams(self.rank)
-            self._run_test_ddp_model_with_diff_params(
-                net, group_to_use, group_gloo
-            )
+            self._run_test_ddp_model_with_diff_params(net, group_to_use, group_gloo)
 
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_but_pass_in_sandcastle_if(
@@ -8516,7 +8568,7 @@ class DistributedTest:
                         self.assertEqual(local_net.a.weight.grad, saved_a_local_grad)
 
                 # Verify grads are the same
-                for (local_param, dist_param) in zip(
+                for local_param, dist_param in zip(
                     local_net.parameters(), net.parameters()
                 ):
                     local_grad = local_param.grad
@@ -8935,7 +8987,9 @@ class DistributedTest:
             if ignore_sparse:
                 for module_name, module in model.named_modules():
                     if module == model.sub_module.embedding_net.embedding:
-                        for parameter_name, _param in module.named_parameters(recurse=False):
+                        for parameter_name, _param in module.named_parameters(
+                            recurse=False
+                        ):
                             fqn = f"{module_name}.{parameter_name}"
                             sparse_embedding_fqns.append(fqn)
 
@@ -9079,7 +9133,9 @@ class DistributedTest:
             f"The {BACKEND} backend does not support DistributedDataParallel",
         )
         @skip_if_lt_x_gpu(2)
-        @unittest.skip("Test is failing, see https://github.com/pytorch/pytorch/pull/113620")
+        @unittest.skip(
+            "Test is failing, see https://github.com/pytorch/pytorch/pull/113620"
+        )
         def test_ddp_sync_bn_training_vs_eval(self):
             rank = self.rank
             torch.cuda.set_device(rank)
@@ -9228,7 +9284,7 @@ class DistributedTest:
                     loss_static = get_loss(out_static)
                     loss_static.backward()
                     self._model_step(model_static_graph)
-                    for (p, p_static) in zip(
+                    for p, p_static in zip(
                         model.parameters(), model_static_graph.parameters()
                     ):
                         self.assertEqual(p, p_static)
@@ -9257,7 +9313,7 @@ class DistributedTest:
 
             model = MyModel().to(self.rank)
             inp = torch.randn(1, 10, device=self.rank)
-            for (find_unused, static_graph) in itertools.product(
+            for find_unused, static_graph in itertools.product(
                 [True, False], [True, False]
             ):
                 ddp = DistributedDataParallel(
@@ -9526,7 +9582,6 @@ class DistributedTest:
             f"The {BACKEND} backend does not support DistributedDataParallel",
         )
         def test_ddp_remove_autograd_hooks(self):
-
             class SimulateError(torch.autograd.Function):
                 @staticmethod
                 def forward(ctx, input):
@@ -9547,7 +9602,6 @@ class DistributedTest:
                         return self.fc1(SimulateError.apply(inp))
                     else:
                         return self.fc1(inp)
-
 
             # Run with error to trigger backward pass that marks fc1 as being marked
             # ready. If we don't remove autograd hooks before running below it would
@@ -9578,9 +9632,10 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel",
         )
-        @unittest.skip("Test is failing, tracking issue at https://github.com/pytorch/pytorch/issues/102751")
+        @unittest.skip(
+            "Test is failing, tracking issue at https://github.com/pytorch/pytorch/issues/102751"
+        )
         def test_ddp_has_finalized(self):
-
             @dataclass
             class MyClass:
                 obj: torch.Tensor
@@ -9615,10 +9670,16 @@ class DistributedTest:
                 (out1.sum() + out2.sum()).backward()
 
             if self.rank == 0:
-                with self.assertRaisesRegex(RuntimeError, "Expected to have finished reduction in the prior iteration"):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "Expected to have finished reduction in the prior iteration",
+                ):
                     ddp._check_reducer_finalized()
 
-                with self.assertRaisesRegex(RuntimeError, "Expected to have finished reduction in the prior iteration"):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "Expected to have finished reduction in the prior iteration",
+                ):
                     ddp(input)
             else:
                 ddp._check_reducer_finalized()
@@ -9901,14 +9962,11 @@ class DistributedTest:
                         p.grad.data = p.grad / iters
 
                     for p_ddp, p_local in zip(
-                        model.parameters(),
-                        local_model.parameters()
+                        model.parameters(), local_model.parameters()
                     ):
                         self.assertTrue(
-                            torch.allclose(
-                                p_ddp.grad, p_local.grad
-                            ),
-                            f"{p_ddp.grad} vs {p_local.grad}"
+                            torch.allclose(p_ddp.grad, p_local.grad),
+                            f"{p_ddp.grad} vs {p_local.grad}",
                         )
 
             dist.barrier()
@@ -10155,11 +10213,8 @@ class DistributedTest:
             f"The {BACKEND} backend does not support DDP communication hook on CUDA devices",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
-        @skip_but_pass_in_sandcastle_if(
-            True, "Skipped due to flakiness"
-        )
+        @skip_but_pass_in_sandcastle_if(True, "Skipped due to flakiness")
         def test_ddp_hook_pickling_powerSGD(self):
-
             hook = powerSGD.powerSGD_hook
             powersgd_state = powerSGD.PowerSGDState(
                 process_group=None,
@@ -10177,17 +10232,21 @@ class DistributedTest:
             world_size = int(os.environ["WORLD_SIZE"])
 
             from torch.distributed.device_mesh import init_device_mesh
+
             device_mesh = init_device_mesh("cuda", (world_size,))
 
             pg = _get_default_group()
 
             torch.cuda.set_device(self.rank)
             model = TwoLinLayerNet().cuda()
-            ddp_model = torch.nn.parallel.DistributedDataParallel(model, device_mesh=device_mesh)
+            ddp_model = torch.nn.parallel.DistributedDataParallel(
+                model, device_mesh=device_mesh
+            )
             self.assertEqual(ddp_model.device_mesh, device_mesh)
 
             with self.assertRaisesRegex(
-                RuntimeError, "Cannot specify both process_group and device_mesh arguments."
+                RuntimeError,
+                "Cannot specify both process_group and device_mesh arguments.",
             ):
                 ddp_model = torch.nn.parallel.DistributedDataParallel(
                     model, process_group=pg, device_mesh=device_mesh
@@ -10200,7 +10259,6 @@ class DistributedTest:
                 ddp_model = torch.nn.parallel.DistributedDataParallel(
                     model, device_mesh=device_mesh
                 )
-
 
         @skip_if_lt_x_gpu(2)
         @require_world_size(2)
@@ -10217,9 +10275,7 @@ class DistributedTest:
                 device_ids=[self.rank],
             )
             ddp_static = torch.nn.parallel.DistributedDataParallel(
-                model_clone,
-                device_ids=[self.rank],
-                static_graph=True
+                model_clone, device_ids=[self.rank], static_graph=True
             )
             ddp = torch.compile(ddp)
             ddp_static = torch.compile(ddp_static)
@@ -10271,6 +10327,61 @@ class DistributedTest:
             with OpPatcher():
                 ddp(input).sum().backward()
 
+        def _test_skip_all_reduce_unused_parameters(
+            self,
+            find_unused_parameters=False,
+            static_graph=False,
+            skip_all_reduce_unused_params=False,
+        ):
+            class LargeNet(nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.fc1 = nn.Linear(100, 5000, bias=False)
+                    # fc2 is unused
+                    self.fc2 = nn.Linear(100, 100, bias=False)
+
+                def forward(self, x):
+                    y = self.fc1(x)
+                    return y
+
+            torch.manual_seed(31415)
+            torch.cuda.set_device(self.rank)
+            model = LargeNet().cuda(self.rank)
+            ddp_model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                find_unused_parameters=find_unused_parameters,
+                static_graph=static_graph,
+                bucket_cap_mb=1.5,
+                skip_all_reduce_unused_params=skip_all_reduce_unused_params,
+            )
+            random_input = torch.randn(20, 100, device=self.rank)
+            for _ in range(10):
+                out = ddp_model(random_input)
+                loss = out.sum()
+                loss.backward()
+            return ddp_model
+
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
+        @skip_if_lt_x_gpu(2)
+        def test_skip_all_reduce_unused_parameters(self):
+            base_model = self._test_skip_all_reduce_unused_parameters(
+                find_unused_parameters=True, static_graph=False
+            )
+            test_model_1 = self._test_skip_all_reduce_unused_parameters(
+                find_unused_parameters=True,
+                static_graph=False,
+                skip_all_reduce_unused_params=True,
+            )
+
+            self.assertEqual(
+                base_model._get_ddp_logging_data().get("num_buckets_reduced"), 2
+            )
+            self.assertEqual(
+                test_model_1._get_ddp_logging_data().get("num_buckets_reduced"), 1
+            )
+
+            for i, j in zip(base_model.parameters(), test_model_1.parameters()):
+                self.assertEqual(i, j)
 
 
 instantiate_parametrized_tests(DistributedTest._DistTestBase)

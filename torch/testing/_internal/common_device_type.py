@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
     dtype_name,
     get_tracked_input,
     IS_FBCODE,
+    IS_MACOS,
     is_privateuse1_backend_available,
     IS_REMOTE_GPU,
     IS_SANDCASTLE,
@@ -278,35 +279,6 @@ except ModuleNotFoundError:
 #
 # setUpClass is called AFTER tests have been created and BEFORE and ONLY IF
 # they are run. This makes it useful for initializing devices and dependencies.
-
-
-# Note [Overriding methods in generic tests]
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#
-# Device generic tests look a lot like normal test classes, but they differ
-# from ordinary classes in some important ways.  In particular, overriding
-# methods in generic tests doesn't work quite the way you expect.
-#
-#     class TestFooDeviceType(TestCase):
-#         # Intention is to override
-#         def assertEqual(self, x, y):
-#             # This DOESN'T WORK!
-#             super().assertEqual(x, y)
-#
-# If you try to run this code, you'll get an error saying that TestFooDeviceType
-# is not in scope.  This is because after instantiating our classes, we delete
-# it from the parent scope.  Instead, you need to hardcode a direct invocation
-# of the desired subclass call, e.g.,
-#
-#     class TestFooDeviceType(TestCase):
-#         # Intention is to override
-#         def assertEqual(self, x, y):
-#             TestCase.assertEqual(x, y)
-#
-# However, a less error-prone way of customizing the behavior of TestCase
-# is to either (1) add your functionality to TestCase and make it toggled
-# by a class attribute, or (2) create your own subclass of TestCase, and
-# then inherit from it for your generic test.
 
 
 def _dtype_test_suffix(dtypes):
@@ -756,15 +728,19 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
     # Replace your privateuse1 backend name with 'privateuse1'
     if is_privateuse1_backend_available():
         privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+
+        def func_replace(x: str):
+            return x.replace(privateuse1_backend_name, "privateuse1")
+
         except_for = (
-            ["privateuse1" if x == privateuse1_backend_name else x for x in except_for]
-            if except_for is not None
-            else None
+            ([func_replace(x) for x in except_for] if except_for is not None else None)
+            if not isinstance(except_for, str)
+            else func_replace(except_for)
         )
         only_for = (
-            ["privateuse1" if x == privateuse1_backend_name else x for x in only_for]
-            if only_for is not None
-            else None
+            ([func_replace(x) for x in only_for] if only_for is not None else None)
+            if not isinstance(only_for, str)
+            else func_replace(only_for)
         )
 
     if except_for:
@@ -892,20 +868,7 @@ def instantiate_device_type_tests(
     # are not discoverable.
     del scope[generic_test_class.__name__]
 
-    # Creates an 'empty' version of the generic_test_class
-    # Note: we don't inherit from the generic_test_class directly because
-    #   that would add its tests to our test classes and they would be
-    #   discovered (despite not being runnable). Inherited methods also
-    #   can't be removed later, and we can't rely on load_tests because
-    #   pytest doesn't support it (as of this writing).
-    empty_name = generic_test_class.__name__ + "_base"
-    empty_class = type(empty_name, generic_test_class.__bases__, {})
-
-    # Acquires members names
-    # See Note [Overriding methods in generic tests]
-    generic_members = set(generic_test_class.__dict__.keys()) - set(
-        empty_class.__dict__.keys()
-    )
+    generic_members = set(generic_test_class.__dict__.keys())
     generic_tests = [x for x in generic_members if x.startswith("test")]
 
     # Creates device-specific test cases
@@ -916,7 +879,30 @@ def instantiate_device_type_tests(
 
         # type set to Any and suppressed due to unsupport runtime class:
         # https://github.com/python/mypy/wiki/Unsupported-Python-Features
-        device_type_test_class: Any = type(class_name, (base, empty_class), {})
+        device_type_test_class: Any = type(class_name, (base, generic_test_class), {})
+
+        # Arrange for setUpClass and tearDownClass methods defined both in the test template
+        # class and in the generic base to be called. This allows device-parameterized test
+        # classes to support setup and teardown.
+        # NB: This should be done before instantiate_test() is called as that invokes setup.
+        @classmethod
+        def _setUpClass(cls):
+            # This should always be called, whether or not the test class invokes
+            # super().setUpClass(), to set the primary device.
+            base.setUpClass()
+            # We want to call the @classmethod defined in the generic base, but pass
+            # it the device-specific class object (cls), hence the __func__ call.
+            generic_test_class.setUpClass.__func__(cls)
+
+        @classmethod
+        def _tearDownClass(cls):
+            # We want to call the @classmethod defined in the generic base, but pass
+            # it the device-specific class object (cls), hence the __func__ call.
+            generic_test_class.tearDownClass.__func__(cls)
+            base.tearDownClass()
+
+        device_type_test_class.setUpClass = _setUpClass
+        device_type_test_class.tearDownClass = _tearDownClass
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
@@ -930,29 +916,10 @@ def instantiate_device_type_tests(
                     )
                 else:
                     device_type_test_class.instantiate_test(name, copy.deepcopy(test))
-            else:  # Ports non-test member
-                assert (
-                    name not in device_type_test_class.__dict__
-                ), f"Redefinition of directly defined member {name}"
+            # Ports non-test member. Setup / teardown have already been handled above
+            elif name not in device_type_test_class.__dict__:
                 nontest = getattr(generic_test_class, name)
                 setattr(device_type_test_class, name, nontest)
-
-        # The dynamically-created test class derives from the test template class
-        # and the empty class. Arrange for both setUpClass and tearDownClass methods
-        # to be called. This allows the parameterized test classes to support setup
-        # and teardown.
-        @classmethod
-        def _setUpClass(cls):
-            base.setUpClass()
-            empty_class.setUpClass()
-
-        @classmethod
-        def _tearDownClass(cls):
-            empty_class.tearDownClass()
-            base.tearDownClass()
-
-        device_type_test_class.setUpClass = _setUpClass
-        device_type_test_class.tearDownClass = _tearDownClass
 
         # Mimics defining the instantiated class in the caller's file
         # by setting its module to the given class's and adding
@@ -960,6 +927,13 @@ def instantiate_device_type_tests(
         # This lets the instantiated class be discovered by unittest.
         device_type_test_class.__module__ = generic_test_class.__module__
         scope[class_name] = device_type_test_class
+
+    # Delete the generic form of the test functions (e.g. TestFoo.test_bar()) so they're
+    # not discoverable. This mutates the original class (TestFoo), which was removed from
+    # scope above. At this point, device-specific tests (e.g. TestFooCUDA.test_bar_cuda)
+    # have already been created and the generic forms are no longer needed.
+    for name in generic_tests:
+        delattr(generic_test_class, name)
 
 
 # Category of dtypes to run an OpInfo-based test for
@@ -1978,11 +1952,22 @@ def get_all_device_types() -> list[str]:
     return ["cpu"] if not torch.cuda.is_available() else ["cpu", "cuda"]
 
 
+# skip since currently flex attention requires at least `avx2` support on CPU.
+IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED = (
+    not torch.xpu.is_available()
+    and not torch.cuda.is_available()
+    and not IS_MACOS
+    and torch.cpu._is_avx2_supported()
+    and os.getenv("ATEN_CPU_CAPABILITY") != "default"
+)
 flex_attention_supported_platform = unittest.skipUnless(
-    torch.cuda.is_available()
-    and torch.utils._triton.has_triton()
-    and torch.cuda.get_device_capability() >= (8, 0),
-    "Requires CUDA and Triton",
+    IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED
+    or (
+        torch.cuda.is_available()
+        and torch.utils._triton.has_triton()
+        and torch.cuda.get_device_capability() >= (8, 0)
+    ),
+    "Requires CUDA and Triton, or CPU with avx2 and later",
 )
 if torch.version.hip and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName:
     e4m3_type = torch.float8_e4m3fnuz

@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     xfailIfPy312Plus,
 )
+from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
 
 if TEST_WITH_ROCM:
@@ -580,7 +581,7 @@ class CudaReproTests(TestCase):
         """
         This UT tests autotune on an inplace kernel. The autotune should not contaminate
         the input buffers when tuning with multiple configs. For more details, refer to
-        https://github.com/openai/triton/issues/781
+        https://github.com/triton-lang/triton/issues/781
         https://github.com/pytorch/torchdynamo/issues/1670
         """
         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
@@ -920,6 +921,43 @@ class CudaReproTests(TestCase):
             out, torch.scatter_reduce(input_orig.clone(), 0, index, src, "sum")
         )
 
+    def test_libdevice_routing(self):
+        def foo(x):
+            return x.exp()
+
+        inp = torch.ones(64, device="cuda").to(torch.float64)
+
+        out, code = run_and_get_code(torch.compile(foo), inp)
+        FileCheck().check("libdevice.exp").run(code[0])
+        self.assertEqual(foo(inp), out)
+
+        inp = inp.to(torch.float)
+        out, code = run_and_get_code(torch.compile(foo), inp)
+        FileCheck().check_not("libdevice.exp").check("tl_math.exp").run(code[0])
+        self.assertEqual(foo(inp), out)
+
+        def foo(x):
+            return x.sigmoid()
+
+        inp = torch.ones(64, device="cuda").to(torch.float64)
+        out, code = run_and_get_code(torch.compile(foo), inp)
+        FileCheck().check("libdevice.exp").run(code[0])
+        self.assertEqual(foo(inp), out)
+
+    def test_uint_view_copy(self):
+        @torch.compile
+        def view_copy(target, source):
+            assert target.dtype == torch.bfloat16
+            assert source.dtype == torch.uint16
+            target.view(torch.uint16).copy_(source)
+
+        target = torch.ones(1024, dtype=torch.bfloat16, device="cuda")
+        source = torch.full_like(target, 4, dtype=torch.uint16)
+
+        out = target.view(torch.uint16).copy_(source).clone()
+        view_copy(target, source)
+        self.assertEqual(out, target.view(torch.uint16))
+
     def test_embedding_var_mean(self):
         def forward(arg0_1):
             full = torch.ops.aten.full.default(
@@ -1096,6 +1134,9 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(expect, actual)
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     @config.patch(
         {
             "max_autotune_gemm_backends": "TRITON",
@@ -1546,7 +1587,7 @@ class CudaReproTests(TestCase):
 
     @config.patch("triton.use_block_ptr", True)
     def test_selecsls42b_misaligned_address(self):
-        # https://github.com/openai/triton/issues/2836
+        # https://github.com/triton-lang/triton/issues/2836
 
         @torch.compile(fullgraph=True)
         def fn(arg207_1, arg208_1, convert_element_type_40, expand, full, mul_3):
