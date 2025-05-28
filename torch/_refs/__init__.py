@@ -5765,9 +5765,13 @@ def full_like(
         ).to(memory_format=memory_format)
 
     shape, stride = _get_shape_stride_like(a, layout)
-    return prims.full(
+    result = full(
         a.shape, fill_value, dtype=dtype, device=device, requires_grad=requires_grad
-    ).as_strided(shape, stride)
+    )
+    if stride:
+        return result.as_strided(shape, stride).clone()
+    else:
+        return result
 
 
 @register_decomposition(aten.zeros_like)
