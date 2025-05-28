@@ -423,6 +423,13 @@ class AutogradCompilerInstance:
         aot_id = CompiledFunction._aot_id
         del CompiledFunction
 
+        if torch.is_grad_enabled():
+            for output_alias_info in metadata.output_info:
+                if output_alias_info.requires_grad:
+                    raise RuntimeError(
+                        "torch.compile does not currently support higher order gradients."
+                    )
+
         @torch._dynamo.allow_in_graph  # type: ignore[misc]
         def call_aot_bwd_prologue(ctx_saved_tensors, ctx_symints, *flat_args):
             out = torch._functorch._aot_autograd.runtime_wrappers._backward_prologue_functional(
