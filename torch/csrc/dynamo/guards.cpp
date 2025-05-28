@@ -4169,6 +4169,8 @@ class SetGetItemGuardAccessor : public GuardAccessor {
         PyObject_CallMethod(PyDict, "fromkeys", "OO", obj, Py_None);
 
     PyObject* keys_list = PyMapping_Keys(dict);
+    Py_XDECREF(dict);  // decref dict as we now have the keys_list
+
     PyObject* x = PyList_GetItem(keys_list, _index); // borrowed ref
     if (x == nullptr) {
       PyErr_Clear();
@@ -4183,7 +4185,10 @@ class SetGetItemGuardAccessor : public GuardAccessor {
     PyObject* PyDict = (PyObject*)&PyDict_Type;
     PyObject* dict =
         PyObject_CallMethod(PyDict, "fromkeys", "OO", obj, Py_None);
+
     PyObject* keys_list = PyMapping_Keys(dict);
+    Py_XDECREF(dict);
+
     PyObject* x = PyList_GetItem(keys_list, _index); // borrowed ref
     if (x == nullptr) {
       PyErr_Clear();
