@@ -114,7 +114,7 @@ except ModuleNotFoundError:
 try:
     import torch._logging
     import torch._numpy as tnp
-    from torch._guards import detect_fake_mode  # noqa: F401n
+    from torch._guards import detect_fake_mode  # noqa: F401
     from torch._logging import LazyString
 
     from . import config
@@ -592,7 +592,7 @@ class CompileEventLogger:
         or ChromiumEventLogger is not initialized.
         This function is syntactic sugar for chromium_event_logger().try_add_event_data.
         """
-        if CHROMIUM_EVENT_LOG is None:
+        if not chromium_event_log_active():
             return
         chromium_log = get_chromium_event_logger()
         chromium_log.try_add_event_data(event_name, **metadata)
@@ -602,7 +602,7 @@ class CompileEventLogger:
         """
         Special function that quietly runs a given method, returning if CHROMIUM_EVENT_LOG is None or metrics context is not set
         """
-        if CHROMIUM_EVENT_LOG is None:
+        if not chromium_event_log_active():
             return
         metrics_context = get_metrics_context()
         if not metrics_context.in_progress():
@@ -1245,7 +1245,6 @@ class CompilationMetrics:
     runtime_cudagraphify_time_us: Optional[int] = None
     runtime_triton_autotune_time_us: Optional[int] = None
     dynamo_compile_time_before_restart_us: Optional[int] = None
-    cuda_synchronize_time_us: Optional[int] = None  # TODO: instrument
     distributed_ephemeral_timeout_us: Optional[int] = None
     structured_logging_overhead_us: Optional[int] = None
     remote_fx_graph_cache_get_time_us: Optional[int] = None
@@ -1548,7 +1547,7 @@ def record_compilation_metrics(
         "dynamo_config": _get_dynamo_config_for_logging(),
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "cuda_version": torch.version.cuda,
-        "triton_version": triton.__version__ if has_triton_package() else "",
+        "triton_version": triton.__version__ if has_triton() else "",
         "remote_cache_version": remote_cache_version,
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
         "python_version": sys.version,
@@ -1922,6 +1921,11 @@ def get_chromium_event_logger() -> ChromiumEventLogger:
     if CHROMIUM_EVENT_LOG is None:
         CHROMIUM_EVENT_LOG = ChromiumEventLogger()
     return CHROMIUM_EVENT_LOG
+
+
+def chromium_event_log_active() -> bool:
+    global CHROMIUM_EVENT_LOG
+    return CHROMIUM_EVENT_LOG is not None
 
 
 @contextmanager
@@ -3830,14 +3834,15 @@ def build_checkpoint_variable(**options):
     )
 
 
-def is_compile_supported(device_type: str) -> bool:
+def is_compile_supported(device_type):
     from .eval_frame import is_dynamo_supported
 
+    type = torch.device(device_type).type
     compile_supported = is_dynamo_supported()
-    if device_type == "cpu":
+    if type == "cpu":
         pass
-    elif device_type in ["cuda", "xpu"] and compile_supported:
-        compile_supported = has_triton(device_type)
+    elif type in ["cuda", "xpu"] and compile_supported:
+        compile_supported = has_triton()
     else:
         compile_supported = False
     return compile_supported

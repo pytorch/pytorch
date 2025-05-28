@@ -20,6 +20,7 @@ from torch._decomp import (
 from torch._decomp.decompositions import (
     _grid_sampler_2d as decomp_grid_sampler_2d,
     _index_add,
+    embedding_dense_backward as decomp_embedding_dense_backward,
     pw_cast_for_opmath,
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
@@ -114,6 +115,7 @@ decomps_to_exclude = [
     aten._softmax_backward_data,
     aten.clamp_max,
     aten.clamp_min,
+    aten.embedding_dense_backward,  # we fall back on xpu
     aten.index_add,  # we conditionally call this decomp
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
@@ -135,6 +137,24 @@ def register_decomposition(
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+@register_decomposition([aten.embedding_dense_backward])
+def _embedding_dense_backward(
+    grad_output: torch.Tensor,
+    indices: torch.Tensor,
+    num_weights: int,
+    padding_idx: int,
+    scale_grad_by_freq: bool,
+) -> torch.Tensor:
+    # TODO: check if XE4 still need this fallback
+    # check torch.xpu.get_device_properties(grad_output.device).architecture
+    if grad_output.is_xpu:
+        return NotImplemented
+    # We can write a util function to update decomp table if we have more ops to fallback.
+    return decomp_embedding_dense_backward(
+        grad_output, indices, num_weights, padding_idx, scale_grad_by_freq
+    )
 
 
 # TODO: for now, inductor doesn't handle asserts
