@@ -648,7 +648,9 @@ class DynamoExporterTest(common_utils.TestCase):
                 [[1, 2, 3, -1], [4, 5, 6, -1], [7, 8, 9, -1]], dtype=torch.float32
             ),
         )
-        onnx_program = torch.onnx.export(ScanModel(), inputs, dynamo=True, fallback=False)
+        onnx_program = torch.onnx.export(
+            ScanModel(), inputs, dynamo=True, fallback=False
+        )
         onnx_testing.assert_onnx_program(onnx_program, args=inputs)
 
 
