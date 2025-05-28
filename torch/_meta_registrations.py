@@ -2443,22 +2443,15 @@ def meta_conv(
     output_padding: list[int],
     groups: int,
 ):
-    from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
-
     def pick_memory_format():
-        try:
-            if device_hint(input_tensor) == "cuda":
-                if is_channels_last(input_tensor) or is_channels_last(weight):
-                    return torch.channels_last
-            else:
-                if is_channels_last(input_tensor):
-                    return torch.channels_last
-            if input_tensor.is_contiguous(memory_format=torch.contiguous_format):
-                return torch.contiguous_format
-            elif input_tensor.is_contiguous(memory_format=torch.preserve_format):
-                return torch.preserve_format
-        except GuardOnDataDependentSymNode:
-            return
+        if device_hint(input_tensor) == "cuda":
+            if is_channels_last(input_tensor) or is_channels_last(weight):
+                return torch.channels_last
+        else:
+            if is_channels_last(input_tensor):
+                return torch.channels_last
+        if utils.definitely_contiguous_for_memory_format(input_tensor, memory_format=torch.contiguous_format):
+            return torch.contiguous_format
 
     shape_out = calc_conv_nd_return_shape(
         input_tensor,

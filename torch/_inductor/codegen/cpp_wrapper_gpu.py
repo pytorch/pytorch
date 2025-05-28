@@ -9,6 +9,7 @@ from typing_extensions import Self
 
 import sympy
 
+import torch
 from torch import dtype as torch_dtype
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 from torch._inductor.runtime.runtime_utils import dynamo_timed
@@ -136,7 +137,7 @@ class DeferredTritonCallWrapper:
             self.generate_launch_kernel(prefix, wrapper, kernel_var_name, params)
         prefix.writeline("}")
 
-        if not config.aot_inductor.embed_cubin:
+        if not config.aot_inductor.embed_kernel_binary:
             # Ensure the cubin file is included in the package
             V.graph.wrapper_code.additional_files.append(
                 params[get_cpp_wrapper_cubin_path_name()]
@@ -165,13 +166,20 @@ class DeferredTritonCallWrapper:
     def generate_load_kernel(self, prefix, kernel_var_name, params):
         prefix.writeline(f"if ({kernel_var_name} == nullptr) {{")
         with prefix.indent():
+            embed_kernel_args = [f"__{params['inductor_meta']['kernel_name']}_start"]
+            if torch.xpu.is_available():
+                # XPU needs the end address of the kernel to calculate the size of the kernel binary.
+                embed_kernel_args.append(
+                    f"__{params['inductor_meta']['kernel_name']}_end"
+                )
+
             load_kernel_args = (
                 [
-                    f"__{params['inductor_meta']['kernel_name']}_start",
+                    *embed_kernel_args,
                     cpp_string_literal(params["mangled_name"]),
                     str(params["shared_mem"]),
                 ]
-                if V.graph.aot_mode and config.aot_inductor.embed_cubin
+                if V.graph.aot_mode and config.aot_inductor.embed_kernel_binary
                 else [
                     cpp_string_literal(params[get_cpp_wrapper_cubin_path_name()]),
                     cpp_string_literal(params["mangled_name"]),
