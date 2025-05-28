@@ -102,6 +102,7 @@ class TestPublicBindings(TestCase):
             "DeserializationStorageContext",
             "device",
             "DeviceObjType",
+            "DeviceError",
             "DictType",
             "DisableTorchFunction",
             "DisableTorchFunctionSubclass",
