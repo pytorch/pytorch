@@ -217,7 +217,7 @@ std::string processErrorMsg(std::string str) {
 }
 
 static std::string formatMessage(const char* format, va_list fmt_args) {
-  return fmt::vsprintf(format, fmt_args);
+  return fmt::vsprintf(fmt::runtime(format), fmt_args);
 }
 
 void translate_exception_to_python(const std::exception_ptr& e_ptr) {

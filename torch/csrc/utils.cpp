@@ -96,7 +96,7 @@ void THPUtils_setError(const char* format, ...) {
   va_list fmt_args;
 
   va_start(fmt_args, format);
-  std::string message = fmt::vsprintf(format, fmt_args);
+  std::string message = fmt::vsprintf(fmt::runtime(format), fmt_args);
   va_end(fmt_args);
 
   PyErr_SetString(PyExc_RuntimeError, message.c_str());
