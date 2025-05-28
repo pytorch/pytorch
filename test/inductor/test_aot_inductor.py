@@ -5803,6 +5803,22 @@ class AOTInductorTestsTemplate:
         # compare against eager
         self.assertEqual(optimized(**model_kwargs), model(**model_kwargs))
 
+    def test_clamp_decomposition(self):
+        class Model1(torch.nn.Module):
+            def forward(self, x):
+                return x.clamp(min=1.5)
+
+        class Model2(torch.nn.Module):
+            def forward(self, x):
+                return x.clamp(min=2)
+
+        x = torch.randint(4, (4,))
+
+        # the output should have float32 type, not int
+        self.check_model(Model1(), (x,))
+        # the output should have int type
+        self.check_model(Model2(), (x,))
+
 
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)
