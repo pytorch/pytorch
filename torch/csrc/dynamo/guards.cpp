@@ -4169,12 +4169,16 @@ class SetGetItemGuardAccessor : public GuardAccessor {
         PyObject_CallMethod(PyDict, "fromkeys", "OO", obj, Py_None);
 
     PyObject* keys_list = PyMapping_Keys(dict);
+    Py_XDECREF(dict);
+
     PyObject* x = PyList_GetItem(keys_list, _index); // borrowed ref
     if (x == nullptr) {
+      Py_XDECREF(keys_list);
       PyErr_Clear();
       return false;
     }
     bool result = _guard_manager->check_nopybind(x);
+    Py_XDECREF(keys_list);
     return result;
   }
 
@@ -4183,14 +4187,19 @@ class SetGetItemGuardAccessor : public GuardAccessor {
     PyObject* PyDict = (PyObject*)&PyDict_Type;
     PyObject* dict =
         PyObject_CallMethod(PyDict, "fromkeys", "OO", obj, Py_None);
+
     PyObject* keys_list = PyMapping_Keys(dict);
+    Py_XDECREF(dict);
+
     PyObject* x = PyList_GetItem(keys_list, _index); // borrowed ref
     if (x == nullptr) {
+      Py_XDECREF(keys_list);
       PyErr_Clear();
       return GuardDebugInfo(
           false, fmt::format("IndexError on {}", get_source()), 0);
     }
     GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    Py_XDECREF(keys_list);
     return result;
   }
 
