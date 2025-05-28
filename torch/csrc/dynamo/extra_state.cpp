@@ -220,3 +220,42 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
   }
   return result;
 }
+
+PrecompileEntry::PrecompileEntry(py::object gm, py::object c)
+    : guard_manager(std::move(gm)), code(std::move(c)) {
+  if (!PyCode_Check(code.ptr())) {
+    throw std::runtime_error("Expecting CodeType from PrecompileEntry.");
+  }
+  root_mgr =
+      torch::dynamo::convert_to_root_guard_manager(guard_manager.attr("root"));
+}
+
+void _reset_precompile_entries(const py::handle& code_obj) {
+  if (!py::isinstance(code_obj, py::module::import("types").attr("CodeType"))) {
+    throw py::type_error("expected a code object!");
+  }
+  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
+  ExtraState* extra = get_extra_state(code);
+  py::list result;
+  if (extra != nullptr) {
+    extra->precompile_entries.clear();
+  }
+}
+
+void _load_precompile_entry(
+    const py::handle& code_obj,
+    py::object guard_manager,
+    py::object dynamo_code) {
+  if (!py::isinstance(code_obj, py::module::import("types").attr("CodeType"))) {
+    throw py::type_error("expected a code object!");
+  }
+  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
+  ExtraState* extra = get_extra_state(code);
+  py::list result;
+  if (extra == nullptr) {
+    extra = init_and_set_extra_state(code);
+  }
+  auto entry =
+      PrecompileEntry(std::move(guard_manager), std::move(dynamo_code));
+  extra->precompile_entries.push_back(std::move(entry));
+}
