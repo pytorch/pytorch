@@ -2680,7 +2680,9 @@ def copy_misaligned_inputs(
 ) -> None:
     for i in check_inputs_idxs:
         _inp = new_inputs[i]
-        assert isinstance(_inp, torch.Tensor), f"Expected tensors only, but got: {type(_inp)}"
+        assert isinstance(_inp, torch.Tensor), (
+            f"Expected tensors only, but got: {type(_inp)}"
+        )
         if _inp.data_ptr() % ALIGNMENT:
             new_inputs[i] = clone_preserve_strides(_inp)
 
