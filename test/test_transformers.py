@@ -4096,7 +4096,7 @@ class TestSDPAXpuOnly(NNTestCase):
             query.float(), key.float(), value.float(), attn_mask=attn_mask, dropout_p=0.0, is_causal=False)[0]
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
-    
+
     def test_attention_preserves_query_layout(self, device):
 
         def test_attention(permute_order: list[list[int]]):
