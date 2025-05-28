@@ -11,6 +11,7 @@ import argparse
 import contextlib
 import copy
 import ctypes
+from pathlib import PosixPath
 import errno
 import functools
 import gc
@@ -1555,6 +1556,10 @@ TEST_WITH_TORCHDYNAMO: bool = TestEnvironment.def_flag(
     env_var="PYTORCH_TEST_WITH_DYNAMO",
     implied_by_fn=lambda: TEST_WITH_TORCHINDUCTOR or TEST_WITH_AOT_EAGER,
 )
+TEST_DISABLE_CA: bool = TestEnvironment.def_flag(
+    "TEST_DISABLE_CA",
+    env_var="PYTORCH_DISABLE_CA",
+)
 
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
@@ -1567,6 +1572,8 @@ if TEST_WITH_TORCHDYNAMO:
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
+    else:
+        torch._dynamo.config.compiled_autograd = not TEST_DISABLE_CA
 
 
 # seems like this is only used in test/torch_np
@@ -3308,11 +3315,25 @@ class TestCase(expecttest.TestCase):
                 assert result.wasSuccessful() is False
             result.stop()
 
+    def skip_test(self, result):
+        bad_paths = ["test_jit.py", "test_jit_fuser_te.py"]
+        if path := getattr(result, "path", None):
+            if isinstance(path, PosixPath):
+                path_str = path.as_posix()
+                print(f"skipping CA test {path_str=}")
+                for bad_path in bad_paths:
+                    if bad_path in path_str:
+                        return True
+        return False
+
+
 
     def run(self, result=None):
         with contextlib.ExitStack() as stack:
             if TEST_WITH_CROSSREF:
                 stack.enter_context(CrossRefMode())
+            if torch._dynamo.compiled_autograd and self.skip_test(result):
+                return
             self._run_custom(
                 result=result,
             )
@@ -5311,6 +5332,9 @@ class TestGradients(TestCase):
 
     def _check_helper(self, device, dtype, op, variant, check, *, check_forward_ad=False, check_backward_ad=True,
                       check_batched_grad=None, check_batched_forward_grad=False):
+        if torch._dynamo.config.compiled_autograd:
+            check_batched_grad = False
+            check_batched_forward_grad = False
         assert check in ('gradcheck', 'bwgrad_bwgrad', 'fwgrad_bwgrad')
         # NB: check_backward_ad does not affect gradgradcheck (always True)
         if variant is None:

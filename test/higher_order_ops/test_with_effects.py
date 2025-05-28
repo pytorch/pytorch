@@ -76,7 +76,8 @@ def get_fw_bw_graph(
     )(*inps)
 
     if requires_grad:
-        out.sum().backward()
+        with torch._dynamo.compiled_autograd._disable():
+            out.sum().backward()
 
     return (fw_graph_cell[0], bw_graph_cell[0])
 
@@ -429,7 +430,9 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
     @skipIfNoDynamoSupport
     def test_effectful_custom_op_with_subclasses(self):
-        with torch.library._scoped_library("_mylib", "FRAGMENT") as lib:
+        with torch.library._scoped_library(
+            "_mylib", "FRAGMENT"
+        ) as lib, torch._dynamo.compiled_autograd._disable():
             lib.define("zoo(Tensor x) -> Tensor")
             lib.define("zoo2(Tensor x) -> Tensor")
 

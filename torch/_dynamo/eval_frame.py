@@ -810,7 +810,12 @@ class OptimizeContext(_TorchDynamoContext):
             if _dynamic is None:
                 _dynamic = not torch._dynamo.config.assume_static_by_default
 
+            def noop():
+                pass
+
             def call_compiled_autograd():
+                if torch._dynamo.compiled_autograd.nested_level > 0:
+                    return noop
                 assert rebuild_ctx is not None
                 compiler_fn = rebuild_ctx()
                 ctx = torch._dynamo.compiled_autograd._enable(

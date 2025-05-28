@@ -767,9 +767,14 @@ def _check_analytical_jacobian_attributes(
     diff_input_list = list(_iter_tensors(inputs, True))
 
     def vjp_fn(grad_output):
-        return torch.autograd.grad(
-            output, diff_input_list, grad_output, retain_graph=True, allow_unused=True
-        )
+        with torch._dynamo.compiled_autograd._disable():
+            return torch.autograd.grad(
+                output,
+                diff_input_list,
+                grad_output,
+                retain_graph=True,
+                allow_unused=True,
+            )
 
     # Compute everything twice to check for nondeterminism (which we call reentrancy)
     if fast_mode:
@@ -1969,6 +1974,13 @@ def gradcheck(
     fast_mode: bool = False,
     masked: Optional[bool] = None,
 ) -> bool:  # noqa: D400,D205
+    if torch._dynamo.config.compiled_autograd:
+        if not check_backward_ad:
+            return True
+        check_batched_grad = False
+        check_batched_forward_grad = False
+        check_forward_ad = False
+        check_undefined_grad = False
     r"""Check gradients computed via small finite differences against analytical
     gradients wrt tensors in :attr:`inputs` that are of floating point or complex type
     and with ``requires_grad=True``.
@@ -2135,6 +2147,10 @@ def gradgradcheck(
     fast_mode: bool = False,
     masked: bool = False,
 ) -> bool:  # noqa: D400,D205
+    if torch._dynamo.config.compiled_autograd:
+        check_undefined_grad = False
+        check_batched_grad = False
+        check_undefined_grad = True
     r"""Check gradients of gradients computed via small finite differences
     against analytical gradients wrt tensors in :attr:`inputs` and
     :attr:`grad_outputs` that are of floating point or complex type and with

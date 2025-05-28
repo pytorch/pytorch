@@ -1356,6 +1356,8 @@ class AutogradCompilerInstance:
 # state of the autograd engine dispatch, kept in sync by enable/disable context managers
 compiled_autograd_enabled = False
 
+nested_level = 0
+
 # global flag to check if compiled autograd is enabled but Dynamo stance is "force_eager"
 compiled_autograd_enabled_force_eager = False
 
@@ -1414,12 +1416,15 @@ def _enable(compiler_fn, dynamic: bool = True):
             torch._C._dynamo.compiled_autograd.set_verbose_logger(verbose_log)
         global compiled_autograd_enabled
         compiled_autograd_enabled = True
+        global nested_level
+        nested_level += 1
         try:
             with torch.autograd.set_multithreading_enabled(False):
                 yield
         finally:
             if not prior_compiler:
                 compiled_autograd_enabled = False
+            nested_level -= 1
             torch._C._dynamo.compiled_autograd.set_autograd_compiler(
                 prior_compiler, prior_dynamic
             )
