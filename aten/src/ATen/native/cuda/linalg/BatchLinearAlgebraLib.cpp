@@ -1215,6 +1215,7 @@ Tensor& orgqr_helper_cusolver(Tensor& result, const Tensor& tau) {
   return result;
 }
 
+#if defined(USE_ROCM) && ROCSOLVER_SYEVD_BATCHED_ENABLED
 template <typename scalar_t>
 rocblas_status _rocsolver_syevd_strided_batched(
     rocblas_handle handle,
@@ -1315,6 +1316,7 @@ static void apply_syevd_batched_rocsolver(const Tensor& values, const Tensor& ve
     batch_size
   )));
 }
+#endif // USE_ROCM && ROCSOLVER_SYEVD_BATCHED_ENABLED
 
 template <typename scalar_t>
 static void apply_syevd(const Tensor& values, const Tensor& vectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
@@ -1587,10 +1589,12 @@ static void linalg_eigh_cusolver_syevj_batched(const Tensor& eigenvalues, const 
   });
 }
 
+#if defined(USE_ROCM) && ROCSOLVER_SYEVD_BATCHED_ENABLED
 static void linalg_eigh_rocsolver_syevd_batched(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
     AT_DISPATCH_FLOATING_TYPES(eigenvectors.scalar_type(), "linalg_eigh_cuda", [&]() {
       apply_syevd_batched_rocsolver<scalar_t>(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);});
 }
+#endif // USE_ROCM && ROCSOLVER_SYEVD_BATCHED_ENABLED
 
 void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
 #if defined(USE_ROCM) && !ROCSOLVER_SYEVD_BATCHED_ENABLED
