@@ -1,11 +1,13 @@
 #include <ATen/core/Formatting.h>
 #include <c10/util/irange.h>
+#include <fmt/compile.h>
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 
 #include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -50,8 +52,8 @@ std::ostream& operator<<(std::ostream & out, const DeprecatedTypeProperties& t) 
 
 enum class FormatType {
   Default,     // 'g' format (defaultfloat equivalent)
-  Scientific,  // 'e' format
-  Fixed        // 'f' format
+  Scientific,  // 'e' format with precision 4
+  Fixed        // 'f' format with precision 4
 };
 
 struct PrintFormat {
@@ -89,17 +91,13 @@ static PrintFormat __printFormat(const Tensor& self) {
   double expMin = 1;
   double expMax = 1;
   if(offset != size) {
-    expMin = fabs(self_p[offset]);
-    expMax = fabs(self_p[offset]);
+    expMin = std::fabs(self_p[offset]);
+    expMax = std::fabs(self_p[offset]);
     for (const auto i : c10::irange(offset, size)) {
-      double z = fabs(self_p[i]);
+      double z = std::fabs(self_p[i]);
       if(std::isfinite(z)) {
-        if(z < expMin) {
-          expMin = z;
-        }
-        if(z > expMax) {
-          expMax = z;
-        }
+        expMin = std::min(expMin, z);
+        expMax = std::max(expMax, z);
       }
     }
     if(expMin != 0) {
@@ -149,19 +147,26 @@ static PrintFormat __printFormat(const Tensor& self) {
   }
 }
 
-static std::string formatValue(double value, const PrintFormat& fmt) {
-  double scaledValue = value / fmt.scale;
+// Precompiled format specs
+static constexpr auto FMT_G   = FMT_COMPILE("{:>{}g}");
+static constexpr auto FMT_E4  = FMT_COMPILE("{:>{}.4e}");
+static constexpr auto FMT_F4  = FMT_COMPILE("{:>{}.4f}");
 
-  switch (fmt.type) {
+// Print a single value directly into the stream buffer with no temporaries
+static void printValue(std::ostream& stream, double v, const PrintFormat& pf) {
+  auto out_it = std::ostreambuf_iterator<char>(stream);
+  double val = v / pf.scale;
+  switch (pf.type) {
     case FormatType::Default:
-      return fmt::format("{:>{}g}", scaledValue, fmt.width);
+      fmt::format_to(out_it, FMT_G,  val, pf.width);
+      break;
     case FormatType::Scientific:
-      return fmt::format("{:>{}.4e}", scaledValue, fmt.width);
+      fmt::format_to(out_it, FMT_E4, val, pf.width);
+      break;
     case FormatType::Fixed:
-      return fmt::format("{:>{}.4f}", scaledValue, fmt.width);
+      fmt::format_to(out_it, FMT_F4, val, pf.width);
+      break;
   }
-  // Should never reach here, but needed for some compilers
-  return fmt::format("{:>{}g}", scaledValue, fmt.width);
 }
 
 static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t linesize, int64_t indent) {
@@ -196,7 +201,7 @@ static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t line
       const double *row_ptr = row.const_data_ptr<double>();
 
       for (const auto c : c10::irange(firstColumn, lastColumn+1)) {
-        fmt::print(stream, "{}", formatValue(row_ptr[c], printFmt));
+        printValue(stream, row_ptr[c], printFmt);
 
         if(c == lastColumn) {
           fmt::print(stream, "\n");
@@ -217,13 +222,11 @@ static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t line
 }
 
 static void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize) {
-  std::vector<int64_t> counter(self.ndimension()-2);
+  std::vector<int64_t> counter(self.ndimension()-2, 0);
+  counter[0] = -1;
+
   bool start = true;
   bool finished = false;
-  counter[0] = -1;
-  for (const auto i : c10::irange(1, counter.size())) {
-    counter[i] = 0;
-  }
 
   while(true) {
     for(int64_t i = 0; self.ndimension()-2; i++) {
@@ -302,7 +305,8 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       }
       const double* tensor_p = tensor.const_data_ptr<double>();
       for (const auto i : c10::irange(tensor.size(0))) {
-        fmt::print(stream, "{}\n", formatValue(tensor_p[i], printFmt));
+        printValue(stream, tensor_p[i], printFmt);
+        fmt::print(stream, "\n");
       }
     }
     fmt::print(stream, "[ {}{{{}}}", tensor_.toString(), tensor.size(0));
