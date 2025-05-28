@@ -600,7 +600,7 @@ jobs:
       docker-image: ${{ needs.linux-focal-cuda12_8-py3_10-gcc11-sm89-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_8-py3_10-gcc11-sm89-build.outputs.test-matrix }}
     secrets: inherit
-  
+
   unstable-linux-focal-cuda12_8-py3_10-gcc11-sm89-build-xfail:
     # A version of the build that sets a larger number of jobs for a build.  May
     # OOM
@@ -621,4 +621,3 @@ jobs:
         ]}
       allow-reuse-old-whl: true
     secrets: inherit
-  
