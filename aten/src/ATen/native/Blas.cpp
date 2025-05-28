@@ -246,6 +246,10 @@ _scaled_mm_out_cpu_emulated(const Tensor& mat1, const Tensor& mat2,
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   TORCH_INTERNAL_ASSERT((scale_a.numel() == 1 && scale_b.numel() == 1), "Now _scaled_mm only supports per-tensor scaling for CPU backend.");
+  TORCH_CHECK(
+      !scale_result ||
+          (scale_result->numel() == 1 && scale_result->scalar_type() == kFloat),
+      "scale_result must be a float scalar");
   TORCH_CHECK(!bias || bias->numel() == mat2.sizes()[1], "Bias must be size ", mat2.sizes()[1],
        " but got ", bias->numel());
 
@@ -262,11 +266,21 @@ _scaled_mm_out_cpu_emulated(const Tensor& mat1, const Tensor& mat2,
 
   float input_scale = scale_a.item<float>();
   float weight_scale = scale_b.item<float>();
+  float output_scale = float(1.0);
+  if (scale_result.has_value() &&
+      (*out_dtype == ScalarType::Float8_e4m3fn ||
+       *out_dtype == ScalarType::Float8_e5m2)) {
+    output_scale = scale_result.value().item<float>();
+  }
   auto fp32_mat1 = at::mul(mat1.to(kFloat), input_scale);
   auto fp32_mat2 = at::mul(mat2_c.to(kFloat), weight_scale);
   auto out_tmp = at::matmul(fp32_mat1, fp32_mat2);
   if (bias) {
     out_tmp.add_(bias.value());
+  }
+  if (*out_dtype == ScalarType::Float8_e4m3fn ||
+      *out_dtype == ScalarType::Float8_e5m2) {
+    out_tmp = at::mul(out_tmp, 1 / output_scale);
   }
   out_tmp = out_tmp.to(out.scalar_type());
   out.copy_(out_tmp);
