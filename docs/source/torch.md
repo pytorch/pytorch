@@ -835,8 +835,10 @@ This feature is a prototype and may have compatibility breaking changes in the f
 [torch.compile documentation](https://pytorch.org/docs/main/torch.compiler.html)_
 
 ## Operator Tags
+```{eval-rst}
 .. autoclass:: Tag
     :members:
+```
 
 ```{eval-rst}
 .. Empty submodules added only for tracking.
