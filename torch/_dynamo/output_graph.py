@@ -386,8 +386,8 @@ class OutputGraph(OutputGraphGuardsState):
         # Set of globals installed via install_global* APIs
         self.installed_globals: set[str] = set()
 
-        # TODO: maybe should just pass the entire f_code in here?  Not
-        # sure...
+        self.f_code = f_code
+        # TODO: maybe should only store the entire f_code
         self.co_fields = {
             "co_name": f_code.co_name,
             "co_filename": f_code.co_filename,
@@ -533,6 +533,14 @@ class OutputGraph(OutputGraphGuardsState):
 
         self.compiler_trace_stack = contextlib.ExitStack()
 
+        # These are the ambient, currently-global saved_tensor_hooks stashed in autograd,
+        # that are set for the entire duration of the compiled region.
+        # This is an invariant today because we graph break on the saved_tensor_hook
+        # context manager inside a compiled region
+        self.saved_tensors_hooks_subgraph_names: Optional[list[str]] = (
+            self.maybe_install_saved_tensors_hooks_subgraphs()
+        )
+
     def mark_bytecode_tracing_start(self):
         self.compiler_trace_stack.enter_context(
             dynamo_timed(
@@ -612,6 +620,41 @@ class OutputGraph(OutputGraphGuardsState):
             self.guards.add(
                 GlobalStateSource().make_guard(GuardBuilder.FUNCTORCH_STACK_MATCH)
             )
+        if not torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+            self.guards.add(
+                GlobalStateSource().make_guard(
+                    GuardBuilder.AUTOGRAD_SAVED_TENSORS_HOOKS
+                )
+            )
+
+    def maybe_install_saved_tensors_hooks_subgraphs(self) -> Optional[list[str]]:
+        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+            return None
+
+        get_hooks = torch._functorch._aot_autograd.utils.top_saved_tensors_hooks
+        are_inline_hooks = (
+            torch._functorch._aot_autograd.utils.saved_tensors_hooks_are_inlineable
+        )
+        hooks = get_hooks()
+        if not are_inline_hooks(hooks):
+            return None
+
+        # If GraphModule provided by user contains fx.wrap,
+        # We can only rely on user provided cache hash in this case.
+        # If user did not provide cache hash - then we always bypass cache.
+
+        pack_gm, unpack_gm = hooks
+        pack_subgraph_name = self.install_subgraph(
+            "saved_tensors_hooks_pack",
+            torch.fx.GraphModule(self.nn_modules, pack_gm.graph),
+        )
+        unpack_subgraph_name = self.install_subgraph(
+            "saved_tensors_hooks_unpack",
+            torch.fx.GraphModule(self.nn_modules, unpack_gm.graph),
+        )
+        assert pack_subgraph_name == "saved_tensors_hooks_pack_0"
+        assert unpack_subgraph_name == "saved_tensors_hooks_unpack_0"
+        return [pack_subgraph_name, unpack_subgraph_name]
 
     def dump_guards_state(self):
         return OutputGraphGuardsState(
@@ -868,7 +911,7 @@ class OutputGraph(OutputGraphGuardsState):
         *names,
         **options,
     ):
-        if is_dynamic_nn_module(target, self.root_tx.export):
+        if is_dynamic_nn_module(target, self.export):
             # Instead of returning UnspecializedNNModuleVariable, call
             # VariableTracker.build so that it is tracked for mutation.
             return VariableTracker.build(self.current_tx, target, **options)
@@ -1555,7 +1598,7 @@ class OutputGraph(OutputGraphGuardsState):
 
             self.run_compiler_collective()
 
-            name = unique_id("__compiled_fn")
+            name = unique_id("__compiled_fn", with_uuid=True)
 
             assert isinstance(rv, list)
             assert isinstance(root, FakeRootModule)
@@ -1596,6 +1639,14 @@ class OutputGraph(OutputGraphGuardsState):
             self.real_value_cache.clear()
 
             gm = _make_graph_module(root, self.graph)
+
+            # Saved tensors hooks are not used by the graph.
+            # GraphModule by default only copies used in the graph submodules.
+            # Copying them into the result graph manually.
+            if self.saved_tensors_hooks_subgraph_names:
+                for subgraph_name in self.saved_tensors_hooks_subgraph_names:
+                    setattr(gm, subgraph_name, getattr(root, subgraph_name))
+
             for register_finalizer in self.register_finalizer_fns:
                 register_finalizer(gm)
 
@@ -1788,10 +1839,11 @@ class OutputGraph(OutputGraphGuardsState):
                 self.remove_node(node)
 
     def remove_unused_graphargs(self) -> None:
-        # NB: It's always OK to drop GraphArg for symbols that ended up being
-        # specialized.  You don't even have to make a guard for it, because
-        # ShapeEnv produce_guards operates on tracked_fakes, which never gets
-        # pruned.  That being said, you'll get marginally better generated
+        # NB: It's OK to drop GraphArg for symbols that ended up being
+        # specialized iff they are not used in runtime assertions.  You don't
+        # even have to make a guard for it, because ShapeEnv produce_guards
+        # operates on tracked_fakes, which never gets pruned.
+        # That being said, you'll get marginally better generated
         # guard code if you promote the guard into a Dynamo guard (since that
         # allows for the guard to be done using C++ guards.)  If we get
         # ShapeEnv guards to go into C++ guards, this will stop being a thing
@@ -1925,11 +1977,6 @@ class OutputGraph(OutputGraphGuardsState):
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
                     )
                     update_used_symbols(used_symbols, fake)
-
-        # Preserve all symbols that appears in original expressions of a deferred_runtime_asserts.
-        for assertion_list in self.shape_env.deferred_runtime_asserts.values():
-            for assertion in assertion_list:
-                used_symbols |= free_symbols(assertion.expr)
 
         # After removing unused graphargs, prune unused binds_symbol
         for node in recheck_placeholders:
