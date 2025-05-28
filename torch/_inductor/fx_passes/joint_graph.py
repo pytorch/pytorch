@@ -248,10 +248,10 @@ class UniformValueConstantFolder(ConstantFolder):
         of the node are unknown.
         """
         for op in itertools.chain(
-            self.module.graph.find_nodes(
+            self.module.graph.find_nodes(  # type: ignore[operator, union-attr]
                 op="call_function", target=torch.ops.aten.mul.Tensor
             ),
-            self.module.graph.find_nodes(
+            self.module.graph.find_nodes(  # type: ignore[operator, union-attr]
                 op="call_function", target=torch.ops.aten.mul.Scalar
             ),
         ):
