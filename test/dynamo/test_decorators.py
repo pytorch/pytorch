@@ -845,30 +845,6 @@ If the above doesn't work, please subtmit an issue to GitHub.
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 6)
 
-    def test_skip_frame(self):
-        cnts = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnts)
-        def fn(x):
-            x = x + 1
-            torch._dynamo.skip_frame()
-            return x + 1
-
-        inp = torch.ones(3, 3)
-        self.assertEqual(fn(inp), inp + 2)
-        self.assertEqual(cnts.frame_count, 0)
-
-        @torch.compile(backend=cnts)
-        def gn(x):
-            x = x + 1
-            torch._dynamo.graph_break()
-            x = x + 1
-            torch._dynamo.skip_frame()
-            return x + 1
-
-        self.assertEqual(gn(inp), inp + 3)
-        self.assertEqual(cnts.frame_count, 1)
-
     def test_disable_recursive_false(self):
         def fn2(x):
             return x + 1
@@ -1493,7 +1469,11 @@ If the above doesn't work, please subtmit an issue to GitHub.
 
         @torch.compile(backend="eager")
         def g(x):
-            torch._dynamo.skip_frame()
+            # cause a skipped frame
+            try:
+                torch._dynamo.graph_break()
+            except Exception:
+                pass
             # NOTE: torch._dynamo.is_compiling() will get traced
             # and return true. torch.compiler.is_compiling() is skipped
             # and will return false.
