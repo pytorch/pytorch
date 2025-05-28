@@ -3838,8 +3838,10 @@ def forward(self, x):
                 a = torch.rand(1, u0 + u1, 1, dtype=torch.bool)
                 b = torch.empty(1, u2 + 4, 100)
                 return torch.where(a, b, torch.zeros_like(b))
-        ep = export(Where(), (torch.tensor([5, 6, 7]),))
-        print(ep)
+
+        x = torch.tensor([5, 6, 7])
+        ep = export(Where(), (x,))
+        ep.module()(x)
 
     def test_export_for_training_with_container_type(self):
         class Foo(torch.nn.Module):
