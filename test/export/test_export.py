@@ -4478,7 +4478,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ep = export(Foo(), inps, dynamic_shapes=dynamic_shapes)
         # values should have no unbacked symbols, bindings should be empty
         for node in ep.graph.nodes:
-            symbols = []
             val = node.meta.get("val")
             bindings = node.meta.get("unbacked_bindings")
             self.assertTrue(
