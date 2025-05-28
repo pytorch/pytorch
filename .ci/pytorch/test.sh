@@ -324,6 +324,12 @@ test_python_smoke() {
   assert_git_not_dirty
 }
 
+test_h100_distributed() {
+  #Tests for distributed tests at H100
+  time python test/run_test.py --include distributed/_composable/test_composability/test_pp_composability.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  assert_git_not_dirty
+}
+
 test_lazy_tensor_meta_reference_disabled() {
   export TORCH_DISABLE_FUNCTIONALIZATION_META_REFERENCE=1
   echo "Testing lazy tensor operations without meta reference"
@@ -1724,6 +1730,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
   test_xpu_bin
 elif [[ "${TEST_CONFIG}" == smoke ]]; then
   test_python_smoke
+elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
+  test_h100_distributed
 else
   install_torchvision
   install_monkeytype
