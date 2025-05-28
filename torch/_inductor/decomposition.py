@@ -627,14 +627,34 @@ def full_like(
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
 ) -> torch.Tensor:
+    # return torch.full(
+    #     [*self.size()],
+    #     fill_value,
+    #     dtype=dtype or self.dtype,
+    #     layout=layout or self.layout,
+    #     device=device or self.device,
+    #     requires_grad=requires_grad,
+    # ).to(memory_format=get_like_layout(self, memory_format))
+    items = [
+        (stride, self.shape[idx], idx) for idx, stride in enumerate(self.stride())
+    ]
+    items.sort(key=lambda x: x[0], reverse=True)
+
+    perms = [None] * len(items)
+    shape = [None] * len(items)
+    for idx, item in enumerate(items):
+        _, size, orig_idx = item
+        perms[orig_idx] = idx
+        shape[idx] = size
+
     return torch.full(
-        [*self.size()],
+        shape,
         fill_value,
         dtype=dtype or self.dtype,
         layout=layout or self.layout,
         device=device or self.device,
         requires_grad=requires_grad,
-    ).to(memory_format=get_like_layout(self, memory_format))
+    ).permute(*perms).to(memory_format=memory_format)
 
 
 @register_decomposition(aten.randint_like.default)

@@ -553,6 +553,8 @@ def check_model(
             # our testing sometimes uses higher precision inputs for the reference
             exact_dtype=False,
         )
+        strides_equal, _ = torch._prims_common.check_significant_strides(correct, actual)
+        self.assertTrue(strides_equal)
     else:
         for correct_val, actual_val in zip(correct_flat, actual_flat):
             if isinstance(correct_val, torch.Tensor):
@@ -6956,6 +6958,21 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return torch.full_like(a, 7.777) - 1
 
         self.common(fn, (torch.randn(8),))
+
+    def test_full_like2(self):
+        def fn(a):
+            return torch.full_like(a, 7.777) - 1
+
+        a = torch.randn(4, 5, 6).transpose(1, -1)
+        self.common(fn, (a,))
+
+    def test_full_like3(self):
+        def fn(a):
+            return torch.full_like(a, 7.777) - 1
+
+        a = torch.rand(4, 3)[::2, :]
+        a = a.permute(1, 0)
+        self.common(fn, (a,))
 
     def test_full_truncation(self):
         def fn(a):
