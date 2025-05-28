@@ -112,7 +112,8 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
   lazy.)
 
   ```bash
-  pip uninstall torch
+  conda uninstall pytorch -y
+  yes | pip uninstall torch
   ```
 
   Next run `python setup.py clean`. After that, you can install in `develop` mode again.
@@ -177,6 +178,14 @@ You can use this script to check out a new nightly branch with the following:
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch
 source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+```
+
+Or if you would like to re-use an existing conda environment, you can pass in
+the prefix argument (`--prefix`):
+
+```bash
+./tools/nightly.py checkout -b my-nightly-branch -p my-env
+source my-env/bin/activate  # or `& .\my-env\Scripts\Activate.ps1` on Windows
 ```
 
 To install the nightly binaries built with CUDA, you can pass in the flag `--cuda`:
@@ -280,7 +289,7 @@ dependencies as well as the nightly binaries into the repo directory.
 ### Python Unit Testing
 
 **Prerequisites**:
-The following packages should be installed with `pip`:
+The following packages should be installed with either `conda` or `pip`:
 - `expecttest` and `hypothesis` - required to run tests
 - `mypy` - recommended for linting
 - `pytest` - recommended to run tests more selectively
@@ -488,7 +497,8 @@ pip install -r requirements.txt
 # Or if you prefer an uncontaminated global executable environment or do not want to go through the node configuration:
 # npm install katex && export PATH="$PATH:$(pwd)/node_modules/.bin"
 ```
-> Note: if you installed `nodejs` with a different package manager then `npm` will probably install a version of `katex` that is not
+> Note: if you installed `nodejs` with a different package manager (e.g.,
+`conda`) then `npm` will probably install a version of `katex` that is not
 compatible with your version of `nodejs` and doc builds will fail.
 A combination of versions that is known to work is `node@6.13.1` and
 `katex@0.13.18`. To install the latter with `npm` you can run
@@ -660,13 +670,13 @@ you run `import torch` anywhere else, the development version will be
 used).
 
 If you want to manage multiple builds of PyTorch, you can make use of
-[venv environments](https://docs.python.org/3/library/venv.html) to maintain
+[conda environments](https://conda.io/docs/using/envs.html) to maintain
 separate Python package environments, each of which can be tied to a
 specific build of PyTorch. To set one up:
 
 ```bash
-python -m venv pytorch-myfeature
-source pytorch-myfeature/bin/activate  # or `& .\pytorch-myfeature\Scripts\Activate.ps1` on Windows
+conda create -n pytorch-myfeature
+source activate pytorch-myfeature
 # if you run python now, torch will NOT be installed
 python setup.py develop
 ```
@@ -744,6 +754,7 @@ same. Using ccache in a situation like this is a real time-saver.
 Before building pytorch, install ccache from your package manager of choice:
 
 ```bash
+conda install ccache -c conda-forge
 sudo apt install ccache
 sudo yum install ccache
 brew install ccache
@@ -1035,7 +1046,8 @@ than Linux, which are worth keeping in mind when fixing these problems.
 
 3. If you have a Windows box (we have a few on EC2 which you can request access to) and
    you want to run the build, the easiest way is to just run `.ci/pytorch/win-build.sh`.
-   If you need to rebuild, run `REBUILD=1 .ci/pytorch/win-build.sh`.
+   If you need to rebuild, run `REBUILD=1 .ci/pytorch/win-build.sh` (this will avoid
+   blowing away your Conda environment.)
 
 Even if you don't know anything about MSVC, you can use cmake to build simple programs on
 Windows; this can be helpful if you want to learn more about some peculiar linking behavior
@@ -1252,7 +1264,7 @@ in the meantime there will be some separation.
 There are a few "unusual" directories which, for historical reasons,
 are Caffe2/PyTorch specific. Here they are:
 
-- `CMakeLists.txt`, `Makefile`, `binaries`, `cmake`, `modules`,
+- `CMakeLists.txt`, `Makefile`, `binaries`, `cmake`, `conda`, `modules`,
   `scripts` are Caffe2-specific. Don't put PyTorch code in them without
   extra coordination.
 

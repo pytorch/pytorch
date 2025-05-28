@@ -2,7 +2,6 @@
 
 import hashlib
 from itertools import chain
-from types import ModuleType
 from typing import Any, Optional, TYPE_CHECKING
 
 import torch
@@ -14,19 +13,13 @@ from torch.fx.operator_schemas import normalize_function
 from torch.fx.passes.shape_prop import TensorMetadata
 
 
-if TYPE_CHECKING:
+try:
     import pydot
 
     HAS_PYDOT = True
-else:
-    pydot: Optional[ModuleType]
-    try:
-        import pydot
-
-        HAS_PYDOT = True
-    except ModuleNotFoundError:
-        HAS_PYDOT = False
-        pydot = None
+except ModuleNotFoundError:
+    HAS_PYDOT = False
+    pydot = None
 
 
 __all__ = ["FxGraphDrawer"]
@@ -423,7 +416,7 @@ if HAS_PYDOT:
                     label=self._get_node_label(
                         graph_module, node, skip_node_names_in_args, parse_stack_trace
                     ),
-                    **style,  # type: ignore[arg-type]
+                    **style,
                 )
 
                 current_graph = dot_graph
@@ -435,7 +428,7 @@ if HAS_PYDOT:
                         buf_name_to_subgraph[buf_name] = pydot.Cluster(
                             buf_name, label=buf_name
                         )
-                    current_graph = buf_name_to_subgraph.get(buf_name)  # type: ignore[assignment]
+                    current_graph = buf_name_to_subgraph.get(buf_name)
 
                 current_graph.add_node(dot_node)
 
@@ -452,7 +445,7 @@ if HAS_PYDOT:
                         dot_w_node = pydot.Node(
                             pname1,
                             label="{" + label1 + self._get_tensor_label(ptensor) + "}",
-                            **_WEIGHT_TEMPLATE,  # type: ignore[arg-type]
+                            **_WEIGHT_TEMPLATE,
                         )
                         dot_graph.add_node(dot_w_node)
                         dot_graph.add_edge(pydot.Edge(pname1, node.name))
@@ -468,7 +461,7 @@ if HAS_PYDOT:
             for subgraph in buf_name_to_subgraph.values():
                 subgraph.set("color", "royalblue")
                 subgraph.set("penwidth", "2")
-                dot_graph.add_subgraph(subgraph)  # type: ignore[arg-type]
+                dot_graph.add_subgraph(subgraph)
 
             for node in graph_module.graph.nodes:
                 if ignore_getattr and node.op == "get_attr":

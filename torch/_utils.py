@@ -391,7 +391,7 @@ def _rebuild_wrapper_subclass(
     requires_grad,
 ):
     device = _get_restore_location(device)
-    return torch.Tensor._make_wrapper_subclass(
+    return torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
         cls,
         size,
         strides=stride,

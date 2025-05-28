@@ -81,7 +81,7 @@ def _set_graph_outputs(
         graph: The graph to set the outputs for.
         outputs: The outputs to set.
     """
-    original_outputs = list(graph.outputs)
+    original_outputs = graph.outputs.copy()
     graph.outputs.clear()
     graph.outputs.extend(outputs)
     try:
@@ -102,7 +102,7 @@ def _create_value_mapping(graph: ir.Graph) -> dict[str, ir.Value]:
     Returns:
         A dictionary mapping names to values.
     """
-    values: dict[str, ir.Value] = {}
+    values = {}
     values.update(graph.initializers)
     # The names of the values can be None or "", which we need to exclude
     for input in graph.inputs:

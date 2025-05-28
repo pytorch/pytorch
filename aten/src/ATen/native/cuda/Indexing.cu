@@ -567,7 +567,7 @@ static std::vector<int64_t> computeLinearStride(const Tensor & tensor) {
   return stride;
 }
 
-static std::tuple<Tensor, int64_t, int64_t, int64_t, int64_t, int64_t>
+static std::tuple<Tensor, int64_t, int64_t, int64_t>
 computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
   auto strides = computeLinearStride(src);
   const auto& device = src.options().device();
@@ -578,10 +578,8 @@ computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
   // are not being index.
   Tensor linearIndex;
   int64_t nElemBefore = 1, nElemAfter = 1, strideBefore =0;
-  int64_t dims_before = 0, dims_indexed = 0;
   for (const auto i: c10::irange(src.dim())) {
     if (indices[i].defined()) {
-      dims_indexed++;
       // Cast index to the longType matching src's device
       // This allows us to support ie indexing a cuda tensor with a cpu tensor
       Tensor index = (wrapIndexOnce(indices[i], i, src.size(i), check_range) * strides[i]).to(device);
@@ -596,17 +594,15 @@ computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
     } else if (linearIndex.defined()) {
       nElemAfter *= src.size(i);
     } else {
-      dims_before++;
       nElemBefore *= src.size(i);
     }
   }
 
-  return std::make_tuple(std::move(linearIndex), nElemBefore, strideBefore, nElemAfter, dims_before, dims_indexed);
+  return std::make_tuple(std::move(linearIndex), nElemBefore, strideBefore, nElemAfter);
 }
 
 
-static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>, int64_t, int64_t>
-makeLinearIndex(Tensor self, IOptTensorListRef orig, bool check_range) {
+static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>> makeLinearIndex(Tensor self, IOptTensorListRef orig, bool check_range) {
   checkIndexTensorTypes(orig, /*allow_int*/true);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
@@ -627,11 +623,13 @@ makeLinearIndex(Tensor self, IOptTensorListRef orig, bool check_range) {
   if (!hasContiguousSubspace(indices)) {
     std::tie(self, indices, inversePerm) = transposeToFrontAndInvPerm(self, indices);
   }
-  auto [linearIndex, nElemBefore, strideBefore, nElemAfter, dims_before, dims_indexed] =
-    computeLinearIndex(self, indices, check_range);
-  return std::make_tuple(linearIndex, self, nElemBefore, strideBefore, nElemAfter, inversePerm,
-                         dims_before, dims_indexed);
+  auto [linearIndex, nElemBefore, strideBefore, nElemAfter] = computeLinearIndex(self, indices, check_range);
+  return std::make_tuple(linearIndex, self, nElemBefore, strideBefore, nElemAfter, inversePerm);
 }
+
+
+void index_put_with_sort_kernel_thrust_helper(Tensor &linearIndex, Tensor &orig_indices, Tensor &sorted_indices, int64_t num_indices);
+
 namespace {
 
 int64_t largestIndex(const Tensor &self) {
@@ -640,20 +638,6 @@ int64_t largestIndex(const Tensor &self) {
     result += (self.sizes()[i] - 1) * self.strides()[i];
   }
   return result;
-}
-
-DimVector valsShape(IntArrayRef self_sizes,
-                              int64_t dims_before,
-                              int64_t dims_indexed,
-                              IntArrayRef replacement_shape) {
-  auto shape = DimVector(self_sizes);
-  int64_t end = dims_before + dims_indexed;
-  shape.erase(shape.begin() + dims_before, shape.begin() + end);
-  shape.insert(
-    shape.begin() + dims_before,
-    replacement_shape.begin(),
-    replacement_shape.end());
-  return shape;
 }
 
 void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Tensor>>& indices, const Tensor & value, bool accumulate, bool unsafe) {
@@ -665,13 +649,27 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
   bool self_contiguous = self.is_contiguous();
   auto self_ = self_contiguous ? self : self.contiguous();
   Tensor linearIndex, src, expandedValue = value;
-  int64_t nElemBefore, strideBefore, sliceSize, dims_before, dims_indexed;
+  int64_t nElemBefore, strideBefore, sliceSize;
   std::vector<int64_t> inversePerm;
-  std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm,
-  dims_before, dims_indexed) = makeLinearIndex(self_, indices, !unsafe);
-  auto vals_shape = valsShape(src.sizes(), dims_before, dims_indexed, linearIndex.sizes());
+  std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm) = makeLinearIndex(self_, indices, !unsafe);
   int64_t num_indices = linearIndex.numel();
-  expandedValue = expandedValue.expand(vals_shape).contiguous();
+
+  if (expandedValue.numel() < num_indices * nElemBefore * sliceSize) {
+    auto expanded_size = at::DimVector(expandedValue.sizes());
+    auto size1 = expandedValue.sizes();
+    auto size2 = linearIndex.sizes();
+    if (are_expandable(size1, size2)) {
+      expanded_size = infer_size_dimvector(size1, size2);
+    }
+    if (nElemBefore > 1) {
+      expanded_size.insert(expanded_size.begin(), nElemBefore);
+    }
+    if (sliceSize > 1) {
+      expanded_size.insert(expanded_size.end(), sliceSize);
+    }
+    expandedValue = expandedValue.expand(expanded_size);
+  }
+  expandedValue = expandedValue.contiguous();
 
   if (num_indices > 0 && sliceSize > 0) {
       const bool permuted = !src.is_contiguous();
@@ -683,6 +681,15 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
 
       linearIndex.divide_(sliceSize, "trunc");
 
+      // cub on CUDA <= 11.2 have a bug that for small sizes
+      // cub's sort can be much slower than thrust's merge sort
+      // this bug is fixed in CUDA 11.3
+#if (defined(CUDA_VERSION) && CUDA_VERSION < 11030) && !defined(USE_ROCM)
+      if (num_indices < 50000) {
+        index_put_with_sort_kernel_thrust_helper(linearIndex, orig_indices, sorted_indices, num_indices);
+      } else
+#endif
+      {
       // Sort the inputs into sorted with the corresponding indices
       auto range = at::arange(num_indices, linearIndex.options());
       // linearIndex can not be negative, and we take advantage of this
@@ -692,7 +699,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
         linearIndex.const_data_ptr<int64_t>(), sorted_indices.mutable_data_ptr<int64_t>(),
         range.const_data_ptr<int64_t>(), orig_indices.mutable_data_ptr<int64_t>(),
         num_indices, false, 0, nbits);
-
+      }
 
       TORCH_INTERNAL_ASSERT(
           linearIndex.numel()*sliceSize*nElemBefore == expandedValue.numel(),
@@ -831,13 +838,24 @@ void index_put_with_sort_quantized(Tensor & self, const c10::List<std::optional<
   bool self_contiguous = self.is_contiguous();
   auto self_ = self_contiguous ? self : self.contiguous();
   Tensor linearIndex, src, expandedValue = value;
-  int64_t nElemBefore, strideBefore, sliceSize, dims_before, dims_indexed;
+  int64_t nElemBefore, strideBefore, sliceSize;
   std::vector<int64_t> inversePerm;
-  std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm,
-  dims_before, dims_indexed) = makeLinearIndex(self_, indices, !unsafe);
-  auto vals_shape = valsShape(src.sizes(), dims_before, dims_indexed, linearIndex.sizes());
+  std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm) = makeLinearIndex(self_, indices, !unsafe);
   int64_t num_indices = linearIndex.numel();
-  expandedValue = expandedValue.expand(vals_shape).contiguous();
+
+  if (expandedValue.numel() < num_indices * nElemBefore * sliceSize) {
+    auto expanded_size = at::DimVector(expandedValue.sizes());
+    auto size1 = expandedValue.sizes();
+    auto size2 = linearIndex.sizes();
+    if (are_expandable(size1, size2)) {
+      expanded_size = infer_size_dimvector(size1, size2);
+    }
+    if (nElemBefore > 1) {
+      expanded_size.insert(expanded_size.begin(), nElemBefore);
+    }
+    expandedValue = expandedValue.expand(expanded_size);
+  }
+  expandedValue = expandedValue.contiguous();
 
   if (num_indices > 0 && sliceSize > 0) {
       const bool permuted = !src.is_contiguous();
@@ -849,6 +867,15 @@ void index_put_with_sort_quantized(Tensor & self, const c10::List<std::optional<
 
       linearIndex.divide_(sliceSize, "trunc");
 
+      // cub on CUDA <= 11.2 have a bug that for small sizes
+      // cub's sort can be much slower than thrust's merge sort
+      // this bug is fixed in CUDA 11.3
+#if (defined(CUDA_VERSION) && CUDA_VERSION < 11030) && !defined(USE_ROCM)
+      if (num_indices < 50000) {
+        index_put_with_sort_kernel_thrust_helper(linearIndex, orig_indices, sorted_indices, num_indices);
+      } else
+#endif
+      {
       // Sort the inputs into sorted with the corresponding indices
       auto range = at::arange(num_indices, linearIndex.options());
       // linearIndex can not be negative, and we take advantage of this
@@ -858,7 +885,7 @@ void index_put_with_sort_quantized(Tensor & self, const c10::List<std::optional<
         linearIndex.const_data_ptr<int64_t>(), sorted_indices.mutable_data_ptr<int64_t>(),
         range.const_data_ptr<int64_t>(), orig_indices.mutable_data_ptr<int64_t>(),
         num_indices, false, 0, nbits);
-
+      }
 
       TORCH_INTERNAL_ASSERT(
           linearIndex.numel()*sliceSize*nElemBefore == expandedValue.numel(),

@@ -810,9 +810,9 @@ def speculate_subgraph(
                     if mutation_info.has_mutation:
                         context = f"{mutation_info.msg} in\n {graph}"
                         unimplemented_v2(
-                            gb_type="Encountered input mutation during higher order op tracing",
+                            gb_type=f"Encountered input mutation during higher order op tracing for HOP - {source_target.name()}",
                             context=context,
-                            explanation=f"Higher order ops do not support input mutation. Found in {source_target.name()}",
+                            explanation="Higher order ops do not support input mutation",
                             hints=[
                                 "Consider using the debug context to change user code to avoid mutation.",
                                 "Please open an issue.",
@@ -824,9 +824,9 @@ def speculate_subgraph(
                     if aliasing_info.has_aliasing:
                         context = f"{aliasing_info.msg} in\n {graph}"
                         unimplemented_v2(
-                            gb_type="Encountered aliasing during higher order op tracing",
+                            gb_type=f"Encountered aliasing during higher order op tracing for HOP - {source_target.name()}",
                             context=context,
-                            explanation=f"Higher order ops do not support aliasing. Found in {source_target.name()}",
+                            explanation="Higher order ops do not support aliasing",
                             hints=[
                                 "Consider using the debug context to change user code to avoid aliasing.",
                                 "Please open an issue.",
@@ -917,8 +917,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return WrapWithSetGradEnabledHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "wrap_with_autocast":
             return WrapWithAutocastHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "dynamo_bypassing_wrapper":
-            return DynamoBypassingWrapperHigherOrderVariable(value, source, **kwargs)
         elif (
             value.__name__ == "auto_functionalized"
             or value.__name__ == "auto_functionalized_v2"
@@ -1067,17 +1065,10 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 supports_aliasing=self.supports_aliasing,
             )
 
-            if not only_consist_of(ret_val, (TensorVariable, ConstantVariable)):
+            if not only_consist_of(ret_val, (TensorVariable,)):
                 unimplemented(
-                    "Expected branches to return a possibly nested pytree of tensors "
-                    "or constant ints but it consists of others.",
+                    "Expected branches to return a possibly nested list/tuple/dict of tensors but it consists of non tensors.",
                 )
-            for ret in ret_val.unpack_var_sequence(tx):
-                if isinstance(ret, ConstantVariable) and ret.python_type() is not int:
-                    unimplemented(
-                        "Expected branches to return a possibly nested pytree of tensors "
-                        f"or constant ints but it consists of others {ret.python_type()}.",
-                    )
             return ret_val, ret_treespec, ret_graph, ret_lifted_freevars
 
         (true_r, true_treespec, true_graph, true_lifted_freevars) = speculate_branch(
@@ -2523,73 +2514,6 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         return _make_inlined(tx, pytree.tree_unflatten)(variable, treespec)
 
 
-class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
-    def __init__(self, hop, source) -> None:
-        super().__init__(hop, source)
-
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        from .builder import wrap_fx_proxy
-
-        func_var = args[0]
-
-        if isinstance(func_var, torch._dynamo.variables.UserFunctionVariable):
-            func = func_var.fn
-        elif isinstance(
-            func_var, torch._dynamo.variables.functions.FunctoolsPartialVariable
-        ):
-            func = func_var.as_python_constant()
-        else:
-            raise RuntimeError(
-                f"DynamoBypassingWrapperHigherOrderVariable: Unsupported function {type(func_var)}"
-            )
-        (
-            p_args,
-            _,
-            example_value,
-            _body_r,
-            treespec,
-            gmod,
-            _,
-        ) = self.create_wrapped_node(
-            tx,
-            args[1],
-            args[2:],
-            kwargs,
-            str(func),
-        )
-
-        # Alternatively, we could've stored only the function's fqn and
-        # reconstructed, but that requires the function to be a global.
-        gmod_meta_key = "_dynamo_bypassing_wrapper_fn"
-        gmod.meta[gmod_meta_key] = func
-
-        # Store the invocation as a call
-        variable = wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                self.value,
-                args=(gmod_meta_key,) + tuple(p_args),
-                kwargs={},
-            ),
-            example_value=example_value,
-        )
-
-        if treespec is None:
-            return variable
-
-        # Transform variable back into a list (previously made into a tuple by
-        # speculate_subgraph function) so as to respect the pytree API typing.
-        variable = BuiltinVariable(list).call_function(tx, [variable], {})
-
-        return _make_inlined(tx, pytree.tree_unflatten)(variable, treespec)
-
-
 class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self,
@@ -3331,8 +3255,8 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         if not isinstance(fn_vt, (UnspecializedNNModuleVariable, UserFunctionVariable)):
             unimplemented_v2(
-                gb_type="Encountered non user function variable during invoke_subgraph HOP tracing",
-                context=str(fn_vt),
+                gb_type=f"Encountered non user function variable during invoke_subgraph HOP tracing : {fn_vt}",
+                context="",
                 explanation="invoke_subgraph does not support non user function variable",
                 hints=graph_break_hints.SUPPORTABLE,
             )

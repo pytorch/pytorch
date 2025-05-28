@@ -104,7 +104,7 @@ class ShardedTensorBase(torch.Tensor):
             sizes, tensor_properties=tensor_properties
         )
 
-        r = torch.Tensor._make_wrapper_subclass(
+        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
             sizes,
             dtype=dtype,

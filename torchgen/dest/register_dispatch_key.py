@@ -66,8 +66,6 @@ def gen_registration_headers(
     elif backend_index.dispatch_key == DispatchKey.XPU:
         # XPU specific, this header resides in third_party/torch-xpu-ops
         headers.append("#include <ATen/xpu/EmptyTensor.h>")
-    elif backend_index.dispatch_key == DispatchKey.MTIA:
-        headers.append("#include <ATen/native/mtia/EmptyTensor.h>")
     elif per_operator_headers:
         headers += [
             "#include <ATen/ops/empty.h>",
@@ -94,7 +92,6 @@ def gen_empty_impl_names(
         DispatchKey.CUDA,
         DispatchKey.MPS,
         DispatchKey.XPU,
-        DispatchKey.MTIA,
     ):
         dispatch = str(backend_index.dispatch_key).lower()
         empty_impl = f"at::detail::empty_{dispatch}"
@@ -648,7 +645,6 @@ if (C10_UNLIKELY(maybe_proxy.has_value())) {
                 DispatchKey.CUDA,
                 DispatchKey.MPS,
                 DispatchKey.XPU,
-                DispatchKey.MTIA,
                 DispatchKey.CompositeExplicitAutogradNonFunctional,
             )
             return f"""{maybe_set_guard_line}
@@ -727,8 +723,6 @@ resize_out(out, sizes, strides, options);
             # TODO: Move to OptionalMPSGuard.
             guard_field = "c10::OptionalDeviceGuard guard_;"
         elif self.backend_index.dispatch_key == DispatchKey.XPU:
-            guard_field = "c10::OptionalDeviceGuard guard_;"
-        elif self.backend_index.dispatch_key == DispatchKey.MTIA:
             guard_field = "c10::OptionalDeviceGuard guard_;"
         else:
             guard_field = ""

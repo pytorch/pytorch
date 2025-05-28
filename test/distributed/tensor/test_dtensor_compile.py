@@ -29,7 +29,6 @@ from torch.distributed.tensor.parallel import (
     PrepareModuleOutput,
     RowwiseParallel,
 )
-from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import (
@@ -197,10 +196,8 @@ def forward(self, b_parametrizations_buffer_original0, x):
             return a
 
         compiled_fn = torch.compile(backend="aot_eager", fullgraph=True)(fn)
-        split_factors = [2, 3, 4]
-        for x in [Shard(0), Replicate(), Partial()] + [
-            _StridedShard(0, split_factor=s) for s in split_factors
-        ]:
+
+        for x in [Shard(0), Replicate(), Partial()]:
             opt_fn = fn(x)
             compiled_out = compiled_fn(x)
             self.assertEqual(opt_fn, compiled_out)

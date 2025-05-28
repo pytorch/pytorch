@@ -890,14 +890,7 @@ class PythonWrapperCodegen(CodeGen):
         self.computed_sizes_stack = []
 
         self.write_header()
-
-        if not (
-            isinstance(self, SubgraphPythonWrapperCodegen)
-            and self.partition_signatures is not None
-        ):
-            # See [Note: Removed Graph Partition Arguments]
-            self.write_prefix()
-
+        self.write_prefix()
         self.write_kernel_autotune_defs_header()
 
         if not V.graph.aot_mode:

@@ -43,7 +43,7 @@ class LintMessage(NamedTuple):
     description: str | None
 
 
-LINTER_CODE = "IMPORT_LINTER"
+LINTER_CODE = "NEWLINE"
 CURRENT_FILE_NAME = os.path.basename(__file__)
 _MODULE_NAME_ALLOW_LIST: set[str] = set()
 

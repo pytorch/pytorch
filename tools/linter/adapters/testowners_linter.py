@@ -41,6 +41,11 @@ class LintMessage(NamedTuple):
     description: str | None
 
 
+# Team/owner labels usually start with "module: " or "oncall: ", but the following are acceptable exceptions
+ACCEPTABLE_OWNER_LABELS = ["NNC", "high priority"]
+OWNERS_PREFIX = "# Owner(s): "
+
+
 def get_pytorch_labels() -> Any:
     url = "https://ossci-metrics.s3.amazonaws.com/pytorch_labels.json"
     try:
@@ -60,7 +65,6 @@ def get_pytorch_labels() -> Any:
 PYTORCH_LABELS = get_pytorch_labels()
 # Team/owner labels usually start with "module: " or "oncall: ", but the following are acceptable exceptions
 ACCEPTABLE_OWNER_LABELS = ["NNC", "high priority"]
-OWNERS_PREFIX = "# Owner(s): "
 GLOB_EXCEPTIONS = ["**/test/run_test.py"]
 
 

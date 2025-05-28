@@ -91,8 +91,7 @@ Tensor& addmm_out(
     // if result and self are the same tensor, we use post op sum.
     bias = self;
   } else {
-    Tensor binary = self.dim() < 1 ? self.unsqueeze(0) : self;
-    binary = binary.dim() == 1 ? binary.unsqueeze(0) : binary;
+    Tensor binary = self.dim() == 1 ? self.unsqueeze(0) : self;
     bool inplace = binary.is_same(result);
     if (inplace) {
       attr.append_post_eltwise(
@@ -220,8 +219,7 @@ Tensor& baddbmm_out(
   if (beta_ == 0.f) {
     attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
   } else {
-    Tensor binary = input.dim() < 1 ? input.unsqueeze(0) : input;
-    binary = binary.dim() < 3 ? binary.unsqueeze(0) : binary;
+    binary = input.dim() < 3 ? input.unsqueeze(0) : input;
     // If input is a 1d tensor need be broadcasted, we need unsqueeze twice.
     binary = binary.dim() < 3 ? binary.unsqueeze_(0) : binary;
     bool inplace = binary.is_same(result);
