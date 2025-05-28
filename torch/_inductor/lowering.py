@@ -93,6 +93,7 @@ FALLBACK_ALLOW_LIST = OrderedSet(
     [
         "torchvision::roi_align",
         "aten::index_add",
+        "aten::_lazy_clone",
     ]
 )
 
