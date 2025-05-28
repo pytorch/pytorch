@@ -360,11 +360,11 @@ PyObject* _new_device_error_object(const c10::DeviceError& e) {
                                                   : e.what_without_backtrace();
 
   auto py_msg = PyUnicode_FromString(msg);
-  auto rc = PyObject_Call(THPException_DeviceError, py_msg, NULL);
+  auto rc = PyObject_CallOneArg(THPException_DeviceError, py_msg);
   auto error_code = PyInt_FromLong(e.get_error_code());
   PyObject_SetAttrString(rc, "error_code", error_code);
-  Py_DECREF(py_msg);
-  Py_DECREF(error_code);
+  Py_XDECREF(py_msg);
+  Py_XDECREF(error_code);
   return rc;
 }
 } // namespace detail

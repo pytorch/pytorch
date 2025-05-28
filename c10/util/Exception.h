@@ -301,7 +301,8 @@ class C10_API DeviceError : public Error {
   int32_t error_code;
 
  public:
-  DeviceError(int32_t code, const std::string& msg) : Error(msg), error_code(code) {}
+  DeviceError(int32_t code, const std::string& msg)
+      : Error(msg), error_code(code) {}
   int32_t get_error_code() const {
     return error_code;
   }

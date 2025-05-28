@@ -89,6 +89,7 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
   catch (c10::DeviceError & e) {                                              \
     auto exc = torch::detail::_new_device_error_object(e);                    \
     PyErr_SetObject(THPException_DeviceError, exc);                           \
+    Py_XDECREF(exc);                                                          \
     retstmnt;                                                                 \
   }                                                                           \
   _CATCH_GENERIC_ERROR(Error, PyExc_RuntimeError, retstmnt)                   \
