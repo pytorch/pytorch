@@ -10,14 +10,7 @@ import sys
 import time
 from enum import Enum
 from pathlib import Path
-from typing import Any, NamedTuple
-
-
-IS_WINDOWS: bool = os.name == "nt"
-
-
-def eprint(*args: Any, **kwargs: Any) -> None:
-    print(*args, file=sys.stderr, flush=True, **kwargs)
+from typing import NamedTuple
 
 
 class LintSeverity(str, Enum):
@@ -37,10 +30,6 @@ class LintMessage(NamedTuple):
     original: str | None
     replacement: str | None
     description: str | None
-
-
-def as_posix(name: str) -> str:
-    return name.replace("\\", "/") if IS_WINDOWS else name
 
 
 # tools/linter/flake8_linter.py:15:13: error: Incompatibl...int")  [assignment]
