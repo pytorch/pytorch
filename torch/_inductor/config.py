@@ -1327,8 +1327,11 @@ class aot_inductor:
     # Experimental.  Controls automatic precompiling of common AOTI include files.
     precompile_headers: bool = not is_fbcode()
 
-    # Embed generated .cubin files into the .so
-    embed_cubin: bool = False
+    # Embed generated kernel binary files into model.so
+    embed_kernel_binary: bool = False
+
+    # Generate kernel binary files that support multiple archs
+    multi_arch_kernel_binary: bool = False
 
     # Custom ops that have implemented C shim wrappers, defined as an op to C shim declaration dict
     custom_ops_to_c_shims: dict[torch._ops.OpOverload, list[str]] = {}
@@ -1379,7 +1382,7 @@ class cuda:
     cutlass_max_profiling_configs: Optional[int] = None
 
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
-    cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4]
+    cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4, 8]
 
     # Whether to use CUTLASS EVT for epilogue fusion
     cutlass_epilogue_fusion_enabled = (
@@ -1443,6 +1446,11 @@ class cuda:
     # use compile command to create kernel .cu and .so name
     cutlass_hash_with_compile_cmd: bool = (
         os.environ.get("TORCHINDUCTOR_CUTLASS_HASH_WITH_COMPILE_CMD", "0") == "1"
+    )
+
+    # Experimental. Prescreen top x configs before tuning on swizzle.
+    cutlass_prescreening: bool = (
+        os.environ.get("TORCHINDUCTOR_CUTLASS_PRESCREENING", "1") == "1"
     )
 
 

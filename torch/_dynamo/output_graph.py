@@ -372,8 +372,8 @@ class OutputGraph(OutputGraphGuardsState):
         # Set of globals installed via install_global* APIs
         self.installed_globals: set[str] = set()
 
-        # TODO: maybe should just pass the entire f_code in here?  Not
-        # sure...
+        self.f_code = f_code
+        # TODO: maybe should only store the entire f_code
         self.co_fields = {
             "co_name": f_code.co_name,
             "co_filename": f_code.co_filename,
@@ -1486,7 +1486,7 @@ class OutputGraph(OutputGraphGuardsState):
 
             self.run_compiler_collective(tx)
 
-            name = unique_id("__compiled_fn")
+            name = unique_id("__compiled_fn", with_uuid=True)
 
             assert isinstance(rv, list)
             assert isinstance(root, FakeRootModule)
@@ -1726,10 +1726,11 @@ class OutputGraph(OutputGraphGuardsState):
                 self.remove_node(node)
 
     def remove_unused_graphargs(self) -> None:
-        # NB: It's always OK to drop GraphArg for symbols that ended up being
-        # specialized.  You don't even have to make a guard for it, because
-        # ShapeEnv produce_guards operates on tracked_fakes, which never gets
-        # pruned.  That being said, you'll get marginally better generated
+        # NB: It's OK to drop GraphArg for symbols that ended up being
+        # specialized iff they are not used in runtime assertions.  You don't
+        # even have to make a guard for it, because ShapeEnv produce_guards
+        # operates on tracked_fakes, which never gets pruned.
+        # That being said, you'll get marginally better generated
         # guard code if you promote the guard into a Dynamo guard (since that
         # allows for the guard to be done using C++ guards.)  If we get
         # ShapeEnv guards to go into C++ guards, this will stop being a thing
@@ -1863,11 +1864,6 @@ class OutputGraph(OutputGraphGuardsState):
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
                     )
                     update_used_symbols(used_symbols, fake)
-
-        # Preserve all symbols that appears in original expressions of a deferred_runtime_asserts.
-        for assertion_list in self.shape_env.deferred_runtime_asserts.values():
-            for assertion in assertion_list:
-                used_symbols |= free_symbols(assertion.expr)
 
         # After removing unused graphargs, prune unused binds_symbol
         for node in recheck_placeholders:
