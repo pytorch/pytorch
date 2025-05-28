@@ -100,6 +100,7 @@ from .utils import (
     sympy_product,
     sympy_subs,
     tensor_is_aligned,
+    dtype_from_size,
 )
 from .virtualized import ops, OpsValue, V
 
@@ -1676,9 +1677,10 @@ class Reduction(Loops):
                 return loader(new_index, reindex([indices]))
 
             if need_mask:
+                index_dtype = dtype_from_size(reduction_numel)
                 mask = ops.lt(
-                    ops.index_expr(indices, torch.int32),
-                    ops.index_expr(reduction_numel, torch.int32),
+                    ops.index_expr(indices, index_dtype),
+                    ops.index_expr(reduction_numel, index_dtype),
                 )
                 return ops.masked(mask, body, default)
             else:

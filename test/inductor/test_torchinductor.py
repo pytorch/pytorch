@@ -13400,6 +13400,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (1, x))
         self.common(fn, (2, x))
 
+    def test_split_reduction_with_int64_size(self):
+        size = (30000, 100000)
+        t = torch.randint(0, 100, size, dtype=torch.float, device=self.device)
+        op = torch.mean
+        expected = op(t)
+        actual = torch.compile(op)(t)
+        # self.common takes more GPU memory. Do the check dirctly
+        assert torch.allclose(expected, actual, atol=1e-2, rtol=1e-2)
 
 @dataclasses.dataclass
 class TestFailure:
