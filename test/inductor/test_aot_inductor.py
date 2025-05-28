@@ -3625,6 +3625,54 @@ class AOTInductorTestsTemplate:
         m = M()
         self.check_model(m, example_args, dynamic_shapes=dynamic_shapes)
 
+    def test_proxy_executor_permute(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                return torch.ops.aten.permute.default(x, [0, 2, 1])
+
+        example_args = (torch.randn((1, 3001, 201), dtype=torch.complex64),)
+        m = M()
+        self.check_model(m, example_args)
+
+    def test_proxy_executor_abs(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                return torch.ops.aten.abs.default(x)
+
+        example_args = (torch.randn((1, 3001, 201), dtype=torch.complex64),)
+        m = M()
+        self.check_model(m, example_args)
+
+    def test_proxy_executor_squeeze(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                return torch.ops.aten.squeeze.dim(x, 0)
+
+        example_args = (torch.randn((1, 300, 201), dtype=torch.complex64),)
+        m = M()
+        self.check_model(m, example_args)
+
+    def test_proxy_executor_hann(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self):
+                return torch.ops.aten.hann_window.default(400)
+
+        example_args = ()
+        m = M()
+        self.check_model(m, example_args)
+
     def test_fqn(self):
         class NestedChild(torch.nn.Module):
             def __init__(self) -> None:
