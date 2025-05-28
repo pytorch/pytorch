@@ -42,6 +42,7 @@ from torch.compiler._cache import (
     CacheArtifactFactory,
     CacheArtifactManager,
 )
+from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
@@ -594,13 +595,23 @@ def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
 
 
 def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
-    return "\n".join(
-        f"{k}:\n"
-        + "\n".join(
-            f"  {src}: {fs.render()}" for src, fs in v.automatic_dynamic.items()
+    terms: list[str] = []
+    dynamic_sources: OrderedSet[str] = OrderedSet()
+    for k, v in cs.items():
+        cs_terms: list[str] = []
+        for src, fs in v.automatic_dynamic.items():
+            cs_terms.append(f"  {src}: {fs.render()}")
+            if isinstance(fs.size, tuple) and auto_dynamic in fs.size:  # type: ignore[operator]
+                dynamic_sources.add(src)
+        terms.append(f"{k}:\n" + "\n".join(cs_terms))
+    code_state_str = "\n".join(terms)
+    if dynamic_sources:
+        code_state_str += (
+            "\n\nPGO detected changes a recompilation due to tensor sizes. "
+            "To potentially avoid thisTo reduce shape recompilations by compiling dynamically to start, "
+            f'set environment variable TORCH_COMPILE_DYNAMIC_SOURCES="{",".join(dynamic_sources)}"'
         )
-        for k, v in cs.items()
-    )
+    return code_state_str
 
 
 @CacheArtifactFactory.register
