@@ -235,6 +235,15 @@ pytree.register_constant(CustomConstantType)
 
 
 class TestGuardSerialization(torch._inductor.test_case.TestCase):
+    def test_function_locals(self):
+        def foo(x):
+            return x + 1
+
+        def fn(x, g):
+            return g(x) + 1
+
+        self._test_serialization("TENSOR_MATCH", fn, torch.randn(3), foo)
+
     def _tracefunc(self, frame, event, arg):
         if event != "call":
             return
