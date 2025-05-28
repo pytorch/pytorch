@@ -1976,28 +1976,28 @@ class TestBinaryUfuncs(TestCase):
         test_cases = [
             {
                 "desc": "Bug Fix: 2 * 2^-25 → 2^-24",
-                "a": torch.tensor([2.], dtype=dtype, device=device),
+                "a": torch.tensor([2.0], dtype=dtype, device=device),
                 "b": torch.tensor([-25], dtype=torch.int32, device=device),
                 "expected": torch.tensor([2**-24], dtype=dtype, device=device),
             },
             {
                 "desc": "Underflow: 2 * 2^-30 → 0.0",
-                "a": torch.tensor([2.], dtype=dtype, device=device),
+                "a": torch.tensor([2.0], dtype=dtype, device=device),
                 "b": torch.tensor([-30], dtype=torch.int32, device=device),
-                "expected": torch.tensor([0.], dtype=dtype, device=device),
+                "expected": torch.tensor([0.0], dtype=dtype, device=device),
             },
             {
                 "desc": "Small representable: 2 * 2^-20 → 2^-19",
-                "a": torch.tensor([2.], dtype=dtype, device=device),
+                "a": torch.tensor([2.0], dtype=dtype, device=device),
                 "b": torch.tensor([-20], dtype=torch.int32, device=device),
                 "expected": torch.tensor([2**-19], dtype=dtype, device=device),
             },
             {
                 "desc": "Overflow: 2 * 2^16 → inf",
-                "a": torch.tensor([2.], dtype=dtype, device=device),
+                "a": torch.tensor([2.0], dtype=dtype, device=device),
                 "b": torch.tensor([16], dtype=torch.int32, device=device),
                 "expected": torch.tensor([float("inf")], dtype=dtype, device=device),
-            }
+            },
         ]
 
         for case in test_cases:
@@ -2006,29 +2006,28 @@ class TestBinaryUfuncs(TestCase):
             # Functional
             result_func = torch.ldexp(a, b)
             self.assertTrue(
-                torch.allclose(result_func, expected, atol=1e-8) or
-                (torch.isinf(expected) and torch.isinf(result_func)),
-                f"(functional) {case['desc']} - Expected {expected.item()}, got {result_func.item()}"
+                torch.allclose(result_func, expected, atol=1e-8)
+                or (torch.isinf(expected) and torch.isinf(result_func)),
+                f"(functional) {case['desc']} - Expected {expected.item()}, got {result_func.item()}",
             )
 
             # In-place
             a_clone = a.clone()
             a_clone.ldexp_(b)
             self.assertTrue(
-                torch.allclose(a_clone, expected, atol=1e-8) or
-                (torch.isinf(expected) and torch.isinf(a_clone)),
-                f"(in-place) {case['desc']} - Expected {expected.item()}, got {a_clone.item()}"
+                torch.allclose(a_clone, expected, atol=1e-8)
+                or (torch.isinf(expected) and torch.isinf(a_clone)),
+                f"(in-place) {case['desc']} - Expected {expected.item()}, got {a_clone.item()}",
             )
 
             # Out variant
             out_tensor = torch.empty_like(a)
             torch.ldexp(a, b, out=out_tensor)
             self.assertTrue(
-                torch.allclose(out_tensor, expected, atol=1e-8) or
-                (torch.isinf(expected) and torch.isinf(out_tensor)),
-                f"(out) {case['desc']} - Expected {expected.item()}, got {out_tensor.item()}"
+                torch.allclose(out_tensor, expected, atol=1e-8)
+                or (torch.isinf(expected) and torch.isinf(out_tensor)),
+                f"(out) {case['desc']} - Expected {expected.item()}, got {out_tensor.item()}",
             )
-
 
     @onlyNativeDeviceTypes
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")

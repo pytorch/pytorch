@@ -11,7 +11,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorMeta.h>
-#include <ATen/TypeDefault.h> 
+#include <ATen/TypeDefault.h>
 #include <ATen/core/ScalarType.h>
 #include <ATen/ops/result_type.h>
 
@@ -149,9 +149,9 @@
 #include <ATen/ops/xlogy.h>
 #include <ATen/ops/xlogy_native.h>
 #include <ATen/ops/xor_native.h>
-#include <ATen/native/cpu/Loops.h>  
-#include <ATen/native/DispatchStub.h>  
-#include <ATen/Dispatch.h> 
+#include <ATen/native/cpu/Loops.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/Dispatch.h>
 #endif
 
 namespace at::meta {
@@ -1552,24 +1552,41 @@ TORCH_IMPL_FUNC(heaviside_out) (
 }
 
 Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  TORCH_CHECK(other.scalar_type() == at::kInt || other.scalar_type() == at::kLong,
-              "ldexp(): exponent must be an integer tensor (int32 or int64), but got ", other.scalar_type());
+    TORCH_CHECK(other.scalar_type() == at::kInt || other.scalar_type() == at::kLong,
+                "ldexp(): exponent must be an integer tensor (int32 or int64), but got ", other.scalar_type());
 
-  auto iter = TensorIteratorConfig()
-    .check_all_same_dtype(false)
-    .add_output(result)
-    .add_input(self)
-    .add_input(other)
-    .build();
+    // Make sure output is floating type!
+    TORCH_CHECK(c10::isFloatingType(result.scalar_type()),
+                "ldexp(): result/output tensor must be floating point (got ", result.scalar_type(), ")");
 
-  ldexp_stub(result.device().type(), iter); 
-  return result;
+    auto iter = TensorIteratorConfig()
+      .check_all_same_dtype(false)
+      .add_output(result)
+      .add_input(self)
+      .add_input(other)
+      .build();
+
+    ldexp_stub(result.device().type(), iter);
+    return result;
 }
 
 Tensor ldexp(const Tensor& self, const Tensor& other) {
-    auto result_dtype = at::result_type(self, other);
-    Tensor result = at::empty(self.sizes(), self.options().dtype(result_dtype));
-    return at::native::ldexp_out(self.to(result_dtype), other, result);
+    ScalarType self_type = self.scalar_type();
+    ScalarType other_type = other.scalar_type();
+    ScalarType out_type;
+
+    if (c10::isFloatingType(self_type) || c10::isFloatingType(other_type)) {
+        out_type = c10::promoteTypes(self_type, other_type);
+        if (!c10::isFloatingType(out_type)) {
+            out_type = at::kFloat;
+        }
+    } else {
+        out_type = at::kFloat;
+    }
+
+    Tensor result = at::empty(self.sizes(), self.options().dtype(out_type));
+    Tensor self_fp = self.to(out_type);
+    return at::native::ldexp_out(self_fp, other, result);
 }
 
 Tensor& ldexp_(Tensor& self, const Tensor& other) {
