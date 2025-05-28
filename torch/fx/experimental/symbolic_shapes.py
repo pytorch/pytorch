@@ -7126,8 +7126,7 @@ class ShapeEnv:
                 if not (new_expr.free_symbols <= self.var_to_val.keys()):
                     ok = False
 
-                    # fallback value is set when guard_or_true, gaurd_or_false are used.
-                    # whe we fail to evaluate soundly, we use the default value set by it.
+                    # fallback_value is set when guard_or_true or gaurd_or_false are used.
                     if not ok and fallback_value is not None:
                         self._log_suppressed_dde(orig_expr, fallback_value)
                         return fallback_value
