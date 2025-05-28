@@ -2895,6 +2895,28 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         ]
         self.assertEqual(actual_torch_fns, exp_torch_fns)
 
+    def test_export_cond_with_unbacked_symint_tensor_input(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                u0 = x.item()
+                # Need to add support for compund expressions
+                y = torch.ones(u0, 10)
+                return torch.cond(
+                    u0 > 0,
+                    self.lin,
+                    lambda y: torch.ones_like(y),
+                    [y],
+                )
+
+        x = torch.tensor([4])
+        mod = Foo()
+        ep = torch.export.export(mod, (x,))
+        self.assertEqual(ep.module()(x), mod(x))
+
     def test_is_exporting(self):
         class Mod(torch.nn.Module):
             def forward(self, pred, x):

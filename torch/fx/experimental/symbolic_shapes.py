@@ -4026,7 +4026,8 @@ class ShapeEnv:
         symbolic_context: SymbolicContext,
     ) -> list[sympy.Expr]:
         assert all(
-            not is_symbolic(val) for val in tensor_size
+            (not is_symbolic(val)) or has_free_unbacked_symbols(val)
+            for val in tensor_size
         ), f"Expect size to be a plain tuple of ints but got {tensor_size}"
         from torch._dynamo.source import TensorProperty, TensorPropertySource
 
@@ -4035,14 +4036,20 @@ class ShapeEnv:
         constraint_dims = symbolic_context.constraint_sizes  # type: ignore[attr-defined]
         size = []
         for i, val in enumerate(tensor_size):
-            sym = self.create_symbol(
-                val,
-                TensorPropertySource(source, TensorProperty.SIZE, i),
-                dynamic_dims[i],
-                constraint_dims[i],
-                do_not_specialize_zero_one=config.backed_size_oblivious,
-                symbolic_context=symbolic_context,
-            )
+            if has_free_unbacked_symbols(val):
+                # sym = self.create_unbacked_symint(TensorPropertySource(source, TensorProperty.SIZE, i)).node.expr
+                sym = make_symbol(
+                    SymT.UNBACKED_INT, next(self.unbacked_symint_counter), integer=True
+                )
+            else:
+                sym = self.create_symbol(
+                    val,
+                    TensorPropertySource(source, TensorProperty.SIZE, i),
+                    dynamic_dims[i],
+                    constraint_dims[i],
+                    do_not_specialize_zero_one=config.backed_size_oblivious,
+                    symbolic_context=symbolic_context,
+                )
             if (
                 config.backed_size_oblivious
                 and isinstance(sym, sympy.Symbol)  # could be static
@@ -4123,6 +4130,11 @@ class ShapeEnv:
     ) -> IntLikeType:
         assert isinstance(maybe_sym, (int, torch.SymInt))
         if is_symbolic(maybe_sym):
+            if has_free_unbacked_symbols(maybe_sym.node.expr):
+                assert isinstance(
+                    maybe_sym, torch.SymInt
+                ), "only unbacked symint are supported"
+                return maybe_sym
             assert (
                 maybe_sym.node.shape_env is not self
             ), "expect the symbol is created from an shape env other than current one."
@@ -4211,10 +4223,27 @@ class ShapeEnv:
             symbolic_context,
         )
 
+        def _create_symintnode_maybe_unbacked(
+            sym: sympy.expr,
+            hint: Union[int, torch.SymInt],
+            source: Source,
+        ) -> torch.SymInt:
+            if isinstance(hint, int):
+                return self.create_symintnode(
+                    sym,
+                    hint=hint,
+                    source=source,
+                )
+            else:
+                assert has_free_unbacked_symbols(
+                    hint.node.expr
+                ), f"Expect hint to be int or unbacked symint but got {hint}"
+                return self.create_unbacked_symint(source=source)
+
         sym_sizes = [
-            self.create_symintnode(
+            _create_symintnode_maybe_unbacked(
                 sym,
-                hint=hint,
+                hint,
                 source=TensorPropertySource(source, TensorProperty.SIZE, i),
             )
             for i, (sym, hint) in enumerate(zip(size, ex_size))
@@ -4225,13 +4254,13 @@ class ShapeEnv:
             # we computed
             assert stride_expr is not None
             sym_stride.append(
-                self.create_symintnode(
+                _create_symintnode_maybe_unbacked(
                     stride_expr,
                     hint=ex_stride[i],
                     source=TensorPropertySource(source, TensorProperty.STRIDE, i),
                 )
             )
-        sym_storage_offset = self.create_symintnode(
+        sym_storage_offset = _create_symintnode_maybe_unbacked(
             self.create_symbol(
                 ex_storage_offset,
                 TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
@@ -4269,6 +4298,11 @@ class ShapeEnv:
         val_list = [(val, -i) for i, val in enumerate(ex_stride)]
         val_list.sort(key=_nested_int_aware_sort)
 
+        def _maybe_expr(s: Union[int, torch.SymInt]) -> Union[sympy.Expr, int]:
+            if isinstance(s, int):
+                return s
+            return s.node.expr
+
         for val, neg_i in val_list:
             i = -neg_i
             contiguous_stride = (
@@ -4279,9 +4313,12 @@ class ShapeEnv:
                 out_stride = sympy.Integer(val)
             else:
                 dynamic_stride = dynamic_strides[i]
-                if dynamic_stride == DimDynamic.INFER_STRIDE and val in candidates:
+                if (
+                    dynamic_stride == DimDynamic.INFER_STRIDE
+                    and _maybe_expr(val) in candidates
+                ):
                     # Set stride to a candidate only for DimDynamic.INFER_STRIDE
-                    out_stride = candidates[val]
+                    out_stride = candidates[_maybe_expr(val)]
                 else:
                     # Set INFER_STRIDE to STATIC or DUCK depending on sizes
                     dyn_stride = dynamic_stride
@@ -4297,7 +4334,7 @@ class ShapeEnv:
                         symbolic_context=symbolic_context,
                     )
             stride[i] = out_stride
-            candidates[ex_size[i] * val] = size[i] * out_stride
+            candidates[_maybe_expr(ex_size[i] * val)] = size[i] * out_stride
 
         assert all(x is not None for x in stride)
         return stride
