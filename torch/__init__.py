@@ -2289,6 +2289,32 @@ from torch._linalg_utils import (  # type: ignore[misc]
 from torch.utils.dlpack import from_dlpack, to_dlpack
 
 
+def check_max_graphs() -> bool:
+    """
+    If we have hit a user specified max number of graphs, skip this frame.
+
+    Then, return if we have hit the maximum number of graphs for the given backend
+    before falling back to aot_eager.
+    """
+    from torch._dynamo.utils import GraphsCompiledState
+
+    max_compiled_graphs = torch._dynamo.config.debug_max_graphs
+    max_backend_graphs = torch._dynamo.config.debug_max_backend_graphs
+    if max_compiled_graphs is None and max_backend_graphs is None:
+        return None
+
+    num_graphs = GraphsCompiledState.increment()
+    num_graphs = GraphsCompiledState.get_num_graphs()
+    if max_compiled_graphs is not None and num_graphs > builtins.int(
+        max_compiled_graphs
+    ):
+        raise torch._dynamo.exc.SkipFrame(f"Hit max graph limit: {max_compiled_graphs}")
+
+    return max_backend_graphs is not None and num_graphs > builtins.int(
+        max_backend_graphs
+    )
+
+
 class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
@@ -2361,6 +2387,11 @@ class _TorchCompileInductorWrapper:
     def __call__(self, model_, inputs_):
         from torch._inductor.compile_fx import compile_fx
 
+        if check_max_graphs():
+            return _TorchCompileWrapper(
+                "aot_eager", "default", {}, self.dynamic
+            ).__call__(model_, inputs_)
+
         return compile_fx(model_, inputs_, config_patches=self.config)
 
     def get_compiler_config(self):
@@ -2406,6 +2437,7 @@ class _TorchCompileWrapper:
         )
 
     def __call__(self, model_, inputs_):
+        check_max_graphs()
         return self.compiler_fn(model_, inputs_, **self.kwargs)
 
     def reset(self):

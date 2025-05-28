@@ -10,6 +10,7 @@ from torch._dynamo.utils import preserve_rng_state
 from torch._inductor import config
 from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import run_and_get_code
 from torch.library import _scoped_library, Library
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -148,6 +149,36 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.backend, "inductor")
         self.assertEqual(out.subsystem, "inductor_fallback_random")
         self.assertTrue("inductor_fallback_random" in out.debug_info)
+
+    # todo - incorporate to compiler bisector
+    @torch._dynamo.config.patch(debug_max_graphs=1)
+    def test_bisecting_num_graphs(self):
+        from torch._dynamo.utils import counters
+
+        def foo(x):
+            out = x + 3
+            torch._dynamo.graph_break()
+            return out * 2
+
+        out = torch.compile(foo)(torch.ones([4], device="cuda"))
+        self.assertEqual(out, foo(torch.ones([4], device="cuda")))
+        self.assertEqual(counters["aot_autograd"]["total"], 1)
+
+    # todo - incorporate to compiler bisector
+    @torch._dynamo.config.patch(debug_max_backend_graphs=1)
+    def test_bisecting_backend_graphs(self):
+        from torch._dynamo.utils import counters
+
+        def foo(x):
+            out = x + 3
+            torch._dynamo.graph_break()
+            return out * 2
+
+        inp = torch.ones([4], device="cuda")
+        out, code = run_and_get_code(torch.compile(foo), inp)
+        self.assertEqual(len(code), 1)
+        self.assertEqual(counters["aot_autograd"]["total"], 2)
+        self.assertEqual(out, foo(torch.ones([4], device="cuda")))
 
     def test_crossref(self):
         with _scoped_library(self.test_ns, "FRAGMENT") as lib:

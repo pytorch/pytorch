@@ -4544,6 +4544,26 @@ class CompileTimeInstructionCounter:
                 cls.end()
 
 
+class GraphsCompiledState:
+    """
+    Tracks number of compiled graphs.
+    """
+
+    num_graphs: int = 0
+
+    @classmethod
+    def clear(cls) -> None:
+        cls.num_graphs = 0
+
+    @classmethod
+    def increment(cls) -> None:
+        cls.num_graphs += 1
+
+    @classmethod
+    def get_num_graphs(cls) -> int:
+        return cls.num_graphs
+
+
 def set_feature_use(feature: str, usage: bool):
     """
     Records whether we are using a feature
