@@ -1345,6 +1345,11 @@ def find_gpu_device(args: Sequence[Any]) -> Optional[torch.device]:
         if not isinstance(arg, torch.fx.Node):
             continue
 
+        # some args such as graphsafe_run_with_rng_state may not
+        # have meta["val"]
+        if "val" not in arg.meta:
+            continue
+
         val = arg.meta["val"]
         if isinstance(val, torch.Tensor) and is_gpu(val.device.type):
             return val.device
@@ -1386,9 +1391,9 @@ def move_cpu_scalar_tensor_to_cuda(gm: torch.fx.GraphModule):
             for arg in node.args:
                 if (
                     isinstance(arg, torch.fx.Node)
-                    and (val := arg.meta["val"]) is not None
-                    and isinstance(val, torch.Tensor)
-                    and val.is_cpu
+                    and "val" in arg.meta
+                    and isinstance(arg.meta["val"], torch.Tensor)
+                    and arg.meta["val"].is_cpu
                 ):
                     new_args.append(get_gpu_arg(arg))
                 else:

@@ -1138,7 +1138,7 @@ class _InProcessFxCompile(FxCompile):
 
             # cudagraph does not support cpu tensors. In this pass, we update the graph
             # by explicitly moving cpu tensors to gpu when profitable, relying on
-            # graph partition to split off this data copy, and cudagraphify
+            # graph partition to split off this data copy, and cudagraphifying
             # the remaining gpu ops.
             if (
                 torch._inductor.config.triton.cudagraphs
