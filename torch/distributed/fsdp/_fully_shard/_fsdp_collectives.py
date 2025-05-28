@@ -224,10 +224,6 @@ def _get_param_all_gather_inputs(
             )
             foreach_copy_inputs.append(all_gather_input)
             foreach_copy_input_numels.append(all_gather_input.numel())
-            param_dtype = fsdp_param.param_dtype
-            if hasattr(fsdp_param, "sharded_param"):
-                fsdp_param.sharded_param = fsdp_param.sharded_param.to(param_dtype)
-                fsdp_param.sharded_param.requires_grad_(True)
         else:
             param_all_gather_inputs[i] = fsdp_param.all_gather_inputs
 
@@ -312,7 +308,8 @@ def foreach_all_gather_copy_out(
 
     if len(non_inference_outs) > 0:
         with torch.autograd._unsafe_preserve_version_counter(tuple(non_inference_outs)):
-            all_gather_output = all_gather_output.to(out[0].dtype)
+            if all_gather_output.dtype != out[0].dtype:
+                all_gather_output = all_gather_output.to(out[0].dtype)
             torch.ops.fsdp.split_with_sizes_copy(
                 all_gather_output, all_gather_input_split_sizes, dim=1, out=out
             )
@@ -543,9 +540,18 @@ def foreach_reduce(
                 new_sharded_dtensor_grad = _from_local_no_grad(
                     new_sharded_grad, fsdp_param._sharding_spec
                 )
-                fsdp_param.sharded_param_fully_shard.grad = new_sharded_dtensor_grad.to(
-                    fsdp_param.sharded_param_fully_shard.dtype
-                )
+                if (
+                    hasattr(fsdp_param, "sharded_param_fully_shard")
+                    and fsdp_param.sharded_param_fully_shard.dtype
+                    != new_sharded_dtensor_grad.dtype
+                ):
+                    fsdp_param.sharded_param_fully_shard.grad = (
+                        new_sharded_dtensor_grad.to(
+                            fsdp_param.sharded_param_fully_shard.dtype
+                        )
+                    )
+                else:
+                    fsdp_param.sharded_param_fully_shard.grad = new_sharded_dtensor_grad
                 fsdp_param._setattr_on_modules(fsdp_param.sharded_param_fully_shard)
             if not compiled_autograd_enabled():
                 for hook in (
