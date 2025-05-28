@@ -20,7 +20,7 @@ install_centos() {
   dnf install -y opencv-devel
   # Doesn't work on CentOS Stream 9 with default repos
   #dnf install -y ffmpeg-devel
-  
+
   # Cleanup
   dnf clean all
   rm -rf /var/cache/dnf
