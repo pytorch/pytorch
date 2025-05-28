@@ -1949,16 +1949,19 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         def foo(x0):
             x1 = x0 + 1
-            x2 = x1.view(dtype)
+            x2 = x1.view(dtype).view([16 * 16])
             return x2
 
         x0 = torch.randint(0, 255, (16, 16), device=device, dtype=torch.uint8)
         foo_c = torch.compile(foo, backend="inductor", fullgraph=True)
 
         with torch.no_grad():
-            y_c = foo_c(x0)
+            result, code = run_and_get_code(foo_c, x0)
 
-        self.assertEqual(foo(x0), y_c)
+        FileCheck().check("call").check_not("torch.ops.aten.reshape.default(").run(
+            code[0]
+        )
+        self.assertEqual(foo(x0), result)
 
     @unittest.skipIf(
         not config.is_fbcode(),
