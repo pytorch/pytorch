@@ -847,7 +847,7 @@ test_inductor_set_cpu_affinity(){
   # Handle cgroups slice start and end CPU
   start_cpu=$(python -c 'import os; print(min(os.sched_getaffinity(0)))')
   # Leaving one physical CPU for other tasks
-  end_cpu=$(( $(python -c 'import os; print(max(os.sched_getaffinity(0)))') - thread_per_core ))
+  end_cpu=$(($(python -c 'import os; print(max(os.sched_getaffinity(0)))') - thread_per_core))
   export TASKSET="taskset -c $start_cpu-$end_cpu"
 }
 
