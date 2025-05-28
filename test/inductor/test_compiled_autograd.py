@@ -19,6 +19,7 @@ from string import Template
 from unittest import mock
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import _inductor as inductor
@@ -30,6 +31,7 @@ from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.nn.attention.flex_attention import flex_attention
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
@@ -4161,6 +4163,54 @@ class CompiledAutograd1(torch.nn.Module):
         first, second, third, fourth = fn(eager(), aot_eager())
         self.assertIsNone(third)
 
+    @unittest.skipIf(
+        not torch.distributed.is_available(),
+        "FakePG relies on distributed build",
+    )
+    def test_ddp_cpp_reducer_error(self):
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        try:
+            model = torch.nn.Sequential(nn.Linear(10, 10), nn.ReLU(), nn.Linear(10, 10))
+            model = DDP(model)
+            inputs = torch.randn(10, 10)
+            loss = model(inputs).sum()
+            with compiled_autograd._enable(compiler_fn), self.assertRaisesRegex(
+                RuntimeError,
+                (
+                    r"Compiled autograd is not compatible with C\+\+ DDP Reducer, "
+                    r'please use torch._dynamo.config.optimize_ddp="python_reducer"'
+                ),
+            ):
+                loss.backward()
+
+        finally:
+            dist.destroy_process_group()
+
+    @unittest.skipIf(
+        not torch.distributed.is_available(),
+        "FakePG relies on distributed build",
+    )
+    @config.patch(optimize_ddp="python_reducer")
+    def test_ddp_python_reducer(self):
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        try:
+            model = torch.nn.Sequential(nn.Linear(10, 10), nn.ReLU(), nn.Linear(10, 10))
+            model = DDP(model)
+            inputs = torch.randn(10, 10)
+            loss = model(inputs).sum()
+            with compiled_autograd._enable(compiler_fn):
+                # no error expected
+                loss.backward()
+            self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        finally:
+            dist.destroy_process_group()
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
@@ -4209,10 +4259,13 @@ def wrap_test_class(orig_cls):
         ):
             dct[name] = unittest.expectedFailure
         elif name.startswith("test_"):
+            backend = lookup_backend(name)
+            if not HAS_CUDA and backend == "inductor":
+                continue
             ctxs = [
                 compiled_autograd._enable(
                     make_compiler_fn(
-                        backend=lookup_backend(name),
+                        backend=backend,
                         fullgraph=name not in known_graph_breaks_tests,
                     )
                 ),
@@ -4305,6 +4358,21 @@ known_graph_breaks_tests = {
     "test_full_backward_hook_double_backward",  # _pack_with_none
     "test_grad_mode_restored_reentrant",  # assertTrue
     "test_multi_grad_any_hooks",  # register_multi_grad_hook
+    "test_saved_variable_packing_unpacking_did_not_save_original_with_hooks",  # register_hooks
+    "test_graph_save_on_cpu",  # dynamo disabled
+    "test_nested_checkpoint_early_stop_False",  # dynamo disable
+    "test_nested_checkpoint_early_stop_True",  # dynamo disable
+    "test_nested_checkpoint_kwargs_early_stop_False",  # dynamo disable
+    "test_nested_checkpoint_kwargs_early_stop_True",  # dynamo disable
+    "test_nested_checkpoint_non_tensor_inputs_and_outputs_early_stop_False",  # dynamo disable
+    "test_nested_checkpoint_non_tensor_inputs_and_outputs_early_stop_True",  # dynamo disable
+    "test_nested_checkpoint_reentrant_backwards_early_stop_False",  # dynamo disable
+    "test_nested_checkpoint_reentrant_backwards_early_stop_True",  # dynamo disable
+    "test_nested_checkpoint_same_graph_early_stop_False",  # dynamo disable
+    "test_nested_checkpoint_same_graph_early_stop_True",  # dynamo disable
+    "test_nested_checkpoint_set_early_stop",  # dynamo disable
+    "test_nested_checkpoint_two_children_early_stop_False",  # dynamo disable
+    "test_nested_checkpoint_two_children_early_stop_True",  # dynamo disable
 }
 
 test_contexts = {
@@ -4329,6 +4397,7 @@ xfail_by_backend = {
         "test_current_graph_task_execution_order",  # nodes are already freed by the time dynamo traces the lifted hook
         "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
         "test_current_node",  # TorchDispatchMode not yet implemented for compiled autograd
+        "test_nested_checkpoint_set_early_stop_no_recompution_needed",  # TorchDispatchMode not yet implemented
         "test_post_accumulate_grad_hook_ordering",  # accuracy error
         "test_current_graph_task_id",  # autograd state already cleared once dynamo is called
         "test_custom_function_forward_mode_forward_is_no_op",  # forward AD
@@ -4362,6 +4431,10 @@ xfail_by_backend = {
         "test_return_duplicate_inplace",  # batched gradients
         "test_naughty_autograd_function_stashing_ctx",  # error not raised
         "test_unrelated_inputs",  # batched gradients
+        "test_nested_checkpoint_early_stop_False",  # unpack hook grad_fn semantics
+        "test_nested_checkpoint_early_stop_True",  # unpack hook grad_fn semantics
+        "test_nested_checkpoint_two_children_early_stop_False",  # unpack hook grad_fn semantics
+        "test_nested_checkpoint_two_children_early_stop_True",  # unpack hook grad_fn semantics
     },
     "eager": {  # will be run without torch.compiling the CA graph
         "test_setup_context_when_forward_has_default_args",  # autograd.Function with class methods
@@ -4370,25 +4443,19 @@ xfail_by_backend = {
         "test_to_sparse_backward",  # Out of bounds: frame_state_entry.stride[i] is None
         "test_custom_function_non_tensor_inputs_outputs",  # gradient batching rule not implemented for aten::sym_size.int
         "test_setitem",  # CopySlices accuracy error
-        "test_save_on_cpu_and_checkpoint",  # https://github.com/pytorch/pytorch/issues/147565
-        "test_checkpoint_detects_non_determinism",  # different error
-        "test_checkpointing_non_reentrant_autocast_cpu",  # saved != recompute
-        "test_checkpointing_non_reentrant_autocast_gpu",  # saved != recompute
         "test_checkpointing_without_reentrant_saved_object_identity",  # same as https://github.com/pytorch/pytorch/issues/136193
-        "test_saved_variable_packing_unpacking_did_not_save_original_with_hooks",  # register_hooks multiple times
-        "test_saved_variable_saved_original_inplace_detach",  # RuntimeError not raised
-        "test_access_saved_tensor_twice_without_recomputation_works",  # saved != recompute
-        "test_checkpointing_without_reentrant_dataparallel",  # https://github.com/pytorch/pytorch/issues/127115
-        "test_checkpointing",  # takes very very long
-        "test_checkpointing_without_reentrant_input_requires_grad_False",  # takes very very long
-        "test_checkpointing_without_reentrant_input_requires_grad_True",  # takes very very long
-        "test_checkpointing_without_reentrant_memory_savings",  # takes very very long
         "test_dtensor_different_gradient_placement",  # Dynamo failed to run FX node with fake tensors
         "test_dtensor_noncontiguous_output",  # Dynamo failed to run FX node with fake tensors
         "test_dtensor_partial_placement_graph_output",  # Dynamo failed to run FX node with fake tensors
         "test_unwrap_async_collective_tensor_tangent",  # AttributeError: 'PlainTensorMeta' object has no attribute 'attrs'
         "test_graph_save_on_cpu",  # torch.save should no-op and be recorded in the graph
         "test_saving_variable_to_disk",  # torch.save should no-op and be recorded in the graph
+        "test_nested_checkpoint_early_stop_False",  # AOT backward higher order gradients
+        # Slow tests, these tests are close to CI timeout if we try to torch.compile them
+        "test_checkpointing",
+        "test_checkpointing_without_reentrant_memory_savings",
+        "test_checkpointing_without_reentrant_input_requires_grad_True",
+        "test_checkpointing_without_reentrant_input_requires_grad_False",
     },
     "aot_eager": {  # will be run with torch.compile(backend="eager")
         # Category: FakeTensor
@@ -4430,6 +4497,9 @@ test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
 
 TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
+TestNestedCheckpointWithCompiledAutograd = wrap_test_class(
+    test_autograd.TestNestedCheckpoint
+)
 TestCustomOpWithCompiledAutograd = wrap_test_class(test_custom_ops.TestCustomOp)
 if torch.distributed.is_available() and HAS_CUDA:
     test_dtensor = load_test_module("distributed/tensor/test_dtensor_compile")

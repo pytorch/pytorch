@@ -715,13 +715,6 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
 
         _, codes = run_and_get_code(run_with_backward)
         for code in codes:
-            assert_keywords = ["assert_size_stride", "assert_alignment"]
-            filtered_lines = [
-                line
-                for line in code.splitlines()
-                if not any(assert_key in line for assert_key in assert_keywords)
-            ]
-            code = "\n".join(filtered_lines)
             FileCheck().check_count(
                 "_c10d_functional.all_to_all_single.default", 1, exactly=True
             ).check_count("_c10d_functional.wait_tensor.default", 1, exactly=True).run(
