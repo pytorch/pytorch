@@ -488,6 +488,11 @@ def extract_normalized_read_writes(
             continue
 
         body = n._body
+
+        # TODO - not handled well
+        if body.indirect_vars:
+            return None
+
         n_reads: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
         n_writes: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
 
@@ -630,15 +635,20 @@ def analyze_memory_coalescing(
 
     coalesced_by_var: dict[sympy.Symbol, int] = Counter()
     uncoalesced_addrs: dict[sympy.Expr, int] = Counter()
+    indirect_exprs : dict[sympy.expr, int] = Counter()
 
     for memory_expr, buf_names in itertools.chain(reads.items(), writes.items()):
         # skip memory deps with indirect vars - todo: better handling
         indirect_expr = bool(memory_expr.free_symbols - norm_read_writes.var_ranges.keys())
 
-        if indirect_expr:
-            continue
-
         size = get_score(memory_expr, var_ranges)
+
+        # TODO: need to reason about how we should tile with indirect exprs
+        if indirect_expr:
+            return None
+            # indirect_exprs[memory_expr] += size
+            # continue
+
         if size == 0:
             continue
 
