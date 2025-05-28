@@ -1360,7 +1360,7 @@ void cuComputeGradGammaBeta(
       if (threadIdx.y < offset) {
         const int read_idx = threadIdx.y * blockDim.x + threadIdx.x;
         sum_gamma += buf[read_idx];
-        if constexpr(!rms_norm){
+        if constexpr (!rms_norm){
           sum_beta += buf[read_idx+nbsize3];
         }
       }
@@ -1372,8 +1372,10 @@ void cuComputeGradGammaBeta(
       if (grad_gamma) {
           grad_gamma[i2] = sum_gamma;
       }
-      if constexpr (grad_beta && !rms_norm) {
-          grad_beta[i2] = sum_beta;
+      if (grad_beta) {
+          if constexpr (!rms_norm){
+            grad_beta[i2] = sum_beta;
+          }
       }
     }
 }
