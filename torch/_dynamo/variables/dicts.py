@@ -113,6 +113,7 @@ def is_hashable(x):
                 variables.SymNodeVariable,
                 variables.ConstantVariable,
                 variables.EnumVariable,
+                variables.FrozensetVariable,
                 variables.UserDefinedClassVariable,
                 variables.UserFunctionVariable,
                 variables.SkipFunctionVariable,
@@ -129,6 +130,8 @@ def is_hashable(x):
 
 
 class ConstDictVariable(VariableTracker):
+    CONTAINS_GUARD = GuardBuilder.DICT_CONTAINS
+
     _nonvar_fields = {
         "user_cls",
         *VariableTracker._nonvar_fields,
@@ -404,7 +407,7 @@ class ConstDictVariable(VariableTracker):
             install_guard(
                 self.make_guard(
                     functools.partial(
-                        GuardBuilder.DICT_CONTAINS,
+                        type(self).CONTAINS_GUARD,
                         key=args[0].value,
                         invert=not contains,
                     )
@@ -572,9 +575,11 @@ class ConstDictVariable(VariableTracker):
         elif name == "__or__":
             assert len(args) == 1
             if not isinstance(args[0], ConstDictVariable):
-                raise TypeError(
-                    f"unsupported operand type(s) for |: 'dict' and '{args[0].python_type().__name__}'"
+                msg = (
+                    f"unsupported operand type(s) for |: '{self.python_type().__name__}'"
+                    f"and '{args[0].python_type().__name__}'"
                 )
+                raise_observed_exception(TypeError, tx, args=[msg])
 
             self.install_dict_keys_match_guard()
             new_dict_vt = self.clone(
@@ -749,6 +754,8 @@ class DefaultDictVariable(ConstDictVariable):
 class SetVariable(ConstDictVariable):
     """We model a sets as dictonary with None values"""
 
+    CONTAINS_GUARD = GuardBuilder.SET_CONTAINS
+
     def __init__(
         self,
         items: list[VariableTracker],
@@ -900,10 +907,6 @@ class SetVariable(ConstDictVariable):
         # Already EQUALS_MATCH guarded
         pass
 
-    def install_dict_contains_guard(self, tx, args):
-        # Already EQUALS_MATCH guarded
-        pass
-
 
 class FrozensetVariable(SetVariable):
     def __init__(
@@ -927,7 +930,7 @@ class FrozensetVariable(SetVariable):
         return frozenset
 
     def as_python_constant(self):
-        return {k.vt.as_python_constant() for k in self.set_items}
+        return frozenset({k.vt.as_python_constant() for k in self.set_items})
 
     def reconstruct(self, codegen: "PyCodegen"):
         codegen.foreach([x.vt for x in self.set_items])
@@ -958,6 +961,14 @@ class FrozensetVariable(SetVariable):
             # In[3]: s
             # frozenset({1, 2})
             return ConstantVariable.create(None)
+        elif name in (
+            "copy",
+            "difference",
+            "intersection",
+            "symmetric_difference",
+        ):
+            r = super().call_method(tx, name, args, kwargs)
+            return FrozensetVariable(r.items)
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -978,6 +989,14 @@ class DictKeySetVariable(SetVariable):
                 + ",".join(k.vt.debug_repr() for k in self.items.keys())
                 + "])"
             )
+
+    def install_dict_keys_match_guard(self):
+        # Already EQUALS_MATCH guarded
+        pass
+
+    def install_dict_contains_guard(self, tx, args):
+        # Already EQUALS_MATCH guarded
+        pass
 
     @property
     def set_items(self):
