@@ -665,8 +665,14 @@ class TritonCPUBenchmarkRequest(CPUDeviceBenchmarkMixin, TritonBenchmarkRequest)
 
 
 class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
-    # Important: Instances of this class have to be serializable
-    # across process boundaries. Do not put CUDA Tensors in here!
+    """
+    A class to handle CUDA (CUTLASS) benchmark requests. This class is for
+    managing the lifecycle of a CUDA kernel benchmark, including compiling
+    the source code, managing workspace memory, and executing the kernel.
+
+    Important: Instances of this class have to be serializable across
+    process boundaries. Do not put CUDA Tensors in here!
+    """
 
     def __init__(
         self,
@@ -687,8 +693,10 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         self.hash_key, self.source_file = CUDACodeCache.write(self.source_code, "so")
 
     def precompile(self):
-        # Prepopulate CUDACodeCache
-        # may happen in separate Threadpool
+        """
+        Precompile the CUDA source code to populate the CUDACodeCache.
+        This may happen in a separate thread pool.
+        """
         autotuning_log.debug("Precompiling %s", self)
         CUDACodeCache.compile(self.source_code, "so")
         autotuning_log.debug("Done precompiling %s", self)
@@ -696,6 +704,10 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     def make_run_fn(
         self, *input_tensors: torch.Tensor, out: torch.Tensor
     ) -> Callable[[], None]:
+        """
+        Create a function to run the CUDA kernel with the given input and output tensors.
+        """
+
         self.ensure_dll_loaded()
         self.update_workspace_size()
         args = [c_void_p(tensor.data_ptr()) for tensor in list(input_tensors) + [out]]
@@ -720,7 +732,7 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             workspace_ptr = c_void_p(self.workspace.data_ptr())
 
         # Generate partial function.
-        return functools.partial(
+        ret = functools.partial(
             run_method,
             *args,
             *self.extra_args,
@@ -728,6 +740,20 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             workspace_ptr,  # set workspace ptr,
             stream_ptr,
         )
+
+        # sanity check to make sure we cleanup run fn properly
+        try:
+            ret()
+        except RuntimeError as e:
+            err_msg = str(e)
+
+            def raise_runtime_error():
+                raise RuntimeError(err_msg)
+
+            self.cleanup_run_fn()
+            return raise_runtime_error
+
+        return ret
 
     def update_workspace_size(self) -> None:
         if self._workspace_size_updated:
@@ -774,6 +800,7 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     def cleanup_run_fn(self) -> None:
         if self.DLL is not None:
             self.DLL.close()
+            self.DLL = None
         self.workspace = None
 
     def __str__(self) -> str:
