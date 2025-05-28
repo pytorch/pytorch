@@ -76,7 +76,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     {%- if os == "windows-arm64" %}
-    runs-on: "windows-11-arm64-preview"
+    runs-on: "windows-11-arm64"
     {%- else %}
     {%- if branches == "nightly" %}
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
@@ -102,12 +102,23 @@ jobs:
         run: |
           mkdir "%NIGHTLIES_PYTORCH_ROOT%"
           mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
-      - name: Enable long paths
+      - name: Git checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          path: "pytorch"
+      - name: Bootstrap Build Tools
         shell: cmd
         run: |
-          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
-          git config --system core.longpaths true
-      - name: Git checkout PyTorch
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
+      - name: Bootstrap Git
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
+      - name: Remove Pytorch folder
+        shell: cmd
+        run: |
+          rmdir /s /q "pytorch"
+      - name: Git checkout PyTorch - recursive
         uses: actions/checkout@v4
         with:
           path: "pytorch"
@@ -161,7 +172,7 @@ jobs:
       - !{{ config["build_name"] }}-build
       - get-label-type
 {%- if os == "windows-arm64" %}
-    runs-on: "windows-11-arm64-preview"
+    runs-on: "windows-11-arm64"
 {%- else %}
 {%- if config["gpu_arch_type"] == "cuda" %}
 {%- if branches == "nightly" %}
@@ -187,11 +198,18 @@ jobs:
           echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
           echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
           echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
-      - name: Enable long paths
+      - name: Git checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          path: "pytorch"
+      - name: Populate binary env
         shell: cmd
         run: |
-          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
-          git config --system core.longpaths true
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
+      - name: Remove Pytorch folder
+        shell: cmd
+        run: |
+          rmdir /s /q "pytorch"
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -205,6 +223,10 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+      - name: Bootstrap Build Tools
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |

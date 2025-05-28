@@ -177,12 +177,7 @@ template <
     typename E,
     typename B = HostBlock<S>>
 struct CachingHostAllocatorImpl {
-  virtual ~CachingHostAllocatorImpl() {
-    active_ = false;
-    if (pinned_use_background_threads()) {
-      getBackgroundThreadPool()->waitWorkComplete();
-    }
-  }
+  virtual ~CachingHostAllocatorImpl() = default;
 
  public:
   // return data_ptr and block pair.
@@ -219,7 +214,7 @@ struct CachingHostAllocatorImpl {
       // Launch the background thread and process events in a loop.
       static bool background_thread_flag [[maybe_unused]] = [this] {
         getBackgroundThreadPool()->run([&]() {
-          while (active_) {
+          while (true) {
             process_events();
             std::this_thread::sleep_for(std::chrono::microseconds(100));
           }
@@ -625,10 +620,6 @@ struct CachingHostAllocatorImpl {
 
   alignas(64) std::mutex events_mutex_;
   std::deque<std::pair<E, B*>> events_; // event queue paired with block
-
-  // Indicates whether the object is active.
-  // Set to false in the destructor to signal background threads to stop.
-  std::atomic<bool> active_{true};
 protected:
   alignas(64) HostStatsStaged stats_;
 };

@@ -48,7 +48,6 @@ torch.fx.experimental.symbolic_shapes
     constrain_unify
     canonicalize_bool_expr
     statically_known_true
-    statically_known_false
     has_static_value
     lru_cache
     check_consistent

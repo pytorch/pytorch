@@ -107,7 +107,7 @@ class NestedTensor(torch.Tensor):
         stride = values.stride()
         _strides = (ragged_size * stride[r], *stride)
 
-        r = torch.Tensor._make_wrapper_subclass(
+        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
             _size,
             _strides,

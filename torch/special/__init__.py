@@ -88,7 +88,6 @@ Keyword args:
     out (Tensor, optional): the output tensor.
 
 Example::
-
     >>> a = torch.arange(-0.5, 1, 0.5)
     >>> a
     tensor([-0.5000,  0.0000,  0.5000])
@@ -190,7 +189,6 @@ Keyword args:
     {out}
 
 Example::
-
     >>> a = torch.tensor([1, 0.5])
     >>> torch.special.polygamma(1, a)
     tensor([1.64493, 4.9348])
@@ -594,7 +592,6 @@ Keyword args:
     {out}
 
 Example::
-
     >>> torch.special.i0e(torch.arange(5, dtype=torch.float32))
     tensor([1.0000, 0.4658, 0.3085, 0.2430, 0.2070])
 """.format(
@@ -621,7 +618,6 @@ Keyword args:
     {out}
 
 Example::
-
     >>> torch.special.i1(torch.arange(5, dtype=torch.float32))
     tensor([0.0000, 0.5652, 1.5906, 3.9534, 9.7595])
 """.format(
@@ -649,7 +645,6 @@ Keyword args:
     {out}
 
 Example::
-
     >>> torch.special.i1e(torch.arange(5, dtype=torch.float32))
     tensor([0.0000, 0.2079, 0.2153, 0.1968, 0.1788])
 """.format(
@@ -676,7 +671,6 @@ Keyword args:
     {out}
 
 Example::
-
     >>> torch.special.ndtr(torch.tensor([-3., -2, -1, 0, 1, 2, 3]))
     tensor([0.0013, 0.0228, 0.1587, 0.5000, 0.8413, 0.9772, 0.9987])
 """.format(
@@ -706,7 +700,6 @@ Keyword args:
     {out}
 
 Example::
-
     >>> torch.special.ndtri(torch.tensor([0, 0.25, 0.5, 0.75, 1]))
     tensor([   -inf, -0.6745,  0.0000,  0.6745,     inf])
 """.format(
@@ -733,7 +726,6 @@ Keyword args:
     {out}
 
 Example::
-
     >>> torch.special.log_ndtr(torch.tensor([-3., -2, -1, 0, 1, 2, 3]))
     tensor([-6.6077 -3.7832 -1.841  -0.6931 -0.1728 -0.023  -0.0014])
 """.format(
@@ -773,7 +765,6 @@ Keyword args:
     {out}
 
 Example::
-
     >>> t = torch.randn(4)
     >>> t
     tensor([ 0.2252, -0.2948,  1.0267, -1.1566])
@@ -847,7 +838,6 @@ Args:
         is performed. This is useful for preventing data type overflows. Default: None.
 
 Example::
-
     >>> t = torch.ones(2, 2)
     >>> torch.special.log_softmax(t, 0)
     tensor([[-0.6931, -0.6931],
@@ -878,7 +868,6 @@ Keyword args:
     {out}
 
 Example::
-
     >>> x = torch.tensor([2., 4.])
     >>> torch.special.zeta(x, 1)
     tensor([1.6449, 1.0823])

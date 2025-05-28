@@ -165,7 +165,6 @@ test_jit_hooks() {
 torchbench_setup_macos() {
   git clone --recursive https://github.com/pytorch/vision torchvision
   git clone --recursive https://github.com/pytorch/audio torchaudio
-  brew install jpeg-turbo libpng
 
   pushd torchvision
   git fetch
@@ -180,8 +179,7 @@ torchbench_setup_macos() {
   git checkout "$(cat ../.github/ci_commit_pins/audio.txt)"
   git submodule update --init --recursive
   python setup.py clean
-  #TODO: Remove me, when figure out how to make TorchAudio find brew installed openmp
-  USE_OPENMP=0 python setup.py develop
+  python setup.py develop
   popd
 
   # Shellcheck doesn't like it when you pass no arguments to a function that can take args. See https://www.shellcheck.net/wiki/SC2120
@@ -189,8 +187,9 @@ torchbench_setup_macos() {
   checkout_install_torchbench
 }
 
-pip_benchmark_deps() {
-  python -mpip install --no-input astunparse requests cython scikit-learn
+conda_benchmark_deps() {
+  conda install -y astunparse numpy scipy ninja pyyaml setuptools cmake typing-extensions requests protobuf numba cython scikit-learn
+  conda install -y -c conda-forge librosa
 }
 
 
@@ -198,7 +197,7 @@ test_torchbench_perf() {
   print_cmake_info
 
   echo "Launching torchbench setup"
-  pip_benchmark_deps
+  conda_benchmark_deps
   torchbench_setup_macos
 
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
@@ -225,7 +224,7 @@ test_torchbench_smoketest() {
   print_cmake_info
 
   echo "Launching torchbench setup"
-  pip_benchmark_deps
+  conda_benchmark_deps
   # shellcheck disable=SC2119,SC2120
   torchbench_setup_macos
 
@@ -290,7 +289,7 @@ test_hf_perf() {
   print_cmake_info
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
-  pip_benchmark_deps
+  conda_benchmark_deps
   torchbench_setup_macos
 
   echo "Launching HuggingFace training perf run"
@@ -306,7 +305,7 @@ test_timm_perf() {
   print_cmake_info
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
-  pip_benchmark_deps
+  conda_benchmark_deps
   torchbench_setup_macos
 
   echo "Launching timm training perf run"

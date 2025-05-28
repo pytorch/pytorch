@@ -52,7 +52,6 @@ def custom_op(qualname, func_or_schema=None):
             schema string.
 
     Example::
-
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> import torch
         >>> import numpy as np
@@ -135,7 +134,6 @@ def impl(qualname, *, device_types=("cpu", "cuda"), func=None):
         device_types (str or Iterable[str]): the device type(s) to register the function for.
 
     Example::
-
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> import torch
         >>> import numpy as np

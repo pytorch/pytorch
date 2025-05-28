@@ -6,7 +6,7 @@ import math
 import os
 import sys
 import textwrap
-from itertools import chain, count
+from itertools import count
 from typing import Callable, Optional, Protocol, TYPE_CHECKING, Union
 
 import sympy
@@ -131,9 +131,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 Only valid when cuda == True.
         """
         assert arg_types is not None and len(call_args) == len(arg_types), (
-            "Mismatch call_args and arg_types in generate_kernel_call:\n"
-            f"call_args: {call_args}\n"
-            f"arg_types: {arg_types}"
+            "Mismatch call_args and arg_types in generate_kernel_call"
         )
         new_args = []
         for idx, arg in enumerate(call_args):
@@ -239,22 +237,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if V.graph.is_const_graph:
             # We do not write prefix for constant graph, it will be written by main module.
             return
-        if config.aot_inductor.custom_ops_to_c_shims:
-            # custom_ops_to_c_shims contains declaration of custom ops with C shim.
-            # TODO: this could be auto-generated from a passed-in custom op schema
-            custom_c_shims = list(
-                chain(*config.aot_inductor.custom_ops_to_c_shims.values())
-            )
-            declarations = "\n".join(
-                [f"extern {textwrap.dedent(shim)};" for shim in custom_c_shims]
-            )
-            self.prefix.splice(
-                f"""
-                extern "C" {{
-                    {declarations}
-                }}
-                """
-            )
         if V.graph.aot_mode:
             self.prefix.writeline("namespace torch::aot_inductor {")
 
@@ -686,7 +668,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace\n\n")
 
-        if config.aot_inductor.embed_kernel_binary:
+        if config.aot_inductor.embed_cubin:
             self.prefix.writeline('extern "C" {')
             for name in sorted(declare_kernel):
                 self.prefix.writeline(
@@ -729,7 +711,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             AOTInductorModel::AOTInductorModel(std::shared_ptr<ConstantMap> constants_map,
                                                std::shared_ptr<std::vector<ConstantHandle>> constants_array,
                                                const std::string& device_str,
-                                               std::optional<std::string> cubin_dir)
+                                               std::optional<std::string> cubin_dir,
+                                               bool include_weights)
                 : AOTInductorModelBase({num_inputs},
                                        {num_outputs},
                                        {num_constants},
@@ -1075,7 +1058,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 result.writeline("} // inductor_entry_impl")
 
     def generate_end(self, result):
-        """Generates the end of the code block, and any code needed to call it."""
         if V.graph.aot_mode:
             if V.graph.is_const_graph:
                 result.writeline("} // AOTInductorModel::_const_run_impl")
@@ -1083,29 +1065,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 result.writeline("} // namespace torch::aot_inductor\n\n\n")
             return
 
-        # Close the wrapper code block, then write any kernel definitions.
-        result.splice("'''\n)")
-        if self.kernel_declarations:
-            result.splice("\nkernel_src = (\nr'''")
-            result.splice(self.kernel_declarations.getvalue())
-            result.splice("'''\n)")
-        else:
-            result.splice(
-                """
-                kernel_src = ''
-                """
-            )
+        # Add any kernel definitions into the wrapped code.  We currently only build
+        # them in separate files in AOT mode.
+        result.splice(self.kernel_declarations.getvalue())
+        self.kernel_declarations.clear()
 
         # cpp entry function for JIT with cpp wrapper
         result.splice(
             f"""
-            inductor_entry = CppWrapperCodeCache.load_pybinding(
-                argtypes=["std::vector<AtenTensorHandle>"],
-                main_code=cpp_wrapper_src,
-                device_type="{self.device}",
-                num_outputs={len(V.graph.graph_outputs)},
-                kernel_code=kernel_src,
+            '''
             )
+
+            inductor_entry = CppWrapperCodeCache.load_pybinding(
+                ["std::vector<AtenTensorHandle>"], cpp_wrapper_src, "{self.device}", {len(V.graph.graph_outputs)})
             """
         )
 

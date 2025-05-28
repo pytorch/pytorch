@@ -309,13 +309,6 @@ y = FakeTensor(..., size=(2,))
             'obj_weakref': None
             'guarded_class': None
         }
-        global '' AUTOGRAD_SAVED_TENSORS_HOOKS
-        {
-            'guard_types': None,
-            'code': None,
-            'obj_weakref': None
-            'guarded_class': None
-        }
         global '' GRAD_MODE
         {
             'guard_types': None,

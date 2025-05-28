@@ -152,7 +152,6 @@ class Library:
             name of the operator as inferred from the schema.
 
         Example::
-
             >>> my_lib = Library("mylib", "DEF")
             >>> my_lib.define("sum(Tensor self) -> Tensor")
         """
@@ -255,7 +254,6 @@ class Library:
                           the dispatch key that the library was created with.
 
         Example::
-
             >>> my_lib = Library("aten", "IMPL")
             >>> my_lib._impl_with_aoti_compile("div.Tensor", "CPU")
         """
@@ -318,7 +316,6 @@ class Library:
                          registered.
 
         Example::
-
             >>> my_lib = Library("aten", "IMPL")
             >>> def div_cpu(self, other):
             >>>     return self * (1 / other)
@@ -402,7 +399,6 @@ class Library:
                          to :attr:`fn` when calling. This should be used to create the appropriate keyset for redispatch calls.
 
         Example::
-
             >>> my_lib = Library("_", "IMPL")
             >>> def fallback_kernel(op, *args, **kwargs):
             >>>     # Handle all autocast ops generically

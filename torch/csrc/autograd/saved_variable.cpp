@@ -52,9 +52,8 @@ SavedVariable::SavedVariable(
       TORCH_INTERNAL_ASSERT(!is_leaf_ && is_output);
       weak_grad_fn_ = variable.grad_fn();
     }
-    std::unique_ptr<SavedVariableHooks> maybe_hooks =
-        at::SavedTensorDefaultHooks::is_enabled() ? get_default_hooks()
-                                                  : nullptr;
+
+    auto maybe_hooks = get_default_hooks();
 
     // Avoid wrapped numbers from being leaked to the user
     if (maybe_hooks && !variable.unsafeGetTensorImpl()->is_wrapped_number()) {
