@@ -4,6 +4,7 @@ import sys
 import subprocess
 from github import Github
 
+def test()
 def get_token():
     my_secret = os.environ.get("GITHUB_TOKEN", None)
     if my_secret is None:
@@ -25,6 +26,7 @@ def get_token():
         print("Error:", e.stderr)
 
 def main() -> None:
+    test()
     get_token()
     token = os.environ.get("GITHUB_TOKEN")
 
