@@ -182,13 +182,13 @@ static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t line
       if(firstColumn != 0) {
         fmt::print(stream, "\n");
       }
-      fmt::print(stream, "{:>{}s}Columns {} to {}",
-                 "", indent, firstColumn+1, lastColumn+1);
+      fmt::print(stream, "Columns {} to {}", firstColumn+1, lastColumn+1);
+      fmt::print(stream, "{:>{}s}", "", indent);
     }
 
     if(printFmt.scale != 1) {
-      fmt::print(stream, "\n{:>{}s}{} *\n{:>{}s}",
-                 "", indent, printFmt.scale, "", indent);
+      fmt::print(stream, "{} *\n{:>{}s}",
+                 printFmt.scale, "", indent);
     }
 
     for (const auto l : c10::irange(self.size(0))) {
