@@ -471,8 +471,8 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
 
 
 @dataclass
-class TracerBox:
-    item: Optional[InstructionTranslator] = None
+class ConvertFrameBox:
+    error_on_graph_break: Optional[bool] = None
 
 
 class ConvertFrameAssert:
@@ -489,8 +489,7 @@ class ConvertFrameAssert:
         self._one_graph = one_graph
         self._export = export
         self._export_constraints = export_constraints
-        # gives access to final tracer after compilation is complete/errors out
-        self._tracer_box = TracerBox()
+        self._box = ConvertFrameBox()
 
     @property
     def _clone_with_backend(self) -> Callable[[CompilerFn], ConvertFrameAssert]:
@@ -646,7 +645,7 @@ class ConvertFrameAssert:
                 frame_state=frame_state,
                 compile_id=compile_id,
                 skip=skip + 1,
-                tracer_box=self._tracer_box,
+                convert_frame_box=self._box,
             )
 
 
@@ -700,7 +699,9 @@ def _compile(
     *,
     compile_id: CompileId,
     skip: int = 0,
-    tracer_box: Optional[TracerBox] = None,
+    # Can be used to record things for the caller, both
+    # in the case of normal and exception code paths
+    convert_frame_box: Optional[ConvertFrameBox] = None,
 ) -> ConvertFrameReturn:
     from torch.fx.experimental.validator import (
         bisect,
@@ -857,8 +858,12 @@ def _compile(
                     code.co_filename,
                     code.co_firstlineno,
                 )
-                assert tracer
-                if one_graph or tracer.error_on_graph_break:
+                error_on_graph_break = (
+                    tracer.error_on_graph_break
+                    if tracer
+                    else config.error_on_graph_break
+                )
+                if one_graph or error_on_graph_break:
                     log.debug(
                         "No graph captured with one_graph=True or torch._dynamo.config.error_on_graph_break=True"
                     )
@@ -1014,12 +1019,14 @@ def _compile(
                 recompile_reason,
                 troubleshooting_url,
             )
-            assert tracer
+            error_on_graph_break = (
+                tracer.error_on_graph_break if tracer else config.error_on_graph_break
+            )
             if config.fail_on_recompile_limit_hit:
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached, because fail_on_recompile_limit_hit = True this is a HARD failure"
                 )
-            elif one_graph or tracer.error_on_graph_break:
+            elif one_graph or error_on_graph_break:
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached with one_graph=True or torch._dynamo.config.error_on_graph_break=True. "
                     "Excessive recompilations can degrade "
@@ -1228,8 +1235,16 @@ def _compile(
             metrics_context.update_outer(metrics)
             # === END WARNING WARNING WARNING ===
 
-            if tracer_box:
-                tracer_box.item = tracer
+            # If tracer is available, then tracer.error_on_graph_break reflects value of
+            # config.error_on_graph_break at the time of the graph break -
+            # config.error_on_graph_break may have been (correctly) changed during cleanup.
+            # If tracer is unavailable, then fallback to config.error_on_graph_break.
+            if convert_frame_box:
+                convert_frame_box.error_on_graph_break = (
+                    tracer.error_on_graph_break
+                    if tracer
+                    else config.error_on_graph_break
+                )
 
 
 class ConvertFrame:
@@ -1266,14 +1281,11 @@ class ConvertFrame:
             counters["frames"]["ok"] += 1
             return result
         except Exception as e:
-            if tracer := self._inner_convert._tracer_box.item:
-                # tracer.error_on_graph_break reflects value of config.error_on_graph_break
-                # at the time of the graph break - config.error_on_graph_break may have been (correctly)
-                # changed during cleanup.
-                if tracer.error_on_graph_break:
-                    raise
-            elif config.error_on_graph_break:
-                # Instruction translator never ran - default back to config.error_on_graph_break
+            error_on_graph_break = (
+                self._inner_convert._box.error_on_graph_break is not None
+            )
+            assert error_on_graph_break is not None
+            if self._inner_convert._box.error_on_graph_break:
                 raise
 
             # These two exception types are "soft" failure, in the sense that
