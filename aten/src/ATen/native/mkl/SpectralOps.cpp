@@ -479,20 +479,14 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
   const auto value_type = c10::toRealValueType(input.scalar_type());
   out.resize_(batched_out_sizes, MemoryFormat::Contiguous);
 
-  // fix mkl-2024 issue
+  // fix mkl issue
   // https://github.com/pytorch/pytorch/issues/154477
-  // copy from
-  // https://github.com/mgorny/pytorch-cpu-feedstock/commit/f83dae757d78b671d102d9d57146560b79ccc066
-  auto astrides = input.strides();
-  bool all_zero = true;
-  for (const auto& stride : astrides) {
-    if (stride != 0) {
-        all_zero = false;
-        break;
-    }
-  }
-  if (all_zero) {
+  auto istrides = input.strides();
+  for (const auto& stride : istrides) {
+    if (stride == 0) {
       input = input.clone(MemoryFormat::Contiguous);
+      break;
+    }
   }
 
   auto descriptor = _plan_mkl_fft(
