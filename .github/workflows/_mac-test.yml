@@ -146,6 +146,7 @@ jobs:
           python-version: ${{ inputs.python-version }}
           environment-file: .github/requirements/conda-env-macOS-ARM64
           pip-requirements-file: .github/requirements/pip-requirements-macOS.txt
+          default-packages: ""
 
       - name: Parse ref
         id: parse-ref
