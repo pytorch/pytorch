@@ -912,6 +912,10 @@ void codegenOutputQuery(
     compile_to_sass = true;
   }
 
+  #if defined(CUDA_VERSION) && CUDA_VERSION < 11010
+    // compile to sass is not allowed prior to CUDA 11.1
+    compile_to_sass = false;
+  #endif
 #endif
 }
 
@@ -1620,7 +1624,7 @@ NvrtcFunction jit_pwise_function(
 
   size_t ptx_size = 0;
   std::vector<char> ptx;
-  #if !defined(USE_ROCM)
+  #if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
     // compile_to_sass determines whether we are generating SASS or PTX, hence
     // the different API.
     const auto getSize = compile_to_sass

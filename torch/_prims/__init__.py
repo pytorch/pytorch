@@ -1285,7 +1285,7 @@ def _broadcast_in_dim_meta(
     # shape must be broadcastable to
     for idx, new_idx in enumerate(broadcast_dimensions):
         torch._check(
-            sym_or(a.shape[idx] == 1, a.shape[idx] == shape[new_idx]),
+            sym_or(a.shape[idx] == 1, shape[new_idx] == a.shape[idx]),
             lambda: f"{a.shape[idx]} must be broadcastable to {shape[new_idx]}",
         )
 
@@ -1296,7 +1296,10 @@ def _broadcast_in_dim_meta(
             # Assigns a stride of zero to dimensions
             # which were actually broadcast
             if guard_or_false(a.shape[original_idx] == 1):
-                new_strides.append(0)
+                if guard_or_false(a.shape[original_idx] == shape[idx]):
+                    new_strides.append(a.stride()[original_idx])
+                else:
+                    new_strides.append(0)
             else:
                 new_strides.append(a.stride()[original_idx])
             original_idx = original_idx + 1
