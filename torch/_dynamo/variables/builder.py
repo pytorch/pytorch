@@ -2972,6 +2972,7 @@ def record_automatic_dynamic(
         tx, name, FrameStateSizeEntry.make_tensor(tuple(ex_size), tuple(stride))
     )
 
+
 _UNBACKED_SOURCES: Optional[set[str]] = None
 _UNBACKED_SOURCES_CONFIG_HASH: Optional[int] = None
 
