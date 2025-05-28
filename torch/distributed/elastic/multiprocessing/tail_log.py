@@ -141,7 +141,7 @@ class TailLog:
             try:
                 f.result()
             except Exception as e:
-                logger.error(  # noqa: TRY400
+                logger.error(
                     "error in log tailor for %s%s. %s: %s",
                     self._name,
                     local_rank,
