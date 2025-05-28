@@ -9,10 +9,10 @@ from abc import ABC, abstractmethod
 from typing import Any, Optional, Union
 
 import torch
+import torch.utils._pytree as pytree
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.select_algorithm import create_inputs_key
 from torch._inductor.utils import clear_on_fresh_inductor_cache
-import torch.utils._pytree as pytree
 
 from ... import ir
 from ...config import cuda as inductor_cuda_config
