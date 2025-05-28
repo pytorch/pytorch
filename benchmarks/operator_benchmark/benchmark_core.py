@@ -534,7 +534,7 @@ class BenchmarkRunner:
 
             record = BenchmarkRecord(
                 benchmark=BenchmarkInfo(
-                    name=f"PyTorch operator benchmark - {test_name}",
+                    name="PyTorch operator benchmark",
                     mode=mode,
                     dtype=dtype,
                     extra_info={"input_config": input_config},
