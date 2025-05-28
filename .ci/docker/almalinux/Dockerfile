@@ -1,7 +1,7 @@
 ARG CUDA_VERSION=12.4
 ARG BASE_TARGET=cuda${CUDA_VERSION}
 ARG ROCM_IMAGE=rocm/dev-almalinux-8:6.3-complete
-FROM amd64/almalinux:8 as base
+FROM amd64/almalinux:8.10-20250519 as base
 
 ENV LC_ALL en_US.UTF-8
 ENV LANG en_US.UTF-8
@@ -11,6 +11,8 @@ ARG DEVTOOLSET_VERSION=11
 
 RUN yum -y update
 RUN yum -y install epel-release
+# install glibc-langpack-en make sure en_US.UTF-8 locale is available
+RUN yum -y install glibc-langpack-en
 RUN yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl zlib-devel openssl-devel yum-utils autoconf automake make gcc-toolset-${DEVTOOLSET_VERSION}-toolchain
 # Just add everything as a safe.directory for git since these will be used in multiple places with git
 RUN git config --global --add safe.directory '*'
