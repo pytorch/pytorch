@@ -23,7 +23,7 @@ from typing_extensions import override
 import torch
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
 from torch._dynamo.utils import (
-    CHROMIUM_EVENT_LOG,
+    chromium_event_log_active,
     CompileEventLogger,
     counters,
     dynamo_timed,
@@ -1063,7 +1063,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                     "components": debug_lines,
                 }
             )
-            if CHROMIUM_EVENT_LOG:
+            if chromium_event_log_active():
                 CompileEventLogger.instant(
                     f"autograd_cache_{cache_state}",
                     metadata=cache_info,
