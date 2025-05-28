@@ -2206,6 +2206,7 @@ def pointwise(
     triton_config_with_settings = functools.partial(
         triton_config, min_elem_per_thread=min_elem_per_thread
     )
+    # breakpoint()
 
     configs = None
     if len(size_hints) == 1:
@@ -2231,6 +2232,7 @@ def pointwise(
         ):
             configs = [triton_config_with_settings(size_hints, 32, 32)]
         else:
+
             configs = [
                 triton_config_with_settings(size_hints, 32, 32),
                 triton_config_with_settings(size_hints, 64, 64),  # ~8% better for fp16
@@ -2244,14 +2246,28 @@ def pointwise(
         if disable_pointwise_autotuning(inductor_meta):
             configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
         else:
+            
+            def get_config(*sizes):
+                out = match_target_block_product(
+                    size_hints, inductor_meta.get("tiling_scores"), math.prod(sizes)
+                )
+                out = triton_config_with_settings(size_hints, *out.values())
+                return out
+
+            # c = adapt_pointwise_config_for_tiling(size_hints, inductor_meta.get("tiling_scores"), 16, 16, 16)
+            get_config(16, 16, 16)
             configs = [
-                triton_config_with_settings(size_hints, 16, 16, 16),
-                triton_config_with_settings(size_hints, 64, 8, 8),
-                triton_config_with_settings(size_hints, 8, 64, 8),
-                triton_config_with_settings(size_hints, 8, 8, 64),
-                triton_config_with_settings(size_hints, bs, 1, 1),
-                triton_config_with_settings(size_hints, 1, bs, 1),
-                triton_config_with_settings(size_hints, 1, 1, bs),
+                get_config(16, 16, 16),
+                get_config(16, 8, 8),
+                get_config(4, 8, 8),
+                get_config(bs, 1, 1),
+                # triton_config_with_settings(size_hints, 16, 16, 16),
+                # triton_config_with_settings(size_hints, 64, 8, 8),
+                # triton_config_with_settings(size_hints, 8, 64, 8),
+                # triton_config_with_settings(size_hints, 8, 8, 64),
+                # triton_config_with_settings(size_hints, bs, 1, 1),
+                # triton_config_with_settings(size_hints, 1, bs, 1),
+                # triton_config_with_settings(size_hints, 1, 1, bs),
                 *hinted_configs,
             ]
 
@@ -2301,7 +2317,7 @@ def _reduction_configs(
         # For 3D case with tiling scores, create an adapted version
         if "y" in size_hints:
             assert "tiling_scores" in inductor_meta
-            return adapt_config_for_tiling(
+            return adapt_reduction_config_for_tiling(
                 size_hints,
                 inductor_meta["tiling_scores"],
                 x,
@@ -2406,7 +2422,7 @@ def match_target_block_product(
     return block_sizes
 
 
-def adapt_config_for_tiling(
+def adapt_reduction_config_for_tiling(
     size_hints,
     tiling_scores,
     original_x,
@@ -2434,6 +2450,32 @@ def adapt_config_for_tiling(
         num_stages=num_stages,
         register_intensive=register_intensive,
     )
+
+def adapt_pointwise_config_for_tiling(
+    size_hints,
+    tiling_scores,
+    original_x,
+    original_y,
+    original_z=1,
+) -> Config:
+    """
+    Create an adapted configuration based on tiling scores,
+    redistributing the same total block size (x * r) according to tiling scores.
+    """
+    assert all(s in tiling_scores for s in size_hints)
+    
+    target_block_product = original_x * original_y * original_z
+    block_sizes = match_target_block_product(
+        size_hints, tiling_scores, target_block_product
+    )
+
+    return triton_config_with_settings(
+        size_hints,
+        block_sizes["z"],
+        block_sizes["y"],
+        block_sizes["x"],
+    )
+
 
 
 def reduction(

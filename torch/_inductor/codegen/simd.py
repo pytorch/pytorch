@@ -2171,8 +2171,17 @@ class SIMDScheduling(BaseScheduling):
         default_tiling = cls.create_tiling([pointwise_numel], [reduction_numel])
 
         # add a slight penalty for longer tilings that dont increase score much
+        additional_tiling_penalty = 1.025
+
         def score_mod(t):
-            return -t[0].score / (1.01 ** (len(t[0].tiling) - 1))
+            score = -t[0].score / (additional_tiling_penalty ** (len(t[0].tiling) - 1))
+
+            for tile in t[0].tiling.values():
+                if not CandidateTiling.is_good_size(tile):
+                    score = score / additional_tiling_penalty
+
+            return score
+
 
         # apply penalty for longer tilings that dont increase score much
         for cand, tiling_score in sorted(tilings, key=score_mod):
@@ -2273,15 +2282,26 @@ class SIMDScheduling(BaseScheduling):
             out = cls.compute_tiling_strategy(
                 node_schedule, numel, reduction_numel, coalesce_analysis
             )
-            out2 = cls.get_tiling_and_scores(
-                node_schedule, numel, reduction_numel, None
-            )
+            # torch._inductor.config.triton.max_tiles=2
+            # out2 = cls.get_tiling_and_scores(
+            #     node_schedule, numel, reduction_numel, None
+            # )
+            # torch._inductor.config.triton.max_tiles=3
             # if not out[0] == out2[0]:
             #     breakpoint()
             #     out = cls.compute_tiling_strategy(
             #         node_schedule, numel, reduction_numel, coalesce_analysis
             #     )
+            #     return {"y": 512, "x": 9437184//512}, None
+            #     breakpoint()
+            #     mm = torch._inductor.tiling_utils.analyze_memory_coalescing(node_schedule[0])
+            #     return out
+
+            #     out = cls.compute_tiling_strategy(
+            #         node_schedule, numel, reduction_numel, coalesce_analysis
+            #     )
             # assert out[0] == out2[0]
+
             return out
                 
         if (
