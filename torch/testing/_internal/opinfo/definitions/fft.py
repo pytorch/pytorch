@@ -137,12 +137,6 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
-        decorators=[
-            # MKL 2024.2.0 has regression in FFT
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit", device_type="cpu"),
-        ],
     ),
     SpectralFuncInfo(
         "fft.fft2",
@@ -164,13 +158,7 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
-        decorators=[
-            precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
-            # MKL 2024.2.0 has regression in FFT
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit", device_type="cpu"),
-        ],
+        decorators=[precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})],
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -202,13 +190,7 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
-        decorators=[
-            precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
-            # MKL 2024.2.0 has regression in FFT
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit", device_type="cpu"),
-        ],
+        decorators=[precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})],
     ),
     SpectralFuncInfo(
         "fft.hfft",
@@ -239,10 +221,6 @@ op_db: list[OpInfo] = [
                 "test_schema_correctness",
                 dtypes=(torch.complex64, torch.complex128),
             ),
-            # MKL 2024.2.0 has regression in FFT
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit", device_type="cpu"),
         ),
     ),
     SpectralFuncInfo(
@@ -287,10 +265,6 @@ op_db: list[OpInfo] = [
                 "test_complex_half_reference_testing",
                 device_type="cuda",
             ),
-            # MKL 2024.2.0 has regression in FFT
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit", device_type="cpu"),
         ),
     ),
     SpectralFuncInfo(
@@ -328,10 +302,6 @@ op_db: list[OpInfo] = [
                 "TestSchemaCheckModeOpInfo",
                 "test_schema_correctness",
             ),
-            # MKL 2024.2.0 has regression in FFT
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit", device_type="cpu"),
         ),
     ),
     SpectralFuncInfo(
@@ -421,11 +391,6 @@ op_db: list[OpInfo] = [
             torch.bool,
             *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
-        decorators=[
-            # MKL 2024.2.0 has regression in FFT
-            DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", device_type="cpu"),
-            DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_variant_consistency_eager", device_type="cpu"),
-        ],
     ),
     SpectralFuncInfo(
         "fft.ifft2",
@@ -452,11 +417,7 @@ op_db: list[OpInfo] = [
                 precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            ),
-            # MKL 2024.2.0 has regression in FFT
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit", device_type="cpu"),
+            )
         ],
     ),
     SpectralFuncInfo(
@@ -484,11 +445,7 @@ op_db: list[OpInfo] = [
                 precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            ),
-            # MKL 2024.2.0 has regression in FFT
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit", device_type="cpu"),
+            )
         ],
     ),
     SpectralFuncInfo(
@@ -541,10 +498,6 @@ op_db: list[OpInfo] = [
             # Mismatched elements!
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out"),
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out_warnings"),
-            # MKL 2024.2.0 has regression in FFT
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit", device_type="cpu"),
         ),
     ),
     SpectralFuncInfo(
@@ -576,10 +529,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 precisionOverride({torch.float: 2e-4}), "TestFFT", "test_reference_nd"
             ),
-            # MKL 2024.2.0 has regression in FFT
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit", device_type="cpu"),
         ],
     ),
     SpectralFuncInfo(
@@ -603,12 +552,6 @@ op_db: list[OpInfo] = [
             *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
         check_batched_gradgrad=False,
-        decorators=[
-            # MKL 2024.2.0 has regression in FFT
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit", device_type="cpu"),
-        ],
     ),
     SpectralFuncInfo(
         "fft.irfft2",
@@ -636,11 +579,7 @@ op_db: list[OpInfo] = [
                 precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            ),
-            # MKL 2024.2.0 has regression in FFT
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit", device_type="cpu"),
+            )
         ],
     ),
     SpectralFuncInfo(
@@ -669,11 +608,7 @@ op_db: list[OpInfo] = [
                 precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            ),
-            # MKL 2024.2.0 has regression in FFT
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit", device_type="cpu"),
+            )
         ],
     ),
     OpInfo(
