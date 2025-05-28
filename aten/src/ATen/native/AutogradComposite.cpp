@@ -172,7 +172,6 @@ Tensor _lazy_clone(Tensor const& self, std::optional<c10::Device> device_opt) {
       at::detail::getMPSHooks().deviceSynchronize();
     }
   } else if (self.device().type() == c10::kMPS) {
-    // CHECK: Do we always need to sync for MPS?
     at::detail::getMPSHooks().deviceSynchronize();
   }
   return Tensor(std::move(tensor));
