@@ -343,7 +343,7 @@ def load_model_from_path(path_and_class_str):
     return model, inputs
 
 
-def write_outputs(filename, headers, row):
+def write_outputs(filename, headers, row, upload_to_benchmark_db: bool = True):
     """
     Write both CSV and JSON outputs using the original CSV output interface
     """
@@ -352,7 +352,8 @@ def write_outputs(filename, headers, row):
         return
 
     output_csv(filename, headers, row)
-    output_json(filename, headers, row)
+    if upload_to_benchmark_db:
+        output_json(filename, headers, row)
 
 
 def output_csv(filename, headers, row):
@@ -1700,8 +1701,8 @@ def maybe_snapshot_memory(should_snapshot_memory, suffix):
                         f"{output_filename.rstrip('.csv')}_{suffix}.pickle",
                     )
                 )
-            except Exception:
-                log.exception("Failed to save memory snapshot")
+            except Exception as e:
+                log.error("Failed to save memory snapshot, %s", e)
 
             torch.cuda.memory._record_memory_history(enabled=None)
 
@@ -2742,7 +2743,7 @@ class BenchmarkRunner:
         try:
             shutil.move("repro.py", f"{repro_dir}/{name}_repro.py")
         except OSError:
-            log.exception("Could not find repro script for model %s", name)
+            log.error("Could not find repro script for model %s", name)
         else:
             log.info(
                 "Repro script for model %s with minified graph saved to %s",
@@ -2847,10 +2848,15 @@ class BenchmarkRunner:
                 user_stack = add_double_quotes(
                     ", ".join([str(x) for x in graph_break.user_stack])
                 )
+
+                # NB: Don't upload them to the benchmark database as they are debugging
+                # infomation. There are also around a million records a day which is
+                # wasteful to store
                 write_outputs(
                     filename,
                     ["model", "reason", "user_stack"],
                     [current_name, reason, user_stack],
+                    False,
                 )
 
         if self.args.stats:
@@ -3597,22 +3603,32 @@ def run(runner, args, original_dir=None):
             "sam_fast",
             "resnet50_quantized_qat",
             "mobilenet_v2_quantized_qat",
+            "detectron2_maskrcnn",
+            "detectron2_maskrcnn_r_101_c4",
+            "detectron2_maskrcnn_r_101_fpn",
+            "detectron2_maskrcnn_r_50_c4",
+            "detectron2_maskrcnn_r_50_fpn",
+            "detectron2_fasterrcnn_r_101_c4",
+            "detectron2_fasterrcnn_r_101_dc5",
+            "detectron2_fasterrcnn_r_101_fpn",
+            "detectron2_fasterrcnn_r_50_c4",
+            "detectron2_fasterrcnn_r_50_dc5",
+            "detectron2_fasterrcnn_r_50_fpn",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
         if args.devices == ["xpu"]:
             torch.use_deterministic_algorithms(True, warn_only=True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-        # TODO(eqy): revisit when cuBLASLt workspace size is bumped
-        # if args.only is not None and args.only in {
-        #     "DebertaForQuestionAnswering",
-        #     "RobertaForQuestionAnswering",
-        #     "nvidia_deeprecommender",
-        #     "volo_d1_224",
-        # }:
-        #     # These seem unhappy with numerics of larger cuBLASLt workspace
-        #     # sizes following #145130 (due to enabling split-k?)
-        #     torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+        if args.only is not None and args.only in {
+            "DebertaForQuestionAnswering",
+            "nvidia_deeprecommender",
+            "crossvit_9_240",
+        }:
+            # These seem unhappy with numerics of larger cuBLASLt workspace
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
         torch.backends.cudnn.benchmark = False
