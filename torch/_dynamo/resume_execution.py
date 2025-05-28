@@ -292,8 +292,8 @@ class ContinueExecutionCache:
         argnames: tuple[str, ...],
         argnames_null: tuple[str, ...],
         setup_fns: tuple[ReenterWith, ...],
-        stack_ctx_vars: tuple[tuple[int, tuple[Any, ...]], ...],
-        argnames_ctx_vars: tuple[tuple[str, tuple[Any, ...]], ...],
+        stack_ctx_vars: tuple[tuple[int, tuple[Any]], ...],
+        argnames_ctx_vars: tuple[tuple[str, tuple[Any]], ...],
         null_idxes: tuple[int, ...],
     ) -> types.CodeType:
         assert offset is not None
@@ -398,10 +398,11 @@ class ContinueExecutionCache:
                         old_hook_target = offset_to_inst[hook_target_offset]
                         meta.prefix_block_target_offset_remap.append(hook_target_offset)
                         old_hook_target_remap[old_hook_target] = exn_target
-                if i in stack_ctx_vars_d:
+                real_i = i + null_idxes_i
+                if real_i in stack_ctx_vars_d:
                     # NOTE: we assume that current stack var is a context manager CLASS!
                     # Load args for context variable and construct it
-                    prefix.extend(_load_tuple_and_call(stack_ctx_vars_d[i]))
+                    prefix.extend(_load_tuple_and_call(stack_ctx_vars_d[real_i]))
 
             if is_py311_plus:
                 # reverse the mapping since targets of later/nested contexts are inserted
