@@ -9237,6 +9237,35 @@ def ___make_guard_fn():
 
         fn(torch.ones(2, 2, device="cpu"))
 
+    def test_unbacked_dim_order(self):
+        @torch.compile(dynamic=False, fullgraph=True, backend="eager")
+        def f(x):
+            return x.dim_order()  # no permutation
+
+        @torch.compile(dynamic=False, fullgraph=True, backend="eager")
+        def g(x):
+            x = x.permute(2, 0, 1, 3)  # reverse: (1, 2, 0, 3)
+            return x.dim_order()
+
+        # shape: [4, u0, 5, u1]
+        x0 = torch.randn(4, 1, 5, 2)
+        torch._dynamo.decorators.mark_unbacked(x0, 1)
+        torch._dynamo.decorators.mark_unbacked(x0, 3)
+        assert f(x0) == (0, 1, 2, 3)
+        assert g(x0) == (1, 2, 0, 3)
+
+        # shape: [u0, u1, u2, u3]
+        x1 = torch.randn(4, 1, 5, 2)
+        for i in range(x1.ndim):
+            torch._dynamo.decorators.mark_unbacked(x1, i)
+        assert f(x1) == (0, 1, 2, 3)
+        assert g(x1) == (1, 2, 0, 3)
+
+        # custom strides
+        x2 = torch.randn(10000)
+        x2 = x2.as_strided([4, 4, 4, 4], [1, 2, 4, 8])
+        assert f(x2) == (3, 2, 1, 0)
+
     # Compiling autograd.Function traces fwd function twice, but the same unbacked symints were not identified
     # as the same across the two tracings. This is an unlikely situation in real use cases, so we add another
     # `test_validate_outputs_unbacked_by_custom_op` to mitigate it and keep this one as expected failure
