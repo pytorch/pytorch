@@ -49,6 +49,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     skip_if_lt_x_gpu,
     skip_if_rocm_multiprocess,
+    sm_is_or_higher_than,
     TEST_SKIPS,
     with_dist_debug_levels,
     with_nccl_blocking_wait,
@@ -3641,7 +3642,7 @@ class NcclProcessGroupWithDispatchedCollectivesTests(
     @parametrize("float8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
     def test_allgather_float8(self, float8_dtype):
         device = torch.device(f"cuda:{self.rank:d}")
-        if not sm_is_or_higher_than(device, 9, 0):
+        if not sm_is_or_higher_than(device, 9, 0):  # noqa: F821
             self.skipTest("FP8 reduction support begins with sm90 capable devices")
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
