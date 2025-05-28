@@ -6,6 +6,8 @@ import json
 import os
 import timeit
 from collections import namedtuple
+from dataclasses import asdict, dataclass
+from typing import Any, Optional
 
 import benchmark_utils
 
@@ -504,28 +506,51 @@ class BenchmarkRunner:
                 mode = "training"
 
             # Create the record
-            record = {
-                "benchmark": {
-                    "name": f"PyTorch operator benchmark - {test_name}",
-                    "mode": mode,
-                    "dtype": dtype,
-                    "extra_info": {
-                        "input_config": input_config,
-                    },
-                },
-                "model": {
-                    "name": test_name,
-                    "type": "micro-benchmark",
-                    "origins": ["pytorch"],
-                },
-                "metric": {
-                    "name": "latency",
-                    "unit": "us",
-                    "benchmark_values": [latency],
-                    "target_value": None,
-                },
-            }
-            records.append(record)
+            @dataclass
+            class BenchmarkInfo:
+                name: str
+                mode: Optional[str]
+                dtype: str
+                extra_info: dict[str, Any]
+
+            @dataclass
+            class ModelInfo:
+                name: str
+                type: str
+                origins: list[str]
+
+            @dataclass
+            class MetricInfo:
+                name: str
+                unit: str
+                benchmark_values: list[float]
+                target_value: Optional[float]
+
+            @dataclass
+            class BenchmarkRecord:
+                benchmark: BenchmarkInfo
+                model: ModelInfo
+                metric: MetricInfo
+
+            record = BenchmarkRecord(
+                benchmark=BenchmarkInfo(
+                    name=f"PyTorch operator benchmark - {test_name}",
+                    mode=mode,
+                    dtype=dtype,
+                    extra_info={"input_config": input_config},
+                ),
+                model=ModelInfo(
+                    name=test_name, type="micro-benchmark", origins=["pytorch"]
+                ),
+                metric=MetricInfo(
+                    name="latency",
+                    unit="us",
+                    benchmark_values=[latency],
+                    target_value=None,
+                ),
+            )
+
+            records.append(asdict(record))
 
         # Write all records to the output file
         with open(output_file, "w", encoding="utf-8") as f:
