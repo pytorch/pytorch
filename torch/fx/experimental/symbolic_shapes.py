@@ -707,8 +707,29 @@ def _sympy_from_args(
     sort: bool = True,
     is_commutative: Optional[bool] = None,
 ) -> sympy.Expr:
+    """
+    Create a sympy expression from a list of arguments, optimizing for performance.
+
+    This function creates a sympy Add or Mul expression from a list of arguments
+    while avoiding expensive operations like flattening. It handles sorting the
+    arguments appropriately based on the expression type.
+
+    Args:
+        cls: The sympy class to create (Add or Mul)
+        args: List of sympy expressions to combine
+        sort: Whether to sort the arguments (default: True)
+        is_commutative: Whether the operation is commutative (default: None)
+
+    Returns:
+        A sympy expression of type cls combining all arguments
+
+    Raises:
+        ValueError: If cls is not sympy.Add or sympy.Mul
+    """
+
     if not args:
         return cls.identity  # type: ignore[union-attr]
+
     # These args are already in canonical form, so we avoid calling
     # Add(*args) to avoid expensive Add.flatten operation
     if sort:
