@@ -1,4 +1,5 @@
 #include <fmt/core.h>
+#include <fmt/printf.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/variable.h>
@@ -92,15 +93,12 @@ std::vector<int> THPUtils_unpackIntTuple(PyObject* arg) {
 }
 
 void THPUtils_setError(const char* format, ...) {
-  static const size_t ERROR_BUFFER_SIZE = 1000;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  char buffer[ERROR_BUFFER_SIZE];
-  va_list fmt_args;
+  va_list args;
+  va_start(args, format);
+  std::string message = fmt::vsprintf(format, args);
+  va_end(args);
 
-  va_start(fmt_args, format);
-  vsnprintf(buffer, ERROR_BUFFER_SIZE, format, fmt_args);
-  va_end(fmt_args);
-  PyErr_SetString(PyExc_RuntimeError, buffer);
+  PyErr_SetString(PyExc_RuntimeError, message.c_str());
 }
 
 void THPUtils_addPyMethodDefs(

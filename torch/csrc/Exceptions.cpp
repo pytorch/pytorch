@@ -7,6 +7,7 @@
 #include <utility>
 
 #include <fmt/format.h>
+#include <fmt/printf.h>
 #include <torch/csrc/THP.h>
 
 #include <c10/util/StringUtil.h>
@@ -216,14 +217,7 @@ std::string processErrorMsg(std::string str) {
 }
 
 static std::string formatMessage(const char* format, va_list fmt_args) {
-  constexpr size_t ERROR_BUF_SIZE = 1024;
-  std::string error_buf(ERROR_BUF_SIZE, '\0');
-  auto res = vsnprintf(error_buf.data(), ERROR_BUF_SIZE, format, fmt_args);
-  if (res < 0) {
-    res = 0;
-  }
-  error_buf.resize(res);
-  return error_buf;
+  return fmt::vsprintf(format, fmt_args);
 }
 
 void translate_exception_to_python(const std::exception_ptr& e_ptr) {
