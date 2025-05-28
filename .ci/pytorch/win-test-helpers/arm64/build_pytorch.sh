@@ -48,9 +48,6 @@ cd "$PYTORCH_ROOT"
 # Copy uv.dll equivalent (if building for Windows target)
 cp "$libuv_ROOT/lib/Release/uv.dll" torch/lib/uv.dll || true
 
-# Activate visual studio
-cmd.exe /c "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" arm64
-
 # Create Python virtual environment
 python -m venv .venv
 echo "*" > .venv/.gitignore
