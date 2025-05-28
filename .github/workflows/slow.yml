@@ -163,3 +163,32 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-py3_10-clang15-asan-build.outputs.test-matrix }}
       sync-tag: asan-test
     secrets: inherit
+
+  linux-focal-cuda12_8-py3_10-gcc11-sm86-build:
+    name: linux-focal-cuda12.8-py3.10-gcc11-sm86
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-focal-cuda12.8-py3.10-gcc11-sm86
+      docker-image-name: ci-image:pytorch-linux-focal-cuda12.8-cudnn9-py3-gcc11
+      cuda-arch-list: 8.6
+      test-matrix: |
+        { include: [
+          { config: "slow", shard: 1, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "slow", shard: 2, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "slow", shard: 3, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
+        ]}
+    secrets: inherit
+
+  linux-focal-cuda12_8-py3_10-gcc11-sm86-test:
+    name: linux-focal-cuda12.8-py3.10-gcc11-sm86
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-focal-cuda12_8-py3_10-gcc11-sm86-build
+      - target-determination
+    with:
+      build-environment: linux-focal-cuda12.8-py3.10-gcc11-sm86
+      docker-image: ${{ needs.linux-focal-cuda12_8-py3_10-gcc11-sm86-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_8-py3_10-gcc11-sm86-build.outputs.test-matrix }}
+    secrets: inherit
