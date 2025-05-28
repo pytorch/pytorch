@@ -88,7 +88,6 @@ __global__ void RowwiseMomentsCUDAKernel(
       mean[i] = m1;
       rstd[i] = c10::cuda::compat::rsqrt(m2 + eps);
     } else {
-      // AARON NOTE: the math should be correct here, not sure about numeric stability
       rstd[i] = c10::cuda::compat::rsqrt(m2 + m1 * m1 + eps);
     }
 
@@ -1702,7 +1701,6 @@ void RMSNormBackwardKernelImpl(
       "LayerNormBackwardKernelImpl",
       [&]() {
         LayerNormBackwardKernelImplInternal<scalar_t, true>(
-          // AARON NOTE pass in rstd for mean and dgamma for dbeta to pass shape checks
             dY.contiguous(), X, rstd, rstd, gamma, M, N, dX, dgamma, dgamma);
       });
 }
@@ -1847,7 +1845,6 @@ std::tuple<Tensor, Tensor> rms_norm_cuda(
   c10::MaybeOwned<Tensor> weight_maybe_owned =
       at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  // AARON NOTE: maybe reimplement this??, not sure, passing in weight for bias
   auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, weight);
   auto M = M_N.first;
   auto N = M_N.second;
