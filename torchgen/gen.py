@@ -2820,6 +2820,11 @@ def main() -> None:
         action="store_true",
         help="Generate XPU registration code when set",
     )
+    parser.add_argument(
+        "--mtia",
+        action="store_true",
+        help="Generate MTIA registration code when set",
+    )
 
     # TODO: --op-registration-whitelist will be removed when all call-sites
     # for gen.py are moved over to using the operator YAML file for mobile
@@ -2918,6 +2923,12 @@ def main() -> None:
         if DispatchKey.XPU in dispatch_keys:
             del dispatch_keys[dispatch_keys.index(DispatchKey.XPU)]
 
+    if not options.mtia:
+        ignore_keys.add(DispatchKey.MTIA)
+
+        if DispatchKey.MTIA in dispatch_keys:
+            del dispatch_keys[dispatch_keys.index(DispatchKey.MTIA)]
+
     parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path, ignore_keys)
     valid_tags = _GLOBAL_PARSE_TAGS_YAML_CACHE[tags_yaml_path]
     native_functions, backend_indices = (
@@ -2977,6 +2988,7 @@ def main() -> None:
         DispatchKey.CompositeExplicitAutograd,
         DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.Meta,
+        DispatchKey.MTIA,
     }
 
     aoti_backends = {
@@ -2986,6 +2998,7 @@ def main() -> None:
 
     if options.mps:
         functions_keys.add(DispatchKey.MPS)
+        aoti_backends.add(DispatchKey.MPS)
 
     if options.xpu:
         functions_keys.add(DispatchKey.XPU)
