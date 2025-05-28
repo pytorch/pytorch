@@ -22,6 +22,7 @@ import functools
 import itertools
 import sys
 import types
+import uuid
 from collections.abc import Iterator, Sequence
 from typing import Any, Callable, cast, Optional, Union
 
@@ -1547,8 +1548,11 @@ def _cached_cleaned_instructions(code, safe=False) -> Sequence[Instruction]:
 _unique_id_counter = itertools.count()
 
 
-def unique_id(name) -> str:
-    return f"{name}_{next(_unique_id_counter)}"
+def unique_id(name, with_uuid=False) -> str:
+    ret = f"{name}_{next(_unique_id_counter)}"
+    if with_uuid:
+        ret += f"_{uuid.uuid4()}".replace("-", "_")
+    return ret
 
 
 def is_generator(code: types.CodeType) -> bool:

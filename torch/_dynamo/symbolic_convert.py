@@ -3580,7 +3580,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             ctx.reconstruct_type(cg)
             cg.append_output(create_instruction("STORE_FAST", argval=name))
 
-        name = unique_id(f"__resume_at_{inst.offset}")
+        name = unique_id(f"__resume_at_{inst.offset}", with_uuid=True)
 
         new_code: types.CodeType = ContinueExecutionCache.lookup(
             self.f_code,
@@ -3935,6 +3935,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         parent.inconsistent_side_effects |= self.inconsistent_side_effects
 
         log.debug("DONE INLINING %s", code)
+        self.output.tracing_context.traced_code.append(code)
 
         if config.enable_faithful_generator_behavior or (
             isinstance(self, InliningGeneratorInstructionTranslator)

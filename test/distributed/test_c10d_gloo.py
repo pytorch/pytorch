@@ -191,6 +191,17 @@ def simple_multi_input_reduce_tests(rank, world_size):
     ]
 
 
+class RendezvousTCPTest(TestCase):
+    @retry_on_connect_failures
+    def test_tcp_init(self):
+        rendezvous_iterator = dist.rendezvous("tcp://127.0.0.1:0", rank=0, world_size=1)
+        store, rank, world_size = next(rendezvous_iterator)
+        self.assertEqual(rank, 0)
+        self.assertEqual(world_size, 1)
+        # port number should get assigned
+        self.assertNotEqual(store.port, "0")
+
+
 class RendezvousEnvTest(TestCase):
     @requires_gloo()
     @retry_on_connect_failures

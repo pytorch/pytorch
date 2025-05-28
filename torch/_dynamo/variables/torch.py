@@ -923,6 +923,17 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             elif isinstance(expr, ConstantVariable):
                 return expr
 
+        @register(torch.fx.experimental.symbolic_shapes.statically_known_false)
+        def handle_statically_known_false(self, tx: "InstructionTranslator", expr):
+            if isinstance(expr, SymNodeVariable):
+                return variables.ConstantVariable.create(
+                    torch.fx.experimental.symbolic_shapes.statically_known_false(
+                        expr.sym_num
+                    )
+                )
+            elif isinstance(expr, ConstantVariable):
+                return expr
+
         @register(torch.fx.experimental.symbolic_shapes.statically_known_true)
         def handle_statically_known_true(self, tx: "InstructionTranslator", expr):
             if isinstance(expr, SymNodeVariable):
@@ -1477,7 +1488,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         varname = tx.output.new_var()
 
         # construct the nn.Parmeter before the graph save it to varname
-        assert tx.output.root_tx
+        assert tx.output.root_tx is not None
         cg = PyCodegen(tx.output.root_tx)
         cg.add_push_null(lambda: cg.load_import_from("torch.nn", "Parameter"))
         cg(data.source)
