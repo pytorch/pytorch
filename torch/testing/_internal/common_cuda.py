@@ -55,7 +55,10 @@ def CDNA3OrLater():
 def CDNA2OrLater():
     return evaluate_gfx_arch_within(["gfx90a", "gfx942"])
 
-IS_GFX12 = LazyVal(lambda: torch.cuda.is_available() and torch.version.hip and 'gfx12' in torch.cuda.get_device_properties(0).gcnArchName)
+IS_GFX12 = LazyVal(lambda: (
+    torch.cuda.is_available() and
+    torch.version.hip and
+    'gfx12' in torch.cuda.get_device_properties(0).gcnArchName))
 
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:
