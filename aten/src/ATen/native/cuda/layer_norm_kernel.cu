@@ -606,7 +606,7 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
 }
 
 
-template <typename T, typename T_ACC>
+template <typename T, typename T_ACC, bool rms_norm>
 __global__ void GammaBetaBackwardSimpleCUDAKernel(
     int64_t M,
     int64_t N,
@@ -622,17 +622,25 @@ __global__ void GammaBetaBackwardSimpleCUDAKernel(
     T_ACC sum2 = 0;
     for (int64_t i = 0; i < M; ++i) {
       const int64_t index = i * N + j;
-      sum1 += dg == nullptr ? T_ACC(0)
-                            : static_cast<T_ACC>(dY[index]) *
-              (static_cast<T_ACC>(X[index]) - static_cast<T_ACC>(mean[i])) *
-              static_cast<T_ACC>(rstd[i]);
-      sum2 += db == nullptr ? T_ACC(0) : static_cast<T_ACC>(dY[index]);
+      if constexpr (!rms_norm){
+        sum1 += dg == nullptr ? T_ACC(0)
+                              : static_cast<T_ACC>(dY[index]) *
+                (static_cast<T_ACC>(X[index]) - static_cast<T_ACC>(mean[i])) *
+                static_cast<T_ACC>(rstd[i]);
+        sum2 += db == nullptr ? T_ACC(0) : static_cast<T_ACC>(dY[index]);
+      } else {
+        sum1 += dg == nullptr ? T_ACC(0)
+                              : static_cast<T_ACC>(dY[index]) *
+                (static_cast<T_ACC>(X[index])) * static_cast<T_ACC>(rstd[i]);
+      }
     }
     if (dg != nullptr) {
       dg[j] = sum1;
     }
     if (db != nullptr) {
-      db[j] = sum2;
+      if constexpr (!rms_norm){
+        db[j] = sum2;
+      }
     }
   }
 }
@@ -1602,7 +1610,7 @@ void LayerNormBackwardKernelImplInternal(
     if (M < 128) {
       // For small batch size, do colwise reduce directly.
       const int64_t B = (N + kCUDANumThreads - 1) / kCUDANumThreads;
-      GammaBetaBackwardSimpleCUDAKernel<T, T_ACC>
+      GammaBetaBackwardSimpleCUDAKernel<T, T_ACC, rms_norm>
           <<<B, kCUDANumThreads, 0, cuda_stream>>>(
               M,
               N,
