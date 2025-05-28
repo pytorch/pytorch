@@ -9,7 +9,6 @@ from unittest.mock import MagicMock
 
 import torch
 from torch.distributed.checkpoint._hf_planner import (
-    _FqnToFileMapping,
     _HuggingFaceLoadPlanner,
 )
 from torch.distributed.checkpoint._hf_storage import (
@@ -46,7 +45,7 @@ class TestHfStorage(TestCase):
         with tempfile.TemporaryDirectory() as path:
             writer = _HuggingFaceStorageWriter(
                 path=path,
-                fqn_to_index_mapping={"tensor_0": 1, "tensor_1": 1},
+                fqn_to_index_mapping={"tensor_0": 1, "tensor_1": 2},
             )
             writer.fs = FileSystem()
 
@@ -59,7 +58,7 @@ class TestHfStorage(TestCase):
 
             save_plan = SavePlan(
                 [write_item_1, write_item_2],
-                storage_data=_FqnToFileMapping({"tensor_0": 1, "tensor_1": 1}),
+                storage_data={"fqn_to_file_mapping": {"tensor_0": 1, "tensor_1": 2}},
             )
             save_planner = DefaultSavePlanner()
             save_planner.set_up_planner(state_dict=state_dict)
@@ -76,7 +75,7 @@ class TestHfStorage(TestCase):
                     ),
                     size_in_bytes=tensor0.numel() * tensor0.element_size(),
                     storage_data=_StorageInfo(
-                        relative_path="model-00001-of-00001.safetensors",
+                        relative_path="model-00001-of-00002.safetensors",
                         offset=0,
                         length=tensor0.numel() * tensor0.element_size(),
                     ),
@@ -87,7 +86,72 @@ class TestHfStorage(TestCase):
                     ),
                     size_in_bytes=tensor1.numel() * tensor1.element_size(),
                     storage_data=_StorageInfo(
-                        relative_path="model-00001-of-00001.safetensors",
+                        relative_path="model-00002-of-00002.safetensors",
+                        offset=0,
+                        length=tensor1.numel() * tensor1.element_size(),
+                    ),
+                ),
+            ]
+
+            self.assertEqual(
+                actual_write_results,
+                expected_write_results,
+            )
+
+    def test_write_data_with_sharding(self) -> None:
+        mock_module = MagicMock()
+        sys.modules["safetensors"] = mock_module
+        sys.modules["huggingface_hub"] = mock_module
+
+        mock_module = MagicMock()
+        mock_module.save.return_value = b""
+        sys.modules["safetensors.torch"] = mock_module
+
+        with tempfile.TemporaryDirectory() as path:
+            writer = _HuggingFaceStorageWriter(
+                path=path,
+                save_sharded=True,
+            )
+            writer.fs = FileSystem()
+
+            tensor0 = torch.rand(4)
+            tensor1 = torch.rand(10)
+            write_item_1 = _create_write_item_for_tensor("tensor_0", tensor0)
+            write_item_2 = _create_write_item_for_tensor("tensor_1", tensor1)
+
+            state_dict = {"tensor_0": tensor0, "tensor_1": tensor1}
+
+            save_plan = SavePlan(
+                [write_item_1, write_item_2],
+                storage_data={"shard_index": 1},
+            )
+            save_planner = DefaultSavePlanner()
+            save_planner.set_up_planner(state_dict=state_dict)
+
+            write_results = writer.write_data(save_plan, save_planner)
+
+            write_results.wait()
+            actual_write_results = write_results.value()
+
+            expected_write_results = [
+                WriteResult(
+                    index=MetadataIndex(
+                        fqn="tensor_0", offset=torch.Size([0]), index=None
+                    ),
+                    size_in_bytes=tensor0.numel() * tensor0.element_size(),
+                    storage_data=_StorageInfo(
+                        relative_path="shard-00001-model-00001-of-00001.safetensors",
+                        offset=0,
+                        length=tensor0.numel() * tensor0.element_size(),
+                    ),
+                ),
+                WriteResult(
+                    index=MetadataIndex(
+                        fqn="tensor_1", offset=torch.Size([0]), index=None
+                    ),
+                    size_in_bytes=tensor1.numel() * tensor1.element_size(),
+                    storage_data=_StorageInfo(
+                        relative_path="shard-00001-model-00001-of-00001.safetensors",
                         offset=0,
                         length=tensor1.numel() * tensor1.element_size(),
                     ),
@@ -160,7 +224,6 @@ class TestHfStorage(TestCase):
 
             writer = _HuggingFaceStorageWriter(
                 path=path,
-                fqn_to_index_mapping=_FqnToFileMapping({}),
             )
             writer.fs = FileSystem()
             writer.finish(
