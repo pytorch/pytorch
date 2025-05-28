@@ -92,3 +92,53 @@ def higher_order_cond(
             (), else_node.outputs, nodes=[else_node], name=false_func.name
         ),
     )
+
+
+@onnx_impl(torch.ops.higher_order.scan, no_compile=True)
+def higher_order_scan(
+    body_func: ir.Function,
+    scan_inits: Sequence[ir.Value],
+    scan_inputs: Sequence[ir.Value],
+    additional_inputs: Optional[Sequence[ir.Value]] = None,
+    reverse: bool = False,
+) -> Sequence[ir.Value]:
+    node_inputs = [
+        *[
+            # inputs are clone to make sure they have different names
+            # from additional inputs which could be the same:
+            # one input can be a scanned input and an additional input
+            ir.node("Identity", [i], num_outputs=1).outputs[0]
+            for i in [*scan_inits, *scan_inputs]
+        ],
+        *(additional_inputs or []),
+    ]
+    body_node = ir.Node(
+        body_func.domain,
+        body_func.name,
+        node_inputs,
+        num_outputs=len(body_func.outputs),
+    )
+
+    # ONNX Runtime complains about duplicate output names if we don't rename them.
+    # But the doesn't seem to be an actual violation of SSA form without renaming.
+    for func_out, out in zip(body_func.outputs, body_node.outputs):
+        out.name = f"{func_out.name}_{body_func.name}"
+
+    n_inputs = len(scan_inits) + len(scan_inputs)
+    n_outputs = len(body_func.outputs) - len(scan_inits)
+    return call_op(
+        "Scan",
+        *scan_inits,
+        *scan_inputs,
+        _num_outputs=len(body_func.outputs),
+        body=ir.Graph(
+            node_inputs[:n_inputs],
+            body_node.outputs,
+            nodes=[body_node],
+            name=body_func.name,
+        ),
+        num_scan_inputs=len(scan_inputs),
+        scan_input_directions=[(1 if reverse else 0) for _ in scan_inputs],
+        scan_output_axes=[0 for _ in range(n_outputs)],
+        scan_output_directions=[(1 if reverse else 0) for _ in range(n_outputs)],
+    )

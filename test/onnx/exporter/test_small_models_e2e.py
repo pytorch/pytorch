@@ -629,6 +629,29 @@ class DynamoExporterTest(common_utils.TestCase):
             [node.op_type for node in onnx_program.model.graph],
         )
 
+    def test_scan_cdist_add(self):
+        def dist(unused: torch.Tensor, x: torch.Tensor, samex: torch.Tensor):
+            sub = samex - x.reshape((1, -1))
+            sq = sub * sub
+            rd = torch.sqrt(sq.sum(axis=1))
+            return [unused.clone(), rd]
+
+        class ScanModel(torch.nn.Module):
+            def forward(self, x):
+                z = torch.tensor([0], dtype=torch.float32)
+                y = x.clone()
+                out = torch.ops.higher_order.scan(dist, [z], [x], additional_inputs=[y])
+                return out[1]
+
+        inputs = (torch.tensor([[1, 2, 3, -1], [4, 5, 6, -1], [7, 8, 9, -1]], dtype=torch.float32),)
+        # This step is used to save the graph, it produces
+        # until there is a mechanism in assert_onnx_program which
+        # lets the developer dump the onnx models it produces.
+        # ep = torch.onnx.export(ScanModel(), inputs, dynamo=True)
+        # ep.save("debug.onnx")
+        onnx_program = self.export(ScanModel(), inputs)
+        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
