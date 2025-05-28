@@ -1258,8 +1258,8 @@ def _broadcast_in_dim_meta(
     a: TensorLikeType, shape: ShapeType, broadcast_dimensions: Sequence[int]
 ):
     from torch.fx.experimental.symbolic_shapes import (
-        guard_or_true,
         guard_or_false,
+        guard_or_true,
         sym_or,
     )
 
@@ -1305,11 +1305,14 @@ def _broadcast_in_dim_meta(
                 else:
                     new_strides.append(0)
             else:
-                torch._check(a.shape[original_idx] == shape[idx])
+                torch._check(
+                    a.shape[original_idx] == shape[idx],
+                    lambda: f"non-broadcasting semantics require {a.shape[original_idx]} == {shape[idx]}",
+                )
                 new_strides.append(a.stride()[original_idx])
             original_idx = original_idx + 1
         else:
-            if guard_or_true(shape[idx] != 1):
+            if guard_or_true(shape[idx] != 1):  # consistent with previous use of guard_size_oblivious
                 new_strides.append(0)
             elif original_idx == a.ndim:
                 new_strides.append(1)
