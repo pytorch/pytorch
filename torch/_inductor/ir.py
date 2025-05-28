@@ -88,6 +88,7 @@ from .utils import (
     convert_shape_to_inductor,
     convert_shape_to_symint,
     developer_warning,
+    dtype_from_size,
     get_dtype_size,
     get_kernel_metadata,
     GPU_ALIGN_BYTES,
@@ -100,7 +101,6 @@ from .utils import (
     sympy_product,
     sympy_subs,
     tensor_is_aligned,
-    dtype_from_size,
 )
 from .virtualized import ops, OpsValue, V
 
