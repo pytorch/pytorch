@@ -187,8 +187,14 @@ static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t line
       if(firstColumn != 0) {
         fmt::print(stream, "\n");
       }
-      fmt::print(stream, "Columns {} to {}", firstColumn+1, lastColumn+1);
-      fmt::print(stream, "{:>{}s}", "", indent);
+      fmt::print(
+          stream,
+          "Columns {} to {}{:>{}s}",
+          firstColumn + 1,
+          lastColumn + 1,
+          "",          // empty string to pad
+          indent       // width to pad to
+      );
     }
 
     if(printFmt.scale != 1) {
@@ -295,8 +301,10 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
   }
 
   if(tensor.ndimension() == 0) {
-    fmt::print(stream, "{}\n", tensor.const_data_ptr<double>()[0]);
-    fmt::print(stream, "[ {}{{}}", tensor_.toString());
+    fmt::print(stream,
+          "{}\n[ {}{{}}",
+          tensor.const_data_ptr<double>()[0],
+          tensor_.toString());
   } else if(tensor.ndimension() == 1) {
     if (tensor.numel() > 0) {
       auto printFmt = __printFormat(tensor);
