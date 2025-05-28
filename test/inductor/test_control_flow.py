@@ -465,7 +465,6 @@ class CondTests(TestCase):
                 dynamic=True,
             )
 
-    @unittest.skip("unbacked symints from inner to outer graph not supported yet")
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_unbacked_symint_inner_to_outer(self, device):
