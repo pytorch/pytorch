@@ -21,6 +21,7 @@ from torch.torch_version import TorchVersion
 
 from .. import config as inductor_config, ir
 from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
+from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphTemplate
 from ..ir import FlexibleLayout, is_triton
@@ -228,6 +229,8 @@ mm_template = TritonTemplate(
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
 """
     ),
+    cache_codegen_enabled_for_template=True,
+    prologue_loads_all_inputs=True,
 )
 
 persistent_tma_mm_template = TritonTemplate(
@@ -674,8 +677,21 @@ def tuned_mm(mat1, mat2, *, layout=None):
                     **mm_options(config, m, n, k, layout),
                     **persistent_mm_options(mat1, mat2),
                 )
+
+        from torch._inductor.ir import get_free_symbols
+
         # Only do split-k optimization if K is much larger than m, n and m, n are small
-        if use_decompose_k_choice(m, n, k):
+        # and if there aren't any unbacked symbols
+        unbacked_symbols = any(
+            len(get_free_symbols(itr, unbacked_only=True)) > 0
+            for itr in (
+                mat1.get_size(),
+                mat1.get_stride(),
+                mat2.get_size(),
+                mat2.get_stride(),
+            )
+        )
+        if use_decompose_k_choice(m, n, k) and not unbacked_symbols:
             from torch._dispatch.python import enable_python_dispatcher
 
             from ..decomposition import select_decomp_table
@@ -709,6 +725,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
+        CKTileGemmTemplate.add_choices(choices, layout, [mat1, mat2])
 
     if use_cpp_gemm_template(layout, mat1, mat2):
         CppGemmTemplate.add_choices(
@@ -1169,6 +1186,14 @@ def tuned_scaled_mm(
                 suffix_args=suffix_args,
                 epilogue_fn=scale_mm_epilogue(),
             )
+
+    if is_nonzero and use_cutlass_template(layout, m, n, k):
+        if use_fast_accum:
+            log.warning(
+                "use_fast_accum=True is not supported by cutlass template, skipping cutlass choices"
+            )
+        else:
+            CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, input_nodes)  # type: ignore[arg-type]
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, input_nodes)

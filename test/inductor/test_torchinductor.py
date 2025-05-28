@@ -2558,7 +2558,7 @@ class CommonTemplate:
         self.common(fn, (torch.ones(32, 32) * 70,))
 
     @skip_if_halide
-    @xfail_if_mps
+    @xfail_if_mps_unimplemented  # aten::_cummin_helper is not implemented for MPS
     def test_cummin(self):
         def fn(x):
             return x.cummin(0)
@@ -4858,18 +4858,16 @@ class CommonTemplate:
 
     @xfail_if_mps_unimplemented
     def test_fractional_max_pool2d2(self):
-        # fallback for larger kernel size
+        # large kernel size without unrolling
 
         def fn(x, samples):
             return aten.fractional_max_pool2d(x, (6, 5), (3, 3), samples)
 
-        torch._inductor.metrics.generated_kernel_count = 0
         self.common(
             fn,
             (torch.randn(2, 4, 36, 36), torch.rand(2, 4, 2)),
             check_lowp=False,
         )
-        assertGeneratedKernelCountEqual(self, 0)
 
     @xfail_if_mps_unimplemented
     def test_fractional_max_pool2d3(self):
@@ -6669,7 +6667,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
             )
 
-    @xfail_if_mps_unimplemented
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     def test_deterministic_codegen(self):
@@ -6720,7 +6717,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
-    @xfail_if_mps
     def test_deterministic_codegen_on_graph_break(self):
         if "cpu" in str(self.device) and config.is_fbcode():
             raise unittest.SkipTest("cpp packaging is wacky in fbcode")
@@ -6741,7 +6737,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
-    @xfail_if_mps
     def test_deterministic_codegen_with_suffix(self):
         if "cpu" in str(self.device) and config.is_fbcode():
             raise unittest.SkipTest("cpp packaging is wacky in fbcode")
@@ -12760,8 +12755,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(forward, (a, b))
 
-    @xfail_if_mps_unimplemented
     def test_isin_tensor_scalar(self):
+        if self.device == "mps" and MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("isin is not implemented on MacOS-13")
+
         for invert in [True, False]:
             torch._dynamo.reset()
             elements = 1
@@ -12794,7 +12791,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(forward, ())
 
-    @xfail_if_mps
     def test_flip_cat(self):
         def forward(unsqueeze, unsqueeze_1):
             cat_1 = torch.ops.aten.cat.default([unsqueeze, unsqueeze_1], 1)
@@ -13070,6 +13066,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         foo = torch.compile(foo)
         foo()
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_mutation_real_name(self):
+        def f(x, y, z, other):
+            mul = x * y
+            diag = torch.diagonal(mul)
+            diag.copy_(other)
+            # force grah partition by device copy
+            u = diag.cpu().to(self.device)
+            return torch.mm(mul, z) + u + diag
+
+        inps = (
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, device=self.device),
+        )
+
+        eager_out = f(*inps)
+        compiled_f = torch.compile(f)
+        compiled_out = compiled_f(*inps)
+        torch.testing.assert_close(eager_out, compiled_out)
 
     @torch._inductor.config.patch("graph_partition", True)
     def test_graph_partition_arange1(self):
