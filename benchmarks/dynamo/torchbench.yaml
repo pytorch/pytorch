@@ -48,7 +48,10 @@ tolerance:
     - doctr_reco_predictor
     - drq
     - hf_Whisper
+    # The following 3 are due to CUDA 12.8 upgrade
     - phlippe_resnet
+    - functorch_dp_cifar10
+    - mobilenetv3_large_100
 
   higher_bf16:
     - doctr_reco_predictor
