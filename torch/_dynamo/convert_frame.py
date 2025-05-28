@@ -39,9 +39,11 @@ import time
 import traceback
 import typing
 import weakref
+from dataclasses import dataclass
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
 from typing import Any, Callable, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
 import torch
@@ -70,7 +72,6 @@ from torch.utils._python_dispatch import (
     is_in_torch_dispatch_mode,
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
-from typing_extensions import ParamSpec
 
 from . import config, decorators, exc, graph_break_hints, trace_rules
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
@@ -264,9 +265,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 return fn(*args, **kwargs)
             finally:
                 cleanup.close()
-                assert (
-                    torch._C._len_torch_function_stack() == 0
-                ), "Torch function mode stack state changed while dynamo tracing, please report a bug"
+                assert torch._C._len_torch_function_stack() == 0, (
+                    "Torch function mode stack state changed while dynamo tracing, please report a bug"
+                )
                 exit_stack.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
@@ -285,9 +286,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                     torch.cuda.set_rng_state(cuda_rng_state)
                 torch._C._set_cublas_allow_tf32(allow_tf32)
                 torch.fx.graph_module._forward_from_src = prior_fwd_from_src
-                assert (
-                    guards.check()
-                ), f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
+                assert guards.check(), (
+                    f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
+                )
 
     _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
     return _fn
@@ -469,6 +470,11 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
     return profile_wrapper
 
 
+@dataclass
+class TracerBox:
+    item: Optional[InstructionTranslator] = None
+
+
 class ConvertFrameAssert:
     def __init__(
         self,
@@ -483,6 +489,8 @@ class ConvertFrameAssert:
         self._one_graph = one_graph
         self._export = export
         self._export_constraints = export_constraints
+        # gives access to final tracer after compilation is complete/errors out
+        self._tracer_box = TracerBox()
 
     @property
     def _clone_with_backend(self) -> Callable[[CompilerFn], ConvertFrameAssert]:
@@ -638,6 +646,7 @@ class ConvertFrameAssert:
                 frame_state=frame_state,
                 compile_id=compile_id,
                 skip=skip + 1,
+                tracer_box=self._tracer_box,
             )
 
 
@@ -691,6 +700,7 @@ def _compile(
     *,
     compile_id: CompileId,
     skip: int = 0,
+    tracer_box: Optional[TracerBox] = None,
 ) -> ConvertFrameReturn:
     from torch.fx.experimental.validator import (
         bisect,
@@ -847,13 +857,16 @@ def _compile(
                     code.co_filename,
                     code.co_firstlineno,
                 )
-                if one_graph or config.error_on_graph_break:
-                    log.debug("No graph captured with one_graph=True or torch._dynamo.config.error_on_graph_break=True")
+                assert tracer
+                if one_graph or tracer.error_on_graph_break:
+                    log.debug(
+                        "No graph captured with one_graph=True or torch._dynamo.config.error_on_graph_break=True"
+                    )
                 return ConvertFrameReturn()
 
-        assert (
-            distributed_state is None or distributed_state.all_states is not None
-        ), "compiler collective wasn't run before compilation completed"
+        assert distributed_state is None or distributed_state.all_states is not None, (
+            "compiler collective wasn't run before compilation completed"
+        )
 
         assert out_code is not None
         log_bytecode(
@@ -1001,11 +1014,12 @@ def _compile(
                 recompile_reason,
                 troubleshooting_url,
             )
+            assert tracer
             if config.fail_on_recompile_limit_hit:
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached, because fail_on_recompile_limit_hit = True this is a HARD failure"
                 )
-            elif one_graph or config.error_on_graph_break:
+            elif one_graph or tracer.error_on_graph_break:
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached with one_graph=True or torch._dynamo.config.error_on_graph_break=True. "
                     "Excessive recompilations can degrade "
@@ -1214,23 +1228,25 @@ def _compile(
             metrics_context.update_outer(metrics)
             # === END WARNING WARNING WARNING ===
 
+            if tracer_box:
+                tracer_box.item = tracer
+
 
 class ConvertFrame:
     def __init__(
         self,
         compiler_fn: CompilerFn,
         hooks: Hooks,
-        error_on_graph_break: bool,
     ) -> None:
         self._torchdynamo_orig_callable = compiler_fn
         self._inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
         self._hooks = hooks
-        self._error_on_graph_break = error_on_graph_break
 
     @property
     def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
         return lambda backend: convert_frame(
-            backend, self._hooks, self._error_on_graph_break
+            backend,
+            self._hooks,
         )
 
     def __call__(
@@ -1243,105 +1259,108 @@ class ConvertFrame:
     ) -> ConvertFrameReturn:
         input_codes.add(frame.f_code)
         counters["frames"]["total"] += 1
-        with decorators.set_fullgraph(fullgraph=self._error_on_graph_break):
-            try:
-                result = self._inner_convert(
-                    frame, cache_entry, hooks, frame_state, skip=skip + 1
+        try:
+            result = self._inner_convert(
+                frame, cache_entry, hooks, frame_state, skip=skip + 1
+            )
+            counters["frames"]["ok"] += 1
+            return result
+        except Exception as e:
+            if tracer := self._inner_convert._tracer_box.item:
+                # tracer.error_on_graph_break reflects value of config.error_on_graph_break
+                # at the time of the graph break - config.error_on_graph_break may have been (correctly)
+                # changed during cleanup.
+                if tracer.error_on_graph_break:
+                    raise
+            elif config.error_on_graph_break:
+                # Instruction translator never ran - default back to config.error_on_graph_break
+                raise
+
+            # These two exception types are "soft" failure, in the sense that
+            # we know this is due to something we didn't implement all the
+            # way, scare the user less about it.  That being said, if you
+            # are trying to understand why a graph break happened, it's still
+            # important to have this information, so offer it.
+            #
+            # NB: NotImplementedError used to be on this list, but actually
+            # it is impossible for it to reach here, as it is converted into
+            # InternalTorchDynamoError.  This behavior seemed reasonable
+            # to me (ezyang, Aug 2023) so I kept it, but maybe at some point
+            # someone wanted these to also get suppressed.  If so, you'll
+            # need to make these exceptions not get wrapped
+
+            # We intentionally don't want to suppress error here.
+            if isinstance(e, UncapturedHigherOrderOpError):
+                raise
+
+            soft_fail = isinstance(e, Unsupported)
+
+            # This is a soft failure. In the sense, the code path reaches here
+            # when we do not support graph breaks on bytecodes like LOAD_ATTR,
+            # BUILD_SET etc. In such case, we can fallback to eager without
+            # scaring users.
+            if soft_fail and graph_break_log.isEnabledFor(logging.DEBUG):
+                # Log this message in the graph break. Also use the string
+                # "skip: " to tell that the whole frame is falling back to
+                # eager.
+                if hasattr(e, "compile_id") and hasattr(e, "real_stack"):
+                    with compile_context(CompileContext(e.compile_id)):  # type: ignore[attr-defined]
+                        user_stack = e.real_stack
+                        user_stack_formatted = "".join(
+                            traceback.format_list(user_stack)
+                        )
+                        user_stack_trace = f"Graph break: skip: from user code at:\n{user_stack_formatted}"
+                        torch._logging.trace_structured(
+                            "artifact",
+                            metadata_fn=lambda: {
+                                "name": "dynamo_graph_break_reason",
+                                "encoding": "string",
+                            },
+                            payload_fn=lambda: f"{user_stack_trace}\n{traceback.format_exc()}",
+                        )
+                        graph_break_log.debug(
+                            user_stack_trace,
+                            exc_info=True,
+                        )
+
+            if not config.suppress_errors and not soft_fail:
+                raise
+
+            # Suppress the error.  NB: It's very important to do the
+            # suppression logging HERE, where the actual suppression
+            # happens. Previously it was somewhere else and so it was
+            # possible to accidentally not log at all.
+            record_filename = getattr(e, "record_filename", None)
+            code = frame.f_code
+            error_msg = format_error_msg(e, code, record_filename, frame)
+
+            if soft_fail:
+                log.info(error_msg, exc_info=True)
+            else:
+                log.warning(error_msg, exc_info=True)
+
+            if isinstance(e, SkipCodeRecursiveException):
+                return ConvertFrameReturn(
+                    frame_exec_strategy=FrameExecStrategy(
+                        FrameAction.SKIP, FrameAction.SKIP
+                    )
                 )
-                counters["frames"]["ok"] += 1
-                return result
-            except Exception as e:
-                if config.error_on_graph_break:
-                    raise
-
-                # These two exception types are "soft" failure, in the sense that
-                # we know this is due to something we didn't implement all the
-                # way, scare the user less about it.  That being said, if you
-                # are trying to understand why a graph break happened, it's still
-                # important to have this information, so offer it.
-                #
-                # NB: NotImplementedError used to be on this list, but actually
-                # it is impossible for it to reach here, as it is converted into
-                # InternalTorchDynamoError.  This behavior seemed reasonable
-                # to me (ezyang, Aug 2023) so I kept it, but maybe at some point
-                # someone wanted these to also get suppressed.  If so, you'll
-                # need to make these exceptions not get wrapped
-
-                # We intentionally don't want to suppress error here.
-                if isinstance(e, UncapturedHigherOrderOpError):
-                    raise
-
-                soft_fail = isinstance(e, Unsupported)
-
-                # This is a soft failure. In the sense, the code path reaches here
-                # when we do not support graph breaks on bytecodes like LOAD_ATTR,
-                # BUILD_SET etc. In such case, we can fallback to eager without
-                # scaring users.
-                if soft_fail and graph_break_log.isEnabledFor(logging.DEBUG):
-                    # Log this message in the graph break. Also use the string
-                    # "skip: " to tell that the whole frame is falling back to
-                    # eager.
-                    if hasattr(e, "compile_id") and hasattr(e, "real_stack"):
-                        with compile_context(CompileContext(e.compile_id)):  # type: ignore[attr-defined]
-                            user_stack = e.real_stack
-                            user_stack_formatted = "".join(
-                                traceback.format_list(user_stack)
-                            )
-                            user_stack_trace = f"Graph break: skip: from user code at:\n{user_stack_formatted}"
-                            torch._logging.trace_structured(
-                                "artifact",
-                                metadata_fn=lambda: {
-                                    "name": "dynamo_graph_break_reason",
-                                    "encoding": "string",
-                                },
-                                payload_fn=lambda: f"{user_stack_trace}\n{traceback.format_exc()}",
-                            )
-                            graph_break_log.debug(
-                                user_stack_trace,
-                                exc_info=True,
-                            )
-
-                if not config.suppress_errors and not soft_fail:
-                    raise
-
-                # Suppress the error.  NB: It's very important to do the
-                # suppression logging HERE, where the actual suppression
-                # happens. Previously it was somewhere else and so it was
-                # possible to accidentally not log at all.
-                record_filename = getattr(e, "record_filename", None)
-                code = frame.f_code
-                error_msg = format_error_msg(e, code, record_filename, frame)
-
-                if soft_fail:
-                    log.info(error_msg, exc_info=True)
-                else:
-                    log.warning(error_msg, exc_info=True)
-
-                if isinstance(e, SkipCodeRecursiveException):
-                    return ConvertFrameReturn(
-                        frame_exec_strategy=FrameExecStrategy(
-                            FrameAction.SKIP, FrameAction.SKIP
-                        )
+            elif isinstance(e, RecompileLimitExceeded):
+                return ConvertFrameReturn(
+                    frame_exec_strategy=FrameExecStrategy(
+                        FrameAction.RUN_ONLY, FrameAction.RUN_ONLY
                     )
-                elif isinstance(e, RecompileLimitExceeded):
-                    return ConvertFrameReturn(
-                        frame_exec_strategy=FrameExecStrategy(
-                            FrameAction.RUN_ONLY, FrameAction.RUN_ONLY
-                        )
-                    )
+                )
 
         return ConvertFrameReturn()
 
 
 def convert_frame(
-    compiler_fn: CompilerFn, hooks: Hooks, error_on_graph_break: bool
+    compiler_fn: CompilerFn,
+    hooks: Hooks,
 ) -> ConvertFrame:
-    """Try to convert a frame into an FX graph, if error leave frame unmodified
-
-    If error_on_graph_break=True, graph breaks become errors (resulting in an unmodified frame).
-    If error_on_graph_break=False, we will attempt to generate optimized and resume functions.
-    """
-    return ConvertFrame(compiler_fn, hooks, error_on_graph_break)
+    """Try to convert a frame into an FX graph, if error leave frame unmodified"""
+    return ConvertFrame(compiler_fn, hooks)
 
 
 # TODO mlazos: add support for same args, or record them
@@ -1462,7 +1481,9 @@ class CatchErrorsWrapper:
                     )
                     assert hasattr(
                         self._torchdynamo_orig_callable, "_clone_with_backend"
-                    ), "DDPOptimizer only supports callback fns that know how to clone themselves."
+                    ), (
+                        "DDPOptimizer only supports callback fns that know how to clone themselves."
+                    )
                     hijacked_callback = (
                         self._torchdynamo_orig_callable._clone_with_backend(
                             ddp_optimizer.compile_fn,
