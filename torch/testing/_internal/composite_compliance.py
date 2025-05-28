@@ -127,7 +127,7 @@ def generate_cct_and_mode(autograd_view_consistency=True):
             # by a Composite operation; if the Composite
             # operator attempts to read from the storage without dispatching then it'll
             # raise a RuntimeError due to it being a meta storage.
-            r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+            r = torch.Tensor._make_wrapper_subclass(
                 cls, elem.size(),
                 dtype=elem.dtype, layout=elem.layout,
                 device=elem.device, requires_grad=elem.requires_grad,
