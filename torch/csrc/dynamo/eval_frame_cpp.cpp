@@ -5,6 +5,7 @@
 #include <torch/csrc/dynamo/eval_frame.h>
 #include <torch/csrc/dynamo/eval_frame_cpp.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
+#include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/utils/python_compat.h>
 
 static constexpr const char* cache_lookup_profiler_str =
@@ -172,6 +173,25 @@ PyObject* dynamo__custom_eval_frame(
 
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
+
+  for (const auto& entry : extra->precompile_entries) {
+    if (torch::dynamo::run_root_guard_manager(entry.root_mgr, locals.get())) {
+      // TODO backend / guard error not handled?
+      // TODO Need to clean up any states?
+      eval_frame_callback_set(recursive_callback.ptr());
+      eval_result = dynamo_eval_custom_code(
+          tstate,
+          frame,
+          (PyCodeObject*)entry.code.ptr(),
+          trace_annotation,
+          throw_flag);
+      if (!callback.is(recursive_callback)) {
+        eval_frame_callback_set(callback.ptr());
+      }
+      clear_old_frame_if_python_312_plus(tstate, frame);
+      return eval_result;
+    }
+  }
 
   _PytorchRecordFunctionState* rf =
       _pytorch_record_function_enter(cache_lookup_profiler_str);
