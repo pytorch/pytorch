@@ -58,6 +58,33 @@ class CustomSetTests(_BaseSetTests):
         self.assertTrue(s.contains(3))
 
 
+class SetWithGeneratorTests(torch._dynamo.test_case.TestCase):
+    def test_isdisjoint_with_generator(self):
+        n = 0
+
+        def gen():
+            nonlocal n
+            n += 1
+            yield 1
+            n += 2
+            yield 2
+            n += 3
+            yield 3
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            nonlocal n
+            s = {2, 4, 5}
+            s.isdisjoint(gen())
+            if n == 3:
+                return x.sin()
+            return x.cos()
+
+        x = torch.randn(1)
+        y = fn(x)
+        self.assertEqual(y, x.sin())
+
+
 class SetGuardsSet(torch._dynamo.test_case.TestCase):
     def test_set_recompile_on_key_pop(self):
         s = {
