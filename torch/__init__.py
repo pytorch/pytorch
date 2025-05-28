@@ -36,7 +36,7 @@ from typing_extensions import ParamSpec as _ParamSpec
 
 
 if TYPE_CHECKING:
-    from .types import IntLikeType
+    from .types import Device, IntLikeType
 
 
 # multipy/deploy is setting this import before importing torch, this is the most
@@ -357,6 +357,7 @@ def _load_global_deps() -> None:
             "cusolver": "libcusolver.so.*[0-9]",
             "nccl": "libnccl.so.*[0-9]",
             "nvtx": "libnvToolsExt.so.*[0-9]",
+            "nvshmem": "libnvshmem_host.so.*[0-9]",
         }
         # cufiile is only available on cuda 12+
         # TODO: Remove once CUDA 11.8 binaries are deprecated
@@ -1154,9 +1155,7 @@ def get_default_device() -> "torch.device":
         return torch.device("cpu")
 
 
-def set_default_device(
-    device: _Optional[_Union["torch.device", str, builtins.int]],
-) -> None:
+def set_default_device(device: "Device") -> None:
     """Sets the default ``torch.Tensor`` to be allocated on ``device``.  This
     does not affect factory function calls which are called with an explicit
     ``device`` argument.  Factory calls will be performed as if they
@@ -2290,19 +2289,30 @@ from torch._linalg_utils import (  # type: ignore[misc]
 from torch.utils.dlpack import from_dlpack, to_dlpack
 
 
-def skip_frame_if_max_graphs() -> None:
+def check_max_graphs() -> bool:
     """
     If we have hit a user specified max number of graphs, skip this frame.
+
+    Then, return if we have hit the maximum number of graphs for the given backend
+    before falling back to aot_eager.
     """
     from torch._dynamo.utils import GraphsCompiledState
 
-    max_graphs = os.environ.get("TORCH_BISECT_MAX_GRAPHS", None)
-    if max_graphs is None:
-        return
+    max_compiled_graphs = torch._dynamo.config.debug_max_graphs
+    max_backend_graphs = torch._dynamo.config.debug_max_backend_graphs
+    if max_compiled_graphs is None and max_backend_graphs is None:
+        return None
 
-    GraphsCompiledState.increment()
-    if GraphsCompiledState.get_num_graphs() > builtins.int(max_graphs):
-        raise torch._dynamo.exc.SkipFrame(f"Hit max graph limit: {max_graphs}")
+    num_graphs = GraphsCompiledState.increment()
+    num_graphs = GraphsCompiledState.get_num_graphs()
+    if max_compiled_graphs is not None and num_graphs > builtins.int(
+        max_compiled_graphs
+    ):
+        raise torch._dynamo.exc.SkipFrame(f"Hit max graph limit: {max_compiled_graphs}")
+
+    return max_backend_graphs is not None and num_graphs > builtins.int(
+        max_backend_graphs
+    )
 
 
 class _TorchCompileInductorWrapper:
@@ -2377,7 +2387,11 @@ class _TorchCompileInductorWrapper:
     def __call__(self, model_, inputs_):
         from torch._inductor.compile_fx import compile_fx
 
-        skip_frame_if_max_graphs()
+        if check_max_graphs():
+            return _TorchCompileWrapper(
+                "aot_eager", "default", {}, self.dynamic
+            ).__call__(model_, inputs_)
+
         return compile_fx(model_, inputs_, config_patches=self.config)
 
     def get_compiler_config(self):
@@ -2423,7 +2437,7 @@ class _TorchCompileWrapper:
         )
 
     def __call__(self, model_, inputs_):
-        skip_frame_if_max_graphs()
+        check_max_graphs()
         return self.compiler_fn(model_, inputs_, **self.kwargs)
 
     def reset(self):
@@ -2466,7 +2480,7 @@ def compile(
 
 
 def compile(
-    model: _Optional[_Callable] = None,
+    model: _Optional[_Callable[_InputT, _RetT]] = None,
     *,
     fullgraph: builtins.bool = False,
     dynamic: _Optional[builtins.bool] = None,
@@ -2497,7 +2511,7 @@ def compile(
     function, they will all share the same code cache.
 
     Args:
-       model (Callable): Module/function to optimize
+       model (Callable or None): Module/function to optimize
        fullgraph (bool): If False (default), torch.compile attempts to discover compileable regions
         in the function that it will optimize. If True, then we require that the entire function be
         capturable into a single graph. If this is not possible (that is, if there are graph breaks),

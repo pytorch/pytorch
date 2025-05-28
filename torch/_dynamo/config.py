@@ -243,6 +243,14 @@ repro_ignore_non_fp = os.environ.get("TORCHDYNAMO_REPRO_IGNORE_NON_FP") == "1"
 # [@compile_ignored: runtime_behaviour]
 same_two_models_use_fp64 = True
 
+# maximum number of dynamo graphs to compile.
+# if we exceed this limit, we will raise a SkipFrame
+debug_max_graphs = os.environ.get("TORCH_BISECT_MAX_GRAPHS", None)
+
+# maximum number of dynamo graphs to invoke with compiled bakcend
+# if we exeed this limit, we will defer to aot_eager
+debug_max_backend_graphs = os.environ.get("TORCH_BISECT_MAX_BACKEND_GRAPHS", None)
+
 # Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
 # When this flag is set to False, we introduce a graph break instead of capturing.
 # This requires dynamic_shapes to be True.
@@ -286,7 +294,7 @@ allow_unspec_int_on_nn_module = False
 
 # Specify how to optimize a compiled DDP module. The flag accepts a boolean
 # value or a string. There are 3 modes.
-# 1. "ddp_optimizer" (or True): with "ddp_ptimizer", Dynamo will automatically
+# 1. "ddp_optimizer" (or True): with "ddp_optimizer", Dynamo will automatically
 # split model graph into pieces to match DDP bucket sizes to allow DDP
 # comm/compute overlap.
 # 2. "python_reducer" (experimental): this optimization requires the usage

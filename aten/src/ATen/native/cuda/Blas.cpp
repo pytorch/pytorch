@@ -346,7 +346,15 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   static bool disable_addmm_cuda_lt = getDisableAddmmCudaLt();
 #endif
   // if lt path fails, we recurse back into this function here and force the lt path to off
-  disable_addmm_cuda_lt |= disable_addmm_cuda_lt_override;
+  // we cannot update varible disable_addmm_cuda_lt from above since it is static and would be permanent
+  bool disable_addmm_cuda_lt_final = disable_addmm_cuda_lt || disable_addmm_cuda_lt_override;
+#if defined(USE_ROCM) && ROCM_VERSION == 60400
+  // hipblaslt TT fp32 regression on ROCm 6.4, cannot use
+  cublasCommonArgs _args(mat1, mat2, result);
+  if (_args.transa == 't' && _args.transb == 't') {
+    disable_addmm_cuda_lt_final = true;
+  }
+#endif
   at::ScalarType scalar_type = mat1.scalar_type();
   bool is_float_output_with_half_input = (scalar_type == at::ScalarType::Half || scalar_type == at::ScalarType::BFloat16) && result.scalar_type() == at::ScalarType::Float;
   c10::MaybeOwned<Tensor> self_;
@@ -360,8 +368,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     // the last two conditions is to skip 16b transA and non-trans-B having
     // leading dim >> rows when they are sliced from a large tensor
     // see fbcode/caffe2/test/test_linalg.py:test_corner_cases_of_cublasltmatmul
-    if (!disable_addmm_cuda_lt) {
-      useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
+    if (!disable_addmm_cuda_lt_final) {
+      useLtInterface = self.dim() == 1 &&
           result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
           self.is_contiguous() && result.is_contiguous() &&
 #ifdef USE_ROCM
@@ -459,9 +467,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               alpha,
               (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
               activation_to_gemm_and_blas_arg(activation));
-        }
-
-        okay = at::cuda::blas::gemm_and_bias<scalar_t>(
+        } else {
+          okay = at::cuda::blas::gemm_and_bias<scalar_t>(
             args.transa == 't',
             args.transb == 't',
             args.m,
@@ -478,7 +485,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
             args.result->data_ptr<scalar_t>(),
             args.result_ld,
             activation_to_gemm_and_blas_arg(activation)
-        );
+          );
+        }
       });
     }
     if (!okay) {

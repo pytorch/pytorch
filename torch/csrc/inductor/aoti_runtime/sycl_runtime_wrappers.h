@@ -18,10 +18,17 @@
   }
 
 static ze_module_handle_t create_module(
-    ze_context_handle_t context,
-    ze_device_handle_t device,
     const uint8_t* binary_ptr,
     size_t binary_size) {
+  sycl::device& sycl_device =
+      c10::xpu::get_raw_device(c10::xpu::current_device());
+  auto sycl_context =
+      sycl_device.get_platform().ext_oneapi_get_default_context();
+  auto l0_device =
+      sycl::get_native<sycl::backend::ext_oneapi_level_zero>(sycl_device);
+  auto l0_context =
+      sycl::get_native<sycl::backend::ext_oneapi_level_zero>(sycl_context);
+
   const char* build_flags = "";
   const ze_module_format_t format = ZE_MODULE_FORMAT_IL_SPIRV;
   ze_module_desc_t module_description = {};
@@ -32,11 +39,9 @@ static ze_module_handle_t create_module(
   module_description.pBuildFlags = build_flags;
   ze_module_build_log_handle_t buildlog = nullptr;
   ze_module_handle_t module = nullptr;
-  auto context_initial = context;
-  auto device_initial = device;
   auto error_no = ZE_RESULT_SUCCESS;
-  error_no =
-      zeModuleCreate(context, device, &module_description, &module, &buildlog);
+  error_no = zeModuleCreate(
+      l0_context, l0_device, &module_description, &module, &buildlog);
 
   if (error_no != ZE_RESULT_SUCCESS) {
     size_t szLog = 0;
@@ -66,28 +71,6 @@ ze_kernel_handle_t create_function(
   assert(module);
   ZE_CHECK(zeKernelCreate(module, &kernel_description, &kernel));
   return kernel;
-}
-
-static ze_module_handle_t loadModule(std::string& spv_path) {
-  sycl::device& sycl_device =
-      c10::xpu::get_raw_device(c10::xpu::current_device());
-  auto sycl_context =
-      sycl_device.get_platform().ext_oneapi_get_default_context();
-  auto l0_device =
-      sycl::get_native<sycl::backend::ext_oneapi_level_zero>(sycl_device);
-  auto l0_context =
-      sycl::get_native<sycl::backend::ext_oneapi_level_zero>(sycl_context);
-
-  std::ifstream IFS(spv_path.c_str(), std::ios::binary);
-  std::ostringstream OSS;
-  OSS << IFS.rdbuf();
-  std::string data(OSS.str());
-
-  return create_module(
-      l0_context,
-      l0_device,
-      reinterpret_cast<const uint8_t*>(data.c_str()),
-      data.size());
 }
 
 static std::unique_ptr<sycl::kernel> getKernel(
@@ -125,7 +108,28 @@ static std::unique_ptr<sycl::kernel> getKernel(
     std::filesystem::path p2{filePath};
     filePath = (p1 / p2.filename()).string();
   }
-  auto mod = loadModule(filePath);
+
+  std::ifstream IFS(filePath.c_str(), std::ios::binary);
+  std::ostringstream OSS;
+  OSS << IFS.rdbuf();
+  std::string data(OSS.str());
+
+  auto mod = create_module(
+      reinterpret_cast<const uint8_t*>(data.c_str()), data.size());
+
+  return getKernel(mod, funcName.c_str());
+}
+
+[[maybe_unused]] static std::unique_ptr<sycl::kernel> loadKernel(
+    const void* start,
+    const void* end,
+    const std::string& funcName,
+    uint32_t sharedMemBytes) {
+  size_t size = reinterpret_cast<const uint8_t*>(end) -
+      reinterpret_cast<const uint8_t*>(start);
+
+  auto mod = create_module(reinterpret_cast<const uint8_t*>(start), size);
+
   return getKernel(mod, funcName.c_str());
 }
 
