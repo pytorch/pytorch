@@ -421,6 +421,7 @@ std::shared_ptr<AOTIModelContainerRunner> AOTIPythonKernelHolder::
       "AOTI for eager does not support ",
       c10::DeviceTypeName(device_.type()),
       " now.");
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   if (device_.type() == c10::DeviceType::CUDA) {
 #ifdef USE_CUDA
     return std::make_shared<AOTIModelContainerRunnerCuda>(so_path);
