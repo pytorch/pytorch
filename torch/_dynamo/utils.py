@@ -4549,6 +4549,11 @@ class CompileTimeInstructionCounter:
                 cls.end()
 
 
+class CompileCounterInt(int):
+    def __add__(self, other):
+        return CompileCounterInt(super().__add__(other))
+
+
 def set_feature_use(feature: str, usage: bool):
     """
     Records whether we are using a feature
