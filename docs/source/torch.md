@@ -37,15 +37,15 @@
 ```{note}
 Random sampling creation ops are listed under {ref}`random-sampling` and
     include:
-    :func:`torch.rand`
-    :func:`torch.rand_like`
-    :func:`torch.randn`
-    :func:`torch.randn_like`
-    :func:`torch.randint`
-    :func:`torch.randint_like`
-    :func:`torch.randperm`
-    You may also use :func:`torch.empty` with the {ref}`inplace-random-sampling`
-    methods to create :class:`torch.Tensor` s with values sampled from a broader
+    {func}`torch.rand`
+    {func}`torch.rand_like`
+    {func}`torch.randn`
+    {func}`torch.randn_like`
+    {func}`torch.randint`
+    {func}`torch.randint_like`
+    {func}`torch.randperm`
+    You may also use {func}`torch.empty` with the {ref}`inplace-random-sampling`
+    methods to create {class}`torch.Tensor` s with values sampled from a broader
     range of distributions.
 ```
 
@@ -152,9 +152,9 @@ Random sampling creation ops are listed under {ref}`random-sampling` and
 
 (accelerators)=
 ## Accelerators
-Within the PyTorch repo, we define an "Accelerator" as a :class:`torch.device` that is being used
+Within the PyTorch repo, we define an "Accelerator" as a {class}`torch.device` that is being used
 alongside a CPU to speed up computation. These device use an asynchronous execution scheme,
-using :class:`torch.Stream` and :class:`torch.Event` as their main way to perform synchronization.
+using {class}`torch.Stream` and {class}`torch.Event` as their main way to perform synchronization.
 We also assume that only one such accelerator can be available at once on a given host. This allows
 us to use the current accelerator as the default device for relevant concepts such as pinned memory,
 Stream device_type, FSDP, etc.
@@ -165,10 +165,10 @@ As of today, accelerator devices are (in no particular order) {doc}`"CUDA" <cuda
 Many tools in the PyTorch Ecosystem use fork to create subprocesses (for example dataloading
 or intra-op parallelism), it is thus important to delay as much as possible any
 operation that would prevent further forks. This is especially important here as most accelerator's initialization has such effect.
-In practice, you should keep in mind that checking :func:`torch.accelerator.current_accelerator`
+In practice, you should keep in mind that checking {func}`torch.accelerator.current_accelerator`
 is a compile-time check by default, it is thus always fork-safe.
 On the contrary, passing the ``check_available=True`` flag to this function or calling
-:func:`torch.accelerator.is_available()` will usually prevent later fork.
+{func}`torch.accelerator.is_available()` will usually prevent later fork.
 
 Some backends provide an experimental opt-in option to make the runtime availability
 check fork-safe. When using the CUDA device ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` can be
@@ -289,13 +289,13 @@ There are a few more in-place random sampling functions defined on Tensors as we
 
 (torch-rst-local-disable-grad)=
 ## Locally disabling gradient computation
-The context managers :func:`torch.no_grad`, :func:`torch.enable_grad`, and
-:func:`torch.set_grad_enabled` are helpful for locally disabling and enabling
+The context managers {func}`torch.no_grad`, {func}`torch.enable_grad`, and
+{func}`torch.set_grad_enabled` are helpful for locally disabling and enabling
 gradient computation. See {ref}`locally-disable-grad` for more details on
 their usage.  These context managers are thread local, so they won't
 work if you send work to another thread using the ``threading`` module, etc.
 
-Examples::
+Examples:
 ```
 >>> x = torch.zeros(1, requires_grad=True)
 >>> with torch.no_grad():
@@ -339,8 +339,8 @@ False
 ### Constants
 
 ======================================= ===========================================
-``inf``                                     A floating-point positive infinity. Alias for :attr:`math.inf`.
-``nan``                                     A floating-point "not a number" value. This value is not a legal number. Alias for :attr:`math.nan`.
+``inf``                                     A floating-point positive infinity. Alias for {attr}`math.inf`.
+``nan``                                     A floating-point "not a number" value. This value is not a legal number. Alias for {attr}`math.nan`.
 ======================================= ===========================================
 
 ### Pointwise Ops
