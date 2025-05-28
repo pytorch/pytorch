@@ -31,7 +31,6 @@ from .decorators import (
     patch_dynamo_config,
     run,
     set_stance,
-    skip_frame,
     substitute_in_graph,
 )
 from .eval_frame import (
@@ -72,7 +71,6 @@ __all__ = [
     "optimize",
     "optimize_assert",
     "patch_dynamo_config",
-    "skip_frame",
     "export",
     "explain",
     "run",
