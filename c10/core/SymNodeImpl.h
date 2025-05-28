@@ -191,21 +191,21 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
     // No improvement for unbacked SymBools by default, replace this
     // with a better implementation! NB: PT2 primarily uses PythonSymNodeImpl,
     // the only user of this fallback path to my knowledge is XLA, which
-    // is AOT and necessarily can't take a dependency on Python. blah
+    // is AOT and necessarily can't take a dependency on Python.
     return guard_bool(file, line);
   }
   virtual bool statically_known_true(const char* file, int64_t line) {
     // No improvement for unbacked SymBools by default, replace this
     // with a better implementation! NB: PT2 primarily uses PythonSymNodeImpl,
     // the only user of this fallback path to my knowledge is XLA, which
-    // is AOT and necessarily can't take a dependency on Python. blah
+    // is AOT and necessarily can't take a dependency on Python.
     return guard_bool(file, line);
   }
   virtual bool guard_or_true(const char* file, int64_t line) {
     // No improvement for unbacked SymBools by default, replace this
     // with a better implementation! NB: PT2 primarily uses PythonSymNodeImpl,
     // the only user of this fallback path to my knowledge is XLA, which
-    // is AOT and necessarily can't take a dependency on Python. blah
+    // is AOT and necessarily can't take a dependency on Python.
     return guard_bool(file, line);
   }
   virtual bool expect_true(const char* file, int64_t line) {
