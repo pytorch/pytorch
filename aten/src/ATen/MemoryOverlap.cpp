@@ -9,6 +9,11 @@ MemOverlap has_internal_overlap(const TensorBase& tensor) {
   return has_internal_overlap(tensor.unsafeGetTensorImpl());
 }
 
+// For tensors with unbacked sizes, this function can report an overlap even
+// if for some concrete inputs there was no overlap. Namely if a tensor of size u0
+// has strides 0. Then the function returns MemOverlap::Yes. Which is true for
+// most tensors represented with size u0, except when u0 is 0.
+// The function can be thought of for that case as probably_overlap.
 MemOverlap has_internal_overlap(TensorImpl* t) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(t->layout() == kStrided);
 
@@ -35,7 +40,11 @@ MemOverlap has_internal_overlap(TensorImpl* t) {
     // SymInts.  Thus, if I have u0 size, we should assume that this has > 1
     // elements (first expression), but if I have a u0 stride, I should NOT
     // assume that it is not zero (second expression)
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(sizes[i].sym_gt(1)) && strides[i] == 0) {
+
+   // Using TORCH_GUARD_OR_TRUE because it preserves existing previous 
+   // TORCH_GUARD_SIZE_OBLIVIOUS(sizes[i].sym_gt(1)) semantics.i.e.: if 
+   // size[i] is unbacked then assume that it's not zero.
+    if (TORCH_GUARD_OR_TRUE(sizes[i].sym_gt(1)) && strides[i] == 0) {
       return MemOverlap::Yes;
     }
   }

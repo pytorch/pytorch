@@ -108,6 +108,9 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
   AT_ASSERT(device() == values_.device());
   AT_ASSERT(values_.device() == indices_.device());
 
+  // For tensors with unbacked sizes coalesced_ will be set to False even if for
+  // some inputs
+  // it is
   coalesced_ = TORCH_GUARD_SIZE_OBLIVIOUS(sym_nnz().sym_lt(2));
 }
 

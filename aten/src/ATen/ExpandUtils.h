@@ -461,8 +461,17 @@ inline Tensor _sum_to(
     reduce_dims.push_back(i);
   }
   for (int64_t i = leading_dims; i < static_cast<int64_t>(sizes.size()); ++i) {
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(shape[i - leading_dims], 1)) &&
-        TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(sizes[i], 1))) {
+    // TODO we do need to add runtime assertion here? we did not previously! 
+    // ideal is this if we do not know if sym_eq(shape[i - leading_dims], 1) 
+    // is true then we should add a runtime assertion that 
+    // sizes[i] == shape[i - leading_dims] . 
+    // 1) both ones --> no reduction
+    // 2) one is one, the other is not --> reduction
+    // 3) both are not ones --> reduction
+    // TODO add runtime assertion here, curretn change generalize current semantics but not ideal.
+
+    if (TORCH_GUARD_OR_FALSE(sym_eq(shape[i - leading_dims], 1)) && // do not do the reduction if shape[i - leading_dims] is unknown.
+         TORCH_GUARD_OR_TRUE(sym_ne(sizes[i], 1))) { // always do the reduction if shape[i - leading_dims] is known 1 and sizes[i] is not known.
       reduce_dims.push_back(i);
     }
   }

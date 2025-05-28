@@ -124,11 +124,12 @@ class TORCH_API TensorBase {
   }
 
   TensorBase contiguous(MemoryFormat memory_format=MemoryFormat::Contiguous) const {
-    if (is_contiguous(memory_format)) {
-      return *this;
-    } else {
+    // Use definetly_contiguous
+    // if (is_contiguous(memory_format)) {
+    //   return *this;
+    // } else {
       return __dispatch_contiguous(memory_format);
-    }
+    // }
   }
 
   /// Should be used if *this can reasonably be expected to be contiguous and

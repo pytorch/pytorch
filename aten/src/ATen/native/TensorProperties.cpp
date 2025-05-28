@@ -113,9 +113,10 @@ Tensor& detach_(Tensor& self) {
 }
 
 Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
-  if (self.is_contiguous(memory_format)) {
-    return self;
-  }
+  // USe definitely_contiguous
+  // if (self.is_contiguous(memory_format)) {
+  //   return self;
+  // }
   TORCH_CHECK(
       memory_format != MemoryFormat::Preserve,
       "preserve memory format is unsupported by the contiguous operator");

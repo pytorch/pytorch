@@ -433,7 +433,7 @@ def is_known_channels_last_contiguous(a: Tensor) -> bool:
     ) or is_known_channels_last_contiguous_3d(a)
 
 
-def is_non_overlapping_and_dense(a: Tensor) -> bool:
+def is_non_overlapping_and_dense(a: Tensor, false_if_dde=False) -> bool:
     """
     True when a tensor is non-overlapping and dense.
 
@@ -447,7 +447,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
         return False
 
     # Short-circuits if the tensor is already contiguous or channels-last contiguous
-    if is_contiguous(a) or is_channels_last_contiguous(a):
+    if is_contiguous(a, false_if_dde) or is_channels_last_contiguous(a, false_if_dde):
         return True
 
     # The following is equivalent to compute_non_overlapping_and_dense in TensorImpl.cpp
