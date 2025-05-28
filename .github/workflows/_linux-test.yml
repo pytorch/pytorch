@@ -376,7 +376,7 @@ jobs:
       - name: Upload pytest cache if tests failed
         uses: ./.github/actions/pytest-cache-upload
         continue-on-error: true
-        if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure'
+        if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure' && inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           cache_dir: .pytest_cache
           shard: ${{ matrix.shard }}
@@ -431,7 +431,7 @@ jobs:
           path: ./**/core.[1-9]*
 
       - name: Upload utilization stats
-        if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && !inputs.disable-monitor }}
+        if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
         continue-on-error: true
         uses: ./.github/actions/upload-utilization-stats
         with:
