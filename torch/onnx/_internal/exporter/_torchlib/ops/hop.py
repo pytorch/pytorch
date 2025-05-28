@@ -19,7 +19,7 @@ def call_op(
     *args: ir.Value,
     _num_outputs: int = 1,
     _domain: str = "",
-    **kwargs: int | float | str | bool | ir.Graph | ir.TensorProtocol,
+    **kwargs: int | float | str | bool | ir.Graph | ir.TensorProtocol | list[int],
 ) -> Sequence[ir.Value]:
     """Call an operator with the given arguments and keyword arguments.
 
@@ -99,7 +99,7 @@ def higher_order_scan(
     body_func: ir.Function,
     scan_inits: Sequence[ir.Value],
     scan_inputs: Sequence[ir.Value],
-    additional_inputs: Optional[Sequence[ir.Value]] = None,
+    additional_inputs: Sequence[ir.Value] | None,
     reverse: bool = False,
 ) -> Sequence[ir.Value]:
     node_inputs = [

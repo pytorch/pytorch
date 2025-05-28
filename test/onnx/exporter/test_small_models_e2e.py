@@ -643,13 +643,12 @@ class DynamoExporterTest(common_utils.TestCase):
                 out = torch.ops.higher_order.scan(dist, [z], [x], additional_inputs=[y])
                 return out[1]
 
-        inputs = (torch.tensor([[1, 2, 3, -1], [4, 5, 6, -1], [7, 8, 9, -1]], dtype=torch.float32),)
-        # This step is used to save the graph, it produces
-        # until there is a mechanism in assert_onnx_program which
-        # lets the developer dump the onnx models it produces.
-        # ep = torch.onnx.export(ScanModel(), inputs, dynamo=True)
-        # ep.save("debug.onnx")
-        onnx_program = self.export(ScanModel(), inputs)
+        inputs = (
+            torch.tensor(
+                [[1, 2, 3, -1], [4, 5, 6, -1], [7, 8, 9, -1]], dtype=torch.float32
+            ),
+        )
+        onnx_program = torch.onnx.export(ScanModel(), inputs, dynamo=True, fallback=False)
         onnx_testing.assert_onnx_program(onnx_program, args=inputs)
 
 
