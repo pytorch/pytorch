@@ -916,46 +916,6 @@ def exported_program_to_ir(
     ).model
 
 
-def _insert_flatten_between_transpose_and_view(exported_program):
-    """
-    Modifies the module inplace to insert a node 'flatten' between a node
-    'transpose' followed by a node 'view'.
-    The modification takes place inplace.
-    See issue https://github.com/pytorch/pytorch/issues/136543.
-    """
-    modified = False
-    graph = exported_program.graph_module.graph
-    for node in graph.nodes:
-        if (node.op != "call_method" or node.target != "transpose") and (
-            node.op != "call_function" or node.target.name() != "aten::transpose.int"
-        ):
-            continue
-        insert = False
-        for user in node.users:
-            if (user.op == "call_method" and user.target == "view") or (
-                user.op == "call_function" and user.target.name() == "aten::view"
-            ):
-                insert = True
-                break
-        if not insert:
-            continue
-
-        modified = True
-        with graph.inserting_after(node):
-            new_node = graph.call_method("flatten", args=(node,))
-            node.replace_all_uses_with(new_node)
-            # new_node is replaced as well so we manually revert the replacement
-            new_node.update_arg(0, node)
-            node.users = {new_node: None}
-
-    if not modified:
-        # no rewrite was done.
-        return exported_program
-
-    graph.lint()
-    return exported_program
-
-
 def _prepare_exported_program_for_export(
     exported_program: torch.export.ExportedProgram,
     *,
