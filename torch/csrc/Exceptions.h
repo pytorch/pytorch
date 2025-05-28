@@ -86,16 +86,15 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
       DistQueueEmptyError, THPException_DistQueueEmptyError, retstmnt)        \
   _CATCH_GENERIC_ERROR(DistStoreError, THPException_DistStoreError, retstmnt) \
   _CATCH_GENERIC_ERROR(DistError, THPException_DistError, retstmnt)           \
+  catch (c10::DeviceError & e) {                                              \
+    auto exc = torch::detail::_new_device_error_object(e);                    \
+    PyErr_SetObject(THPException_DeviceError, exc);                           \
+    retstmnt;                                                                 \
+  }                                                                           \
   _CATCH_GENERIC_ERROR(Error, PyExc_RuntimeError, retstmnt)                   \
   catch (torch::PyTorchError & e) {                                           \
     auto msg = torch::processErrorMsg(e.what());                              \
     PyErr_SetString(e.python_type(), msg);                                    \
-    retstmnt;                                                                 \
-  }                                                                           \
-  catch (c10::DeviceError & e) {                                              \
-    auto exc = torch::details::_new_device_error_object(e);                   \
-    \ 
-	  PyErr_SetObject(THPException_DeviceError, exc);                     \
     retstmnt;                                                                 \
   }
 
