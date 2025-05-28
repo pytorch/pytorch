@@ -640,11 +640,11 @@ def full_like(
     ]
     items.sort(key=lambda x: x[0], reverse=True)
 
-    perms = [None] * len(items)
+    dims = [None] * len(items)
     shape = [None] * len(items)
     for idx, item in enumerate(items):
         _, size, orig_idx = item
-        perms[orig_idx] = idx
+        dims[orig_idx] = idx
         shape[idx] = size
 
     return torch.full(
@@ -654,7 +654,7 @@ def full_like(
         layout=layout or self.layout,
         device=device or self.device,
         requires_grad=requires_grad,
-    ).permute(*perms).to(memory_format=memory_format)
+    ).permute(dims=dims).to(memory_format=memory_format)
 
 
 @register_decomposition(aten.randint_like.default)
