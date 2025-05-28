@@ -1438,7 +1438,6 @@ exclude_patterns = [
     'torch/utils/throughput_benchmark.py',
     'torch/utils/viz/__init__.py',
     'torch/utils/viz/_cycles.py',
-    'torch/utils/weak.py',
 ]
 init_command = [
     'python3',
