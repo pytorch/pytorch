@@ -5175,6 +5175,8 @@ class ExternKernel(InputsKernel):
             self.schema_kwargs = [
                 x for x in self.op_overload._schema.arguments if x.kwarg_only
             ]
+        else:
+            self.schema_kwargs = []
 
     def decide_layout(self):  # type: ignore[no-untyped-def]
         if isinstance(self.layout, FlexibleLayout):

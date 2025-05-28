@@ -34,8 +34,8 @@ jobs:
       - get-default-label-prefix
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      build-environment: linux-focal-cuda12.8-py3.10-gcc9-sm80
-      docker-image-name: ci-image:pytorch-linux-focal-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm80
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
@@ -48,7 +48,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: build
     with:
-      build-environment: linux-focal-cuda12.8-py3.10-gcc9-sm80
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm80
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       timeout-minutes: 720
