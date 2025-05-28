@@ -4531,7 +4531,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                     # Now, this sleep is removed which lets the host thread spin continuously
                     # Therefore, the state can either be scheduled or started before test dumps the trace.
                     if (
-                        TEST_WITH_ROCM
+                        torch.version.hip
                         and _get_torch_rocm_version() >= (6, 4)
                         and timing_enabled
                     ):
