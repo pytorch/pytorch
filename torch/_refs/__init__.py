@@ -5730,7 +5730,6 @@ def _get_shape_stride_like(
     shape = a.shape
 
     p_strides = utils.make_contiguous_strides_for([shape[l] for l in physical_layout])
-    dim = len(shape)
     strides = [0] * len(shape)
     for p, l in enumerate(physical_layout):
         strides[l] = p_strides[p]
