@@ -1257,7 +1257,11 @@ as_strided = _make_prim(
 def _broadcast_in_dim_meta(
     a: TensorLikeType, shape: ShapeType, broadcast_dimensions: Sequence[int]
 ):
-    from torch.fx.experimental.symbolic_shapes import guard_or_true, guard_or_false, sym_or
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_true,
+        guard_or_false,
+        sym_or,
+    )
 
     # Type checks
     assert isinstance(a, TensorLike)
