@@ -4604,7 +4604,8 @@ def pool3d_shape_check(
         effectiveKT / 2 >= pT and effectiveKW / 2 >= pW and effectiveKH / 2 >= pH,
         lambda: (
             f"pad should be smaller than or equal to half of effective kernel size, but got "
-            f"padT: {pT}, padW: {pW}, padH: {pH}, effectiveKT: {effectiveKT}, effectiveKW: {effectiveKW}, effectiveKH: {effectiveKH}"
+            f"padT: {pT}, padW: {pW}, padH: {pH}, "
+            f"effectiveKT: {effectiveKT}, effectiveKW: {effectiveKW}, effectiveKH: {effectiveKH}"
         ),
     )
 
