@@ -33,8 +33,8 @@ using MIOpenPoolType = at::cuda::DeviceThreadHandlePool<miopenHandle_t, createMI
 } // namespace
 
 miopenHandle_t getMiopenHandle() {
-  int device;
-  HIP_CHECK(hipGetDevice(&device));
+  c10::DeviceIndex device = 0;
+  MIOPEN_CHECK(c10::cuda::GetDevice(&device));
 
   // Thread local PoolWindows are lazily-initialized
   // to avoid initialization issues that caused hangs on Windows.
