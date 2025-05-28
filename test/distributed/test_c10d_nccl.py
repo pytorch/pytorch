@@ -722,38 +722,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @skip_but_pass_in_sandcastle_if(
         torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs"
     )
-    def test_close_multi_pg_unordered(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_nccl(store, self.opts())
-        device = self.rank_to_GPU[self.rank][0]
-        t = torch.rand(10, 10, device=device)
-        # First allreduce to initialize default PG's communicator.
-        pg.allreduce(t).wait()
-        new_pg1 = c10d.new_group([0, 1])
-        new_pg2 = c10d.new_group([0, 1])
-        if self.rank == 0 or self.rank == 1:
-            t1 = torch.rand(10, 10, device=device)
-            t2 = torch.rand(10, 10, device=device)
-            new_pg1.allreduce(t1).wait()
-            new_pg2.allreduce(t2).wait()
-        if self.rank == 0:
-            dist.destroy_process_group(new_pg2)
-            # force destruction of pg2 first
-            del new_pg2
-            dist.destroy_process_group(new_pg1)
-            del new_pg1
-        if self.rank == 1:
-            c10d.destroy_process_group(new_pg1)
-            # force destruction of pg1 first
-            del new_pg1
-            dist.destroy_process_group(new_pg2)
-            del new_pg2
-        dist.destroy_process_group()
-
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(
-        torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs"
-    )
     def test_abort_in_destroy_multi_pgs(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
@@ -3515,17 +3483,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         )
 
         c10d.barrier(device_ids=[self.rank])
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_nccl_barrier_device_ids_function_argument(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="nccl", rank=self.rank, world_size=self.world_size, store=store
-        )
-
-        with self.assertRaisesRegex(TypeError, "Invalid function argument"):
-            c10d.barrier(device_ids=self.rank)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)

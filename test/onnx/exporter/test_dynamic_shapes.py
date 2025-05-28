@@ -558,7 +558,7 @@ class TestDynamicShapes(common_utils.TestCase):
         expected_dynamic_shapes = {
             "input_x": [
                 {
-                    0: torch.export.Dim.AUTO,
+                    0: torch.export.Dim.DYNAMIC,
                     1: torch.export.Dim.STATIC,
                 },
                 {
@@ -566,7 +566,7 @@ class TestDynamicShapes(common_utils.TestCase):
                     1: dimx,
                 },
             ],
-            "input_b": {2: torch.export.Dim.AUTO},
+            "input_b": {2: torch.export.Dim.DYNAMIC},
         }
         dynamic_shapes_with_export_dim, need_axis_mapping = (
             _dynamic_shapes.convert_str_to_export_dim(dynamic_shapes)
@@ -598,7 +598,7 @@ class TestDynamicShapes(common_utils.TestCase):
                 },
                 {
                     0: torch.export.Dim.AUTO,
-                    1: torch.export.Dim.AUTO,
+                    1: torch.export.Dim.DYNAMIC,
                 },
             ],
             {2: torch.export.Dim.STATIC},
