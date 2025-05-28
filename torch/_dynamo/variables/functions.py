@@ -863,9 +863,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 raise_observed_exception(RuntimeError, tracer)
             return retval
         elif name == "__contains__":
-            return self.force_unpack_var_sequence(tx).call_method(
-                tx, "__contains__", [args[0]], {}
-            )
+            # The generator needs to be lazily consumed here to avoid unintended
+            # side effects
+            return variables.UserFunctionVariable(
+                polyfills.generator___contains__
+            ).call_function(tx, [self, *args], {})
 
         super().call_method(tx, name, args, kwargs)
 

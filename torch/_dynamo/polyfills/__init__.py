@@ -186,6 +186,12 @@ def set_difference_update(set1, *others):
     set1.update(result)
 
 
+def generator___contains__(gen, item):
+    # "any" lazily consumes the generator, which is important to prevent
+    # unintended side effects.
+    return any(e == item for e in gen)
+
+
 def getattr_and_trace(*args, **kwargs):
     wrapper_obj = args[0]
     attr_name = args[1]
