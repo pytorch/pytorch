@@ -339,10 +339,7 @@ False
 ### Constants
 
 ```{list-table}
-:header-rows: 1
 
-* - Symbol
-  - Description
 * - `inf`
   - A floating-point positive infinity.
     Alias for {attr}`math.inf`.
