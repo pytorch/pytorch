@@ -625,7 +625,6 @@ class CUDATemplateCaller(ChoiceCaller):
             ]
         )
 
-
     def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         if self.info_kwargs is not None and "op" in self.info_kwargs:
