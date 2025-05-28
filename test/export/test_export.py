@@ -3892,7 +3892,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         class Conv1d(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.conv = torch.nn.Conv1d(512, 512, kernel_size=7, padding=(3,), groups=512)
+                self.conv = torch.nn.Conv1d(
+                    512, 512, kernel_size=7, padding=(3,), groups=512
+                )
             def forward(self, xs):
                 u0, u1 = xs.tolist()
                 y = torch.empty(1, u0 + u1, 512).permute(0, 2, 1)
