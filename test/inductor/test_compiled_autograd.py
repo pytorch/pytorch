@@ -4269,6 +4269,7 @@ def wrap_test_class(orig_cls):
                         fullgraph=name not in known_graph_breaks_tests,
                     )
                 ),
+                config.patch(compiled_autograd=True),
                 test_contexts.get(name, contextlib.nullcontext()),
             ]
             dct[name] = make_wrapped(fn, ctxs)

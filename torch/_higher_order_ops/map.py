@@ -46,7 +46,7 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
 
     # See Note [HOP create fw_bw graph] in create_fw_bw_graph in utils.py
 
-    with suspend_functionalization(), disable_functional_mode():
+    with suspend_functionalization(), disable_functional_mode(), torch._dynamo.compiled_autograd._disable():
         with disable_proxy_modes_tracing():
             unwrapped_mapped_xs = pytree.tree_map(_from_fun, mapped_xs)
             example_xs = _unstack_pytree(unwrapped_mapped_xs)[0]
