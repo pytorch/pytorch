@@ -599,8 +599,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Class that runs as a separate thread aside from watchdog
   // thread because we need to check the heartbeat from watchdog thread
   // so that when we get stuck in some NCCL/CUDA calls,
-  // we can dump the debugging information and abort the process./
-  // The thread is per class not per instance.
+  // we can dump the debugging information and abort the process.
   class HeartbeatMonitor {
    public:
     HeartbeatMonitor(ProcessGroupNCCL* pg);
@@ -612,7 +611,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Stop the heartbeat monitor thread.
     void wait();
 
-    // Run the actual loop which the heartbeat monitor thread is running.
+    // Run the actual loop to check watchdog heartbeat.
     virtual void runLoop();
 
     // notify the heartbeat monitor thread to stop.
