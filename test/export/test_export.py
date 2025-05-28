@@ -3840,7 +3840,7 @@ def forward(self, x):
 
         mod = Unsqueeze()
         x = torch.tensor([5, 6])
-        ep = export(mod, (x,))
+        ep = export(mod, (x,), strict=False)
         self.assertTrue(torch.allclose(mod(x), ep.module()(x)))
         x = torch.tensor([1, 2])
         self.assertTrue(torch.allclose(mod(x), ep.module()(x)))
