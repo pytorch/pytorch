@@ -407,9 +407,9 @@ def get_path(
 def get_hash(
     content: Union[str, bytes], extra: str = "", hash_type: str = "code"
 ) -> str:
-    if hash_type == "code":
+    if hash_type in {"amdgcn", "code", "ptx"}:
         return code_hash(content, extra)
-    if hash_type in ["cubin", "hsaco", "spv"]:
+    if hash_type in {"cubin", "hsaco", "spv"}:
         return code_hash(repr(content))
     raise AssertionError(f"Unknown hash type {hash_type}")
 
@@ -420,11 +420,13 @@ def write(
     extra: str = "",
     hash_type: str = "code",
     specified_dir: str = "",
+    key: Optional[str] = None,
 ) -> tuple[str, str]:
-    # use striped content to compute hash so we don't end up with different
-    # hashes just because the content begins/ends with different number of
-    # spaces.
-    key: str = get_hash(content.strip(), extra, hash_type)
+    if key is None:
+        # use striped content to compute hash so we don't end up with different
+        # hashes just because the content begins/ends with different number of
+        # spaces.
+        key = get_hash(content.strip(), extra, hash_type)
     basename, _subdir, path = get_path(key, extension, specified_dir)
     if not os.path.exists(path):
         write_atomic(path, content, make_dirs=True)
@@ -1544,28 +1546,62 @@ class CudaKernelParamCache:
     cache_clear = staticmethod(cache.clear)
 
     @classmethod
-    def set(cls, key: str, params: dict[str, str], cubin: str, bin_type: str) -> None:
-        _, path = write(
+    def set(
+        cls,
+        key: str,
+        params: dict[str, Optional[str]],
+        cubin: str,
+        bin_type: str,
+        asm: Optional[str] = None,
+        asm_type: Optional[str] = None,
+    ) -> None:
+        basename = None
+        if config.aot_inductor.package_cpp_only:
+            assert config.triton.unique_kernel_names, (
+                "package_cpp_only requires triton kernel names to be unique"
+            )
+            assert params["mangled_name"], "Missing kernel name"
+            basename = params["mangled_name"]
+
+        _, bin_path = write(
             cubin,
             bin_type,
             hash_type=bin_type,
             specified_dir=split_aot_inductor_output_path(
                 config.aot_inductor.output_path
             )[0],
+            key=basename,
         )
-        if config.aot_inductor.package_cpp_only:
-            assert config.triton.unique_kernel_names, (
-                "package_cpp_only requires triton kernel names to be unique"
+        # Retrieve the basename again in case it is a generated hashcode
+        basename, _ = get_name_and_dir_from_output_file_path(bin_path)
+
+        if config.aot_inductor.multi_arch_kernel_binary:
+            assert bin_type == "cubin", (
+                "multi_arch_kernel_binary only supported in CUDA"
             )
-            dir_name = os.path.dirname(path)
-            _, ext = os.path.splitext(path)
-            # Construct the new full path
-            new_path = os.path.join(dir_name, params["mangled_name"] + ext)
-            os.rename(path, new_path)
-            path = new_path
+            base_path, _ = os.path.splitext(bin_path)
+            bin_path = base_path + ".fatbin"
 
-        params[get_cpp_wrapper_cubin_path_name()] = path
+        asm_path: str = ""
+        if (
+            config.aot_inductor.multi_arch_kernel_binary
+            or config.aot_inductor.package_cpp_only
+        ):
+            assert asm, "Missing kernel assembly code"
+            assert asm_type, "Missing kernel assembly type"
+            _, asm_path = write(
+                asm,
+                asm_type,
+                hash_type=asm_type,
+                specified_dir=split_aot_inductor_output_path(
+                    config.aot_inductor.output_path
+                )[0],
+                # make sure asm file has the same basename
+                key=basename,
+            )
 
+        params[get_cpp_wrapper_cubin_path_name()] = bin_path
+        params["asm"] = asm_path
         cls.cache[key] = params
 
     @classmethod
@@ -1939,7 +1975,7 @@ class AotCodeCompiler:
                 )
                 wrapper_build_options.save_flags_to_json(compile_flags)
                 generated_files.append(compile_flags)
-                wrapper_builder.save_compile_cmd_to_cmake(cmake_path)
+                wrapper_builder.save_compile_cmd_to_cmake(cmake_path, device_type)
                 wrapper_builder.save_src_to_cmake(cmake_path, wrapper_path)
                 generated_files.append(cmake_path)
             else:
@@ -2007,13 +2043,33 @@ class AotCodeCompiler:
                 for entry in gpu_codecache.cache.values()
                 if entry.output_path.endswith(".o")
             ]
+            if gpu_kernels_o:
+                assert not config.aot_inductor.multi_arch_kernel_binary, (
+                    "TODO: add multi_arch_kernel_binary support for cutlass kernels"
+                )
 
             cubins_o = []
-            if config.aot_inductor.embed_cubin:
-                # Embed cubin files into .so using objcopy
-                ld, objcopy = get_ld_and_objcopy(use_relative_path)
-                for kernel_name, value in CudaKernelParamCache.cache.items():
-                    cubin_file = value[get_cpp_wrapper_cubin_path_name()]
+            asm_files = []
+            ld, objcopy = get_ld_and_objcopy(use_relative_path)
+            for kernel_name, value in CudaKernelParamCache.cache.items():
+                if asm_file := value["asm"]:
+                    asm_files.append(asm_file)
+
+                cubin_file = value[get_cpp_wrapper_cubin_path_name()]
+                if config.aot_inductor.multi_arch_kernel_binary:
+                    # Compile .ptx into .fatbin
+                    archs = OrderedSet(
+                        [cuda_env.get_cuda_arch(), "80", "86", "89", "90"]
+                    )
+                    cmd = f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file}"
+                    for arch in archs:
+                        cmd += f" -gencode arch=compute_{arch},code=compute_{arch}"
+                    subprocess.run(
+                        cmd.split(), capture_output=True, text=True, check=True
+                    )
+
+                if config.aot_inductor.embed_kernel_binary:
+                    # Embed cubin files into model.so using objcopy
                     cubins_o.append(
                         convert_cubin_to_obj(cubin_file, kernel_name, ld, objcopy)
                     )
@@ -2061,7 +2117,6 @@ class AotCodeCompiler:
 
                 # If we only want to package the cpp, then we need to save the
                 # weights separately into a bin, and we also need to prevent compiling the so
-
                 if use_mmap_weights:
                     weight_file = str(
                         wrapper_path_operator.with_name(
@@ -2073,11 +2128,20 @@ class AotCodeCompiler:
                         f_weights.write(struct.pack("q", magic_number))
 
                     generated_files.append(weight_file)
+                else:
+                    # TODO: unify to alway use mmap_weights
+                    generated_files.append(consts_o)
+                    so_builder.save_src_to_cmake(cmake_path, consts_o)
 
-                obj_srcs = [consts_o, *gpu_kernels_o, *cubins_o]
-                generated_files.extend(obj_srcs)
-                for obj in obj_srcs:
-                    so_builder.save_src_to_cmake(cmake_path, obj)
+                if config.aot_inductor.multi_arch_kernel_binary:
+                    so_builder.save_kernel_asm_to_cmake(cmake_path, asm_files)
+                    generated_files.extend(asm_files)
+                else:
+                    obj_srcs = [*gpu_kernels_o, *cubins_o]
+                    generated_files.extend(obj_srcs)
+                    for obj in obj_srcs:
+                        so_builder.save_src_to_cmake(cmake_path, obj)
+
                 so_builder.save_link_cmd_to_cmake(cmake_path)
             else:
                 so_builder.build()
