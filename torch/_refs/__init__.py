@@ -5718,7 +5718,7 @@ def full(
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-    return torch.fill(e, fill_value)  # type: ignore[arg-type]
+    return prims.fill(e, fill_value)  # type: ignore[arg-type]
 
 
 def _get_shape_stride_like(
@@ -5754,7 +5754,7 @@ def full_like(
     layout = a.layout if layout is None else layout
     device = a.device if device is None else device
 
-    if memory_format == torch.preserve_format:
+    if memory_format != torch.preserve_format:
         return torch.full(
             a.shape,
             fill_value,
