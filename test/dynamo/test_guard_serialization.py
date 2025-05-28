@@ -16,6 +16,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.bytecode_transformation import transform_code_object
+from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import CheckFunctionManager, CompileId
 from torch._dynamo.symbolic_convert import (
     ExceptionStack,
@@ -490,7 +491,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         # === example subclass defined locally (error) ===
         local_sub = LocalSubclass(torch.randn(3))
         with self.assertRaisesRegex(
-            RuntimeError, "Please define the class at global scope"
+            PackageError, "Please define the class at global scope"
         ):
             self._test_serialization("TENSOR_SUBCLASS_METADATA_MATCH", fn, local_sub)
 
@@ -655,7 +656,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             # we don't support NN_MODULE because it adds an ID_MATCH guard, and we don't
             # support that in serialization
             with self.assertRaisesRegex(
-                RuntimeError, "NN_MODULE guard cannot be serialized."
+                PackageError, "NN_MODULE guard cannot be serialized."
             ):
                 self._test_serialization("NN_MODULE", fn, m, x)
 
@@ -671,7 +672,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         # we don't support FUNCTION_MATCH because it adds an ID_MATCH guard, and we don't
         # support that in serialization
         with self.assertRaisesRegex(
-            RuntimeError, "FUNCTION_MATCH guard cannot be serialized."
+            PackageError, "FUNCTION_MATCH guard cannot be serialized."
         ):
             self._test_serialization("FUNCTION_MATCH", fn, x)
 
@@ -685,7 +686,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         # we don't support CLOSURE_MATCH because it adds a FUNCTION_MATCH guard, and we don't
         # support that in serialization
         with self.assertRaisesRegex(
-            RuntimeError, "CLOSURE_MATCH guard cannot be serialized."
+            PackageError, "CLOSURE_MATCH guard cannot be serialized."
         ):
             self._test_serialization("CLOSURE_MATCH", fn, x)
 
@@ -804,7 +805,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             return pytree.tree_leaves(x)[0] + 1
 
         with self.assertRaisesRegex(
-            RuntimeError, "DICT_VERSION guard cannot be serialized."
+            PackageError, "DICT_VERSION guard cannot be serialized."
         ):
             self._test_serialization("DICT_VERSION", fn, {"t": torch.randn(3)})
 
@@ -856,7 +857,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             return x + id(x)
 
         with self.assertRaisesRegex(
-            RuntimeError, "ID_MATCH guard cannot be serialized."
+            PackageError, "ID_MATCH guard cannot be serialized."
         ):
             self._test_serialization("ID_MATCH", fn, torch.randn(3))
 
@@ -1032,7 +1033,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
 
         x = torch.randn(3, 2)
         with self.assertRaisesRegex(
-            RuntimeError, "DUPLICATE_INPUT guard cannot be serialized"
+            PackageError, "DUPLICATE_INPUT guard cannot be serialized"
         ):
             self._test_serialization("DUPLICATE_INPUT", fn, x, x)
 
@@ -1049,7 +1050,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             return params[0].sum()
 
         with self.assertRaisesRegex(
-            RuntimeError, "WEAKREF_ALIVE guard cannot be serialized"
+            PackageError, "WEAKREF_ALIVE guard cannot be serialized"
         ):
             with torch.set_grad_enabled(False):
                 self._test_serialization("WEAKREF_ALIVE", fn)
@@ -1168,7 +1169,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             with torch._C.DisableTorchFunction():
                 self._test_check_fn(ref, loaded, {"x": x}, False)
         with self.assertRaisesRegex(
-            RuntimeError,
+            PackageError,
             "defined in local scope. Please define the class at global scope",
         ):
             with LocalTorchFunctionMode():
