@@ -680,7 +680,7 @@ inline constexpr std::string_view kScalarTypePrefix = "ScalarType::";
 /**
  * Debug format serialization. The format here is intended to be human readable
  * and easy to work with, and is intended for debugging and testing only.
- * If you want stable serialization, use the thrift conversion utils.
+ * If you want stable serialization, use the json conversion utils.
  *
  * NOTE: node metadata currently not serialized
  */

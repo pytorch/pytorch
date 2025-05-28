@@ -1,4 +1,4 @@
-	
+
 #include <c10/core/Device.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -19,7 +19,7 @@ namespace torch::nativert {
     EXPECT_EQ(graph->inputs()[0]->name(), "foo");
     EXPECT_EQ(graph->inputs()[1]->name(), "bar");
     EXPECT_EQ(graph->inputs()[2]->name(), "baz");
-  
+
     const auto& nodes = graph->nodes();
     EXPECT_EQ(nodes.size(), 3);
     // First node is the input node
@@ -40,7 +40,7 @@ namespace torch::nativert {
       EXPECT_EQ(node.inputs().size(), 2);
       EXPECT_EQ(node.inputs()[0].name, "self");
       EXPECT_EQ(node.inputs()[1].name, "target");
-  
+
       EXPECT_EQ(node.attributes().size(), 1);
       EXPECT_EQ(node.attributes()[0].name, "alpha");
     }
@@ -55,7 +55,7 @@ namespace torch::nativert {
     EXPECT_EQ(graph->outputs().size(), 2);
     EXPECT_EQ(graph->outputs()[0]->name(), "o2");
     EXPECT_EQ(graph->outputs()[1]->name(), "baz");
-  
+
     const auto& values = graph->values();
     EXPECT_EQ(values.size(), 5);
     std::vector<std::string> valueNames;
@@ -64,12 +64,12 @@ namespace torch::nativert {
       valueNames.emplace_back(v->name());
     }
     std::sort(valueNames.begin(), valueNames.end());
-  
+
     EXPECT_THAT(
         valueNames,
         ContainerEq(std::vector<std::string>({"bar", "baz", "foo", "o1", "o2"})));
   }
-  
+
   TEST(GraphTest, ValueProducer) {
     static constexpr std::string_view source =
         R"(graph(%foo, %bar, %baz):
@@ -82,7 +82,7 @@ namespace torch::nativert {
     auto o1 = graph->getValue("o1");
     EXPECT_EQ(o1->producer()->target(), "aten.foo");
   }
-  
+
   TEST(GraphTest, InsertBeforeAfter) {
     static constexpr std::string_view source =
         R"(graph(%foo, %bar, %baz):
@@ -97,11 +97,11 @@ namespace torch::nativert {
     auto before = graph->createNode("before", {});
     auto after = graph->createNode("after", {});
     auto atEnd = graph->createNode("atEnd", {});
-  
+
     graph->insertBefore(before, &node);
     graph->insertAfter(after, &node);
     graph->insert(atEnd);
-  
+
     static constexpr std::string_view expected =
         R"(graph(%foo, %bar, %baz):
    = before()
@@ -112,7 +112,7 @@ namespace torch::nativert {
   )";
     EXPECT_EQ(graphToString(*graph), expected);
   }
-  
+
   TEST(GraphTest, ValueUses) {
     static constexpr std::string_view source =
         R"(graph(%foo, %bar, %baz):
@@ -124,23 +124,23 @@ namespace torch::nativert {
     EXPECT_EQ(o2->users().size(), 1);
     EXPECT_EQ(o2->users()[0]->target(), "prim.Output");
   }
-  
+
   TEST(GraphTest, ApplyDevicePlacement) {
     auto graph = Graph::createGraph();
     auto node1 = graph->insertNode("node1");
     auto node2 = graph->insertNode("node2");
-  
+
     node1->addAttribute({"a", c10::Device(c10::DeviceType::CPU)});
     node1->addAttribute({"b", c10::Device(c10::DeviceType::CUDA, 0)});
     node1->addAttribute({"c", c10::Device(c10::DeviceType::CUDA, 1)});
-  
+
     node2->addAttribute({"d", c10::Device(c10::DeviceType::CUDA, 0)});
-  
+
     graph->applyDevicePlacement(
         Placement(std::unordered_map<c10::Device, c10::Device>{
             {c10::Device(c10::DeviceType::CUDA, 0),
              c10::Device(c10::DeviceType::CUDA, 1)}}));
-  
+
     EXPECT_EQ(
         std::get<c10::Device>(node1->getAttribute("a").value),
         c10::Device(c10::DeviceType::CPU));
@@ -154,7 +154,7 @@ namespace torch::nativert {
         std::get<c10::Device>(node2->getAttribute("d").value),
         c10::Device(c10::DeviceType::CUDA, 1));
   }
-  
+
   TEST(GraphTest, ReplaceAllUses) {
     static constexpr std::string_view source =
         R"(graph(%foo, %bar, %baz):
@@ -165,15 +165,15 @@ namespace torch::nativert {
     auto o2 = graph->getValue("o2");
     auto bar = graph->getValue("bar");
     auto foo = graph->getValue("foo");
-  
+
     EXPECT_EQ(o2->users().size(), 1);
     EXPECT_EQ(bar->users().size(), 1);
     EXPECT_EQ(foo->users().size(), 1);
-  
+
     graph->replaceAllUses(o2, bar);
     EXPECT_EQ(o2->users().size(), 0);
     EXPECT_EQ(bar->users().size(), 2);
-  
+
     graph->replaceAllUses(bar, foo);
     EXPECT_EQ(bar->users().size(), 0);
     EXPECT_EQ(foo->users().size(), 2);
@@ -184,7 +184,7 @@ namespace torch::nativert {
   )";
     EXPECT_EQ(graphToString(*graph), expected);
   }
-  
+
   TEST(GraphTest, GetUniqueValueName) {
     static constexpr std::string_view source =
         R"(graph(%foo, %bar, %baz):
@@ -203,7 +203,7 @@ namespace torch::nativert {
     EXPECT_EQ(v1, "v1");
     EXPECT_EQ(v2, "v2");
   }
-  
+
   TEST(GraphTest, ReplaceAllUsesMultiUse) {
     static constexpr std::string_view source =
         R"(graph(%foo, %bar):
@@ -214,7 +214,7 @@ namespace torch::nativert {
     auto foo = graph->getValue("foo");
     auto bar = graph->getValue("bar");
     graph->replaceAllUses(foo, bar);
-  
+
     static constexpr std::string_view expected =
         R"(graph(%foo, %bar):
   %o1 = aten.foo(a=%bar, b=%bar, c=%bar)
@@ -222,7 +222,7 @@ namespace torch::nativert {
   )";
     EXPECT_EQ(graphToString(*graph), expected);
   }
-  
+
   TEST(GraphTest, ReplaceAllUsesAfter) {
     static constexpr std::string_view source =
         R"(graph(%foo):
@@ -236,7 +236,7 @@ namespace torch::nativert {
     auto o1 = graph->getValue("o1");
     auto foo3Node = graph->getValue("o3")->producer();
     graph->replaceAllUsesAfterNode(foo, o1, foo3Node);
-  
+
     static constexpr std::string_view expected =
         R"(graph(%foo):
   %o1 = aten.foo1(a=%foo)
@@ -248,7 +248,7 @@ namespace torch::nativert {
     EXPECT_EQ(foo->users().size(), 3);
     EXPECT_EQ(o1->users().size(), 2);
   }
-  
+
   TEST(GraphTest, InsertingAfter) {
     static constexpr std::string_view source =
         R"(graph(%foo, %bar):
@@ -277,18 +277,18 @@ namespace torch::nativert {
   )";
     EXPECT_EQ(graphToString(*graph), expected);
   }
-  
+
   TEST(NodeTest, GetInputAndAttribute) {
     auto graph = Graph::createGraph();
     auto input1 = graph->addInput("input1", Type::Kind::Tensor);
     auto input2 = graph->addInput("input2", Type::Kind::Tensor);
     auto input3 = graph->addInput("input3", Type::Kind::Tensor);
     auto node = graph->createNode("foo.bar");
-  
+
     node->addInput({"out_of_order", input1});
     node->addInput({"arg1", input2});
     node->addInput({"arg2", input3});
-  
+
     node->addAttribute({"b", static_cast<int64_t>(0)});
     node->addAttribute({"a", static_cast<int64_t>(2)});
     node->addAttribute({"c", static_cast<int64_t>(1)});
@@ -322,11 +322,11 @@ namespace torch::nativert {
       EXPECT_EQ(attr.name, "c");
       EXPECT_EQ(attr.value, Constant(static_cast<int64_t>(1)));
     }
-  
+
     EXPECT_EQ(node->tryGetInput("doesnotexist"), nullptr);
     EXPECT_EQ(node->tryGetAttribute("doesnotexist"), nullptr);
   }
-  
+
   TEST(NodeTest, NextPrev) {
     static constexpr std::string_view source =
         R"(graph(%foo):
@@ -348,7 +348,7 @@ namespace torch::nativert {
     EXPECT_EQ(graph->inputNode()->prev(), nullptr);
     EXPECT_EQ(graph->outputNode()->next(), nullptr);
   }
-  
+
   TEST(GraphTest, IsBefore) {
     auto source = R"IR(
       graph(%foo):
@@ -357,26 +357,26 @@ namespace torch::nativert {
         %o3 = aten.foo3(a=%o2)
         return (%o3)
     )IR";
-  
+
     auto graph = stringToGraph(source);
     ASSERT_NE(graph, nullptr);
-  
+
     auto* o1 = graph->tryGetValue("o1");
     auto* o2 = graph->tryGetValue("o2");
     auto* o3 = graph->tryGetValue("o3");
-  
+
     auto* foo1 = o1->producer();
     auto* foo2 = o2->producer();
     auto* foo3 = o3->producer();
-  
+
     EXPECT_TRUE(foo1->isBefore(foo2)) << "foo1 should appear before foo2";
     EXPECT_TRUE(foo2->isBefore(foo3)) << "foo2 should appear before foo3";
     EXPECT_TRUE(foo1->isBefore(foo3)) << "foo1 should appear before foo3";
-  
+
     EXPECT_FALSE(foo2->isBefore(foo1)) << "foo2 should not appear before foo1";
     EXPECT_FALSE(foo3->isBefore(foo2)) << "foo3 should not appear before foo2";
   }
-  
+
   TEST(GraphTest, RemoveNodeWithUsers) {
     // Check we shouldn't be able to remove a node that still has users
     auto source = R"IR(
@@ -386,16 +386,16 @@ namespace torch::nativert {
           %o3 = aten.foo3(a=%o2, b=%o2, c=%foo)
           return (%foo, %o1, %o3)
     )IR";
-  
+
     auto graph = stringToGraph(source);
     ASSERT_NE(graph, nullptr);
-  
+
     auto* o2 = graph->tryGetValue("o2");
     auto* foo2 = o2->producer();
-  
+
     EXPECT_THROW(graph->removeNode(foo2), c10::Error);
   }
-  
+
   TEST(GraphTest, RemoveNodeUnused) {
     // Check node removal works as expected
     auto source = R"IR(
@@ -406,18 +406,18 @@ namespace torch::nativert {
         return(%foo, %o1, %o2)
     )IR";
     auto graph = stringToGraph(source);
-  
+
     auto* valUnused = graph->tryGetValue("unused");
     Node* nodeUnused = valUnused->producer();
     EXPECT_EQ(nodeUnused->target(), "aten.fooUnused");
-  
+
     graph->removeNode(nodeUnused);
     graph->lint();
-  
+
     // %unused should now be gone
     EXPECT_EQ(graph->tryGetValue("unused"), nullptr)
         << "Value %unused should no longer exist in the graph";
-  
+
     for (const auto& node : graph->nodes()) {
       EXPECT_NE(node.target(), "aten.fooUnused");
       for (const auto* output : node.outputs()) {
@@ -426,7 +426,7 @@ namespace torch::nativert {
       }
     }
   }
-  
+
   TEST(GraphTest, RemoveValue) {
     auto source = R"IR(
       graph(%foo):
@@ -435,15 +435,15 @@ namespace torch::nativert {
     %o3 = aten.foo3(a=%o2, b=%o2, c=%foo)
     return (%foo, %o1, %o3)
     )IR";
-  
+
     auto graph = stringToGraph(source);
     auto* val_o1 = graph->tryGetValue("o1");
-  
+
     {
       // Check we shouldn't be able to remove a value that still has users
       EXPECT_THROW(graph->removeValue(val_o1), c10::Error);
     }
-  
+
     {
       // Check value removal works as expected
       graph->replaceAllUses(val_o1, graph->tryGetValue("foo"));
@@ -451,14 +451,14 @@ namespace torch::nativert {
       EXPECT_EQ(graph->tryGetValue("%o1"), nullptr);
     }
   }
-  
+
   TEST(GraphTest, InsertGraph) {
     auto source = R"IR(
       graph(%foo):
           %o1 = aten.foo1(a=%foo)
           return (%o1)
     )IR";
-  
+
     // Subgraph to be inserted
     auto subgraphSource = R"IR(
       graph(%x):
@@ -466,30 +466,30 @@ namespace torch::nativert {
           %s2 = aten.subFoo2(a=%s1)
           return (%s2)
     )IR";
-  
+
     auto mainGraph = stringToGraph(source);
     auto subGraph = stringToGraph(subgraphSource);
-  
+
     // Insert subGraph into mainGraph. Use %o1 as the subGraph's %x
     auto val_o1 = mainGraph->tryGetValue("o1");
     std::unordered_map<const Value*, Value*> valueMap;
     std::vector<Value*> insertedOutputs =
         mainGraph->insertGraph(*subGraph, {val_o1}, valueMap);
-  
+
     EXPECT_EQ(insertedOutputs.size(), 1);
-  
+
     // Check all new nodes are inserted correctly from the copied %s2
     auto* newS2 = insertedOutputs.front();
-  
+
     auto* newSubFoo2 = newS2->producer();
     EXPECT_EQ(newSubFoo2->target(), "aten.subFoo2");
-  
+
     auto* newS1 = newSubFoo2->inputs().front().value;
     auto* newSubFoo1 = newS1->producer();
     EXPECT_EQ(newSubFoo1->target(), "aten.subFoo1");
-  
+
     EXPECT_EQ(newSubFoo1->inputs().front().value, val_o1);
-  
+
     auto* subInputVal = subGraph->inputs().front();
     EXPECT_EQ(valueMap[subInputVal], val_o1);
     for (const auto& [val1, val2] : valueMap) {
@@ -503,10 +503,10 @@ namespace torch::nativert {
         EXPECT_EQ(val2->name(), val_o1->name());
       }
     }
-  
+
     mainGraph->lint();
   }
-  
+
   TEST(GraphTest, CleanupDeadNodes) {
     // %c is unused
     const std::string source = R"(
@@ -517,21 +517,21 @@ namespace torch::nativert {
   return(%b)
   )";
     auto graph = stringToGraph(source);
-  
+
     // Verify that %c exists initially
     auto* cVal = graph->tryGetValue("c");
     ASSERT_NE(nullptr, cVal);
     size_t nodeCountBefore = graph->nodes().size();
-  
+
     graph->cleanupDeadNodes();
-  
+
     // %c should now be gone
     EXPECT_EQ(nullptr, graph->tryGetValue("c"));
     // %b should still be there
     EXPECT_NE(nullptr, graph->tryGetValue("b"));
     EXPECT_EQ(nodeCountBefore - 1, graph->nodes().size());
   }
-  
+
   TEST(GraphTest, RenumberValues) {
     const std::string source = R"(
     graph(%x):
@@ -541,13 +541,13 @@ namespace torch::nativert {
   )";
     auto graph = stringToGraph(source);
     graph->cleanupDeadNodes();
-  
+
     // %b should now be gone
     EXPECT_EQ(nullptr, graph->tryGetValue("b"));
-  
+
     // %a should now be the last value
     EXPECT_EQ(graph->tryGetValue("a")->id(), graph->numValues() - 1);
-  
+
     // All values should be renumbered
     size_t numVals = graph->numValues();
     std::unordered_set<ValueId> ids;
@@ -556,7 +556,7 @@ namespace torch::nativert {
       ASSERT_LT(val->id(), numVals);
       ids.insert(val->id());
     }
-  
+
     // Check ids are contiguous and unique b/w 0 and numVals
     EXPECT_EQ(numVals, ids.size());
     for (size_t i = 0; i < numVals; ++i) {
