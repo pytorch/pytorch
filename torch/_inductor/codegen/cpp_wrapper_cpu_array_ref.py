@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, Union
+from typing import Callable, Optional
 
 import sympy
 
@@ -750,16 +749,57 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self,
         buf_name: str,
         python_kernel_name: str,
-        codegen_args: Sequence[str],
-        op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
-        raw_args: Sequence[Any],
-        outputs: Sequence[ir.Buffer],
-    ) -> None:
+        cpp_kernel_name: str,
+        codegen_args: list[str],
+        op_overload: Optional[torch._ops.OpOverload] = None,
+        raw_args=None,
+        outputs=None,
+    ):
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
-        super().generate_fallback_kernel_with_runtime_lookup(
-            buf_name, python_kernel_name, codegen_args, op_overload, raw_args, outputs
-        )
+
+        def extract_output_name(out):
+            if out is None:
+                return None
+            elif isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
+                return out.get_name()
+            elif isinstance(out, (list, tuple)):
+                return type(out)(extract_output_name(o) for o in out)
+            else:
+                raise AssertionError(f"Unexpected output: {type(out)}")
+
+        # output_args has the same pytree structure as outputs
+        output_args = None
+        if outputs is None:
+            # outputs is not specified, the default is to write to buf_name
+            output_args = [buf_name]
+        else:
+            output_args = extract_output_name(outputs)
+            if isinstance(output_args, str):
+                output_args = [output_args]
+
+        if V.graph.aot_mode:
+            assert op_overload is not None
+            assert raw_args is not None
+            assert outputs is not None
+
+            return self.generate_fallback_kernel_with_runtime_lookup_aot(
+                op_overload,
+                raw_args,
+                output_args,
+                outputs,
+            )
+        else:
+            return self.generate_fallback_kernel_with_runtime_lookup_jit(
+                buf_name,
+                python_kernel_name,
+                cpp_kernel_name,
+                codegen_args,
+                op_overload,
+                raw_args,
+                output_args,  # type: ignore[arg-type]
+                outputs,
+            )
 
     def codegen_device_copy(self, src, dst, non_blocking: bool):
         # aoti_torch_tensor_copy_ takes AtenTensorHandle as input,
