@@ -707,7 +707,6 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
     def fn(self):
         return self.value
 
-    @property
     def python_type(self):
         return self.value
 
@@ -1162,11 +1161,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 subobj.fget, self, source=source
             ).call_function(tx, [], {})
         elif isinstance(subobj, staticmethod):
+            # Safe because `staticmethod.__get__` basically won't trigger user
+            # code and just returns the underlying `__func__`:
+            # https://github.com/python/cpython/blob/3.11/Objects/funcobject.c#L1088-L1100
             func = subobj.__get__(self.value)
-            if source is not None:
-                return trace_rules.lookup(func).create_with_source(func, source=source)
-            else:
-                return trace_rules.lookup(func)(func)
+            return VariableTracker.build(tx, func, source)
         elif isinstance(subobj, classmethod):
             return variables.UserMethodVariable(
                 subobj.__func__, self.var_getattr(tx, "__class__"), source=source
@@ -1481,6 +1480,15 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
             with TracingContext.patch(force_unspec_int_unbacked_size_like=True):
                 return super().var_getattr(tx, name)
         return super().var_getattr(tx, name)
+
+
+class IntWrapperVariable(UserDefinedObjectVariable):
+    # Dummy class to check if the object is an IntWrapper, and turn it into a
+    # symint
+    @staticmethod
+    def is_matching_object(obj):
+        mod = sys.modules.get("torch.export.dynamic_shapes")
+        return mod is not None and type(obj) is mod._IntWrapper
 
 
 class RemovableHandleClass:
