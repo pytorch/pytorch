@@ -745,7 +745,8 @@ class CachingAutotuner(KernelInterface):
             # so we can sort them by index.
             constexpr_args: list[tuple[int, Any]] = []
             for arg_name, arg_val in launcher.config.kwargs.items():
-                constexpr_args.append((self.fn.arg_names.index(arg_name), arg_val))
+                if arg_name in self.fn.arg_names:
+                    constexpr_args.append((self.fn.arg_names.index(arg_name), arg_val))
 
             constexpr_args.sort()
             new_args = [*args]
