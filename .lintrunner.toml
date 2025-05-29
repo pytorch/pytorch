@@ -1160,12 +1160,6 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
-    'test/_nvfuser/__init__.py',
-    'test/_nvfuser/test_dynamo.py',
-    'test/_nvfuser/test_python_frontend.py',
-    'test/_nvfuser/test_torchscript.py',
-    'test/delete.py',
-    'test/expect/__init__.py',
     'test/quantization/__init__.py',
     'test/quantization/core/__init__.py',
     'test/quantization/core/experimental/apot_fx_graph_mode_ptq.py',
@@ -1322,12 +1316,6 @@ exclude_patterns = [
     'torch/_export/passes/const_prop_pass.py',
     'torch/_export/passes/functionalize_side_effectful_ops_pass.py',
     'torch/_export/passes/replace_sym_size_ops_pass.py',
-    'torch/_export/passes/replace_view_ops_with_view_copy_ops_pass.py',
-    'torch/_export/serde/__init__.py',
-    'torch/_export/serde/schema.py',
-    'torch/_export/serde/serialize.py',
-    'torch/_export/serde/upgrade.py',
-    'torch/_export/trace.py',
     'torch/testing/_internal/__init__.py',
     'torch/testing/_internal/autocast_test_lists.py',
     'torch/testing/_internal/autograd_function_db.py',
@@ -1444,7 +1432,6 @@ exclude_patterns = [
     'torch/utils/throughput_benchmark.py',
     'torch/utils/viz/__init__.py',
     'torch/utils/viz/_cycles.py',
-    'torch/utils/weak.py',
 ]
 init_command = [
     'python3',
