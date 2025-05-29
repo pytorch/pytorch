@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import os
+from typing import cast as _cast
 from collections import namedtuple
 
 
@@ -74,6 +75,30 @@ NVIDIA_PATTERNS = [
     "nvtx",
 ]
 
+ONEAPI_PATTERNS = [
+    "dpcpp-cpp-rt",
+    "intel-cmplr-lib-rt",
+    "intel-cmplr-lib-ur",
+    "intel-cmplr-lic-rt",
+    "intel-opencl-rt",
+    "intel-sycl-rt",
+    "mkl",
+    "onemkl-sycl-blas",
+    "onemkl-sycl-dft",
+    "onemkl-sycl-lapack",
+    "onemkl-sycl-rng",
+    "onemkl-sycl-sparse",
+    "intel-openmp",
+    "tbb",
+    "impi-rt",
+    "impi-devel",
+    "oneccl",
+    "oneccl-devel",
+    "intel-pti",
+    "umf",
+    "tcmlib",
+]
+
 CONDA_PATTERNS = [
     "cudatoolkit",
     "soumith",
@@ -132,7 +157,7 @@ def run_and_return_first_line(run_lambda, command):
 
 def get_conda_packages(run_lambda, patterns=None):
     if patterns is None:
-        patterns = CONDA_PATTERNS + COMMON_PATTERNS + NVIDIA_PATTERNS
+        patterns = CONDA_PATTERNS + COMMON_PATTERNS + NVIDIA_PATTERNS + ONEAPI_PATTERNS
     conda = os.environ.get('CONDA_EXE', 'conda')
     out = run_and_read_all(run_lambda, "{} list".format(conda))
     if out is None:
@@ -166,10 +191,6 @@ def get_nvidia_driver_version(run_lambda):
 
 
 def get_gpu_info(run_lambda):
-    return get_nvidia_gpu_info(run_lambda)
-
-
-def get_nvidia_gpu_info(run_lambda):
     if get_platform() == 'darwin' or (TORCH_AVAILABLE and hasattr(torch.version, 'hip') and torch.version.hip is not None):
         if TORCH_AVAILABLE and torch.cuda.is_available():
             if torch.version.hip is not None:
@@ -248,56 +269,85 @@ def get_nvidia_smi():
     return smi
 
 
-def get_pkg_version(run_lambda, pkg):
-    ret = ""
-    index = -1
-    if get_platform() == "linux":
-        mgr_name = ""
-        for mgr_name in ["dpkg", "dnf", "yum", "zypper", ""]:
-            if mgr_name == "":
-                continue
-            rc, _, _ = run(f"which {mgr_name}")
-            if rc == 0:
-                break
-        if mgr_name != "":
-            cmd = ""
-            # 0: centos/suse
-            # 1: ubuntu
-            pkg_names = {0: {"intel_opencl": "intel-opencl",
-                             "level_zero": "level-zero"},
-                         1: {"intel_opencl": "intel-opencl-icd",
-                             "level_zero": "libze1"}}
-            if mgr_name in ["dnf", "yum", "zypper"]:
-                pkg_name = pkg_names[0][pkg]
-                if mgr_name in ["dnf", "yum"]:
-                    index = 1
-                    cmd = f"{mgr_name} list | grep {pkg_name}"
-                if mgr_name in ["zypper"]:
-                    index = 2
-                    cmd = f"{mgr_name} info {pkg_name} | grep Version"
-            if mgr_name == "dpkg":
-                index = 2
-                pkg_name = pkg_names[1][pkg]
-                cmd = f"{mgr_name} -l | grep {pkg_name}"
-            if cmd != "":
-                ret = run_and_read_all(run_lambda, cmd)
-    lst: list[str] = []
-    if ret:
-        lst += re.sub(" +", " ", ret).split(" ")
-    if len(lst) > index and index != -1:
-        ret = lst[index]
-    else:
-        ret = "N/A"
-    return ret
+def _detect_linux_pkg_manager():
+    if get_platform() != "linux":
+        return "N/A"
+    mgr_name = ""
+    for mgr_name in ["dpkg", "dnf", "yum", "zypper", ""]:
+        if mgr_name == "":
+            continue
+        rc, _, _ = run(f"which {mgr_name}")
+        if rc == 0:
+            break
+    return mgr_name
+
+
+def get_linux_pkg_version(run_lambda, pkg):
+    if get_platform() != "linux":
+        return "N/A"
+    pkg_mgr = _detect_linux_pkg_manager()
+    if pkg_mgr in ["", "N/A"]:
+        return "N/A"
+
+    pkgs = {
+        "dpkg": {
+            "intel_opencl": "intel-opencl-icd",
+            "level_zero": "libze1",
+        },
+        "dnf": {
+            "intel_opencl": "intel-opencl",
+            "level_zero": "level-zero",
+        },
+        "yum": {
+            "intel_opencl": "intel-opencl",
+            "level_zero": "level-zero",
+        },
+        "zypper": {
+            "intel_opencl": "intel-opencl",
+            "level_zero": "level-zero",
+        },
+    }
+
+    grep_version = {
+        "dpkg": {
+            "field_index": 2,
+            "command": "dpkg -l | grep {}",
+        },
+        "dnf": {
+            "field_index": 1,
+            "command": "dnf list | grep {}",
+        },
+        "yum": {
+            "field_index": 1,
+            "command": "yum list | grep {}",
+        },
+        "zypper": {
+            "field_index": 2,
+            "command": "zypper info {} | grep Version",
+        },
+    }
+
+    assert pkg in pkgs[pkg_mgr].keys(), f"Unexpected package {pkg} found."
+    field_index: int = int(_cast(int, grep_version[pkg_mgr]["field_index"]))
+    pkg_name: str = str(pkgs[pkg_mgr][pkg])
+    cmd: str = str(grep_version[pkg_mgr]["command"])
+    cmd = cmd.format(pkg_name)
+    ret = run_and_read_all(run_lambda, cmd)
+    if ret == "":
+        return "N/A"
+    lst = re.sub(" +", " ", ret).split(" ")
+    if len(lst) <= field_index:
+        return "N/A"
+    return lst[field_index]
 
 
 def get_intel_gpu_driver_version(run_lambda):
-    lst: list[str] = []
+    lst = []
     platform = get_platform()
     if platform == "linux":
         for pkg in ["intel_opencl", "level_zero"]:
-            lst.append(f"* {pkg}:\t{get_pkg_version(run_lambda, pkg)}")
-    if platform == "win32" or platform == "cygwin":
+            lst.append(f"* {pkg}:\t{get_linux_pkg_version(run_lambda, pkg)}")
+    if platform in ["win32", "cygwin"]:
         txt = run_and_read_all(
             run_lambda,
             'powershell.exe "gwmi -Class Win32_PnpSignedDriver | where{$_.DeviceClass -eq \\"DISPLAY\\"\
@@ -337,7 +387,7 @@ def get_intel_gpu_onboard(run_lambda):
                 lst.append(str(e))
         else:
             lst.append("N/A")
-    if platform == "win32" or platform == "cygwin":
+    if platform in ["win32", "cygwin"]:
         txt = run_and_read_all(
             run_lambda,
             'powershell.exe "gwmi -Class Win32_PnpSignedDriver | where{$_.DeviceClass -eq \\"DISPLAY\\"\
@@ -359,7 +409,7 @@ def get_intel_gpu_onboard(run_lambda):
 
 
 def get_intel_gpu_detected(run_lambda):
-    if not TORCH_AVAILABLE:
+    if not TORCH_AVAILABLE or not hasattr(torch, "xpu"):
         return "N/A"
 
     device_count = torch.xpu.device_count()
@@ -456,7 +506,7 @@ def get_cpu_info(run_lambda):
             | ConvertTo-Json"'
         )
         if rc == 0:
-            lst: list[str] = []
+            lst = []
             try:
                 obj = json.loads(out)
                 if type(obj) is list:
@@ -523,7 +573,7 @@ def get_os(run_lambda):
     from platform import machine
     platform = get_platform()
 
-    if platform == 'win32' or platform == 'cygwin':
+    if platform in ["win32", "cygwin"]:
         return get_windows_version(run_lambda)
 
     if platform == 'darwin':
@@ -564,7 +614,7 @@ def get_libc_version():
 def get_pip_packages(run_lambda, patterns=None):
     """Return `pip list` output. Note: will also find conda-installed pytorch and numpy packages."""
     if patterns is None:
-        patterns = PIP_PATTERNS + COMMON_PATTERNS + NVIDIA_PATTERNS
+        patterns = PIP_PATTERNS + COMMON_PATTERNS + NVIDIA_PATTERNS + ONEAPI_PATTERNS
 
     pip_version = 'pip3' if sys.version_info.major == 3 else 'pip'
 
@@ -667,7 +717,7 @@ def get_env_info():
         cuda_compiled_version=cuda_version_str,
         cuda_runtime_version=get_running_cuda_version(run_lambda),
         cuda_module_loading=get_cuda_module_loading_config(),
-        nvidia_gpu_models=get_nvidia_gpu_info(run_lambda),
+        nvidia_gpu_models=get_gpu_info(run_lambda),
         nvidia_driver_version=get_nvidia_driver_version(run_lambda),
         cudnn_version=get_cudnn_version(run_lambda),
         is_xpu_available=xpu_available_str,
