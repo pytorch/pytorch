@@ -118,6 +118,18 @@ _global_forward_hooks: dict[int, Callable] = OrderedDict()
 _global_forward_hooks_always_called: dict[int, bool] = OrderedDict()
 _global_forward_hooks_with_kwargs: dict[int, bool] = OrderedDict()
 
+
+def _has_any_global_hook():
+    return (
+        _global_backward_pre_hooks
+        or _global_backward_hooks
+        or _global_forward_pre_hooks
+        or _global_forward_hooks
+        or _global_forward_hooks_always_called
+        or _global_forward_hooks_with_kwargs
+    )
+
+
 _EXTRA_STATE_KEY_SUFFIX = "_extra_state"
 
 
@@ -514,7 +526,7 @@ class Module:
     ) -> None:
         r"""Add a buffer to the module.
 
-        This is typically used to register a buffer that should not to be
+        This is typically used to register a buffer that should not be
         considered a model parameter. For example, BatchNorm's ``running_mean``
         is not a parameter, but is part of the module's state. Buffers, by
         default, are persistent and will be saved alongside parameters. This

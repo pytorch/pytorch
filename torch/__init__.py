@@ -978,6 +978,7 @@ __all__.append("sym_sqrt")
 
 
 def sym_ite(b, t, f):
+    """SymInt-aware utility for ternary operator (``t if b else f``.)"""
     if overrides.has_torch_function((b, t, f)):
         return overrides.handle_torch_function(sym_ite, (b, t, f), b, t, f)
     assert isinstance(b, (SymBool, builtins.bool)) and type(t) == type(f)
@@ -2448,7 +2449,7 @@ def compile(
 
 
 def compile(
-    model: _Optional[_Callable] = None,
+    model: _Optional[_Callable[_InputT, _RetT]] = None,
     *,
     fullgraph: builtins.bool = False,
     dynamic: _Optional[builtins.bool] = None,
@@ -2479,7 +2480,7 @@ def compile(
     function, they will all share the same code cache.
 
     Args:
-       model (Callable): Module/function to optimize
+       model (Callable or None): Module/function to optimize
        fullgraph (bool): If False (default), torch.compile attempts to discover compileable regions
         in the function that it will optimize. If True, then we require that the entire function be
         capturable into a single graph. If this is not possible (that is, if there are graph breaks),
@@ -2596,6 +2597,10 @@ def compile(
     if options and isinstance(options, dict):
         guard_filter_fn = options.pop("guard_filter_fn", None)
 
+    frame_traced_fn = None
+    if options and isinstance(options, dict):
+        frame_traced_fn = options.pop("frame_traced_fn", None)
+
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
     else:
@@ -2607,6 +2612,7 @@ def compile(
         dynamic=dynamic,
         disable=disable,
         guard_filter_fn=guard_filter_fn,
+        frame_traced_fn=frame_traced_fn,
     )(model)  # type: ignore[return-value]
 
 
