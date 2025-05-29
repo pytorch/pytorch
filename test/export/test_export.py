@@ -14418,9 +14418,9 @@ def forward(self, q, k, v):
     getitem = _scaled_dot_product_cudnn_attention[0];  _scaled_dot_product_cudnn_attention = None
     return (getitem,)"""
             self.assertExpectedInline(
-                            ep.graph_module.code.strip(),
-                            code_str,
-                        )
+                ep.graph_module.code.strip(),
+                code_str,
+            )
 
     def test_int_list_output(self):
         class M(torch.nn.Module):
