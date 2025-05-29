@@ -5022,6 +5022,27 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
   return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
 }
 
+// std::tuple<Tensor, Tensor> rms_norm_double_backward(
+//   const Tensor& input_t,
+//   const std::optional<Tensor>& gamma,
+//   const Tensor& ggI,
+//   const Tensor& ggG,
+//   const Tensor& gO_t,
+//   const Tensor& save_invstd_t,
+//   IntArrayRef normalized_shape,
+//   std::array<bool, 2> output_mask) {
+  
+//   auto view_size = input_t.sizes().vec();
+//   auto mean_p = at::zeros(view_size, input_p.device());
+
+//   std::array<bool, 3> output_mask_layer{true, true, false};
+
+//   return layer_norm_double_backward(
+//     input_t, gamma, ggI, ggG, at::Tensor(), mean_p, save_invstd_t,
+//     c10::fromIntArrayRefUnchecked(normalized_shape), output_mask_layer
+//   );  
+// }
+
 std::tuple<Tensor, Tensor, Tensor>
 infinitely_differentiable_native_group_norm_backward(
     const Tensor& dY,
@@ -6374,6 +6395,63 @@ Tensor layer_norm_jvp(
       weight_p.defined() ? weight_p.view(view_size_affine) : weight_p,
       weight_t.defined() ? weight_t.view(view_size_affine) : weight_t,
       bias_t.defined() ? bias_t.view(view_size_affine) : bias_t);
+}
+
+Tensor rms_norm_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& weight_p,
+    const Tensor& weight_t,
+    const Tensor& saved_invstd,
+    IntArrayRef normalized_shape) {
+
+  auto dims = std::vector<int64_t>{};
+  auto input_sizes = input_p.sizes().vec();
+  auto view_size = input_sizes;
+  auto view_size_affine = input_sizes;
+
+  for (const auto i : c10::irange(view_size.size())) {
+    if (i < view_size.size() - normalized_shape.size()) {
+      view_size_affine[i] = 1;
+    } else {
+      view_size[i] = 1;
+      dims.push_back(static_cast<int64_t>(i));
+    }
+  }
+
+  auto invstd_p = saved_invstd.view(view_size);
+
+  Tensor invstd_rms_t;
+  if (input_t._is_zerotensor()) {
+    invstd_rms_t = at::zeros_like(invstd_p, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  } else {
+    auto prod_p_t = input_p * input_t;
+    auto mean_prod_p_t = prod_p_t.mean(IntArrayRef(dims), true);
+    invstd_rms_t = -invstd_p.pow(3) * mean_prod_p_t;
+  }
+
+  Tensor result_t;
+  if (input_t._is_zerotensor()) {
+    result_t = at::zeros_like(input_p, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  } else if (areAnyTensorSubclassLike({input_t, input_p, invstd_p, invstd_rms_t})) {
+    result_t = input_t * invstd_p + input_p * invstd_rms_t;
+  } else {
+    result_t = input_t * invstd_p;
+    auto term2 = input_p * invstd_rms_t;
+    result_t += term2;
+  }
+
+  std::optional<Tensor> result_p = std::nullopt;
+  if (weight_p.defined()) {
+    result_p = std::optional<Tensor>(input_p * invstd_p);
+  }
+
+  return _affine_jvp(
+      result_p,
+      result_t,
+      weight_p.defined() ? weight_p.view(view_size_affine) : weight_p,
+      weight_t.defined() ? weight_t.view(view_size_affine) : weight_t,
+      Tensor());
 }
 
 Tensor group_norm_jvp(
