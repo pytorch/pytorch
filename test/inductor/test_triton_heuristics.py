@@ -53,7 +53,7 @@ def amd_sqr_kernel(in_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr):
 
 @functools.lru_cache()
 def get_autotuned_amd_sqr_kernel():
-    @triton.autotune(
+    return triton.autotune(
         configs=[
             triton.Config(
                 {
