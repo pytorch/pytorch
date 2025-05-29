@@ -138,14 +138,15 @@ def _autograd_grad(
             diff_outputs, grad_outputs = zip(*result)
     if len(diff_outputs) == 0:
         return tuple(torch.zeros_like(inp) for inp in inputs)
-    grad_inputs = torch.autograd.grad(
-        diff_outputs,
-        inputs,
-        grad_outputs,
-        retain_graph=retain_graph,
-        create_graph=create_graph,
-        allow_unused=True,
-    )
+    with torch._dynamo.compiled_autograd._disable():
+        grad_inputs = torch.autograd.grad(
+            diff_outputs,
+            inputs,
+            grad_outputs,
+            retain_graph=retain_graph,
+            create_graph=create_graph,
+            allow_unused=True,
+        )
     grad_inputs = tuple(
         torch.zeros_like(inp) if gi is None else gi
         for gi, inp in zip(grad_inputs, inputs)
@@ -1701,6 +1702,7 @@ def linearize(func: Callable, *primals) -> tuple[Any, Callable]:
         with a single evaluation.
 
     Example::
+
         >>> import torch
         >>> from torch.func import linearize
         >>> def fn(x):
