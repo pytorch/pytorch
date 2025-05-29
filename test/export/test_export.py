@@ -12802,6 +12802,33 @@ graph():
         ):
             ep.module()(torch.randn(10), torch.tensor(2))
 
+    @testing.expectedFailureCppSerDes  # TODO: When we deserialize we somehow hardcode sympy.lower to 2
+    @testing.expectedFailureSerDerNonStrict
+    @testing.expectedFailureSerDer
+    def test_baddbmm(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(
+                    torch.randn(64, 64, 192, dtype=torch.float16)
+                )
+                self.bias = torch.nn.Parameter(
+                    torch.randn(64, 1, 192, dtype=torch.float16)
+                )
+
+            def forward(self, x):
+                return torch.ops.aten.baddbmm.default(self.bias, x, self.weight)
+
+        x1 = torch.randn(64, 2048, 64, dtype=torch.float16)
+        x2 = torch.randn(64, 1, 64, dtype=torch.float16)
+        m = M()
+
+        torch.fx.experimental._config.backed_size_oblivious = True
+        ep = export(m, (x2,), dynamic_shapes=({1: Dim("batch")},))
+
+        self.assertTrue(torch.allclose(m(x2), ep.module()(x2)))
+        self.assertTrue(torch.allclose(m(x1), ep.module()(x1)))
+
     @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureSerDerNonStrict  # construtor is not serialized today
