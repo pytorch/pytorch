@@ -341,6 +341,8 @@ void initModule(PyObject* module) {
             api::compile_glsl(name, source, use_buffers));
       });
 }
-#endif /* USE_VULKAN */
+#else // USE_VULKAN
+void initModule(PyObject* module) {}
+#endif // USE_VULKAN
 
 } // namespace torch::vulkan
