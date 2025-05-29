@@ -2121,9 +2121,6 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # TODO - assert that we have not mutating kernels here
 
-        # TODO(nmacchioni): remove once CI tests are fixed
-        choices = [choice for choice in choices if choice is not None]
-
         if config.test_configs.autotune_choice_name_regex is not None:
             choices = [
                 c
