@@ -209,7 +209,7 @@ Diagnosing TorchInductor Errors
 
 If the error does not occur with the ``"eager"`` backend, then the
 backend compiler is the source of the error (`example
-error <https://gist.github.com/mlazos/2f13681e3cc6c43b3911f336327032de%5D>`__).
+error <https://gist.github.com/mlazos/2f13681e3cc6c43b3911f336327032de>`__).
 There are `different choices <./torch.compiler.rst>`__
 for backend compilers for TorchDynamo, with TorchInductor
 fitting the needs of most users. This section focuses on TorchInductor

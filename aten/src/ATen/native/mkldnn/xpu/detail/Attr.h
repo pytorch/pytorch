@@ -131,7 +131,7 @@ struct PostOpParam {
 
 class Attr {
  public:
-  Attr() : q_scale_(1.f), q_zero_point_(0) {}
+  Attr() : q_scale_(1.f) {}
   Attr(float q_scale, int64_t zp = 0) : q_scale_(q_scale), q_zero_point_(zp) {}
 
   /***** eltwise *****/

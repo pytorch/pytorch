@@ -223,6 +223,9 @@ TEST(XPUStreamTest, ExternalTest) {
   ASSERT_TRUE(curStream == myStream);
   ASSERT_TRUE(&(curStream.queue()) == stream);
 
+  sycl::queue* q_ptr = curStream;
+  ASSERT_TRUE(q_ptr == stream);
+
   delete stream;
 }
 
