@@ -56,6 +56,10 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
 
 
+OPTIMUS_EXCLUDE_POST_GRAD = [
+    "activation_quantization_aten_pass",
+]
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence, ValuesView
 
@@ -436,6 +440,23 @@ def convert_shape_to_inductor(
     return [sympy.sympify(i) for i in lst]
 
 
+def convert_to_symint(i: Union[int, sympy.Expr]) -> Union[int, torch.SymInt]:
+    """
+    Like convert_shape_to_symint, but operates on a single expression.
+    """
+    from .virtualized import V
+
+    return (
+        i
+        if isinstance(i, int)
+        else (
+            int(i)
+            if isinstance(i, sympy.Integer)
+            else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
+        )
+    )
+
+
 def convert_shape_to_symint(
     lst: Iterable[Union[int, sympy.Expr]],
 ) -> list[Union[int, torch.SymInt]]:
@@ -443,20 +464,7 @@ def convert_shape_to_symint(
     Takes a list of shapes from Inductor and converts them into symints (or just
     ints if all shapes are static).
     """
-    from .virtualized import V
-
-    return [
-        (
-            i
-            if isinstance(i, int)
-            else (
-                int(i)
-                if isinstance(i, sympy.Integer)
-                else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
-            )
-        )
-        for i in lst
-    ]
+    return [convert_to_symint(i) for i in lst]
 
 
 def is_view(op: torch._ops.OpOverload) -> bool:
@@ -1420,12 +1428,15 @@ def get_num_sms() -> int:
 def get_tma_workspace_arg(
     num_tma_descriptors: int,
     device: torch.device,
+    num_programs: Optional[int] = None,
 ) -> WorkspaceArg:
     """Builds and returns a WorkspaceArg for the device side TMA workspace buffer."""
     from .codegen.common import WorkspaceArg, WorkspaceZeroMode
 
+    if num_programs is None:
+        num_programs = get_num_sms()
     zero_mode = WorkspaceZeroMode.from_bool(False)
-    size = get_num_sms() * num_tma_descriptors * TMA_DESCRIPTOR_SIZE
+    size = num_programs * num_tma_descriptors * TMA_DESCRIPTOR_SIZE
     return WorkspaceArg(
         count=size,
         zero_mode=zero_mode,
@@ -2464,7 +2475,7 @@ def is_gpu(device: Optional[str]) -> bool:
 
 
 def device_need_guard(device: str) -> bool:
-    return is_gpu(device)
+    return device != "mps" and is_gpu(device)  # TODO: MPS does not expose streams now
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
@@ -2641,13 +2652,23 @@ def shape_env_from_inputs(inputs: Sequence[InputType]) -> Optional[ShapeEnv]:
 def align_inputs_from_check_idxs(
     model: Callable[[list[InputType]], _T],
     inputs_to_check: Sequence[int],
+    mutated_input_idxs: OrderedSet[int],
 ) -> Callable[[list[InputType]], _T]:
     if len(inputs_to_check) == 0:
         return model
 
     def run(new_inputs: list[InputType]) -> Any:
-        copy_misaligned_inputs(new_inputs, inputs_to_check)
-        return model(new_inputs)
+        old_tensors, new_tensors = copy_misaligned_inputs(
+            new_inputs, inputs_to_check, mutated_input_idxs
+        )
+        out = model(new_inputs)
+
+        # If a mutated tensor was cloned to be aligned, we need to reflect back the mutation to the
+        # original tensor.
+        if len(old_tensors):
+            torch._foreach_copy_(old_tensors, new_tensors)
+
+        return out
 
     return run
 
@@ -2665,13 +2686,31 @@ def clone_preserve_strides(x: torch.Tensor) -> torch.Tensor:
 
 
 def copy_misaligned_inputs(
-    new_inputs: list[InputType], check_inputs_idxs: Sequence[int]
-) -> None:
+    new_inputs: list[InputType],
+    check_inputs_idxs: Sequence[int],
+    return_pair_idxs: Optional[OrderedSet[int]] = None,
+) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
+    """
+    Clones misaligned tensors which we inferred were aligned. Returns a tuple of [old_tensors], [new_tensors] for every
+    cloned tensor which is in `return_pair_idxs`.
+    """
+
+    old_tensors: list[torch.Tensor] = []
+    new_tensors: list[torch.Tensor] = []
+
+    # hoist above loop because this is on the hot path
+    ret_pair_defined = return_pair_idxs is not None
     for i in check_inputs_idxs:
         _inp = new_inputs[i]
         assert isinstance(_inp, torch.Tensor)
         if _inp.data_ptr() % ALIGNMENT:
             new_inputs[i] = clone_preserve_strides(_inp)
+
+            if ret_pair_defined and i in return_pair_idxs:  # type: ignore[operator]
+                old_tensors.append(_inp)
+                new_tensors.append(new_inputs[i])  # type: ignore[arg-type]
+
+    return old_tensors, new_tensors
 
 
 def remove_unaligned_input_idxs(

@@ -5825,11 +5825,15 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         error_message = ""
         if torch._dynamo.config.inline_inbuilt_nn_modules:
-            error_message = r"HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)"
+            error_message = (
+                "map doesn't work unless it is captured completely with torch.compile"
+            )
         else:
             error_message = "Can't inplace modify module params/buffers"
 
-        with self.assertRaisesRegex(Unsupported, error_message):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError, error_message
+        ):
             opt_fn = torch.compile(mod, backend="eager", fullgraph=True)
             opt_fn(torch.randn(3, 2))
 
@@ -5927,7 +5931,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         from functorch.experimental.control_flow import cond
 
         def true_fn(x):
-            return x
+            return x.clone()
 
         def false_fn(x):
             return x.sin()
@@ -7633,6 +7637,15 @@ utils_device.CURRENT_DEVICE == None""".split(
             torch.compile(dyn_fn, backend="eager")(y)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_empty_tensor(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            n = x.item()
+            return torch.empty((n - 1) // 2)
+
+        self.assertEqual(fn(torch.tensor([4])).size(0), 1)
+        self.assertEqual(fn(torch.tensor([1])).size(0), 0)
+
     def test_unbacked_2d_expand(self):
         @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
         def func(a, b):
@@ -7905,6 +7918,34 @@ utils_device.CURRENT_DEVICE == None""".split(
         fn(torch.randn(2))
         fn(torch.randn(3))
         fn(torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(unbacked_sources="L['x']")
+    def test_unbacked_sources_tensor(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x * x
+
+        fn(torch.randn(0))
+        fn(torch.randn(1))
+        fn(torch.randn(2))
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(unbacked_sources="L['x']")
+    def test_unbacked_sources_scalar(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x * x
+
+        fn(0)
+        fn(1)
+        fn(2)
 
         self.assertEqual(counter.frame_count, 1)
 
@@ -8377,6 +8418,17 @@ utils_device.CURRENT_DEVICE == None""".split(
         ref = fn(x, y)
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
+
+    def test_recursion_depth_guards(self):
+        @torch.compile(dynamic=True)
+        def foo(*args, **kwargs):
+            if sum(args) == 0:
+                return 0
+            return 1
+
+        args = list(range(2000))
+        foo(*args)
+        # Previously would have crashed
 
     @dataclasses.dataclass
     class CSETestCase:
@@ -12492,6 +12544,16 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             )
 
         f(torch.tensor([30, 30], device=device), torch.tensor([68, 32], device=device))
+
+    def test_scalar_isin_decomposition(self):
+        def f():
+            x = torch.tensor(0)
+            return torch.isin(x, x)
+
+        opt_f = torch.compile(f, backend="inductor", fullgraph=True)
+        ref = f()
+        res = opt_f()
+        self.assertEqual(ref, res)
 
 
 devices = ("cuda", "hpu")
