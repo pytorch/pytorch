@@ -1,7 +1,11 @@
-from typing import Any, Callable
+from typing import Any, Callable, ParamSpec, TypeVar
 
 import torch
 import torch.nn.functional as F
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 from .conv_utils import (
     conv_args_and_kwargs,
@@ -21,7 +25,7 @@ class ConvPerSampleGrad(torch.autograd.Function):
     def forward(
         ctx: Any,
         kwarg_names: list[str],
-        conv_fn: Callable,
+        conv_fn: Callable[_P, _R],
         *expanded_args_and_kwargs: Any,
     ) -> torch.Tensor:
         expanded_args, expanded_kwargs = conv_args_and_kwargs(
