@@ -14,6 +14,7 @@
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 
+
 #define TORCH_HIPBLASLT_CHECK(EXPR)               \
   do {                                            \
     hipblasStatus_t __err = EXPR;                 \
@@ -83,6 +84,16 @@ constexpr hipDataType HipDataTypeFor<c10::Float8_e5m2>() {
 template <>
 constexpr hipDataType HipDataTypeFor<c10::Float8_e8m0fnu>() {
   return static_cast<hipDataType>(500);
+}
+
+template <>
+constexpr hipDataType HipDataTypeFor<c10::Float4_e2m1fn_x2>() {
+#if ROCM_VERSION >= 70000
+  return HIP_R_4F_E2M1;
+#else
+  // Return HIP_R_4F_E2M1 enum value for earlier ROCm version.
+  return static_cast<hipDataType>(33);
+#endif
 }
 
 template <typename T>
@@ -513,7 +524,7 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       if (mat1_scale_ptr && mat2_scale_ptr) {
 #ifdef HIPBLASLT_VEC_EXT
         if (GetUseRowwiseFromParams<CT>(params)) {
-          // swapped
+          // Set scale pointers (swapped as before)
           matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
           matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
         }
