@@ -75,10 +75,6 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Print MSVC directory
-        shell: cmd
-        run: |
-          dir "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC"
       - name: configure aws credentials
         id: aws_creds
         uses: aws-actions/configure-aws-credentials@v4
