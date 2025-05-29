@@ -135,7 +135,8 @@ could not be completed because the input matrix is singular.",
           nullptr));
   type = (PyTypeObject*)THPException_AcceleratorError;
   ASSERT_TRUE(
-      PyModule_AddObject(module, "AcceleratorError", THPException_AcceleratorError) == 0);
+      PyModule_AddObject(
+          module, "AcceleratorError", THPException_AcceleratorError) == 0);
 
   return true;
 }
