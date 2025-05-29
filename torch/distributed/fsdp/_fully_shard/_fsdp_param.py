@@ -4,6 +4,7 @@ import itertools
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import auto, Enum
+from threading import local
 from typing import Any, Callable, cast, Optional
 
 import torch
@@ -413,7 +414,6 @@ class FSDPParam:
 
         self.sharded_param = nn.Parameter(self.to_sharded_dtensor(sharded_param))
         self.sharded_param.requires_grad_(param.requires_grad)
-
         # Let `param_data` be freed normally when its ref count reaches 0 when
         # the `fully_shard` call returns to allow provided parameters to alias
         # self._setattr_on_modules(self.sharded_param)
@@ -765,7 +765,6 @@ class FSDPParam:
                     t.size() for t in all_gather_inputs
                 ]
                 return [t.view(-1) for t in all_gather_inputs]
-            # torch.distributed.breakpoint()
             sharded_param_data = self._sharded_param_data.to(self.mp_policy.param_dtype)
             if self.offload_to_cpu:
                 sharded_param_data = sharded_param_data.to(
@@ -853,7 +852,6 @@ class FSDPParam:
         # sharded local tensor and re-save the reference.
         module_info = self._module_info
         new_param = getattr(module_info.module, module_info.param_name)
-        # torch.distributed.breakpoint()
         if new_param is not self.sharded_param_fully_shard:
             if torch.__future__.get_swap_module_params_on_conversion():
                 raise AssertionError(
@@ -877,14 +875,11 @@ class FSDPParam:
                 local_tensor
             )
             local_tensor = padded_local_tensor
-            updated_local_tensor = True
+            # updated_local_tensor = True
         if self.pin_memory and not local_tensor.is_pinned():
             local_tensor = local_tensor.cpu().pin_memory(device=self.device)
             updated_local_tensor = True
-        self._sharded_param_data = local_tensor.view(-1)
-        # self._sharded_param_data = local_tensor.view(-1).to(
-        #    self._sharding_spec.tensor_meta.dtype
-        # )
+        # self._sharded_param_data = local_tensor.view(-1)
         assert isinstance(self.sharded_param_fully_shard, DTensor)  # mypy
         if updated_local_tensor:
             # Only change the local tensor object if needed
