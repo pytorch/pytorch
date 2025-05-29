@@ -436,11 +436,8 @@ max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE", "DEFAULT"
 ).upper()  # type: ignore[assignment]
 
-# NOTE: This feature is deprecated and will be defauled to False in the future.
-# Whether we fall back to ATen or hard error when no matches are found during autotuning
-autotune_fallback_to_aten = (
-    os.environ.get("TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN", "0") == "1"
-)
+# DEPRECATED. This setting is ignored.
+autotune_fallback_to_aten = False
 
 # the value used as a fallback for the unbacked SymInts
 # that can appear in the input shapes (e.g., in autotuning)
