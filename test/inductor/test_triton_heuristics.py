@@ -237,6 +237,7 @@ class TestTritonHeuristics(TestCase):
         waves_per_eu is an example of a special config arg on AMD; if it is explicitly specified
         in a config, the kwarg will exist in the kwargs but not in the function signature.
         """
+
         @torch.library.triton_op("test_triton_heuristics::triton_sqr", mutates_args=())
         def triton_sqr(x: torch.Tensor) -> torch.Tensor:
             y = torch.empty_like(x)
