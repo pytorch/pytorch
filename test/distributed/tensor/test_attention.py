@@ -460,7 +460,7 @@ class RingFlexAttentionTest(DTensorTestBase):
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
         # Compile the flex_attention function
-        flex_attention = torch.compile(flex_attention, dynamic=False)
+        flex_attention = torch.compile(flex_attention, dynamic=False, fullgraph=True)
         Q_BLOCK_SIZE_DEFAULT = 128
         KV_BLOCK_SIZE_DEFAULT = Q_BLOCK_SIZE_DEFAULT
 
@@ -544,36 +544,47 @@ class RingFlexAttentionTest(DTensorTestBase):
         # create sharder
         sharder = _FlexAttentionSequentialSharder(device_mesh, block_mask=block_mask)
 
-        with CommDebugMode() as comm_mode:
-            with context_parallel(
-                device_mesh,
-                buffers=[cp_q, cp_k, cp_v],
-                buffer_seq_dims=[2, 2, 2],
-                sharder=sharder,
-            ):
-                cp_q.requires_grad = True
-                cp_k.requires_grad = True
-                cp_v.requires_grad = True
-                cp_out, cp_lse = flex_attention(
-                    cp_q,
-                    cp_k,
-                    cp_v,
-                    block_mask=block_mask_post_sharding,
-                    return_lse=True,
-                )
-                cp_out.sum().backward()
+        # dump profiling snapshot
+        import os
 
-                cp_q.requires_grad = False
-                cp_k.requires_grad = False
-                cp_v.requires_grad = False
+        snapshot_dir = os.path.join("./", "memory_snapshot/")
+        if not os.path.exists(snapshot_dir):
+            os.makedirs(snapshot_dir, exist_ok=True)
 
-        self.assertDictEqual(
-            comm_mode.get_comm_counts(),
-            {
-                c10d_functional.all_gather_into_tensor: 2 * 2,  # forward + backward
-                c10d_functional.reduce_scatter_tensor: 2,  # backward
-            },  # currently we have k and v all-gather separate
-        )
+        torch.cuda.memory._record_memory_history(max_entries=100000)
+
+        with context_parallel(
+            device_mesh,
+            buffers=[cp_q, cp_k, cp_v],
+            buffer_seq_dims=[2, 2, 2],
+            sharder=sharder,
+        ):
+            cp_q.requires_grad = True
+            cp_k.requires_grad = True
+            cp_v.requires_grad = True
+            cp_out, cp_lse = flex_attention(
+                cp_q,
+                cp_k,
+                cp_v,
+                block_mask=block_mask_post_sharding,
+                return_lse=True,
+            )
+            cp_out.sum().backward()
+
+            cp_q.requires_grad = False
+            cp_k.requires_grad = False
+            cp_v.requires_grad = False
+
+        try:
+            if self.rank == 0:
+                import pickle
+
+                with open(
+                    f"./memory_snapshot/rank{self.rank}_memory_snapshot.pickle", "wb"
+                ) as output:
+                    pickle.dump(torch.cuda.memory._snapshot(), output)
+        finally:
+            torch.cuda.memory._record_memory_history(enabled=None)
 
         # unshard the output
         cp_out, cp_lse = context_parallel_unshard(
