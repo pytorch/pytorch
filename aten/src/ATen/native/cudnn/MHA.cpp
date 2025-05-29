@@ -295,14 +295,21 @@ struct MHAGraphCache {
 // @eqy: use thread local caches as cuDNN Execution Plans are not guaranteed to
 // be thread safe across all engines see Limitations in
 // https://docs.nvidia.com/deeplearning/cudnn/backend/latest/release-notes.html
-thread_local MHAGraphCache<
+// We also leak the caches to workaround potential teardown race issues.
+
+auto& getMHAGraphCache_() {
+  thread_local auto& instance = *new MHAGraphCache<
     std::shared_ptr<fe::graph::Graph>,
-    MHACacheKeyWrapper>
-    mhagraphcache;
-thread_local MHAGraphCache<
+    MHACacheKeyWrapper>;
+  return instance;
+}
+
+auto& getMHAGraphBackwardCache_() {
+  thread_local auto& instance = *new MHAGraphCache<
     std::shared_ptr<fe::graph::Graph>,
-    MHACacheKeyWrapper>
-    mhagraphbackwardcache;
+    MHACacheKeyWrapper>;
+  return instance;
+}
 
 namespace {
 
@@ -1178,7 +1185,7 @@ void run_cudnn_SDP_fprop(
       dropout_probability,
       is_causal,
       return_softmaxstats);
-  auto graph_ptr = mhagraphcache.find(key);
+  auto graph_ptr = getMHAGraphCache_().find(key);
   std::shared_ptr<fe::graph::Graph> mha_graph;
   if (graph_ptr) {
     mha_graph = *graph_ptr;
@@ -1225,7 +1232,7 @@ void run_cudnn_SDP_fprop(
       c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
   TORCH_CHECK(
       mha_graph->execute(handle, variant_pack, workspace_ptr.get()).is_good());
-  mhagraphcache.update(key, mha_graph);
+  getMHAGraphCache_().update(key, mha_graph);
 }
 
 void run_cudnn_SDP_fprop_nestedtensor(
@@ -1396,7 +1403,7 @@ void run_cudnn_SDP_bprop(
       dropout_probability,
       is_causal,
       true);
-  auto graph_backward_ptr = mhagraphbackwardcache.find(key);
+  auto graph_backward_ptr = getMHAGraphBackwardCache_().find(key);
   std::shared_ptr<fe::graph::Graph> mha_graph;
   if (graph_backward_ptr) {
     mha_graph = *graph_backward_ptr;
@@ -1451,7 +1458,7 @@ void run_cudnn_SDP_bprop(
   TORCH_CHECK(!workspace_size || workspace_ptr.get());
   TORCH_CHECK(
       mha_graph->execute(handle, variant_pack, workspace_ptr.get()).is_good());
-  mhagraphbackwardcache.update(key, mha_graph);
+  getMHAGraphBackwardCache_().update(key, mha_graph);
 }
 
 void run_cudnn_SDP_bprop_nestedtensor(
