@@ -5049,41 +5049,57 @@ class TestMemPool(TestCase):
         # increments the id
         self.assertTrue(abs(pool2[1] - pool1[1]) > 0)
 
-    def test_mempool_with_allocator(self):
-        pool = torch.cuda.MemPool()
-
-        # MemPool doesn't have an allocator by default
-        self.assertEqual(pool.allocator, None)
-
-        from torch.utils.cpp_extension import load_inline
-
-        dummy_allocator_source = """
+    def get_dummy_allocator(self, check_vars):
+        dummy_allocator_source_vars = """
         #include <torch/extension.h>
         #include <ATen/cuda/Exceptions.h>
         #include <cuda_runtime_api.h>
 
         extern "C" {
-          C10_EXPORT int called_dummy_alloc = 0;
-          C10_EXPORT int called_dummy_free = 0;
+            C10_EXPORT int called_dummy_alloc = 0;
+            C10_EXPORT int called_dummy_free = 0;
 
+            // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
+            C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) {
+            called_dummy_alloc = 123;
+            void* ptr;
+            C10_CUDA_CHECK(cudaMallocManaged(&ptr, size));
+            return ptr;
+            }
+
+            C10_EXPORT void dummy_free(void* ptr, size_t size, int device, void* stream) {
+            called_dummy_free = 321;
+            C10_CUDA_CHECK(cudaFree(ptr));
+            }
+        }
+        """
+        dummy_allocator_source_no_vars = """
+        #include <torch/extension.h>
+        #include <ATen/cuda/Exceptions.h>
+        #include <cuda_runtime_api.h>
+
+        extern "C" {
           // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
           C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) {
-            called_dummy_alloc = 123;
             void* ptr;
             C10_CUDA_CHECK(cudaMallocManaged(&ptr, size));
             return ptr;
           }
 
           C10_EXPORT void dummy_free(void* ptr, size_t size, int device, void* stream) {
-            called_dummy_free = 321;
             C10_CUDA_CHECK(cudaFree(ptr));
           }
         }
         """
+
+        from torch.utils.cpp_extension import load_inline
+
         dummy_allocator_libname = "dummy_allocator"
         dummy_allocator = load_inline(
             name=dummy_allocator_libname,
-            cpp_sources=dummy_allocator_source,
+            cpp_sources=dummy_allocator_source_vars
+            if check_vars
+            else dummy_allocator_source_no_vars,
             is_python_module=False,
             keep_intermediates=False,
             verbose=True,
@@ -5094,6 +5110,15 @@ class TestMemPool(TestCase):
             "dummy_alloc",
             "dummy_free",
         )
+        return allocator, dummy_allocator
+
+    def test_mempool_with_allocator(self):
+        pool = torch.cuda.MemPool()
+
+        # MemPool doesn't have an allocator by default
+        self.assertEqual(pool.allocator, None)
+        allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
+
         pool = torch.cuda.MemPool(allocator.allocator())
 
         # pool should point to the same allocator as the one passed into it
@@ -5128,6 +5153,8 @@ class TestMemPool(TestCase):
         # out tensor
         self.assertEqual(called_dummy_alloc.value, 123)
 
+        out_non_pool = torch.empty(nelem_1mb, device="cuda")
+
         with torch.cuda.use_mem_pool(pool):
             # pool should have 1 segment since we made a small allocation (1 MB)
             # above and so the CUDACachingAllocator packed it into a 2 MB buffer
@@ -5145,6 +5172,9 @@ class TestMemPool(TestCase):
             # to make a new 2 MB buffer to accomodate out_2
             self.assertEqual(len(pool.snapshot()), 2)
 
+        all_segments = torch.cuda.memory._snapshot()["segments"]
+        self.assertEqual(len(all_segments), 3)
+
         del out_0, out_1, out_2
 
         # pool's destructor calls emptyCache()
@@ -5156,40 +5186,7 @@ class TestMemPool(TestCase):
 
     @serialTest()
     def test_mempool_limited_memory_with_allocator(self):
-        from torch.utils.cpp_extension import load_inline
-
-        dummy_allocator_source = """
-        #include <torch/extension.h>
-        #include <ATen/cuda/Exceptions.h>
-        #include <cuda_runtime_api.h>
-
-        extern "C" {
-          // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
-          C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) {
-            void* ptr;
-            C10_CUDA_CHECK(cudaMallocManaged(&ptr, size));
-            return ptr;
-          }
-
-          C10_EXPORT void dummy_free(void* ptr, size_t size, int device, void* stream) {
-            C10_CUDA_CHECK(cudaFree(ptr));
-          }
-        }
-        """
-        dummy_allocator_libname = "dummy_allocator"
-        dummy_allocator = load_inline(
-            name=dummy_allocator_libname,
-            cpp_sources=dummy_allocator_source,
-            is_python_module=False,
-            keep_intermediates=False,
-            verbose=True,
-            with_cuda=True,
-        )
-        allocator = torch.cuda.memory.CUDAPluggableAllocator(
-            dummy_allocator,
-            "dummy_alloc",
-            "dummy_free",
-        )
+        allocator, _ = self.get_dummy_allocator(check_vars=False)
         pool_do_not_use = torch.cuda.MemPool(allocator.allocator())
         pool_use = torch.cuda.MemPool(allocator.allocator(), use_on_oom=True)
 
@@ -5258,37 +5255,12 @@ class TestMemPool(TestCase):
 
         self._teardown_mempool_limited_memory_test()
 
-    def test_mempool_context(self):
-        active_pool = torch.cuda.MemPoolContext.active_pool()
-
-        # there is no active pool if none was made active
-        self.assertEqual(active_pool, None)
-
-        pool = torch.cuda.MemPool()
-        ctx = torch.cuda.MemPoolContext(pool)
-        active_pool = torch.cuda.MemPoolContext.active_pool()
-
-        # pool was made active
-        self.assertEqual(active_pool, pool)
-
-        del ctx
-        active_pool = torch.cuda.MemPoolContext.active_pool()
-
-        # ctx was deleted, so active pool is the previous one
-        self.assertEqual(active_pool, None)
-
     def test_mempool_multithread(self):
         pool_ids = []
-        active_pool_ids = []
 
         def create_mempool_and_make_active():
             pool = torch.cuda.MemPool()
             pool_ids.extend([pool.id])
-
-            ctx = torch.cuda.MemPoolContext(pool)
-            active_pool = torch.cuda.MemPoolContext.active_pool()
-            active_pool_ids.extend([active_pool.id])
-            del ctx
 
         num_threads = 4
         threads = [
@@ -5304,14 +5276,12 @@ class TestMemPool(TestCase):
         # mempool id creation is atomic
         self.assertEqual(len(set(pool_ids)), 4)
 
-        # each thread should have different active mempool, since
-        # the pointer to the mempool is thread local
-        self.assertEqual(len(set(active_pool_ids)), 4)
-
     @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Load_inline doesn't work in fbcode")
     def test_mempool_expandable(self):
         torch.cuda.memory._set_allocator_settings("expandable_segments:True")
-        pool = torch.cuda.MemPool()
+        allocator, _ = self.get_dummy_allocator(check_vars=False)
+        pool = torch.cuda.MemPool(allocator.allocator())
 
         # torch.cuda.MemPool doesn't work with expandable segments
         with self.assertRaises(RuntimeError):
