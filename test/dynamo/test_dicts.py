@@ -1263,8 +1263,12 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(TypeError, d.values, 1)
 
 
-class DictSubclassMethodsTests(torch._dynamo.test_case.TestCase):
+class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
+
+
+class OrderedDictMethodsTests(DictMethodsTests):
+    thetype = OrderedDict
 
 
 if __name__ == "__main__":
