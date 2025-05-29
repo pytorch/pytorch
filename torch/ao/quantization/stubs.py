@@ -2,6 +2,7 @@ from typing import Any, Optional
 
 import torch
 from torch import nn
+from torch.ao.quantization import QConfig
 
 
 class QuantStub(nn.Module):
@@ -13,7 +14,7 @@ class QuantStub(nn.Module):
             if qconfig is not provided, we will get qconfig from parent modules
     """
 
-    def __init__(self, qconfig: Optional[Any] = None):
+    def __init__(self, qconfig: Optional[QConfig] = None):
         super().__init__()
         if qconfig:
             self.qconfig = qconfig
