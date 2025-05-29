@@ -41,6 +41,14 @@ static void tan_kernel(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "tan");
 }
 
+static void asin_kernel(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "asin");
+}
+
+static void acos_kernel(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "acos");
+}
+
 static void atan_kernel(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "atan");
 }
@@ -88,6 +96,8 @@ REGISTER_DISPATCH(tanh_stub, tanh_kernel);
 REGISTER_DISPATCH(sin_stub, sin_kernel);
 REGISTER_DISPATCH(cos_stub, cos_kernel);
 REGISTER_DISPATCH(tan_stub, tan_kernel);
+REGISTER_DISPATCH(asin_stub, asin_kernel);
+REGISTER_DISPATCH(acos_stub, acos_kernel);
 REGISTER_DISPATCH(atan_stub, atan_kernel);
 REGISTER_DISPATCH(round_decimals_stub, round_decimals_kernel);
 REGISTER_DISPATCH(sqrt_stub, sqrt_kernel_mps);
