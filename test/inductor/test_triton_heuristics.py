@@ -42,17 +42,6 @@ from torch._inductor.runtime.triton_heuristics import (
 from torch._inductor.test_case import run_tests, TestCase
 
 
-@triton.autotune(
-    configs=[
-        triton.Config(
-            {
-                "BLOCK_SIZE": 64,
-                "waves_per_eu": 3,
-            }
-        )
-    ],
-    key=[],
-)
 @triton.jit
 def amd_sqr_kernel(in_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(0)
@@ -60,6 +49,21 @@ def amd_sqr_kernel(in_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr):
     data = tl.load(in_ptr + offsets, mask=offsets < numel)
     sqr = data * data
     tl.store(out_ptr + offsets, sqr, mask=offsets < numel)
+
+
+@functools.lru_cache()
+def get_autotuned_amd_sqr_kernel():
+    @triton.autotune(
+        configs=[
+            triton.Config(
+                {
+                    "BLOCK_SIZE": 64,
+                    "waves_per_eu": 3,
+                }
+            )
+        ],
+        key=[],
+    )(amd_sqr_kernel)
 
 
 class TestTritonHeuristics(TestCase):
@@ -245,7 +249,7 @@ class TestTritonHeuristics(TestCase):
             def grid(meta):
                 return (triton.cdiv(x.numel(), meta["BLOCK_SIZE"]),)
 
-            torch.library.wrap_triton(amd_sqr_kernel)[grid](x, y, x.numel())
+            torch.library.wrap_triton(get_autotuned_amd_sqr_kernel())[grid](x, y, x.numel())
 
         def fn(x):
             return triton_sqr(x)
