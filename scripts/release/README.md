@@ -1,4 +1,4 @@
-# PyTorch Release Scripts For doing Release branch cut and applying release only changes
+# PyTorch release scripts performing branch cut and applying release only changes
 
 These are a collection of scripts that are to be used for release activities.
 
@@ -6,15 +6,6 @@ These are a collection of scripts that are to be used for release activities.
 >       to `disabled`.
 >       The basic idea being that there should be no potential to do anything dangerous unless
 >       `DRY_RUN` is explicitly set to `disabled`.
-
-
-### Usage
-
-Usage should be fairly straightforward and should actually require no extra variables
-if you are running from the correct git tags. (i.e. the GA tag to promote is currently
-checked out)
-
-`PACKAGE_TYPE` and `PACKAGE_NAME` can be swapped out to promote other packages.
 
 ### Order of Execution
 
