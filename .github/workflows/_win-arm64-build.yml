@@ -75,6 +75,11 @@ jobs:
       run:
         shell: bash
     steps:
+      - name: Print link.exe's location
+        shell: cmd
+        run: |
+          where link.exe || echo "link.exe not found, please install Visual Studio"
+
       - name: configure aws credentials
         id: aws_creds
         uses: aws-actions/configure-aws-credentials@v4
