@@ -1094,6 +1094,15 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
         super().__init__(pack_hook, unpack_hook)
 
 
+# torch._disable_dynamo creates a reference cycle with decorated function
+# This function is used ot ensure that the decorated function does not have
+# a closure, so that other objects aren't also kept alive.
+# Note: does not work when fn is compiled
+@torch._disable_dynamo
+def _run_fn_with_dynamo_disabled(fn, *args, **kwargs):
+    return fn(*args, **kwargs)
+
+
 class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
     def __init__(self, frame):
         def pack_hook(x):
@@ -1120,7 +1129,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                     with _recomputation_hook(
                         weakref.ref(frame), gid
                     ), torch.autograd.enable_grad():
-                        frame.recompute_fn(*args)
+                        _run_fn_with_dynamo_disabled(frame.recompute_fn, *args)
                 except _StopRecomputationError:
                     pass
                 frame.is_recomputed[gid] = True
