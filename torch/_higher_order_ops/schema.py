@@ -1,3 +1,4 @@
+import copy
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -92,6 +93,7 @@ class HopSchemaGenerator:
     def __init__(self, hop: torch._ops.HigherOrderOperator):
         self.arg_infos: list[HopArgumentInfo] = []
         self.example_outputs: list[Any] = []
+        self.schema_tree_spec: Optional[pytree.TreeSpec] = None
         self.hop = hop
 
     def add_arg(
@@ -109,6 +111,12 @@ class HopSchemaGenerator:
                 "Expect callable to be a GraphModule or an. Please call materialize_as_graph first "
                 f"to turn callable arguments {example_value} into a GraphModule."
             )
+        _, flat_spec = pytree.tree_flatten(example_value)
+        if not flat_spec.is_leaf():
+            raise RuntimeError(
+                f"example_value {example_value} is not a leaf node. "
+                "Please only add flattened inputs to the hop schema."
+            )
 
         arg_info = HopArgumentInfoGen.from_example(
             example_value=example_value,
@@ -122,11 +130,23 @@ class HopSchemaGenerator:
     def add_output(self, output: Any) -> None:
         self.example_outputs.append(output)
 
+    def add_schema_tree_spec(self, *args: Any, **kwargs: Any) -> None:
+        """schema tree spec is the tree spec from flattening all inputs to the hop with pytree.tree_flatten
+        Since torch.FunctionSchema only have proper mutation/alias support for flattened inputs, we need
+        to store the tree spec in order to reconstruct the inputs to the hop.
+        """
+        self.schema_tree_spec = pytree.tree_flatten((args, kwargs))[1]
+
     def gen_schema(self) -> torch._C.FunctionSchema:
+        if self.schema_tree_spec is None:
+            raise RuntimeError(
+                "schema_tree_spec is not set. Please call add_schema_tree_spec first."
+            )
         return CFunctionSchemaGen.from_hop_argument_info(
             str(self.hop),
             self.arg_infos,
             HopArgumentInfoGen.from_example(tuple(self.example_outputs), name="out"),
+            self.schema_tree_spec,
         )
 
 
@@ -171,6 +191,7 @@ class CFunctionSchemaGen:
         op_name: str,
         inp_argument_info: list[HopArgumentInfo],
         out_argument_info: HopArgumentInfo,
+        schema_tree_spec: pytree.TreeSpec,
     ) -> Any:
         args = []
         for i, arg_info in enumerate(inp_argument_info):
@@ -201,13 +222,51 @@ class CFunctionSchemaGen:
                 for i, val in enumerate(out_argument_info.example_value)
             ]
 
-        return torch._C.FunctionSchema(
+        return HopSchema(
             op_name,
             "",
             args,
             rets,
             False,
             False,
+            schema_tree_spec,
+        )
+
+
+class HopSchema(torch._C.FunctionSchema):
+    def __init__(
+        self,
+        name: str,
+        overload_name: str,
+        arguments: list[torch._C.Argument],
+        returns: list[torch._C.Argument],
+        is_vararg: bool,
+        is_varret: bool,
+        schema_tree_spec: pytree.TreeSpec,
+    ):
+        self.tree_spec = schema_tree_spec
+        self.is_vararg = is_vararg
+        self.is_varret = is_varret
+        super().__init__(
+            name,
+            overload_name,
+            arguments,
+            returns,
+            self.is_vararg,
+            self.is_varret,
+        )
+
+    def __deepcopy__(self, memo: Any) -> "HopSchema":
+        # Need to additionally copy the tree_spec since
+        # it's not a member of torch._C.FunctionSchema
+        return HopSchema(
+            self.name,
+            self.overload_name,
+            self.arguments,
+            self.returns,
+            self.is_vararg,
+            self.is_varret,
+            copy.deepcopy(self.tree_spec),
         )
 
 
