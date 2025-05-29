@@ -32,8 +32,7 @@ from torch.torch_version import TorchVersion
 
 
 if config.is_fbcode():
-    from triton.fb import build_paths  # noqa: F401
-    from triton.fb.build import _run_build_command
+    from triton.fb.build import _run_build_command, build_paths
 
     from torch._inductor.fb.utils import (
         log_global_cache_errors,
@@ -183,11 +182,11 @@ def convert_cubin_to_obj(
     obj_file = cubin_file + ".o"
     # Convert .cubin to .o
     cmd = f"{ld} -r -b binary -z noexecstack -o {obj_file} {cubin_file}"
-    subprocess.run(cmd.split(), capture_output=True, text=True)
+    subprocess.run(cmd.split(), capture_output=True, text=True, check=True)
     os.remove(cubin_file)
     # Rename .data to .rodata
     cmd = f"{objcopy} --rename-section .data=.rodata,alloc,load,readonly,data,contents {obj_file}"
-    subprocess.run(cmd.split(), capture_output=True, text=True)
+    subprocess.run(cmd.split(), capture_output=True, text=True, check=True)
     # By default objcopy will create *_start, *_size, *_end symbols using the full path
     # Rename to use the unique kernel name
     file_name = re.sub(r"[\W]", "_", cubin_file)
@@ -198,7 +197,7 @@ def convert_cubin_to_obj(
         + f"--redefine-sym _binary_{file_name}_end=__{kernel_name}_end "
         + obj_file
     )
-    subprocess.run(cmd.split(), capture_output=True, text=True)
+    subprocess.run(cmd.split(), capture_output=True, text=True, check=True)
     return obj_file
 
 
@@ -1323,6 +1322,9 @@ def get_cpp_torch_device_options(
                 if not compile_only:
                     # Only add link args, when compile_only is false.
                     passthrough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
+
+    if config.aot_inductor.custom_op_libs:
+        libraries += config.aot_inductor.custom_op_libs
 
     return (
         definitions,
