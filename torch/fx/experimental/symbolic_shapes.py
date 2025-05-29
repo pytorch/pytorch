@@ -2129,10 +2129,13 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
             self.inner_contexts = {}
 
 
-# Tracks the sources of all fake tensors we wrap in Dynamo.
-# Used by shape guard computation.
 @dataclass
 class TrackedFake:
+    """
+    Tracks the sources of all fake tensors we wrap in Dynamo.
+    Used by shape guard computation.
+    """
+
     fake: Union[FakeTensor, SymInt]
     source: Source
     symbolic_context: Optional[SymbolicContext]
@@ -2158,6 +2161,22 @@ IndicatorTypes = (IsNonOverlappingAndDenseIndicator,)
 
 
 def _expandsums(args: list[sympy.Expr]) -> tuple[sympy.Expr, bool]:
+    """
+    Expand products of sums into sums of products.
+
+    This function takes a list of sympy expressions and separates them into
+    additive expressions (those with is_Add=True) and other expressions.
+    It then computes the distributive product, expanding (a+b)*(c+d) into a*c + a*d + b*c + b*d.
+
+    Args:
+        args: A list of sympy expressions to expand
+
+    Returns:
+        A tuple containing:
+        - The expanded expression as a sympy.Expr
+        - A boolean indicating whether expansion occurred (True if multiple additive
+          expressions were present or if there was at least one additive and one other expression)
+    """
     adds, other = [], []
     for arg in args:
         if arg.is_Add:
@@ -2174,6 +2193,20 @@ def _expandsums(args: list[sympy.Expr]) -> tuple[sympy.Expr, bool]:
 
 
 def _fast_expand(expr: _SympyT) -> _SympyT:
+    """
+    A faster implementation of sympy's expand function for common cases.
+
+    This function expands expressions like (a+b)^n or (a+b)*(c+d) into sums of products,
+    but avoids the expensive checks and features of sympy's full expand implementation.
+    It only recreates objects when necessary to avoid expensive operations.
+
+    Args:
+        expr: A sympy expression to expand
+
+    Returns:
+        The expanded expression
+    """
+
     # The expand algorithm in sympy is slow due to all the features is supports
     # For eg: e^(-x)*(x-1)/(x+1) is expanded to (x-1)/(e^x + e^x*x) if x is
     # positive and (e^(-x)*x-e^(-x))/(x+1) if x is negative. We do not implement
@@ -2351,6 +2384,19 @@ def eval_is_non_overlapping_and_dense(
 def _eval_is_non_overlapping_and_dense(
     sizes: Sequence[int], strides: Sequence[int]
 ) -> bool:
+    """
+    Evaluates whether a tensor with the given sizes and strides is non-overlapping and dense.
+
+    A tensor is non-overlapping if there's no memory location that belongs to more than one element.
+    A tensor is dense if all elements are stored in memory without gaps.
+
+    Args:
+        sizes: Sequence of dimension sizes for the tensor
+        strides: Sequence of strides for the tensor
+
+    Returns:
+        True if the tensor is non-overlapping and dense, False otherwise
+    """
     dim = len(sizes)
 
     # Short-circuits for tensors of rank one, which are
@@ -2385,6 +2431,20 @@ def _sympy_cast_symbool_to_symint_guardless(x: SympyBoolean) -> sympy.Expr:
 def cast_symbool_to_symint_guardless(
     symbool: Union[bool, torch.SymBool]
 ) -> Union[int, torch.SymInt]:
+    """
+    Converts a SymBool or bool to a SymInt or int without introducing guards.
+
+    This function maps True to 1 and False to 0, preserving the symbolic nature
+    of the input when it's a SymBool. Unlike regular casting which might introduce
+    guards, this function performs the conversion without adding any guards.
+
+    Args:
+        symbool: A boolean value, either a concrete bool or symbolic SymBool
+
+    Returns:
+        The corresponding integer value (1 for True, 0 for False) as either
+        a concrete int or symbolic SymInt
+    """
     if isinstance(symbool, bool):
         return 1 if symbool else 0
     int_sym = _sympy_cast_symbool_to_symint_guardless(symbool.node.expr)

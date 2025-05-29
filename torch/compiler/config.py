@@ -83,5 +83,15 @@ this to a string that identifies the shared profile. This is useful if you want 
 for models that are not identical, but are similar enough to share PGO profiles.
 """
 
+unbacked_sources: str = Config(
+    env_name_default="TORCH_COMPILE_UNBACKED_SOURCES", default=""
+)
+"""
+Comma delimited list of sources that should be marked as unbacked. Primarily useful for large
+models with graph breaks where you need intermediate tensors marked unbacked.
+
+This whitelist is dominant over all other flags dynamic=False, force_nn_module_property_static_shapes
+and force_parameter_static_shapes.
+"""
 
 install_config_module(sys.modules[__name__])
