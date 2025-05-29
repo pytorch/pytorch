@@ -1792,7 +1792,7 @@ class TestReductions(TestCase):
     @dtypes(*complex_types())
     def test_nansum_complex(self, device, dtype):
         x = torch.randn((3, 3, 3), device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, "nansum does not support complex inputs"):
+        with self.assertRaisesRegex(RuntimeError, "nansum on CPU does not support complex inputs"):
             torch.nansum(x)
 
     @dtypes(*all_types_and(torch.half))
