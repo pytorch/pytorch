@@ -781,7 +781,6 @@ def check_input_alias_and_mutation_return_ouputs(
 
         def _tensor_version(t) -> Optional[int]:
             if isinstance(t, torch.Tensor):
-                # Dynamo is unbale to handle assertion failures.
                 if not isinstance(t, FakeTensor):
                     raise RuntimeError("Only fake tensor is allowed")
                 return t._version
