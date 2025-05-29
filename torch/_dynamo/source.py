@@ -599,7 +599,6 @@ class SetGetItemSource(ChainedSource):
         return self.base.guard_source()
 
     def reconstruct(self, codegen: "PyCodegen"):
-        breakpoint()
         codegen.add_push_null(
             lambda: codegen.load_import_from(utils.__name__, "set_getitem")
         )
