@@ -24,9 +24,15 @@ from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, T
 
 # TODO: Once more test files are created, move the contents to a ao folder.
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+handler = logging.StreamHandler()
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+handler.setFormatter(formatter)
+
+logger.addHandler(handler)
+logger.propagate = False  # Prevent duplicate logs if root logger also has handlers
 
 
 class TestQuantizedSparseKernels(TestCase):
@@ -78,10 +84,10 @@ class TestQuantizedSparseKernels(TestCase):
 
             for use_channelwise, dynamic_mode in product([True, False], [True, False]):
                 if qengine_is_fbgemm() and dynamic_mode:
-                    logging.info("dynamic sparse qlinear is only available in qnnpack")
+                    logger.info("dynamic sparse qlinear is only available in qnnpack")
                     continue
                 if qengine_is_qnnpack() and not dynamic_mode:
-                    logging.info("static sparse qlinear is only available in fbgemm")
+                    logger.info("static sparse qlinear is only available in fbgemm")
                     continue
                 if use_channelwise:
                     W_q = torch.quantize_per_channel(

@@ -10,13 +10,10 @@ C10_CLANG_DIAGNOSTIC_PUSH()
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
 #endif
 
-#if defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
 #if defined(CL_SYCL_LANGUAGE_VERSION)
 #include <CL/sycl.hpp> // for SYCL 1.2.1
-#else
+#elif defined(SYCL_LANGUAGE_VERSION)
 #include <sycl/sycl.hpp> // for SYCL 2020
-#endif
-#include <ext/oneapi/bfloat16.hpp>
 #endif
 
 namespace c10 {

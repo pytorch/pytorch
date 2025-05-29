@@ -146,10 +146,8 @@ nvrtcResult nvrtcCreateProgram(nvrtcProgram *prog,
 NVRTC_STUB1(nvrtcDestroyProgram, nvrtcProgram *)
 NVRTC_STUB2(nvrtcGetPTXSize, nvrtcProgram, size_t *)
 NVRTC_STUB2(nvrtcGetPTX, nvrtcProgram, char *)
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
 NVRTC_STUB2(nvrtcGetCUBINSize, nvrtcProgram, size_t *)
 NVRTC_STUB2(nvrtcGetCUBIN, nvrtcProgram, char *)
-#endif
 NVRTC_STUB3(nvrtcCompileProgram, nvrtcProgram, int, const char * const *)
 _STUB_1(NVRTC, nvrtcGetErrorString, const char *, nvrtcResult)
 NVRTC_STUB2(nvrtcGetProgramLogSize,nvrtcProgram, size_t*)
@@ -160,6 +158,7 @@ CUDA_STUB2(cuModuleLoad, CUmodule*, const char*)
 CUDA_STUB2(cuModuleLoadData, CUmodule *, const void *)
 CUDA_STUB2(cuFuncSetCacheConfig, CUfunction, CUfunc_cache_enum)
 CUDA_STUB3(cuDeviceGetAttribute, int*, CUdevice_attribute_enum, CUdevice)
+CUDA_STUB2(cuDeviceGet, CUdevice*, int)
 CUDA_STUB3(cuModuleGetFunction, CUfunction *, CUmodule, const char *)
 CUDA_STUB4(cuOccupancyMaxActiveBlocksPerMultiprocessor, int *, CUfunction, int, size_t)
 CUDA_STUB2(cuGetErrorString, CUresult, const char **)

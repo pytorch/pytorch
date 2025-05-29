@@ -1,6 +1,7 @@
 ARG CUDA_VERSION=12.4
 ARG BASE_TARGET=cuda${CUDA_VERSION}
-FROM amd64/almalinux:8 as base
+ARG ROCM_IMAGE=rocm/dev-almalinux-8:6.3-complete
+FROM amd64/almalinux:8.10-20250519 as base
 
 ENV LC_ALL en_US.UTF-8
 ENV LANG en_US.UTF-8
@@ -8,12 +9,10 @@ ENV LANGUAGE en_US.UTF-8
 
 ARG DEVTOOLSET_VERSION=11
 
-ENV LC_ALL en_US.UTF-8
-ENV LANG en_US.UTF-8
-ENV LANGUAGE en_US.UTF-8
-
 RUN yum -y update
 RUN yum -y install epel-release
+# install glibc-langpack-en make sure en_US.UTF-8 locale is available
+RUN yum -y install glibc-langpack-en
 RUN yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl zlib-devel openssl-devel yum-utils autoconf automake make gcc-toolset-${DEVTOOLSET_VERSION}-toolchain
 # Just add everything as a safe.directory for git since these will be used in multiple places with git
 RUN git config --global --add safe.directory '*'
@@ -64,6 +63,12 @@ ENV DESIRED_CUDA=12.6
 FROM cuda as cuda12.8
 RUN bash ./install_cuda.sh 12.8
 ENV DESIRED_CUDA=12.8
+
+FROM ${ROCM_IMAGE} as rocm
+ENV PYTORCH_ROCM_ARCH="gfx900;gfx906;gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201"
+ADD ./common/install_mkl.sh install_mkl.sh
+RUN bash ./install_mkl.sh && rm install_mkl.sh
+ENV MKLROOT /opt/intel
 
 # Install MNIST test data
 FROM base as mnist

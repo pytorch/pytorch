@@ -104,7 +104,7 @@ class ShardedTensorBase(torch.Tensor):
             sizes, tensor_properties=tensor_properties
         )
 
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        r = torch.Tensor._make_wrapper_subclass(
             cls,
             sizes,
             dtype=dtype,
@@ -470,7 +470,7 @@ class ShardedTensor(ShardedTensorBase):
                     warnings.warn(
                         "Gathering a tensor with zero elements on rank " + str(rank)
                     )
-                    return
+                    continue
                 shard_offset = shard_placement[shard.metadata][1]
                 data[shard_offset : shard_offset + src.numel()].copy_(src)
 
@@ -735,6 +735,20 @@ class ShardedTensor(ShardedTensorBase):
         process_group=None,
         init_rrefs=False,
     ):
+        # recalc metadata handles special ST creation cases like each rank only has tensor available
+        # caller need to provide None on the unknown dimension of the global size
+        # We will change None into zeros and go through the same amount of checks as before to create ST
+        # and use all_gather to calculate the offsets and global size for metadata
+        # It is compatible with the current use case since, conventionally we don't pass None as global size
+        # Therefore the old path won't trigger the new feature
+        recalc_metadata = False
+        for dim in global_size:
+            if dim is None:
+                recalc_metadata = True
+        if recalc_metadata:
+            global_size = tuple(
+                0 if dim_size is None else dim_size for dim_size in global_size
+            )
         # STEP 1: Validate the Shardmetadatas locally
         process_group = cls._normalize_pg(process_group)
         current_rank = dist.get_rank()  # intentional to get global rank
@@ -760,7 +774,29 @@ class ShardedTensor(ShardedTensorBase):
         else:
             gathered_metadatas = [local_sharded_tensor_metadata]
 
-        global_sharded_tensor_metadata = build_global_metadata(gathered_metadatas)
+        global_sharded_tensor_metadata = build_global_metadata(
+            gathered_metadatas, recalc_metadata=recalc_metadata
+        )
+        if recalc_metadata:
+            # for recalc use cases, we only support rw for now, limit the blast radius
+            # will modify here once we support more sharding type
+            assert (
+                len(local_shards) > 0
+                and len(global_sharded_tensor_metadata.shards_metadata) > current_rank
+            ), (
+                f"# for metadata recalculation, local_shards must be larger than 0 "
+                f"actual:{len(local_shards)}, # glb metadata must be greater than any rank id, "
+                f"# metadata:{len(global_sharded_tensor_metadata.shards_metadata)}, rank id:{current_rank}"
+            )
+            local_md = [
+                shard_md
+                for shard_md in global_sharded_tensor_metadata.shards_metadata
+                if shard_md.placement.rank() == current_rank
+            ]
+            assert len(local_md) == 1, (
+                f"should has and only has one metadata for local rank, actual:{local_md}"
+            )
+            local_shards[0].metadata = local_md[0]
         tensor_properties = global_sharded_tensor_metadata.tensor_properties
 
         # STEP 3: Validation done, create the actual ShardedTensor and populate fields

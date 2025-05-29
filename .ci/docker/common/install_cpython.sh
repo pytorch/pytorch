@@ -3,7 +3,7 @@
 set -uex -o pipefail
 
 PYTHON_DOWNLOAD_URL=https://www.python.org/ftp/python
-PYTHON_DOWNLOAD_GITHUB_BRANCH=https://github.com/python/cpython/archive/refs/heads
+PYTHON_DOWNLOAD_GITHUB_BRANCH=https://github.com/python/cpython/archive/refs/heads  # @lint-ignore
 GET_PIP_URL=https://bootstrap.pypa.io/get-pip.py
 
 # Python versions to be installed in /opt/$VERSION_NO

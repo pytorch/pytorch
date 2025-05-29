@@ -1,17 +1,13 @@
 # Owner(s): ["module: dynamo"]
 
 # ruff: noqa: TRY002
-# flake8: noqa
 
-import dataclasses
-import gc
 import itertools
 import types
 import unittest
 import weakref
 from collections import defaultdict, namedtuple, OrderedDict
-from dataclasses import dataclass, fields, is_dataclass
-from typing import Any, Optional, Tuple
+from typing import Any
 
 import torch
 import torch._dynamo.config
@@ -22,8 +18,6 @@ import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import TestCase
 
 
 class SimpleDict(dict):
@@ -435,7 +429,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         config = dotdict({"a": 1, "b": 2})
 
         def fn(x):
-            x2 = x * 2
+            x2 = x * 2  # noqa: F841
             x3 = x * config.get("a", 3)
             return x3
 
@@ -643,8 +637,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
         ):
 
             class CustomDict(super_class):
-                def __new__(self, *args, **kwargs):
-                    return super().__new__(self, *args, **kwargs)
+                def __new__(cls, *args, **kwargs):
+                    return super().__new__(cls, *args, **kwargs)
 
                 def __init__(self, *args, **kwargs):
                     super().__init__(*args, **kwargs)
@@ -806,7 +800,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             d = {"a": 2, "b": 3, "c": 5 * x}
             mp = types.MappingProxyType(d)
             y = torch.sin(x * mp["a"])
-            for k, v in mp.items():
+            for k, v in mp.items():  # noqa: PERF102
                 y += torch.cos(x * v)
             return mp
 
@@ -823,7 +817,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             mp = types.MappingProxyType(d)
             y = torch.sin(x * mp["a"])
-            for k, v in mp.items():
+            for k, v in mp.items():  # noqa: PERF102
                 y += torch.cos(x * v)
             d["d"] = 4
             return mp
@@ -844,7 +838,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         def fn(x, mp):
             y = torch.sin(x * mp["a"])
-            for k, v in mp.items():
+            for k, v in mp.items():  # noqa: PERF102
                 y += torch.cos(x * v)
             return y
 
@@ -939,7 +933,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
     def test_items_type(self):
         def fn():
-            d = dict({"a": 1, "b": "2", "c": torch.tensor(3)})
+            d = dict({"a": 1, "b": "2", "c": torch.tensor(3)})  # noqa: C418
             return d.items()
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)

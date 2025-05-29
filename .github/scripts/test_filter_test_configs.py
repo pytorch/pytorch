@@ -807,7 +807,7 @@ class TestConfigFilter(TestCase):
         # test bad things
         pr_body = (
             "fixes189 fixeshttps://github.com/pytorch/pytorch/issues/75123 "
-            "closedhttps://githubcom/pytorch/pytorch/issues/75123"
+            "closedhttps://githubcom/pytorch/pytorch/issues/75123"  # @lint-ignore
             "fix 234, fixes # 45, fixing #123, close 234, closes#45, closing #123 resolve 234, "
             "resolves  #45, resolving #123"
         )

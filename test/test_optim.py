@@ -1179,7 +1179,7 @@ class TestOptimRenewed(TestCase):
         opt_name = optim_cls.__name__
         if opt_name in ("SGD", "Adagrad") and impl == "capturable":
             # Capturable SGD/Adagrad does not exist
-            self.skipTest("SGD does not currently support capturable")
+            self.skipTest(f"{opt_name} does not currently support capturable")
         if _get_device_type(device) == "cpu":
             self.skipTest("Test is only for non-cpu devices")
         elif (

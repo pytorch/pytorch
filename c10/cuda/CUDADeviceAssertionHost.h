@@ -148,7 +148,7 @@ class C10_CUDA_API CUDAKernelLaunchRegistry {
 #endif
 };
 
-std::string c10_retrieve_device_side_assertion_info();
+C10_CUDA_API std::string c10_retrieve_device_side_assertion_info();
 
 } // namespace c10::cuda
 

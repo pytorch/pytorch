@@ -809,7 +809,7 @@ def _templated_ring_attention_backward(
     grad_query = grad_query.to(query.dtype)
     next_grad_kv = dkv_rotater.next_buffer().to(key.dtype)
     grad_key = next_grad_kv[: grad_key.numel()].reshape(grad_key.shape)
-    grad_value = next_grad_kv[grad_value.numel() :].reshape(grad_value.shape)
+    grad_value = next_grad_kv[grad_key.numel() :].reshape(grad_value.shape)
     return (
         grad_query,
         grad_key,
@@ -1372,7 +1372,7 @@ def context_parallel(
             these buffers can be put in this list to avoid extra restore time.
 
     .. warning::
-        `torch.distributed._tensor.experimental.attention.context_parallel` is a
+        `torch.distributed.tensor.experimental.context_parallel` is a
         prototype feature in PyTorch. The API is subject to change.
     """
     buffers = [] if buffers is None else buffers

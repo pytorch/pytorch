@@ -131,7 +131,12 @@ cdll.LoadLibrary("__lib_path__")
                     ],
                     cwd=output_dir,
                     stderr=subprocess.DEVNULL,
-                    env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
+                    env={
+                        **os.environ,
+                        "PYTHONPATH": os.environ.get(
+                            "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
+                        ),
+                    },
                 )
             except Exception:
                 return False

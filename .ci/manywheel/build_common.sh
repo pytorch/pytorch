@@ -18,12 +18,10 @@ retry () {
     $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
 }
 
-PLATFORM="manylinux2014_x86_64"
+PLATFORM=""
 # TODO move this into the Docker images
 OS_NAME=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
-if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
-    retry yum install -q -y zip openssl
-elif [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
+if [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
     retry yum install -q -y zip openssl
     PLATFORM="manylinux_2_28_x86_64"
 elif [[ "$OS_NAME" == *"Red Hat Enterprise Linux"* ]]; then
@@ -36,6 +34,9 @@ elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
 
     retry apt-get update
     retry apt-get -y install zip openssl
+else
+    echo "Unknown OS: '$OS_NAME'"
+    exit 1
 fi
 
 # We use the package name to test the package by passing this to 'pip install'
@@ -78,8 +79,6 @@ if [[ -e /opt/openssl ]]; then
     export OPENSSL_ROOT_DIR=/opt/openssl
     export CMAKE_INCLUDE_PATH="/opt/openssl/include":$CMAKE_INCLUDE_PATH
 fi
-
-
 
 mkdir -p /tmp/$WHEELHOUSE_DIR
 
@@ -321,8 +320,8 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
             # ROCm workaround for roctracer dlopens
             if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
                 patchedpath=$(fname_without_so_number $destpath)
-            # Keep the so number for XPU dependencies
-            elif [[ "$DESIRED_CUDA" == *"xpu"* ]]; then
+            # Keep the so number for XPU dependencies and libgomp.so.1 to avoid twice load
+            elif [[ "$DESIRED_CUDA" == *"xpu"* || "$filename" == "libgomp.so.1" ]]; then
                 patchedpath=$destpath
             else
                 patchedpath=$(fname_with_sha256 $destpath)

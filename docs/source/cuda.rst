@@ -128,7 +128,6 @@ Memory management
      CUDAPluggableAllocator
      change_current_allocator
      MemPool
-     MemPoolContext
 
 .. currentmodule:: torch.cuda.memory
 

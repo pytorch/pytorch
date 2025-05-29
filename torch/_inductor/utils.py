@@ -43,6 +43,7 @@ from typing_extensions import (
     dataclass_transform,
     ParamSpec,
     Self,
+    TypeAlias,
     TypeGuard,
 )
 from unittest import mock
@@ -54,6 +55,10 @@ from torch._inductor.runtime.hints import DeviceProperties
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
 
+
+OPTIMUS_EXCLUDE_POST_GRAD = [
+    "activation_quantization_aten_pass",
+]
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence, ValuesView
@@ -435,6 +440,23 @@ def convert_shape_to_inductor(
     return [sympy.sympify(i) for i in lst]
 
 
+def convert_to_symint(i: Union[int, sympy.Expr]) -> Union[int, torch.SymInt]:
+    """
+    Like convert_shape_to_symint, but operates on a single expression.
+    """
+    from .virtualized import V
+
+    return (
+        i
+        if isinstance(i, int)
+        else (
+            int(i)
+            if isinstance(i, sympy.Integer)
+            else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
+        )
+    )
+
+
 def convert_shape_to_symint(
     lst: Iterable[Union[int, sympy.Expr]],
 ) -> list[Union[int, torch.SymInt]]:
@@ -442,20 +464,7 @@ def convert_shape_to_symint(
     Takes a list of shapes from Inductor and converts them into symints (or just
     ints if all shapes are static).
     """
-    from .virtualized import V
-
-    return [
-        (
-            i
-            if isinstance(i, int)
-            else (
-                int(i)
-                if isinstance(i, sympy.Integer)
-                else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
-            )
-        )
-        for i in lst
-    ]
+    return [convert_to_symint(i) for i in lst]
 
 
 def is_view(op: torch._ops.OpOverload) -> bool:
@@ -1419,12 +1428,15 @@ def get_num_sms() -> int:
 def get_tma_workspace_arg(
     num_tma_descriptors: int,
     device: torch.device,
+    num_programs: Optional[int] = None,
 ) -> WorkspaceArg:
     """Builds and returns a WorkspaceArg for the device side TMA workspace buffer."""
     from .codegen.common import WorkspaceArg, WorkspaceZeroMode
 
+    if num_programs is None:
+        num_programs = get_num_sms()
     zero_mode = WorkspaceZeroMode.from_bool(False)
-    size = get_num_sms() * num_tma_descriptors * TMA_DESCRIPTOR_SIZE
+    size = num_programs * num_tma_descriptors * TMA_DESCRIPTOR_SIZE
     return WorkspaceArg(
         count=size,
         zero_mode=zero_mode,
@@ -1558,6 +1570,85 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
             )
             return False
     return res
+
+
+decompose_k_threshold = 32
+
+# To limit compile time
+k_splits_limit = 5
+
+# Hand-tuned
+default_k_splits = [16, 32, 64, 128, 256]
+
+_IntLike: TypeAlias = Union[int, sympy.Expr]
+
+
+def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
+    from torch._inductor.virtualized import V
+
+    return (
+        V.graph.sizevars.is_expr_static_and_true(
+            sympy.And(
+                sympy.Ge(k, decompose_k_threshold * m),
+                sympy.Ge(k, decompose_k_threshold * n),
+            )
+        )
+        and not V.graph.aot_mode  # TODO: Support AOTI for decomposeK
+        and not V.graph.cpp_wrapper
+    )
+
+
+@functools.lru_cache(None)
+def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
+    # If k is a sympy expression, we can't do any splitting
+    if isinstance(k, sympy.Expr) and not k.is_number:
+        return default_k_splits
+
+    if (isinstance(m, sympy.Expr) and not m.is_number) or (
+        isinstance(n, sympy.Expr) and not n.is_number
+    ):
+        max_k_split = 256
+    else:
+        max_k_split = min(k // m, k // n)
+
+    min_k_split = 2
+    # Get all divisors of k, k has to be divisible by kPart
+    divisors = sympy.divisors(k)
+
+    divisors = [
+        divisor
+        for divisor in divisors
+        if divisor <= max_k_split and divisor >= min_k_split
+    ]
+
+    pow_of_2_divisors, mul_of_32_divisors, rest_of_splits = [], [], []
+
+    for d in divisors:
+        kPart = k // d
+
+        # Smaller than 128 might not even fit in a single tile, BLOCK_K can be 128
+        if kPart < 128:
+            continue
+
+        # Power of 2 divisors are best performing, conform to hardware
+        if (kPart & kPart - 1) == 0 and kPart >= 128:
+            pow_of_2_divisors.append(d)
+        # Else check if creates a multiple of 32
+        elif kPart % 32 == 0:
+            mul_of_32_divisors.append(d)
+        # otherwise, take the smallest values
+        else:
+            rest_of_splits.append(d)
+
+    # If the # of power of 2 divisors are greater than k_splits_limit, return all
+    # This should be ok for compile time, all perfect squares between 128 and min(k / m, k / n)
+    # should never be a massive amount
+    if len(pow_of_2_divisors) >= k_splits_limit:
+        return pow_of_2_divisors
+    else:
+        best_splits = pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
+        # Otherwise, conform results to k_splits_limit
+        return best_splits[:k_splits_limit]
 
 
 @functools.lru_cache(None)
@@ -2384,7 +2475,7 @@ def is_gpu(device: Optional[str]) -> bool:
 
 
 def device_need_guard(device: str) -> bool:
-    return is_gpu(device)
+    return device != "mps" and is_gpu(device)  # TODO: MPS does not expose streams now
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:

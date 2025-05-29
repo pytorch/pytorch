@@ -16,8 +16,14 @@ function(c10d_add_test test_src)
 
   get_filename_component(test_name ${test_src} NAME_WE)
   add_executable(${test_name} "${test_src}")
-  target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
-  target_link_libraries(${test_name} ${ARG_LINK_LIBRARIES})
+  target_include_directories(${test_name} PRIVATE
+      $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>
+      $<TARGET_PROPERTY:fmt::fmt-header-only,INTERFACE_INCLUDE_DIRECTORIES>
+  )
+  target_link_libraries(${test_name} PRIVATE
+    fmt::fmt-header-only
+    ${ARG_LINK_LIBRARIES}
+  )
   add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
 
   if(ARG_INSTALL_TEST)

@@ -24,7 +24,7 @@ struct NoOpMemoryPythonTracer : public PythonMemoryTracerBase {
   ~NoOpMemoryPythonTracer() override = default;
   void start() override {}
   void stop() override {}
-  void export_memory_history(const std::string path) override {}
+  void export_memory_history(const std::string&) override {}
 };
 
 } // namespace

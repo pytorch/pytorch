@@ -370,9 +370,9 @@ class SmallVectorTemplateCommon
 /// note
 template <
     typename T,
-    bool = (std::is_trivially_copy_constructible_v<T>)&&(
-        std::is_trivially_move_constructible_v<
-            T>)&&std::is_trivially_destructible_v<T>>
+    bool = (std::is_trivially_copy_constructible_v<T>) &&
+        (std::is_trivially_move_constructible_v<T>) &&
+        std::is_trivially_destructible_v<T>>
 class SmallVectorTemplateBase : public SmallVectorTemplateCommon<T> {
   friend class SmallVectorTemplateCommon<T>;
 

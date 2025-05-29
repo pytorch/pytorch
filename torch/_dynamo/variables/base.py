@@ -22,7 +22,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING
 
 from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
-from ..exc import unimplemented_v2
+from ..exc import raise_observed_exception, unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
 from ..utils import cmp_name_to_op_mapping, istype
@@ -515,11 +515,18 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                     hints=[],
                 )
 
-            return variables.ConstantVariable.create(
-                cmp_name_to_op_mapping[name](
-                    self.as_python_constant(), other.as_python_constant()
+            try:
+                return variables.ConstantVariable.create(
+                    cmp_name_to_op_mapping[name](
+                        self.as_python_constant(), other.as_python_constant()
+                    )
                 )
-            )
+            except Exception as e:
+                raise_observed_exception(
+                    type(e),
+                    tx,
+                    args=[list(map(variables.ConstantVariable.create, e.args))],
+                )
         hints = [
             f"Avoid calling `{self.python_type_name()}.{name}` in your code.",
             "Please report an issue to PyTorch.",

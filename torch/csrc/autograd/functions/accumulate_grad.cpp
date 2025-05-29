@@ -71,6 +71,7 @@ void AccumulateGrad::compiled_args(CompiledNodeArgs& args) const {
     args.collect(variable);
     args.collect(variable.grad());
   }
+  args.collect(GradMode::is_enabled());
   const auto& hook = tensor_post_acc_grad_hooks();
   if (hook != nullptr) {
     hook->compiled_args(args);

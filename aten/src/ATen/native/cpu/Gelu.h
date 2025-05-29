@@ -5,6 +5,7 @@
 #ifdef _WIN32
 #define _USE_MATH_DEFINES
 #include <cmath>
+#include <math.h>
 #endif // _WIN32
 
 #include <ATen/cpu/vec/vec.h>

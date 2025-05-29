@@ -23,7 +23,6 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 #if defined(BUILD_ROWWISE_FP8_KERNEL)
 
 #include <ATen/native/cuda/GroupMMCommon.cuh>
-#include <ATen/native/cuda/cutlass_utils.cuh>
 
 #include <cute/tensor.hpp>
 #include <cutlass/core_io.h>
@@ -160,20 +159,17 @@ void f8f8bf16_grouped_gemm_impl_sm90(
   using EpilogueSchedule =
       typename Schedule<FastAccum::value, Pong::value, TB_M, TB_N, TB_K>::
           EpilogueSchedule;
-  // TODO remove *BroadcastPtrArrays and replace with just Broadcast
-  // when  https://github.com/NVIDIA/cutlass/pull/2120/ is in the tagged cutlass
-  // version Implement rowwise scaling epilogue.
-  using ScaleA = cutlass::epilogue::fusion::Sm90ColBroadcastPtrArray<
+  using ScaleA = cutlass::epilogue::fusion::Sm90ColBroadcast<
       0,
       TileShape,
-      DtypeScale,
+      DtypeScale*,
       DtypeScale,
       cute::Stride<cute::Int<1>, cute::Int<0>, cute::Int<0>>>;
 
-  using ScaleB = cutlass::epilogue::fusion::Sm90RowBroadcastPtrArray<
+  using ScaleB = cutlass::epilogue::fusion::Sm90RowBroadcast<
       0,
       TileShape,
-      DtypeScale,
+      DtypeScale*,
       DtypeScale,
       cute::Stride<cute::Int<0>, cute::Int<1>, cute::Int<0>>>;
 

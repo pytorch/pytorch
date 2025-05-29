@@ -106,6 +106,7 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cpu();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cuda();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_meta();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_xpu();
+AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_mps();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_privateuse1();
 
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e5m2();
@@ -782,11 +783,6 @@ int32_t aoti_torch_dtype() = delete;
   inline int32_t aoti_torch_dtype<ctype>() {         \
     return aoti_torch_dtype_##typename();            \
   }
-
-namespace c10 {
-struct BFloat16;
-struct Half;
-} // namespace c10
 
 DEFINE_DTYPE_SPECIALIZATION(c10::BFloat16, bfloat16)
 DEFINE_DTYPE_SPECIALIZATION(c10::Half, float16)

@@ -639,7 +639,7 @@ IntArrayRef MPSHeapAllocatorImpl::getBufferShape(const void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
-  if (buffer_block && buffer_block->shape.size() > 0) {
+  if (buffer_block && !buffer_block->shape.empty()) {
     return IntArrayRef{buffer_block->shape};
   }
   return IntArrayRef();

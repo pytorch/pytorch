@@ -7,8 +7,8 @@ from torch import Tensor
 from torch.distributed.rpc import RRef
 from torch.testing._internal.dist_utils import (
     dist_init,
+    wait_until_pending_futures_and_users_flushed,
     worker_name,
-    wait_until_pending_futures_and_users_flushed
 )
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
@@ -64,13 +64,16 @@ def rpc_async_call_future_ret(
     fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
     return fut
 
+
 @torch.jit.script
 def rref_to_here(rref_var: RRef[Tensor]) -> Tensor:
     return rref_var.to_here()
 
+
 @torch.jit.script
 def rref_to_here_with_timeout(rref_var: RRef[Tensor], timeout: float) -> Tensor:
     return rref_var.to_here(timeout)
+
 
 @torch.jit.script
 def rpc_async_with_rref_arg(dst_worker_name: str, args: tuple[RRef[Tensor]]) -> Tensor:
@@ -84,6 +87,7 @@ class JitFaultyAgentRpcTest(RpcAgentTestFixture):
     Run tests for rpc_async in JIT under the faulty agent test fixture to test
     arbitrary timeouts.
     """
+
     @dist_init(faulty_messages=[], messages_to_delay={"SCRIPT_CALL": 1.5})
     def test_timeout_in_torchscript_function(self):
         # Call rpc_async + fut.wait() in torchscript function and ensure that
@@ -108,9 +112,7 @@ class JitFaultyAgentRpcTest(RpcAgentTestFixture):
         # is less than the RPC takes to execute.
         rpc._set_rpc_timeout(0.001)
         with self.assertRaisesRegex(RuntimeError, expected_error):
-            script_rpc_async_call(
-                dst_worker_name, args, kwargs
-            )
+            script_rpc_async_call(dst_worker_name, args, kwargs)
 
         # Ensure that we run to completion if zero timeout is specified.
         ret = rpc_async_call_with_timeout(dst_worker_name, args, kwargs, 0)
@@ -198,7 +200,7 @@ class JitFaultyAgentRpcTest(RpcAgentTestFixture):
         # Call RPC with RRef arg in JIT, which will go through JIT pickling and
         # ensure error is raised.
         with self.assertRaisesRegex(RuntimeError, "RRef creation"):
-            rpc_async_with_rref_arg(dst_worker, (rref, ))
+            rpc_async_with_rref_arg(dst_worker, (rref,))
 
     @dist_init(faulty_messages=["SCRIPT_REMOTE_CALL"])
     def test_rref_timeout_pickle_script_func(self):
@@ -214,4 +216,4 @@ class JitFaultyAgentRpcTest(RpcAgentTestFixture):
         wait_until_pending_futures_and_users_flushed()
         # Call RPC with script function that takes RRef, ensure timeout during pickling
         with self.assertRaisesRegex(RuntimeError, "RRef creation"):
-            rpc.rpc_sync(dst_worker, rref_to_here, args=(rref, ))
+            rpc.rpc_sync(dst_worker, rref_to_here, args=(rref,))

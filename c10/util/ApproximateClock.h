@@ -59,7 +59,7 @@ inline time_t getTime(bool allow_monotonic = false) {
       .count();
 #else
   // clock_gettime is *much* faster than std::chrono implementation on Linux
-  struct timespec t {};
+  struct timespec t{};
   auto mode = CLOCK_REALTIME;
   if (allow_monotonic) {
     mode = CLOCK_MONOTONIC;

@@ -12,7 +12,7 @@ import re
 import typing
 import warnings
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, NamedTuple, Optional, TYPE_CHECKING
@@ -317,6 +317,9 @@ def _parse_stack_trace(stack_trace: str):
 
 @compatibility(is_backward_compatible=False)
 class CodeGen:
+    # This is an override hook so we can customize the SymNode printer.
+    _sym_repr: Callable[["torch.types.PySymType"], str] = lambda x: repr(x)
+
     def __init__(self):
         self._body_transformer: Optional[TransformCodeFunc] = None
         self._func_name: str = "forward"
@@ -609,7 +612,8 @@ class CodeGen:
                         f'{dim_blue(stride_annotation)}{dim_green(device_annotation)}"'
                     )
                 elif isinstance(meta_val, py_sym_types):
-                    maybe_type_annotation = f': "Sym({meta_val})"'
+                    val_str = CodeGen._sym_repr(meta_val)
+                    maybe_type_annotation = f': "Sym({val_str})"'
                 elif isinstance(meta_val, TensorMetadata):
                     maybe_type_annotation = f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}"'
 
@@ -1417,6 +1421,7 @@ class Graph:
         args: Optional[tuple["Argument", ...]] = None,
         kwargs: Optional[dict[str, "Argument"]] = None,
         type_expr: Optional[Any] = None,
+        name: Optional[str] = None,
     ) -> Node:
         """
         Insert a ``call_function`` ``Node`` into the ``Graph``. A ``call_function`` node
@@ -1437,6 +1442,8 @@ class Graph:
             type_expr (Optional[Any]): an optional type annotation representing the
                 Python type the output of this node will have.
 
+            name (Optional[str]): The name of the node. If not specified, set to None
+
         Returns:
 
             The newly created and inserted ``call_function`` node.
@@ -1446,7 +1453,7 @@ class Graph:
             as :meth:`Graph.create_node`.
         """
         return self.create_node(
-            "call_function", the_function, args, kwargs, type_expr=type_expr
+            "call_function", the_function, args, kwargs, name=name, type_expr=type_expr
         )
 
     @compatibility(is_backward_compatible=True)
@@ -1779,6 +1786,8 @@ class Graph:
             of functional operations or you supply your own custom
             function for detecting side-effectful nodes.
         """
+        from torch.utils._ordered_set import OrderedSet
+
         # Lint the graph first to make sure its topologically sorted, otherwise
         # DCE below will not behave as expected.
         self.lint()
@@ -1800,6 +1809,20 @@ class Graph:
             if not has_side_effect(node) and len(node.users) == 0:
                 self.erase_node(node)
                 changed = True
+
+        # Call DCE on the subgraphs
+        if self.owning_module is not None:
+            subgraph_names = OrderedSet(
+                x.target for x in self.find_nodes(op="get_attr")
+            )
+            for child_name, child_module in self.owning_module.named_children():
+                # Sometimes an owning_module can have unused children. Skip them
+                # by checking them from get_attr node targets.
+                if child_name in subgraph_names and isinstance(
+                    child_module, torch.fx.GraphModule
+                ):
+                    changed |= child_module.graph.eliminate_dead_code()
+                    child_module.recompile()
 
         return changed
 
@@ -1889,6 +1912,18 @@ class Graph:
                 self._codegen._body_transformer = on_gen_code_old
 
         return on_generate_code_context_manager()
+
+
+@contextmanager
+def _override_sym_repr(
+    override: Callable[["torch.types.PySymType"], str]
+) -> Iterator[None]:
+    tmp = CodeGen._sym_repr
+    try:
+        CodeGen._sym_repr = override
+        yield
+    finally:
+        CodeGen._sym_repr = tmp
 
 
 def _identity(x):

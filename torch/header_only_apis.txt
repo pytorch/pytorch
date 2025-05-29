@@ -1,0 +1,49 @@
+# This file contains all the header-only C++ APIs/symbols in torch.
+# If a symbol is added in this file, it should be tested in a .cpp file
+# to guarantee that compiling these symbols do not require linking libtorch
+# to ensure header-only-ness.
+
+# c10/util/TypeCast.h
+convert
+
+# c10/util/bit_cast.h
+bit_cast
+
+# c10/util/BFloat16-math.h, c10/util/BFloat16.h
+BFloat16
+
+# c10/util/Float8_e4m3fn.h
+Float8_e4m3fn
+
+# c10/util/Float8_e4m3fnuz.h
+Float8_e4m3fnuz
+
+# c10/util/Float8_e5m2.h
+Float8_e5m2
+
+# c10/util/Float8_e5m2fnuz.h
+Float8_e5m2fnuz
+
+# c10/util/Half.h
+Half
+
+# c10/util/complex.h
+complex
+
+# ATen/NumericUtils.h, c10/util/generic_math.h
+div_floor_floating
+div_floor_integer
+_isnan
+
+# ATen/core/PhiloxRNGEngine.h
+Philox4_32
+randn
+
+# ATen/cpu/vec/vec.h
+Vectorized
+clamp_min
+convert
+loadu
+maximum
+minimum
+size

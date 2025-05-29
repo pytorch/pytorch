@@ -5,7 +5,7 @@ r"""This file is allowed to initialize CUDA context when imported."""
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS
+from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS
 import inspect
 import contextlib
 import os
@@ -33,6 +33,7 @@ SM80OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_devic
 SM89OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 9))
 SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0))
 SM100OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (10, 0))
+SM120OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (12, 0))
 
 IS_THOR = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 10
                   and torch.cuda.get_device_capability()[1] > 0)
@@ -335,6 +336,11 @@ def xfailIfSM89(func):
 def xfailIfSM100OrLater(func):
     return func if not SM100OrLater else unittest.expectedFailure(func)
 
+def xfailIfSM120OrLater(func):
+    return func if not SM120OrLater else unittest.expectedFailure(func)
+
+def xfailIfDistributedNotSupported(func):
+    return func if not (IS_MACOS or IS_JETSON) else unittest.expectedFailure(func)
 
 # Importing this module should NOT eagerly initialize CUDA
 if not CUDA_ALREADY_INITIALIZED_ON_IMPORT:

@@ -844,6 +844,39 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
         self.assertTrue(conv_node is not None)
         self.assertTrue(bn_node is None)
 
+    def test_fold_bn_erases_add_node(self):
+        """
+        Test that batch norm stat tracking (which results in an add_ tensor) is removed when folding batch norm.
+        """
+        m = self._get_conv_bn_model(has_conv_bias=False, has_bn=True, has_relu=False)
+        m = export_for_training(m, self.example_inputs, strict=True).module()
+
+        def _has_add_(graph):
+            for node in graph.nodes:
+                if node.target == torch.ops.aten.add_.Tensor:
+                    return True
+            return False
+
+        # Verify that add_ tensor exists in the exported model (for tracking batch norm stats)
+        has_add_tensor_before = _has_add_(m.graph)
+        self.assertTrue(
+            has_add_tensor_before, "Expected to find add_ tensor in the exported model"
+        )
+
+        quantizer = XNNPACKQuantizer()
+        quantizer.set_global(
+            get_symmetric_quantization_config(is_per_channel=False, is_qat=True),
+        )
+        m = prepare_qat_pt2e(m, quantizer)
+        m = convert_pt2e(m)
+
+        # Verify that add_ tensor is removed in the quantized model
+        has_add_tensor_after = _has_add_(m.graph)
+        self.assertFalse(
+            has_add_tensor_after,
+            "Expected add_ tensor to be removed in the quantized model",
+        )
+
 
 @skipIfNoQNNPACK
 class TestQuantizePT2EQAT_ConvBn1d(TestQuantizePT2EQAT_ConvBn_Base):

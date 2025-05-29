@@ -12,7 +12,7 @@
 #
 # The path hints include CUDA_TOOLKIT_ROOT_DIR seeing as some folks
 # install NCCL in the same location as the CUDA toolkit.
-# See https://github.com/caffe2/caffe2/issues/1601
+# See https://github.com/facebookarchive/caffe2/issues/1601
 
 set(NCCL_INCLUDE_DIR $ENV{NCCL_INCLUDE_DIR} CACHE PATH "Folder contains NVIDIA NCCL headers")
 set(NCCL_LIB_DIR $ENV{NCCL_LIB_DIR} CACHE PATH "Folder contains NVIDIA NCCL libraries")

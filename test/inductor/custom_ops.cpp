@@ -1,5 +1,8 @@
 #include <torch/csrc/api/include/torch/types.h>  // @manual=fbcode//caffe2:libtorch
 
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/inductor/aoti_torch/utils.h>
+
 #include <cstdint>
 #include <iostream>
 #include <string>
@@ -310,7 +313,39 @@ void fn_out_variant_without_return_meta(
     Tensor& out) {
 }
 
+Tensor fn_square_impl(const Tensor& tensor) {
+  return tensor * tensor;
+}
+
+Tensor fn_square_meta(const Tensor& tensor) {
+  return at::empty_like(tensor);
+}
 } // namespace at
+
+
+extern "C" {
+  AOTI_TORCH_EXPORT AOTITorchError
+  aoti_torch_cpu_fn_square(
+      AtenTensorHandle input,
+      AtenTensorHandle* ret) {
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+      auto tmp_result = at::fn_square_impl(
+          torch::aot_inductor::resolve_tensor_dispatch_flags(input));
+      *ret = torch::aot_inductor::new_tensor_handle(std::move(tmp_result));
+    });
+  }
+
+  AOTI_TORCH_EXPORT AOTITorchError
+  aoti_torch_cuda_fn_square(
+      AtenTensorHandle input,
+      AtenTensorHandle* ret) {
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+      auto tmp_result = at::fn_square_impl(
+          torch::aot_inductor::resolve_tensor_dispatch_flags(input));
+      *ret = torch::aot_inductor::new_tensor_handle(std::move(tmp_result));
+    });
+  }
+}
 
 TORCH_LIBRARY(aoti_custom_ops, m) {
   m.def("custom_add(Tensor t1, Tensor t2) -> Tensor");
@@ -354,6 +389,7 @@ TORCH_LIBRARY(aoti_custom_ops, m) {
       "fn_with_input_mutation(Tensor(a!) t0, Tensor t1, Tensor(b!) t2) -> (Tensor, Tensor)");
 
   m.def("fn_out_variant_without_return(Tensor x, Tensor(a!) out) -> ()");
+  m.def("fn_square(Tensor x) -> Tensor");
 }
 
 TORCH_LIBRARY_IMPL(aoti_custom_ops, CompositeExplicitAutograd, m) {
@@ -365,6 +401,7 @@ TORCH_LIBRARY_IMPL(aoti_custom_ops, CompositeExplicitAutograd, m) {
   m.impl("fn_with_mix_outputs", at::fn_with_mix_outputs_impl);
   m.impl("fn_with_input_mutation", at::fn_with_input_mutation_impl);
   m.impl("fn_out_variant_without_return", at::fn_out_variant_without_return_impl);
+  m.impl("fn_square", at::fn_square_impl);
 }
 
 TORCH_LIBRARY_IMPL(aoti_custom_ops, Meta, m) {
@@ -375,4 +412,5 @@ TORCH_LIBRARY_IMPL(aoti_custom_ops, Meta, m) {
   m.impl("fn_with_mix_outputs", at::fn_with_mix_outputs_meta);
   m.impl("fn_with_input_mutation", at::fn_with_input_mutation_meta);
   m.impl("fn_out_variant_without_return", at::fn_out_variant_without_return_meta);
+  m.impl("fn_square", at::fn_square_meta);
 }

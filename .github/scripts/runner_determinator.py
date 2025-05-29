@@ -199,6 +199,16 @@ def parse_args() -> Any:
         help="comma separated list of experiments to check, if omitted all experiments marked with default=True are checked",
     )
     parser.add_argument(
+        "--opt-out-experiments",
+        type=_str_comma_separated_to_set,
+        required=False,
+        default="",
+        help=(
+            "comma separated list of experiments to opt-out of. If unset, no opt-outs will occur. "
+            "If the same experiment is listed both here and in '--eligible-experiments' opt-out will take priority."
+        ),
+    )
+    parser.add_argument(
         "--pr-number",
         type=str,
         required=False,
@@ -422,6 +432,7 @@ def get_runner_prefix(
     workflow_requestors: Iterable[str],
     branch: str,
     eligible_experiments: frozenset[str] = frozenset(),
+    opt_out_experiments: frozenset[str] = frozenset(),
     is_canary: bool = False,
 ) -> str:
     settings = parse_settings(rollout_state)
@@ -435,6 +446,14 @@ def get_runner_prefix(
                 f"Branch {branch} is an exception branch. Not enabling experiment {experiment_name}."
             )
             continue
+
+        if opt_out_experiments:
+            if experiment_name in opt_out_experiments:
+                opt_out_exp_list = ", ".join(opt_out_experiments)
+                log.info(
+                    f"Skipping experiment '{experiment_name}', as this workflow has opted-out (opted out experiments are: {opt_out_exp_list})"
+                )
+                continue
 
         if eligible_experiments:
             if experiment_name not in eligible_experiments:
@@ -600,6 +619,7 @@ def main() -> None:
             (args.github_issue_owner, username),
             args.github_branch,
             args.eligible_experiments,
+            args.opt_out_experiments,
             is_canary,
         )
 
