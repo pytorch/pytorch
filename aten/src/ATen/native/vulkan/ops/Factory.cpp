@@ -48,7 +48,9 @@ static Tensor empty_memory_format(
       convert_dtype(dtype ? *dtype : c10::kFloat),
       storage_type,
       memory_format ? get_gpu_memory_layout(storage_type, *memory_format)
-                    : api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED,
+                    : (should_alloc_buffer
+                           ? api::GPUMemoryLayout::TENSOR_WIDTH_PACKED
+                           : api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED),
   });
 }
 

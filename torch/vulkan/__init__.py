@@ -7,25 +7,33 @@ from typing import Union
 import torch
 from torch import Tensor
 
+
 def _device_count() -> int:
     r"""Returns the number of available Vulkan devices."""
     # TODO: actually get the number!
     return int(torch.is_vulkan_available())
 
 
-def _compile_shader(name: str, source: str):
+def _compile_shader(name: str, source: str, use_buffers: bool):
     r"""Compiles compute shader from source and allows one to invoke kernels
     defined there from the comfort of Python runtime.
     We rely on the shader to follow a number of important conventions:
     - we determine the number of arguments by looking for lines in the source starting with "layout(set"
     - specialization constants must be used to set workgroup size, exactly like so:
       layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
+
+    There are two possible calling conventions for shaders. When use_buffers = False:
     - Binding 0 is a uniform restrict writeonly image3D where the output is to be written.
     - Bindings 1-N (where N is the arity of the op) are uniform sampler3D objects.
     - Binding N+1 is a uniform Block containing a single ivec3 indicating the operation
       size. (TODO: This should probably be a push constant (or specialization constant
       as done in the ExecuTorch backend???), but currently we are just matching existing
       shader convention.)
+
+    When use_buffers = True:
+    - Binding 0 is a buffer restrict writeonly containing a float[] where the output is to be written.
+    - Bindings 1-N (where N is the arity of the op) are buffers containing a float[] where the input argument is stored.
+    - Binding N+1 is a uniform block that may contain an arbitrary number of ints. The caller must pass that many ints when calling the compiled shader.
 
     Example::
 
@@ -71,7 +79,7 @@ def _compile_shader(name: str, source: str):
         [Path(__file__).parent.parent / "include"],
         set(),
     )
-    return torch._C._vulkan_compileShader(name, source)
+    return torch._C._vulkan_compileShader(name, source, use_buffers)
 
 
 def _is_available() -> bool:

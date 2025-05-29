@@ -29,7 +29,10 @@ int count_layouts(std::string_view src) {
 }
 } // namespace
 
-DynamicShaderInfo compile_glsl(std::string name, std::string_view src) {
+DynamicShaderInfo compile_glsl(
+    std::string name,
+    std::string_view src,
+    bool use_buffers) {
   // Prototype-quality compilation: shell out to glslc, which we just
   // assume is available and on PATH. This doesn't support Win32, but
   // we should be replacing this with libshaderc for a real
@@ -67,24 +70,11 @@ DynamicShaderInfo compile_glsl(std::string name, std::string_view src) {
       " but file size was ",
       fsize);
 
-  std::ofstream out_dbg("/tmp/dbg.spv");
-  out_dbg.write(reinterpret_cast<char*>(spv_data.get()), fsize);
-
-  std::vector<VkDescriptorType> layout;
-  auto num_layouts = count_layouts(src);
-  layout.reserve(num_layouts);
-  // See calling convention in torch/csrc/vulkan/Module.cpp.
-  layout.push_back(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE); // output image;
-  for (const auto ii : c10::irange(1, num_layouts - 1)) {
-    // input samplers
-    layout.push_back(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-  }
-  layout.push_back(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
   return DynamicShaderInfo(
       std::move(name),
       std::move(spv_data),
       spv_num_blocks * 4,
-      std::move(layout));
+      count_layouts(src));
 }
 
 } // namespace at::native::vulkan::api
