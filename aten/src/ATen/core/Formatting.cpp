@@ -184,7 +184,7 @@ static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t line
 
     if(nColumnPerLine < self.size(1)) {
       if(firstColumn != 0) {
-        fmt::print(stream, "\n");
+     stream.put('\n');
       }
       fmt::print(
           stream,
@@ -209,7 +209,7 @@ static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t line
         printValue(stream, row_ptr[c], printFmt);
 
         if(c == lastColumn) {
-          fmt::print(stream, "\n");
+          stream.put('\n');
           if(l != self.size(0)-1) {
             if(printFmt.scale != 1) {
               fmt::print(stream, "{:>{}s} ", "", indent);
@@ -218,7 +218,7 @@ static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t line
             }
           }
         } else {
-          fmt::print(stream, " ");
+      stream.put(' ');
         }
       }
     }
@@ -252,10 +252,10 @@ static void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize) 
     if(start) {
       start = false;
     } else {
-      fmt::print(stream, "\n");
+      stream.put('\n');
     }
 
-    fmt::print(stream, "(");
+    stream.put('(');
     Tensor tensor = self;
     for (const auto i : c10::irange(self.ndimension()-2)) {
       tensor = tensor.select(0, counter[i]);
@@ -313,7 +313,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       const double* tensor_p = tensor.const_data_ptr<double>();
       for (const auto i : c10::irange(tensor.size(0))) {
         printValue(stream, tensor_p[i], printFmt);
-        fmt::print(stream, "\n");
+        stream.put('\n');
       }
     }
     fmt::print(stream, "[ {}{{{}}}", tensor_.toString(), tensor.size(0));
