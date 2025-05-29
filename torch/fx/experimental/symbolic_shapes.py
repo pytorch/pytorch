@@ -859,6 +859,24 @@ IterateExprs: TypeAlias = Union[IterateExprsAtom, Sequence[IterateExprsAtom]]
 
 
 def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
+    """
+    Recursively iterate through a value and yield all sympy expressions contained within it.
+
+    This function traverses various data structures (tensors, lists, tuples, etc.) and extracts
+    any symbolic expressions they contain. It's used for operations like finding free symbols
+    in complex nested structures.
+
+    Args:
+        val: The value to extract sympy expressions from. Can be a symbolic type (SymInt, SymFloat, SymBool),
+             a sympy expression, a primitive type (int, float, bool), a container (tuple, list),
+             a sparse tensor, a regular tensor, None, or a torch.Generator.
+
+    Yields:
+        sympy.Basic: Each sympy expression found in the value.
+
+    Raises:
+        AssertionError: If the value is of an unsupported type.
+    """
     if isinstance(val, SymTypes):
         # This allow applies to the jagged layout NestedTensor case as
         # nested ints are not symbolic
@@ -887,9 +905,25 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
 
 
 def free_symbols(val: IterateExprs) -> OrderedSet[sympy.Symbol]:
+    """
+    Recursively collect all free symbols from a value.
+
+    This function traverses various data structures (tensors, lists, tuples, etc.) and extracts
+    all sympy symbols contained within them. It's useful for finding all symbolic variables
+    that a complex nested structure depends on.
+
+    Args:
+        val: The value to extract symbols from. Can be a symbolic type (SymInt, SymFloat, SymBool),
+             a container (tuple, list), a tensor, or None.
+
+    Returns:
+        OrderedSet[sympy.Symbol]: An ordered set of all free symbols found in the value.
+    """
     if val is None:
         return OrderedSet()
+
     itr = _iterate_exprs(val)
+
     # we need at least 1 to call union, so we hand code the identity
     try:
         first_expr = next(itr)
@@ -919,8 +953,9 @@ def has_free_unbacked_symbols(x: IterateExprs) -> bool:
     return False
 
 
-# Like free_symbols, but filtered to only report unbacked symbols
 def free_unbacked_symbols(x: IterateExprs) -> OrderedSet[sympy.Symbol]:
+    """Like free_symbols, but filtered to only report unbacked symbols"""
+
     # NB: keep synced with is_unbacked_symint
     return OrderedSet(
         s
@@ -932,6 +967,18 @@ def free_unbacked_symbols(x: IterateExprs) -> OrderedSet[sympy.Symbol]:
 # WARNING: Don't use this on Dynamo produced graphs, they don't have meta
 # setup!
 def is_symbol_binding_fx_node(node: torch.fx.Node) -> Optional[sympy.Symbol]:
+    """
+    Check if a given FX node is a symbol binding node.
+
+    A symbol binding node is one that has a SymInt value in its meta that contains
+    a sympy Symbol expression, and is either a placeholder node or contains unbacked symbols.
+
+    Args:
+        node (torch.fx.Node): The FX node to check
+
+    Returns:
+        Optional[sympy.Symbol]: The sympy Symbol if the node is a symbol binding node, None otherwise
+    """
     if (
         "val" in node.meta
         and isinstance(node.meta["val"], torch.SymInt)
@@ -948,6 +995,19 @@ def is_symbol_binding_fx_node(node: torch.fx.Node) -> Optional[sympy.Symbol]:
 def find_symbol_binding_fx_nodes(
     graph: torch.fx.Graph,
 ) -> dict[sympy.Symbol, torch.fx.Node]:
+    """
+    Find all nodes in an FX graph that bind sympy Symbols.
+
+    This function scans through all nodes in the given FX graph and identifies
+    nodes that bind sympy Symbols (typically placeholder nodes with SymInt values).
+    When multiple nodes bind the same symbol, only the first occurrence is kept.
+
+    Args:
+        graph: The FX graph to search for symbol binding nodes
+
+    Returns:
+        A dictionary mapping from sympy Symbols to their binding FX nodes
+    """
     r = {}
     # NB: Prefer first occurrence of symbol
     for node in graph.nodes:
@@ -1011,6 +1071,24 @@ def _free_unbacked_symbols_with_path(
     pending: Optional[set[sympy.Symbol]] = None,
     simplify: bool = False,
 ) -> dict[sympy.Symbol, pytree.KeyPath]:
+    """
+    Recursively traverses a structure to find unbacked symbols and their access paths.
+
+    This function walks through tensors, lists, tuples, and symbolic values to locate
+    unbacked symbols that are in the pending set, and returns a mapping from those
+    symbols to their access paths in the structure.
+
+    Args:
+        a: The object to traverse (tensor, list, tuple, SymInt, etc.)
+        path: The current path in the object tree
+        real: Optional real tensor corresponding to the fake tensor being traversed
+        shape_env: Optional ShapeEnv to register unbacked values with
+        pending: Set of unbacked symbols to look for (will be modified in-place)
+        simplify: Whether to use simplified expressions
+
+    Returns:
+        A dictionary mapping unbacked symbols to their access paths
+    """
     go = functools.partial(
         _free_unbacked_symbols_with_path,
         shape_env=shape_env,
@@ -1261,6 +1339,9 @@ def compute_unbacked_bindings(
 #      assuming expand/reshape inputs are not -1. or assuming the non-broadcasting path.
 #
 def _guard_or(a: BoolLikeType, default: bool) -> bool:
+    """
+    Try to guard a, if data dependent error encountered just return default.
+    """
     if not isinstance(a, SymBool):
         assert isinstance(a, bool)
         return a
@@ -1404,6 +1485,20 @@ def sym_or(x: BoolLikeType, *others: BoolLikeType) -> BoolLikeType:
 def guard_scalar(
     a: Union[SymBool, SymInt, SymFloat, int, bool, float]
 ) -> Union[bool, int, float]:
+    """
+    Guard a scalar value, which can be a symbolic or concrete boolean, integer, or float.
+
+    This function dispatches to the appropriate guard function based on the type of the input.
+
+    Args:
+        a: A symbolic or concrete scalar value (bool, int, or float)
+
+    Returns:
+        The concrete value after guarding
+
+    Raises:
+        AssertionError: If the input is not a recognized scalar type
+    """
     if isinstance(a, (SymBool, bool)):
         return guard_bool(a)
     elif isinstance(a, (SymInt, int)):
@@ -1412,12 +1507,6 @@ def guard_scalar(
         return guard_float(a)
     else:
         raise AssertionError(f"unrecognized scalar {a}")
-
-
-def _constrain_symbol_range(
-    shape_env: ShapeEnv, s: sympy.Symbol, compiler_min: int, compiler_max: int
-) -> None:
-    shape_env.constrain_symbol_range(s, compiler_min, compiler_max)
 
 
 def _advise_is_size(a: SymInt) -> None:
@@ -2040,10 +2129,13 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
             self.inner_contexts = {}
 
 
-# Tracks the sources of all fake tensors we wrap in Dynamo.
-# Used by shape guard computation.
 @dataclass
 class TrackedFake:
+    """
+    Tracks the sources of all fake tensors we wrap in Dynamo.
+    Used by shape guard computation.
+    """
+
     fake: Union[FakeTensor, SymInt]
     source: Source
     symbolic_context: Optional[SymbolicContext]
@@ -2069,6 +2161,22 @@ IndicatorTypes = (IsNonOverlappingAndDenseIndicator,)
 
 
 def _expandsums(args: list[sympy.Expr]) -> tuple[sympy.Expr, bool]:
+    """
+    Expand products of sums into sums of products.
+
+    This function takes a list of sympy expressions and separates them into
+    additive expressions (those with is_Add=True) and other expressions.
+    It then computes the distributive product, expanding (a+b)*(c+d) into a*c + a*d + b*c + b*d.
+
+    Args:
+        args: A list of sympy expressions to expand
+
+    Returns:
+        A tuple containing:
+        - The expanded expression as a sympy.Expr
+        - A boolean indicating whether expansion occurred (True if multiple additive
+          expressions were present or if there was at least one additive and one other expression)
+    """
     adds, other = [], []
     for arg in args:
         if arg.is_Add:
@@ -2085,6 +2193,20 @@ def _expandsums(args: list[sympy.Expr]) -> tuple[sympy.Expr, bool]:
 
 
 def _fast_expand(expr: _SympyT) -> _SympyT:
+    """
+    A faster implementation of sympy's expand function for common cases.
+
+    This function expands expressions like (a+b)^n or (a+b)*(c+d) into sums of products,
+    but avoids the expensive checks and features of sympy's full expand implementation.
+    It only recreates objects when necessary to avoid expensive operations.
+
+    Args:
+        expr: A sympy expression to expand
+
+    Returns:
+        The expanded expression
+    """
+
     # The expand algorithm in sympy is slow due to all the features is supports
     # For eg: e^(-x)*(x-1)/(x+1) is expanded to (x-1)/(e^x + e^x*x) if x is
     # positive and (e^(-x)*x-e^(-x))/(x+1) if x is negative. We do not implement
@@ -2262,6 +2384,19 @@ def eval_is_non_overlapping_and_dense(
 def _eval_is_non_overlapping_and_dense(
     sizes: Sequence[int], strides: Sequence[int]
 ) -> bool:
+    """
+    Evaluates whether a tensor with the given sizes and strides is non-overlapping and dense.
+
+    A tensor is non-overlapping if there's no memory location that belongs to more than one element.
+    A tensor is dense if all elements are stored in memory without gaps.
+
+    Args:
+        sizes: Sequence of dimension sizes for the tensor
+        strides: Sequence of strides for the tensor
+
+    Returns:
+        True if the tensor is non-overlapping and dense, False otherwise
+    """
     dim = len(sizes)
 
     # Short-circuits for tensors of rank one, which are
@@ -2296,6 +2431,20 @@ def _sympy_cast_symbool_to_symint_guardless(x: SympyBoolean) -> sympy.Expr:
 def cast_symbool_to_symint_guardless(
     symbool: Union[bool, torch.SymBool]
 ) -> Union[int, torch.SymInt]:
+    """
+    Converts a SymBool or bool to a SymInt or int without introducing guards.
+
+    This function maps True to 1 and False to 0, preserving the symbolic nature
+    of the input when it's a SymBool. Unlike regular casting which might introduce
+    guards, this function performs the conversion without adding any guards.
+
+    Args:
+        symbool: A boolean value, either a concrete bool or symbolic SymBool
+
+    Returns:
+        The corresponding integer value (1 for True, 0 for False) as either
+        a concrete int or symbolic SymInt
+    """
     if isinstance(symbool, bool):
         return 1 if symbool else 0
     int_sym = _sympy_cast_symbool_to_symint_guardless(symbool.node.expr)
@@ -2367,12 +2516,15 @@ def _lru_cache(
     return wrapper  # type: ignore[return-value]
 
 
-# This is pretty similar to ShapeGuard but it also comes with a message,
-# and is exclusively used for things that MUST be true (unlike guards,
-# which can evaluate False, in which case you just choose not to use
-# a particular specialization)
 @dataclass(frozen=True)
 class RuntimeAssert:
+    """
+    This is pretty similar to ShapeGuard but it also comes with a message,
+    and is exclusively used for things that MUST be true (unlike guards,
+    which can evaluate False, in which case you just choose not to use
+    a particular specialization)
+    """
+
     expr: SympyBoolean
     msg: str = field(repr=False)
     stack: CapturedTraceback = field(repr=False)
@@ -2385,6 +2537,19 @@ class SymExprPrinter(PythonPrinter):
 
 
 class _ShapeGuardPrinter(abc.ABC):
+    """
+    Abstract base class for printers that convert symbolic expressions to string representations.
+
+    This class provides common functionality for printing symbolic expressions with
+    special handling for symbols that represent tensor shapes, strides, etc.
+    Subclasses implement specific formatting for different output languages.
+
+    Args:
+        symbol_to_source: Mapping from sympy symbols to their source objects
+        source_ref: Function to convert a source to its string representation
+        var_to_sources: Mapping from sympy symbols to their source objects (for error reporting)
+    """
+
     def __init__(
         self,
         symbol_to_source: Mapping[sympy.Symbol, list[Source]],
@@ -2397,9 +2562,25 @@ class _ShapeGuardPrinter(abc.ABC):
         super().__init__()
 
     def _print_Float(self, expr: sympy.Float) -> str:
+        """Convert a sympy Float to a Python float string representation."""
         return str(float(expr))
 
     def _print_Symbol(self, expr: sympy.Symbol) -> str:
+        """
+        Convert a sympy Symbol to its source representation.
+
+        This method looks up the symbol in symbol_to_source mapping and returns
+        the string representation of its first source.
+
+        Args:
+            expr: The sympy Symbol to convert
+
+        Returns:
+            String representation of the symbol's source
+
+        Raises:
+            AssertionError: If the symbol is not found in symbol_to_source
+        """
         assert isinstance(expr, sympy.Symbol), str(type(expr))
 
         def repr_symbol_to_source() -> str:
@@ -2419,22 +2600,73 @@ class _ShapeGuardPrinter(abc.ABC):
 
     @abc.abstractmethod
     def print_source(self, source: Source) -> str:
+        """
+        Convert a source object to its string representation.
+
+        Args:
+            source: The source object to convert
+
+        Returns:
+            String representation of the source
+        """
         ...
 
     @abc.abstractmethod
     def doprint(self, expr: sympy.Expr) -> str:
+        """
+        Convert a sympy expression to its string representation.
+
+        Args:
+            expr: The sympy expression to convert
+
+        Returns:
+            String representation of the expression
+        """
         ...
 
 
 class ShapeGuardPythonPrinter(_ShapeGuardPrinter, PythonPrinter):
+    """
+    Python printer for shape guards that extends the base ShapeGuardPrinter.
+
+    This class provides functionality to print symbolic expressions as Python code,
+    with caching to improve performance when printing the same expressions multiple times.
+    It handles printing of sources and expressions according to Python syntax.
+
+    Args:
+        *args: Arguments passed to the parent classes.
+    """
+
     def __init__(self, *args: Any) -> None:
         super().__init__(*args)
         self._print_cache: dict[sympy.Expr, str] = {}
 
     def print_source(self, source: Source) -> str:
+        """
+        Convert a source object to its string representation using the source_ref function.
+
+        Args:
+            source: The source object to convert
+
+        Returns:
+            String representation of the source
+        """
         return self.source_ref(source)
 
     def doprint(self, expr: sympy.Expr) -> str:
+        """
+        Convert a sympy expression to its Python string representation with caching.
+
+        This method first checks if the expression is already in the cache.
+        If found, it returns the cached result; otherwise, it delegates to
+        PythonPrinter's doprint method and caches the result.
+
+        Args:
+            expr: The sympy expression to convert
+
+        Returns:
+            String representation of the expression in Python syntax
+        """
         val = self._print_cache.get(expr, None)
         if val is not None:
             return val
@@ -5976,10 +6208,13 @@ class ShapeEnv:
 
     @_lru_cache
     def replace(self, expr: _SympyT) -> _SympyT:
-        """Apply symbol replacements to any symbols in the given expression"""
+        """
+        Apply symbol replacements to any symbols in the given expression.
+        """
         replacements = {}
         for s in expr.free_symbols:
             r = self._find(s)
+
             # Micro-optimization: only do replacements if r and s are different
             # Otherwise, xreplace is not a no-op and will trigger expensive
             # assumption queries if expr has a relational node.
@@ -7566,6 +7801,20 @@ def _is_non_negative_check(cond: sympy.Basic) -> Optional[str]:
 def _suggest_torch_checks(
     e: GuardOnDataDependentSymNode, src_map: defaultdict[str, list[str]]
 ) -> None:
+    """
+    Enhances a GuardOnDataDependentSymNode error with suggested fixes using torch._check.
+
+    This function analyzes the condition that caused the data-dependent error and generates
+    user-friendly suggestions for fixing it by adding appropriate torch._check calls.
+    It handles special cases like non-negative checks with specific recommendations.
+
+    Args:
+        e: The GuardOnDataDependentSymNode error to enhance with suggestions
+        src_map: A mapping from symbol names to their corresponding source-level variable names
+
+    Returns:
+        None. Modifies the error message in-place by updating e.args[0].
+    """
     # extract the unresolved condition on unbacked symints in the error
     cond = e.cond
     diff = ", ".join(s.name for s in cond.free_symbols if s.name not in src_map)
@@ -7655,6 +7904,20 @@ def _suggest_fixes_for_data_dependent_error_non_strict(
 def _remove_effect_token_unbacked_bindings(
     node: torch.fx.Node,
 ) -> Generator[None, None, None]:
+    """
+    Temporarily modifies unbacked_bindings in a node's metadata by removing the first element
+    of each path, which corresponds to an effect token.
+
+    This is used when processing nodes that have effect tokens as the first element in their
+    unbacked_bindings paths. The context manager ensures that the original bindings are
+    restored after the operation is complete.
+
+    Args:
+        node: The FX node whose unbacked_bindings will be temporarily modified
+
+    Yields:
+        None
+    """
     old_bindings = node.meta.get("unbacked_bindings", {})
 
     # Remove the extra layer for effect token
@@ -7666,3 +7929,15 @@ def _remove_effect_token_unbacked_bindings(
         yield
     finally:
         node.meta["unbacked_bindings"] = old_bindings
+
+
+# This helper function is used in passes that insert runtime assertions in the graph.
+# When accessing expressions representing input placeholders, we do not apply replacements
+# since those inputs should be seen by assertions that use them to be inserted. The only replacement
+# that we apply is unbacked renaming.
+def _get_placeholder_expr(sym_node: SymNode) -> sympy.Expr:
+    shape_env = sym_node.shape_env
+    result = sym_node._expr
+    if result in shape_env.unbacked_renamings:
+        return shape_env.unbacked_renamings[result]
+    return result
