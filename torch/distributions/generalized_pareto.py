@@ -54,7 +54,7 @@ class GeneralizedPareto(Distribution):
         scale: Union[float, Tensor],
         concentration: Union[float, Tensor],
         validate_args: Optional[bool] = None,
-    ):
+    ) -> None:
         self.loc, self.scale, self.concentration = broadcast_all(
             loc, scale, concentration
         )

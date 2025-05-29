@@ -46,15 +46,12 @@ P2 = TypeVar("P2", bound=Distribution)
 Q2 = TypeVar("Q2", bound=Distribution)
 _KL: TypeAlias = Callable[[P, Q], Tensor]
 
-# NOTE: Technically, this should be annotated as a polymorphic mapping, but we keep it simple.
 # Source of truth mapping a few general (type, type) pairs to functions.
 _KL_REGISTRY: dict[tuple[type[Distribution], type[Distribution]], _KL[Any, Any]] = {}
 # Memoized version mapping many specific (type, type) pairs to functions.
 _KL_MEMOIZE: dict[tuple[type[Distribution], type[Distribution]], _KL[Any, Any]] = {}
 
 
-# NOTE: Technically, P2 and Q2 should be bound to P and Q, but this requires
-#   higher kinded types, which are currently not supported in Python.
 class _KL_Decorator(Protocol):
     def __call__(self, arg: _KL[P2, Q2], /) -> _KL[P2, Q2]: ...
 

@@ -5949,7 +5949,6 @@ class TestKL(DistributionsTestCase):
     def test_kl_exponential_family(self) -> None:
         for (p, _), (_, q) in self.finite_examples:
             if type(p) == type(q) and isinstance(p, ExponentialFamily):
-                assert isinstance(p, ExponentialFamily)
                 assert isinstance(q, ExponentialFamily)
                 actual = kl_divergence(p, q)
                 expected = _kl_expfamily_expfamily(p, q)

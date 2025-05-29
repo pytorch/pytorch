@@ -53,7 +53,7 @@ class ContinuousBernoulli(ExponentialFamily):
         "logits": constraints.real,
     }
     support: ClassVar[constraints.UnitInterval] = constraints.unit_interval
-    _mean_carrier_measure: float = 0
+    _mean_carrier_measure: float = 0.0
     has_rsample: bool = True
 
     def __init__(

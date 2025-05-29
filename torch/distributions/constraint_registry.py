@@ -100,9 +100,11 @@ __all__ = [
 
 Con = TypeVar("Con", bound=Constraint)
 Factory: TypeAlias = Callable[[Con], Transform]
-# Note: Technically, `F` should be lower-bounded by `Con`, but higher-kinded
-#    type-variables are not supported at the time of writing this.
 F = TypeVar("F", bound=Callable[[Never], Transform])
+# Note: Technically, `F` should be lower-bounded by `Con`, but higher-kinded
+#    type-variables (type-variables dependent on other type-variables)
+#    are not supported at the time of writing this, see https://github.com/python/typing/issues/548.
+#    Useful example: https://github.com/python/typing/issues/548#issuecomment-621195693
 
 
 class ConstraintRegistry:
@@ -115,23 +117,15 @@ class ConstraintRegistry:
         super().__init__()
 
     @overload
-    def register(
-        self,
-        constraint: Union[Con, type[Con]],
-        factory: F,
-    ) -> F: ...
+    def register(self, constraint: Union[Con, type[Con]], factory: F) -> F: ...
 
     @overload  # decorator usage
     def register(
-        self,
-        constraint: Union[Con, type[Con]],
-        factory: None = ...,
+        self, constraint: Union[Con, type[Con]], factory: None = ...
     ) -> Callable[[F], F]: ...
 
     def register(
-        self,
-        constraint: Union[Con, type[Con]],
-        factory: Optional[F] = None,
+        self, constraint: Union[Con, type[Con]], factory: Optional[F] = None
     ) -> Union[F, Callable[[F], F]]:
         """
         Registers a :class:`~torch.distributions.constraints.Constraint`
@@ -155,14 +149,15 @@ class ConstraintRegistry:
 
         # Support calling on singleton instances.
         if isinstance(constraint, Constraint):
-            constraint = type(constraint)  # type: ignore[assignment]
-
-        if not isinstance(constraint, type) or not issubclass(constraint, Constraint):
+            constraint_type = type(constraint)
+        elif isinstance(constraint, type) and issubclass(constraint, Constraint):
+            constraint_type = constraint
+        else:
             raise TypeError(
                 f"Expected constraint to be either a Constraint subclass or instance, but got {constraint}"
             )
 
-        self._registry[constraint] = factory
+        self._registry[constraint_type] = factory
         return factory
 
     def __call__(self, constraint: Constraint) -> Transform:

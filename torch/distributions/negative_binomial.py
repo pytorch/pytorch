@@ -56,11 +56,11 @@ class NegativeBinomial(Distribution):
                 "Either `probs` or `logits` must be specified, but not both."
             )
         if probs is not None:
-            (self.total_count, self.probs) = broadcast_all(total_count, probs)
+            self.total_count, self.probs = broadcast_all(total_count, probs)
             self.total_count = self.total_count.type_as(self.probs)
         else:
             assert logits is not None  # helps mypy
-            (self.total_count, self.logits) = broadcast_all(total_count, logits)
+            self.total_count, self.logits = broadcast_all(total_count, logits)
             self.total_count = self.total_count.type_as(self.logits)
 
         self._param = self.probs if probs is not None else self.logits

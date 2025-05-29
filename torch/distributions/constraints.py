@@ -222,11 +222,11 @@ class _DependentProperty(property, _Dependent, Generic[T, R]):
         property.__init__(self, fn)
         _Dependent.__init__(self, is_discrete=is_discrete, event_dim=event_dim)
 
-    _T2 = TypeVar("_T2", contravariant=True)
-    _R2 = TypeVar("_R2", covariant=True)
+    T2 = TypeVar("T2", contravariant=True)
+    R2 = TypeVar("R2", covariant=True)
 
     # polymorphic decorator
-    def __call__(self, fn: Callable[[_T2], _R2]) -> "_DependentProperty[_T2, _R2]":  # type: ignore[override]
+    def __call__(self, fn: Callable[[T2], R2]) -> "_DependentProperty[T2, R2]":  # type: ignore[override]
         """
         Support for syntax to customize static attributes::
 
