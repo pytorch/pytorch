@@ -294,17 +294,20 @@ class ConvolutionUnary(ExternKernelAlloc):
         inputs,
         constant_args=(),
     ) -> None:
+        self.device_type = get_device_type(inputs[0])
         super().__init__(
             layout,
             inputs,
             constant_args,
             None,
             op_overload=torch.ops.mkldnn._convolution_pointwise.default,
-            cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_pointwise",
+            cpp_kernel_name=f"aoti_torch_{self.device_type}_mkldnn__convolution_pointwise",
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.include_extra_header(
+            f"torch/csrc/inductor/aoti_torch/c/shim_{self.device_type}.h"
+        )
         super().codegen(wrapper)
 
     @classmethod
@@ -351,18 +354,21 @@ class ConvolutionBinary(ExternKernelAlloc):
         constant_args=(),
         cpp_constant_args=(),
     ) -> None:
+        self.device_type = get_device_type(inputs[0])
         super().__init__(
             layout,
             inputs,
             constant_args,
             None,
             op_overload=torch.ops.mkldnn._convolution_pointwise.binary,
-            cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_pointwise_binary",
+            cpp_kernel_name=f"aoti_torch_{self.device_type}_mkldnn__convolution_pointwise_binary",
         )
         self.cpp_constant_args = cpp_constant_args
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.include_extra_header(
+            f"torch/csrc/inductor/aoti_torch/c/shim_{self.device_type}.h"
+        )
         super().codegen(wrapper)
 
     @classmethod
@@ -416,6 +422,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         constant_args=(),
     ) -> None:
         # Due to constrain of op.call, other (Tensor&) should be at input[0]
+        self.device_type = get_device_type(inputs[0])
         reordered_inputs = [inputs[1], inputs[0]] + inputs[2:]
 
         super().__init__(
@@ -424,7 +431,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             constant_args,
             None,
             op_overload=torch.ops.mkldnn._convolution_pointwise_.binary,
-            cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_pointwise_binary_",
+            cpp_kernel_name=f"aoti_torch_{self.device_type}_mkldnn__convolution_pointwise_binary_",
         )
 
         self.mutation_outputs = [
@@ -433,7 +440,9 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         ]
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.include_extra_header(
+            f"torch/csrc/inductor/aoti_torch/c/shim_{self.device_type}.h"
+        )
         super().codegen(wrapper)
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -829,17 +838,20 @@ class LinearUnary(ExternKernelAlloc):
         inputs,
         constant_args=(),
     ) -> None:
+        self.device_type = get_device_type(inputs[0])
         super().__init__(
             layout,
             inputs,
             constant_args,
             None,
             op_overload=torch.ops.mkldnn._linear_pointwise.default,
-            cpp_kernel_name="aoti_torch_cpu__linear_pointwise",
+            cpp_kernel_name=f"aoti_torch_{self.device_type}__linear_pointwise",
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.include_extra_header(
+            f"torch/csrc/inductor/aoti_torch/c/shim_{self.device_type}.h"
+        )
         super().codegen(wrapper)
 
     @classmethod
@@ -882,17 +894,20 @@ class LinearBinary(ExternKernelAlloc):
         inputs,
         constant_args=(),
     ) -> None:
+        self.device_type = get_device_type(inputs[0])
         super().__init__(
             layout,
             inputs,
             constant_args,
             None,
             op_overload=torch.ops.mkldnn._linear_pointwise.binary,
-            cpp_kernel_name="aoti_torch_cpu__linear_pointwise_binary",
+            cpp_kernel_name=f"aoti_torch_{self.device_type}__linear_pointwise_binary",
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.include_extra_header(
+            f"torch/csrc/inductor/aoti_torch/c/shim_{self.device_type}.h"
+        )
         super().codegen(wrapper)
 
     @classmethod
