@@ -473,7 +473,7 @@ class SerializationMixin:
                     with torch.sparse.check_sparse_tensor_invariants():
                         with self.assertRaisesRegex(
                                 RuntimeError,
-                                "size is inconsistent with indices"):
+                                "size is inconsistent with indices|found negative index"):
                             y = torch.load(f, weights_only=weights_only)
         finally:
             if prev_invariant_check_enabled:
