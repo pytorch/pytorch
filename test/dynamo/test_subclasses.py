@@ -769,7 +769,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x.ndim
 
-        msg = "Currently only support accessing overridden attributes that are functions or properties, but got <class 'int'>"
+        msg = "`torch.compile` only support tracing certain types of overriden tensor subclass attributes"
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
@@ -1041,6 +1041,24 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             pass
 
         def fn(x):
+            x = x.t()
+            x = x.T
+            return x + 1
+
+        fn_opt = compile_full_eager(fn)
+
+        x = torch.randn(2, 2).as_subclass(MySubclass)
+        res_exp = fn(x)
+        res_act = fn_opt(x)
+        self.assertEqual(res_exp, res_act)
+
+    def test_subclass_with_disabled_torch_function(self):
+        class MySubclass(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+        def fn(x):
+            x = x.t()
+            x = x.T
             return x + 1
 
         fn_opt = compile_full_eager(fn)
@@ -3207,6 +3225,25 @@ class GraphModule(torch.nn.Module):
         values = torch.randn(9, 5, requires_grad=True)
         lengths = torch.tensor([2, 4, 3])
         self._validate_compile(fn, arg_fn=lambda: (values, lengths))
+
+    def test_in_graph_construction_from_input_6(self):
+        # Construct with symbolic int.
+        def fn(values, offsets, max_seqlen):
+            t = torch.nested.nested_tensor_from_jagged(
+                values, offsets, max_seqlen=max_seqlen
+            )
+            return torch.nested.nested_tensor_from_jagged(
+                values, t.offsets(), max_seqlen=t._maybe_max_seqlen
+            )
+
+        opt_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        values = torch.randn(10, 5)
+        offsets = torch.tensor([0, 2, 4, 7, 10])
+        max_seqlen = 5
+
+        ref = fn(values, offsets, max_seqlen)
+        res = opt_fn(values, offsets, max_seqlen)
+        self.assertEqualIgnoringNestedInts(ref, res)
 
     #
     # Case 2: in-graph construction where offsets are graph intermediates

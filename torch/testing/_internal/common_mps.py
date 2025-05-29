@@ -22,6 +22,7 @@ if torch.backends.mps.is_available():
         SUPPORTED_COMPLEX_OPS = {
             "__radd__",
             "__rmul__",
+            "__rsub__",
             "__getitem__",
             "_unsafe_masked_index",
             "abs",
@@ -43,6 +44,7 @@ if torch.backends.mps.is_available():
             "conj",
             "conj_physical",
             "contiguous",
+            "cos",
             "diag",
             "diag_embed",
             "diagflat",
@@ -55,6 +57,7 @@ if torch.backends.mps.is_available():
             "empty_permuted",
             "empty_strided",
             "exp",
+            "exp2",
             "expand",
             "expand_as",
             "expand_copy",
@@ -72,6 +75,9 @@ if torch.backends.mps.is_available():
             "kron",
             "linalg.diagonal",
             "linalg.svd",
+            "log10",
+            "log2",
+            "log",
             "mH",
             "mT",
             "masked_fill",
@@ -83,6 +89,7 @@ if torch.backends.mps.is_available():
             "mul",
             "narrow",
             "narrow_copy",
+            "neg",
             "new_full",
             "new_ones",
             "new_zeros",
@@ -109,9 +116,12 @@ if torch.backends.mps.is_available():
             "reshape",
             "resolve_conj",
             "resolve_neg",
+            "rsqrt",
+            "rsub",
             "scalar_tensor",
             "select",
             "sgn",
+            "sin",
             "sinc",
             "slice",
             "special.spherical_bessel_j0",
@@ -131,6 +141,7 @@ if torch.backends.mps.is_available():
             "t",
             "t_copy",
             "tanh",
+            "tan",
             "tensor_split",
             "transpose",
             "transpose_copy",
@@ -181,7 +192,6 @@ if torch.backends.mps.is_available():
             "combinations",
             "corrcoef",
             "constant_pad_nd",
-            "cos",
             "cosh",
             "cov",
             "count_nonzero",
@@ -192,7 +202,6 @@ if torch.backends.mps.is_available():
             "einsum",
             "eq",
             "equal",
-            "exp2",
             "expm1",
             "eye",
             "fft.fft",
@@ -226,10 +235,7 @@ if torch.backends.mps.is_available():
             "linalg.pinv",
             "linspace",
             "linspacetensor_overload",
-            "log10",
             "log1p",
-            "log2",
-            "log",
             "logical_and",
             "logical_not",
             "logical_or",
@@ -247,7 +253,6 @@ if torch.backends.mps.is_available():
             "mm",
             "mv",
             "ne",
-            "neg",
             "nn.functional.padconstant",
             "nn.functional.padreflect",
             "nn.functional.padreplicate",
@@ -259,10 +264,8 @@ if torch.backends.mps.is_available():
             "reciprocal",
             "roll",
             "rot90",
-            "rsqrt",
             "short",
             "sigmoid",
-            "sin",
             "sinh",
             "sqrt",
             "square",
@@ -270,7 +273,6 @@ if torch.backends.mps.is_available():
             "stft",
             "sum",
             "sum_to_size",
-            "tan",
             "tensordot",
             "trace",
             "trapz",
@@ -283,10 +285,7 @@ if torch.backends.mps.is_available():
         }
         # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
         MACOS_BEFORE_13_3_XFAILLIST = {
-            # float16 seems horribly wrong on MacOS13
-            "floor_divide": [torch.float16],
             # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
-            "tan": [torch.float32],
             "cdist": [torch.float32],
             # CPU Error: cpu not giving nan for x/0.0
             "atan2": [
@@ -379,7 +378,6 @@ if torch.backends.mps.is_available():
             "linalg.eigvals": None,
             "put": None,
             "nn.functional.conv_transpose3d": None,
-            "__rsub__": None,
             "cauchy_": None,
             "cauchy": None,
             "cholesky_inverse": None,
@@ -451,7 +449,6 @@ if torch.backends.mps.is_available():
             "ormqr": None,
             "pca_lowrank": None,
             "qr": None,
-            "rsub": None,
             "scatter_reduceamax": [torch.int32, torch.int64]
             if MACOS_VERSION < 15.0
             else [torch.int64],
@@ -584,7 +581,6 @@ if torch.backends.mps.is_available():
             "mat": [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
             "matmul": [torch.int64] if MACOS_VERSION < 14.0 else [],
             "__rmatmul__": [torch.int64] if MACOS_VERSION < 14.0 else [],
-            "unravel_index": [torch.int32, torch.int64],
             # returned output on CPU is float64
             "bincount": [
                 torch.int16,
@@ -593,9 +589,6 @@ if torch.backends.mps.is_available():
                 torch.uint8,
                 torch.int8,
             ],
-            # trunc_tensor not working properly for float16 and bfloat16
-            "divtrunc_rounding": [torch.float16, torch.bfloat16],
-            "fmod": [torch.float16],
             # round not working properly for float16 and bfloat16
             "round": [torch.float16, torch.bfloat16],
             "rounddecimals_0": [torch.bfloat16],
@@ -932,9 +925,6 @@ if torch.backends.mps.is_available():
             "signal.windows.kaiser": [torch.float32],
             "signal.windows.nuttall": [torch.float32],
             "eye": [torch.float16, torch.float32],
-            # trunc_tensor not working properly for float16
-            "divtrunc_rounding": [torch.float16],
-            "fmod": [torch.float16],
             # round not working properly for float16
             "round": [torch.float16],
             # topk fails with duplicate indices
@@ -947,7 +937,6 @@ if torch.backends.mps.is_available():
             "masked.softmax": [torch.float32, torch.float16],
             "masked.log_softmax": [torch.float32, torch.float16],
             "atanh": [torch.float16],
-            "__rmod__": [torch.float16],
             "triangular_solve": [torch.float32],
             # Unsupported Border padding mode, forward pass success as fallback to cpu
             "grid_sampler_2d": [torch.float32, torch.float16, torch.bfloat16],

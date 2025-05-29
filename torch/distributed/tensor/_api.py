@@ -269,7 +269,7 @@ class DTensor(torch.Tensor):
         # new method instruct wrapper tensor from local_tensor and add
         # placement spec, it does not do actual distribution
         assert spec.tensor_meta is not None, "TensorMeta should not be None!"
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        r = torch.Tensor._make_wrapper_subclass(
             cls,
             spec.tensor_meta.shape,
             strides=spec.tensor_meta.stride,
@@ -996,8 +996,6 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     placements: Optional[Sequence[Placement]] = None,
     **kwargs,
 ) -> DTensor:
-    # from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
-
     # if device_mesh is None, use the one from mesh resources
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()
     kwargs["device"] = device_mesh.device_type
