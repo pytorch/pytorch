@@ -26,6 +26,10 @@ register_artifact(
     "cudagraphs",
     "Logs information from wrapping inductor generated code with cudagraphs.",
 )
+register_artifact(
+    "codecache",
+    "Logs information about inductor's code cache",
+)
 
 register_log("dynamic", DYNAMIC)
 register_log("torch", "torch")
