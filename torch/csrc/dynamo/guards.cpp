@@ -4164,42 +4164,38 @@ class SetGetItemGuardAccessor : public GuardAccessor {
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
-    PyObject* PyDict = (PyObject*)&PyDict_Type;
-    PyObject* dict =
-        PyObject_CallMethod(PyDict, "fromkeys", "OO", obj, Py_None);
 
-    PyObject* keys_list = PyMapping_Keys(dict);
-    Py_XDECREF(dict);
+    py::object sorted = py::module_::import("builtins").attr("sorted");
+    py::object hash = py::module_::import("builtins").attr("hash");
+    py::object pybind_obj = py::reinterpret_borrow<py::object>(obj);
 
-    PyObject* x = PyList_GetItem(keys_list, _index); // borrowed ref
-    if (x == nullptr) {
-      Py_XDECREF(keys_list);
-      PyErr_Clear();
+    py::list lst = sorted(pybind_obj, py::arg("key") = hash);
+
+    if (_index >= static_cast<Py_ssize_t>(py::len(lst))) {
       return false;
     }
-    bool result = _guard_manager->check_nopybind(x);
-    Py_XDECREF(keys_list);
+
+    py::object x = lst[_index];
+    bool result = _guard_manager->check_nopybind(x.ptr());
     return result;
   }
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
-    PyObject* PyDict = (PyObject*)&PyDict_Type;
-    PyObject* dict =
-        PyObject_CallMethod(PyDict, "fromkeys", "OO", obj, Py_None);
 
-    PyObject* keys_list = PyMapping_Keys(dict);
-    Py_XDECREF(dict);
+    py::object sorted = py::module_::import("builtins").attr("sorted");
+    py::object hash = py::module_::import("builtins").attr("hash");
+    py::object pybind_obj = py::reinterpret_borrow<py::object>(obj);
 
-    PyObject* x = PyList_GetItem(keys_list, _index); // borrowed ref
-    if (x == nullptr) {
-      Py_XDECREF(keys_list);
-      PyErr_Clear();
+    py::list lst = sorted(pybind_obj, py::arg("key") = hash);
+
+    if (_index >= static_cast<Py_ssize_t>(py::len(lst))) {
       return GuardDebugInfo(
           false, fmt::format("IndexError on {}", get_source()), 0);
     }
-    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
-    Py_XDECREF(keys_list);
+
+    py::object x = lst[_index];
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x.ptr());
     return result;
   }
 

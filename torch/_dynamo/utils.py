@@ -2532,9 +2532,8 @@ def dict_keys_getitem(d, n):
 
 
 def set_getitem(s, n):
-    # Mimic set.__getitem__ by converting the set to a dict to have a partial
-    # ordering.
-    return list(dict.fromkeys(s))[n]
+    # Mimic set.__getitem__ by sorting the set using the hash
+    return sorted(s, key=hash)[n]
 
 
 def enum_repr(value, local):
