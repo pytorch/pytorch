@@ -608,17 +608,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Start the heartbeat monitor thread.
     void start();
 
-    // Stop the heartbeat monitor thread.
-    void wait();
+    // Join the heartbeat monitor thread.
+    void join();
 
     // Run the actual loop to check watchdog heartbeat.
     virtual void runLoop();
 
-    // notify the heartbeat monitor thread to stop.
+    // Set the terminal flag and notify the heartbeat monitor thread to stop.
     void stop();
-
-    // print out ENV settings for the heartbeat monitor thread.
-    void printLogMsg();
 
     // Set the last update time of watchdog thread.
     void setLastWorkListUpdateTime(
@@ -632,7 +629,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
    protected:
     // We need to keep a reference to the PG instance so that we can access
-    // the member functions of the PG instance.
+    // the member functions of the PG instance. We store a raw pointer on
+    // purpose because the heartbeat monitor thread now still lives within the
+    // lifetime of the PG instance.
     ProcessGroupNCCL* pg_;
 
    private:
@@ -653,7 +652,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // We gate the heartbeat monitor thread so that we can roll it out
     // gradually.
-    std::atomic<bool> watchdogHeartbeatMonitorEnabled_{};
+    bool watchdogHeartbeatMonitorEnabled_;
 
     // Monitor thread which checks the heartbeat of Watchdog thread.
     // If the monitor thread finds there is no heartbeat, it will dump debug
@@ -673,7 +672,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Mutex to Guard monitorWakeUpCV_
     std::mutex monitorMutex_;
 
-    // The last update time of watchdog thread.
+    // The last update time of WorkList inside watchdog thread.
     std::chrono::time_point<std::chrono::steady_clock> lastWorkListUpdateTime_;
   };
 
@@ -738,8 +737,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     return false;
 #endif
   }
-
-  uint64_t getWatchdogHeartbt() const;
 
   void startCoalescing() override;
 
@@ -945,6 +942,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void setEnableNanCheck(bool enableNanCheck);
 
  protected:
+  uint64_t getWatchdogHeartbt() const;
+
   // Instance of the heartbeat monitor thread.
   std::unique_ptr<HeartbeatMonitor> heartbeatMonitor_;
 
@@ -1180,6 +1179,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // comes with prefix and it is different across ProcessGroup NCCL instances
   // (aka, different ProcessGroups).
   c10::intrusive_ptr<Store> store_;
+
+  // Reference to the store without prefix so that keys are same across all
+  // ProcessGroup NCCL instances and (key, value) pairs written to the store are
+  // global.
+  c10::intrusive_ptr<Store> globalStore_;
 
   // The lock which protects the write/read of
   // ephemeralTimeoutActive_/ephemeralTimeoutInflight_.

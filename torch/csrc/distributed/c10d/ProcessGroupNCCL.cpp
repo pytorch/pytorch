@@ -963,6 +963,13 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000 /*15 Sec*/);
   traceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 2000);
   enableCollectiveHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
+  // store_ usually is wrapped with PrefixStore and the prefix is different
+  // across different ProcessGroupNCCL(PG) instances. We need to get the
+  // underlying non-PrefixStore for sharing global information shared across
+  // different PGs.
+  PrefixStore* prefixStore = dynamic_cast<PrefixStore*>(store_.get());
+  globalStore_ =
+      prefixStore ? prefixStore->getUnderlyingNonPrefixStore() : store_;
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
       getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_);
@@ -1026,7 +1033,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_
             << ", TORCH_NCCL_CUDA_EVENT_CACHE: " << cudaEventCacheEnabled_;
   heartbeatMonitor_ = std::make_unique<HeartbeatMonitor>(this);
-  heartbeatMonitor_->printLogMsg();
 
   getGlobalRankStartAndStride(
       options_->global_ranks_in_group,
@@ -1541,7 +1547,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
     ncclCommWatchdogThread_.join();
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
   }
-  heartbeatMonitor_->wait();
+  heartbeatMonitor_->join();
   if (onCompletionHookThread_.joinable()) {
     onCompletionHookThread_.join();
     LOG(INFO) << logPrefix()
@@ -1643,15 +1649,14 @@ ProcessGroupNCCL::HeartbeatMonitor::HeartbeatMonitor(ProcessGroupNCCL* pg) {
   // logging C++ stack isn't safe. Gate it with an ENV.
   logCppStackOnUncleanShutdown_ =
       getCvarBool(TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN, true);
-  watchdogHeartbeatMonitorEnabled_.store(
-      getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
-}
+  watchdogHeartbeatMonitorEnabled_ =
+      getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true);
 
-void ProcessGroupNCCL::HeartbeatMonitor::printLogMsg() {
+  // print out ENV settings for the heartbeat monitor thread.
   LOG(INFO)
       << pg_->logPrefix() << "HeartbeatMonitor environments: "
       << "TORCH_NCCL_ENABLE_MONITORING (Whether to kill program when no watchdog heartbeat detected): "
-      << watchdogHeartbeatMonitorEnabled_.load()
+      << watchdogHeartbeatMonitorEnabled_
       << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeoutOrEx_
       << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: " << waitTimeoutDumpInMilSec_
       << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
@@ -1666,11 +1671,14 @@ void ProcessGroupNCCL::HeartbeatMonitor::stop() {
 }
 
 void ProcessGroupNCCL::HeartbeatMonitor::start() {
+  TORCH_CHECK(
+      !ncclHeartbeatMonitorThread_.joinable(),
+      "HeartbeatMonitor thread already started");
   ncclHeartbeatMonitorThread_ =
       std::thread(&ProcessGroupNCCL::HeartbeatMonitor::runLoop, this);
 }
 
-void ProcessGroupNCCL::HeartbeatMonitor::wait() {
+void ProcessGroupNCCL::HeartbeatMonitor::join() {
   if (ncclHeartbeatMonitorThread_.joinable()) {
     ncclHeartbeatMonitorThread_.join();
     LOG(INFO) << pg_->logPrefix()
@@ -1941,7 +1949,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     // we throw exception and make the whole process to be killed.
     // TODO(fduwjj): After having a hang debug wiki, we need to update the wiki
     // url here.
-    if (watchdogHeartbeatMonitorEnabled_.load()) {
+    if (watchdogHeartbeatMonitorEnabled_) {
       pg_->terminateProcess(getNCCLWatchdogTimeoutExitMsg(exitReason));
     } else {
       // Ideally we want to merge this one with the above one, but we are going
@@ -2122,8 +2130,7 @@ const int& ProcessGroupNCCL::globalRank() const {
 }
 
 const c10::intrusive_ptr<Store>& ProcessGroupNCCL::globalStore() const {
-  static c10::intrusive_ptr<Store> globalStore = store_;
-  return globalStore;
+  return globalStore_;
 }
 
 const std::vector<uint64_t>& ProcessGroupNCCL::groupRanks() const {
