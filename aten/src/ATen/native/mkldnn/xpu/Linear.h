@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/Tensor.h>
 #include <ATen/Config.h>
+#include <ATen/Tensor.h>
 
 #if AT_MKLDNN_ENABLED()
 
@@ -21,6 +21,6 @@ C10_API Tensor linear_pointwise_binary(
     const std::optional<Tensor>& bias_opt,
     std::string_view binary_attr);
 
-} // namespace at
+} // namespace at::native::xpu
 
 #endif // AT_MKLDNN_ENABLED()

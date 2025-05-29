@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/Tensor.h>
 #include <ATen/Config.h>
+#include <ATen/Tensor.h>
 
 #if AT_MKLDNN_ENABLED()
 
@@ -48,6 +48,6 @@ C10_API Tensor& convolution_pointwise_binary_(
     torch::List<std::optional<at::Scalar>> unary_scalars,
     std::optional<std::string_view> unary_algorithm);
 
-} // namespace at::natiive::xpu
+} // namespace at::native::xpu
 
 #endif // AT_MKLDNN_ENABLED()
