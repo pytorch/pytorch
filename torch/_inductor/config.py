@@ -1327,8 +1327,14 @@ class aot_inductor:
     # Experimental.  Controls automatic precompiling of common AOTI include files.
     precompile_headers: bool = not is_fbcode()
 
-    # Embed generated .cubin files into the .so
-    embed_cubin: bool = False
+    # Embed generated kernel binary files into model.so
+    embed_kernel_binary: bool = False
+
+    # Generate kernel files that support multiple archs
+    # Default it will emit multi arch kernels as asm files, e.g. PTX for CUDA.
+    emit_multi_arch_kernel: bool = False
+    # In addition to emit asm files, also emit binary files for current arch
+    emit_current_arch_binary: bool = False
 
     # Custom ops that have implemented C shim wrappers, defined as an op to C shim declaration dict
     custom_ops_to_c_shims: dict[torch._ops.OpOverload, list[str]] = {}
@@ -1382,7 +1388,9 @@ class cuda:
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4, 8]
 
     # Whether to use CUTLASS EVT for epilogue fusion
-    cutlass_epilogue_fusion_enabled = False
+    cutlass_epilogue_fusion_enabled = (
+        os.environ.get("CUTLASS_EPILOGUE_FUSION", "0") == "1"
+    )
 
     # Whether to only use TMA-compatible kernels in CUTLASS
     cutlass_tma_only = False
