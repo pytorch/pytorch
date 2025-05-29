@@ -148,6 +148,52 @@ template <typename T>
 constexpr constant bool is_scalar_integral_v =
     ::metal::is_integral_v<T> && ::metal::is_scalar_v<T>;
 
+template <typename U, typename V>
+using common_dtype = decltype(U(0) + V(0));
+
+// floor_divide
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_integral_v<T> && is_scalar_integral_v<U>,
+        bool> = true>
+inline common_dtype<T, U> floor_divide(T x, U y) {
+  const auto quot = x / y;
+  return (x < 0) == (y < 0) ? quot : (x % y != 0) ? quot - 1 : quot;
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_floating_point_v<T> && is_scalar_floating_point_v<U>,
+        bool> = true>
+inline common_dtype<T, U> floor_divide(T x, U y) {
+  return ::metal::floor(x / y);
+}
+
+// fmod
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_integral_v<T> && is_scalar_integral_v<U>,
+        bool> = true>
+inline common_dtype<T, U> fmod(T x, U y) {
+  return x % y;
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_floating_point_v<T> && is_scalar_floating_point_v<U>,
+        bool> = true>
+inline common_dtype<T, U> fmod(T x, U y) {
+  return ::metal::fmod(x, y);
+}
+
 // cast_to primitives
 //  - No-op if types as the same
 template <
@@ -186,8 +232,6 @@ inline T cast_to(const U from) {
 }
 
 // Generalizable math operators (used for both scalar and complex)
-template <typename U, typename V>
-using common_dtype = decltype(U(0) + V(0));
 
 template <
     typename T,
