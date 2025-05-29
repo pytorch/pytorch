@@ -488,15 +488,28 @@ def extract_normalized_read_writes(
             continue
 
         body = n._body
+
+        # TODO - not handled well
+        if body.indirect_vars:
+            return None
+
         n_reads: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
         n_writes: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
 
         for inp in inputs:
             for expr in body.get_all_read_expr(inp):
                 n_reads[expr].add(inp)
+            if real_name := V.graph.scheduler.mutation_real_name.get(inp):
+                for expr in body.get_all_read_expr(real_name):
+                    n_reads[expr].add(real_name)
+                
         for out in outputs:
             for expr in body.get_all_write_expr(out):
                 n_writes[expr].add(out)
+
+            if real_name := V.graph.scheduler.mutation_real_name.get(out):
+                for expr in body.get_all_write_expr(real_name):
+                    n_writes[expr].add(real_name)
 
         if not n_reads and not n_writes:
             continue

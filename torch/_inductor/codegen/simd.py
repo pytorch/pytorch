@@ -698,9 +698,10 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                         )
                     )
                 else:
-                    return_getters.append(
-                        operator.itemgetter(add_range(current_group, size))
-                    )
+                    if current_group < len(remaining):
+                        return_getters.append(
+                            operator.itemgetter(add_range(current_group, size))
+                        )
             return_getters_groups.append(return_getters)
 
         assert all(V.graph.sizevars.size_hint(s) == 1 for s in remaining), (
@@ -2116,6 +2117,15 @@ class SIMDScheduling(BaseScheduling):
                 splits.append(prod)
                 split_scores.append(prev_var_coalesced_score)
 
+            # penalize splits that leave small blocks
+            # where we cant fully utilize full memory transaction
+            # TODO: incorporate exact bitwidth, and read/write
+            # coalesced write is 2x more important
+            for i in range(len(splits)):
+                s = V.graph.sizevars.size_hint(splits[i], fallback=32)
+                s = min(s, 32)
+                split_scores[i] *= s/32
+
             scored_sub_split[key] = (splits, split_scores)
             return (splits, split_scores)
 
@@ -2175,10 +2185,6 @@ class SIMDScheduling(BaseScheduling):
 
         def score_mod(t):
             score = -t[0].score / (additional_tiling_penalty ** (len(t[0].tiling) - 1))
-
-            for tile in t[0].tiling.values():
-                if not CandidateTiling.is_good_size(tile):
-                    score = score / additional_tiling_penalty
 
             return score
 
@@ -2287,8 +2293,18 @@ class SIMDScheduling(BaseScheduling):
             #     node_schedule, numel, reduction_numel, None
             # )
             # torch._inductor.config.triton.max_tiles=3
+            # # if "buf1148" in str(node_schedule[0].get_buffer_names()):
+            # #     breakpoint()
             # if not out[0] == out2[0]:
-            #     breakpoint()
+            # #     breakpoint()
+            # #     # if "buf1148" in str(node_schedule[0].get_buffer_names()):
+            # #     #     breakpoint()
+            # #     mm = torch._inductor.tiling_utils.analyze_memory_coalescing(node_schedule[0])
+            # #     #     out = cls.compute_tiling_strategy(
+            # #     #         node_schedule, numel, reduction_numel, coalesce_analysis
+            # #     #     )
+            # #     #     breakpoint()
+            #     print("DIFFERENCE", node_schedule[0].get_buffer_names())
             #     out = cls.compute_tiling_strategy(
             #         node_schedule, numel, reduction_numel, coalesce_analysis
             #     )

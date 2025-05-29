@@ -1002,8 +1002,11 @@ class CachingAutotuner(KernelInterface):
 
         bin_type = {"hip": "hsaco", "xpu": "spv"}.get(self.device_props.type, "cubin")
         binary = launcher.bin.asm[bin_type]
-        CudaKernelParamCache.set(key, params, binary, bin_type)
+        # Also store asm code which can be used for debugging and generating cpp package
+        asm_type = {"hip": "amdgcn", "cuda": "ptx"}.get(self.device_props.type, None)
+        asm = launcher.bin.asm.get(asm_type, None)
 
+        CudaKernelParamCache.set(key, params, binary, bin_type, asm, asm_type)
         self.cuda_kernel_saved = True
 
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
@@ -2246,30 +2249,17 @@ def pointwise(
         if disable_pointwise_autotuning(inductor_meta):
             configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
         else:
-            
-            def get_config(*sizes):
-                out = match_target_block_product(
-                    size_hints, inductor_meta.get("tiling_scores"), math.prod(sizes)
-                )
-                out = triton_config_with_settings(size_hints, *out.values())
-                return out
-
-            # c = adapt_pointwise_config_for_tiling(size_hints, inductor_meta.get("tiling_scores"), 16, 16, 16)
-            get_config(16, 16, 16)
             configs = [
-                get_config(16, 16, 16),
-                get_config(16, 8, 8),
-                get_config(4, 8, 8),
-                get_config(bs, 1, 1),
-                # triton_config_with_settings(size_hints, 16, 16, 16),
-                # triton_config_with_settings(size_hints, 64, 8, 8),
-                # triton_config_with_settings(size_hints, 8, 64, 8),
-                # triton_config_with_settings(size_hints, 8, 8, 64),
-                # triton_config_with_settings(size_hints, bs, 1, 1),
-                # triton_config_with_settings(size_hints, 1, bs, 1),
-                # triton_config_with_settings(size_hints, 1, 1, bs),
+                triton_config_with_settings(size_hints, 16, 16, 16),
+                triton_config_with_settings(size_hints, 64, 8, 8),
+                triton_config_with_settings(size_hints, 8, 64, 8),
+                triton_config_with_settings(size_hints, 8, 8, 64),
+                triton_config_with_settings(size_hints, bs, 1, 1),
+                triton_config_with_settings(size_hints, 1, bs, 1),
+                triton_config_with_settings(size_hints, 1, 1, bs),
                 *hinted_configs,
             ]
+
 
     if not configs:
         raise NotImplementedError(f"size_hints: {size_hints}")

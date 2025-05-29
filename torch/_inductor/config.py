@@ -1147,8 +1147,8 @@ class triton:
     tile_reductions: bool = False
 
     # should we stop a fusion to allow better tiling?
-    tiling_prevents_pointwise_fusion = False
-    tiling_prevents_reduction_fusion = False
+    tiling_prevents_pointwise_fusion = True
+    tiling_prevents_reduction_fusion = True
 
     # should we give different names to kernels
     # Note: This is orthogonal to descriptive_names - this is deciding whether
@@ -1337,8 +1337,11 @@ class aot_inductor:
     # Experimental.  Controls automatic precompiling of common AOTI include files.
     precompile_headers: bool = not is_fbcode()
 
-    # Embed generated .cubin files into the .so
-    embed_cubin: bool = False
+    # Embed generated kernel binary files into model.so
+    embed_kernel_binary: bool = False
+
+    # Generate kernel binary files that support multiple archs
+    multi_arch_kernel_binary: bool = False
 
     # Custom ops that have implemented C shim wrappers, defined as an op to C shim declaration dict
     custom_ops_to_c_shims: dict[torch._ops.OpOverload, list[str]] = {}
