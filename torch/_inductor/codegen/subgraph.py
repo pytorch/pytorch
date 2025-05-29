@@ -3,6 +3,7 @@ import logging
 from typing import Any, Callable
 
 import torch
+import torch._inductor.config as config
 from torch._inductor import ir
 from torch._inductor.codegen.common import KernelTemplate
 from torch._inductor.ir import (
@@ -14,6 +15,7 @@ from torch._inductor.ir import (
     Layout,
 )
 from torch._inductor.runtime.benchmarking import benchmarker
+from torch._inductor.utils import do_bench_using_profiling
 from torch._inductor.virtualized import V
 
 
@@ -113,6 +115,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 bm_func = mod.call
 
                 bm_func([*sym_inputs, *args])
+        if config.profile_bandwidth_with_do_bench_using_profiling:
+            return do_bench_using_profiling(lambda: bm_func([*sym_inputs, *args]))
         return benchmarker.benchmark_gpu(lambda: bm_func([*sym_inputs, *args]))
 
     def hash_key(self) -> str:
