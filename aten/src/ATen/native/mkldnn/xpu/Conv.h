@@ -2,6 +2,7 @@
 
 #include <ATen/Config.h>
 #include <ATen/Tensor.h>
+#include <ATen/core/List.h>
 
 #if AT_MKLDNN_ENABLED()
 
