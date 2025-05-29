@@ -991,8 +991,6 @@ elseif(USE_CUDA)
   # Otherwise, NVSHMEM_HOME is auto detected in tools/setup_helpers/cmake.py
   if($ENV{NVSHMEM_HOME})
     set(NVSHMEM_HOME $ENV{NVSHMEM_HOME} CACHE PATH "Path to NVSHMEM build dir")
-  else()
-    message(WARNING "NVSHMEM_HOME not found. Building without NVSHMEM.")
   endif()
 
   if(USE_NVSHMEM AND DEFINED NVSHMEM_HOME)
