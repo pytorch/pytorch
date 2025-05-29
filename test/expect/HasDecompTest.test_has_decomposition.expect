@@ -355,7 +355,10 @@ aten::_functional_sym_constrain_range
 aten::_functional_sym_constrain_range_for_size
 aten::_fused_adagrad
 aten::_fused_adagrad.out
+aten::_fused_adagrad.tensor_lr
+aten::_fused_adagrad.tensor_lr_out
 aten::_fused_adagrad_
+aten::_fused_adagrad_.tensor_lr
 aten::_fused_adam
 aten::_fused_adam.out
 aten::_fused_adam.tensor_lr

@@ -28,31 +28,33 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
 
-  linux-focal-rocm-py3_10-inductor-build:
+  linux-jammy-rocm-py3_10-inductor-build:
     name: rocm-py3.10-inductor
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-rocm-py3.10
-      docker-image-name: pytorch-linux-focal-rocm-n-py3
+      build-environment: linux-jammy-rocm-py3.10
+      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       test-matrix: |
         { include: [
           { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.2" },
           { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.2" },
         ]}
+      allow-reuse-old-whl: true
     secrets: inherit
 
-  linux-focal-rocm-py3_10-inductor-test:
+  linux-jammy-rocm-py3_10-inductor-test:
     permissions:
       id-token: write
       contents: read
     name: rocm-py3.10-inductor
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-focal-rocm-py3_10-inductor-build
+    needs: linux-jammy-rocm-py3_10-inductor-build
     with:
-      build-environment: linux-focal-rocm-py3.10
-      docker-image: ${{ needs.linux-focal-rocm-py3_10-inductor-build.outputs.docker-image }}
-      test-matrix:  ${{ needs.linux-focal-rocm-py3_10-inductor-build.outputs.test-matrix }}
+      build-environment: linux-jammy-rocm-py3.10
+      docker-image: ${{ needs.linux-jammy-rocm-py3_10-inductor-build.outputs.docker-image }}
+      test-matrix:  ${{ needs.linux-jammy-rocm-py3_10-inductor-build.outputs.test-matrix }}
     secrets: inherit
