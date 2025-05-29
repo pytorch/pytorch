@@ -359,7 +359,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   bool is_float_output_with_half_input = (scalar_type == at::ScalarType::Half || scalar_type == at::ScalarType::BFloat16) && result.scalar_type() == at::ScalarType::Float;
   c10::MaybeOwned<Tensor> self_;
   if (&result != &self) {
-#if (defined(CUDA_VERSION) && (CUDA_VERSION >= 11040)) || defined(USE_ROCM)
+#if defined(CUDA_VERSION) || defined(USE_ROCM)
     // Strangely, if mat2 has only 1 row or column, we get
     // CUBLAS_STATUS_INVALID_VALUE error from cublasLtMatmulAlgoGetHeuristic.
     // self.dim() == 1 && result.dim() == 2 && self.sizes()[0] == mat2_sizes[1]
@@ -495,15 +495,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     }
 #else
     auto activation_epilogue = activation_to_gemm_and_blas_arg(activation);
-#if (defined(CUDA_VERSION) && (CUDA_VERSION < 11080))
-    // GELU is not supported (and does not compile!) prior
-    // to CUDA 11.4. Have observed accuracy issues with
-    // GELU epilogue in 11.4; disabling the GELU epilogue
-    // path for CUDA version < 11.8.
-    if (activation == Activation::GELU)
-      activation_epilogue = cuda::blas::GEMMAndBiasActivationEpilogue::None;
-#endif
-
     bool okay = true;
     if (is_float_output_with_half_input) {
       AT_DISPATCH_REDUCED_FLOATING_TYPES(
@@ -646,7 +637,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 // gating activation_to_gemm_and_blas_arg above; here we are manually
 // performing a post-GELU because we weren't able to use the GELU
 // epilogue above.
-#if !(defined(CUDA_VERSION) && CUDA_VERSION >= 11080) && !defined(USE_ROCM)
+#if !defined(CUDA_VERSION) && !defined(USE_ROCM)
   if (useLtInterface && activation == Activation::GELU) {
     at::gelu_(const_cast<Tensor&>(*args.result), "tanh");
   }
@@ -1017,7 +1008,7 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
 
   TORCH_CHECK(result.is_contiguous(), "Expected result to be contiguous.");
 
-#if (defined(CUDA_VERSION) && (CUDA_VERSION >= 11070)) || defined(USE_ROCM)
+#if defined(CUDA_VERSION) || defined(USE_ROCM)
   cublasCommonArgs args(self, mat2, result);
 
   at::cuda::blas::int8_gemm(

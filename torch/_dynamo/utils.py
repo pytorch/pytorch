@@ -592,7 +592,7 @@ class CompileEventLogger:
         or ChromiumEventLogger is not initialized.
         This function is syntactic sugar for chromium_event_logger().try_add_event_data.
         """
-        if CHROMIUM_EVENT_LOG is None:
+        if not chromium_event_log_active():
             return
         chromium_log = get_chromium_event_logger()
         chromium_log.try_add_event_data(event_name, **metadata)
@@ -602,7 +602,7 @@ class CompileEventLogger:
         """
         Special function that quietly runs a given method, returning if CHROMIUM_EVENT_LOG is None or metrics context is not set
         """
-        if CHROMIUM_EVENT_LOG is None:
+        if not chromium_event_log_active():
             return
         metrics_context = get_metrics_context()
         if not metrics_context.in_progress():
@@ -1921,6 +1921,11 @@ def get_chromium_event_logger() -> ChromiumEventLogger:
     if CHROMIUM_EVENT_LOG is None:
         CHROMIUM_EVENT_LOG = ChromiumEventLogger()
     return CHROMIUM_EVENT_LOG
+
+
+def chromium_event_log_active() -> bool:
+    global CHROMIUM_EVENT_LOG
+    return CHROMIUM_EVENT_LOG is not None
 
 
 @contextmanager

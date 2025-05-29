@@ -139,7 +139,7 @@ void CUDAGraph::capture_end() {
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597
   // cudaGraphInstantiateWithFlags
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1ga2c652a24ba93e52b99a47bec0888233
-#if ((defined(CUDA_VERSION) && CUDA_VERSION >= 11040) || (defined(USE_ROCM) && ROCM_VERSION >= 60200))
+#if !defined(USE_ROCM) || ROCM_VERSION >= 60200
   int version = 0;
   AT_CUDA_CHECK(cudaDriverGetVersion(&version));
   if (version < 11040) {
@@ -154,7 +154,7 @@ void CUDAGraph::capture_end() {
 #endif
 //Since ROCm 6.2, we want to go down this path as hipGraphExecDestroy in the destructor will not immediately free the memory.
 //It will wait for the next sync operation. cudaGraphInstantiateFlagAutoFreeOnLaunch will add async frees after graph launch.
-#if ((defined(CUDA_VERSION) && CUDA_VERSION >= 11040) || (defined(USE_ROCM) && ROCM_VERSION >= 60200))
+#if !defined(USE_ROCM) || ROCM_VERSION >= 60200
   } else {
     AT_CUDA_CHECK(cudaGraphInstantiateWithFlags(&graph_exec_,
                                                 graph_,
@@ -216,7 +216,7 @@ void CUDAGraph::enable_debug_mode() {
 }
 
 void CUDAGraph::debug_dump(const std::string& debug_path) {
-#if (defined(CUDA_VERSION) && CUDA_VERSION >= 11030)|| defined(USE_ROCM)
+#if defined(CUDA_VERSION) || defined(USE_ROCM)
   if (_cuda_graphs_debug) {
     TORCH_WARN("DEBUG: calling debug_dump()");
     if (has_graph_) {

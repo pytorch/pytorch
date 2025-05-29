@@ -3226,6 +3226,25 @@ class GraphModule(torch.nn.Module):
         lengths = torch.tensor([2, 4, 3])
         self._validate_compile(fn, arg_fn=lambda: (values, lengths))
 
+    def test_in_graph_construction_from_input_6(self):
+        # Construct with symbolic int.
+        def fn(values, offsets, max_seqlen):
+            t = torch.nested.nested_tensor_from_jagged(
+                values, offsets, max_seqlen=max_seqlen
+            )
+            return torch.nested.nested_tensor_from_jagged(
+                values, t.offsets(), max_seqlen=t._maybe_max_seqlen
+            )
+
+        opt_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        values = torch.randn(10, 5)
+        offsets = torch.tensor([0, 2, 4, 7, 10])
+        max_seqlen = 5
+
+        ref = fn(values, offsets, max_seqlen)
+        res = opt_fn(values, offsets, max_seqlen)
+        self.assertEqualIgnoringNestedInts(ref, res)
+
     #
     # Case 2: in-graph construction where offsets are graph intermediates
     #

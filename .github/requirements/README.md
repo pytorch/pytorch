@@ -12,7 +12,5 @@ reliability.
 
 The list of support files are as follows:
 * Pip:
-  * pip-requirements-iOS.txt. This is used by iOS build and test jobs to
-    setup the pip environment
   * pip-requirements-macOS.txt. This is used by MacOS build and test jobs to
     setup the pip environment

@@ -792,6 +792,9 @@ def check_input_alias_and_mutation_return_ouputs(
             # has a persistent fake mode but fake tensors can be created
             # outside of the tracing context (e.g. in testing).
             # Instead, we just look at fake_args fake tensor mode
+            if len(fake_args) == 0:
+                return torch.fx.experimental.symbolic_shapes.ShapeEnv()
+
             prev_fake_mode = None
             for arg in fake_args:
                 if isinstance(arg, torch.Tensor):

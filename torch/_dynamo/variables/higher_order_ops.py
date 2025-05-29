@@ -810,9 +810,9 @@ def speculate_subgraph(
                     if mutation_info.has_mutation:
                         context = f"{mutation_info.msg} in\n {graph}"
                         unimplemented_v2(
-                            gb_type=f"Encountered input mutation during higher order op tracing for HOP - {source_target.name()}",
+                            gb_type="Encountered input mutation during higher order op tracing",
                             context=context,
-                            explanation="Higher order ops do not support input mutation",
+                            explanation=f"Higher order ops do not support input mutation. Found in {source_target.name()}",
                             hints=[
                                 "Consider using the debug context to change user code to avoid mutation.",
                                 "Please open an issue.",
@@ -824,9 +824,9 @@ def speculate_subgraph(
                     if aliasing_info.has_aliasing:
                         context = f"{aliasing_info.msg} in\n {graph}"
                         unimplemented_v2(
-                            gb_type=f"Encountered aliasing during higher order op tracing for HOP - {source_target.name()}",
+                            gb_type="Encountered aliasing during higher order op tracing",
                             context=context,
-                            explanation="Higher order ops do not support aliasing",
+                            explanation=f"Higher order ops do not support aliasing. Found in {source_target.name()}",
                             hints=[
                                 "Consider using the debug context to change user code to avoid aliasing.",
                                 "Please open an issue.",
@@ -1067,10 +1067,17 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 supports_aliasing=self.supports_aliasing,
             )
 
-            if not only_consist_of(ret_val, (TensorVariable,)):
+            if not only_consist_of(ret_val, (TensorVariable, ConstantVariable)):
                 unimplemented(
-                    "Expected branches to return a possibly nested list/tuple/dict of tensors but it consists of non tensors.",
+                    "Expected branches to return a possibly nested pytree of tensors "
+                    "or constant ints but it consists of others.",
                 )
+            for ret in ret_val.unpack_var_sequence(tx):
+                if isinstance(ret, ConstantVariable) and ret.python_type() is not int:
+                    unimplemented(
+                        "Expected branches to return a possibly nested pytree of tensors "
+                        f"or constant ints but it consists of others {ret.python_type()}.",
+                    )
             return ret_val, ret_treespec, ret_graph, ret_lifted_freevars
 
         (true_r, true_treespec, true_graph, true_lifted_freevars) = speculate_branch(
@@ -3324,8 +3331,8 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         if not isinstance(fn_vt, (UnspecializedNNModuleVariable, UserFunctionVariable)):
             unimplemented_v2(
-                gb_type=f"Encountered non user function variable during invoke_subgraph HOP tracing : {fn_vt}",
-                context="",
+                gb_type="Encountered non user function variable during invoke_subgraph HOP tracing",
+                context=str(fn_vt),
                 explanation="invoke_subgraph does not support non user function variable",
                 hints=graph_break_hints.SUPPORTABLE,
             )

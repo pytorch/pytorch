@@ -269,7 +269,7 @@ class DTensor(torch.Tensor):
         # new method instruct wrapper tensor from local_tensor and add
         # placement spec, it does not do actual distribution
         assert spec.tensor_meta is not None, "TensorMeta should not be None!"
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        r = torch.Tensor._make_wrapper_subclass(
             cls,
             spec.tensor_meta.shape,
             strides=spec.tensor_meta.stride,

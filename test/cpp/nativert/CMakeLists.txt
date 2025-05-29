@@ -8,6 +8,7 @@ set(NATIVERT_TEST_SRCS
   ${TORCH_ROOT}/torch/nativert/graph/TensorMeta.cpp
   ${TORCH_ROOT}/torch/nativert/graph/GraphSignature.cpp
   ${TORCH_ROOT}/torch/nativert/executor/PlacementUtils.cpp
+  ${TORCH_ROOT}/torch/nativert/common/FileUtil.cpp
 )
 
 add_executable(test_nativert

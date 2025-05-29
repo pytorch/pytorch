@@ -24,6 +24,7 @@
 #include <ATen/native/cpu/SerialStackImpl.h>
 #include <ATen/native/cpu/StackKernel.h>
 #include <ATen/quantized/QTensorImpl.h>
+#include <c10/core/Contiguity.h>
 #include <c10/core/GradMode.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
@@ -1993,11 +1994,15 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
     TORCH_CHECK(false, "reshape is not implemented for sparse tensors");
   }
 
-  if (self.is_contiguous() && !self.is_mkldnn()) {
+  auto sym_sizes = self.sym_sizes();
+  auto sym_strides = self.sym_strides();
+  auto sym_numel = self.sym_numel();
+  if (definitely_contiguous(sym_sizes, sym_strides, sym_numel) &&
+      !self.is_mkldnn()) {
     return self.view_symint(proposed_shape);
   }
 
-  c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
+  c10::SymDimVector shape = infer_size_dv(proposed_shape, sym_numel);
 
   if (self.is_mkldnn()) {
     return at::_mkldnn_reshape(self, C10_AS_INTARRAYREF_SLOW(shape));
@@ -2005,8 +2010,7 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
 
   // `computeStride` returns the proper strides to use if this
   // `reshape` can be just a view.
-  auto stride =
-      at::detail::computeStride(self.sym_sizes(), self.sym_strides(), shape);
+  auto stride = at::detail::computeStride(sym_sizes, sym_strides, shape);
 
   // NB: Even though we have viewable geometry and the target strides here,
   //     we do not just call `as_strided` on `self` because the backward

@@ -1542,7 +1542,7 @@ class TritonTemplate(KernelTemplate):
         # capability doesn't support them.  This is a bug in Triton, but for now we'll
         # patch around it here.  See https://github.com/triton-lang/triton/issues/3011
         # for one example issue with this problem.
-        if not torch.cuda.is_tf32_supported():
+        if torch.cuda.is_available() and not torch.cuda.is_tf32_supported():
             kwargs["ALLOW_TF32"] = "False"
 
         if call_sizes is None:
@@ -2710,19 +2710,18 @@ class AlgorithmSelectorCache(PersistentCache):
             return []
 
         log.debug("Before pruning using prescreening timings, %d choices", len(choices))
-        sorted_choices = sorted(
+        sorted_candidates = sorted(
             candidate_timings.keys(), key=lambda choice: candidate_timings[choice]
         )
         num_to_keep = max(int(math.sqrt(len(choices)) / 4), 8)
 
         # prune choices based on prescreening timings
         candidates_to_prune = OrderedSet(
-            candidate.bmreq.hash_key  # type: ignore[attr-defined]
-            for candidate in sorted_choices[num_to_keep:]
+            candidate.hash_key() for candidate in sorted_candidates[num_to_keep:]
         )
-        for candidate in sorted_choices[:num_to_keep]:
+        for candidate in sorted_candidates[:num_to_keep]:
             if candidate_timings[candidate] == float("inf"):
-                candidates_to_prune.add(candidate.bmreq.hash_key)  # type: ignore[attr-defined]
+                candidates_to_prune.add(candidate.hash_key())
             else:
                 if isinstance(candidate, CUDATemplateCaller):
                     candidate.bmreq.ensure_dll_loaded()
@@ -2730,7 +2729,7 @@ class AlgorithmSelectorCache(PersistentCache):
         choices = [
             choice
             for choice in choices
-            if choice.bmreq.hash_key not in candidates_to_prune  # type: ignore[attr-defined]
+            if choice.hash_key() not in candidates_to_prune  # type: ignore[attr-defined]
         ]
 
         log.debug("After pruning using prescreening timings, %d choices", len(choices))

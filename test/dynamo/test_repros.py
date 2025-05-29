@@ -7254,6 +7254,23 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         actual = torch.autograd.grad(c_out.sum(), inputs=(x,))
         self.assertEqual(expected, actual)
 
+    def test_module_attribute_error(self):
+        @torch.compile(backend="eager")
+        def f1(x):
+            return torch._bar(x)
+
+        @torch.compile(backend="eager")
+        def f2(x):
+            try:
+                return torch._bar(x)
+            except AttributeError:
+                return x + 1
+
+        with self.assertRaises(AttributeError):
+            f1(torch.ones(3))
+
+        self.assertEqual(f2(torch.ones(3)), torch.ones(3) + 1)
+
 
 instantiate_parametrized_tests(ReproTests)
 

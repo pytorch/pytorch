@@ -1270,7 +1270,10 @@ class PythonModuleVariable(VariableTracker):
             return tx.output.side_effects.load_attr(self, name)
 
         if self.is_torch or name not in self.value.__dict__:
-            attr_value = getattr(self.value, name)
+            try:
+                attr_value = getattr(self.value, name)
+            except AttributeError:
+                raise_observed_exception(AttributeError, tx)
         else:
             attr_value = self.value.__dict__[name]
 

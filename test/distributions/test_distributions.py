@@ -6825,6 +6825,12 @@ class TestJit(DistributionsTestCase):
     def _perturb_tensor(self, value, constraint):
         if isinstance(constraint, constraints._IntegerGreaterThan):
             return value + 1
+        if isinstance(constraint, constraints._LessThan):
+            return value - torch.rand(value.shape)
+        if isinstance(
+            constraint, (constraints._GreaterThan, constraints._GreaterThanEq)
+        ):
+            return value + torch.rand(value.shape)
         if isinstance(
             constraint,
             (constraints._PositiveDefinite, constraints._PositiveSemidefinite),
@@ -6843,15 +6849,19 @@ class TestJit(DistributionsTestCase):
 
     def _perturb(self, Dist, keys, values, sample):
         with torch.no_grad():
-            if Dist is Uniform:
-                param = dict(zip(keys, values))
-                param["low"] = param["low"] - torch.rand(param["low"].shape)
-                param["high"] = param["high"] + torch.rand(param["high"].shape)
-                values = [param[key] for key in keys]
-            else:
+            if isinstance(Dist.arg_constraints, dict):
                 values = [
                     self._perturb_tensor(
                         value, Dist.arg_constraints.get(key, constraints.real)
+                    )
+                    for key, value in zip(keys, values)
+                ]
+            else:
+                # arg_constraints is parameter-dependent
+                dist = Dist(**dict(zip(keys, values)))
+                values = [
+                    self._perturb_tensor(
+                        value, dist.arg_constraints.get(key, constraints.real)
                     )
                     for key, value in zip(keys, values)
                 ]

@@ -61,7 +61,7 @@ while IFS=: read -r filepath url; do
   while [ "$(running_jobs)" -ge "$max_jobs" ]; do
     sleep 1
   done
- done < <(
+done < <(
   pattern='(?!.*@lint-ignore)(?<!git\+)(?<!\$\{)https?://(?![^/]*@)(?![^\s<>\")]*[<>\{\}\$])[^[:space:]<>")\[\]\\|]+'
   excludes=(
     ':(exclude,glob)**/.*'
@@ -73,12 +73,17 @@ while IFS=: read -r filepath url; do
     ':(exclude,glob)**/third-party/**'
     ':(exclude,glob)**/third_party/**'
   )
-  if [ $# -gt 0 ]; then
-    paths=("$@")
+  if [ $# -eq 2 ]; then
+    for filename in $(git diff --name-only --unified=0 "$1...$2"); do
+      git diff --unified=0 "$1...$2" -- "$filename" "${excludes[@]}" \
+        | grep -E '^\+' \
+        | grep -Ev '^\+\+\+' \
+        | perl -nle 'print for m#'"$pattern"'#g' \
+        | sed 's|^|'"$filename"':|'
+    done
   else
-    paths=('*')
-  fi
-  git --no-pager grep --no-color -I -P -o "$pattern" -- "${paths[@]}" "${excludes[@]}" \
+    git --no-pager grep --no-color -I -P -o "$pattern" -- . "${excludes[@]}"
+  fi \
   | sed -E 's/[^/[:alnum:]]+$//' \
   | grep -Ev '://(0\.0\.0\.0|127\.0\.0\.1|localhost)([:/])' \
   | grep -Ev '://[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' \
