@@ -1002,8 +1002,11 @@ class CachingAutotuner(KernelInterface):
 
         bin_type = {"hip": "hsaco", "xpu": "spv"}.get(self.device_props.type, "cubin")
         binary = launcher.bin.asm[bin_type]
-        CudaKernelParamCache.set(key, params, binary, bin_type)
+        # Also store asm code which can be used for debugging and generating cpp package
+        asm_type = {"hip": "amdgcn", "cuda": "ptx"}.get(self.device_props.type, None)
+        asm = launcher.bin.asm.get(asm_type, None)
 
+        CudaKernelParamCache.set(key, params, binary, bin_type, asm, asm_type)
         self.cuda_kernel_saved = True
 
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
@@ -1314,7 +1317,10 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
                 # is codegenned anyway
                 raise CannotStaticallyLaunchKernel("Cpp wrapper enabled")
 
-            if heuristic_type == HeuristicType.USER_AUTOTUNE:
+            if (
+                heuristic_type == HeuristicType.USER_AUTOTUNE
+                and not torch._inductor.config.static_launch_user_defined_triton_kernels
+            ):
                 # Don't support user defined triton kernels yet
                 raise CannotStaticallyLaunchKernel("User defined triton kernel")
 
