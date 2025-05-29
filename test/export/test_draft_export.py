@@ -679,6 +679,7 @@ class TestDraftExport(TestCase):
 
         # measure base usage
         device = torch.device("cuda:0")
+        torch.cuda.reset_peak_memory_stats()
         base_usage = torch.cuda.memory_allocated(device)
 
         # usage with input tensor allocated
