@@ -138,8 +138,8 @@ jobs:
           fi
 
           docker exec -t "${container_name}" yum install -y zlib-devel zip
-          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==78.1.0 pybind11==2.13.1 auditwheel wheel cmake
-          docker exec -t "${container_name}" which wheel
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==78.1.0 pybind11==2.13.1 auditwheel wheel
+          docker exec -t "${container_name}" conda install cmake\>=3.20
           docker exec -t "${container_name}" which cmake
           docker exec -t "${container_name}" cmake --version
 
