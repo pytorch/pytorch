@@ -627,7 +627,10 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
             # The alternative is to give a new identifer when we re-trace the invoke_subgraph but this will increase
             # the compilatoin time, which defeats the purpose of caching.
             registered_before = False
-            for _, submod in proxy_mode.tracer.root.named_modules():
+            for (
+                _,
+                submod,
+            ) in proxy_mode.tracer.root.named_modules():  # ignore[union-attr]
                 if arg is submod:
                     registered_before = True
 
