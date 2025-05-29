@@ -1028,6 +1028,9 @@ if(USE_ROCM)
     list(APPEND HIP_HIPCC_FLAGS --offload-compress)
     if(WIN32)
       add_definitions(-DROCM_ON_WINDOWS)
+      list(APPEND HIP_CXX_FLAGS -fms-extensions)
+      # Suppress warnings about dllexport.
+      list(APPEND HIP_CXX_FLAGS -Wno-ignored-attributes)
     endif()
     add_definitions(-DROCM_VERSION=${ROCM_VERSION_DEV_INT})
     add_definitions(-DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
@@ -1151,6 +1154,7 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
     list(APPEND Caffe2_DEPENDENCY_LIBS nlohmann)
+    list(APPEND Caffe2_DEPENDENCY_LIBS moodycamel)
     if(USE_CUDA)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS tensorpipe_cuda)
     elseif(USE_ROCM)
@@ -1710,3 +1714,7 @@ target_include_directories(httplib SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_
 # Include nlohmann-json
 add_library(nlohmann INTERFACE IMPORTED)
 include_directories(nlohmann SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/nlohmann/include)
+
+# Include moodycamel
+add_library(moodycamel INTERFACE IMPORTED)
+include_directories(moodycamel SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/concurrentqueue)
