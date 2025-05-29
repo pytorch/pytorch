@@ -37,6 +37,7 @@
 namespace c10d {
 
 constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
+using FlightRecorderCUDA = FlightRecorder<at::cuda::CUDAEvent>;
 
 namespace {
 
@@ -56,34 +57,15 @@ const std::map<ReduceOp::RedOpType, ncclRedOp_t> ncclOp = {
 #endif // NCCL_HAS_AVG
 };
 
-// NCCL type typing
-std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
-    {at::kChar, ncclInt8},
-    {at::kByte, ncclUint8},
-    {at::kFloat, ncclFloat},
-    {at::kDouble, ncclDouble},
-    {at::kInt, ncclInt32},
-    {at::kLong, ncclInt64},
-    {at::kHalf, ncclHalf},
-    {at::kBool, ncclUint8},
-    {at::kFloat8_e5m2, ncclUint8},
-    {at::kFloat8_e4m3fn, ncclUint8},
-    {at::kFloat8_e4m3fnuz, ncclUint8},
-    {at::kFloat8_e5m2fnuz, ncclUint8},
-#if HAS_NCCL_BF16_DATATYPE
-    {at::kBFloat16, ncclBfloat16},
-#endif // HAS_NCCL_BF16_DATATYPE
-};
-
-// Helper function that gets the data type and issues error if not supported
-ncclDataType_t getNcclDataType(at::ScalarType type) {
-  auto it = ncclDataType.find(type);
-  TORCH_CHECK_WITH(
-      TypeError,
-      it != ncclDataType.end(),
-      "Input tensor data type is not supported for NCCL process group: ",
-      type);
-  return it->second;
+inline bool isUnsupportedFloat8(at::ScalarType t) {
+  return (
+      t == at::ScalarType::Float8_e5m2fnuz ||
+      t == at::ScalarType::Float8_e4m3fnuz ||
+      t == at::ScalarType::Float8_e8m0fnu
+#ifndef NCCL_SUPPORTS_FP8
+      || t == at::ScalarType::Float8_e5m2 || t == at::ScalarType::Float8_e4m3fn
+#endif
+  );
 }
 
 bool complexViewAsRealAllowed(const ReduceOp& reduceOp) {
@@ -421,13 +403,13 @@ std::string dump_nccl_trace(
     printNcclCommProxyTrace("Received dump signal " + ncclUniqueIDStr, dump);
   }
 #endif // defined(USE_ROCM) && defined(NCCL_COMM_DUMP)
-  return FlightRecorder::get()->dump(
+  return FlightRecorderCUDA::get()->dump(
       ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
 }
 
 std::string dump_nccl_trace_json(bool includeCollectives, bool onlyActive) {
   auto ncclDumpMap = getNCCLCommDumpMap();
-  return FlightRecorder::get()->dump_json(
+  return FlightRecorderCUDA::get()->dump_json(
       ncclDumpMap, includeCollectives, onlyActive);
 }
 
@@ -722,8 +704,8 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
 void ProcessGroupNCCL::WorkNCCL::printTraceback() const {
   // First step we get the corresponding record entry from FR, based on work's
   // trace_id_
-  std::optional<FlightRecorder::Entry> entry =
-      FlightRecorder::get()->getEntry(trace_id_);
+  std::optional<FlightRecorderCUDA::Entry> entry =
+      FlightRecorderCUDA::get()->getEntry(trace_id_);
   if (entry.has_value()) {
     auto entryVal = entry.value();
     // Get stack trace from FR entry, in string format
@@ -1120,9 +1102,12 @@ bool ProcessGroupNCCL::useNonblocking() {
     useNonblocking_ = nbEnv;
   }
   // 3rd priority: automatically use nonblocking if we are in eager init mode
-  else if (getBoundDeviceId()) {
-    useNonblocking_ = true;
-  }
+  // Note: this automatic selection is disabled in torch 2.7.1 to work around a
+  // hang in NCCL 2.26 in non-blocking mode. We can revisit if NCCL fixes the
+  // bug. See https://github.com/pytorch/pytorch/issues/153960
+  // else if (getBoundDeviceId()) {
+  //   useNonblocking_ = true;
+  // }
   // 4th priority: otherwise, nonblocking = false to preserve old behavior
   else {
     useNonblocking_ = false;
@@ -1201,8 +1186,7 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
   // We must ensure we're listening for allocator trace events in order to
   // register future segments allocated in this pool (this call is idempotent).
   attachAllocatorHooks();
-  auto ctx = c10::cuda::MemPoolContext(pool);
-  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(pool->id());
   for (const auto& segmentInfo : snapshot.segments) {
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == pool->device(),
@@ -1236,8 +1220,7 @@ void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
     auto iter = ncclCommMemPoolMap.find(ncclComm);
     iter->second.erase(pool->id());
   }
-  auto ctx = c10::cuda::MemPoolContext(pool);
-  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(pool->id());
   for (const auto& segmentInfo : snapshot.segments) {
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == pool->device(),
@@ -1623,6 +1606,7 @@ bool ProcessGroupNCCL::dumpDebuggingInfo(bool includeStackTrace /*=true*/) {
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL dumping nccl trace to "
               << writer.getWriterTarget();
     writer.write(ncclTrace);
+    LOG(INFO) << logPrefix() << "Flight Recorder trace successfully dumped.";
     return true;
   }
   return false;
@@ -2456,7 +2440,7 @@ void ProcessGroupNCCL::watchdogHandler() {
         pgStatus_->lastCompletedWorkName = opTypeToString(work.opType_);
         pgStatus_->lastCompletedNumelIn = work.numelIn_;
         pgStatus_->lastCompletedNumelOut = work.numelOut_;
-        FlightRecorder::get()->retire_id(work.trace_id_, true);
+        FlightRecorderCUDA::get()->retire_id(work.trace_id_, true);
         if (onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
           // thread
@@ -2505,15 +2489,16 @@ void ProcessGroupNCCL::runHookLoop() {
         // Hook might grab GIL, unlock first to prevent deadlock
         lock.unlock();
 
+        auto timeFinished = std::chrono::system_clock::now();
         auto timeStarted =
-            std::chrono::system_clock::now() +
-            std::chrono::duration_cast<std::chrono::system_clock::duration>(
+            timeFinished +
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                 work.workStartTime_ - std::chrono::steady_clock::now());
         onCompletionHook_(std::make_shared<WorkInfo>(
             work.retrieveOpType(), // OpType
             work.getSequencenumber(), // seq
             timeStarted, // timeStarted
-            std::chrono::system_clock::now(), // timeFinished
+            timeFinished, // timeFinished
             std::chrono::duration<float, std::milli>(
                 work.getDuration()) // activeDuration
             ));
@@ -2988,9 +2973,9 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     inInitializationCommMap_.emplace(deviceKey, ncclComm);
   }
 
-  FlightRecorder::get()->record_pg_ranks(
+  FlightRecorderCUDA::get()->record_pg_ranks(
       std::make_tuple(pg_uid_, pg_desc_), groupRanks());
-  FlightRecorder::get()->record_accelerator_version(getNcclVersion());
+  FlightRecorderCUDA::get()->record_accelerator_version(getNcclVersion());
 
   VLOG(2) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
           << ncclComm->repr()
@@ -3204,7 +3189,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     //   these objects to the Work becuase it has implications for keeping those
     //   tensors alive longer and adds overhead when copying Work objects
     //   between threads
-    r->trace_id_ = FlightRecorder::get()->record(
+    r->trace_id_ = FlightRecorderCUDA::get()->record(
         local_id_,
         std::make_tuple(pg_uid_, pg_desc_),
         seqCollective_,
@@ -3491,7 +3476,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     // later in endCoalescing we record a 'coalesced' Work which has
     // timing/state updates via watchdog thread, but lacks op metadata such as
     // input/output sizes and profilingTitle per-op in the group.
-    FlightRecorder::get()->record(
+    FlightRecorderCUDA::get()->record(
         local_id_,
         std::make_tuple(pg_uid_, pg_desc_),
         seqCollective_,
@@ -3889,7 +3874,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // later in endCoalescing we record a 'coalesced' Work which has
     // timing/state updates via watchdog thread, but lacks op metadata such as
     // input/output sizes and profilingTitle per-op in the group.
-    FlightRecorder::get()->record(
+    FlightRecorderCUDA::get()->record(
         local_id_,
         std::make_tuple(pg_uid_, pg_desc_),
         seqCollective_,
@@ -3930,7 +3915,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // TODO(whc) because we don't pass output {tensor} to initWork, we tell
     // initWork to not record, and then we manually call record passing all the
     // information it wants.
-    work->trace_id_ = FlightRecorder::get()->record(
+    work->trace_id_ = FlightRecorderCUDA::get()->record(
         local_id_,
         std::make_tuple(pg_uid_, pg_desc_),
         seqCollective_,
@@ -4110,8 +4095,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto tensor = tensors.back();
   TORCH_CHECK(
-      !isFloat8Type(tensor.scalar_type()),
-      "Float8 dtypes are not currenlty supported for NCCL reductions");
+      !isUnsupportedFloat8(tensor.scalar_type()),
+      "Unsupported Float8 type for NCCL reduction");
 #ifdef IS_NCCLX
   tensor = tensor.coalesce();
   at::Tensor outputTensor =
@@ -4230,8 +4215,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
     }
   }
   TORCH_CHECK(
-      !isFloat8Type(tensor.scalar_type()),
-      "Float8 dtypes are not currenlty supported for NCCL reductions");
+      !isUnsupportedFloat8(tensor.scalar_type()),
+      "Unsupported Float8 type for NCCL reduction");
   RECORD_PARAM_COMMS_DATA(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
@@ -4259,8 +4244,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
     const AllreduceCoalescedOptions& opts) {
   auto total_numel = check_gpu_tensors_same_device(tensors);
   TORCH_CHECK(
-      !isFloat8Type(tensors.back().scalar_type()),
-      "Float8 dtypes are not currenlty supported for NCCL reductions");
+      !isUnsupportedFloat8(tensors.back().scalar_type()),
+      "Unsupported Float8 type for NCCL reduction");
 
   RECORD_PARAM_COMMS_DATA(
       std::make_tuple(
@@ -4655,8 +4640,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
   check_gpu_single_tensor(outputTensor);
   auto inputTensors_ = inputTensors.back();
   TORCH_CHECK(
-      !isFloat8Type(outputTensor.scalar_type()),
-      "Float8 dtypes are not currenlty supported for NCCL reductions");
+      !isUnsupportedFloat8(outputTensor.scalar_type()),
+      "Unsupported Float8 type for NCCL reduction");
 
   RECORD_PARAM_COMMS_DATA(
       std::make_tuple(
@@ -4759,8 +4744,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
 
   const auto& tensor = outputTensor;
   TORCH_CHECK(
-      !isFloat8Type(tensor.scalar_type()),
-      "Float8 dtypes are not currenlty supported for NCCL reductions");
+      !isUnsupportedFloat8(tensor.scalar_type()),
+      "Unsupported Float8 type for NCCL reduction");
   RECORD_PARAM_COMMS_DATA(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
@@ -4818,8 +4803,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
     std::vector<at::Tensor>& inputs,
     const ReduceScatterOptions& opts) {
   TORCH_CHECK(
-      !isFloat8Type(inputs.back().scalar_type()),
-      "Float8 dtypes are not currenlty supported for NCCL reductions");
+      !isUnsupportedFloat8(inputs.back().scalar_type()),
+      "Unsupported Float8 type for NCCL reduction");
 
   RECORD_PARAM_COMMS_DATA(
       std::make_tuple(
@@ -5585,9 +5570,12 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
   }
 
   // Allocate tensor under this MemPool's context
-  auto ctx = c10::cuda::MemPoolContext(memPool_.get());
+  auto tid = std::this_thread::get_id();
   c10::cuda::CUDACachingAllocator::beginAllocateToPool(
-      memPool_->device(), memPool_->id(), [](cudaStream_t) { return true; });
+      memPool_->device(), memPool_->id(), [=](cudaStream_t) {
+        auto current_tid = std::this_thread::get_id();
+        return current_tid == tid;
+      });
   at::Tensor tensor = at::empty({size}, options);
   c10::cuda::CUDACachingAllocator::endAllocateToPool(
       memPool_->device(), memPool_->id());
