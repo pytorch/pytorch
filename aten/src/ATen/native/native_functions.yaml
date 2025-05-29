@@ -8418,7 +8418,7 @@
   structured_inherits: TensorIteratorBase
   variants: function
   dispatch:
-    CPU, CUDA: bitwise_or_out
+    CPU, CUDA, MTIA: bitwise_or_out
     MPS: bitwise_or_out_mps
   tags: pointwise
 
