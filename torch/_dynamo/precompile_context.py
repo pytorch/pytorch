@@ -64,8 +64,9 @@ class PrecompileCacheArtifact(CacheArtifact, Generic[T]):
 class PrecompileContext(CacheArtifactManager):
     """
     PrecompileContext is a special CacheArtifactManager for handling precompilation
-    It uses the same interface as CacheArtifactManager, but handles deserialization differently:
-    it converts all of the cache artifacts into a set of LazyCompilePackages, and puts them into a global cache.
+    It uses the same interface as CacheArtifactManager, but handles deserialization differently: instead
+    of placing each artifact into respective caches, it will stitch all the cache artifacts for a single key
+    together and place it into a global Precompile Cache.
 
     The following artifact types are supported by PrecompileContext:
      - BundledAOTAutogradCacheArtifact
