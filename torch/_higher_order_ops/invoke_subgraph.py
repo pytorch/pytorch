@@ -90,12 +90,8 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             if isinstance(subgraph, torch.fx.GraphModule)
             else materialize_as_graph(subgraph, operands)
         )
-        example_inputs = [
-            n.meta["val"] if "val" in n.meta else n.meta["example_value"]
-            for n in gm.graph.find_nodes(op="placeholder")
-        ]
         _, _, _, mutated_inputs, outputs = check_input_alias_and_mutation_return_ouputs(
-            gm, example_inputs
+            gm, operands
         )
 
         schema_gen = HopSchemaGenerator(self)
@@ -627,7 +623,10 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
             # The alternative is to give a new identifer when we re-trace the invoke_subgraph but this will increase
             # the compilatoin time, which defeats the purpose of caching.
             registered_before = False
-            for _, submod in proxy_mode.tracer.root.named_modules():
+            for (
+                _,
+                submod,
+            ) in proxy_mode.tracer.root.named_modules():  # ignore[union-attr]
                 if arg is submod:
                     registered_before = True
 
