@@ -19,6 +19,7 @@ from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     _set_compilation_env,
+    check_input_alias_and_mutation_return_outputs,
     HopInstance,
     materialize_as_graph,
     reenter_make_fx,
@@ -56,10 +57,7 @@ class CondOp(HigherOrderOperator):
 
     def gen_schema(self, pred, true_fn, false_fn, operands):
         from torch._higher_order_ops.schema import HopSchemaGenerator
-        from torch._higher_order_ops.utils import (
-            check_input_alias_and_mutation_return_ouputs,
-            materialize_as_graph,
-        )
+        from torch._higher_order_ops.utils import materialize_as_graph
 
         then_gm: torch.fx.GraphModule = (
             true_fn
@@ -81,14 +79,14 @@ class CondOp(HigherOrderOperator):
             _,
             then_mutated_inputs,
             then_outputs,
-        ) = check_input_alias_and_mutation_return_ouputs(then_gm, example_inputs)
+        ) = check_input_alias_and_mutation_return_outputs(then_gm, example_inputs)
         (
             _,
             _,
             _,
             else_mutated_inputs,
             else_outputs,
-        ) = check_input_alias_and_mutation_return_ouputs(else_gm, example_inputs)
+        ) = check_input_alias_and_mutation_return_outputs(else_gm, example_inputs)
         mutated_inputs = set(then_mutated_inputs) | set(else_mutated_inputs)
 
         schema_gen = HopSchemaGenerator(self)
