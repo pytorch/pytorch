@@ -1246,7 +1246,6 @@ if(USE_MIMALLOC)
   set(MI_BUILD_TESTS OFF)
   add_definitions(-DUSE_MIMALLOC)
   add_subdirectory(third_party/mimalloc)
-  include_directories(third_party/mimalloc/include)
 endif()
 
 if(USE_MIMALLOC AND USE_MIMALLOC_ON_MKL)

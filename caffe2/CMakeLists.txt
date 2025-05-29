@@ -1301,6 +1301,9 @@ if(USE_KINETO)
   target_include_directories(torch_cpu PRIVATE
     ${TORCH_ROOT}/third_party/kineto/libkineto/src)
 endif()
+if(USE_MIMALLOC)
+  target_link_libraries(torch_cpu PRIVATE mimalloc)
+endif()
 
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/cpp-httplib)
