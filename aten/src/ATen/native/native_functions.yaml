@@ -3110,6 +3110,7 @@
   - dim -> int dim
   dispatch:
     CPU, CUDA: index_copy_out
+    MPS: index_copy_out_mps
 
 - func: index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
   variants: method
