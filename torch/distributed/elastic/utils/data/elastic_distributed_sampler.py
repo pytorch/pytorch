@@ -19,6 +19,7 @@ T = TypeVar("T")
 
 __all__ = ["ElasticDistributedSampler"]
 
+
 class ElasticDistributedSampler(DistributedSampler[T]):
     """
     Sampler that restricts data loading to a subset of
