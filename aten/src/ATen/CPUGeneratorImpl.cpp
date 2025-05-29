@@ -1,8 +1,13 @@
 #include <ATen/CPUGeneratorImpl.h>
+#include <ATen/Config.h>
 #include <ATen/Utils.h>
 #include <ATen/core/MT19937RNGEngine.h>
 #include <c10/util/MathConstants.h>
 #include <algorithm>
+
+#if AT_MKL_ENABLED()
+#include <ATen/mklrng/MKLGeneratorImpl.h>
+#endif
 
 namespace at {
 
@@ -43,6 +48,10 @@ struct CPUGeneratorImplState {
   CPUGeneratorImplStateLegacy legacy_pod;
   float next_float_normal_sample;
   bool is_next_float_normal_sample_valid;
+#if AT_MKL_ENABLED()
+  uint64_t mkl_seed;
+  uint64_t mkl_offset;
+#endif
 };
 
 /**
@@ -82,7 +91,15 @@ CPUGeneratorImpl::CPUGeneratorImpl(uint64_t seed_in)
   : c10::GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(c10::DispatchKey::CPU)},
     engine_{seed_in},
     next_float_normal_sample_{std::optional<float>()},
-    next_double_normal_sample_{std::optional<double>()} { }
+    next_double_normal_sample_{std::optional<double>()} {
+#if AT_MKL_ENABLED()
+      {
+        auto mkl_gen = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
+        std::scoped_lock lock(mkl_gen->mutex_);
+        mkl_gen->set_current_seed(seed_in);
+      }
+#endif
+    }
 
 /**
  * Manually seeds the engine with the seed input
@@ -92,6 +109,13 @@ void CPUGeneratorImpl::set_current_seed(uint64_t seed) {
   next_float_normal_sample_.reset();
   next_double_normal_sample_.reset();
   engine_ = mt19937(seed);
+#if AT_MKL_ENABLED()
+  {
+    auto mkl_gen = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
+    std::scoped_lock lock(mkl_gen->mutex_);
+    mkl_gen->set_current_seed(seed);
+  }
+#endif
 }
 
 /**
@@ -126,6 +150,13 @@ uint64_t CPUGeneratorImpl::current_seed() const {
 uint64_t CPUGeneratorImpl::seed() {
   auto random = c10::detail::getNonDeterministicRandom();
   this->set_current_seed(random);
+#if AT_MKL_ENABLED()
+  {
+    auto mkl_gen = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
+    std::scoped_lock lock(mkl_gen->mutex_);
+    mkl_gen->set_current_seed(random);
+  }
+#endif
   return random;
 }
 
@@ -153,6 +184,10 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   at::mt19937 engine;
   auto float_normal_sample = std::optional<float>();
   auto double_normal_sample = std::optional<double>();
+#if AT_MKL_ENABLED()
+  uint64_t mkl_seed;
+  uint64_t mkl_offset;
+#endif
 
   // Construct the state of at::CPUGeneratorImpl based on input byte tensor size.
   CPUGeneratorImplStateLegacy* legacy_pod{nullptr};
@@ -188,6 +223,11 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
     if (legacy_pod->normal_is_valid) {
       double_normal_sample = std::optional<double>(legacy_pod->normal_y);
     }
+
+#if AT_MKL_ENABLED()
+    mkl_seed = rng_state->mkl_seed;
+    mkl_offset = rng_state->mkl_offset;
+#endif
   } else {
     TORCH_CHECK(false, "Expected either a CPUGeneratorImplStateLegacy of size ", size_legacy,
              " or a CPUGeneratorImplState of size ", size_current,
@@ -209,6 +249,15 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   this->engine_ = engine;
   this->next_float_normal_sample_ = float_normal_sample;
   this->next_double_normal_sample_ = double_normal_sample;
+
+#if AT_MKL_ENABLED()
+  {
+    auto mkl_gen = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
+    std::scoped_lock lock(mkl_gen->mutex_);
+    mkl_gen->set_current_seed(mkl_seed);
+    mkl_gen->skip_ahead(mkl_offset);
+  }
+#endif
 }
 
 /**
@@ -246,6 +295,15 @@ c10::intrusive_ptr<c10::TensorImpl> CPUGeneratorImpl::get_state() const {
     accum_state->is_next_float_normal_sample_valid = true;
     accum_state->next_float_normal_sample = *(this->next_float_normal_sample_);
   }
+
+#if AT_MKL_ENABLED()
+  {
+    auto mkl_gen = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
+    std::scoped_lock lock(mkl_gen->mutex_);
+    accum_state->mkl_seed = mkl_gen->current_seed();
+    accum_state->mkl_offset = mkl_gen->get_offset();
+  }
+#endif
 
   memcpy(rng_state, accum_state.get(), size);
   return state_tensor.getIntrusivePtr();
