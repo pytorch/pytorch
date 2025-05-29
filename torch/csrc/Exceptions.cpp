@@ -15,7 +15,7 @@ PyObject *THPException_FatalError, *THPException_LinAlgError,
     *THPException_OutOfMemoryError, *THPException_DistError,
     *THPException_DistBackendError, *THPException_DistNetworkError,
     *THPException_DistStoreError, *THPException_DistQueueEmptyError,
-    *THPException_DeviceError;
+    *THPException_AcceleratorError;
 
 #define ASSERT_TRUE(cond) \
   if (!(cond))            \
@@ -128,15 +128,14 @@ could not be completed because the input matrix is singular.",
 
   // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
   ASSERT_TRUE(
-      THPException_DeviceError = PyErr_NewExceptionWithDoc(
-          "torch.DeviceError",
+      THPException_AcceleratorError = PyErr_NewExceptionWithDoc(
+          "torch.AcceleratorError",
           "Exception raised while executing on device",
           PyExc_RuntimeError,
           nullptr));
-  type = (PyTypeObject*)THPException_DeviceError;
-  type->tp_name = "torch.DeviceError";
+  type = (PyTypeObject*)THPException_AcceleratorError;
   ASSERT_TRUE(
-      PyModule_AddObject(module, "DeviceError", THPException_DeviceError) == 0);
+      PyModule_AddObject(module, "AcceleratorError", THPException_AcceleratorError) == 0);
 
   return true;
 }
@@ -355,12 +354,12 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
 }
 
 namespace detail {
-PyObject* _new_device_error_object(const c10::DeviceError& e) {
+PyObject* _new_accelerator_error_object(const c10::AcceleratorError& e) {
   auto msg = torch::get_cpp_stacktraces_enabled() ? e.what()
                                                   : e.what_without_backtrace();
 
   auto py_msg = PyUnicode_FromString(msg);
-  auto rc = PyObject_CallOneArg(THPException_DeviceError, py_msg);
+  auto rc = PyObject_CallOneArg(THPException_AcceleratorError, py_msg);
   auto error_code = PyInt_FromLong(e.get_error_code());
   PyObject_SetAttrString(rc, "error_code", error_code);
   Py_XDECREF(py_msg);

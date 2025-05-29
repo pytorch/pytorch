@@ -59,6 +59,7 @@ class TestPublicBindings(TestCase):
         #
         #   {elem for elem in dir(torch._C) if not elem.startswith("_")}
         torch_C_allowlist_superset = {
+            "AcceleratorError",
             "AggregationType",
             "AliasDb",
             "AnyType",
@@ -102,7 +103,6 @@ class TestPublicBindings(TestCase):
             "DeserializationStorageContext",
             "device",
             "DeviceObjType",
-            "DeviceError",
             "DictType",
             "DisableTorchFunction",
             "DisableTorchFunctionSubclass",

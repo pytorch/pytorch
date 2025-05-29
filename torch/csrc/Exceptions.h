@@ -86,9 +86,9 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
       DistQueueEmptyError, THPException_DistQueueEmptyError, retstmnt)        \
   _CATCH_GENERIC_ERROR(DistStoreError, THPException_DistStoreError, retstmnt) \
   _CATCH_GENERIC_ERROR(DistError, THPException_DistError, retstmnt)           \
-  catch (c10::DeviceError & e) {                                              \
-    auto exc = torch::detail::_new_device_error_object(e);                    \
-    PyErr_SetObject(THPException_DeviceError, exc);                           \
+  catch (c10::AcceleratorError & e) {                                         \
+    auto exc = torch::detail::_new_accelerator_error_object(e);               \
+    PyErr_SetObject(THPException_AcceleratorError, exc);                      \
     Py_XDECREF(exc);                                                          \
     retstmnt;                                                                 \
   }                                                                           \
@@ -148,7 +148,7 @@ extern PyObject *THPException_FatalError, *THPException_LinAlgError,
     *THPException_OutOfMemoryError, *THPException_DistError,
     *THPException_DistBackendError, *THPException_DistNetworkError,
     *THPException_DistStoreError, *THPException_DistQueueEmptyError,
-    *THPException_DeviceError;
+    *THPException_AcceleratorError;
 
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.
@@ -377,7 +377,7 @@ auto wrap_pybind_function_impl_(
   };
 }
 
-PyObject* _new_device_error_object(const c10::DeviceError&);
+PyObject* _new_accelerator_error_object(const c10::AcceleratorError&);
 } // namespace detail
 
 // Wrap a function with TH error and warning handling.

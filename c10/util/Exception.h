@@ -296,13 +296,13 @@ class C10_API SyntaxError : public Error {
 };
 
 // Raised when accelerator API call hits an error.
-// These turn into DeviceError when the cross into Python
-class C10_API DeviceError : public Error {
+// These turn into AcceleratorError when the cross into Python
+class C10_API AcceleratorError : public Error {
   int32_t error_code;
 
  public:
-  DeviceError(int32_t code, const std::string& msg)
-      : Error(msg), error_code(code) {}
+  AcceleratorError(SourceLocation loc, int32_t code, const std::string& msg)
+      : Error(loc, msg), error_code(code) {}
   int32_t get_error_code() const {
     return error_code;
   }
