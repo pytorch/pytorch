@@ -888,7 +888,7 @@ class FxGraphHashDetails:
             return custom_pass
         if isinstance(custom_pass, CustomGraphPass):
             return custom_pass.uuid()
-        if isinstance(custom_pass, callable):
+        if callable(custom_pass):
             # Returning None is safe here because we raise an explicit bypass error
             # later if we detect these passes are set to callables
             return None
