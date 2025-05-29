@@ -187,9 +187,9 @@ class CudaReproTests(TestCase):
             # padded bias should have an expanded dim
             FileCheck().check("buf0 =").check_same(", 0, ").run(code[0])
             # single fused padded kernel
-            FileCheck().check("def call").check_count(
-                "empty_strided_cuda", 1, exactly=True
-            ).check("return").run(code[0])
+            FileCheck().check_count("empty_strided_cuda(", 1, exactly=True).check(
+                "return"
+            ).run(code[0])
 
             self.assertEqual(out, f(*inputs))
 
@@ -785,7 +785,10 @@ class CudaReproTests(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(False)
         snapshot = str(torch.cuda.memory._snapshot())
-        self.assertTrue("called_inside_compile" in snapshot)
+        if torch._inductor.config.graph_partition:
+            self.assertTrue("partition_0" in snapshot)
+        else:
+            self.assertTrue("called_inside_compile" in snapshot)
 
     def test_negative_arange_dynamic_shapes(self):
         # Repro from alibi relative encodings

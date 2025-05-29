@@ -281,10 +281,14 @@ if HAS_CUDA:
             with capture_stderr() as captured_output:
                 foo(torch.ones([10], device="cuda"), torch.ones([20]))
 
-            FileCheck().check(
-                "skipping cudagraphs due to cpu device (arg1_1). Found from"
-            ).check("y + 2").run(captured_output[0])
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            if torch._inductor.config.graph_partition:
+                # graph partition splits on cpu ops
+                self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+            else:
+                FileCheck().check(
+                    "skipping cudagraphs due to cpu device (arg1_1). Found from"
+                ).check("y + 2").run(captured_output[0])
+                self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
             with capture_stderr() as captured_output:
                 foo(
@@ -294,7 +298,10 @@ if HAS_CUDA:
             FileCheck().check("skipping cudagraphs due to multiple devices").run(
                 captured_output[0]
             )
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 2)
+            self.assertEqual(
+                counters["inductor"]["cudagraph_skips"],
+                1 if torch._inductor.config.graph_partition else 2,
+            )
 
         @torch._inductor.config.patch("triton.cudagraph_skip_dynamic_graphs", True)
         def test_skip_symbolic(self):
@@ -809,10 +816,16 @@ if HAS_CUDA:
             # the three saved tensors should die in the backward
             # we kept alive the output
             self.assertEqual(self.curr_node().expected_dead_indices_before_graph, [])
-            self.assertEqual(
-                self.curr_node().expected_dead_indices_after_graph,
-                [(0, 1), (0, 2)],
-            )
+            if torch._inductor.config.graph_partition:
+                self.assertEqual(
+                    self.curr_node().expected_dead_indices_after_graph,
+                    [(0, 0), (0, 2)],
+                )
+            else:
+                self.assertEqual(
+                    self.curr_node().expected_dead_indices_after_graph,
+                    [(0, 1), (0, 2)],
+                )
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
 
@@ -1129,8 +1142,13 @@ if HAS_CUDA:
 
             node = self.curr_node()
             first_node = next(node._path_from_root)
-            self.assertFalse(first_node.unaliased_in_all_paths[0])
-            self.assertTrue(first_node.cached_tensor_outputs[0] is None)
+            if torch._inductor.config.graph_partition:
+                # graph partition may changed the order of outputs
+                self.assertFalse(first_node.unaliased_in_all_paths[1])
+                self.assertTrue(first_node.cached_tensor_outputs[1] is None)
+            else:
+                self.assertFalse(first_node.unaliased_in_all_paths[0])
+                self.assertTrue(first_node.cached_tensor_outputs[0] is None)
 
         @torch._inductor.config.patch("implicit_fallbacks", True)
         def test_multinomial(self):
@@ -1633,10 +1651,16 @@ if HAS_CUDA:
             # the three saved tensors should die in the backward
             # we kept alive the output
             self.assertEqual(self.curr_node().expected_dead_indices_before_graph, [])
-            self.assertEqual(
-                self.curr_node().expected_dead_indices_after_graph,
-                [(0, 1), (0, 2)],
-            )
+            if torch._inductor.config.graph_partition:
+                self.assertEqual(
+                    self.curr_node().expected_dead_indices_after_graph,
+                    [(0, 0), (0, 2)],
+                )
+            else:
+                self.assertEqual(
+                    self.curr_node().expected_dead_indices_after_graph,
+                    [(0, 1), (0, 2)],
+                )
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
         def test_separate_recordings(self):
@@ -2139,8 +2163,8 @@ if HAS_CUDA:
             with self.assertRaisesRegex(
                 Exception,
                 r"(?s)static input data pointer changed.\n"
-                r"input name: primals_2. data pointer changed from .* to .*. input stack trace:.*"
-                r"input name: primals_3. data pointer changed from .* to .*. input stack trace:.*,"
+                r"input name: primals_.*. data pointer changed from .* to .*. input stack trace:.*"
+                r"input name: primals_.*. data pointer changed from .* to .*. input stack trace:.*,"
                 r" in forward\n.* self.static_tensor.add\_\(torch.ones\(\(2, 2\), device=\"cuda\"\)\).*\n",
             ):
                 self.curr_node().run(
