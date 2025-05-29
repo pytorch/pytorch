@@ -141,30 +141,19 @@ endif()
 # cudart
 add_library(torch::cudart INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
-    set_property(
-        TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cudart_static)
+  target_link_libraries(torch::cudart INTERFACE CUDA::cudart_static)
 else()
-    set_property(
-        TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cudart)
+  target_link_libraries(torch::cudart INTERFACE CUDA::cudart)
 endif()
 
 
 # cublas
-add_library(caffe2::cublas INTERFACE IMPORTED)
+add_library(torch::cublas INTERFACE IMPORTED)
+# NOTE: cublas is always linked dynamically
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
-    set_property(
-        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-        # NOTE: cublas is always linked dynamically
-        CUDA::cublas CUDA::cublasLt)
-    set_property(
-        TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cudart_static rt)
+  target_link_libraries(torch::cublas INTERFACE CUDA::cublas CUDA::cublasLt CUDA::cudart_static)
 else()
-    set_property(
-        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cublas CUDA::cublasLt)
+  target_link_libraries(torch::cublas INTERFACE CUDA::cublas CUDA::cublasLt)
 endif()
 
 # cudnn interface
@@ -236,40 +225,28 @@ endif()
 if(CAFFE2_USE_CUFILE)
   add_library(torch::cufile INTERFACE IMPORTED)
   if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
-      set_property(
-          TARGET torch::cufile PROPERTY INTERFACE_LINK_LIBRARIES
-          CUDA::cuFile_static CUDA::culibos)
+    target_link_libraries(torch::cufile INTERFACE CUDA::cuFile_static CUDA::culibos)
   else()
-      set_property(
-          TARGET torch::cufile PROPERTY INTERFACE_LINK_LIBRARIES
-          CUDA::cuFile CUDA::culibos)
+    target_link_libraries(torch::cufile INTERFACE CUDA::cuFile CUDA::culibos)
   endif()
 else()
   message(STATUS "USE_CUFILE is set to 0. Compiling without cuFile support")
 endif()
 
 # curand
-add_library(caffe2::curand INTERFACE IMPORTED)
+add_library(torch::curand INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
-    set_property(
-        TARGET caffe2::curand PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::curand_static)
+  target_link_libraries(torch::curand INTERFACE CUDA::curand_static)
 else()
-    set_property(
-        TARGET caffe2::curand PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::curand)
+  target_link_libraries(torch::curand INTERFACE CUDA::curand)
 endif()
 
 # cufft
-add_library(caffe2::cufft INTERFACE IMPORTED)
+add_library(torch::cufft INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
-    set_property(
-        TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cufft_static_nocallback)
+  target_link_libraries(torch::cufft INTERFACE CUDA::cufft_static_nocallback)
 else()
-    set_property(
-        TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cufft)
+  target_link_libraries(torch::cufft INTERFACE CUDA::cufft)
 endif()
 
 # nvrtc
