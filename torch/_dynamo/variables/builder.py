@@ -2938,31 +2938,6 @@ def is_dynamic_source(source_name: str) -> bool:
     return False
 
 
-def record_automatic_dynamic(
-    tx: "InstructionTranslator", name: str, e: torch.Tensor
-) -> FrameStateSizeEntry:
-    # This mimics stride inference algorithm in _create_symbolic_sizes_strides_storage_offset
-    ex_size = e.size()
-    if not is_sparse_any(e):
-        ex_stride = e.stride()
-        dim = e.dim()
-
-        stride = [None] * dim
-        pending = [(ex_stride[i], -i) for i in range(dim)]
-        pending.sort(key=_nested_int_aware_sort)
-        candidates = {}
-        for i_stride, neg_i in pending:
-            i = -neg_i
-            stride[i] = candidates.get(i_stride, i_stride)
-            candidates.setdefault(i_stride * ex_size[i], InferStride(i))
-    else:
-        stride = []
-
-    return process_automatic_dynamic(
-        tx, name, FrameStateSizeEntry.make_tensor(tuple(ex_size), tuple(stride))
-    )
-
-
 # Performs automatic dynamic dim determination.
 # Returns a SymbolicContext
 def _automatic_dynamic(
@@ -3019,7 +2994,6 @@ def _automatic_dynamic(
         )
 
     if static_shapes and not is_dynamic_source(name):
-        record_automatic_dynamic(tx, name, e)
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
@@ -3049,7 +3023,27 @@ def _automatic_dynamic(
         )
 
     # Prep for automatic dynamic
-    frame_state_entry = record_automatic_dynamic(tx, name, e)
+
+    # This mimics stride inference algorithm in _create_symbolic_sizes_strides_storage_offset
+    ex_size = e.size()
+    if not is_sparse_any(e):
+        ex_stride = e.stride()
+        dim = e.dim()
+
+        stride = [None] * dim
+        pending = [(ex_stride[i], -i) for i in range(dim)]
+        pending.sort(key=_nested_int_aware_sort)
+        candidates = {}
+        for i_stride, neg_i in pending:
+            i = -neg_i
+            stride[i] = candidates.get(i_stride, i_stride)
+            candidates.setdefault(i_stride * ex_size[i], InferStride(i))
+    else:
+        stride = []
+
+    frame_state_entry = process_automatic_dynamic(
+        tx, name, FrameStateSizeEntry.make_tensor(tuple(ex_size), tuple(stride))
+    )
 
     # TODO: index export_constraints ahead of time so we don't have to
     # do a linear scan every time here

@@ -474,13 +474,13 @@ class GraphModule(torch.nn.Module):
             return invoke_quant_test(inner, x, y, scheme="nf4")
 
         with self.assertRaisesRegex(
-            RuntimeError, "Encountered aliasing during higher order op tracing"
+            RuntimeError, "Encountered aliasing during higher order op tracing for HOP"
         ):
             f(inner, x, y)
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "Encountered input mutation during higher order op tracing",
+            "Encountered input mutation during higher order op tracing for HOP",
         ):
             f(inner2, x, y)
 

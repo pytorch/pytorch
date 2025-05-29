@@ -686,7 +686,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace\n\n")
 
-        if config.aot_inductor.embed_kernel_binary:
+        if config.aot_inductor.embed_cubin:
             self.prefix.writeline('extern "C" {')
             for name in sorted(declare_kernel):
                 self.prefix.writeline(

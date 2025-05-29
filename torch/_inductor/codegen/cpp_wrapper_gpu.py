@@ -137,7 +137,7 @@ class DeferredTritonCallWrapper:
             self.generate_launch_kernel(prefix, wrapper, kernel_var_name, params)
         prefix.writeline("}")
 
-        if not config.aot_inductor.embed_kernel_binary:
+        if not config.aot_inductor.embed_cubin:
             # Ensure the cubin file is included in the package
             V.graph.wrapper_code.additional_files.append(
                 params[get_cpp_wrapper_cubin_path_name()]
@@ -179,7 +179,7 @@ class DeferredTritonCallWrapper:
                     cpp_string_literal(params["mangled_name"]),
                     str(params["shared_mem"]),
                 ]
-                if V.graph.aot_mode and config.aot_inductor.embed_kernel_binary
+                if V.graph.aot_mode and config.aot_inductor.embed_cubin
                 else [
                     cpp_string_literal(params[get_cpp_wrapper_cubin_path_name()]),
                     cpp_string_literal(params["mangled_name"]),
