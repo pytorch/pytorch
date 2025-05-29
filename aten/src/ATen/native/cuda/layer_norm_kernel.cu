@@ -128,53 +128,44 @@ struct WelfordDataLN{
   C10_HOST_DEVICE WelfordDataLN(float mean, float sigma2, float count): mean(mean), sigma2(sigma2), count(count) {}
 };
 
-template<typename U> __device__
+template<typename U, bool rms_norm> __device__
 WelfordDataLN cuWelfordOnlineSum(
   const U val,
   const WelfordDataLN& curr_sum)
 {
-  U delta = val - curr_sum.mean;
-  U new_count = curr_sum.count + 1.f;
-  U new_mean = curr_sum.mean + delta * (1.f/new_count); //proper division is slow, this is less accurate but noticeably faster
-  return {new_mean, curr_sum.sigma2 + delta * (val - new_mean), new_count};
+  if constexpr (!rms_norm){
+    U delta = val - curr_sum.mean;
+    U new_count = curr_sum.count + 1.f;
+    U new_mean = curr_sum.mean + delta * (1.f/new_count); //proper division is slow, this is less accurate but noticeably faster
+    return {new_mean, curr_sum.sigma2 + delta * (val - new_mean), new_count};
+  } else{
+    return {0.f, curr_sum.sigma2 + val * val, 0};
+  }
 }
 
-__device__
+template<typename U, bool rms_norm> __device__
 WelfordDataLN cuWelfordCombine(
   const WelfordDataLN dataB,
   const WelfordDataLN dataA
 ) {
-  using U = decltype(dataB.count);
-  U delta = dataB.mean - dataA.mean;
-  U count = dataA.count + dataB.count;
-  U mean, sigma2;
-  if (count > decltype(dataB.count){0}) {
-    auto coef = 1.f/count; //NB we don't use --use_fast_math, but this is emulation, 1./count goes to intrinsic, `* coef` is multiplication, instead of slow fp division
-    auto nA = dataA.count * coef;
-    auto nB = dataB.count * coef;
-    mean = nA*dataA.mean + nB*dataB.mean;
-    sigma2 = dataA.sigma2 + dataB.sigma2 + delta * delta * dataA.count * nB;
+  if constexpr (!rms_norm){
+    U delta = dataB.mean - dataA.mean;
+    U count = dataA.count + dataB.count;
+    U mean, sigma2;
+    if (count > decltype(dataB.count){0}) {
+      auto coef = 1.f/count; //NB we don't use --use_fast_math, but this is emulation, 1./count goes to intrinsic, `* coef` is multiplication, instead of slow fp division
+      auto nA = dataA.count * coef;
+      auto nB = dataB.count * coef;
+      mean = nA*dataA.mean + nB*dataB.mean;
+      sigma2 = dataA.sigma2 + dataB.sigma2 + delta * delta * dataA.count * nB;
+    } else {
+      mean = U(0);
+      sigma2 = U(0);
+    }
+    return {mean, sigma2, count};
   } else {
-    mean = U(0);
-    sigma2 = U(0);
+    return {0.f, dataB.sigma2 + dataA.sigma2, 0};
   }
-  return {mean, sigma2, count};
-}
-
-template<typename U> __device__
-WelfordDataLN cuRMSOnlineSum(
-  const U val,
-  const WelfordDataLN& curr_sum)
-{
-  return {0.f, curr_sum.sigma2 + val * val, 0};
-}
-
-__device__
-WelfordDataLN cuRMSCombine(
-  const WelfordDataLN dataB,
-  const WelfordDataLN dataA
-) {
-  return {0.f, dataB.sigma2 + dataA.sigma2, 0};
 }
 
 template<typename T, bool rms_norm = false>
@@ -196,21 +187,13 @@ __device__ WelfordDataLN compute_stats(
       vec_t data = X_vec[i];
       #pragma unroll
       for (int ii=0; ii < vec_size; ii++){
-        if constexpr (!rms_norm){
-          wd = cuWelfordOnlineSum(static_cast<acc_t>(data.val[ii]), wd);
-        } else{
-          wd = cuRMSOnlineSum(static_cast<acc_t>(data.val[ii]), wd);
-        }
+        wd = cuWelfordOnlineSum<T, rms_norm>(static_cast<acc_t>(data.val[ii]), wd);
       }
     }
     // intra-warp reduction
     for (int offset = (C10_WARP_SIZE >> 1); offset > 0; offset >>= 1) {
         WelfordDataLN wdB{WARP_SHFL_DOWN(wd.mean, offset), WARP_SHFL_DOWN(wd.sigma2, offset), WARP_SHFL_DOWN(wd.count, offset)};
-        if constexpr (!rms_norm){
-          wd = cuWelfordCombine(wd, wdB);
-        } else {
-          wd = cuRMSCombine(wd, wdB);
-        }
+        wd = cuWelfordCombine<T, rms_norm>(wd, wdB);
     }
     // threadIdx.x == 0 has correct values for each warp
     // inter-warp reductions
@@ -231,11 +214,7 @@ __device__ WelfordDataLN compute_stats(
           WelfordDataLN wdB{meansigmabuf[2*threadIdx.y],
                           meansigmabuf[2*threadIdx.y+1],
                           countbuf[threadIdx.y]};
-          if constexpr (!rms_norm){
-            wd = cuWelfordCombine(wd, wdB);
-          } else {
-            wd = cuRMSCombine(wd, wdB);
-          }
+          wd = cuWelfordCombine<T, rms_norm>(wd, wdB);
         }
         __syncthreads();
       }
