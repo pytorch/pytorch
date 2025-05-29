@@ -1,12 +1,9 @@
 import functools
+import os
 from typing import Any, Optional
 from typing_extensions import Unpack
 
-from .triton_compat import ASTSource, CompiledKernel
-
-
-MAX_SHARED_MEMORY = 49152
-MAX_ARGS = 120
+from .triton_compat import ASTSource, CompiledKernel, knobs as triton_knobs
 
 
 class StaticallyLaunchedCudaKernel:
@@ -38,6 +35,7 @@ class StaticallyLaunchedCudaKernel:
 
     def __init__(self, kernel: CompiledKernel) -> None:
         self.name = kernel.src.fn.__name__
+        self.cubin_raw = kernel.asm.get("cubin", None)
         self.cubin_path = kernel._cubin_path
 
         # Used by torch.compile to filter constants in older triton versions
@@ -48,10 +46,15 @@ class StaticallyLaunchedCudaKernel:
         self.declared_constexprs = kernel.src.fn.constexprs
 
         self.hash = kernel.hash
-        if (
-            kernel.__class__.launch_enter_hook is not None
-            or kernel.__class__.launch_exit_hook is not None
-        ):
+
+        if triton_knobs is None:
+            launch_enter = kernel.__class__.launch_enter_hook
+            launch_exit = kernel.__class__.launch_exit_hook
+        else:
+            launch_enter = triton_knobs.runtime.launch_enter_hook
+            launch_exit = triton_knobs.runtime.launch_exit_hook
+
+        if launch_enter is not None or launch_exit is not None:
             raise NotImplementedError(
                 "We don't support launch enter or launch exit hooks"
             )
@@ -59,13 +62,6 @@ class StaticallyLaunchedCudaKernel:
         self.shared = (
             kernel.shared if hasattr(kernel, "shared") else kernel.metadata.shared
         )
-        # When shared memory > 48 KB, triton allocates CUDA memory via both static and dynamic
-        # memory allocation, which gets really complicated. We'll handle it later.
-        # See triton/third-party/nvidia/driver.c in loadBinary
-        if self.shared > MAX_SHARED_MEMORY:
-            raise NotImplementedError(
-                "Shared memory size > 48KB requires special triton handling"
-            )
 
         # Newer triton versions pass an extra global scratch parameter to the compiled cuda kernel.
         # Inductor never uses this field or enables it, but we still have to pass
@@ -93,15 +89,33 @@ class StaticallyLaunchedCudaKernel:
                 "Static cuda launcher only supports num_ctas == 1"
             )
 
-    def load_kernel(self) -> None:
+    def reload_cubin_from_raw(self, filepath: str) -> str:
+        """
+        If the cubin file triton generated gets deleted under us, we can
+        reload it from the raw cubin file.
+        """
+        if self.cubin_path is None:
+            assert self.cubin_raw is not None
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            with open(filepath, "wb") as f:
+                f.write(self.cubin_raw)
+                self.cubin_path = filepath
+        return self.cubin_path
+
+    def load_kernel(self, device: int) -> None:
         from torch._C import _StaticCudaLauncher
 
-        assert hasattr(self, "cubin_path")
         if self.function is not None:
             return
+
+        assert hasattr(self, "cubin_path")
+        assert self.cubin_path is not None
         (self.function, self.n_regs, self.n_spills) = _StaticCudaLauncher._load_kernel(
-            self.cubin_path, self.name, self.shared
+            self.cubin_path, self.name, self.shared, device
         )
+        # Don't need the cubin path anymore now that we've loaded
+        self.cubin_path = None
+        self.cubin_raw = None
 
     @staticmethod
     @functools.lru_cache
@@ -171,6 +185,15 @@ class StaticallyLaunchedCudaKernel:
             else:
                 params.append(self.extract_type(ty))
         return "".join(params)
+
+    def __getstate__(self) -> dict[str, Any]:
+        # Remove objects that are no longer valid for pickling
+        state = self.__dict__.copy()
+        state["function"] = None
+        # Cubin paths aren't consistent across processes, so we clear
+        # and reload them.
+        state["cubin_path"] = None
+        return state
 
     def run(
         self,

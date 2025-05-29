@@ -608,6 +608,16 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([3], device=device))
 
+    def test_meta_dynamic_shapes(self):
+        def foobar(x, y):
+            return x * 2, y * 3
+
+        foo_c = torch.compile(dynamic=True)(foobar)
+        t = torch.empty((1, 16, 128, 128), device="meta")
+        y = torch.rand([64])
+
+        self.assertEqual(foo_c(t, y), foobar(t, y))
+
     def test_floor(self):
         def fn(x):
             n = x.size(-1)

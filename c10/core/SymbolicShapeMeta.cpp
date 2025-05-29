@@ -128,11 +128,11 @@ DEFINE_SYMBOOL_COMPUTE(compute_non_overlapping_and_dense, is_non_overlapping_and
 
 SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_dim4() const {
   init_is_contiguous();
-  if (definitely_true(is_contiguous(), __FILE__, __LINE__)) {
+  if (guard_or_false(is_contiguous(), __FILE__, __LINE__)) {
     return true;
   }
   init_is_channels_last_contiguous();
-  if (definitely_true(is_channels_last_contiguous(), __FILE__, __LINE__)) {
+  if (guard_or_false(is_channels_last_contiguous(), __FILE__, __LINE__)) {
     return true;
   }
   return is_contiguous() | is_channels_last_contiguous() |
@@ -141,7 +141,7 @@ SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_dim4() const {
 
 SymBool SymbolicShapeMeta::compute_channels_last_contiguous_3d_dim5() const {
   init_is_channels_last_contiguous();
-  if (definitely_true(is_channels_last_contiguous(), __FILE__, __LINE__)) {
+  if (guard_or_false(is_channels_last_contiguous(), __FILE__, __LINE__)) {
     return false;
   }
   return ~is_channels_last_contiguous() & compute_channels_last_contiguous_3d();
@@ -149,7 +149,7 @@ SymBool SymbolicShapeMeta::compute_channels_last_contiguous_3d_dim5() const {
 
 SymBool SymbolicShapeMeta::compute_channels_last_2d_dim5() const {
   init_is_channels_last_3d_contiguous();
-  if (definitely_true(is_channels_last_3d_contiguous(), __FILE__, __LINE__)) {
+  if (guard_or_false(is_channels_last_3d_contiguous(), __FILE__, __LINE__)) {
     return false;
   }
   return ~is_channels_last_3d_contiguous() &
@@ -157,20 +157,20 @@ SymBool SymbolicShapeMeta::compute_channels_last_2d_dim5() const {
 }
 
 SymBool SymbolicShapeMeta::compute_channels_last_3d_dim5() const {
-  if (definitely_true(is_channels_last(), __FILE__, __LINE__)) {
+  if (guard_or_false(is_channels_last(), __FILE__, __LINE__)) {
     return false;
   }
   return ~is_channels_last() & compute_strides_like_channels_last_3d();
 }
 
 SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_dim5() const {
-  if (definitely_true(is_contiguous(), __FILE__, __LINE__)) {
+  if (guard_or_false(is_contiguous(), __FILE__, __LINE__)) {
     return true;
   }
-  if (definitely_true(is_channels_last_contiguous(), __FILE__, __LINE__)) {
+  if (guard_or_false(is_channels_last_contiguous(), __FILE__, __LINE__)) {
     return true;
   }
-  if (definitely_true(is_channels_last_3d_contiguous(), __FILE__, __LINE__)) {
+  if (guard_or_false(is_channels_last_3d_contiguous(), __FILE__, __LINE__)) {
     return true;
   }
   return is_contiguous() | is_channels_last_contiguous() |
@@ -178,7 +178,7 @@ SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_dim5() const {
 }
 
 SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_anydim() const {
-  if (definitely_true(is_contiguous(), __FILE__, __LINE__)) {
+  if (guard_or_false(is_contiguous(), __FILE__, __LINE__)) {
     return true;
   }
   return is_contiguous() | compute_non_overlapping_and_dense();
