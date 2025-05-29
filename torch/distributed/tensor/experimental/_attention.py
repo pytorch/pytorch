@@ -1416,7 +1416,7 @@ class _AttentionContextParallel(ParallelStyle):
 def _context_parallel(
     seq_dim: int,
     mesh: DeviceMesh,
-    sharder: Optional[Union[_Sharder, type[_Sharder]]] = None,
+    sharder: Union[_Sharder, type[_Sharder]],
 ) -> Generator[None, None, None]:
     """Replace SDPA with the CP-wrapped version and enable DTensor CP dispatcher."""
 
@@ -1519,17 +1519,10 @@ def _context_parallel_buffers(
     mesh: DeviceMesh,
     buffers: list[torch.Tensor],
     buffer_seq_dims: list[int],
-    sharder: Optional[Union[_Sharder, type[_Sharder]]] = None,
+    sharder: Union[_Sharder, type[_Sharder]],
 ) -> list[torch.Tensor]:
     """Shard the buffers along the sequence dimensions according to CP rules."""
     new_buffers = []
-    if sharder is None:
-        sharder = (
-            _RoundRobinSharder
-            if _cp_options.enable_load_balance
-            else _SequentialSharder
-        )
-
     for buffer, seq_dim in zip(buffers, buffer_seq_dims):
         new_buffers.append(sharder.shard(buffer, mesh, seq_dim))
 
@@ -1590,6 +1583,15 @@ def context_parallel(
         `torch.distributed.tensor.experimental.context_parallel` is a
         prototype feature in PyTorch. The API is subject to change.
     """
+    # NOTE: SDPA will be used if ``sharder`` is not specified. Choose the
+    # sharder type based on ``_cp_options.enable_load_balance``.
+    if sharder is None:
+        sharder = (
+            _RoundRobinSharder
+            if _cp_options.enable_load_balance
+            else _SequentialSharder
+        )
+
     buffers = [] if buffers is None else buffers
     buffer_seq_dims = [] if buffer_seq_dims is None else buffer_seq_dims
     no_restore_buffers = set() if no_restore_buffers is None else no_restore_buffers
@@ -1654,6 +1656,8 @@ def context_parallel_unshard(
     Returns:
         List[torch.Tensor]: the unsharded buffers.
     """
+    # NOTE: SDPA is used if ``sharder`` is not specified. Choose the
+    # sharder type based on ``_cp_options.enable_load_balance``.
     if sharder is None:
         sharder = (
             _RoundRobinSharder
