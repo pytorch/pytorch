@@ -810,9 +810,9 @@ def speculate_subgraph(
                     if mutation_info.has_mutation:
                         context = f"{mutation_info.msg} in\n {graph}"
                         unimplemented_v2(
-                            gb_type=f"Encountered input mutation during higher order op tracing for HOP - {source_target.name()}",
+                            gb_type="Encountered input mutation during higher order op tracing",
                             context=context,
-                            explanation="Higher order ops do not support input mutation",
+                            explanation=f"Higher order ops do not support input mutation. Found in {source_target.name()}",
                             hints=[
                                 "Consider using the debug context to change user code to avoid mutation.",
                                 "Please open an issue.",
@@ -824,9 +824,9 @@ def speculate_subgraph(
                     if aliasing_info.has_aliasing:
                         context = f"{aliasing_info.msg} in\n {graph}"
                         unimplemented_v2(
-                            gb_type=f"Encountered aliasing during higher order op tracing for HOP - {source_target.name()}",
+                            gb_type="Encountered aliasing during higher order op tracing",
                             context=context,
-                            explanation="Higher order ops do not support aliasing",
+                            explanation=f"Higher order ops do not support aliasing. Found in {source_target.name()}",
                             hints=[
                                 "Consider using the debug context to change user code to avoid aliasing.",
                                 "Please open an issue.",
@@ -3331,8 +3331,8 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         if not isinstance(fn_vt, (UnspecializedNNModuleVariable, UserFunctionVariable)):
             unimplemented_v2(
-                gb_type=f"Encountered non user function variable during invoke_subgraph HOP tracing : {fn_vt}",
-                context="",
+                gb_type="Encountered non user function variable during invoke_subgraph HOP tracing",
+                context=str(fn_vt),
                 explanation="invoke_subgraph does not support non user function variable",
                 hints=graph_break_hints.SUPPORTABLE,
             )

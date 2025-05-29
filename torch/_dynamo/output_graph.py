@@ -33,7 +33,7 @@ import re
 import sys
 import traceback
 import weakref
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dc_field
 from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 
 import sympy
@@ -67,7 +67,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from . import config, exc, graph_break_hints, logging as torchdynamo_logging, variables
+from . import config, exc, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
     create_call_function,
@@ -135,6 +135,7 @@ from .variables.builder import (
     TrackedFake,
     wrap_fx_proxy,
 )
+from .variables.ctx_manager import ContextWrappingVariable
 from .variables.lists import BaseListVariable
 from .variables.misc import CellVariable, NullVariable
 from .variables.nn_module import NNModuleVariable
@@ -323,6 +324,19 @@ class OutputGraphGuardsState:
         return self._aotautograd_guards
 
 
+@dataclass
+class StackLocalsMetadata:
+    """
+    Stores metadata for a frame's stack and locals for the purposes of building resume functions
+    """
+
+    stack_null_idxes: list[int] = dc_field(default_factory=list)
+    locals_null_keys: list[str] = dc_field(default_factory=list)
+    stack_ctx_args: list[tuple[int, tuple[Any, ...]]] = dc_field(default_factory=list)
+    stack_ctx_idxes_orig: list[int] = dc_field(default_factory=list)
+    locals_ctx_args: list[tuple[str, tuple[Any, ...]]] = dc_field(default_factory=list)
+
+
 class OutputGraph(OutputGraphGuardsState):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
@@ -372,8 +386,8 @@ class OutputGraph(OutputGraphGuardsState):
         # Set of globals installed via install_global* APIs
         self.installed_globals: set[str] = set()
 
-        # TODO: maybe should just pass the entire f_code in here?  Not
-        # sure...
+        self.f_code = f_code
+        # TODO: maybe should only store the entire f_code
         self.co_fields = {
             "co_name": f_code.co_name,
             "co_filename": f_code.co_filename,
@@ -1117,84 +1131,47 @@ class OutputGraph(OutputGraphGuardsState):
         # other parts of Dynamo like guards.
         return alias_insts, overridden_sources
 
-    def compile_subgraph(
-        self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None
-    ):
+    def _get_stack_values_to_restore(self, tx, stack_pops):
         """
-        Generate a subgraph to continue execution on user code.
-        Automatically restore live variables.
+        Gets the stack + locals values belonging to tx that need to be restored.
+
+        Also prunes dead tx locals and realizes all VTs in the tx's stack.
+
+        NullVariables in stack/locals will NOT be restored, unless they are the top `stack_pops`
+        elements of the stack - it is expected that the next instruction to run will pop the top
+        `stack_pops` elements of the stack, so we should codegen NULLs.
+
+        Returns:
+            - stack_values: stack and locals values that need to be restored
+            - restore_vars: names of locals corresponding to the locals part of `stack_values`
+            - meta: locations of NULLs and ContextWrappingVariables in the stack/locals
+                (ignores the top `stack_pops` values on the stack)
         """
-        # bytecode tracing has finished. Pop the context manager for dynamo_timed
-        self.mark_bytecode_tracing_stop()
-        assert reason is not None
-
-        from .decorators import disable
-
-        self.partial_convert = partial_convert
-        self.compile_subgraph_reason = reason
-        self.should_exit = True
-
-        log.debug("COMPILING GRAPH due to %s", reason)
-
-        if not all(block.can_restore() for block in tx.block_stack):
-            unimplemented_v2(
-                gb_type="Attempt to compile graph in a try block",
-                context="",
-                explanation="Dynamo cannot compile traced graphs while in a try block.",
-                hints=[
-                    *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
-                ],
-            )
-
-        prefix_insts: list[Instruction] = []
-        if sys.version_info >= (3, 11):
-            # prefix instructions (Python 3.11+)
-            for inst in tx.prefix_insts:
-                if inst.opname == "MAKE_CELL":
-                    prefix_insts.append(
-                        create_instruction("MAKE_CELL", argval=inst.argval)
-                    )
-                elif inst.opname == "COPY_FREE_VARS":
-                    prefix_insts.append(
-                        create_instruction(
-                            "COPY_FREE_VARS", arg=len(tx.code_options["co_freevars"])
-                        )
-                    )
-                else:
-                    prefix_insts.append(copy.copy(inst))
-        assert not (self.pregraph_bytecode and self.export), (
-            "export does not support pregraph_bytecode"
-        )
-        prefix_insts.extend(self.pregraph_bytecode)
-        alias_insts, overridden_sources = self.handle_aliases_for_stolen_lists(tx)
-        prefix_insts.extend(alias_insts)
-
-        def append_prefix_insts():
-            self.add_output_instructions(prefix_insts)
-            prefix_insts.clear()
-
-        for block in reversed(tx.block_stack):
-            block.exit(tx, is_graph_break=reason.graph_break)
-
-        self.cleanup_graph()
         tx.prune_dead_locals()
-        stack_values = list(tx.stack)
+
+        stack_values = []
+        meta = StackLocalsMetadata()
 
         # realize any unrealized tensor VTs in case they
         # need to be added to self.nn_modules as attributes
-        for value in stack_values:
+        for i, value in enumerate(tx.stack):
             variables.LazyVariableTracker.realize_all(value)
+            # ignore top `stack_pops` values on the stack
+            if len(tx.stack) - i <= stack_pops:
+                stack_values.append(value)
+                continue
+            if isinstance(value, NullVariable):
+                meta.stack_null_idxes.append(i)
+            else:
+                stack_values.append(value)
+            if isinstance(value, ContextWrappingVariable):
+                target_values = (
+                    () if value.target_values is None else tuple(value.target_values)
+                )
+                # NOTE: track index in stack after NULLs have been removed
+                meta.stack_ctx_args.append((len(stack_values) - 1, target_values))
+                meta.stack_ctx_idxes_orig.append(i)
 
-        # Use nn.Module "proxies" in the constructed GraphModule so that
-        # the resulting GM does not hold additional strong references to the original modules.
-        # This prevents a strong ref cycle where Dynamo created code holds on to references
-        # to modules that also have Dynamo code cache invalidation checks.
-        # When cache invalidation runs, the generated GM will be invalidated, which also deletes
-        # the proxies.
-        nn_modules_proxies = {
-            name: nn_module_proxy(mod) for name, mod in self.nn_modules.items()
-        }
-        root = FakeRootModule(nn_modules_proxies)
         # Add all the local vars to the "stack" so restore at the end
         restore_vars: list[str] = []
         val_to_names: dict[VariableTracker, list[str]] = {}
@@ -1203,6 +1180,9 @@ class OutputGraph(OutputGraphGuardsState):
         # will clear out all of symbolic_locals because RETURN_VALUE is the
         # last instruction and no more locals are used.  The fanciness here
         # is only needed for partial graphs.
+        # NOTE: All cell and free variables are represented as CellVariable,
+        # so checks for NULLs and context managers in the case of codegen'ing resume
+        # functions will not be performed on them. This is expected behavior.
         for k, v in tx.symbolic_locals.items():
             # Note! this explicitly uses .local_name for matching
             # Failure to do so will cause spurious registrations in val_to_names.
@@ -1217,10 +1197,16 @@ class OutputGraph(OutputGraphGuardsState):
             if sys.version_info >= (3, 12):
                 # Continuation function will load the NULL for v.
                 if type.__instancecheck__(NullVariable, v):
+                    meta.locals_null_keys.append(k)
                     continue
             else:
                 # A variable should never be NULL in < 3.12
                 assert not type.__instancecheck__(NullVariable, v)
+            if isinstance(v, ContextWrappingVariable):
+                target_values = (
+                    () if v.target_values is None else tuple(v.target_values)
+                )
+                meta.locals_ctx_args.append((k, target_values))
             if v not in val_to_names:
                 val_to_names[v] = []
             val_to_names[v].append(k)
@@ -1228,9 +1214,114 @@ class OutputGraph(OutputGraphGuardsState):
             restore_vars.extend(val_to_names[v])
             stack_values.extend([v] * len(val_to_names[v]))
 
+        return stack_values, restore_vars, meta
+
+    def compile_subgraph(
+        self,
+        tx: "InstructionTranslatorBase",
+        reason: GraphCompileReason,
+        partial_convert=False,
+        stack_pops=0,
+    ):
+        """
+        Compiles the current subgraph, with inputs w.r.t. self.root_tx, and codegens:
+            - Call the compiled subgraph
+            - Apply side effects
+            - Codegen stack and locals
+            - Store the locals
+
+        Python does not allow NULL to be an arg to a function, so we do not codegen NULLs on the stack,
+        unless the value is one of the top `stack_pops` values on the stack (these values are expected to be
+        popped immediately after this generated code. The prologue of the resume function is expected to restore
+        any dropped NULLs.
+
+        Returns stack indices and locals keys where we dropped NULLs, and where we found inactive context manager objects.
+        """
+
+        assert self.root_tx is not None
+
+        # FIXME temporary assert to make sure we're not accidentally compiling nested graph breaks
+        # before we're done the full implementation
+        assert self.root_tx is tx
+
+        # bytecode tracing has finished. Pop the context manager for dynamo_timed
+        self.mark_bytecode_tracing_stop()
+
+        self.partial_convert = partial_convert
+        self.compile_subgraph_reason = reason
+        self.should_exit = True
+
+        log.debug("COMPILING GRAPH due to %s", reason)
+
+        # prefix instructions (Python 3.11+)
+        prefix_insts: list[Instruction] = []
+        if sys.version_info >= (3, 11):
+            for inst in tx.prefix_insts:
+                if inst.opname == "MAKE_CELL":
+                    prefix_insts.append(
+                        create_instruction("MAKE_CELL", argval=inst.argval)
+                    )
+                elif inst.opname == "COPY_FREE_VARS":
+                    prefix_insts.append(
+                        create_instruction(
+                            "COPY_FREE_VARS", arg=len(tx.code_options["co_freevars"])
+                        )
+                    )
+                else:
+                    prefix_insts.append(copy.copy(inst))
+        self.add_output_instructions(prefix_insts)
+
+        assert not (self.pregraph_bytecode and self.export), (
+            "export does not support pregraph_bytecode"
+        )
+        self.add_output_instructions(self.pregraph_bytecode)
+
+        alias_insts, overridden_sources = self.handle_aliases_for_stolen_lists(
+            self.root_tx
+        )
+        self.add_output_instructions(alias_insts)
+
+        # Exit from all context manager variables to make sure global state is restored
+        for block in reversed(self.root_tx.block_stack):
+            block.exit(self.root_tx, is_graph_break=reason.graph_break)
+
+        self.cleanup_graph()
+
+        # stack values and restore vars for each frame are pushed in reverse order
+        # i.e. last element corresponds to root frame, first element corresponds to current frame
+        all_stack_values = []
+        all_restore_vars = []
+        all_stack_locals_metas = []
+        cur_tx: Optional[InstructionTranslatorBase] = tx
+        while True:
+            assert cur_tx is not None
+            # this should have been checked by the caller
+            assert all(block.can_restore() for block in cur_tx.block_stack)
+            stack_values, restore_vars, meta = self._get_stack_values_to_restore(
+                cur_tx, stack_pops
+            )
+            all_stack_values.append(stack_values)
+            all_restore_vars.append(restore_vars)
+            all_stack_locals_metas.append(meta)
+            if cur_tx is self.root_tx:
+                break
+            cur_tx = tx.parent
+
+        # Use nn.Module "proxies" in the constructed GraphModule so that
+        # the resulting GM does not hold additional strong references to the original modules.
+        # This prevents a strong ref cycle where Dynamo created code holds on to references
+        # to modules that also have Dynamo code cache invalidation checks.
+        # When cache invalidation runs, the generated GM will be invalidated, which also deletes
+        # the proxies.
+        nn_modules_proxies = {
+            name: nn_module_proxy(mod) for name, mod in self.nn_modules.items()
+        }
+        root = FakeRootModule(nn_modules_proxies)
+
+        from .decorators import disable
+
         # to handle random calls
         if len(self.random_calls) > 0:
-            append_prefix_insts()
             random_calls_instructions = []
             self.random_values_var = self.new_var("random_values")
             rand_fn = disable(
@@ -1238,18 +1329,25 @@ class OutputGraph(OutputGraphGuardsState):
                 reason="do not trace into Dynamo rng recovery function",
             )
             rand_fn_name = self.install_global("__gen_rand_values", rand_fn)
-            codegen = PyCodegen(tx, root, overridden_sources=overridden_sources)
+            codegen = PyCodegen(
+                self.root_tx, root, overridden_sources=overridden_sources
+            )
             random_calls_instructions.extend(
                 codegen.load_function_name(rand_fn_name, True)
             )
             random_calls_instructions.extend(create_call_function(0, False))
             random_calls_instructions.append(
-                codegen.create_store(tx.output.random_values_var),
+                codegen.create_store(self.random_values_var),
             )
             self.add_output_instructions(random_calls_instructions)
 
+        # call compiled fx graph
+        graph_output_var = None
+        stored_graph_output_var = False
+        root_stack_values = all_stack_values[-1]
         if (
-            stack_values
+            self.root_tx is tx
+            and root_stack_values
             and all(
                 not isinstance(
                     v,
@@ -1260,47 +1358,47 @@ class OutputGraph(OutputGraphGuardsState):
                     ),
                 )
                 and not (isinstance(v, SymNodeVariable) and v.python_type() is float)
-                for v in stack_values
+                for v in root_stack_values
             )
-            and all(isinstance(x, TensorVariable) for x in stack_values)
-            and len(set(stack_values)) == len(stack_values)
+            and all(isinstance(x, TensorVariable) for x in root_stack_values)
+            and len(set(root_stack_values)) == len(root_stack_values)
             and self.side_effects.is_empty()
-            and not len(tx.debug_locals) != 0
+            and not tx.debug_locals
             and not self.backward_state
+            and not all_stack_locals_metas[-1].stack_null_idxes
+            and not all_stack_locals_metas[-1].locals_null_keys
         ):
-            append_prefix_insts()
             # optimization to generate better code in a common case
             self.add_output_instructions(
-                self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
-                + [create_instruction("UNPACK_SEQUENCE", arg=len(stack_values))]
-            )
-            # restore all the live local vars
-            self.add_output_instructions(
-                [
-                    PyCodegen(tx, overridden_sources=overridden_sources).create_store(
-                        var
-                    )
-                    for var in reversed(restore_vars)
-                ]
+                self.compile_and_call_fx_graph(
+                    tx, list(reversed(root_stack_values)), root
+                )
+                + [create_instruction("UNPACK_SEQUENCE", arg=len(root_stack_values))]
             )
         else:
             graph_output_var = self.new_var("graph_out")
+            # load stack values in a flat manner for now - will likely change later.
+            stack_values_flat = [
+                val for vals in reversed(all_stack_values) for val in vals
+            ]
             pass1 = PyCodegen(
-                tx, root, graph_output_var, overridden_sources=overridden_sources
+                self.root_tx,
+                root,
+                graph_output_var,
+                overridden_sources=overridden_sources,
             )
-            self.codegen_suffix(tx, stack_values, pass1)
+            self.codegen_suffix(tx, stack_values_flat, pass1)
 
             # one more time now that we have established tempvars
             pass2 = PyCodegen(
-                tx,
+                self.root_tx,
                 root,
                 graph_output_var,
                 tempvars={val: None for val, count in pass1.uses.items() if count > 1},
                 overridden_sources=overridden_sources,
             )
-            self.codegen_suffix(tx, stack_values, pass2)
+            self.codegen_suffix(tx, stack_values_flat, pass2)
 
-            stored_graph_output_var = False
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
                 output.extend(
@@ -1315,28 +1413,27 @@ class OutputGraph(OutputGraphGuardsState):
             else:
                 # NB: Important to run compiler collective even when there is
                 # a graph break
-                self.run_compiler_collective(tx)
-            append_prefix_insts()
+                self.run_compiler_collective()
             self.add_output_instructions(output + pass2.get_instructions())
 
-            # restore all the live local vars
+        # restore all the live local vars of the root
+        local_restore_cg = PyCodegen(
+            self.root_tx, overridden_sources=overridden_sources
+        )
+        # TODO this local restoration should be removed when fully implementing nested graph breaks
+        self.add_output_instructions(
+            [
+                local_restore_cg.create_store(var)
+                for var in reversed(all_restore_vars[-1])
+            ]
+        )
+
+        if graph_output_var and stored_graph_output_var:
             self.add_output_instructions(
-                [
-                    PyCodegen(tx, overridden_sources=overridden_sources).create_store(
-                        var
-                    )
-                    for var in reversed(restore_vars)
-                ]
+                [local_restore_cg.create_delete(graph_output_var)]
             )
 
-            if stored_graph_output_var:
-                self.add_output_instructions(
-                    [
-                        PyCodegen(
-                            tx, overridden_sources=overridden_sources
-                        ).create_delete(graph_output_var)
-                    ]
-                )
+        return all_stack_locals_metas
 
     def codegen_suffix(self, tx, stack_values, cg):
         # NOTE: `codegen_save_tempvars` must run first to update `source` fields
@@ -1444,7 +1541,9 @@ class OutputGraph(OutputGraphGuardsState):
                 GlobalContextCheckpointState(current_global_state)
             )
 
-    def run_compiler_collective(self, tx):
+    def run_compiler_collective(self):
+        tx = self.root_tx
+        assert tx is not None
         if (ds := tx.distributed_state) is not None and ds.all_states is None:
             compile_pg = ds.compile_pg
             log.info("compiler_collective %s", ds.local_state)
@@ -1478,13 +1577,16 @@ class OutputGraph(OutputGraphGuardsState):
         """
         Generate code from self.graph and return the Instruction()s to
         call that generated code.
+
+        Code is generated w.r.t. self.root_tx.
+        tx is only used for preserving GraphModule metadata
         """
         with torch._guards.TracingContext.clear_frame():
             from .decorators import disable
 
             assert self.should_exit
 
-            self.run_compiler_collective(tx)
+            self.run_compiler_collective()
 
             name = unique_id("__compiled_fn", with_uuid=True)
 
@@ -1500,7 +1602,7 @@ class OutputGraph(OutputGraphGuardsState):
             sub_gms = self.dedup_pass()
             root.add_nn_modules(sub_gms)
 
-            tx.output.current_tracer._maybe_preserve_original_meta(tx, output_node)
+            self.current_tracer._maybe_preserve_original_meta(tx, output_node)
             if not config.do_not_emit_runtime_asserts:
                 # There is a rare scenario where codegen_suffix adds a new entry
                 # to self.nn_modules while `root` knows only about the
@@ -1606,7 +1708,8 @@ class OutputGraph(OutputGraphGuardsState):
             # This is safe because we pre-process name to be unique
             self.install_global_unsafe(name, compiled_fn)
 
-            cg = PyCodegen(tx)
+            assert self.root_tx is not None
+            cg = PyCodegen(self.root_tx)
             cg.make_call_generated_code(name)
             return cg.get_instructions()
 
@@ -1726,10 +1829,11 @@ class OutputGraph(OutputGraphGuardsState):
                 self.remove_node(node)
 
     def remove_unused_graphargs(self) -> None:
-        # NB: It's always OK to drop GraphArg for symbols that ended up being
-        # specialized.  You don't even have to make a guard for it, because
-        # ShapeEnv produce_guards operates on tracked_fakes, which never gets
-        # pruned.  That being said, you'll get marginally better generated
+        # NB: It's OK to drop GraphArg for symbols that ended up being
+        # specialized iff they are not used in runtime assertions.  You don't
+        # even have to make a guard for it, because ShapeEnv produce_guards
+        # operates on tracked_fakes, which never gets pruned.
+        # That being said, you'll get marginally better generated
         # guard code if you promote the guard into a Dynamo guard (since that
         # allows for the guard to be done using C++ guards.)  If we get
         # ShapeEnv guards to go into C++ guards, this will stop being a thing
@@ -1863,11 +1967,6 @@ class OutputGraph(OutputGraphGuardsState):
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
                     )
                     update_used_symbols(used_symbols, fake)
-
-        # Preserve all symbols that appears in original expressions of a deferred_runtime_asserts.
-        for assertion_list in self.shape_env.deferred_runtime_asserts.values():
-            for assertion in assertion_list:
-                used_symbols |= free_symbols(assertion.expr)
 
         # After removing unused graphargs, prune unused binds_symbol
         for node in recheck_placeholders:
