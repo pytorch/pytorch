@@ -1145,9 +1145,8 @@ def tuned_scaled_mm(
 
             # On NVIDIA B200 GPUs, K dim must be >= 32 for tcgen05.mma.kind::f8f6f4.* PTX instruction to be valid
             # source: https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-matrix-shape
-            if using_b200() and guard_or_false(k < 32):
-                # Uncommon for real workloads
-                continue
+            if using_b200():
+                torch._check(k >= 32, f"K dim must be >= 32 for B200 GPUs, got k={k}")
 
             kwargs = scaled_mm_options(
                 config, m, n, k, layout, scale_a, scale_b, use_fast_accum
