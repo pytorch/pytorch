@@ -326,7 +326,6 @@ Tensor rms_norm_symint(
     c10::SymIntArrayRef normalized_shape,
     const std::optional<Tensor>& weight_opt /* optional */,
     const std::optional<double> eps) {
-  // See [Note: hacky wrapper removal for optional tensor]
 
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
