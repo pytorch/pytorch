@@ -526,8 +526,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: acos_out
-    MPS: acos_out_mps
+    CPU, CUDA, MPS: acos_out
   tags: pointwise
 
 # arccos, alias of acos
@@ -981,8 +980,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: asin_out
-    MPS: asin_out_mps
+    CPU, CUDA, MPS: asin_out
     SparseCPU, SparseCUDA: asin_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: asin_sparse_csr_out
   tags: pointwise

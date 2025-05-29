@@ -131,6 +131,72 @@ struct tanh_functor {
   }
 };
 
+struct asin_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(precise::asin(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return precise::asin(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // asin(z) = (-i)ln(sqrt(1 - z^2) + (i)(z))
+    auto sqrt_val = T(1, 0) - c10::metal::mul(x, x);
+    // calculate sqrt
+    // modulus
+    auto m = precise::sqrt(sqrt_val.x * sqrt_val.x + sqrt_val.y * sqrt_val.y);
+    // real part: sqrt((m + a)/2)
+    auto real_part = precise::sqrt((m + sqrt_val.x) * .5);
+    // imaginary part: sign(b) * sqrt((m - a)/2)
+    auto imag_part = copysign(
+        static_cast<decltype(x.y)>(precise::sqrt((m - sqrt_val.x) * .5)),
+        sqrt_val.y);
+    auto log_val = T(real_part, imag_part) + c10::metal::mul(T(0, 1), x);
+    // calculate log (see log_functor)
+    auto magnitude =
+        ::precise::sqrt(log_val.x * log_val.x + log_val.y * log_val.y);
+    auto real = ::precise::log(magnitude);
+    auto imag = ::precise::atan2(log_val.y, log_val.x);
+    return c10::metal::mul(T(0, -1), T(real, imag));
+  }
+};
+
+struct acos_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(precise::acos(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return precise::acos(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // asin(z) = (-i)ln(sqrt(1 - z^2) + (i)(z))
+    auto sqrt_val = T(1, 0) - c10::metal::mul(x, x);
+    // calculate sqrt
+    // modulus
+    auto m = precise::sqrt(sqrt_val.x * sqrt_val.x + sqrt_val.y * sqrt_val.y);
+    // real part: sqrt((m + a)/2)
+    auto real_part = precise::sqrt((m + sqrt_val.x) * .5);
+    // imaginary part: sign(b) * sqrt((m - a)/2)
+    auto imag_part = copysign(
+        static_cast<decltype(x.y)>(precise::sqrt((m - sqrt_val.x) * .5)),
+        sqrt_val.y);
+    auto log_val = T(real_part, imag_part) + c10::metal::mul(T(1, 0), x);
+    // calculate log (see log_functor)
+    auto magnitude =
+        ::precise::sqrt(log_val.x * log_val.x + log_val.y * log_val.y);
+    auto real = ::precise::log(magnitude);
+    auto imag = (log_val.x == 0 && log_val.y == 0)
+        ? 0
+        : ::precise::atan2(log_val.y, log_val.x);
+    return c10::metal::mul(T(0, -1), T(real, imag));
+  }
+};
+
 struct atan_functor {
   template <typename T>
   inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
@@ -393,6 +459,8 @@ REGISTER_UNARY_OP(abs, half, half);
   REGISTER_UNARY_OP(sin, DTYPE1, DTYPE0);          \
   REGISTER_UNARY_OP(cos, DTYPE1, DTYPE0);          \
   REGISTER_UNARY_OP(tan, DTYPE1, DTYPE0);          \
+  REGISTER_UNARY_OP(asin, DTYPE1, DTYPE0);         \
+  REGISTER_UNARY_OP(acos, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(atan, DTYPE1, DTYPE0)
 
 #if __METAL_VERSION__ >= 310
@@ -427,6 +495,8 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
   REGISTER_UNARY_OP(sin, DTYPE##2, DTYPE##2);     \
   REGISTER_UNARY_OP(cos, DTYPE##2, DTYPE##2);     \
   REGISTER_UNARY_OP(tan, DTYPE##2, DTYPE##2);     \
+  REGISTER_UNARY_OP(asin, DTYPE##2, DTYPE##2);    \
+  REGISTER_UNARY_OP(acos, DTYPE##2, DTYPE##2);    \
   REGISTER_UNARY_OP(atan, DTYPE##2, DTYPE##2)
 
 INSTANTIATE_UNARY_KERNELS_VEC2(half);

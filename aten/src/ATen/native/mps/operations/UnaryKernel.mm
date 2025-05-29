@@ -20,6 +20,14 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
   }                                                         \
   REGISTER_DISPATCH(NAME##_stub, NAME##_kernel_mps)
 
+static void asin_kernel(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "asin");
+}
+
+static void acos_kernel(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "acos");
+}
+
 static void atan_kernel(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "atan");
 }
@@ -38,6 +46,8 @@ REGISTER_UNARY_TI_DISPATCH(abs);
 REGISTER_UNARY_TI_DISPATCH(sin);
 REGISTER_UNARY_TI_DISPATCH(cos);
 REGISTER_UNARY_TI_DISPATCH(tan);
+REGISTER_UNARY_TI_DISPATCH(asin);
+REGISTER_UNARY_TI_DISPATCH(acos);
 REGISTER_UNARY_TI_DISPATCH(atan);
 REGISTER_UNARY_TI_DISPATCH(sqrt);
 REGISTER_UNARY_TI_DISPATCH(rsqrt);
