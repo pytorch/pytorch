@@ -2,10 +2,6 @@
 
 include_guard(GLOBAL)
 
-# sccache is only supported in CMake master and not in the newest official
-# release (3.11.3) yet. Hence we need our own Modules_CUDA_fix to enable sccache.
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../Modules_CUDA_fix)
-
 # We don't want to statically link cudart, because we rely on it's dynamic linkage in
 # python (follow along torch/cuda/__init__.py and usage of cudaGetErrorName).
 # Technically, we can link cudart here statically, and link libtorch_python.so
