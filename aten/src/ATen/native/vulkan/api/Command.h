@@ -11,13 +11,14 @@
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
 #include <ATen/native/vulkan/api/Utils.h>
+#include <c10/macros/Macros.h>
 
 namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
 
-class CommandBuffer final {
+class TORCH_API CommandBuffer final {
  public:
   explicit CommandBuffer(VkCommandBuffer, const VkCommandBufferUsageFlags);
 
@@ -130,7 +131,7 @@ struct CommandPoolConfig final {
   uint32_t cmdPoolBatchSize;
 };
 
-class CommandPool final {
+class TORCH_API CommandPool final {
  public:
   explicit CommandPool(VkDevice, const uint32_t, const CommandPoolConfig&);
 

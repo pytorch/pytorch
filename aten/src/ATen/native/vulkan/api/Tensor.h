@@ -25,7 +25,7 @@ struct LastAccess {
       : stage{stage_flags}, access{access_flags} {}
 };
 
-class vTensorStorage final {
+class TORCH_API vTensorStorage final {
  public:
   // Do not allow empty vTensorStorage construction
   vTensorStorage() = default;
@@ -89,7 +89,7 @@ class vTensorStorage final {
       const api::ScalarType dtype);
 };
 
-class vTensor final {
+class TORCH_API vTensor final {
  public:
   // Do not allow empty vTensor construction
   vTensor() = default;

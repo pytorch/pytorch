@@ -69,7 +69,7 @@ uint32_t dim_at(const vTensor& v_in) {
  * For most global work group sizes, returns {4, 4, 4}, but adjusts the size for
  * 2D global work group sizes. Always maintains a total of 64 invocations
  */
-api::utils::uvec3 adaptive_work_group_size(
+TORCH_API api::utils::uvec3 adaptive_work_group_size(
     const api::utils::uvec3& global_work_group);
 
 } // namespace vulkan
