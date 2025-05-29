@@ -51,8 +51,8 @@ from torch._guards import (
     CompileId,
     GlobalContextCheckpointState,
     Source,
-    TracingContext,
     tracing,
+    TracingContext,
 )
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
