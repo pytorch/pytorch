@@ -284,6 +284,7 @@ if __name__ == "__main__":
         self.assertEqual(event1.event_id, 0)
         a = torch.randn(1000)
         b = torch.randn(1000)
+        
         with torch.xpu.stream(xpu_stream):
             a_xpu = a.to("xpu", non_blocking=True)
             b_xpu = b.to("xpu", non_blocking=True)
