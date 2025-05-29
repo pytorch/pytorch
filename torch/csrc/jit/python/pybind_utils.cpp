@@ -59,7 +59,7 @@ void clear_registered_instances(void* ptr) {
 // SymIntList is in fact only ints, and if so, you called this with T=int64_t.
 // This precondition is NOT checked at runtime.
 template <typename T>
-IValue listToIValue(py::handle obj) {
+static IValue listToIValue(py::handle obj) {
   c10::List<T> rs;
   for (auto it = obj.begin(); it != obj.end(); it++) {
     auto elm = *it;

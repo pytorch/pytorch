@@ -1125,20 +1125,6 @@ NodeAttrNameMap ONNXFunctionExtraction(
   return fe.run();
 }
 
-Node* ONNXGetPreviousScope(std::shared_ptr<Graph>& graph) {
-  auto* last_node = graph->nodes().back()->prev();
-  auto* scope_node = NodeOfMostRecentScope(last_node);
-  auto* attr_node = scope_attr_graph_->create(prim::TracedModuleForward);
-  attr_node->setScope(scope_node->scope());
-  TORCH_INTERNAL_ASSERT(
-      scope_attr_map_.find(scope_node->scope()) == scope_attr_map_.end(),
-      "Found duplicated scope. Scope ",
-      scope_node->scope()->namesFromRoot(),
-      " already processed.");
-  scope_attr_map_[scope_node->scope()] = attr_node;
-  return attr_node;
-}
-
 void ONNXClearScopeRecords() {
   scope_attr_map_.clear();
   scope_attr_graph_ = std::make_shared<Graph>();

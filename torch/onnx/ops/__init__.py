@@ -38,6 +38,9 @@ _TORCH_DTYPE_TO_ONNX_DTYPE = {
     torch.float8_e4m3fnuz: 18,  # FLOAT8E4M3FNUZ
     torch.float8_e5m2: 19,  # FLOAT8E5M2
     torch.float8_e5m2fnuz: 20,  # FLOAT8E5M2FNUZ
+    # 21 = UINT4
+    # 22 = INT4
+    torch.float4_e2m1fn_x2: 23,  # FLOAT4E2M1
 }
 
 
@@ -55,7 +58,7 @@ def _parse_domain_op_type(domain_op: str) -> tuple[str, str]:
 def symbolic(
     domain_op: str,
     /,
-    inputs: Sequence[torch.Tensor],
+    inputs: Sequence[torch.Tensor | None],
     attrs: dict[
         str,
         int
@@ -153,7 +156,7 @@ def symbolic(
 def symbolic_multi_out(
     domain_op: str,
     /,
-    inputs: Sequence[torch.Tensor],
+    inputs: Sequence[torch.Tensor | None],
     attrs: dict[
         str,
         int

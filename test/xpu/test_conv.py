@@ -1,5 +1,6 @@
 # Owner(s): ["module: intel"]
 
+import copy
 import itertools
 import math
 import unittest
@@ -1190,6 +1191,25 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     output_ng = m(input)
                 output = m(input)
                 self.assertEqual(output, output_ng, rtol=1e-2, atol=1e-5)
+
+    @unittest.skipIf(torch.xpu.device_count() < 2, "only one GPU detected")
+    @dtypes(torch.double, torch.float, torch.half)
+    def test_conv2d_on_multi_device(self, dtype):
+        input = torch.randn(3, 256, 224, 224, dtype=dtype, requires_grad=True)
+        conv = torch.nn.Conv2d(256, 256, kernel_size=3, padding=1, dtype=dtype)
+        output_grad = torch.randn(3, 256, 224, 224, dtype=dtype)
+        input_0 = input.to(device="xpu:0")
+        conv_0 = copy.deepcopy(conv).to(device="xpu:0")
+        output_0 = conv_0(input_0)
+        input_1 = input.to(device="xpu:1")
+        conv_1 = copy.deepcopy(conv).to(device="xpu:1")
+        output_1 = conv_1(input_1)
+        self.assertEqual(output_0.cpu(), output_1.cpu())
+        output_grad_0 = output_grad.to(device="xpu:0")
+        output_0.backward(output_grad_0)
+        output_grad_1 = output_grad.to(device="xpu:1")
+        output_1.backward(output_grad_1)
+        self.assertEqual(output_grad_0.cpu(), output_grad_1.cpu())
 
     def test_conv_double_backward_strided_with_3D_input_and_weight(self, device):
         input = torch.randn(2, 3, 6, device=device)
