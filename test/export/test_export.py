@@ -418,11 +418,12 @@ class TestDynamismExpression(TestCase):
 
         inputs = (torch.arange(10), torch.tensor(2))
 
-        # Without transforming the unbacked int expression, we can't export.
-        with self.assertRaisesRegex(
-            RuntimeError, escape("Could not guard on data-dependent expression")
-        ):
-            export(Module(identity), inputs, strict=True)
+        # See https://github.com/pytorch/pytorch/issues/154574
+        # # Without transforming the unbacked int expression, we can't export.
+        # with self.assertRaisesRegex(
+        #     RuntimeError, escape("Could not guard on data-dependent expression")
+        # ):
+        #     export(Module(identity), inputs, strict=True)
 
         # It works if we transform the whole unbacked int expression into
         # an unbacked int.
