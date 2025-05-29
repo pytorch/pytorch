@@ -631,7 +631,7 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
             for (
                 _,
                 submod,
-            ) in proxy_mode.tracer.root.named_modules():  # ignore[union-attr]
+            ) in proxy_mode.tracer.root.named_modules():  # type: ignore[union-attr]
                 if arg is submod:
                     registered_before = True
 
