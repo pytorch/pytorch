@@ -2246,30 +2246,44 @@ def pointwise(
         if disable_pointwise_autotuning(inductor_meta):
             configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
         else:
-            
-            def get_config(*sizes):
-                out = match_target_block_product(
-                    size_hints, inductor_meta.get("tiling_scores"), math.prod(sizes)
-                )
-                out = triton_config_with_settings(size_hints, *out.values())
-                return out
 
-            # c = adapt_pointwise_config_for_tiling(size_hints, inductor_meta.get("tiling_scores"), 16, 16, 16)
-            get_config(16, 16, 16)
-            configs = [
-                get_config(16, 16, 16),
-                get_config(16, 8, 8),
-                get_config(4, 8, 8),
-                get_config(bs, 1, 1),
-                # triton_config_with_settings(size_hints, 16, 16, 16),
-                # triton_config_with_settings(size_hints, 64, 8, 8),
-                # triton_config_with_settings(size_hints, 8, 64, 8),
-                # triton_config_with_settings(size_hints, 8, 8, 64),
-                # triton_config_with_settings(size_hints, bs, 1, 1),
-                # triton_config_with_settings(size_hints, 1, bs, 1),
-                # triton_config_with_settings(size_hints, 1, 1, bs),
-                *hinted_configs,
-            ]
+            if inductor_meta.get("tiling_scores"):
+            
+                def get_config(*sizes):
+                    out = match_target_block_product(
+                        size_hints, inductor_meta.get("tiling_scores"), math.prod(sizes)
+                    )
+                    out = triton_config_with_settings(size_hints, *out.values())
+                    return out
+
+                # c = adapt_pointwise_config_for_tiling(size_hints, inductor_meta.get("tiling_scores"), 16, 16, 16)
+                # get_config(16, 16, 16)
+                configs = [
+                    get_config(16, 16, 16),
+                    get_config(16, 8, 8),
+                    get_config(4, 8, 8),
+                    get_config(bs, 1, 1),
+                    # triton_config_with_settings(size_hints, 16, 16, 16),
+                    # triton_config_with_settings(size_hints, 64, 8, 8),
+                    # triton_config_with_settings(size_hints, 8, 64, 8),
+                    # triton_config_with_settings(size_hints, 8, 8, 64),
+                    # triton_config_with_settings(size_hints, bs, 1, 1),
+                    # triton_config_with_settings(size_hints, 1, bs, 1),
+                    # triton_config_with_settings(size_hints, 1, 1, bs),
+                    *hinted_configs,
+                ]
+            else:
+                configs = [
+                    triton_config_with_settings(size_hints, 16, 16, 16),
+                    triton_config_with_settings(size_hints, 64, 8, 8),
+                    triton_config_with_settings(size_hints, 8, 64, 8),
+                    triton_config_with_settings(size_hints, 8, 8, 64),
+                    triton_config_with_settings(size_hints, bs, 1, 1),
+                    triton_config_with_settings(size_hints, 1, bs, 1),
+                    triton_config_with_settings(size_hints, 1, 1, bs),
+                    *hinted_configs,
+                ]
+
 
     if not configs:
         raise NotImplementedError(f"size_hints: {size_hints}")

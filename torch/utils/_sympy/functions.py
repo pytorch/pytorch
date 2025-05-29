@@ -361,22 +361,22 @@ class ModularIndexing(sympy.Function):
             if len(new_terms) != len(base.args) and all_positive:
                 return ModularIndexing(sum(new_terms), divisor, modulus)
 
-            if all_positive and divisor != 1:
-                divisible_terms = []
-                non_divisible_terms = []
-                for term in base.args:
-                    if sympy.gcd(term, divisor) == divisor:
-                        divisible_terms.append(FloorDiv(term, divisor))
-                    else:
-                        non_divisible_terms.append(term)    
+            # if all_positive and divisor != 1:
+            #     divisible_terms = []
+            #     non_divisible_terms = []
+            #     for term in base.args:
+            #         if sympy.gcd(term, divisor) == divisor:
+            #             divisible_terms.append(FloorDiv(term, divisor))
+            #         else:
+            #             non_divisible_terms.append(term)    
 
-                if len(divisible_terms):
-                    out = 0
-                    if non_divisible_terms:
-                        out += ModularIndexing(sum(non_divisible_terms), divisor, modulus)
-                    if divisible_terms:
-                        out += ModularIndexing(sum(divisible_terms), 1, modulus)
-                    return out
+            #     if len(divisible_terms):
+            #         out = 0
+            #         if non_divisible_terms:
+            #             out += ModularIndexing(sum(non_divisible_terms), divisor, modulus)
+            #         if divisible_terms:
+            #             out += ModularIndexing(sum(divisible_terms), 1, modulus)
+            #         return out
 
 
         if isinstance(base, FloorDiv):
