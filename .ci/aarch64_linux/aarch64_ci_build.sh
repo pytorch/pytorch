@@ -20,8 +20,6 @@ cd /
 # on the mounted pytorch repo
 git config --global --add safe.directory /pytorch
 pip install -r /pytorch/requirements.txt
-
-
 pip install auditwheel==6.2.0
 if [ "$DESIRED_CUDA" = "cpu" ]; then
     echo "BASE_CUDA_VERSION is not set. Building cpu wheel."
