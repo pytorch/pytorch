@@ -1,3 +1,6 @@
+warning: Selection `PLW1507` has no effect because preview is not enabled.
+warning: Selection `RUF041` has no effect because preview is not enabled.
+warning: Selection `RUF048` has no effect because preview is not enabled.
 # mypy: allow-untyped-defs
 import functools
 import logging
@@ -17,6 +20,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
 from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import guard_or_false
 from torch.torch_version import TorchVersion
 
 from .. import config as inductor_config, ir
@@ -1135,12 +1139,14 @@ def tuned_scaled_mm(
                 )
 
         for config in scaled_mm_configs(m, n, k):
-            if k <= 16:
-                continue  # Triton crashes in this case
+            if guard_or_false(k <= 16):
+                # Triton crashes however uncommon for real workloads
+                continue
 
             # On NVIDIA B200 GPUs, K dim must be >= 32 for tcgen05.mma.kind::f8f6f4.* PTX instruction to be valid
             # source: https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-matrix-shape
-            if using_b200() and k < 32:
+            if using_b200() and guard_or_false(k < 32):
+                # Uncommon for real workloads
                 continue
 
             kwargs = scaled_mm_options(
