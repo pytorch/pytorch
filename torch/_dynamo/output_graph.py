@@ -1709,7 +1709,6 @@ class OutputGraph(OutputGraphGuardsState):
             )
 
             counters["stats"]["unique_graphs"] += 1
-            # This is safe because we pre-process name to be unique
             if specializations := old_fake_mode.shape_env.specializations:
                 specialization_guards = []
                 specialization_cache: dict[Specialization, Callable[[Any], Any]] = {}
@@ -1761,8 +1760,10 @@ class OutputGraph(OutputGraphGuardsState):
                             return specialization_cache[specialization](*args, **kwargs)
                     return compiled_fn(*args, **kwargs)
 
+                # This is safe because we pre-process name to be unique
                 self.install_global_unsafe(name, specialized_dispatch)
             else:
+                # This is safe because we pre-process name to be unique
                 self.install_global_unsafe(name, compiled_fn)
 
             assert self.root_tx is not None
