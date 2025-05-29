@@ -806,8 +806,8 @@ def check_input_alias_and_mutation_return_outputs(
             for arg in fake_args:
                 if isinstance(arg, FunctionalTensor):
                     arg = torch._from_functional_tensor(arg)
-                    prev_fake_mode = arg.fake_mode
-                elif isinstance(arg, torch.Tensor):
+
+                if isinstance(arg, torch.Tensor):
                     assert isinstance(arg, FakeTensor)
                     prev_fake_mode = arg.fake_mode
             assert prev_fake_mode is not None
