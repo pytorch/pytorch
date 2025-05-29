@@ -600,6 +600,21 @@ class TensorVariable(VariableTracker):
         static_attr = all_tensor_attrs.get(name, None)
         is_base_tensor_method = static_attr is not None
 
+        # For historical reasons, these ops decompose down to syntactically
+        # invalid aten ops because they contain the python keyword `from`, see
+        # discussions in #151432 for more details.
+        # We graph break for now since this use case is uncommon.
+        if name in ("random_", "uniform_"):
+            unimplemented_v2(
+                gb_type="Tensor.random_ op called with `from` keyword",
+                context=f"Tensor.{name}({args=}, {kwargs=})",
+                explanation="This is not supported.",
+                hints=[
+                    "Please use the out-of-place version of this op",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
         if (
             can_dispatch_torch_function(tx, tuple([self] + list(args)), kwargs)
             and is_base_tensor_method
