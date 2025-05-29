@@ -9,6 +9,9 @@ namespace vec {
 inline namespace CPU_CAPABILITY {
 
 template <>
+struct is_vec_specialized_for<int32_t> : std::bool_constant<true> {};
+
+template <>
 class Vectorized<int32_t> {
  private:
   union {

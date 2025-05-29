@@ -692,7 +692,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
-    def get_mutation_names(self) -> list[str]:
+    def get_mutation_names(self) -> Sequence[str]:
         input = self.inputs[self.idx_for_inplace_sum]
         assert isinstance(input, IRNode)
         return [input.get_name()]
@@ -1054,7 +1054,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
-    def get_mutation_names(self):
+    def get_mutation_names(self) -> Sequence[str]:
         binary_post_op = self.constant_args[-5]
         if binary_post_op == "sum":
             input = self.inputs[self.idx_for_inplace_sum]

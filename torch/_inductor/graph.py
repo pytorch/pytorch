@@ -34,6 +34,7 @@ from torch._utils_internal import full_aoti_runtime_assert
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
+    _get_placeholder_expr,
     free_unbacked_symbols,
     has_free_symbols,
     resolve_unbacked_bindings,
@@ -188,7 +189,12 @@ def get_user_visible_output_strides(g: Graph) -> dict[Node, tuple[int, ...]]:
     if "user_visible_output_idxs" not in output_node.meta:
         return ret
 
-    for idx, node in enumerate(output_node.args[0]):
+    if not isinstance(output_node.args[0], torch.fx.Node):
+        output_node_args = output_node.args[0]
+    else:
+        output_node_args = output_node.args
+
+    for idx, node in enumerate(output_node_args):
         if idx in output_node.meta["user_visible_output_idxs"]:
             ret[node] = output_node.meta["original_output_strides"][idx]
     return ret
@@ -1062,7 +1068,7 @@ class GraphLowering(torch.fx.Interpreter):
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         target = self.qualify_name(target)
         if isinstance(example, SymTypes):
-            expr = example.node.expr
+            expr = _get_placeholder_expr(example.node)
             self.graph_inputs[target] = expr
             self.graph_input_names.append(target)
             return expr
@@ -2282,8 +2288,8 @@ class GraphLowering(torch.fx.Interpreter):
             return self._compile_to_module()
 
     def _compile_to_module(self) -> CompiledModule:
-        # Currently, if we're here, we don't have to worry about the kernel code, which
-        # is only available in AOTInductor mode.
+        # If we're here, we don't have to worry about the kernel code, which is only
+        # returned separately in AOTInductor mode.
         wrapper_code, _ = (
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )

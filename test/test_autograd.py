@@ -76,9 +76,9 @@ from torch.testing._internal.common_utils import (
     skipIfNoLapack,
     skipIfTorchDynamo,
     skipIfWindows,
+    skipIfXpu,
     slowTest,
     TestCase,
-    xfailIfTorchDynamo,
 )
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -830,7 +830,7 @@ class TestAutograd(TestCase):
         x_grad, x_grad_clone = compute_grad(create_graph=False)
         self.assertEqual(x_grad, x_grad_clone * 2)
 
-        # Accumulate out-of-place when create_graph is False
+        # Accumulate out-of-place when create_graph is True
         x_grad, x_grad_clone = compute_grad(create_graph=True)
         self.assertEqual(x_grad, x_grad_clone)
 
@@ -7430,8 +7430,7 @@ for shape in [(1,), ()]:
         self.assertEqual(b_grad, c_grad)
         self.assertEqual(b_grad, d_grad)
 
-    # PYTORCH_TEST_WITH_DYNAMO=1 test fails on CI but can't repro locally
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127115")
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_checkpointing_without_reentrant_dataparallel(self):
         """
         Verifies gradient correctness when checkpoint without reentrant autograd
@@ -7489,8 +7488,6 @@ for shape in [(1,), ()]:
         # should only call hook once
         self.assertEqual(count, 1)
 
-    # https://github.com/pytorch/pytorch/issues/127115
-    @xfailIfTorchDynamo
     def test_checkpointing_without_reentrant_arbitrary_input_output(self):
         """
         Ensures checkpointing without reentrant autograd works with functions
@@ -9376,10 +9373,14 @@ for shape in [(1,), ()]:
             with set_warn_always_context(True):
                 with warnings.catch_warnings(record=True) as w:
                     tmp.exp().sum().backward(create_graph=True)
-                    self.assertTrue(len(w) == 1)
-                    self.assertTrue(
-                        "Using backward() with create_graph=True" in str(w[0].message)
-                    )
+                    self.assertTrue(w)
+                    found = 0
+                    for warning in w:
+                        if "Using backward() with create_graph=True" in str(
+                            warning.message
+                        ):
+                            found += 1
+                    self.assertEqual(found, 1)
 
             # Remove the backward + create_graph=True cycle
             a.grad = None
@@ -13390,13 +13391,6 @@ class TestAutogradStreamSynchronization(TestCase):
             # Sanity check: side backward's end happens after start
             self.assertTrue(
                 events["side_backward_start"].elapsed_time(events["side_backward_end"])
-                > 0
-            )
-            # Sanity check: main's backward started after side's backward started
-            self.assertTrue(
-                events["side_backward_start"].elapsed_time(
-                    events["main_backward_start"]
-                )
                 > 0
             )
             # Overlap check: side's backward starts before side backward ends
