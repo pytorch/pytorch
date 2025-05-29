@@ -820,16 +820,7 @@ test_inductor_torchbench_smoketest_perf() {
   done
 }
 
-test_inductor_get_core_number() {
-  if [[ "${TEST_CONFIG}" == *aarch64* ]]; then
-    echo "$(($(lscpu | grep 'Cluster(s):' | awk '{print $2}') * $(lscpu | grep 'Core(s) per cluster:' | awk '{print $4}')))"
-  else
-    echo "$(($(lscpu | grep 'Socket(s):' | awk '{print $2}') * $(lscpu | grep 'Core(s) per socket:' | awk '{print $4}')))"
-  fi
-}
-
 test_inductor_set_cpu_affinity(){
-  #set jemalloc
   JEMALLOC_LIB="$(find /usr/lib -name libjemalloc.so.2)"
   export LD_PRELOAD="$JEMALLOC_LIB":"$LD_PRELOAD"
   export MALLOC_CONF="oversize_threshold:1,background_thread:true,metadata_thp:auto,dirty_decay_ms:-1,muzzy_decay_ms:-1"
@@ -841,14 +832,23 @@ test_inductor_set_cpu_affinity(){
     export KMP_AFFINITY=granularity=fine,compact,1,0
     export KMP_BLOCKTIME=1
   fi
-  cores=$(test_inductor_get_core_number)
-  # Set number of cores to 16 on Aarch64 for performance runs.
+
+  # Use nproc here instead of lscpu because it takes into account cgroups slice
+  cpus=$(nproc)
+  thread_per_core=$(lscpu | grep 'Thread(s) per core:' | awk '{print $4}')
+  cores=$((cpus / thread_per_core))
+
+  # Set number of cores to 16 on aarch64 for performance runs
   if [[ "${TEST_CONFIG}" == *aarch64* && $cores -gt 16 ]]; then
     cores=16
   fi
   export OMP_NUM_THREADS=$cores
-  end_core=$((cores-1))
-  export TASKSET="taskset -c 0-$end_core"
+
+  # Handle cgroups slice start and end CPU
+  start_cpu=$(python -c 'import os; print(min(os.sched_getaffinity(0)))')
+  # Leaving one physical CPU for other tasks
+  end_cpu=$(($(python -c 'import os; print(max(os.sched_getaffinity(0)))') - thread_per_core))
+  export TASKSET="taskset -c $start_cpu-$end_cpu"
 }
 
 test_inductor_torchbench_cpu_smoketest_perf(){
