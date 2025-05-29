@@ -169,7 +169,7 @@ case "$tag" in
     INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-focal-cuda12.8-cudnn9-py3-gcc9)
-    CUDA_VERSION=12.8.0
+    CUDA_VERSION=12.8
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
