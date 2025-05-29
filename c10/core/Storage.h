@@ -98,6 +98,10 @@ struct C10_API Storage {
     storage_impl_->set_nbytes(std::move(size_bytes));
   }
 
+  size_t get_id() const {
+    return storage_impl_->get_id();
+  }
+
   bool resizable() const {
     return storage_impl_->resizable();
   }
