@@ -1214,7 +1214,6 @@ def decompose_auto_functionalized(graph):
 
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
-    graph.owning_module.print_readable()
     graph_pass.apply(graph)
 
     # We need to remove the get_attr registered for _constant_schema and the
@@ -1231,8 +1230,6 @@ def decompose_auto_functionalized(graph):
         graph.erase_node(node)
 
     graph.lint()
-    print("after")
-    graph.owning_module.print_readable()
 
     for _ in graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.auto_functionalized
