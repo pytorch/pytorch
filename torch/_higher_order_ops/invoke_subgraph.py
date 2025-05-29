@@ -14,6 +14,7 @@ from torch._higher_order_ops.utils import (
     _from_fun,
     _maybe_reenter_make_fx,
     _set_compilation_env,
+    check_input_alias_and_mutation_return_outputs,
     clone_outputs_aliasing_inputs,
     FunctionalizeCtxWrapper,
     get_dummy_aot_autograd_config,
@@ -80,19 +81,20 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 
     def gen_schema(self, subgraph, identifier, *operands):
         from torch._higher_order_ops.schema import HopSchemaGenerator
-        from torch._higher_order_ops.utils import (
-            check_input_alias_and_mutation_return_ouputs,
-            materialize_as_graph,
-        )
+        from torch._higher_order_ops.utils import materialize_as_graph
 
         gm: torch.fx.GraphModule = (
             subgraph
             if isinstance(subgraph, torch.fx.GraphModule)
             else materialize_as_graph(subgraph, operands)
         )
-        _, _, _, mutated_inputs, outputs = check_input_alias_and_mutation_return_ouputs(
-            gm, operands
-        )
+        (
+            _,
+            _,
+            _,
+            mutated_inputs,
+            outputs,
+        ) = check_input_alias_and_mutation_return_outputs(gm, operands)
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("subgraph", gm)

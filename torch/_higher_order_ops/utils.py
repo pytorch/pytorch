@@ -758,16 +758,13 @@ def check_input_alias_and_mutation(
         inp_out_alias_map,
         out_out_alias_map,
         mutated_inputs,
-    ) = check_input_alias_and_mutation_return_ouputs(gm, fake_args)[:-1]
+    ) = check_input_alias_and_mutation_return_outputs(gm, fake_args)[:-1]
     return inp_inp_alias_map, inp_out_alias_map, out_out_alias_map, mutated_inputs
 
 
-def check_input_alias_and_mutation_return_ouputs(
+def check_input_alias_and_mutation_return_outputs(
     gm: torch.fx.GraphModule,
-    fake_args: Union[
-        Union[list[FakeTensor], list[FunctionalTensor]],
-        tuple[Union[FakeTensor, FunctionalTensor], ...],
-    ],
+    fake_args: Union[list[FakeTensor], list[FunctionalTensor], tuple[FakeTensor, ...]],
 ) -> tuple[
     dict[int, int],
     dict[int, int],
@@ -808,7 +805,7 @@ def check_input_alias_and_mutation_return_ouputs(
             prev_fake_mode = None
             for arg in fake_args:
                 if isinstance(arg, FunctionalTensor):
-                    arg = arg.from_functional()
+                    arg = torch._from_functional_tensor(arg)
                     prev_fake_mode = arg.fake_mode
                 elif isinstance(arg, torch.Tensor):
                     assert isinstance(arg, FakeTensor)
