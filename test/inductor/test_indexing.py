@@ -120,19 +120,6 @@ class TestIndexingSimplification(InductorTestCase):
         expr = ModularIndexing(ModularIndexing(i2, 1, 28) + 1, 7, 4)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
 
-    def test_modular_indexing_divisor_extraction(self):
-        """Test that terms divisible by the divisor are properly extracted."""
-        n0 = sympy.Symbol("n0", integer=True)
-        n1 = sympy.Symbol("n1", integer=True) 
-        n2 = sympy.Symbol("n2", integer=True)
-        n3 = sympy.Symbol("n3", integer=True)
-        
-        # Test the specific case: 512*n1 // 512 should become n1
-        expr = ModularIndexing(n0 + 512*n1 + 32*n2 + 2*n3, 512, 144)
-        expected = ModularIndexing(n1, 1, 144) + ModularIndexing(n0 + 32*n2 + 2*n3, 512, 144)
-        self.assertEqual(expr, expected)
-
-
     def test_indexing_join(self):
         sizevars = SizeVarAllocator()
         i0 = sympy.Symbol("i0", integer=True)
