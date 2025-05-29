@@ -2183,17 +2183,6 @@ class InstructionTranslatorBase(
             null = self.pop()
             assert isinstance(null, NullVariable)
 
-        if isinstance(fn, GetAttrVariable) and isinstance(fn.obj, TensorVariable):
-            # realize is requires for Python 3.8
-            kwargsvars = kwargsvars.realize()
-            if fn.name == "view" and isinstance(
-                argsvars, (ConstantVariable, TensorVariable)
-            ):
-                # Hack to handle special case in some bert models.  Converts
-                # x.view(*shape) into x.view(shape), which is correct for view()
-                # but not generally.  See test_transpose_for_scores().
-                argsvars = TupleVariable([argsvars])
-
         if not isinstance(
             argsvars, BaseListVariable
         ) and argsvars.has_force_unpack_var_sequence(self):
