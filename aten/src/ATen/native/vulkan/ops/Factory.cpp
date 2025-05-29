@@ -35,7 +35,13 @@ static Tensor empty_memory_format(
     const std::optional<Device> device,
     const std::optional<bool> pin_memory,
     const std::optional<MemoryFormat> memory_format) {
-  api::StorageType storage_type = api::StorageType::TEXTURE_3D;
+  // NOCOMMIT: terrible hack to allow allocating SSBO-backed Vulkan Tensors from
+  // Python.
+  const bool should_alloc_buffer =
+      device.has_value() && device->type() == c10::DeviceType::PrivateUse1;
+  api::StorageType storage_type = should_alloc_buffer
+      ? api::StorageType::BUFFER
+      : api::StorageType::TEXTURE_3D;
   return convert(vTensor{
       api::context(),
       sizes.vec(),
@@ -66,6 +72,17 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("aten::_empty_affine_quantized"),
       at::native::vulkan::ops::_empty_affine_quantized);
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::empty_strided"),
+      TORCH_FN(at::native::vulkan::ops::empty_strided));
+}
+
+// NOCOMMIT: terrible hack to allow allocating SSBO-backed Vulkan Tensors from
+// Python.
+TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::empty.memory_format"),
+      at::native::vulkan::ops::empty_memory_format);
   m.impl(
       TORCH_SELECTIVE_NAME("aten::empty_strided"),
       TORCH_FN(at::native::vulkan::ops::empty_strided));
