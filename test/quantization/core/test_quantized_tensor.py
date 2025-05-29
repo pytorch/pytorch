@@ -146,6 +146,16 @@ class TestQuantizedTensor(TestCase):
         y_q = torch.quantize_per_tensor(x, 0.1, 10, torch.quint4x2)
         self.assertTrue(torch.equal(x_q, y_q))
 
+    def test_qtensor_scale(self):
+        input_tensor = torch.randn(2, 2, dtype=torch.float32)
+        scale = torch.tensor([1 + 0j])
+        zero_point = torch.tensor([0], dtype=torch.int)
+        torch.quantize_per_tensor(input_tensor, scale, zero_point, torch.qint8)
+
+        scale = torch.tensor([1 + 2j])
+        with self.assertRaisesRegex(RuntimeError, "not supported for quantization."):
+            torch.quantize_per_tensor(input_tensor, scale, zero_point, torch.qint8)
+
     def test_per_tensor_qtensor_to_memory_format(self):
         n = np.random.randint(1, 10)
         c = np.random.randint(2, 10)
