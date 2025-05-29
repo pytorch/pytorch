@@ -35,33 +35,38 @@ class Type {
     CustomObj,
   };
 
-  friend std::ostream& operator<<(std::ostream& out, const Type& ty);
+  // For simple kinds without classFqn
+  /*implicit*/ Type(Kind kind) : kind_(kind) {}
 
-  /* implicit */ Type(Kind kind) : kind_(kind) {}
-
+  // For CustomObj kind with classFqn
   explicit Type(Kind kind, const std::string& classFqn)
-      : kind_(kind), classFqn_(classFqn) {
+      : kind_(CustomObjData{classFqn}) {
     TORCH_CHECK(kind == Kind::CustomObj);
     TORCH_CHECK(!classFqn.empty());
   }
 
   Kind kind() const {
-    return kind_;
+    if (std::holds_alternative<CustomObjData>(kind_)) {
+      return Kind::CustomObj;
+    }
+    return std::get<Kind>(kind_);
   }
+
+  friend std::ostream& operator<<(std::ostream& out, const Type& ty);
+  friend bool operator==(const Type& left, const Type& right);
 
   std::string classFqn() const {
     TORCH_CHECK(
-        kind_ == Kind::CustomObj,
-        "Only CustomObj type can have classFqn, but got {}");
-    return classFqn_;
+        kind() == Kind::CustomObj, "Only CustomObj type can have classFqn");
+    return std::get<CustomObjData>(kind_).classFqn;
   }
 
  private:
-  const Kind kind_;
-  const std::string classFqn_;
+  struct CustomObjData {
+    std::string classFqn;
+  };
+  std::variant<Kind, CustomObjData> kind_;
 };
-
-bool operator==(const Type& left, const Type& right);
 
 // These are all the constant types that are allowed as attributes on Nodes.
 struct None {};
@@ -72,6 +77,12 @@ inline bool operator==(const None&, const None&) {
 
 class Graph;
 
+/**
+ * We distinguish between a symbolic value (Tensor, TensorList, SymInt, SymInts,
+ * etc) and a constant value (int, bool, string, etc). Here Constant is the type
+ * for all possible constant values. Along with a name, they are represented as
+ * Attributes on a Node.
+ */
 using Constant = std::variant<
     None,
     int64_t,
@@ -187,6 +198,10 @@ struct Attribute {
 
 /**
  * Node represents a single unit of execution, typically a PyTorch operator.
+ * Using an intrusive list allows us to allocate all the memory at once for a
+ * node. This also allows us to track nodes safely without passing around the
+ * list object, as an intrusive list maintains a stronger invariant that
+ * expiration will always cause unlinking.
  */
 class Node : public c10::IntrusiveListHook {
  public:
@@ -688,7 +703,7 @@ std::string graphToString(const Graph& g, bool include_signature = false);
 std::unique_ptr<Graph> stringToGraph(std::string_view source);
 
 // Standalone functions to parse common constructs
-// Parse something that looks like `Device{cuda:1}` to a thrift device.
+// Parse something that looks like `Device{cuda:1}` to a device in json format.
 c10::Device convertDevice(std::string_view symbol);
 // We have separate functions for parsing atomic and list constants because
 // there are restrictive rules about which constants can go in lists (i.e.

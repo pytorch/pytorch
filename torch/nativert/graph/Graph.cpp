@@ -1,3 +1,5 @@
+#include <torch/nativert/graph/Graph.h>
+
 #include <fmt/ostream.h>
 #include <fmt/ranges.h>
 #include <limits>
@@ -7,15 +9,14 @@
 #include <c10/util/FbcodeMaps.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/string_view.h>
-#include <torch/nativert/executor/Placement.h>
-#include <torch/nativert/graph/Graph.h>
-#include <torch/nativert/graph/TensorMeta.h>
+#include <torch/nativert/executor/Placement.h> // @manual
+#include <torch/nativert/graph/TensorMeta.h> // @manual
 
 namespace torch::nativert {
 
 namespace {
 
-// Workaround for MSVC bug.
+// Workaround for MSVC bug: "std" ambiguous symbol.
 template <typename T, typename U>
 constexpr bool is_same_v = std::is_same_v<T, U>;
 
@@ -36,7 +37,13 @@ size_t expectImpl(
     size_t curPos) {
   curPos = consumeWhitespaceImpl(source, curPos);
   const auto actual = source.substr(curPos, expected.size());
-  TORCH_CHECK_EQ(expected, actual);
+  TORCH_CHECK(
+      expected == actual,
+      fmt::format(
+          "Parser error: expected '{}' at postition {}, but found '{}'.",
+          expected,
+          curPos,
+          actual));
   curPos += expected.size();
   return curPos;
 }
@@ -46,14 +53,26 @@ size_t expectImpl(std::string_view source, char expected, size_t curPos) {
   while (isBlank(source.at(curPos))) {
     curPos++;
   }
-  TORCH_CHECK_EQ(expected, source[curPos]);
+  TORCH_CHECK(
+      expected == source[curPos],
+      "Parser error: expected '{}' at postition {}, but found '{}'.",
+      expected,
+      curPos,
+      source[curPos]);
   curPos++;
   return curPos;
 }
 } // namespace
 
 bool operator==(const Type& left, const Type& right) {
-  return left.kind() == right.kind();
+  if (left.kind() != right.kind()) {
+    return false;
+  }
+  if (std::holds_alternative<Type::CustomObjData>(left.kind_)) {
+    return std::get<Type::CustomObjData>(left.kind_).classFqn ==
+        std::get<Type::CustomObjData>(right.kind_).classFqn;
+  }
+  return true;
 }
 
 Graph::Graph()
@@ -162,34 +181,43 @@ Node* Graph::insertNode(
 }
 
 std::ostream& operator<<(std::ostream& out, const Type& ty) {
-  switch (ty.kind_) {
-    case Type::Kind::None:
-      out << "None";
-      break;
-    case Type::Kind::Tensor:
-      out << "Tensor";
-      break;
-    case Type::Kind::TensorList:
-      out << "TensorList";
-      break;
-    case Type::Kind::OptionalTensorList:
-      out << "OptionalTensorList";
-      break;
-    case Type::Kind::SymInt:
-      out << "SymInt";
-      break;
-    case Type::Kind::SymFloat:
-      out << "SymFloat";
-      break;
-    case Type::Kind::SymIntList:
-      out << "SymIntList";
-      break;
-    case Type::Kind::CustomObj:
-      out << "CustomObj " << ty.classFqn_;
-      break;
-    default:
-      TORCH_CHECK(false, "Unhandled type", ty.kind_);
-  }
+  std::visit(
+      [&out](auto&& arg) {
+        using T = std::decay_t<decltype(arg)>;
+        if constexpr (is_same_v<T, Type::Kind>) {
+          switch (arg) {
+            case Type::Kind::None:
+              out << "None";
+              break;
+            case Type::Kind::Tensor:
+              out << "Tensor";
+              break;
+            case Type::Kind::TensorList:
+              out << "TensorList";
+              break;
+            case Type::Kind::OptionalTensorList:
+              out << "OptionalTensorList";
+              break;
+            case Type::Kind::SymInt:
+              out << "SymInt";
+              break;
+            case Type::Kind::SymFloat:
+              out << "SymFloat";
+              break;
+            case Type::Kind::SymIntList:
+              out << "SymIntList";
+              break;
+            case Type::Kind::CustomObj:
+              out << "CustomObj";
+              break;
+            default:
+              TORCH_CHECK(false, "Unhandled type");
+          }
+        } else if constexpr (is_same_v<T, Type::CustomObjData>) {
+          out << "CustomObj: " << arg.classFqn;
+        }
+      },
+      ty.kind_);
   return out;
 }
 
@@ -483,15 +511,15 @@ void Graph::renumberValues() {
 
 bool Graph::cleanupDeadNodes() {
   std::unordered_set<const Node*> visited;
-  std::queue<const Node*> visitQueue;
+  std::vector<const Node*> visitStack;
 
   // Mark reachable nodes from output
-  visitQueue.push(outputNode_);
+  visitStack.push_back(outputNode_);
   visited.insert(outputNode_);
 
-  while (!visitQueue.empty()) {
-    const Node* current = visitQueue.front();
-    visitQueue.pop();
+  while (!visitStack.empty()) {
+    const Node* current = visitStack.back();
+    visitStack.pop_back();
 
     for (auto& namedArg : current->inputs()) {
       Value* val = namedArg.value;
@@ -502,7 +530,7 @@ bool Graph::cleanupDeadNodes() {
       }
       if (!visited.count(producer)) {
         visited.insert(producer);
-        visitQueue.push(producer);
+        visitStack.push_back(producer);
       }
     }
   }
@@ -749,7 +777,7 @@ std::vector<Value*> Graph::insertGraph(
 
       std::visit(
           [&](auto&& val) -> void {
-            // Workaround for MSVC bug
+            // Workaround for MSVC bug: "std" ambiguous symbol.
             using std::unique_ptr;
             using std::move;
             using T = std::decay_t<decltype(val)>;
@@ -879,7 +907,7 @@ template <class>
 [[maybe_unused]] inline constexpr bool AlwaysFalse = false;
 
 c10::IValue constantToIValue(const Constant& constant) {
-  // Workaround for MSVC bug
+  // Workaround for MSVC bug: "std" ambiguous symbol.
   using std::string;
   using std::unique_ptr;
   using std::vector;
@@ -931,7 +959,7 @@ std::ostream& printList(
 }
 
 std::ostream& operator<<(std::ostream& out, const Constant& constant) {
-  // Workaround for MSVC bug
+  // Workaround for MSVC bug: "std" ambiguous symbol.
   using std::quoted;
   using std::string;
   using std::unique_ptr;
@@ -1465,7 +1493,7 @@ std::variant<NamedArgument, Attribute> Parser::parseNamedArgument() {
 
 std::pair<std::string_view, Type> Parser::parseOutput() {
   consumeWhitespace();
-  TORCH_CHECK_EQ(cur(), '%');
+  TORCH_CHECK(cur() == '%', fmt::format("expected % but got {}", cur()));
 
   auto symbol = parseAtomicSymbol();
   if (nextIf('[')) {
@@ -1478,7 +1506,7 @@ std::pair<std::string_view, Type> Parser::parseOutput() {
 
 Value* Parser::parseSymbolicArgument() {
   consumeWhitespace();
-  TORCH_CHECK_EQ(cur(), '%');
+  TORCH_CHECK(cur() == '%', fmt::format("expected % but got {}", cur()));
 
   auto symbol = parseAtomicSymbol();
   std::vector<Value*> listElements;
