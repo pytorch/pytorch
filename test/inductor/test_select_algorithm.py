@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import functools
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -46,6 +47,7 @@ def patches(fn):
     return wrapped
 
 
+@unittest.skipIf(not HAS_GPU, "No GPU available")
 class TestSelectAlgorithm(TestCase):
     def setUp(self):
         super().setUp()

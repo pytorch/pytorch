@@ -1,12 +1,15 @@
 # Owner(s): ["oncall: mobile"]
 
+import unittest
+
 import torch
 from torch.nn import functional as F
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_S390X
 from torch.testing import FileCheck
 import io
 
+@unittest.skipIf(IS_S390X, "metal_prepack::conv2d_prepack not implemented for s390x")
 class TestMetalRewritePass(TestCase):
     @staticmethod
     def validate_transformed_module(

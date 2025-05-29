@@ -32,6 +32,7 @@ class TestMoveConstructorsToCuda(TestCase):
         else:
             FileCheck().check_not("cpp_fused").run(code[0])
 
+    @unittest.skipIf(not HAS_CUDA, "No CUDA available")
     def test_simple(self):
         def foo(x):
             return x[torch.arange(x.shape[0])]
@@ -40,6 +41,7 @@ class TestMoveConstructorsToCuda(TestCase):
 
         self._check_fn(foo, False, inp)
 
+    @unittest.skipIf(not HAS_CUDA, "No CUDA available")
     def test_output_failure(self):
         def foo(x):
             tmp1 = torch.arange(x.shape[0])
@@ -49,6 +51,7 @@ class TestMoveConstructorsToCuda(TestCase):
 
         self._check_fn(foo, True, inp)
 
+    @unittest.skipIf(not HAS_CUDA, "No CUDA available")
     def test_non_convertable_op_failure(self):
         def foo(x):
             y = torch.arange(x.shape[0])
@@ -69,6 +72,7 @@ class TestMoveConstructorsToCuda(TestCase):
         inp = torch.rand([200, 200])
         self._check_fn(foo, True, inp)
 
+    @unittest.skipIf(not HAS_CUDA, "No CUDA available")
     def test_sets_equiv(self):
         @torch.compile()
         def foo(x):

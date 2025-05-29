@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_LINUX,
+    IS_S390X,
     IS_X86,
     MI300_ARCH,
     parametrize,
@@ -132,6 +133,7 @@ def cal_conv_generated_kernel_number(mod, input, dtype, dim=4, device="cpu"):
     return input_kernel + output_kernel
 
 
+@unittest.skipIf(IS_S390X, "mkldnn not supported on s390x")
 @config.patch({"freezing": True})
 class TestPatternMatcherBase(TestCase):
     def _check_unary_is_decomposed(self, unary_fn):
@@ -248,6 +250,7 @@ class TestPatternMatcherBase(TestCase):
                 torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
 
 
+@unittest.skipIf(IS_S390X, "mkldnn not supported on s390x")
 class TestPatternMatcherGeneric(TestPatternMatcherBase):
     def _test_conv_unary_base(self, dim=4):
         assert dim == 4 or dim == 5
@@ -454,9 +457,11 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
                     v,
                 )
                 self.assertIn(
-                    "torch.ops.mkldnn._linear_pointwise.default"
-                    if autocast_enabled
-                    else "torch.ops.mkl._mkl_linear.default",
+                    (
+                        "torch.ops.mkldnn._linear_pointwise.default"
+                        if autocast_enabled
+                        else "torch.ops.mkl._mkl_linear.default"
+                    ),
                     source_code,
                 )
                 torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
@@ -3922,9 +3927,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 )
 
             include_ops = [
-                "aoti_torch_cpu__weight_int4pack_mm_cpu_tensor"
-                if torch._inductor.config.cpp_wrapper
-                else "torch.ops.quantized.int4mm_packed_weight_cpu.default"
+                (
+                    "aoti_torch_cpu__weight_int4pack_mm_cpu_tensor"
+                    if torch._inductor.config.cpp_wrapper
+                    else "torch.ops.quantized.int4mm_packed_weight_cpu.default"
+                )
             ]
             self._test_code_common(
                 m,
@@ -4208,6 +4215,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self.assertEqual(counters["inductor"]["qlinear_binary_matcher_count"], 1)
 
 
+@unittest.skipIf(IS_S390X, "mkldnn not supported on s390x")
 class TestDynamicPatternMatcherGeneric(TestPatternMatcherBase):
     def setUp(self):
         TestCase.setUp(self)

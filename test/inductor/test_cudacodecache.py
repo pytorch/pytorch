@@ -37,6 +37,7 @@ int saxpy(int n, float a, float *x, float *y) {
 """
 
 
+@unittest.skipIf(not nvcc_exist(), "No CUDA available")
 @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUDA_HOME setup")
 class TestCUDACodeCache(InductorTestCase):
     def test_cuda_load(self):

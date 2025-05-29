@@ -3,6 +3,7 @@
 import os
 import subprocess
 import sys
+import unittest
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -11,6 +12,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
+@unittest.skipIf(not HAS_GPU, "No GPU available")
 class TestTritonWrapper(TestCase):
     def get_compiled_module(self):
         compiled_module = None

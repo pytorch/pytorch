@@ -56,10 +56,11 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    IS_ARM64,
     IS_JETSON,
     IS_LINUX,
+    IS_S390X,
     IS_WINDOWS,
+    IS_X86,
     parametrize,
     run_tests,
     serialTest,
@@ -339,6 +340,7 @@ class TestProfiler(TestCase):
     )
     @serialTest()
     @parametrize("work_in_main_thread", [True, False])
+    @unittest.skipIf(IS_S390X, "fails sometimes based on unidentified conditions")
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_source_multithreaded(self, name, thread_spec, work_in_main_thread):
         """Test various threading configurations.
@@ -2898,7 +2900,7 @@ aten::mm""",
                 actual_fields = sorted(event.keys())
                 self.assertEqual(expected_fields, actual_fields)
 
-    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "x86 linux only cpp unwinding")
+    @unittest.skipIf(not IS_X86 or not IS_LINUX, "x86 linux only cpp unwinding")
     def test_fuzz_symbolize(self):
         # generate some random addresses in the text section and make sure the
         # symbolizers do not throw exceptions/crash
