@@ -21,7 +21,7 @@ from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Uni
 from typing_extensions import override
 
 import torch
-from torch._dynamo.precompile import PrecompileCacheArtifact, PrecompileContext
+from torch._dynamo.precompile_context import PrecompileCacheArtifact, PrecompileContext
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
 from torch._dynamo.utils import (
     chromium_event_log_active,
@@ -1201,6 +1201,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 AOTAutogradCacheArtifact.type(), key, content
             )
             if config.bundled_autograd_cache:
+                # TODO: the key here isn't correct
                 PrecompileContext.record_artifact(
                     BundledAOTAutogradCacheArtifact.type(), key, content
                 )

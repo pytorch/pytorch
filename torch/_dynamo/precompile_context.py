@@ -1,11 +1,13 @@
 from abc import abstractmethod
 from collections import defaultdict
+from itertools import chain
 from typing import Any, Generic, Optional, TypeVar
 from typing_extensions import override
 
 from torch.compiler._cache import (
     _serialize_single_cache,
     CacheArtifact,
+    CacheArtifactFactory,
     CacheArtifactManager,
     CacheArtifactsResult,
     CacheInfo,
@@ -63,20 +65,19 @@ class PrecompileContext(CacheArtifactManager):
     """
     PrecompileContext is a special CacheArtifactManager for handling precompilation
     It uses the same interface as CacheArtifactManager, but handles deserialization differently:
-    specifically, it returns a full Callable object instead of populating caches. The goal of PrecompileContext
-    is to provide a way for torch.compile to record and serialize various artifacts
-    that are needed for precompile as it is compiling.
+    it converts all of the cache artifacts into a set of LazyCompilePackages, and puts them into a global cache.
 
     The following artifact types are supported by PrecompileContext:
      - BundledAOTAutogradCacheArtifact
-
-    In order to add new artifacts that are needed to return a callable from precompile,
-    implement the class PrecompileCacheArtifact[T], where T is a serializable type.
-
-    TODO: interface not yet finalized.
+     - CodeStateArtifact (from torch._dynamo.package once available)
     """
 
     # Protected by the compile_lock
+    # _new_cache_artifacts_by_key organizes results by the key of each artifact.
+    # This allows us to implement serialize_by_key easily.
+    # On call to `serialize()`, all cache artifacts in _new_cache_artifacts_by_key
+    # are transferred to _new_cache_artifacts before serialization.
+    _new_cache_artifacts_by_key: dict[str, list[CacheArtifact]] = defaultdict(list)
     _new_cache_artifacts: CacheArtifactsResult = defaultdict(list)
     # Keep a seperate seen artifacts list to make avoid unnecessary duplicates
     # This list will not be cleared between serialize() calls
@@ -89,39 +90,54 @@ class PrecompileContext(CacheArtifactManager):
     )
     _cache_info: CacheInfo = CacheInfo()
 
-    @staticmethod
-    # TODO: return a Callable here instead of the dict of artifacts
-    def deserialize_into_callable(
-        serialized_artifacts: bytes,
-    ) -> Optional[dict[str, Any]]:
-        """
-        Similar to CacheArtifactManager.serialize, but instead of populating caches,
-        we want to return a full Callable object.
+    @classmethod
+    def clear(cls) -> None:
+        cls._new_cache_artifacts_by_key.clear()
+        super().clear()
 
-        TODO: Add dynamo specific logic to convert dict[str, Any] into a Callable
+    @override
+    @classmethod
+    def record_artifact(
+        cls,
+        artifact_type: str,
+        key: str,
+        content: Any,
+    ) -> None:
         """
-        artifacts: Optional[CacheArtifactsResult] = PrecompileContext.deserialize(
-            serialized_artifacts
-        )
-        if not artifacts:
-            return None
-        results = {}
-        for artifact_type, deserialized_artifacts in artifacts.items():
-            result_artifacts = []
-            for artifact in deserialized_artifacts:
-                if not artifact.precompile_compatible():
-                    raise RuntimeError(
-                        f"Unsupported precompile artifact type: {artifact.__class__.type()}"
-                    )
-                assert isinstance(artifact, PrecompileCacheArtifact)
-                result_artifacts.append(artifact.after_deserialization())
-            results[artifact_type] = result_artifacts
-        # TODO: return a Callable here instead of the dict of artifacts
-        return results
+        Called from each caching operation to record the artifact in this
+        "mega" list
+        """
+        artifact = CacheArtifactFactory.encode_create(artifact_type, key, content)
+        if artifact in cls._seen_artifacts:
+            return
+        cls._new_cache_artifacts_by_key[key].append(artifact)
+        cls._seen_artifacts.add(artifact)
+
+    @classmethod
+    def _save_artifacts_by_type(cls) -> None:
+        """
+        We normally record artifacts by key, but serialization expects them to be organized
+        by artifact type. This function transfers artifacts from _new_cache_artifacts_by_key to _new_cache_artifacts
+        """
+        for artifact in chain(*cls._new_cache_artifacts_by_key.values()):
+            cls._new_cache_artifacts[artifact.__class__.type()].append(artifact)
+        cls._new_cache_artifacts_by_key.clear()
+
+    @classmethod
+    def serialize_artifacts_by_key(cls, key: str) -> list[CacheArtifact]:
+        """
+        Serialize all artifacts with the given key returned in a list.
+        """
+        return cls._new_cache_artifacts_by_key.get(key, [])
+
+    @classmethod
+    def serialize(cls) -> Optional[tuple[bytes, CacheInfo]]:
+        cls._save_artifacts_by_type()
+        return super().serialize()
 
     @staticmethod
     def populate_caches(artifacts: CacheArtifactsResult) -> CacheInfo:
-        raise RuntimeError("Precompile Contexts do not directly populate any caches")
+        raise NotImplementedError("TODO")
 
     @classmethod
     def _ensure_cache_artifacts_registered(cls) -> None:
