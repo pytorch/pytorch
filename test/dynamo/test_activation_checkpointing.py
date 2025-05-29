@@ -19,6 +19,7 @@ from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM90OrLater,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -1284,6 +1285,10 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertEqual(ref, res)
 
     @requires_cuda
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION and not PLATFORM_SUPPORTS_CUDNN_ATTENTION,
+        "Flash and CuDNN attention not support on GPU arch.
+    )
     def test_pattern_matcher(self, device):
         # Check that the sdpa op is recomputed in the backward graph
         # tests percolate_tags
