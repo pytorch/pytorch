@@ -1095,8 +1095,9 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
 
 
 # torch._disable_dynamo creates a reference cycle with decorated function
-# This function is used ot ensure that the decorated function does not have
+# This function is used to ensure that the decorated function does not have
 # a closure, so that other objects aren't also kept alive.
+# https://github.com/pytorch/pytorch/issues/154642
 # Note: does not work when fn is compiled
 @torch._disable_dynamo
 def _run_fn_with_dynamo_disabled(fn, *args, **kwargs):
