@@ -693,10 +693,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                         )
                     )
                 else:
-                    if current_group < len(remaining):
-                        return_getters.append(
-                            operator.itemgetter(add_range(current_group, size))
-                        )
+                    return_getters.append(
+                        operator.itemgetter(add_range(current_group, size))
+                    )
             return_getters_groups.append(return_getters)
 
         assert all(V.graph.sizevars.size_hint(s) == 1 for s in remaining), (
