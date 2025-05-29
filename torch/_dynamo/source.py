@@ -599,6 +599,7 @@ class SetGetItemSource(ChainedSource):
         return self.base.guard_source()
 
     def reconstruct(self, codegen: "PyCodegen"):
+        breakpoint()
         codegen.add_push_null(
             lambda: codegen.load_import_from(utils.__name__, "set_getitem")
         )
@@ -607,8 +608,8 @@ class SetGetItemSource(ChainedSource):
         codegen.extend_output(create_call_function(2, False))
 
     def name(self):
-        # The dict gives a order which we can rely on
-        return f"list(dict.fromkeys({self.base.name()}).keys())[{self.index!r}]"
+        # sorting by the hash gives an ordering we can rely on
+        return f"sorted({self.base.name()}, key=hash)[{self.index!r}]"
 
     def is_dict_key(self):
         return False
