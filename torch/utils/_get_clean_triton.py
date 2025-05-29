@@ -81,7 +81,9 @@ def add_launch_params(
     return remove_inductor_wrappers
 
 
-def process_file(input_filename: str, output_filename: str, auto_generate_params: bool = True) -> str:
+def process_file(
+    input_filename: str, output_filename: str, auto_generate_params: bool = True
+) -> str:
     with open(input_filename) as file:
         source_code = file.read()
 
@@ -95,30 +97,38 @@ def process_file(input_filename: str, output_filename: str, auto_generate_params
     transformed_code = remove_async_compile(transformed_code)
 
     launch_params_filename = f"{input_filename}.launch_params"
-    
+
     # Auto-generate launch_params if they don't exist and auto_generate_params is True
     if not os.path.exists(launch_params_filename) and auto_generate_params:
         print(f"Launch params file {launch_params_filename} not found. Generating...")
         try:
             # Set environment variable and run the input file
             env = os.environ.copy()
-            env['TORCHINDUCTOR_DUMP_LAUNCH_PARAMS'] = '1'
-            
-            result = subprocess.run([
-                'python', input_filename
-            ], env=env, capture_output=True, text=True, cwd=os.path.dirname(input_filename) or '.')
-            
+            env["TORCHINDUCTOR_DUMP_LAUNCH_PARAMS"] = "1"
+
+            result = subprocess.run(
+                ["python", input_filename],
+                env=env,
+                capture_output=True,
+                text=True,
+                cwd=os.path.dirname(input_filename) or ".",
+            )
+
             if result.returncode != 0:
                 print(f"Error running {input_filename}:")
                 print(f"stdout: {result.stdout}")
                 print(f"stderr: {result.stderr}")
-                raise RuntimeError(f"Failed to generate launch params. Command failed with return code {result.returncode}")
-            
+                raise RuntimeError(
+                    f"Failed to generate launch params. Command failed with return code {result.returncode}"
+                )
+
             print(f"Successfully generated {launch_params_filename}")
-            
+
         except Exception as e:
-            raise RuntimeError(f"Failed to generate launch params by running {input_filename}: {str(e)}")
-    
+            raise RuntimeError(
+                f"Failed to generate launch params by running {input_filename}: {str(e)}"
+            ) from e
+
     if not os.path.exists(launch_params_filename):
         raise RuntimeError(
             f"Missing {launch_params_filename}. Run `TORCHINDUCTOR_DUMP_LAUNCH_PARAMS=1 python {input_filename}` first."
@@ -138,7 +148,9 @@ def process_file(input_filename: str, output_filename: str, auto_generate_params
 
 
 def get_clean_triton(
-    input_path: Path, output_path: Path = Path("triton_only_repro.py"), auto_generate_params: bool = True
+    input_path: Path,
+    output_path: Path = Path("triton_only_repro.py"),
+    auto_generate_params: bool = True,
 ):
     """Run experiments and output results to file
 
@@ -154,7 +166,7 @@ if __name__ == "__main__":
     """Sample usage:
     # Running sweep
     python _get_clean_triton.py output_code.py
-    
+
     # To disable auto-generation of launch params:
     python _get_clean_triton.py output_code.py --no-auto-generate
     """
@@ -175,11 +187,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--no-auto-generate",
         action="store_true",
-        help="Disable automatic generation of launch_params file"
+        help="Disable automatic generation of launch_params file",
     )
 
     # Parse the arguments
     args = parser.parse_args()
 
     # Call the function with parsed arguments
-    result = get_clean_triton(args.input_path, args.output_path, not args.no_auto_generate)
+    result = get_clean_triton(
+        args.input_path, args.output_path, not args.no_auto_generate
+    )
