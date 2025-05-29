@@ -564,17 +564,34 @@ class CompiledNodeArgs {
     collect_hooks_from(t.node.get());
   }
   void collect(const Edge& t) {
+    std::cout << "collecting edge start" << std::endl;
     if (cond(t.is_valid())) {
       collect_size(_compiler.node_calls.lookup(t.function).id);
       collect_size(t.input_nr);
+      std::cout << "collecting edge input metadata" << std::endl;
       collect(t.function->input_metadata(t.input_nr)); // for validate_outputs
     }
+    std::cout << "collecting edge done" << std::endl;
   }
   void collect(const InputMetadata& t) {
-    TORCH_CHECK(!t.is_nested_tensor(), "NestedTensor not implemented");
+    // TORCH_CHECK(!t.is_nested_tensor(), "NestedTensor not implemented");
+    std::cout << "collect options" << std::endl;
     collect(t.options());
+    std::cout << "collect subclass" << std::endl;
     collect(t.is_tensor_subclass());
-    collect(t.shape_as_dim_vector());
+    std::cout << "collect shape" << std::endl;
+    // need to collect
+    // 1. nestedness
+    // 2. shapes to pass in and reconstruct... or fk dynamic shapes
+    // nested tensors store their shape as a ... tensor?
+    // and the values matter.
+    // we dynamic it by just not collecting
+    // should be safe?
+    if (t.is_nested_tensor()) {
+      // t.shape_as_tensor();
+    } else {
+      collect(t.shape_as_dim_vector());
+    }
   }
   void collect(const VariableInfo& t) {
     collect(t.layout);
@@ -1448,10 +1465,15 @@ struct IValuePacker<at::TensorGeometry> {
 template <>
 struct IValuePacker<InputMetadata> {
   static at::IValue pack(const InputMetadata& t) {
-    TORCH_INTERNAL_ASSERT(!t.is_nested_tensor());
+    if (!t.is_nested_tensor()) {
+      auto input_shape = t.shape_as_dim_vector().vec();
+    } else {
+
+    }
+
     auto tuple = std::make_tuple(
         pack_TensorOptions(t.options()),
-        t.shape_as_dim_vector().vec(),
+        input_shape,
         t.is_tensor_subclass());
     return tuple;
   }

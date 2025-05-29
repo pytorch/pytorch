@@ -308,10 +308,12 @@ class AutogradCompilerInstance:
         self.stack.enter_context(preserve_node_meta())
         inputs_origins, sizes_origins, scalars_origins = origins
         # tensor inputs to fake tensors
-        inputs = [
-            self.wrap_fake(x, self.source("inputs", idx))
-            for idx, x in enumerate(inputs)
-        ]
+        # if strided nested tensor, can't fakify, must copy
+        # inputs = [
+        #     self.wrap_fake(x, self.source("inputs", idx))
+        #     for idx, x in enumerate(inputs)
+        # ]
+        inputs = [self.allocate_dummy() for x in inputs]
         self.bind_objects_to_proxies(inputs, args_proxy, inputs_origins)
 
         # size inputs to symints

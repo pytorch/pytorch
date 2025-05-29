@@ -2470,6 +2470,7 @@ def _clone_input(value, fake_mode):
             )
             or value.is_nested
         ):
+            breakpoint()
             # NB: ensure strides are preserved
             value = clone_input(value)
 
@@ -3257,6 +3258,7 @@ def wrap_to_fake_tensor_and_record(
             type(e),
         )
 
+        breakpoint()
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,

@@ -97,8 +97,9 @@ struct TORCH_API InputMetadata {
   // Danger: not thread safe, caller must protect with lock
   SymIntSmallVec& mutable_shape_as_dim_vector();
 
- private:
   at::Tensor shape_as_tensor() const;
+
+ private:
   bool is_nestedness_same(const at::Tensor& grad) const;
   bool maybe_expandable_to(const at::Tensor& grad) const;
 

@@ -919,7 +919,9 @@ static CacheNode* _compiled_autograd_impl(
       }
       node_args.collect(call);
       if (node_args.cond(call.needed)) {
+        std::cout << "compiled_args on " << fn->name() << std::endl;
         fn->compiled_args(node_args);
+        std::cout << "next edges on " << fn->name() << std::endl;
         node_args.collect(call.node->next_edges());
       }
       CacheKey key = node_args.key();
@@ -937,6 +939,7 @@ static CacheNode* _compiled_autograd_impl(
       cache = cache->lookup(key);
     }
 
+    std::cout << "collecting edges on " << fn->name() << std::endl;
     for (const auto& edge : fn->next_edges()) {
       if (!edge.is_valid()) {
         continue;
