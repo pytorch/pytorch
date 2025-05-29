@@ -56,7 +56,6 @@ if(NCCL_FOUND)  # obtaining NCCL version and some sanity checks
   list (APPEND CMAKE_REQUIRED_INCLUDES ${NCCL_INCLUDE_DIRS})
   include(CheckCXXSymbolExists)
   check_cxx_symbol_exists(NCCL_VERSION_CODE nccl.h NCCL_VERSION_DEFINED)
-  message (STATUS "NCCL_VERSION_CODE: ${NCCL_VERSION_CODE}")
 
   # this condition check only works for non static NCCL linking
   if (NCCL_VERSION_DEFINED AND NOT USE_STATIC_NCCL)
@@ -71,12 +70,11 @@ if(NCCL_FOUND)  # obtaining NCCL version and some sanity checks
         ncclGetVersion(&x);
         return x == NCCL_VERSION_CODE;
       }
-  ")
+")
     try_run(NCCL_VERSION_MATCHED compile_result ${PROJECT_BINARY_DIR} ${file}
           RUN_OUTPUT_VARIABLE NCCL_VERSION_FROM_HEADER
           CMAKE_FLAGS  "-DINCLUDE_DIRECTORIES=${NCCL_INCLUDE_DIRS}"
           LINK_LIBRARIES ${NCCL_LIBRARIES})
-
     if (NOT NCCL_VERSION_MATCHED)
       message(FATAL_ERROR "Found NCCL header version and library version do not match! \
 (include: ${NCCL_INCLUDE_DIRS}, library: ${NCCL_LIBRARIES}) Please set NCCL_INCLUDE_DIR and NCCL_LIB_DIR manually.")
