@@ -3,15 +3,24 @@
 
 set -ex
 
+ver() {
+    printf "%3d%03d%03d%03d" $(echo "$1" | tr '.' ' ');
+}
 
 MKLROOT=${MKLROOT:-/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION}
 
 # "install" hipMAGMA into /opt/rocm/magma by copying after build
-git clone https://bitbucket.org/icl/magma.git
-pushd magma
-
-# Version 2.7.2 + ROCm related updates
-git checkout a1625ff4d9bc362906bd01f805dbbe12612953f6
+if [[ $(ver $ROCM_VERSION) -ge $(ver 7.0) ]]; then
+    git clone https://github.com/ROCm/utk-magma.git -b release/2.9.0_rocm70 magma
+    pushd magma
+    # version 2.9 + ROCm 7.0 related updates
+    git checkout 91c4f720a17e842b364e9de41edeef76995eb9ad
+else
+    git clone https://bitbucket.org/icl/magma.git
+    pushd magma
+    # Version 2.7.2 + ROCm related updates
+    git checkout a1625ff4d9bc362906bd01f805dbbe12612953f6
+fi
 
 cp make.inc-examples/make.inc.hip-gcc-mkl make.inc
 echo 'LIBDIR += -L$(MKLROOT)/lib' >> make.inc
