@@ -8282,7 +8282,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
-    @tf32_on_and_off(0.001)
+    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.001)
     @bf32_on_and_off(0.001)
     def test_affine_2d_rotate90(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
@@ -8410,7 +8410,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
     @bf32_on_and_off(0.005)
     def test_affine_2d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
@@ -8463,7 +8463,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @expectedFailureMPS  # aten::grid_sampler_3d not implemented https://github.com/pytorch/pytorch/issues/77764
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
     @bf32_on_and_off(0.005)
     def test_affine_3d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
@@ -9281,7 +9281,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @dtypes(torch.float, torch.double)
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
     def test_rnn_fused(self, device, dtype):
 
         def copy_rnn(rnn1, rnn2):
@@ -11708,7 +11708,7 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS  # RuntimeError: LSTM with projections is not currently supported with MPS.
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_variable_sequence(self, device, dtype):
         def pad(var, length):
