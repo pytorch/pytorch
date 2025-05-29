@@ -5142,19 +5142,17 @@ def _fractional_max_pool(x, kernel_size, output_size, random_samples, n_dim):
             ranges=new_size,
             reduction_ranges=kernel_size,
         )
-        for node in (result, offsets):
-            if (
-                isinstance(node, TensorBox)
-                and isinstance(node.data, TensorBox)
-                and isinstance(node.data.data, Reduction)
-            ):
-                # Only realize if reduction isn't unrolled
-                node.realize()
+        assert isinstance(result, TensorBox), result
+        if isinstance(result.data.data, Reduction):  # type: ignore[attr-defined]
+            # Only realize if reduction isn't unrolled
+            result.realize()
+        assert isinstance(offsets, TensorBox), offsets
+        if isinstance(offsets.data.data, Reduction):  # type: ignore[attr-defined]
+            # Only realize if reduction isn't unrolled
+            offsets.realize()
+
         indices = _pool_offsets_to_indices(
-            offsets,  # type: ignore[arg-type]
-            kernel_size,
-            x.shape,
-            increments_to_index,  # type: ignore[arg-type]
+            offsets, kernel_size, x.shape, increments_to_index
         )
         return result, indices
 
