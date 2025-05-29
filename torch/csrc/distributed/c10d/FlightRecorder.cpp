@@ -316,17 +316,22 @@ void FlightRecorder<EventType>::record_accelerator_version(
 
 template <typename EventType>
 void FlightRecorder<EventType>::update_state(Entry& r) {
-  if (r.start_ != nullptr) {
-    bool started = r.start_->query();
-    if (started && !r.time_discovered_started_) {
-      r.time_discovered_started_ = c10::getTime();
+  try {
+    if (r.start_ != nullptr) {
+      bool started = r.start_->query();
+      if (started && !r.time_discovered_started_) {
+        r.time_discovered_started_ = c10::getTime();
+      }
     }
-  }
-  if (r.end_ != nullptr) {
-    bool completed = r.end_->query();
-    if (completed && !r.time_discovered_completed_) {
-      r.time_discovered_completed_ = c10::getTime();
+    if (r.end_ != nullptr) {
+      bool completed = r.end_->query();
+      if (completed && !r.time_discovered_completed_) {
+        r.time_discovered_completed_ = c10::getTime();
+      }
     }
+  } catch (std::exception& e) {
+    LOG(ERROR) << "Failed to update state for entry " << r.id_ << ": "
+               << r.profiling_name_ << " with error: " << e.what();
   }
 }
 

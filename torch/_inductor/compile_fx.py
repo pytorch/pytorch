@@ -95,7 +95,7 @@ from .._dynamo.backends.common import aot_autograd
 from .._dynamo.exc import ShortenTraceback, SkipFrame
 from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
-from ..utils._triton import has_triton_package
+from ..utils._triton import has_triton
 from . import config, metrics
 from .codegen.common import get_wrapper_codegen_for_device, init_backend_registration
 from .debug import DebugContext
@@ -201,6 +201,7 @@ post_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "post_grad_gra
 static_inputs_log = torch._logging.getArtifactLogger(
     __name__, "cudagraph_static_inputs"
 )
+inductor_metrics_log = torch._logging.getArtifactLogger(__name__, "inductor_metrics")
 
 
 def get_static_input_idxs(num_fixed: int) -> list[int]:
@@ -219,7 +220,13 @@ def get_static_input_idxs(num_fixed: int) -> list[int]:
 def record_original_output_strides(gm: GraphModule) -> None:
     output_node = gm.graph.find_nodes(op="output")[0]
     output_strides = []
-    for output in output_node.args[0]:
+
+    if not isinstance(output_node.args[0], torch.fx.Node):
+        output_node_args = output_node.args[0]
+    else:
+        output_node_args = output_node.args
+
+    for output in output_node_args:
         if (
             isinstance(output, torch.fx.Node)
             and (val := output.meta.get("val")) is not None
@@ -772,8 +779,8 @@ def _compile_fx_inner(
         if backend is not None
     )
 
-    with (
-        _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _,
+    with dynamo_timed(
+        "fx_codegen_and_compile", log_pt2_compile_event=True, log_waitcounter=True
     ):
         use_cache = (
             not config.force_disable_caches
@@ -967,7 +974,7 @@ def _compile_fx_inner(
         trace_structured(
             "artifact",
             metadata_fn=lambda: {
-                "name": "inductor_triton_kernel_to_post_grad_nodes",
+                "name": "inductor_generated_kernel_to_post_grad_nodes",
                 "encoding": "json",
             },
             payload_fn=lambda: json.dumps(debug_info),
@@ -1055,6 +1062,9 @@ class _InProcessFxCompile(FxCompile):
         inputs_to_check: Sequence[int],
         graph_kwargs: _CompileFxKwargs,
     ) -> OutputCode:
+        """
+        Generates the OutputCode from the GraphModule and example_inputs.
+        """
         # Sorry about the mess, we need graph_kwargs to continue to be able
         # to propagate it further on
         # TODO: _CompileFxKwargs actually has stronger types than in the
@@ -1140,19 +1150,31 @@ class _InProcessFxCompile(FxCompile):
             # .view() call.
             view_to_reshape(gm)
 
-            # It is safe to run FakeTensorProp under no_grad because by the time
-            # we're in inductor, we assume that AOTAutograd has already "taken care"
-            # of autograd, so there should be no more autograd-related API's in the
-            # graph.
-            with torch.no_grad():
-                fake_mode = fake_tensor_prop(gm, example_inputs)
+            with dynamo_timed(
+                "additional_fake_tensor_prop", log_pt2_compile_event=True
+            ):
+                # It is safe to run FakeTensorProp under no_grad because by the time
+                # we're in inductor, we assume that AOTAutograd has already "taken care"
+                # of autograd, so there should be no more autograd-related API's in the
+                # graph.
+                with torch.no_grad():
+                    fake_mode = fake_tensor_prop(gm, example_inputs)
 
             record_original_output_strides(gm)
 
             # pattern matcher passes might not preserve striding information
             # on node.meta["val"]. if in the future we rely on these being
             # correct we will need to fix.
-
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "before_post_grad_graph",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: gm.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                ),
+            )
             with V.set_fake_mode(fake_mode):
                 # has some issues with memory in training
                 cuda_context = get_cuda_device_context(gm)
@@ -1179,8 +1201,14 @@ class _InProcessFxCompile(FxCompile):
                     include_device=True,
                     fast_sympy_print=True,
                 )
+                # "after_post_grad_graph" is used in inductor provenance
+                # tracking highlighter front-end.
                 trace_structured(
-                    "inductor_post_grad_graph",
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "after_post_grad_graph",
+                        "encoding": "string",
+                    },
                     payload_fn=lambda: inductor_post_grad_graph_str,
                 )
                 if config.trace.enabled:
@@ -1377,10 +1405,19 @@ class _InProcessFxCompile(FxCompile):
                                 compiled_module, "runner", None
                             )
 
-                    num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
-                    metrics.num_bytes_accessed += num_bytes
-                    metrics.node_runtimes += node_runtimes
-                    metrics.nodes_num_elem += nodes_num_elem
+                    if inductor_metrics_log.isEnabledFor(logging.INFO):
+                        num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
+                        metrics.num_bytes_accessed += num_bytes
+                        metrics.node_runtimes += node_runtimes
+                        metrics.nodes_num_elem += nodes_num_elem
+                        inductor_metrics_log.info(
+                            "Graph Metrics:\n%s",
+                            {
+                                "num_bytes_accessed": num_bytes,
+                                "nodes_num_elem": nodes_num_elem,
+                                "node_runtimes": node_runtimes,
+                            },
+                        )
 
                     if (
                         cudagraphs
@@ -1676,7 +1713,7 @@ def cudagraphify_impl(
             graph.replay()
             return static_outputs
 
-    return align_inputs_from_check_idxs(run, check_input_idxs)
+    return align_inputs_from_check_idxs(run, check_input_idxs, OrderedSet())
 
 
 def compile_fx_aot(
@@ -1857,7 +1894,7 @@ def get_cpp_wrapper_config() -> dict[str, object]:
         "triton.autotune_at_compile_time": (
             config.triton.autotune_at_compile_time
             if config.triton.autotune_at_compile_time is not None
-            else has_triton_package()
+            else has_triton()
         ),
         "triton.autotune_cublasLt": False,
         "triton.cudagraphs": False,  # TODO: to be removed
@@ -2026,8 +2063,14 @@ def compile_fx(
         # having AOTAutograd trace it.
         # TODO: Get rid of this?
         if isinstance(model_, GraphModule):
+            # "before_pre_grad_graph" is used in inductor provenance
+            # tracking highlighter front-end.
             trace_structured(
-                "inductor_pre_grad_graph",
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "before_pre_grad_graph",
+                    "encoding": "string",
+                },
                 payload_fn=lambda: model_.print_readable(
                     print_output=False, include_stride=True, include_device=True
                 )
@@ -2046,6 +2089,17 @@ def compile_fx(
             torch._inductor.debug._pre_grad_graph_id = id(model_.graph)
 
             model_ = _recursive_pre_grad_passes(model_, example_inputs_)
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "after_pre_grad_graph",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: model_.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                )
+                + f"\n\n # graph id: {id(model_.graph)}",
+            )
 
         # TODO: Move this before recursive pre-grad passes
         # NB: This short circuit never occurs for Dynamo produced graphs
@@ -2196,13 +2250,17 @@ def compile_fx(
             static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
                 "static_lifetime_input_indices", None
             )
-            return min_cut_rematerialization_partition(
-                gm,
-                joint_inputs,
-                compiler="inductor",
-                static_lifetime_input_indices=static_lifetime_input_indices,
-                **kwargs,
-            )
+
+            with dynamo_utils.dynamo_timed(
+                "min_cut_rematerialization_partition", log_pt2_compile_event=True
+            ):
+                return min_cut_rematerialization_partition(
+                    gm,
+                    joint_inputs,
+                    compiler="inductor",
+                    static_lifetime_input_indices=static_lifetime_input_indices,
+                    **kwargs,
+                )
 
         @compile_time_strobelight_meta(phase_name="backward")
         def bw_compiler(

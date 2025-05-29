@@ -65,17 +65,22 @@ extensions = [
     "myst_parser",
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
-    "sphinxext.opengraph",
+    "sphinx_sitemap",
 ]
-
-ogp_site_url = "http://pytorch.org/"
-ogp_image = "https://pytorch.org/assets/images/social-share.jpg"
 
 myst_enable_extensions = [
     "colon_fence",
     "deflist",
     "html_image",
 ]
+
+html_baseurl = "https://docs.pytorch.org/docs/stable/"  # needed for sphinx-sitemap
+sitemap_locales = [None]
+sitemap_excludes = [
+    "search.html",
+    "genindex.html",
+]
+sitemap_url_scheme = "{link}"
 
 # build the templated autosummary files
 autosummary_generate = True
@@ -126,7 +131,7 @@ html_theme_options = {
     "analytics_id": "GTM-T8XT4PS",
     "canonical_url": "https://pytorch.org/docs/stable/",
     "switcher": {
-        "json_url": "https://pytorch.org/docs/pytorch-versions.json",
+        "json_url": "https://docs.pytorch.org/docs/pytorch-versions.json",
         "version_match": switcher_version,
     },
     "navigation_with_keys": False,
@@ -163,32 +168,13 @@ html_theme_options = {
     "navbar_start": ["version-switcher", "navbar-logo"],
     "navbar_center": ["navbar-nav"],
     "navbar_end": ["search-field-custom", "theme-switcher", "navbar-icon-links"],
-    "header_links_before_dropdown": 4,
+    "header_links_before_dropdown": 6,
     "navbar_persistent": [],
     "use_edit_page_button": True,
     "pytorch_project": "docs",
 }
 
 theme_variables = pytorch_sphinx_theme2.get_theme_variables()
-# For these links to appear in the right nav, there is an override in
-# the theme:
-# pytorch_sphinx_theme2/templates/sections/sidebar-secondary.html#L17
-community_links = [
-    {"url": "/community/index", "name": "PyTorch Governance"},
-    {"url": "/community/design", "name": "PyTorch Design Philosophy"},
-    {
-        "url": "https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions",
-        "name": "The Ultimate Guide to PyTorch Contributions",
-    },
-]
-# For these links to appear in the right nav, there is an override in
-# /pytorch_sphinx_theme2/templates/sections/sidebar-secondary.html
-language_bindings_links = [
-    {"url": "/cpp_index", "name": "C++"},
-    {"url": "https://pytorch.org/javadoc/", "name": "Javadoc"},
-    {"url": "https://github.com/pytorch/multipy", "name": "torch.multiply"},
-]
-
 html_context = {
     "theme_variables": theme_variables,
     "github_url": "https://github.com",
@@ -202,8 +188,6 @@ html_context = {
     # library links are defined in
     # pytorch_sphinx_theme2/pytorch_sphinx_theme2/links.json
     "library_links": theme_variables.get("library_links", []),
-    "community_links": community_links,
-    "language_bindings_links": language_bindings_links,
     "version": version,
     "date_info": {
         "paths_to_skip": ["generated/", "index"],
@@ -1015,7 +999,6 @@ coverage_ignore_functions = [
     "to_node",
     "wrap_node",
     "sym_sqrt",
-    "sym_ite",
     # torch.fx.experimental.symbolic_shapes
     "bind_symbols",
     "cast_symbool_to_symint_guardless",
@@ -2299,7 +2282,6 @@ coverage_ignore_classes = [
     "UnsynchronizedAccessError",
     # torch.cuda.memory
     "MemPool",
-    "MemPoolContext",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
     "ProcessFailure",

@@ -275,6 +275,11 @@ if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)
       "${TORCH_SRC_DIR}/csrc/lazy/generated/RegisterLazy.cpp"
     )
   endif()
+  if(USE_MPS)
+    list(APPEND GENERATED_CXX_TORCH
+      "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_mps.cpp"
+    )
+  endif()
 endif()
 
 set(GENERATED_H_TORCH
@@ -583,7 +588,7 @@ if(USE_CUDA)
     if(CMAKE_COMPILER_IS_GNUCXX)
       set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-Wno-unused-but-set-variable")
     endif()
-    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0 AND EXISTING_ARCH_FLAGS MATCHES ".*compute_90.*")
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0 AND CUDA_NVCC_FLAGS MATCHES ".*compute_90.*")
       set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
     endif()
   endif()
@@ -703,6 +708,8 @@ list(APPEND Caffe2_CPU_SRCS ${TORCH_SRCS})
 
 if(USE_MPS)
   list(APPEND Caffe2_CPU_SRCS ${Caffe2_MPS_SRCS})
+  list(APPEND Caffe2_CPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/shim_mps.cpp)
+  list(APPEND Caffe2_CPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_runner/model_container_runner_mps.cpp)
   if(CAN_COMPILE_METAL)
       file(TOUCH ${CMAKE_BINARY_DIR}/aten/src/ATen/metallib_dummy.cpp)
       list(APPEND Caffe2_CPU_SRCS ${CMAKE_BINARY_DIR}/aten/src/ATen/metallib_dummy.cpp)
@@ -1420,13 +1427,6 @@ if(USE_ROCM)
     set(ROCM_SOURCE_DIR "/opt/rocm")
   endif()
   message(INFO "caffe2 ROCM_SOURCE_DIR = ${ROCM_SOURCE_DIR}")
-  target_include_directories(torch_hip PRIVATE
-    ${ROCM_SOURCE_DIR}/include
-    ${ROCM_SOURCE_DIR}/hcc/include
-    ${ROCM_SOURCE_DIR}/rocblas/include
-    ${ROCM_SOURCE_DIR}/hipsparse/include
-    ${ROCM_SOURCE_DIR}/include/rccl/
-    )
   if(USE_FLASH_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE
         USE_FLASH_ATTENTION
@@ -1740,6 +1740,10 @@ if(USE_ROCM)
     endforeach()
   endif()
 
+  if(WIN32)
+    list(APPEND HIP_CXX_FLAGS "-fms-extensions")
+  endif()
+
   # Call again since Caffe2_HIP_INCLUDE is extended with ATen include dirs.
   hip_include_directories(${Caffe2_HIP_INCLUDE})
 
@@ -1760,7 +1764,8 @@ if(USE_ROCM)
   target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
 
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
-  target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE})
+  # ROCM_INCLUDE_DIRS is defined in LoadHIP.cmake
+  target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE} ${ROCM_INCLUDE_DIRS})
   target_include_directories(torch_hip INTERFACE $<INSTALL_INTERFACE:include>)
 endif()
 
@@ -1769,7 +1774,7 @@ if(BUILD_STATIC_RUNTIME_BENCHMARK)
   add_executable(static_runtime_bench "${STATIC_RUNTIME_BENCHMARK_SRCS}")
   add_executable(static_runtime_test "${STATIC_RUNTIME_TEST_SRCS}")
   target_link_libraries(static_runtime_bench torch_library benchmark)
-  target_link_libraries(static_runtime_test torch_library gtest_main)
+  target_link_libraries(static_runtime_test torch_library gtest_main gtest)
 endif()
 
 if(BUILD_MOBILE_BENCHMARK)
@@ -1840,7 +1845,7 @@ if(BUILD_TEST)
   foreach(test_src ${Caffe2_CPU_TEST_SRCS})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")
-    target_link_libraries(${test_name} torch_library gtest_main)
+    target_link_libraries(${test_name} torch_library gtest_main gtest gmock)
     if(NOT MSVC)
       target_link_libraries(${test_name} stdc++)
     endif()
@@ -1945,9 +1950,12 @@ if(BUILD_TEST)
         set(HIP_HIPCC_FLAGS ${BASE_HIPCC_FLAGS})
         set_source_files_properties(${test_src} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
         hip_add_executable(${test_name} "${test_src}")
-        set_target_properties(${test_name} PROPERTIES LINKER_LANGUAGE CXX HIP_ARCHITECTURES ${PYTORCH_ROCM_ARCH})
+        set_target_properties(${test_name} PROPERTIES HIP_ARCHITECTURES ${PYTORCH_ROCM_ARCH})
       else()
         add_executable(${test_name} "${test_src}")
+      endif()
+      if(test_src MATCHES "^.*\.hip$")
+        set_target_properties(${test_name} PROPERTIES LINKER_LANGUAGE CXX)
       endif()
       target_link_libraries(${test_name} torch_library gtest_main)
       target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
