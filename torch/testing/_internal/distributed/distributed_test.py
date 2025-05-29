@@ -6694,7 +6694,7 @@ class DistributedTest:
 
             b = Bar()
             gather_objects = [b for _ in range(dist.get_world_size())]
-            with self.assertRaisesRegex(AttributeError, "Can't pickle local object"):
+            with self.assertRaisesRegex(AttributeError, "Can't (get|pickle) local object"):
                 dist.all_gather_object(
                     [None for _ in range(dist.get_world_size())],
                     gather_objects[self.rank],
