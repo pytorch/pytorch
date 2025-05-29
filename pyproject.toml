@@ -3,16 +3,16 @@ name = "torch"
 requires-python = ">=3.9"
 license = {text = "BSD-3-Clause"}
 dynamic = [
-  "authors",
-  "classifiers",
-  "entry-points",
-  "dependencies",
-  "description",
-  "keywords",
-  "optional-dependencies",
-  "readme",
-  "scripts",
-  "version",
+    "authors",
+    "classifiers",
+    "entry-points",
+    "dependencies",
+    "description",
+    "keywords",
+    "optional-dependencies",
+    "readme",
+    "scripts",
+    "version",
 ]
 
 [project.urls]
@@ -168,10 +168,12 @@ select = [
     "PLW0406", # import self
     "PLW0711", # binary op exception
     "PLW1501", # bad open mode
+    "PLW1507", # shallow copy os.environ
     "PLW1509", # preexec_fn not safe with threads
     "PLW2101", # useless lock statement
     "PLW3301", # nested min max
     "PT006", # TODO: enable more PT rules
+    "PT014", # duplicate parameterize case
     "PT022",
     "PT023",
     "PT024",
@@ -188,9 +190,14 @@ select = [
     "RUF017",
     "RUF018", # no assignment in assert
     "RUF019", # unnecessary-key-check
+    "RUF020", # never union
     "RUF024", # from keys mutable
     "RUF026", # default factory kwarg
     "RUF030", # No print statement in assert
+    "RUF033", # default values __post_init__ dataclass
+    "RUF041", # simplify nested Literal
+    "RUF048", # properly parse `__version__`
+    "RUF200", # validate pyproject.toml
     "S324", # for hashlib FIPS compliance
     "SLOT",
     "TC",
@@ -198,11 +205,17 @@ select = [
     "TRY203",
     "TRY401", # verbose-log-message
     "UP",
+    "YTT",
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = [
     "F401",
+]
+"*.pyi" = [
+    "PYI011", # typed-argument-default-in-stub
+    "PYI021", # docstring-in-stub
+    "PYI053", # string-or-bytes-too-long
 ]
 "functorch/notebooks/**" = [
     "F401",

@@ -859,3 +859,5 @@ API Reference
 .. automodule:: torch.export.experimental
 .. automodule:: torch.export.passes
 .. autofunction:: torch.export.passes.move_to_device_pass
+.. automodule:: torch.export.pt2_archive
+.. automodule:: torch.export.pt2_archive.constants

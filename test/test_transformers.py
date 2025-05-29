@@ -49,6 +49,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
+    SM90OrLater,
     tf32_on_and_off,
     tf32_enabled,
 )
@@ -1897,6 +1898,26 @@ class TestSDPAFailureModes(NNTestCase):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, is_causal=True))
 
+    @onlyCUDA
+    def test_mem_eff_attention_fail_with_batch_size_geq_65536(self):
+        query = torch.rand([2**16, 2, 2, 8], device='cuda', dtype=torch.float16)
+        key = torch.rand([2**16, 2, 2, 8], device='cuda', dtype=torch.float16)
+        value = torch.rand([2**16, 2, 2, 8], device='cuda', dtype=torch.float16)
+        with sdpa_kernel(backends=SDPBackend.EFFICIENT_ATTENTION):
+            out = F.scaled_dot_product_attention(query, key, value)
+        out_cpu = F.scaled_dot_product_attention(query.cpu(), key.cpu(), value.cpu())
+        self.assertEqual(out, out_cpu, atol=1e-3, rtol=1e-4)
+
+    @onlyCUDA
+    def test_mem_eff_attention_fail_with_batch_size_geq_65536_error(self):
+        query = torch.rand([2**16, 2, 2, 8], device='cuda', dtype=torch.float16)
+        key = torch.rand([2**16, 2, 2, 8], device='cuda', dtype=torch.float16)
+        value = torch.rand([2**16, 2, 2, 8], device='cuda', dtype=torch.float16)
+        error_str = (r"Efficient attention cannot produce valid seed, "
+                     r"logsumexp and offset outputs when the batch size exceeds \(65535\)\.")
+        with self.assertRaisesRegex(RuntimeError, error_str):
+            torch._scaled_dot_product_efficient_attention(query, key, value, attn_bias=None, compute_log_sumexp=True)
+
 def _get_block_size_n(device, head_dim, is_dropout, is_causal):
     # This should match the block sizes in the CUDA kernel
     assert head_dim <= 256
@@ -2993,18 +3014,15 @@ class TestSDPACudaOnly(NNTestCase):
         value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
         key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
-        device_capability = None
-        if "cuda" in str(device):
-            device_capability = torch.cuda.get_device_capability()
-        prefer_cudnn = device_capability and (device_capability == (9, 0) or device_capability == (10, 0))
-
         # TODO we are currently disabling this by default, lets assert that this returns
         # FlashAttention, we need to change when we make remove opt-in for cudnn
-        if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION and prefer_cudnn:
-            self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
+        if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION and SM90OrLater:
+            self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.FLASH_ATTENTION.value)
+            with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION]):
+                self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
         elif PLATFORM_SUPPORTS_FLASH_ATTENTION:
             self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.FLASH_ATTENTION.value)
-        elif type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION and not prefer_cudnn:  # e.g., we're on Windows
+        elif type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION:  # e.g., we're on Windows
             self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.EFFICIENT_ATTENTION.value)
             with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION]):
                 self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
@@ -4005,6 +4023,28 @@ class TestSDPAXpuOnly(NNTestCase):
         with sdpa_kernel(backends=[SDPBackend.OVERRIDEABLE]):
             with self.assertRaisesRegex(RuntimeError, "No available kernel."):
                 _ = F.scaled_dot_product_attention(q, k, v)
+
+    def test_fused_attention_broadcasted_input(self, device):
+        dtype = torch.bfloat16
+        make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=False)
+        batch, num_heads, seqlen, head_dim = 32, 16, 128, 32
+        q_shape = SdpaShape(batch, num_heads, seqlen, head_dim)
+        k_shape = SdpaShape(batch, num_heads, seqlen, head_dim)
+        v_shape = SdpaShape(batch, num_heads, seqlen, head_dim)
+        query, key, value = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
+
+        attn_mask_shape = (1, seqlen)
+        attn_mask = make_tensor(attn_mask_shape)
+        attn_mask = attn_mask.expand(1, 1, seqlen, seqlen)
+
+        # test that we do not dispatch to onednn for an unsupported case
+        actual = F.scaled_dot_product_attention(
+            query, key, value, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
+
+        math_ref = torch.ops.aten._scaled_dot_product_attention_math(
+            query.float(), key.float(), value.float(), attn_mask=attn_mask, dropout_p=0.0, is_causal=False)[0]
+
+        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
     @parametrize("type", ["dense"])
     @parametrize("is_contiguous", [True, False])
