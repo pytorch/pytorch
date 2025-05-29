@@ -2146,6 +2146,8 @@ class AotCodeCompiler:
             else:
                 so_builder.build()
                 for o_file in obj_srcs:
+                    if o_file in gpu_kernels_o:
+                        continue
                     # Remove these as they are not needed anymore
                     os.remove(o_file)
 
