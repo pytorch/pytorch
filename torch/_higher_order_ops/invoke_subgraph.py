@@ -552,7 +552,6 @@ def _(subgraph, identifier, *operands):
 def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
     # Check if we have already traced the subgraph.
     graph = None
-    assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
     invoke_subgraph_cache = get_invoke_subgraph_cache()
     if invoke_subgraph_cache:
         graph = invoke_subgraph_cache.get_proxy_dispatch_entry(identifier)
@@ -574,14 +573,12 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
         )
         graph.recompile()
 
-        assert isinstance(identifier, str) and not hasattr(
-            proxy_mode.tracer.root, identifier
-        )
-        proxy_mode.tracer.root.register_module(identifier, graph)
+        assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
+        qualname = proxy_mode.tracer.get_fresh_qualname("repeated_subgraph")
+        proxy_mode.tracer.root.register_module(qualname, graph)
         if invoke_subgraph_cache:
             invoke_subgraph_cache.add_proxy_dispatch_entry(identifier, graph)
 
-    assert hasattr(proxy_mode.tracer.root, identifier)
     node_args = (graph, identifier, *operands)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)  # type: ignore[union-attr]
     out_proxy = proxy_mode.tracer.create_proxy(

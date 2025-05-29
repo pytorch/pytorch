@@ -542,12 +542,12 @@ class GraphModule(torch.nn.Module):
                 """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[8]"):
-        subgraph_0 = self.subgraph_0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', arg0_1);  subgraph_0 = arg0_1 = None
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', arg0_1);  repeated_subgraph0 = arg0_1 = None
         getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
         return (getitem,)
 
-    class subgraph_0(torch.nn.Module):
+    class repeated_subgraph0(torch.nn.Module):
         def forward(self, arg0_1: "f32[8]"):
             inductor_seeds_default: "i64[1]" = torch.ops.prims.inductor_seeds.default(1, device(type='cpu'))
             inductor_lookup_seed_default: "i64[]" = torch.ops.prims.inductor_lookup_seed.default(inductor_seeds_default, 0);  inductor_seeds_default = None
@@ -669,12 +669,12 @@ class GraphModule(torch.nn.Module):
                 """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[4]"):
-        subgraph_0 = self.subgraph_0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', arg0_1);  subgraph_0 = arg0_1 = None
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', arg0_1);  repeated_subgraph0 = arg0_1 = None
         getitem: "f32[4]" = invoke_subgraph[0];  invoke_subgraph = None
         return (getitem,)
 
-    class subgraph_0(torch.nn.Module):
+    class repeated_subgraph0(torch.nn.Module):
         def forward(self, arg0_1: "f32[4]"):
             sin: "f32[4]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
             return (sin,)
@@ -772,12 +772,12 @@ class GraphModule(torch.nn.Module):
                 """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[8]"):
-        subgraph_0 = self.subgraph_0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', arg0_1);  subgraph_0 = arg0_1 = None
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', arg0_1);  repeated_subgraph0 = arg0_1 = None
         getitem: "f32[1, 8]" = invoke_subgraph[0];  invoke_subgraph = None
         return (getitem,)
 
-    class subgraph_0(torch.nn.Module):
+    class repeated_subgraph0(torch.nn.Module):
         def forward(self, arg0_1: "f32[8]"):
             sin: "f32[8]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
 
@@ -1975,16 +1975,16 @@ class TestInvokeSubgraphExport(TestCase):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, x: "f32[8]", y: "f32[8]"):
-        subgraph_0 = self.subgraph_0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', x, y);  subgraph_0 = x = None
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', x, y);  repeated_subgraph0 = x = None
         getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
 
-        subgraph_1 = self.subgraph_0
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', getitem, y);  subgraph_1 = getitem = y = None
+        repeated_subgraph0_1 = self.repeated_subgraph0
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, 'subgraph_0', getitem, y);  repeated_subgraph0_1 = getitem = y = None
         getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
         return (getitem_1,)
 
-    class subgraph_0(torch.nn.Module):
+    class repeated_subgraph0(torch.nn.Module):
         def forward(self, arg0_1: "f32[8]", arg1_1: "f32[8]"):
             mul: "f32[8]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
             return (mul,)
