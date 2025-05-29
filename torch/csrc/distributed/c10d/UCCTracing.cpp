@@ -94,7 +94,7 @@ void CommTraceLogger::recordComms(
       (!outputTensors.empty()) ? outputTensors[0].scalar_type() : at::kByte;
   auto devType = (!outputTensors.empty()) ? outputTensors[0].device().type()
                                           : c10::DeviceType::CPU;
-  auto now = std::chrono::system_clock::now();
+  auto now = std::chrono::steady_clock::now();
   static auto startTS = now;
   int64_t time_since_begin =
       std::chrono::duration_cast<std::chrono::nanoseconds>(now - startTS)
