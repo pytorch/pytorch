@@ -37,6 +37,8 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
+    from types import CodeType
+
     import sympy
 
 
@@ -825,6 +827,8 @@ class TracingContext:
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
+        self.previously_inlined_functions = dict()
+        self.previously_cleaned_instructions = dict()
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
         # This is morally part of frame_summary_stack, but it is kept separate
@@ -865,11 +869,15 @@ class TracingContext:
         # see note: [Returning Fake Tensors on First AOT Autograd Call]
         self.fakify_first_call = False
         self.hop_dispatch_set_cache = HopDispatchSetCache()
+        # list of code objects for inlined functions
+        self.traced_code: list[CodeType] = []
 
     def clear(self):
         # Look at the note in output_graph.py in function `save_global_state`
         # for the context on clearing global context.
         self.global_context.global_state = {}
+        self.previously_inlined_functions.clear()
+        self.previously_cleaned_instructions.clear()
 
     @staticmethod
     @contextmanager
@@ -895,8 +903,13 @@ class TracingContext:
             return traceback.StackSummary()
         stack = self.frame_summary_stack
         if self.loc_in_frame is not None:
-            stack = stack + [self.loc_in_frame]
+            stack = stack + [self._populate_loc_in_frame_summary()]
         return traceback.StackSummary.from_list(stack)
+
+    def _populate_loc_in_frame_summary(self):
+        assert self.loc_in_frame is not None
+        filename, lineno, frame_name = self.loc_in_frame
+        return traceback.FrameSummary(filename, lineno, frame_name, lookup_line=False)
 
     # Call this when you want to call into some code that isn't necessarily
     # associated with the current frame state
@@ -969,9 +982,9 @@ class TracingContext:
 
     @staticmethod
     def set_current_loc(filename, lineno, frame_name):
-        TracingContext.get().loc_in_frame = traceback.FrameSummary(
-            filename, lineno, frame_name, lookup_line=False
-        )
+        # Save the current location in the frame. Lazily generate the
+        # framesummary.
+        TracingContext.get().loc_in_frame = (filename, lineno, frame_name)
 
 
 @contextmanager
