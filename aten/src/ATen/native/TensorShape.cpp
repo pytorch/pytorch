@@ -24,6 +24,7 @@
 #include <ATen/native/cpu/SerialStackImpl.h>
 #include <ATen/native/cpu/StackKernel.h>
 #include <ATen/quantized/QTensorImpl.h>
+#include <c10/core/Contiguity.h>
 #include <c10/core/GradMode.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
@@ -216,7 +217,7 @@
 
 namespace at::meta {
 
-inline c10::MemoryFormat cat_compute_output_memory_format(
+static inline c10::MemoryFormat cat_compute_output_memory_format(
     const MaterializedITensorListRef& inputs) {
   std::optional<c10::MemoryFormat> format = std::nullopt;
   for (const Tensor& t : inputs) {
@@ -572,7 +573,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   // }
 
   // Then define for each sparse dim the number of reps for each nnz index/value
-  // due to broadcasting. Repetitions do not take into accout the current value
+  // due to broadcasting. Repetitions do not take into account the current value
   // of nnz - this will be taken care of later {
   auto nnz_repeats = c10::DimVector(res_sparse_dim);
   nnz_repeats.back() = res_sparse_dim_broadcast_mask.back();
@@ -1119,7 +1120,7 @@ std::vector<Tensor> tensor_split_sections_symint(
 }
 
 template <typename T>
-std::vector<Tensor> _tensor_split_indices(
+static std::vector<Tensor> _tensor_split_indices(
     const Tensor& self,
     ArrayRef<T> indices,
     int64_t dim) {
@@ -1417,7 +1418,7 @@ Tensor as_strided_tensorimpl(
 }
 
 template <typename T>
-inline void setStridedUnchecked(
+static inline void setStridedUnchecked(
     const Tensor& self,
     ArrayRef<T> size,
     ArrayRef<T> stride,
@@ -1922,7 +1923,7 @@ Tensor tile_symint(const Tensor& self, SymIntArrayRef reps) {
 // templated for ArrayRef<int64_t> and SmallVector<int64_t> use cases
 //
 template <typename Vec>
-Tensor alias_with_sizes_and_strides(
+static Tensor alias_with_sizes_and_strides(
     const Tensor& self,
     const Vec& sizes,
     const Vec& strides) {
@@ -1958,7 +1959,7 @@ Tensor alias_with_sizes_and_strides(
 // SymIntArrayRef/ArrayRef<c10::SymInt> and
 // SmallVector<c10::SymInt>/SymDimVector
 template <template <typename...> typename Container>
-Tensor alias_with_sizes_and_strides(
+static Tensor alias_with_sizes_and_strides(
     const Tensor& self,
     const Container<c10::SymInt>& sizes,
     const Container<c10::SymInt>& strides) {
@@ -1993,11 +1994,15 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
     TORCH_CHECK(false, "reshape is not implemented for sparse tensors");
   }
 
-  if (self.is_contiguous() && !self.is_mkldnn()) {
+  auto sym_sizes = self.sym_sizes();
+  auto sym_strides = self.sym_strides();
+  auto sym_numel = self.sym_numel();
+  if (definitely_contiguous(sym_sizes, sym_strides, sym_numel) &&
+      !self.is_mkldnn()) {
     return self.view_symint(proposed_shape);
   }
 
-  c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
+  c10::SymDimVector shape = infer_size_dv(proposed_shape, sym_numel);
 
   if (self.is_mkldnn()) {
     return at::_mkldnn_reshape(self, C10_AS_INTARRAYREF_SLOW(shape));
@@ -2005,8 +2010,7 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
 
   // `computeStride` returns the proper strides to use if this
   // `reshape` can be just a view.
-  auto stride =
-      at::detail::computeStride(self.sym_sizes(), self.sym_strides(), shape);
+  auto stride = at::detail::computeStride(sym_sizes, sym_strides, shape);
 
   // NB: Even though we have viewable geometry and the target strides here,
   //     we do not just call `as_strided` on `self` because the backward
@@ -3290,7 +3294,7 @@ static inline std::vector<Tensor> get_stack_inputs(
   return inputs;
 }
 
-bool inline maybe_native_stack(
+static bool inline maybe_native_stack(
     Tensor& result,
     TensorList tensors,
     int64_t dim) {
@@ -3366,7 +3370,7 @@ static std::vector<Tensor> _pad_chunk(
     std::vector<int64_t> view_sizes(
         tensor_size.begin(), tensor_size.begin() + dim);
     view_sizes.insert(view_sizes.end(), {num_chunks, -1});
-    padded_tensors.push_back(padded_tensor.view(view_sizes));
+    padded_tensors.push_back(padded_tensor.reshape(view_sizes));
   }
   return padded_tensors;
 }
@@ -3601,7 +3605,7 @@ Tensor& transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
   // in-place operations. For other sparse formats, the in-place
   // transpose would not be possible without shuffling the specified
   // values. So we don't support this as it would defeat the purpose
-  // of in-place opreations of being memory-efficient.
+  // of in-place operations of being memory-efficient.
   if (self.is_sparse()) {
     return sparse_transpose_(self, dim0, dim1);
   }
@@ -3614,7 +3618,7 @@ Tensor& transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
   std::swap(sizes[dim0], sizes[dim1]);
   SymDimVector strides(self.sym_strides().begin(), self.sym_strides().end());
   std::swap(strides[dim0], strides[dim1]);
-  auto result = self.as_strided__symint(std::move(sizes), std::move(strides));
+  self.as_strided__symint(std::move(sizes), std::move(strides));
   return self;
 }
 
@@ -4021,7 +4025,7 @@ Tensor& squeeze_(Tensor& self, IntArrayRef dims) {
 // This is a hack because in-place operations on tensors treated like views
 // can be much more expensive than the same operations on non-view tensors.
 
-inline Tensor view_impl(const Tensor& self, IntArrayRef size) {
+static inline Tensor view_impl(const Tensor& self, IntArrayRef size) {
   at::DimVector inferred_size = at::infer_size_dv(size, self.numel());
   auto stride =
       at::detail::computeStride(self.sizes(), self.strides(), inferred_size);
@@ -4198,11 +4202,10 @@ Tensor ravel(const Tensor& self) {
 }
 
 static inline void handle_unflatten_exception(
-    const std::runtime_error& e,
+    const std::exception& e,
     const Tensor& self,
     int64_t dim,
-    SymIntArrayRef sizes,
-    std::optional<DimnameList> names) {
+    SymIntArrayRef sizes) {
   if (!strstr(e.what(), "is invalid for input of size")) {
     TORCH_CHECK(false, "unflatten got an unexpected error:\n", e.what());
   }
@@ -4252,11 +4255,11 @@ static Tensor unflatten_impl(
   SymDimVector inferred_size;
   try {
     inferred_size = at::infer_size_dv(sizes, self.sym_size(dim));
-  } catch (const std::runtime_error& e) {
+  } catch (const std::exception& e) {
     // at::infer_size would throw std::runtime_error for invalid size,
     // catch the runtime_error and display the error message in a more
     // user-friendly way for both tensors and named tensors
-    handle_unflatten_exception(e, self, dim, sizes, names);
+    handle_unflatten_exception(e, self, dim, sizes);
   }
 
   SymDimVector shape(self.sym_sizes().begin(), self.sym_sizes().end());

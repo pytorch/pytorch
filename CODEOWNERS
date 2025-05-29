@@ -14,6 +14,7 @@
 /torch/csrc/autograd/ @albanD @soulitzer
 /torch/autograd/ @albanD @soulitzer
 /tools/autograd/ @albanD @soulitzer
+/torch/header_only_apis.txt @janeyx99
 /torch/nn/ @albanD @jbschlosser @mikaylagawarecki
 /torch/optim/ @albanD @janeyx99
 /test/test_public_bindings.py @albanD
@@ -21,6 +22,7 @@
 /test/forward_backward_compatibility/check_forward_backward_compatibility.py @larryliu0820
 /docs/source/conf.py @albanD
 /aten/src/ATen/native/tags.yaml @ezyang
+/.github/merge_rules.yaml @albanD @malfet
 
 # Architecture Optimization (quantization, sparsity, etc.)
 /aten/src/ATen/native/ao_sparse @salilsdesai @kimishpatel @digantdesai @jianyuh
@@ -49,12 +51,12 @@ nn/qat/ @jerryzh168
 /torch/csrc/distributed/c10d/Ops.* @kwen2501
 
 # ONNX Export
-/torch/_dynamo/backends/onnxrt.py @wschin @xadupre
-/torch/csrc/jit/passes/onnx.h @titaiwangms @shubhambhokare1 @xadupre
-/torch/csrc/jit/passes/onnx.cpp @titaiwangms @shubhambhokare1 @xadupre
-/torch/csrc/jit/passes/onnx/ @titaiwangms @shubhambhokare1 @xadupre
-/torch/onnx/ @titaiwangms @shubhambhokare1 @justinchuby @wschin @xadupre
-/test/onnx/  @titaiwangms @shubhambhokare1 @justinchuby @wschin @xadupre
+/torch/_dynamo/backends/onnxrt.py @wschin
+/torch/csrc/jit/passes/onnx.h @titaiwangms @shubhambhokare1
+/torch/csrc/jit/passes/onnx.cpp @titaiwangms @shubhambhokare1
+/torch/csrc/jit/passes/onnx/ @titaiwangms @shubhambhokare1
+/torch/onnx/ @titaiwangms @shubhambhokare1 @justinchuby @wschin
+/test/onnx/  @titaiwangms @shubhambhokare1 @justinchuby @wschin
 
 # CI
 /.ci  @pytorch/pytorch-dev-infra
@@ -134,7 +136,7 @@ torch/profiler/ @sraikund16
 test/functorch/test_aotdispatch.py @ezyang @Chillee
 
 # Dataloader
-torch/utils/data/ @andrewkho @divyanshk
+torch/utils/data/ @divyanshk @ramanishsingh
 
 # hipify
 torch/utils/hipify/ @jeffdaily @jithunnair-amd
@@ -165,9 +167,9 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 /torch/_export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
 
 # Dynamic Shapes
-/torch/fx/experimental/symbolic_shapes.py @bobren @laithsakka
-/torch/fx/experimental/sym_node.py @bobren @laithsakka
-/torch/fx/experimental/recording.py @bobren @laithsakka
+/torch/fx/experimental/symbolic_shapes.py @bobrenjc93 @laithsakka
+/torch/fx/experimental/sym_node.py @bobrenjc93 @laithsakka
+/torch/fx/experimental/recording.py @bobrenjc93 @laithsakka
 
 # serialization-related files
 /aten/src/ATen/MapAllocator* @mikaylagawarecki

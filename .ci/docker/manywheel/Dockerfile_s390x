@@ -5,7 +5,9 @@ ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
 ENV LANGUAGE=C.UTF-8
 
-ARG DEVTOOLSET_VERSION=13
+# there is a bugfix in gcc >= 14 for precompiled headers and s390x vectorization interaction.
+# with earlier gcc versions test/inductor/test_cpu_cpp_wrapper.py will fail.
+ARG DEVTOOLSET_VERSION=14
 # Installed needed OS packages. This is to support all
 # the binary builds (torch, vision, audio, text, data)
 RUN yum -y install epel-release
@@ -58,7 +60,8 @@ RUN yum install -y \
   libxslt-devel \
   libxml2-devel \
   openssl-devel \
-  valgrind
+  valgrind \
+  ninja-build
 
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
@@ -103,9 +106,6 @@ CMD ["/bin/bash"]
 # install test dependencies:
 # - grpcio requires system openssl, bundled crypto fails to build
 RUN dnf install -y \
-  protobuf-devel \
-  protobuf-c-devel \
-  protobuf-lite-devel \
   hdf5-devel \
   python3-h5py \
   git
@@ -129,6 +129,9 @@ RUN pip3 install flatbuffers && \
   git clone https://github.com/microsoft/onnxruntime && \
   cd onnxruntime && git checkout v1.21.0 && \
   git submodule update --init --recursive && \
-  ./build.sh --config Release --parallel 0 --enable_pybind --build_wheel --enable_training --enable_training_apis --enable_training_ops --skip_tests --allow_running_as_root && \
+  ./build.sh --config Release --parallel 0 --enable_pybind \
+  --build_wheel --enable_training --enable_training_apis \
+  --enable_training_ops --skip_tests --allow_running_as_root \
+  --compile_no_warning_as_error && \
   pip3 install ./build/Linux/Release/dist/onnxruntime_training-*.whl && \
   cd .. && /bin/rm -rf ./onnxruntime

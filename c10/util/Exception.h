@@ -116,8 +116,8 @@ class C10_API Error : public std::exception {
 
 class C10_API Warning {
  public:
-  class C10_API UserWarning {};
-  class C10_API DeprecationWarning {};
+  class C10_API UserWarning{};
+  class C10_API DeprecationWarning{};
 
   using warning_variant_t = std::variant<UserWarning, DeprecationWarning>;
 
@@ -289,8 +289,8 @@ class C10_API OutOfMemoryError : public Error {
   using Error::Error;
 };
 
-// Used for handling syntacitc erros in input arguments.
-// They shuld turn into SytnaxError when the cross into Python
+// Used for handling syntactic errors in input arguments.
+// These turn into SyntaxError when the cross into Python.
 class C10_API SyntaxError : public Error {
   using Error::Error;
 };
@@ -317,6 +317,12 @@ class C10_API DistStoreError : public DistError {
 // libraries. These turn into DistNetworkError when they cross into Python.
 class C10_API DistNetworkError : public DistError {
   using DistError::DistError;
+};
+
+// Raised when a queue is empty and a non-blocking pop is called.
+// Translated to torch.distributed.QueueEmptyError in Python
+class C10_API DistQueueEmptyError : public DistStoreError {
+  using DistStoreError::DistStoreError;
 };
 
 // A utility function to return an exception std::string by prepending its
