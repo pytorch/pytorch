@@ -392,7 +392,6 @@ if torch.backends.mps.is_available():
             "heaviside": None,
             "igamma": None,
             "igammac": None,
-            "index_copy": None,
             "index_reduceprod": None,
             "index_reducemean": None,
             "index_reduceamax": None,
