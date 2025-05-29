@@ -1,4 +1,5 @@
-from typing import Any, Callable, ParamSpec, TypeVar
+from typing import Any, Callable, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 import torch.nn.functional as F

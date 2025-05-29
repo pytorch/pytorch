@@ -5,6 +5,9 @@ from torch import nn
 from torch.ao.quantization import QConfig
 
 
+__all__ = ["QuantStub", "DeQuantStub", "QuantWrapper"]
+
+
 class QuantStub(nn.Module):
     r"""Quantize stub module, before calibration, this is same as an observer,
     it will be swapped as `nnq.Quantize` in `convert`.
