@@ -3916,6 +3916,7 @@ class ShapeEnv:
         expr = check_fn(SymInt(SymNode(sym, self, int, None))).node._expr
         new_axioms = dict(self.get_implications(self.simplify(expr)))
         added_replacements = {}
+
         for axiom in new_axioms:
             if (
                 isinstance(axiom, sympy.Eq)
@@ -3925,8 +3926,11 @@ class ShapeEnv:
             ):
                 self.replacements[axiom.lhs] = axiom.rhs
                 added_replacements[axiom.lhs] = axiom.rhs
-
         self.axioms.update(new_axioms)
+
+        # We need to freeze the ShapeEnv becuase any additional modification of
+        # the ShapeEnv will cause unsoundness for subsequent specialization calls.
+        self.frozen = True
         try:
             yield
         finally:
@@ -3934,6 +3938,7 @@ class ShapeEnv:
                 self.axioms.pop(k, None)
             for k in added_replacements:
                 self.replacements.pop(k, None)
+            self.frozen = False
 
     def check_equal(self, other: ShapeEnv) -> None:
         """Compare another ShapeEnv for equivalence"""
