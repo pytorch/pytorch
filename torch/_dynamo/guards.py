@@ -60,6 +60,7 @@ from torch._C._dynamo.guards import (
 )
 from torch._dynamo.source import (
     get_global_source_name,
+    get_local_source_name,
     IndexedSource,
     is_from_flatten_script_object_source,
     is_from_local_source,
@@ -1470,7 +1471,9 @@ class GuardBuilder(GuardBuilderBase):
 
     def DICT_VERSION(self, guard: Guard):
         if self.serialization_mode == "save":
-            raise RuntimeError("DICT_VERSION guard cannot be serialized.")
+            raise torch._dynamo.exc.PackageError(
+                "DICT_VERSION guard cannot be serialized."
+            )
         # ___check_dict_version is same as `dict_version(x) == y`
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
@@ -1526,7 +1529,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def ID_MATCH(self, guard: Guard):
         if self.serialization_mode == "save":
-            raise RuntimeError("ID_MATCH guard cannot be serialized.")
+            raise torch._dynamo.exc.PackageError("ID_MATCH guard cannot be serialized.")
         # ___check_obj_id is same as `id(x) == y`
         if isinstance(guard.originating_source, TypeSource):
             # optional optimization to produce cleaner/faster guard code
@@ -1614,6 +1617,33 @@ class GuardBuilder(GuardBuilderBase):
             fn, get_verbose_code_parts(code, guard)
         )
 
+    def AUTOGRAD_SAVED_TENSORS_HOOKS(self, guard: Guard):
+        get_hooks = torch._functorch._aot_autograd.utils.top_saved_tensors_hooks
+        are_inline_hooks = (
+            torch._functorch._aot_autograd.utils.saved_tensors_hooks_are_inlineable
+        )
+
+        def hooks_ids_fn(hooks):
+            if not are_inline_hooks(hooks):
+                return None
+
+            pack_hook, unpack_hook = hooks
+            return tuple(map(id, hooks))
+
+        guard_hooks_ids = hooks_ids_fn(get_hooks())
+
+        code = [
+            f"torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == {guard_hooks_ids}"
+        ]
+        self._set_guard_export_info(guard, code)
+
+        def fn(x):
+            return guard_hooks_ids == hooks_ids_fn(get_hooks())
+
+        self.guard_manager.root.add_lambda_guard(
+            fn, get_verbose_code_parts(code, guard)
+        )
+
     def TENSOR_SUBCLASS_METADATA_MATCH(self, guard: Guard):
         value = self.get(guard.name)
         original_metadata = deepcopy(self.get(guard.name).__tensor_flatten__()[1])
@@ -1675,6 +1705,7 @@ class GuardBuilder(GuardBuilderBase):
         if torch.distributed.is_available():
             from torch.distributed.device_mesh import DeviceMesh
             from torch.distributed.tensor.placement_types import (
+                _StridedShard,
                 Partial,
                 Replicate,
                 Shard,
@@ -1685,7 +1716,12 @@ class GuardBuilder(GuardBuilderBase):
                 Replicate,
                 Partial,
                 DeviceMesh,
+                _StridedShard,
             )
+
+        from torch.export.dynamic_shapes import _IntWrapper
+
+        ok_types = ok_types + (_IntWrapper,)
 
         import torch.utils._pytree as pytree
 
@@ -1746,7 +1782,9 @@ class GuardBuilder(GuardBuilderBase):
     def NN_MODULE(self, guard: Guard):
         # don't support this in serialization because it uses unsupported ID_MATCH
         if self.serialization_mode == "save":
-            raise RuntimeError("NN_MODULE guard cannot be serialized.")
+            raise torch._dynamo.exc.PackageError(
+                "NN_MODULE guard cannot be serialized."
+            )
         self.ID_MATCH(guard)
         val = self.get(guard.name)
         if hasattr(val, "training"):
@@ -1767,14 +1805,18 @@ class GuardBuilder(GuardBuilderBase):
         """things like torch.add and user defined functions"""
         # don't support this in serialization because it uses unsupported ID_MATCH
         if self.serialization_mode == "save":
-            raise RuntimeError("FUNCTION_MATCH guard cannot be serialized.")
+            raise torch._dynamo.exc.PackageError(
+                "FUNCTION_MATCH guard cannot be serialized."
+            )
         return self.ID_MATCH(guard)
 
     def CLOSURE_MATCH(self, guard: Guard):
         """matches a closure by __code__ id."""
         # don't support this in serialization because it uses unsupported FUNCTION_MATCH
         if self.serialization_mode == "save":
-            raise RuntimeError("CLOSURE_MATCH guard cannot be serialized.")
+            raise torch._dynamo.exc.PackageError(
+                "CLOSURE_MATCH guard cannot be serialized."
+            )
         val = self.get(guard.name)
         # Strictly only want user-defined functions
         if type(val) == types.FunctionType and hasattr(val, "__code__"):
@@ -1849,7 +1891,9 @@ class GuardBuilder(GuardBuilderBase):
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     def DUPLICATE_INPUT(self, guard, source_b):
         if self.serialization_mode == "save":
-            raise RuntimeError("DUPLICATE_INPUT guard cannot be serialized yet.")
+            raise torch._dynamo.exc.PackageError(
+                "DUPLICATE_INPUT guard cannot be serialized yet."
+            )
         ref_a = self.arg_ref(guard)
         ref_b = self.arg_ref(source_b.name())
 
@@ -1877,7 +1921,9 @@ class GuardBuilder(GuardBuilderBase):
 
     def WEAKREF_ALIVE(self, guard):
         if self.serialization_mode == "save":
-            raise RuntimeError("WEAKREF_ALIVE guard cannot be serialized.")
+            raise torch._dynamo.exc.PackageError(
+                "WEAKREF_ALIVE guard cannot be serialized."
+            )
         code = [f"{self.arg_ref(guard)} is not None"]
 
         self._set_guard_export_info(guard, code)
@@ -2659,7 +2705,7 @@ class GuardsStatePickler(pickle.Pickler):
             return type(self)._unpickle_mapping_proxy, (obj.copy(),)
 
         if type(obj).__qualname__ != type(obj).__name__:
-            raise RuntimeError(
+            raise torch._dynamo.exc.PackageError(
                 f"Type {type(obj)} for object {obj} cannot be saved "
                 + "into torch.compile() package since it's defined in local scope. "
                 + "Please define the class at global scope (top level of a module)."
@@ -2671,7 +2717,10 @@ class GuardsStatePickler(pickle.Pickler):
 def pickle_guards_state(state: GuardsState) -> bytes:
     buf = io.BytesIO()
     pickler = GuardsStatePickler(buf)
-    pickler.dump(state)
+    try:
+        pickler.dump(state)
+    except AttributeError as e:
+        raise torch._dynamo.exc.PackageError(str(e)) from e
     return buf.getvalue()
 
 
@@ -2823,17 +2872,23 @@ class CheckFunctionManager:
 
         self.guards_state: Optional[bytes] = None
         if self.guards_serialization_mode == "save":
-            output_graph_guards_state = self.output_graph.dump_guards_state()
-            # Only serialize the global variables that are actually used in guards.
             used_global_vars = set()
-            for guard in sorted_guards:
-                if name := get_global_source_name(guard.originating_source):
-                    assert isinstance(name, str)
-                    used_global_vars.add(name)
-            for source in self.output_graph.guard_on_key_order:
+            used_local_vars = set()
+
+            def prune_variable(source):
                 if name := get_global_source_name(source):
                     assert isinstance(name, str)
                     used_global_vars.add(name)
+                elif name := get_local_source_name(source):
+                    assert isinstance(name, str)
+                    used_local_vars.add(name)
+
+            output_graph_guards_state = self.output_graph.dump_guards_state()
+            # Only serialize the global variables that are actually used in guards.
+            for guard in sorted_guards:
+                prune_variable(guard.originating_source)
+            for source in self.output_graph.guard_on_key_order:
+                prune_variable(source)
 
             def normalize_create_fn(x):
                 if isinstance(x, functools.partial):
@@ -2851,6 +2906,11 @@ class CheckFunctionManager:
 
             output_graph_guards_state = dataclasses.replace(
                 output_graph_guards_state,
+                local_scope={
+                    k: v
+                    for k, v in output_graph_guards_state.local_scope.items()
+                    if k in used_local_vars
+                },
                 global_scope={
                     k: v
                     for k, v in output_graph_guards_state.global_scope.items()
@@ -3176,10 +3236,16 @@ def build_guard_function(code_parts, closure_args) -> tuple[str, str]:
     from torch._inductor.utils import IndentedBuffer
 
     csepass = PyExprCSEPass()
-    csepass.count(code_parts)
+    try:
+        csepass.count(code_parts)
 
-    def replace(expr: str) -> tuple[list[str], str]:
-        return csepass.replace(expr)
+        def replace(expr: str) -> tuple[list[str], str]:
+            return csepass.replace(expr)
+    except RecursionError:
+        # If we hit recursion limits during CSE analysis, fall back to a no-op replace function
+        # This can happen with extremely complex guard expressions
+        def replace(expr: str) -> tuple[list[str], str]:
+            return [], expr
 
     # Generate the inner body of the guard function.
     # i.e. if-chain of the guard expressions.
