@@ -106,11 +106,13 @@ public:
         C10_CUDA_CHECK(cudaEventCreate(&ev));
         C10_CUDA_CHECK(cudaEventRecord(ev, current_stream));
         TORCH_WARN("STARTING PUSH");
-        CUcontext current;
-        C10_CUDA_DRIVER_CHECK(cuCtxGetCurrent(&current));
+        CUcontext current = nullptr;
+        uint32_t version;
+        C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuCtxGetCurrent_(&current));
         if (!current) {
           C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuCtxSetCurrent_(context_));
         } else {
+
           C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuCtxPushCurrent_(context_));
         }
         TORCH_WARN("FINISH PUSH");
