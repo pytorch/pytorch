@@ -1018,6 +1018,10 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     Writes to ./speedups.csv
     """
+    if args.auto_dynamic:
+        return auto_dynamic_experiment(
+            args, model_iter_fn, model, example_inputs, **kwargs
+        )
     # if args.dynamic_shapes:
     #     return speedup_experiment_ds(args, model_iter_fn, model, example_inputs)
 
@@ -1177,6 +1181,208 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     )
 
     return msg
+
+
+def generate_varied_inputs(
+    example_inputs, batch_size, variation_factor=0.2, num_variations=3
+):
+    """
+    Generate variations of the example inputs with slightly different shapes.
+
+    Args:
+        example_inputs: The original example inputs
+        batch_size: The original batch size
+        variation_factor: How much to vary the dimensions by (as a percentage)
+        num_variations: Number of input variations to generate
+
+    Returns:
+        A list of input variations
+    """
+    variations = [example_inputs]
+
+    for _ in range(num_variations - 1):
+        # Clone the example inputs to avoid modifying the original
+        inputs_clone = clone_inputs(example_inputs)
+
+        def vary_shape(t):
+            if not isinstance(t, torch.Tensor) or t.ndim == 0:
+                return t
+
+            # Find batch dimension(s) - look for dimensions matching the batch size
+            batch_dims = [i for i, s in enumerate(t.shape) if s == batch_size]
+
+            if not batch_dims:
+                # If no batch dimension found, this tensor might not be batched
+                return t
+
+            new_shape = list(t.shape)
+            for dim in batch_dims:
+                # Vary batch dimension by a random factor around variation_factor
+                # Add 1 to ensure we don't get a zero-size dimension
+                new_size = max(
+                    1,
+                    int(
+                        t.shape[dim]
+                        * (1.0 + variation_factor * (2 * torch.rand(1).item() - 1))
+                    ),
+                )
+                new_shape[dim] = new_size
+
+            # Create a new tensor with the varied shape
+            if t.dtype in (torch.float32, torch.float64):
+                return torch.randn(new_shape, dtype=t.dtype, device=t.device)
+            elif t.dtype == torch.int64:
+                # For integer tensors, just resize and keep the original values where possible
+                result = torch.zeros(new_shape, dtype=t.dtype, device=t.device)
+                # Copy data where it fits
+                for i in range(min(new_shape[0], t.shape[0])):
+                    idx = (slice(i, i + 1),) + tuple(
+                        slice(None) for _ in range(t.ndim - 1)
+                    )
+                    result[idx] = t[idx]
+                return result
+            else:
+                # For other types, just resize
+                return t.new_zeros(new_shape)
+
+        varied_inputs = tree_map(vary_shape, inputs_clone)
+        variations.append(varied_inputs)
+
+    return variations
+
+
+def auto_dynamic_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
+    """
+    Run benchmarks with automatically varied input shapes.
+
+    Instead of using mark_dynamic, this actually creates inputs with varying shapes
+    to simulate real dynamic workloads.
+    """
+    # Get the inputs with varied shapes
+    batch_size = current_batch_size
+    input_variations = generate_varied_inputs(
+        example_inputs,
+        batch_size=batch_size,
+        variation_factor=0.2,  # Vary by ±20%
+        num_variations=3,
+    )
+
+    # Record timings for each shape variation
+    eager_timings = []
+    compiled_timings = []
+    shapes = []
+
+    # Capture the first tensor's shape in each input for reporting
+    for inputs in input_variations:
+        first_tensor = None
+        for item in tree_map_only(torch.Tensor, lambda x: x, inputs):
+            first_tensor = item
+            break
+        if first_tensor is not None:
+            shapes.append(first_tensor.shape)
+
+    print(f"Testing with {len(input_variations)} shape variations: {shapes}")
+
+    # Warmup
+    torch._dynamo.reset()
+    optimized_model_iter_fn = optimize_ctx(model_iter_fn)
+    for _ in range(3):  # Do a few warmup runs
+        model_iter_fn(model, input_variations[0])
+        optimized_model_iter_fn(model, input_variations[0])
+
+    # Benchmark each input variation
+    times = args.iterations_per_run
+    for i, inputs in enumerate(input_variations):
+        print(f"\nRunning with input variation {i + 1}/{len(input_variations)}")
+
+        # Run eager
+        eager_timing = timed(
+            model,
+            model_iter_fn,
+            inputs,
+            times=times,
+            collect_outputs=args.collect_outputs,
+        )
+        eager_timings.append(eager_timing)
+
+        # Run with dynamo
+        compiled_timing = timed(
+            model,
+            optimized_model_iter_fn,
+            inputs,
+            times=times,
+            collect_outputs=args.collect_outputs,
+        )
+        compiled_timings.append(compiled_timing)
+
+        # Report speedup for this variation
+        speedup = eager_timing / compiled_timing
+        print(
+            f"Shape {shapes[i]}: Eager: {eager_timing:.6f}s, Compiled: {compiled_timing:.6f}s, Speedup: {speedup:.2f}x"
+        )
+
+    # Calculate statistics
+    eager_median = np.median(eager_timings)
+    compiled_median = np.median(compiled_timings)
+    speedup = eager_median / compiled_median
+    speedups = [e / c for e, c in zip(eager_timings, compiled_timings)]
+    speedup_min = min(speedups)
+    speedup_max = max(speedups)
+    speedup_std = np.std(speedups)
+
+    # Report overall results
+    output_str = f"Auto-dynamic speedup: {speedup:.2f}x (min: {speedup_min:.2f}x, max: {speedup_max:.2f}x, std: {speedup_std:.2f})"
+    print(output_str)
+
+    # Write CSV output
+    headers = [
+        "dev",
+        "name",
+        "batch_size",
+        "speedup",
+        "min_speedup",
+        "max_speedup",
+        "std_speedup",
+        "abs_latency",
+    ]
+    row = [
+        current_device,
+        current_name,
+        current_batch_size,
+        speedup,
+        speedup_min,
+        speedup_max,
+        speedup_std,
+        compiled_median * 1000,  # convert to ms
+    ]
+
+    # Add any extra fields from kwargs
+    if "tag" in kwargs:
+        headers.insert(3, "tag")
+        row.insert(3, kwargs["tag"])
+
+    # Add compilation metrics if available
+    if "compilation_latency" in kwargs:
+        headers += [
+            "compilation_latency",
+            "compression_ratio",
+        ]
+        row.append(kwargs["compilation_latency"])
+        row.append(kwargs.get("compression_ratio", 0.0))
+
+    # Add dynamo stats if available
+    if "dynamo_stats" in kwargs:
+        for k, v in kwargs["dynamo_stats"].items():
+            headers.append(k)
+            row.append(v)
+
+    write_outputs(
+        output_filename,
+        headers,
+        row,
+    )
+
+    return output_str
 
 
 # WARNING: This code is currently dead
@@ -3052,6 +3258,11 @@ def parse_args(args=None):
         help="Only assume batch dimension is dynamic.  Implies --dynamic-shapes",
     )
     parser.add_argument(
+        "--auto-dynamic",
+        action="store_true",
+        help="Use automatic shape variation during benchmarking instead of marking tensors dynamic",
+    )
+    parser.add_argument(
         "--specialize-int", action="store_true", help="Run with specialize_int=True."
     )
     parser.add_argument(
@@ -3539,12 +3750,14 @@ def run(runner, args, original_dir=None):
     if args.quantization:
         assert args.backend is None
         args.backend = "torchao"
-    if args.dynamic_batch_only:
+    if args.auto_dynamic:
+        # Auto dynamic mode doesn't need to mark tensors dynamic, as it will vary the shapes
+        pass
+    elif args.dynamic_batch_only:
         args.dynamic_shapes = True
         torch._dynamo.config.assume_static_by_default = True
-    if args.dynamic_shapes:
-        if not args.dynamic_batch_only:
-            torch._dynamo.config.assume_static_by_default = False
+    elif args.dynamic_shapes:
+        torch._dynamo.config.assume_static_by_default = False
     if args.compiled_autograd:
         torch._dynamo.config.compiled_autograd = True
     if args.propagate_real_tensors:
@@ -4105,6 +4318,7 @@ def run(runner, args, original_dir=None):
                 args.dynamic_batch_only
                 and batch_size > 1
                 and model_name not in CI_SKIP_DYNAMIC_BATCH_ONLY
+                and not args.auto_dynamic
             ):
                 tree_map_only(torch.Tensor, detect_and_mark_batch, example_inputs)
                 assert marked, f"nothing in example_inputs had a dim with {batch_size}"
