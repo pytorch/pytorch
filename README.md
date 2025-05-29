@@ -502,7 +502,7 @@ To create the PDF:
 ### Previous Versions
 
 Installation instructions and binaries for previous PyTorch versions may be found
-on [our website](https://pytorch.org/previous-versions).
+on [our website](https://pytorch.org/get-started/previous-versions).
 
 
 ## Getting Started

@@ -36,7 +36,7 @@ from typing_extensions import ParamSpec as _ParamSpec
 
 
 if TYPE_CHECKING:
-    from .types import IntLikeType
+    from .types import Device, IntLikeType
 
 
 # multipy/deploy is setting this import before importing torch, this is the most
@@ -357,6 +357,7 @@ def _load_global_deps() -> None:
             "cusolver": "libcusolver.so.*[0-9]",
             "nccl": "libnccl.so.*[0-9]",
             "nvtx": "libnvToolsExt.so.*[0-9]",
+            "nvshmem": "libnvshmem_host.so.*[0-9]",
         }
         # cufiile is only available on cuda 12+
         # TODO: Remove once CUDA 11.8 binaries are deprecated
@@ -977,6 +978,7 @@ __all__.append("sym_sqrt")
 
 
 def sym_ite(b, t, f):
+    """SymInt-aware utility for ternary operator (``t if b else f``.)"""
     if overrides.has_torch_function((b, t, f)):
         return overrides.handle_torch_function(sym_ite, (b, t, f), b, t, f)
     assert isinstance(b, (SymBool, builtins.bool)) and type(t) == type(f)
@@ -1154,9 +1156,7 @@ def get_default_device() -> "torch.device":
         return torch.device("cpu")
 
 
-def set_default_device(
-    device: _Optional[_Union["torch.device", str, builtins.int]],
-) -> None:
+def set_default_device(device: "Device") -> None:
     """Sets the default ``torch.Tensor`` to be allocated on ``device``.  This
     does not affect factory function calls which are called with an explicit
     ``device`` argument.  Factory calls will be performed as if they
@@ -2449,7 +2449,7 @@ def compile(
 
 
 def compile(
-    model: _Optional[_Callable] = None,
+    model: _Optional[_Callable[_InputT, _RetT]] = None,
     *,
     fullgraph: builtins.bool = False,
     dynamic: _Optional[builtins.bool] = None,
@@ -2480,7 +2480,7 @@ def compile(
     function, they will all share the same code cache.
 
     Args:
-       model (Callable): Module/function to optimize
+       model (Callable or None): Module/function to optimize
        fullgraph (bool): If False (default), torch.compile attempts to discover compileable regions
         in the function that it will optimize. If True, then we require that the entire function be
         capturable into a single graph. If this is not possible (that is, if there are graph breaks),
@@ -2597,6 +2597,10 @@ def compile(
     if options and isinstance(options, dict):
         guard_filter_fn = options.pop("guard_filter_fn", None)
 
+    frame_traced_fn = None
+    if options and isinstance(options, dict):
+        frame_traced_fn = options.pop("frame_traced_fn", None)
+
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
     else:
@@ -2608,6 +2612,7 @@ def compile(
         dynamic=dynamic,
         disable=disable,
         guard_filter_fn=guard_filter_fn,
+        frame_traced_fn=frame_traced_fn,
     )(model)  # type: ignore[return-value]
 
 
