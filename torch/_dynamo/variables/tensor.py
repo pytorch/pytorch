@@ -639,7 +639,7 @@ class TensorVariable(VariableTracker):
                     *graph_break_hints.SUPPORTABLE,
                 ],
             )
-        elif name == "uniform_" and 'from' in kwargs:
+        elif name == "uniform_" and "from" in kwargs:
             unimplemented_v2(
                 gb_type="Tensor.uniform_ op called with `from` keyword",
                 context=f"Tensor.{name}({args=}, {kwargs=})",
