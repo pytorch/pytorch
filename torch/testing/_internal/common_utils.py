@@ -892,6 +892,11 @@ def num_profiled_runs(num_runs):
 func_call = torch._C.ScriptFunction.__call__
 meth_call = torch._C.ScriptMethod.__call__
 
+def raise_on_run_directly(file_to_call):
+    raise RuntimeError("This test file is not meant to be run directly, "
+                       f"use:\n\n\tpython {file_to_call} TESTNAME\n\n"
+                       "instead.")
+
 def prof_callable(callable, *args, **kwargs):
     if 'profile_and_replay' in kwargs:
         del kwargs['profile_and_replay']
