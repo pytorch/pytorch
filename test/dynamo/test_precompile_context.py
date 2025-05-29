@@ -91,6 +91,7 @@ class PrecompileContextTests(InductorTestCase):
         result = PrecompileContext.serialize_artifacts_by_key(key)
         assert len(result) == 1
         assert isinstance(result[0], BundledAOTAutogradCacheArtifact)
+        self.assertEqual(result[0].key, key)
 
         self.assertEqual(len(PrecompileContext._new_cache_artifacts), 0)
         result = PrecompileContext.serialize()
