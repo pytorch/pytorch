@@ -17,6 +17,7 @@ from torch.utils.data.distributed import DistributedSampler
 
 T = TypeVar("T")
 
+__all__ = ["ElasticDistributedSampler"]
 
 class ElasticDistributedSampler(DistributedSampler[T]):
     """
