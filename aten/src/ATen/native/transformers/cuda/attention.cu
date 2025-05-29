@@ -1032,7 +1032,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
     final_attention.slice(0, start, end).copy_(attn);
     Tensor final_log_sumexp;
     if (compute_log_sumexp && log_sumexp.numel() > 0) {
-      std::vector<int64_t> lse_sizes = {batch_size};
+      std::vector<int64_t> lse_sizes;
+      lse_sizes.reserve(log_sumexp.dim());
+      lse_sizes.push_back(batch_size);
       for (int i = 1; i < log_sumexp.dim(); i++) {
         lse_sizes.push_back(log_sumexp.size(i));
       }
