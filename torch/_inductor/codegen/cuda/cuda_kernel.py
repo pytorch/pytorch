@@ -8,10 +8,11 @@ from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 
 from sympy import Expr, symbols
 
+import torch._inductor.config as config
 from torch import dtype as torch_dtype
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.scheduler import BaseSchedulerNode
-from torch._inductor.utils import Placeholder
+from torch._inductor.utils import do_bench_using_profiling, Placeholder
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .cutlass_utils import DTYPE_TO_CUTLASS_TYPE
@@ -593,9 +594,10 @@ class CUDATemplateCaller(ChoiceCaller):
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(
-            *args, out=out
-        )  # @TODO: Hack for ensuring that Cutlass Kernel is preferred
+        if config.profile_bandwidth_with_do_bench_using_profiling:
+            algo = self.bmreq.make_run_fn(*args, out=out)
+            return do_bench_using_profiling(algo)
+        return self.bmreq.benchmark(*args, out=out)
 
     def __str__(self) -> str:
         return f"CUDATemplateCaller(source_file={self.bmreq.source_file})"
