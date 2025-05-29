@@ -104,7 +104,11 @@ def build_triton(
 
         # old triton versions have setup.py in the python/ dir,
         # new versions have it in the root dir.
-        triton_setupdir = triton_basedir if (triton_basedir / "setup.py").exists() else triton_pythondir
+        triton_setupdir = (
+            triton_basedir
+            if (triton_basedir / "setup.py").exists()
+            else triton_pythondir
+        )
 
         check_call(
             [sys.executable, "setup.py", "bdist_wheel"], cwd=triton_setupdir, env=env
