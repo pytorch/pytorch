@@ -24,6 +24,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/empty_strided.h>
 #include <ATen/ops/_flash_attention_backward.h>
 #include <ATen/ops/_flash_attention_backward_native.h>
 #include <ATen/ops/_efficient_attention_backward.h>
@@ -905,17 +906,34 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
   }
-  auto grad_out = grad_out_.transpose(1, 2);
-  auto out_t = out.transpose(1, 2);
-  auto q_t = query.transpose(1, 2);
-  auto k_t = key.transpose(1, 2);
-  auto v_t = value.transpose(1, 2);
+  constexpr int64_t MAX_BATCH_SIZE = (1LL << 16) - 1;
+  int64_t batch_size = query.size(0);
+
+  if (batch_size > MAX_BATCH_SIZE) {
+    TORCH_CHECK(dropout_p == 0.0,
+                "Efficient attention backward cannot handle dropout when "
+                "the batch size exceeds (", MAX_BATCH_SIZE, ").");
+  }
+
+  auto process_chunk = [&](const Tensor& grad_out_chunk,
+                          const Tensor& query_chunk,
+                          const Tensor& key_chunk,
+                          const Tensor& value_chunk,
+                          const std::optional<Tensor>& attn_bias_chunk,
+                          const Tensor& out_chunk,
+                          const Tensor& logsumexp_chunk)
+      -> std::tuple<Tensor, Tensor, Tensor, Tensor> {
+  auto grad_out = grad_out_chunk.transpose(1, 2);
+  auto out_t = out_chunk.transpose(1, 2);
+  auto q_t = query_chunk.transpose(1, 2);
+  auto k_t = key_chunk.transpose(1, 2);
+  auto v_t = value_chunk.transpose(1, 2);
 
   // This is needed because SaveVariable automatically converts
   // std::optional to undefined tensor
   std::optional<Tensor> kernel_bias;
-  if (attn_bias.defined()) {
-    kernel_bias = attn_bias;
+  if (attn_bias_chunk.has_value() && attn_bias_chunk.value().defined()) {
+    kernel_bias = attn_bias_chunk.value();
   }
   // Will add with signauter changes for dropout and bias
   // We are only handling Dense inputs, but this should be passed
@@ -938,7 +956,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
           std::nullopt,
           max_seqlen_q,
           max_seqlen_k,
-          logsumexp,
+          logsumexp_chunk,
           dropout_p,
           philox_seed,
           philox_offset,
@@ -948,6 +966,110 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
           std::nullopt);  // num_split_keys
   return std::make_tuple(
       grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2), grad_bias);
+  };
+
+  // process in chunks if batch size exceeds maximum
+  if (batch_size > MAX_BATCH_SIZE) {
+    Tensor final_grad_q, final_grad_k, final_grad_v, final_grad_bias;
+
+    int64_t start = 0;
+    int64_t end = std::min(start + MAX_BATCH_SIZE, batch_size);
+
+    Tensor grad_out_chunk = grad_out_.slice(0, start, end);
+    Tensor query_chunk = query.slice(0, start, end);
+    Tensor key_chunk = key.slice(0, start, end);
+    Tensor value_chunk = value.slice(0, start, end);
+    std::optional<Tensor> attn_bias_chunk;
+    if (attn_bias.defined()) {
+      attn_bias_chunk = attn_bias.slice(0, start, end);
+    }
+    Tensor out_chunk = out.slice(0, start, end);
+    Tensor logsumexp_chunk = logsumexp.numel() > 0 ? logsumexp.slice(0, start, end) : logsumexp;
+
+    auto [grad_q, grad_k, grad_v, grad_bias] =
+        process_chunk(grad_out_chunk, query_chunk, key_chunk, value_chunk,
+                    attn_bias_chunk, out_chunk, logsumexp_chunk);
+
+    auto create_strided_output = [batch_size](const Tensor& chunk_tensor) -> Tensor {
+      if (!chunk_tensor.defined()) {
+        return Tensor{};
+      }
+      int dim = chunk_tensor.dim();
+      std::vector<int64_t> sizes;
+      sizes.reserve(dim);
+      sizes.push_back(batch_size);
+      for (int i = 1; i < dim; i++) {
+        sizes.push_back(chunk_tensor.size(i));
+      }
+      return at::empty_strided(sizes, chunk_tensor.strides(), chunk_tensor.options());
+    };
+
+    if (grad_input_mask[0]) {
+      final_grad_q = create_strided_output(grad_q);
+      final_grad_q.slice(0, start, end).copy_(grad_q);
+    }
+
+    if (grad_input_mask[1]) {
+      final_grad_k = create_strided_output(grad_k);
+      final_grad_k.slice(0, start, end).copy_(grad_k);
+    }
+
+    if (grad_input_mask[2]) {
+      final_grad_v = create_strided_output(grad_v);
+      final_grad_v.slice(0, start, end).copy_(grad_v);
+    }
+
+    if (grad_input_mask[3] && grad_bias.defined()) {
+      final_grad_bias = grad_bias.clone();
+    }
+
+    for (start = end; start < batch_size; start += MAX_BATCH_SIZE) {
+      end = std::min(start + MAX_BATCH_SIZE, batch_size);
+
+      grad_out_chunk = grad_out_.slice(0, start, end);
+      query_chunk = query.slice(0, start, end);
+      key_chunk = key.slice(0, start, end);
+      value_chunk = value.slice(0, start, end);
+      if (attn_bias.defined()) {
+        attn_bias_chunk = attn_bias.slice(0, start, end);
+      } else {
+        attn_bias_chunk.reset();
+      }
+      out_chunk = out.slice(0, start, end);
+      logsumexp_chunk = logsumexp.numel() > 0 ? logsumexp.slice(0, start, end) : logsumexp;
+
+      auto [chunk_grad_q, chunk_grad_k, chunk_grad_v, chunk_grad_bias] =
+          process_chunk(grad_out_chunk, query_chunk, key_chunk, value_chunk,
+                      attn_bias_chunk, out_chunk, logsumexp_chunk);
+
+      if (grad_input_mask[0] && chunk_grad_q.defined()) {
+        final_grad_q.slice(0, start, end).copy_(chunk_grad_q);
+      }
+      if (grad_input_mask[1] && chunk_grad_k.defined()) {
+        final_grad_k.slice(0, start, end).copy_(chunk_grad_k);
+      }
+      if (grad_input_mask[2] && chunk_grad_v.defined()) {
+        final_grad_v.slice(0, start, end).copy_(chunk_grad_v);
+      }
+      if (grad_input_mask[3] && chunk_grad_bias.defined()) {
+        final_grad_bias.add_(chunk_grad_bias);
+      }
+    }
+
+    return std::make_tuple(
+        std::move(final_grad_q),
+        std::move(final_grad_k),
+        std::move(final_grad_v),
+        std::move(final_grad_bias));
+  }
+  // when batch size is within allowed size, no chunking needed
+  else {
+    std::optional<Tensor> attn_bias_opt;
+    if (attn_bias.defined()) {
+      attn_bias_opt = attn_bias;
+    }
+    return process_chunk(grad_out_, query, key, value, attn_bias_opt, out, logsumexp);
+  }
 }
 
 } // namespace at::native
