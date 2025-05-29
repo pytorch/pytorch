@@ -13,7 +13,10 @@ from torch._guards import detect_fake_mode
 from torch._higher_order_ops.schema import HopSchema
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
-from torch._subclasses.functional_tensor import disable_functional_mode
+from torch._subclasses.functional_tensor import (
+    disable_functional_mode,
+    FunctionalTensor,
+)
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
     disable_proxy_modes_tracing,
@@ -420,7 +423,6 @@ def unique_graph_name_with_root(
 
 def _from_fun(t):
     from torch._functorch.aot_autograd import from_fun
-    from torch._subclasses.functional_tensor import FunctionalTensor
 
     if isinstance(t, torch.Tensor):
         if t.dtype != torch.bool:
@@ -762,7 +764,10 @@ def check_input_alias_and_mutation(
 
 def check_input_alias_and_mutation_return_ouputs(
     gm: torch.fx.GraphModule,
-    fake_args: Union[list[FakeTensor], tuple[FakeTensor, ...]],
+    fake_args: Union[
+        Union[list[FakeTensor], list[FunctionalTensor]],
+        tuple[Union[FakeTensor, FunctionalTensor], ...],
+    ],
 ) -> tuple[
     dict[int, int],
     dict[int, int],
@@ -802,7 +807,10 @@ def check_input_alias_and_mutation_return_ouputs(
 
             prev_fake_mode = None
             for arg in fake_args:
-                if isinstance(arg, torch.Tensor):
+                if isinstance(arg, FunctionalTensor):
+                    arg = arg.from_functional()
+                    prev_fake_mode = arg.fake_mode
+                elif isinstance(arg, torch.Tensor):
                     assert isinstance(arg, FakeTensor)
                     prev_fake_mode = arg.fake_mode
             assert prev_fake_mode is not None
