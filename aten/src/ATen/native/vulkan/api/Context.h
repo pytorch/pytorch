@@ -15,6 +15,8 @@
 #include <ATen/native/vulkan/api/Runtime.h>
 #include <ATen/native/vulkan/api/Shader.h>
 #include <ATen/native/vulkan/api/Utils.h>
+#include <c10/macros/Macros.h>
+#include <c10/util/Enumerate.h>
 
 namespace at {
 namespace native {
@@ -37,7 +39,7 @@ struct ContextConfig final {
 // to be if we were to make it explicit to the user.
 //
 
-class Context final {
+class TORCH_API Context final {
  public:
   explicit Context(size_t adapter_i, const ContextConfig&);
 
@@ -202,7 +204,7 @@ class Context final {
   void flush();
 };
 
-class UniformParamsBuffer final {
+class TORCH_API UniformParamsBuffer final {
  private:
   Context* context_p_;
   size_t nbytes_;
@@ -299,11 +301,11 @@ class StorageBuffer final {
   }
 };
 
-bool available();
+TORCH_API bool available();
 
 // The global runtime is retrieved using this function, where it is declared as
 // a static local variable.
-Context* context();
+TORCH_API Context* context();
 
 namespace detail {
 
