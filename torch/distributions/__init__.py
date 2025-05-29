@@ -31,11 +31,13 @@ parameters, we only need :meth:`~torch.distributions.Distribution.sample` and
 
 .. math::
 
-    \Delta\theta  = \alpha r \frac{\partial\log p(a|\pi^\theta(s))}{\partial\theta}
+    \Delta \theta = \alpha r \nabla_{\theta} \log \pi_{\theta}(a \mid s)
 
 where :math:`\theta` are the parameters, :math:`\alpha` is the learning rate,
-:math:`r` is the reward and :math:`p(a|\pi^\theta(s))` is the probability of
-taking action :math:`a` in state :math:`s` given policy :math:`\pi^\theta`.
+:math:`r` is the reward and :math:`\pi_{\theta}(a \mid s)` is the probability of
+taking action :math:`a` in state :math:`s` given the policy parameters :math:`\theta`.
+To reduce the variance in gradient estimation, we can incorporate a baseline, for example,
+using :math:`r - b` instead of :math:`r`, where :math:`b` is the baseline value.
 
 In practice we would sample an action from the output of a network, apply this
 action in an environment, and then use ``log_prob`` to construct an equivalent
