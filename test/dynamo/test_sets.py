@@ -5,10 +5,28 @@
 
 import torch
 import torch._dynamo.test_case
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import CompileCounter
 
 
 class SetGuardsSet(torch._dynamo.test_case.TestCase):
+    def test_set_with_tensor(self):
+        s = {
+            torch._C._set_grad_enabled,
+            torch.randn(2),
+            torch.amp._exit_autocast,
+        }
+
+        def fn(x, s):
+            if torch.amp._exit_autocast in s:
+                return x.sin()
+            return x.cos()
+
+        x = torch.randn(2)
+
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, s)
+
     def test_set_recompile_on_key_pop(self):
         s = {
             torch._C._set_grad_enabled,
