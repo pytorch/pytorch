@@ -122,17 +122,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
     def hash_key(self) -> str:
         return "-".join(
             [
-                self.name,
-                *[
-                    str(arg.shape)
-                    for arg in self.example_inputs
-                    if isinstance(arg, torch.Tensor)
-                ],
-                *[
-                    str(arg.stride())
-                    for arg in self.example_inputs
-                    if isinstance(arg, torch.Tensor)
-                ],
+                self.name.rsplit("_", 1)[0],
+                *[str(inp.get_size()) for inp in self.input_nodes],
+                *[str(inp.get_stride()) for inp in self.input_nodes],
                 str(self.gm.graph),
             ]
         )
