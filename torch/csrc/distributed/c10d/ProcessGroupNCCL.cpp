@@ -1102,9 +1102,12 @@ bool ProcessGroupNCCL::useNonblocking() {
     useNonblocking_ = nbEnv;
   }
   // 3rd priority: automatically use nonblocking if we are in eager init mode
-  else if (getBoundDeviceId()) {
-    useNonblocking_ = true;
-  }
+  // Note: this automatic selection is disabled in torch 2.7.1 to work around a
+  // hang in NCCL 2.26 in non-blocking mode. We can revisit if NCCL fixes the
+  // bug. See https://github.com/pytorch/pytorch/issues/153960
+  // else if (getBoundDeviceId()) {
+  //   useNonblocking_ = true;
+  // }
   // 4th priority: otherwise, nonblocking = false to preserve old behavior
   else {
     useNonblocking_ = false;
@@ -1183,8 +1186,7 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
   // We must ensure we're listening for allocator trace events in order to
   // register future segments allocated in this pool (this call is idempotent).
   attachAllocatorHooks();
-  auto ctx = c10::cuda::MemPoolContext(pool);
-  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(pool->id());
   for (const auto& segmentInfo : snapshot.segments) {
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == pool->device(),
@@ -1218,8 +1220,7 @@ void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
     auto iter = ncclCommMemPoolMap.find(ncclComm);
     iter->second.erase(pool->id());
   }
-  auto ctx = c10::cuda::MemPoolContext(pool);
-  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(pool->id());
   for (const auto& segmentInfo : snapshot.segments) {
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == pool->device(),
@@ -5569,9 +5570,12 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
   }
 
   // Allocate tensor under this MemPool's context
-  auto ctx = c10::cuda::MemPoolContext(memPool_.get());
+  auto tid = std::this_thread::get_id();
   c10::cuda::CUDACachingAllocator::beginAllocateToPool(
-      memPool_->device(), memPool_->id(), [](cudaStream_t) { return true; });
+      memPool_->device(), memPool_->id(), [=](cudaStream_t) {
+        auto current_tid = std::this_thread::get_id();
+        return current_tid == tid;
+      });
   at::Tensor tensor = at::empty({size}, options);
   c10::cuda::CUDACachingAllocator::endAllocateToPool(
       memPool_->device(), memPool_->id());

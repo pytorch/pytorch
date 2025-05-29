@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 # cmake_policy(SET CMP0022 NEW) cmake_policy(SET CMP0023 NEW)
 
 # Use compiler ID "AppleClang" instead of "Clang" for XCode. Not setting this
@@ -6,6 +6,7 @@ cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 # one is detected as "AppleClang".
 cmake_policy(SET CMP0010 NEW)
 cmake_policy(SET CMP0025 NEW)
+cmake_policy(SET CMP0126 OLD)
 
 # Enables CMake to set LTO on compilers other than Intel.
 cmake_policy(SET CMP0069 NEW)
@@ -259,6 +260,8 @@ option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(USE_MPS "Use MPS for macOS build" ON "MPS_FOUND" OFF)
 cmake_dependent_option(USE_NCCL "Use NCCL" ON
                        "USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
+cmake_dependent_option(USE_XCCL "Use XCCL" OFF
+                       "USE_XPU;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_RCCL "Use RCCL" ON USE_NCCL OFF)
 cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
 cmake_dependent_option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF "USE_NCCL"
@@ -338,6 +341,8 @@ cmake_dependent_option(
     USE_C10D_GLOO "USE C10D GLOO" ON "USE_DISTRIBUTED;USE_GLOO" OFF)
 cmake_dependent_option(
     USE_C10D_NCCL "USE C10D NCCL" ON "USE_DISTRIBUTED;USE_NCCL" OFF)
+cmake_dependent_option(
+    USE_C10D_XCCL "USE C10D XCCL" ON "USE_DISTRIBUTED;USE_XCCL" OFF)
 cmake_dependent_option(
     USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI" OFF)
 cmake_dependent_option(
@@ -981,12 +986,11 @@ endif()
 include(cmake/public/utils.cmake)
 if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -O2 -fPIC")
-  if(NOT USE_XPU)
-    # This prevents use of `c10::optional`, `c10::nullopt` etc within the codebase
-    string(APPEND CMAKE_CXX_FLAGS " -DC10_NODEPRECATED")
-    string(APPEND CMAKE_CUDA_FLAGS " -DC10_NODEPRECATED")
-    string(APPEND CMAKE_OBJCXX_FLAGS " -DC10_NODEPRECATED")
-  endif()
+
+  # This prevents use of `c10::optional`, `c10::nullopt` etc within the codebase
+  string(APPEND CMAKE_CXX_FLAGS " -DC10_NODEPRECATED")
+  string(APPEND CMAKE_CUDA_FLAGS " -DC10_NODEPRECATED")
+  string(APPEND CMAKE_OBJCXX_FLAGS " -DC10_NODEPRECATED")
 
   # Eigen fails to build with some versions, so convert this to a warning
   # Details at http://eigen.tuxfamily.org/bz/show_bug.cgi?id=1459

@@ -18,7 +18,6 @@ These classes work together to track tensor operations and properties during Dyn
 """
 
 import functools
-import inspect
 import logging
 import operator
 import textwrap
@@ -124,6 +123,13 @@ def is_bound_tensor_method(value):
         and isinstance(value.__self__, torch.Tensor)
         and getattr(value.__self__, value.__name__, None)
     )
+
+
+# instead of using inspect.getattr_static, we directly lookup the appropriate
+# dicts. It is necessary to keep the torch._C.TensorBase first in the or
+# operation, because the second arg takes priority in or operation when there
+# are common keys.
+all_tensor_attrs = torch._C.TensorBase.__dict__ | torch.Tensor.__dict__
 
 
 class TensorVariable(VariableTracker):
@@ -473,9 +479,8 @@ class TensorVariable(VariableTracker):
                 from .builder import wrap_fx_proxy
                 from .misc import GetAttrVariable
 
-                try:
-                    static_attr = inspect.getattr_static(torch.Tensor, name)
-                except AttributeError:
+                static_attr = all_tensor_attrs.get(name, None)
+                if static_attr is None:
                     return None
 
                 # Make sure this is an attribute, not a method.
@@ -592,12 +597,8 @@ class TensorVariable(VariableTracker):
         # Only override builtin tensor methods
         # The user can manually add override handling
         # with a decorator for other methods (e.g. a dispatch subclass with other methods)
-        is_base_tensor_method = False
-        try:
-            inspect.getattr_static(torch.Tensor, name)
-            is_base_tensor_method = True
-        except AttributeError:
-            is_base_tensor_method = False
+        static_attr = all_tensor_attrs.get(name, None)
+        is_base_tensor_method = static_attr is not None
 
         if (
             can_dispatch_torch_function(tx, tuple([self] + list(args)), kwargs)
@@ -606,7 +607,7 @@ class TensorVariable(VariableTracker):
             if self.source:
                 func_var = VariableBuilder(
                     tx, AttrSource(AttrSource(self.source, "__class__"), name)
-                )(inspect.getattr_static(torch.Tensor, name))
+                )(static_attr)
             else:
                 func_var = SourcelessBuilder.create(tx, getattr(torch.Tensor, name))
 
