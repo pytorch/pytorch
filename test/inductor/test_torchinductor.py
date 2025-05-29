@@ -13064,6 +13064,17 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ms = do_bench(lambda: opt_f(x))
             print(f"{ms=:.3f}")
 
+    def test_slice_overflow(self):
+        # https://github.com/pytorch/pytorch/issues/147071
+        def f(input):
+            var = torch.slice_copy(
+                input, dim=0, start=449, end=None, step=9223372036854775807
+            )
+            return torch.reciprocal(var)
+
+        input = torch.randn((875,))
+        self.assertEqual(torch.compile(f)(input), f(input))
+
     @torch._inductor.config.patch("graph_partition", True)
     def test_graph_partition_no_inputs(self):
         def foo():
