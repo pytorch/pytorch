@@ -60,7 +60,6 @@ from .mm_common import (
     persistent_mm_options,
     scale_mm_epilogue,
     scaled_mm_options,
-    should_fallback_to_aten,
 )
 
 
@@ -783,8 +782,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     for k in inductor_config.external_matmul:
         choices.append(lazy_register_extern_choice(k).bind((mat1, mat2), layout))
-    if should_fallback_to_aten(choices):
-        return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
     return autotune_select_algorithm(name, choices, [mat1, mat2], layout)
 
@@ -834,15 +831,11 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
                 **mm_options(config, m, n, k, layout),
             )
 
-    if should_fallback_to_aten(choices):
-        return aten__int_mm.bind((mat1, mat2), layout).output_node()
-
     return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
 
 
 @register_lowering(aten.addmm, type_promotion_kind=None)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
-    ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
     device_type = ir.get_device_type(mat1)
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     static_shape, is_nonzero = _is_static_problem(layout)
@@ -972,30 +965,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             beta=beta,
             has_bias=True,
         )
-
-    if should_fallback_to_aten(choices):
-        choices.append(
-            aten_addmm.bind(
-                (inp_expanded, mat1, mat2),
-                layout,
-                ordered_kwargs_for_cpp_kernel,
-                alpha=alpha,
-                beta=beta,
-            )
-        )
-
-        if (
-            inp_expanded.get_stride()[0] == 0
-            and inp_expanded.get_device().type == "cuda"
-            and inductor_config.triton.autotune_cublasLt
-        ):
-            # unexpand inp to make sure fused addmm from cublasLt is used
-            choices.insert(
-                0,
-                aten_bias_addmm.bind(
-                    (inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta
-                ),
-            )
 
     return autotune_select_algorithm(
         "addmm", choices, [inp_expanded, mat1, mat2], layout
@@ -1197,9 +1166,6 @@ def tuned_scaled_mm(
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, input_nodes)
-
-    if should_fallback_to_aten(choices):
-        return aten_choice.output_node()
 
     return autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
 
