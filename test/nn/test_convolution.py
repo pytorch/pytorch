@@ -2132,9 +2132,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         arg_str="N",
         arg_values=[
             subtest(arg_values=(2), name="ConvTranspose2d"),
-            subtest(
-                arg_values=(3), name="ConvTranspose3d"
-            ),
+            subtest(arg_values=(3), name="ConvTranspose3d"),
         ],
     )
     def test_conv_transpose_with_output_size_and_no_batch_dim(self, device, N):
