@@ -32,6 +32,8 @@ from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     hint_int,
     is_symbol_binding_fx_node,
+    statically_known_false,
+    statically_known_true,
 )
 from torch.fx.passes import graph_drawer
 from torch.utils._ordered_set import OrderedSet
@@ -301,7 +303,7 @@ def _remove_by_name(saved_values: list[fx.Node], name: str):
 
 
 def find_first_sym_node(
-    fwd_module_outputs: Union[list[fx.Node], tuple[fx.Node]]
+    fwd_module_outputs: Union[list[fx.Node], tuple[fx.Node]],
 ) -> int:
     idx = len(fwd_module_outputs)
     for i in range(len(fwd_module_outputs) - 1, -1, -1):
@@ -488,13 +490,26 @@ def should_quantize(node: torch.fx.Node) -> bool:
     allowed_dtypes = get_allowed_dtypes()
     if not is_node_meta_valid(node) or node.meta["val"].dtype not in allowed_dtypes:
         return False
-
-    # calculate the size of the node
-    size_in_mb = calculate_tensor_size(node.meta["val"])
-
-    return size_in_mb >= torch._inductor.config.post_grad_fusion_options[
+    size_threshold = torch._inductor.config.post_grad_fusion_options[
         "activation_quantization_aten_pass"
     ].get("size_in_mb", 100)
+    # calculate the size of the node
+    size_in_mb = calculate_tensor_size(node.meta["val"])
+    if not torch._inductor.config.post_grad_fusion_options[
+        "activation_quantization_aten_pass"
+    ].get("skip_dynamo_guards", False):
+        return size_in_mb >= size_threshold
+    else:
+        # case 1: we alway quantize tensors with dynamic shapes
+        if torch._inductor.config.post_grad_fusion_options[
+            "activation_quantization_aten_pass"
+        ].get("quantize_dynamic_shape", False):
+            return statically_known_true(
+                size_in_mb >= size_threshold
+            ) or not statically_known_false(size_in_mb >= size_threshold)
+        else:
+            # case 2: we alway not quantize tensors with dynamic shapes
+            return statically_known_true(size_in_mb >= size_threshold)
 
 
 def get_quant_type() -> torch.dtype:
@@ -1894,16 +1909,16 @@ def visualize_min_cut_graph(nx_graph):
     import pydot
 
     dot_format = nx.nx_pydot.to_pydot(nx_graph).to_string()
-    dot_graph = pydot.graph_from_dot_data(dot_format)[0]
+    dot_graph = pydot.graph_from_dot_data(dot_format)[0]  # type: ignore[index]
     for edge in dot_graph.get_edges():
         weight = nx_graph[edge.get_source()][edge.get_destination()]["capacity"]
         # Set edge label to weight
-        edge.set_label(str(weight))
+        edge.set_label(str(weight))  # type: ignore[union-attr]
         # Color edges with weight 'inf' as red
         if weight == float("inf"):
-            edge.set_color("red")
+            edge.set_color("red")  # type: ignore[union-attr]
     log.info("Visualizing the failed graph to min_cut_failed.svg")
-    dot_graph.write_svg("min_cut_failed.svg")
+    dot_graph.write_svg("min_cut_failed.svg")  # type: ignore[union-attr]
 
 
 def get_default_op_list() -> OpTypes:
