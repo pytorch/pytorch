@@ -238,16 +238,20 @@ class _DependentProperty(property, _Dependent, Generic[T, R]):
         )
 
 
-class _IndependentConstraint(Constraint):
+Con = TypeVar("Con", bound=Constraint)
+
+
+class _IndependentConstraint(Constraint, Generic[Con]):
     """
     Wraps a constraint by aggregating over ``reinterpreted_batch_ndims``-many
     dims in :meth:`check`, so that an event is valid only if all its
     independent entries are valid.
     """
 
-    def __init__(
-        self, base_constraint: Constraint, reinterpreted_batch_ndims: int
-    ) -> None:
+    base_constraint: Con
+    reinterpreted_batch_ndims: int
+
+    def __init__(self, base_constraint: Con, reinterpreted_batch_ndims: int) -> None:
         assert isinstance(base_constraint, Constraint)
         assert isinstance(reinterpreted_batch_ndims, int)
         assert reinterpreted_batch_ndims >= 0
@@ -280,7 +284,7 @@ class _IndependentConstraint(Constraint):
         return f"{self.__class__.__name__[1:]}({repr(self.base_constraint)}, {self.reinterpreted_batch_ndims})"
 
 
-class MixtureSameFamilyConstraint(Constraint):
+class MixtureSameFamilyConstraint(Constraint, Generic[Con]):
     """
     Constraint for the :class:`~torch.distribution.MixtureSameFamily`
     distribution that adds back the rightmost batch dimension before
@@ -293,7 +297,9 @@ class MixtureSameFamilyConstraint(Constraint):
             the :class:`~torch.distribution.MixtureSameFamily` distribution.
     """
 
-    def __init__(self, base_constraint: Constraint) -> None:
+    base_constraint: Con
+
+    def __init__(self, base_constraint: Con) -> None:
         assert isinstance(base_constraint, Constraint)
         self.base_constraint = base_constraint
         super().__init__()
@@ -786,14 +792,14 @@ stack = _Stack
 # Type aliases.
 Dependent: TypeAlias = _Dependent
 DependentProperty: TypeAlias = _DependentProperty
-Independent: TypeAlias = _IndependentConstraint
+Independent: TypeAlias = _IndependentConstraint[Con]
 Boolean: TypeAlias = _Boolean
 OneHot: TypeAlias = _OneHot
 NonNegativeInteger: TypeAlias = _IntegerGreaterThan
 PositiveInteger: TypeAlias = _IntegerGreaterThan
 IntegerInterval: TypeAlias = _IntegerInterval
 Real: TypeAlias = _Real
-RealVector: TypeAlias = independent
+RealVector: TypeAlias = _IndependentConstraint[_Real]
 Positive: TypeAlias = _GreaterThan
 NonNegative: TypeAlias = _GreaterThanEq
 GreaterThan: TypeAlias = _GreaterThan
