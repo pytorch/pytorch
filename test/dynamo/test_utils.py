@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import dataclasses
+import os
 import pprint
 import sys
 from unittest import mock
@@ -141,6 +142,72 @@ class TestUtils(TestCase):
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
             self.assertEqual(compilation_events[-1].num_graph_breaks, 2)
 
+    def test_frame_traced_hook(self):
+        try:
+            from .utils import add, break_it
+        except ImportError:
+            from utils import add, break_it
+
+        traced_code_lists = []
+
+        def get_traced_code(s):
+            nonlocal traced_code_lists
+            traced_code_lists.append(s)
+
+        def get_filenames(traced_code_lists):
+            return [
+                [code.co_filename for code in code_list]
+                for code_list in traced_code_lists
+            ]
+
+        utils_path = os.path.join(os.path.dirname(__file__), "utils.py")
+
+        # === no inlining ===
+        @torch.compile(options={"frame_traced_fn": get_traced_code})
+        def fn(x):
+            return x * 2
+
+        x = torch.randn(3)
+        traced_code_lists = []
+        fn(x)
+        # expect hook to be called once with this file
+        self.assertEqual(get_filenames(traced_code_lists), [[__file__]])
+
+        # === successful inlining ===
+        @torch.compile(options={"frame_traced_fn": get_traced_code})
+        def fn(x):
+            return add(x) * 2
+
+        x = torch.randn(3)
+        traced_code_lists = []
+        fn(x)
+        utils_path = os.path.join(os.path.dirname(__file__), "utils.py")
+        # expect hook to be called once with both this file and file of inlined func
+        self.assertEqual(get_filenames(traced_code_lists), [[utils_path, __file__]])
+
+        # === graph break occurs during inlining ===
+        @torch.compile(options={"frame_traced_fn": get_traced_code})
+        def fn(x):
+            y = break_it(x)
+            return y * 2
+
+        x = torch.randn(3)
+        traced_code_lists = []
+        fn(x)
+        # expect hook to be called twice; once for this file one for file of inlined func
+        self.assertEqual(get_filenames(traced_code_lists), [[__file__], [utils_path]])
+
+        # === empty graph ===
+        @torch.compile(options={"frame_traced_fn": get_traced_code})
+        def fn(x):
+            return x
+
+        x = torch.randn(3)
+        traced_code_lists = []
+        fn(x)
+        # hook is not expected to be called at all for an empty graph
+        self.assertEqual(traced_code_lists, [])
+
 
 class TestModel(torch.nn.Module):
     def __init__(self):
@@ -174,6 +241,7 @@ class TestDynamoTimed(TestCase):
 
         add(torch.rand([10]), torch.rand([10]))
         utils.reset_frame_count()
+        torch._logging._internal.structured_logging_overhead.clear()
 
     @dynamo_config.patch(
         {
@@ -229,14 +297,22 @@ class TestDynamoTimed(TestCase):
  '_recursive_joint_graph_passes': [0.0],
  '_recursive_post_grad_passes': [0.0, 0.0],
  '_recursive_pre_grad_passes': [0.0],
+ 'additional_fake_tensor_prop': [0.0, 0.0],
+ 'aot_collect_metadata': [0.0],
+ 'aot_trace_joint_graph': [0.0],
  'async_compile.wait': [0.0, 0.0],
  'backward._backward_impl': [0.0],
+ 'build_guards': [0.0],
+ 'bytecode_tracing': [0.0],
+ 'compile_attempt_0': [0.0],
  'compile_file': [0.0, 0.0],
  'compile_fx.<locals>.bw_compiler': [0.0],
  'compile_fx.<locals>.fw_compiler_base': [0.0],
  'compile_fx_inner': [0.0, 0.0],
  'create_aot_dispatcher_function': [0.0],
- 'gc': [0.0]}""",  # noqa: B950
+ 'fx_codegen_and_compile': [0.0, 0.0],
+ 'gc': [0.0],
+ 'min_cut_rematerialization_partition': [0.0]}""",  # noqa: B950
         )
 
         # Now validate utils.calculate_time_spent(). Formatting the return
@@ -280,6 +356,9 @@ class TestDynamoTimed(TestCase):
         raw = dataclasses.asdict(compilation_events[0])
         del raw["feature_usage"]
         del raw["ir_count"]
+        del raw["param_numel"]
+        del raw["param_bytes"]
+        del raw["param_count"]
         # guard_latency_us is not deterministic
         del raw["guard_latency_us"]
         self.assertExpectedInline(
@@ -299,7 +378,6 @@ class TestDynamoTimed(TestCase):
  'compliant_custom_ops': set(),
  'config_inline_inbuilt_nn_modules': False,
  'config_suppress_errors': False,
- 'cuda_synchronize_time_us': None,
  'cuda_version': None,
  'cudagraph_skip_reason': None,
  'distributed_ephemeral_timeout_us': None,
@@ -319,7 +397,7 @@ class TestDynamoTimed(TestCase):
  'graph_input_count': 1,
  'graph_node_count': 3,
  'graph_op_count': 1,
- 'guard_count': 8,
+ 'guard_count': 9,
  'has_guarded_code': True,
  'inductor_code_gen_cumulative_compile_time_us': 0,
  'inductor_compile_time_s': 0.0,
@@ -371,6 +449,9 @@ class TestDynamoTimed(TestCase):
         del raw["feature_usage"]
         del raw["ir_count"]
         del raw["guard_latency_us"]
+        del raw["param_numel"]
+        del raw["param_bytes"]
+        del raw["param_count"]
         self.assertExpectedInline(
             pprint.pformat(raw),
             """\
@@ -388,7 +469,6 @@ class TestDynamoTimed(TestCase):
  'compliant_custom_ops': None,
  'config_inline_inbuilt_nn_modules': None,
  'config_suppress_errors': None,
- 'cuda_synchronize_time_us': None,
  'cuda_version': None,
  'cudagraph_skip_reason': None,
  'distributed_ephemeral_timeout_us': None,
@@ -468,7 +548,7 @@ class TestDynamoTimed(TestCase):
             (3, 9): (10, 6),
             (3, 10): (10, 6),
             (3, 11): (10, 6),
-            (3, 12): (10, 6),
+            (3, 12): (11, 7),
             (3, 13): (11, 7),
         }[version]
 
@@ -492,6 +572,110 @@ class TestDynamoTimed(TestCase):
             torch.compile(test2)(torch.randn(10, 10))
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].ir_count, second)
+
+    @dynamo_config.patch({"log_compilation_metrics": True})
+    @inductor_config.patch({"force_disable_caches": True})
+    def test_dynamic_shape_feature_use(self):
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+
+            @torch.compile()
+            def f(x):
+                return x * x
+
+            f(torch.randn(4))
+            f(torch.randn(3))
+            compilation_events = [
+                arg[0][0].feature_usage for arg in log_event.call_args_list
+            ]
+        self.assertIn(
+            ("dynamo.automatic_dynamic_shapes", True), compilation_events[1].items()
+        )
+
+        compilation_events = []
+        with dynamo_config.patch({"automatic_dynamic_shapes": False}), mock.patch(
+            "torch._dynamo.utils.log_compilation_event"
+        ) as log_event:
+
+            @torch.compile()
+            def f(x):
+                return x * x
+
+            f(torch.randn(4))
+            f(torch.randn(3))
+            compilation_events = [
+                arg[0][0].feature_usage for arg in log_event.call_args_list
+            ]
+        self.assertIn(
+            ("dynamo.automatic_dynamic_shapes", False), compilation_events[1].items()
+        )
+
+    @dynamo_config.patch({"log_compilation_metrics": True})
+    def test_num_params(self):
+        import torch.nn as nn
+        import torch.nn.functional as F
+
+        class ModelSimple(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv1 = nn.Conv2d(1, 20, 5)
+
+            def forward(self, x):
+                return F.relu(self.conv1(x))
+
+        self.assertEqual([x.numel() for x in ModelSimple().parameters()], [500, 20])
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            m = ModelSimple()
+            torch.compile(m)(torch.randn(1, 10, 10))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        self.assertEqual(compilation_events[0].param_numel, 520)
+        self.assertEqual(compilation_events[0].param_bytes, 4 * 520)
+        self.assertEqual(compilation_events[0].param_count, 2)
+
+        class ModelWrapped(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.m1 = ModelSimple()
+                self.m2 = ModelSimple()
+
+            def forward(self, x):
+                return self.m1(x) + self.m2(x)
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            m = ModelWrapped()
+            torch.compile(m)(torch.randn(1, 10, 10))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        self.assertEqual(compilation_events[0].param_numel, 1040)
+        self.assertEqual(compilation_events[0].param_bytes, 4 * 1040)
+        self.assertEqual(compilation_events[0].param_count, 4)
+
+        # Test a tied module
+        l1 = nn.Linear(4, 4)
+        l2 = nn.Linear(4, 4)
+        m = nn.Sequential(l1, nn.Sequential(l1, l2))
+        self.assertEqual([x.numel() for x in m.parameters()], [16, 4, 16, 4])
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            torch.compile(m)(torch.randn(4, 4))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        self.assertEqual(compilation_events[0].param_numel, 40)
+        self.assertEqual(compilation_events[0].param_bytes, 4 * 40)
+        self.assertEqual(compilation_events[0].param_count, 4)
+
+        # Test tied weights
+        l1 = nn.Linear(4, 4)
+        l2 = nn.Linear(4, 4)
+        l1.weight = l2.weight
+        m = nn.Sequential(l1, nn.Sequential(l2))
+        self.assertEqual([x.numel() for x in m.parameters()], [16, 4, 4])
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            torch.compile(m)(torch.randn(4, 4))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        self.assertEqual(compilation_events[0].param_numel, 24)
+        self.assertEqual(compilation_events[0].param_bytes, 4 * 24)
+        self.assertEqual(compilation_events[0].param_count, 3)
 
 
 class TestInductorConfigParsingForLogging(TestCase):

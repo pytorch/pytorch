@@ -652,7 +652,7 @@ static at::Tensor linear_dynamic_fp16_with_onednn_weight(
   std::vector<int64_t> dst_dims = {M, N};
   at::Tensor output = at::empty(
         dst_dims,
-        device(c10::kCPU)
+        at::device(c10::kCPU)
             .dtype(c10::kFloat)
       );
   if (output.numel() == 0) {

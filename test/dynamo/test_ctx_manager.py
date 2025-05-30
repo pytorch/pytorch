@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
 import sys
-import traceback
 import unittest
 from contextlib import contextmanager
 
@@ -9,18 +8,12 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.exc import InternalTorchDynamoError
-from torch._dynamo.testing import (
-    EagerAndRecordGraphs,
-    normalize_gm,
-    same,
-    skipIfNotPy311,
-)
+from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm, same
 from torch._dynamo.utils import counters
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    make_dynamo_test,
     parametrize,
 )
 
@@ -35,6 +28,16 @@ _variable = 0
 _variable1 = 0
 z_glb = 0
 k_glb = 0
+
+
+@contextlib.contextmanager
+def set_default_dtype(dtype):
+    old_dtype = torch.get_default_dtype()
+    try:
+        torch.set_default_dtype(dtype)
+        yield
+    finally:
+        torch.set_default_dtype(old_dtype)
 
 
 class CustomizedCtxManager:
@@ -2698,319 +2701,6 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         y = fn(t)
         self.assertEqual(y, t.sin())
-
-
-class CPythonContextManagerTestCase(torch._dynamo.test_case.CPythonTestCase):
-    # Tests taken from CPython source code in cpython/Lib/test/test_contextlib.py
-    # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_contextlib.py
-
-    @make_dynamo_test
-    def test_contextmanager_plain(self):
-        state = []
-
-        @contextmanager
-        def woohoo():
-            state.append(1)
-            yield 42
-            state.append(999)
-
-        with woohoo() as x:
-            self.assertEqual(state, [1])
-            self.assertEqual(x, 42)
-            state.append(x)
-        self.assertEqual(state, [1, 42, 999])
-
-    @skipIfNotPy311
-    @make_dynamo_test
-    def test_contextmanager_finally(self):
-        state = []
-
-        @contextmanager
-        def woohoo():
-            state.append(1)
-            try:
-                yield 42
-            finally:
-                state.append(999)
-
-        with self.assertRaises(ZeroDivisionError):
-            with woohoo() as x:
-                self.assertEqual(state, [1])
-                self.assertEqual(x, 42)
-                state.append(x)
-                raise ZeroDivisionError
-        self.assertEqual(state, [1, 42, 999])
-
-    @unittest.expectedFailure
-    @make_dynamo_test
-    def test_contextmanager_traceback(self):
-        @contextmanager
-        def f():
-            yield
-
-        try:
-            with f():
-                1 / 0
-        except ZeroDivisionError as e:
-            frames = traceback.extract_tb(e.__traceback__)
-
-        self.assertEqual(len(frames), 1)
-        self.assertEqual(frames[0].name, "test_contextmanager_traceback")
-        self.assertEqual(frames[0].line, "1/0")
-
-        # Repeat with RuntimeError (which goes through a different code path)
-        try:
-            with f():
-                raise NotImplementedError(42)
-        except NotImplementedError as e:
-            frames = traceback.extract_tb(e.__traceback__)
-
-        self.assertEqual(len(frames), 1)
-        self.assertEqual(frames[0].name, "test_contextmanager_traceback")
-        self.assertEqual(frames[0].line, "raise NotImplementedError(42)")
-
-    @make_dynamo_test
-    def test_contextmanager_no_reraise(self):
-        @contextmanager
-        def whee():
-            yield
-
-        ctx = whee()
-        ctx.__enter__()
-        # Calling __exit__ should not result in an exception
-        self.assertFalse(ctx.__exit__(TypeError, TypeError("foo"), None))
-
-    @make_dynamo_test
-    def test_contextmanager_trap_yield_after_throw(self):
-        @contextmanager
-        def whoo():
-            try:
-                yield
-            except Exception:  # noqa: E722
-                yield
-
-        ctx = whoo()
-        ctx.__enter__()
-        with self.assertRaises(RuntimeError):
-            ctx.__exit__(TypeError, TypeError("foo"), None)
-
-    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
-    def test_contextmanager_except(self):
-        state = []
-
-        @contextmanager
-        def woohoo():
-            state.append(1)
-            try:
-                yield 42
-            except ZeroDivisionError as e:
-                state.append(e.args[0])
-                self.assertEqual(state, [1, 42, 999])
-
-        with woohoo() as x:
-            self.assertEqual(state, [1])
-            self.assertEqual(x, 42)
-            state.append(x)
-            raise ZeroDivisionError(999)
-        self.assertEqual(state, [1, 42, 999])
-
-    @unittest.expectedFailure
-    @make_dynamo_test
-    def test_contextmanager_except_stopiter(self):
-        @contextmanager
-        def woohoo():
-            yield
-
-        class StopIterationSubclass(StopIteration):
-            pass
-
-        for stop_exc in (StopIteration("spam"), StopIterationSubclass("spam")):
-            with self.subTest(type=type(stop_exc)):
-                try:
-                    with woohoo():
-                        raise stop_exc
-                except Exception as ex:
-                    self.assertIs(ex, stop_exc)
-                else:
-                    self.fail(f"{stop_exc} was suppressed")
-
-    @unittest.expectedFailure
-    @make_dynamo_test
-    def test_contextmanager_except_pep479(self):
-        code = """\
-from __future__ import generator_stop
-from contextlib import contextmanager
-@contextmanager
-def woohoo():
-    yield
-"""
-        locals = {}
-        exec(code, locals, locals)
-        woohoo = locals["woohoo"]
-
-        stop_exc = StopIteration("spam")
-        try:
-            with woohoo():
-                raise stop_exc
-        except Exception as ex:
-            self.assertIs(ex, stop_exc)
-        else:
-            self.fail("StopIteration was suppressed")
-
-    @unittest.expectedFailure
-    @make_dynamo_test
-    def test_contextmanager_do_not_unchain_non_stopiteration_exceptions(self):
-        @contextmanager
-        def test_issue29692():
-            try:
-                yield
-            except Exception as exc:
-                raise RuntimeError("issue29692:Chained") from exc
-
-        try:
-            with test_issue29692():
-                raise ZeroDivisionError
-        except Exception as ex:
-            self.assertIs(type(ex), RuntimeError)
-            self.assertEqual(ex.args[0], "issue29692:Chained")
-            self.assertIsInstance(ex.__cause__, ZeroDivisionError)
-
-        try:
-            with test_issue29692():
-                raise StopIteration("issue29692:Unchained")
-        except Exception as ex:
-            self.assertIs(type(ex), StopIteration)
-            self.assertEqual(ex.args[0], "issue29692:Unchained")
-            self.assertIsNone(ex.__cause__)
-
-    @unittest.expectedFailure
-    @make_dynamo_test
-    def _create_contextmanager_attribs(self):
-        def attribs(**kw):
-            def decorate(func):
-                for k, v in kw.items():
-                    setattr(func, k, v)
-                return func
-
-            return decorate
-
-        @contextmanager
-        @attribs(foo="bar")
-        def baz(spam):
-            """Whee!"""
-
-        return baz
-
-    @unittest.expectedFailure
-    @make_dynamo_test
-    def test_contextmanager_attribs(self):
-        baz = self._create_contextmanager_attribs()
-        self.assertEqual(baz.__name__, "baz")
-        self.assertEqual(baz.foo, "bar")
-
-    @make_dynamo_test
-    def test_keywords(self):
-        # Ensure no keyword arguments are inhibited
-        @contextmanager
-        def woohoo(self, func, args, kwds):
-            yield (self, func, args, kwds)
-
-        with woohoo(self=11, func=22, args=33, kwds=44) as target:
-            self.assertEqual(target, (11, 22, 33, 44))
-
-    @unittest.expectedFailure
-    @make_dynamo_test
-    def test_param_errors(self):
-        @contextmanager
-        def woohoo(a, *, b):
-            yield
-
-        with self.assertRaises(TypeError):
-            woohoo()
-        with self.assertRaises(TypeError):
-            woohoo(3, 5)
-        with self.assertRaises(TypeError):
-            woohoo(b=3)
-
-    @make_dynamo_test
-    def test_recursive(self):
-        depth = 0
-
-        @contextmanager
-        def woohoo():
-            nonlocal depth
-            before = depth
-            depth += 1
-            yield
-            depth -= 1
-            self.assertEqual(depth, before)
-
-        @woohoo()
-        def recursive():
-            if depth < 10:
-                recursive()
-
-        recursive()
-        self.assertEqual(depth, 0)
-
-    @skipIfNotPy311
-    @make_dynamo_test
-    def test_contextmanager_trap_no_yield(self):
-        @contextmanager
-        def whoo():
-            if False:
-                yield
-
-        ctx = whoo()
-        with self.assertRaises(RuntimeError):
-            ctx.__enter__()
-
-    @make_dynamo_test
-    def test_contextmanager_trap_second_yield(self):
-        @contextmanager
-        def whoo():
-            yield
-            yield
-
-        ctx = whoo()
-        ctx.__enter__()
-        with self.assertRaises(RuntimeError):
-            ctx.__exit__(None, None, None)
-
-    @unittest.expectedFailure
-    @make_dynamo_test
-    def test_contextmanager_wrap_runtimeerror(self):
-        @contextmanager
-        def woohoo():
-            try:
-                yield
-            except Exception as exc:
-                raise RuntimeError(f"caught {exc}") from exc
-
-        with self.assertRaises(RuntimeError):
-            with woohoo():
-                1 / 0
-
-        # If the context manager wrapped StopIteration in a RuntimeError,
-        # we also unwrap it, because we can't tell whether the wrapping was
-        # done by the generator machinery or by the generator itself.
-        with self.assertRaises(StopIteration):
-            with woohoo():
-                raise StopIteration
-
-    @make_dynamo_test
-    def test_contextmanager_non_normalised(self):
-        @contextmanager
-        def whoo():
-            try:
-                yield
-            except RuntimeError:
-                raise SyntaxError  # noqa: B904
-
-        ctx = whoo()
-        ctx.__enter__()
-        with self.assertRaises(SyntaxError):
-            ctx.__exit__(RuntimeError, None, None)
 
 
 instantiate_parametrized_tests(CtxManagerTests)

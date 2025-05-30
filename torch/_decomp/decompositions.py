@@ -58,11 +58,17 @@ def type_casts(
     f: Callable,
     type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIND,
     compute_dtype_only: bool = False,
+    include_non_tensor_args: bool = False,
 ):
     @functools.wraps(f)
     def inner(*args, **kwargs):
+        allowed_types = (
+            (Tensor, torch.types._Number) if include_non_tensor_args else (Tensor,)
+        )  # type: ignore[arg-type]
         flat_args = [
-            x for x in pytree.arg_tree_leaves(*args, **kwargs) if isinstance(x, Tensor)
+            x
+            for x in pytree.arg_tree_leaves(*args, **kwargs)
+            if isinstance(x, allowed_types)
         ]
         computation_dtype, result_dtype = utils.elementwise_dtypes(
             *flat_args, type_promotion_kind=type_promotion
@@ -97,6 +103,11 @@ compute_only_pw_cast_for_opmath = partial(
 )
 pw_cast_for_opmath = partial(
     type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+)
+pw_cast_for_opmath_non_tensor_args = partial(
+    type_casts,
+    type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    include_non_tensor_args=True,
 )
 pw_cast_for_int_to_real = partial(
     type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
@@ -1282,7 +1293,7 @@ def _pad_chunk(
             ]
             tensor = aten.constant_pad_nd(tensor, pad, 0)
         view_size = tensor_size[:dim] + torch.Size([num_chunks, -1])
-        padded_tensors.append(tensor.view(view_size))
+        padded_tensors.append(tensor.reshape(view_size))
     return padded_tensors
 
 
@@ -4389,8 +4400,7 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
     t1_stride = t1.stride()
 
     # Check the contiguous, we can skip the dim with size of 1
-    # as aten: https://github.com/pytorch/pytorch/blob/
-    # e201460f8aa1510b4c4686627d57b69756c4b916/aten/src/ATen/TensorGeometry.cpp#L17
+    # as aten: https://github.com/pytorch/pytorch/blob/e201460f8aa1510b4c4686627d57b69756c4b916/aten/src/ATen/TensorGeometry.cpp#L17
     expected_stride = [1]
     for size in reversed(t1_shape[1:]):
         expected_stride.append(size * expected_stride[-1])
@@ -5135,7 +5145,8 @@ def bernoulli(
 def isin_default(elements, test_elements, *, invert=False):
     if elements.numel() == 0:
         return torch.empty_like(elements, dtype=torch.bool)
-    x = elements.view(*elements.shape, *((1,) * test_elements.ndim))
+    expanded_elem_shape = elements.shape + (1,) * test_elements.ndim
+    x = elements.view(expanded_elem_shape)
     dim = tuple(range(-1, -test_elements.ndim - 1, -1))
     res = (x == test_elements).any(dim=dim)
     return ~res if invert else res

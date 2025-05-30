@@ -429,7 +429,7 @@ Tensor sparse_compressed_tensor_with_dims(
     compressed_indices_size.push_back(compressed_size / blocksize[d0] + 1);
     values_size.append(DimVector(blocksize));
   } else {
-    TORCH_CHECK(blocksize.size() == 0, "sparse_compressed_tensor_with_dims: blocksize cannot be specified for non-block layout ", layout_);
+    TORCH_CHECK(blocksize.empty(), "sparse_compressed_tensor_with_dims: blocksize cannot be specified for non-block layout ", layout_);
     compressed_indices_size.push_back(size[compressedDimension(layout_, size, dense_dim)] + 1);
   }
 
@@ -480,7 +480,7 @@ Tensor _sparse_compressed_tensor_unsafe_symint(
 }
 
 template <Layout required_layout>
-Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indices,
+static Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indices,
                                                  const Tensor& plain_indices,
                                                  const Tensor& values,
                                                  IntArrayRef size,
@@ -967,7 +967,7 @@ Tensor empty_like_sparse_csr(
 }
 
 template <bool require_view, bool require_copy>
-Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) {
+static Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) {
 #ifndef STRIP_ERROR_MESSAGES
   constexpr const char* select_name = (require_view ? "select()" : "select_copy()");
 #endif

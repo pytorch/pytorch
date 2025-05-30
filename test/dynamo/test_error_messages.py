@@ -126,6 +126,33 @@ from user code:
     return torch.equal(x, x)""",
             )
 
+    def test_sort_with_nonconstant_keys(self):
+        lst = [
+            torch.tensor(4),
+            torch.tensor(1),
+            torch.tensor(2),
+            torch.tensor(3),
+        ]
+
+        def fn(lst):
+            return sorted(lst)
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(lst),
+            """\
+sort with non-constant keys
+  Explanation: Cannot perform sort with non-constant key. First non-constant key type: <class 'torch.Tensor'>. Most notably, we cannot sort with Tensor or SymInt keys, but we can sort ints.
+  Hint: Use something else as the key.
+
+  Developer debug context: TensorVariable()
+
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    return sorted(lst)""",
+        )
+
     def test_super_call_method(self):
         def fn(it):
             return [x + 1 for x in it]
@@ -148,6 +175,33 @@ Unsupported method call
 from user code:
    File "test_error_messages.py", line N, in fn
     return [x + 1 for x in it]""",
+        )
+
+    def test_dict_items_input(self):
+        def fn(x, items):
+            it = iter(items)
+            return next(it), x.sin()
+
+        x = torch.randn(3)
+        dct = {"a": 3, "b": 3}
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(x, dct.items()),
+            """\
+Unsupported method call
+  Explanation: Dynamo does not know how to trace method `__iter__` of class `dict_items`
+  Hint: Avoid calling `dict_items.__iter__` in your code.
+  Hint: Please report an issue to PyTorch.
+  Hint: Consider moving the creation of dict view object (e.g. `dict.keys()`, `dict.items()`,) to the compiled region, instead of passing it as an input to the compiled region.
+  Hint: Dynamo does not fully support tracing builtin iterators (e.g. `map`, `zip`, `enumerate`) passed in from uncompiled to compiled regions (e.g. `torch.compile(fn)(enumerate(...))`). This can happen unintentionally if a previous graph break happens with a builtin iterator in the local scope.
+
+  Developer debug context: call_method UserDefinedObjectVariable(dict_items) __iter__ () {}
+
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    it = iter(items)""",
         )
 
     def test_super_call_function(self):
@@ -185,6 +239,7 @@ from user code:
 Unsupported context manager
   Explanation: Dynamo does not know how to enter a `int` context manager.
   Hint: Avoid using the unsupported context manager.
+  Hint: If the context manager seems like it should be supported (e.g. torch.set_grad_enabled), then it may be the case that it was created outside the compiled region, which Dynamo does not support. Supported context managers can cross graph break boundaries only if they are local non-closure variables, or are intermediate values.
   Hint: File an issue to PyTorch. Simple context managers can potentially be supported, but note that context managers can't be supported in general
 
   Developer debug context: Attempted SETUP_WITH/BEFORE_WITH on ConstantVariable(int: 3)
@@ -255,7 +310,7 @@ from user code:
 Attempted to call function marked as skipped
   Explanation: Dynamo developers have intentionally marked that the function `skip` in file `case.py` should not be traced.
   Hint: Avoid calling the function `skip`.
-  Hint: Remove the function `skip` or the file `case.py` from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of attempting to trace into the function.
+  Hint: Apply `@torch._dynamo.dont_skip_tracing` to the function `skip` to force tracing into the function. More graph breaks may occur as a result of attempting to trace into the function.
   Hint: Please file an issue to PyTorch.
 
   Developer debug context: module: unittest.case, qualname: skip, skip reason: <missing reason>
@@ -304,7 +359,7 @@ from user code:
 Attempted to inline function marked as skipped
   Explanation: Dynamo developers have intentionally marked that the function `skip` should not be traced.
   Hint: Avoid calling the function `skip`.
-  Hint: Remove the function `case.py` from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of attempting to trace into the function.
+  Hint: Apply `@torch._dynamo.dont_skip_tracing` to the function `skip` to force tracing into the function. More graph breaks may occur as a result of attempting to trace into the function.
   Hint: Please file an issue to PyTorch.
 
   Developer debug context: qualname: skip, name: skip, filename: `case.py`, skip reason: skipped according trace_rules.lookup unittest
@@ -902,8 +957,8 @@ from user code:
 Traceback (most recent call last):
   File "test_error_messages.py", line N, in test_no_internal_compiler_stacktrace
     torch.compile(fn, backend="eager", fullgraph=True)()
-  File "eval_frame.py", line N, in _fn
-    raise e.with_traceback(None) from e.__cause__
+  File "eval_frame.py", line N, in compile_wrapper
+    raise e.with_traceback(None) from e.__cause__  # User compiler error
 torch._dynamo.exc.Unsupported: Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
