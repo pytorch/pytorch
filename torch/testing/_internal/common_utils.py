@@ -857,6 +857,11 @@ def cppProfilingFlagsToProfilingMode():
     else:
         return ProfilingMode.LEGACY
 
+def raise_on_run_directly(file_to_call):
+    raise RuntimeError("This test file is not meant to be run directly, "
+                       f"use:\n\n\tpython {file_to_call} TESTNAME\n\n"
+                       "instead.")
+
 @contextmanager
 def enable_profiling_mode_for_profiling_tests():
     old_prof_exec_state = False
