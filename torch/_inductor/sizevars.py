@@ -304,7 +304,7 @@ class SizeVarAllocator:
         return [x for x in sizes if x is not None], reindex, prune
 
     # The statically_known_* family of functions below NEVER guard, they could return True if the
-    # asked questions can be asked with out guarding else they return False.
+    # asked questions can be answered without guarding otherwise they return False.
     # Those are similar to statically_known_true in symbolic_shapes.
     def statically_known_true(self, expr: Union[sympy.Basic, bool]) -> bool:
         return _statically_known_true(self.shape_env, expr)
