@@ -4,6 +4,7 @@ set -ex
 
 export TH_BINARY_BUILD=1
 export USE_CUDA=0
+export USE_STATIC_MKL=1
 
 # Keep an array of cmake variables to add to
 if [[ -z "$CMAKE_ARGS" ]]; then
