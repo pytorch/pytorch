@@ -110,7 +110,7 @@ case "$tag" in
     TRITON=yes
     ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks)
-    CUDA_VERSION=12.8
+    CUDA_VERSION=12.8.1
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
@@ -169,7 +169,7 @@ case "$tag" in
     INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-focal-cuda12.8-cudnn9-py3-gcc9)
-    CUDA_VERSION=12.8
+    CUDA_VERSION=12.8.1
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
@@ -254,7 +254,7 @@ case "$tag" in
     ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3.9-clang12)
     ANACONDA_PYTHON_VERSION=3.9
-    CUDA_VERSION=12.8
+    CUDA_VERSION=12.8.1
     CUDNN_VERSION=9
     CLANG_VERSION=12
     VISION=yes
@@ -311,7 +311,7 @@ case "$tag" in
     ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3.9-linter)
     PYTHON_VERSION=3.9
-    CUDA_VERSION=12.8
+    CUDA_VERSION=12.8.1
     ;;
   pytorch-linux-jammy-aarch64-py3.10-gcc11)
     ANACONDA_PYTHON_VERSION=3.10
