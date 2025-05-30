@@ -305,7 +305,8 @@ class SizeVarAllocator:
 
     # The statically_known_* family of functions below NEVER guard, they could return True if the
     # asked questions can be answered without guarding otherwise they return False.
-    # Those are similar to statically_known_true in symbolic_shapes.
+    # Those are similar to statically_known_true in symbolic_shapes but operate on sympy expressions 
+    # instead of symnodes.
     def statically_known_true(self, expr: Union[sympy.Basic, bool]) -> bool:
         return _statically_known_true(self.shape_env, expr)
 
