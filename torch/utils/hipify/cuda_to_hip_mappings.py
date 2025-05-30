@@ -1,5 +1,6 @@
 import collections
 import os
+from typing import Any
 
 from .constants import (API_BLAS, API_C10, API_CAFFE2, API_DRIVER, API_FFT,
                         API_PYTORCH, API_RAND, API_ROCTX, API_RTC, API_RUNTIME,
@@ -32,7 +33,7 @@ _IS_FBCODE = os.environ.get("IS_FBCODE", "0") == "1"
 _RCCL_HEADER = "<rccl.h>" if _IS_FBCODE else "<rccl/rccl.h>"
 
 # List of math functions that should be replaced inside device code only.
-MATH_TRANSPILATIONS = collections.OrderedDict(
+MATH_TRANSPILATIONS = collections.OrderedDict[str,str](
     [
         ("std::max", ("::max")),
         ("std::min", ("::min")),
@@ -48,7 +49,7 @@ MATH_TRANSPILATIONS = collections.OrderedDict(
     ]
 )
 
-CUDA_TYPE_NAME_MAP = collections.OrderedDict(
+CUDA_TYPE_NAME_MAP = collections.OrderedDict[str, tuple[str, int, int, int]] (
     [
         ("CUresult", ("hipError_t", CONV_TYPE, API_DRIVER)),
         ("cudaError_t", ("hipError_t", CONV_TYPE, API_RUNTIME)),
@@ -549,7 +550,7 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict(
     ]
 )
 
-CUDA_INCLUDE_MAP = collections.OrderedDict(
+CUDA_INCLUDE_MAP = collections.OrderedDict[str, tuple[str, int, int]](
     [
         # since pytorch uses "\b{pattern}\b" as the actual re pattern,
         # patterns listed here have to begin and end with alnum chars
@@ -634,7 +635,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
     ]
 )
 
-CUDA_IDENTIFIER_MAP = collections.OrderedDict(
+CUDA_IDENTIFIER_MAP = collections.OrderedDict[str, tuple[str, int, int]](
     [
         ("__CUDACC__", ("__HIPCC__", CONV_DEF, API_RUNTIME)),
         (
@@ -8007,7 +8008,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
     ]
 )
 
-CUDA_SPECIAL_MAP = collections.OrderedDict(
+CUDA_SPECIAL_MAP = collections.OrderedDict[str, tuple[str, int, int]](
     [
         # SPARSE
         ("cusparseStatus_t", ("hipsparseStatus_t", CONV_MATH_FUNC, API_SPECIAL)),
@@ -8451,7 +8452,7 @@ CUDA_SPECIAL_MAP = collections.OrderedDict(
     ]
 )
 
-PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
+PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict[str, tuple[str, int]](
     [
         ("USE_CUDA", ("USE_ROCM", API_PYTORCH)),
         ("TORCH_CUDA_CPP_API", ("TORCH_HIP_CPP_API", API_PYTORCH)),
@@ -8619,7 +8620,7 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
     ]
 )
 
-CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
+CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict[str, tuple[str, int]](
     [
         ("PYTORCH_NO_CUDA_MEMORY_CACHING", ("PYTORCH_NO_CUDA_MEMORY_CACHING", API_CAFFE2)),
         ("PYTORCH_CUDA_ALLOC_CONF", ("PYTORCH_CUDA_ALLOC_CONF", API_CAFFE2)),
@@ -8704,7 +8705,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
 #
 # NB: if you want a transformation to ONLY apply to the c10/ directory,
 # put it as API_CAFFE2
-C10_MAPPINGS = collections.OrderedDict(
+C10_MAPPINGS = collections.OrderedDict[str, tuple[str, int]](
     [
         ("CUDA_VERSION", ("TORCH_HIP_VERSION", API_PYTORCH)),
         ("CUDA_LAUNCH_BLOCKING=1", ("AMD_SERIALIZE_KERNEL=3", API_C10)),
@@ -8769,7 +8770,7 @@ C10_MAPPINGS = collections.OrderedDict(
 
 # NB: C10 mappings are more specific than Caffe2 mappings, so run them
 # first
-CUDA_TO_HIP_MAPPINGS = [
+CUDA_TO_HIP_MAPPINGS: list[collections.OrderedDict[str, Any]] = [
     CUDA_IDENTIFIER_MAP,
     CUDA_TYPE_NAME_MAP,
     CUDA_INCLUDE_MAP,
