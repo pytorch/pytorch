@@ -250,7 +250,9 @@ class TestTritonHeuristics(TestCase):
             def grid(meta):
                 return (triton.cdiv(x.numel(), meta["BLOCK_SIZE"]),)
 
-            torch.library.wrap_triton(get_autotuned_amd_sqr_kernel())[grid](x, y, x.numel())
+            torch.library.wrap_triton(get_autotuned_amd_sqr_kernel())[grid](
+                x, y, x.numel()
+            )
 
         def fn(x):
             return triton_sqr(x)
