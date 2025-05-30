@@ -23,7 +23,7 @@ from .ir import (
     NoneLayout,
     TensorBox,
 )
-from .utils import convert_shape_to_inductor, pad_listlike
+from .utils import convert_shape_to_inductor, pad_listlike, SUPPORTED_MKLDNN_DEVICES
 from .virtualized import V
 
 
@@ -178,7 +178,7 @@ def _prepare_convolution_fusion_create(
         output_stride = make_channels_last_strides_for(output_size)
 
     assert get_device_type(x) == get_device_type(weight)
-    assert get_device_type(x) in ["cpu", "xpu"]
+    assert get_device_type(x) in SUPPORTED_MKLDNN_DEVICES
     inputs = [x]
 
     if quantize_args is not None:
@@ -242,7 +242,7 @@ def _prepare_linear_fusion_create(
 
     x = cls.require_stride_order(x, req_stride_order)
     assert get_device_type(x) == get_device_type(weight)
-    assert get_device_type(x) in ["cpu", "xpu"]
+    assert get_device_type(x) in SUPPORTED_MKLDNN_DEVICES
     inputs = [x]
 
     if quantize_args is not None:

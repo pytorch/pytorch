@@ -328,13 +328,20 @@ class OptimizeForInferenceTemplate(TestCase):
                     mm_invoke = "mkldnn._linear_pointwise.default("
                 elif torch._C.has_mkl:
                     mm_invoke = "mkl_linear.default("
+            elif self.device == "xpu":
+                mm_invoke = "mkldnn._linear_pointwise.default("
 
             with torch.no_grad():
                 out_eager = mod(inp)
                 out, code = run_and_get_code(foo, mod, inp)
-                FileCheck().check_not(kernel_invoke).check_count(
-                    mm_invoke, count=1, exactly=True
-                ).run(code[0])
+                if self.device == "xpu":
+                    FileCheck().check_count(mm_invoke, count=1, exactly=True).run(
+                        code[0]
+                    )
+                else:
+                    FileCheck().check_not(kernel_invoke).check_count(
+                        mm_invoke, count=1, exactly=True
+                    ).run(code[0])
                 self.assertEqual(out_eager, out)
 
             mod2 = mod_fn()
@@ -351,9 +358,14 @@ class OptimizeForInferenceTemplate(TestCase):
             with torch.no_grad():
                 out_eager = mod2(inp)
                 out, code = run_and_get_code(foo, mod2, inp)
-                FileCheck().check_not(kernel_invoke).check_count(
-                    mm_invoke, count=count, exactly=True
-                ).run(code[0])
+                if self.device == "xpu":
+                    FileCheck().check_count(mm_invoke, count=count, exactly=True).run(
+                        code[0]
+                    )
+                else:
+                    FileCheck().check_not(kernel_invoke).check_count(
+                        mm_invoke, count=count, exactly=True
+                    ).run(code[0])
                 self.assertEqual(out_eager, out)
 
     # With inlining of inbuilt nn modules, Dynamo traces the innards of inbuilt
@@ -510,7 +522,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
 
             # we unfuse the conv bias, but it should only have one constant in the kernel
-            if self.device == GPU_TYPE:
+            if self.device == "cuda":
                 FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
                     "frozen_param"
                 ).check_not("frozen_param").check_next("return").run(code[0])
@@ -555,7 +567,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
 
             # we unfuse the conv bias, but it should only have one constant in the kernel
-            if self.device == GPU_TYPE:
+            if self.device == "cuda":
                 FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
                     "frozen_param"
                 ).check_not("frozen_param").check_next("return").run(code[0])
@@ -879,7 +891,7 @@ class OptimizeForInferenceTemplate(TestCase):
         # in the joint graph rather than torch.ops.aten.convolution.default.
         # Currently we only handle aten.convolution.default in layout
         # optimization. That's why the count may be 0 here for CPU.
-        if self.device == GPU_TYPE:
+        if self.device == "cuda":
             self.assertTrue(nconv == 1)
 
     def test_unequal_bias_horizontal_addmm_fusion(self):
