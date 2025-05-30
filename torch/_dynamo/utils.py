@@ -1049,7 +1049,7 @@ def is_numpy_float_type(value):
 @overload
 def is_lru_cache_wrapped_function(
     value: Callable[..., T],
-) -> TypeGuard[functools._lru_cache_wrapper[Any]]: ...
+) -> TypeGuard[functools._lru_cache_wrapper[T]]: ...
 
 
 @overload
