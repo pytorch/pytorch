@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
+#include <c10/core/Stream.h>
 
 namespace c10::CachingDeviceAllocator {
 
@@ -59,3 +60,33 @@ struct DeviceStats {
 };
 
 } // namespace c10::CachingDeviceAllocator
+
+namespace c10 {
+
+using CaptureId_t = unsigned long long;
+
+// first is set if the instance is created by Graph mode capture_begin.
+// second is set if the instance is created by Graph mode graph_pool_handle.
+using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
+
+struct C10_API DeviceAllocator : public c10::Allocator {
+  virtual bool initialized() = 0;
+  virtual void emptyCache(MempoolId_t mempool_id = {0, 0}) = 0;
+  virtual void recordStream(const DataPtr&, c10::Stream stream) = 0;
+  virtual CachingDeviceAllocator::DeviceStats getDeviceStats(
+      c10::DeviceIndex device) = 0;
+  virtual void resetAccumulatedStats(c10::DeviceIndex device) = 0;
+  virtual void resetPeakStats(c10::DeviceIndex device) = 0;
+};
+
+// This function is used to get the DeviceAllocator for a specific device type
+// and keep backward compatibility with c10::GetAllocator.
+C10_API inline DeviceAllocator* GetDeviceAllocator(const DeviceType& t) {
+  auto* allocator = c10::GetAllocator(t);
+  auto* device_allocator = dynamic_cast<DeviceAllocator*>(allocator);
+  TORCH_INTERNAL_ASSERT(
+      device_allocator, "Allocator for ", t, " is not a DeviceAllocator.");
+  return device_allocator;
+}
+
+} // namespace c10
