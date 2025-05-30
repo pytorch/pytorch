@@ -247,7 +247,7 @@ class NNModuleVariable(VariableTracker):
 
         if object_has_getattribute(base):
             unimplemented_v2(
-                gb_type="torch.nn.Module with a custom __getattribute__ defined",
+                gb_type="Custom __getattribute__ in nn.Module dict key check",
                 context=f"has_key_in_generic_dict {self} {key}",
                 explanation="Dynamo does not support checking key existence "
                 "on `nn.Module` instances that have a custom "
@@ -269,7 +269,7 @@ class NNModuleVariable(VariableTracker):
         """Check for a __getattr__ and handle it specially if it is implemented"""
         if object_has_getattribute(base):
             unimplemented_v2(
-                gb_type="torch.nn.Module with a custom __getattribute__ defined",
+                gb_type="Custom __getattribute__ in nn.Module attribute access",
                 context=f"var_getattr {self} {name}",
                 explanation="Dynamo does not support checking key existence "
                 "on `nn.Module` instances that have a custom "
@@ -662,16 +662,14 @@ class NNModuleVariable(VariableTracker):
             return source
 
         if name == "named_children":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules").name())
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
             assert not (args or kwargs)
             result = []
             for name, submod in module.named_children():
                 result.append(named_embed(name, submod))
             return ListIteratorVariable(result, mutation_type=ValueMutationNew())
         elif name == "named_parameters":
-            tx.output.guard_on_key_order.add(
-                AttrSource(self.source, "_parameters").name()
-            )
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_parameters"))
             result = []
             for name, param in module.named_parameters(
                 **get_kwargs("prefix", "recurse")
@@ -679,7 +677,7 @@ class NNModuleVariable(VariableTracker):
                 result.append(named_embed(name, param))
             return ListIteratorVariable(result, mutation_type=ValueMutationNew())
         elif name == "named_buffers":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers").name())
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers"))
             result = []
             for name, buffer in module.named_buffers(
                 **get_kwargs("prefix", "recurse", "remove_duplicate")
@@ -687,7 +685,7 @@ class NNModuleVariable(VariableTracker):
                 result.append(named_embed(name, buffer))
             return ListIteratorVariable(result, mutation_type=ValueMutationNew())
         elif name == "named_modules":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules").name())
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
             result = []
             for name, submod in module.named_modules(
                 **get_kwargs("memo", "prefix", "remove_duplicate")
@@ -695,19 +693,17 @@ class NNModuleVariable(VariableTracker):
                 result.append(named_embed(name, submod))
             return ListIteratorVariable(result, mutation_type=ValueMutationNew())
         elif name == "children":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules").name())
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
             assert not (args or kwargs)
             return wrap_values(module.named_children())
         elif name == "modules":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules").name())
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
             return wrap_values(module.named_modules())
         elif name == "parameters":
-            tx.output.guard_on_key_order.add(
-                AttrSource(self.source, "_parameters").name()
-            )
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_parameters"))
             return wrap_values(module.named_parameters(**get_kwargs("recurse")))
         elif name == "buffers":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers").name())
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers"))
             return wrap_values(module.named_buffers(**get_kwargs("recurse")))
         elif name == "keys":
             assert not (args or kwargs)
@@ -1151,7 +1147,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             hooks_dict = getattr(self.value, name)
             hooks_dict_source = AttrSource(self.source, name)
             install_guard(hooks_dict_source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
-            tx.output.guard_on_key_order.add(hooks_dict_source.name())
+            tx.output.guard_on_key_order.add(hooks_dict_source)
 
             def build_key_value(i, k, v):
                 # Make key sourceless to avoid any guard on it

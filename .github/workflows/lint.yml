@@ -10,6 +10,8 @@ on:
       - main
       - release/*
       - landchecks/*
+    tags:
+      - ciflow/pull/*
   workflow_dispatch:
 
 permissions: read-all
@@ -31,7 +33,7 @@ jobs:
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      docker-image: pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter
+      docker-image: ci-image:pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter
       # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
       # to run git rev-parse HEAD~:.ci/docker when a new image is needed
       fetch-depth: 0
@@ -48,7 +50,7 @@ jobs:
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      docker-image: pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter
+      docker-image: ci-image:pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter
       # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
       # to run git rev-parse HEAD~:.ci/docker when a new image is needed
       fetch-depth: 0
@@ -64,7 +66,7 @@ jobs:
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      docker-image: pytorch-linux-focal-linter
+      docker-image: ci-image:pytorch-linux-focal-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
@@ -117,7 +119,7 @@ jobs:
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      docker-image: pytorch-linux-focal-linter
+      docker-image: ci-image:pytorch-linux-focal-linter
       fetch-depth: -1
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -151,7 +153,7 @@ jobs:
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      docker-image: pytorch-linux-focal-linter
+      docker-image: ci-image:pytorch-linux-focal-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
@@ -187,7 +189,7 @@ jobs:
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      docker-image: pytorch-linux-focal-linter
+      docker-image: ci-image:pytorch-linux-focal-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
@@ -281,38 +283,14 @@ jobs:
           # All we need to see is that it passes
           python3 torch/utils/collect_env.py
 
-  lint-urls:
-    name: Lint URLs
-    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-url-lint')
-    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+  link-check:
+    name: Link checks
     needs: get-label-type
+    uses: ./.github/workflows/_link_check.yml
     with:
-      timeout: 120
-      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      docker-image: pytorch-linux-focal-linter
-      fetch-depth: 0
-      submodules: false
-      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-      script: |
-        if ! ./scripts/lint_urls.sh; then
-          echo
-          echo "URL lint failed. If this is a transient outage, you can bypass it by adding the `skip-url-lint` label to your PR."
-          exit 1
-        fi
-
-  lint-xrefs:
-    name: Lint Xrefs
-    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
-    needs: get-label-type
-    with:
-      timeout: 60
-      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      docker-image: pytorch-linux-focal-linter
-      fetch-depth: 0
-      submodules: false
-      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-      script: |
-        ./scripts/lint_xrefs.sh
+      runner: ${{ needs.get-label-type.outputs.label-type }}
+      ref:    ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    secrets: inherit
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

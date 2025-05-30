@@ -13,6 +13,7 @@ typedef void* MTLComputePipelineState_t;
 typedef void* MTLComputeCommandEncoder_t;
 #endif
 
+#include <c10/core/Scalar.h>
 #include <c10/util/OptionalArrayRef.h>
 #include <functional>
 #include <optional>
@@ -137,7 +138,10 @@ class MetalShaderLibrary {
       TensorIteratorBase& iter,
       const std::string& name,
       std::optional<int64_t> extra = std::nullopt);
-  void exec_binary_kernel(TensorIteratorBase& iter, const std::string& name);
+  void exec_binary_kernel(
+      TensorIteratorBase& iter,
+      const std::string& name,
+      const std::optional<c10::Scalar> alpha = std::nullopt);
 
  protected:
   virtual MTLLibrary_t getLibrary();

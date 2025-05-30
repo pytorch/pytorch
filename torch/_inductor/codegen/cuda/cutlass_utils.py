@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs
+import atexit
 import functools
 import logging
 import os
+import shutil
 import sys
 import time
 from dataclasses import dataclass
@@ -17,12 +19,32 @@ from ... import config
 from ...ir import Layout
 from ...runtime.runtime_utils import cache_dir
 from ...virtualized import V
+from ..cpp_utils import DTYPE_TO_CPP
 from .cuda_env import get_cuda_arch, get_cuda_version
 
 
 log = logging.getLogger(__name__)
 
 CUTLASS_OPERATION_KIND: str = "gemm"
+
+
+@atexit.register
+def move_cutlass_compiled_cache() -> None:
+    """Move CUTLASS compiled cache file to the cache directory if it exists."""
+    if "cutlass" not in sys.modules:
+        return
+
+    import cutlass  # type: ignore[import-not-found]
+
+    if not os.path.exists(cutlass.CACHE_FILE):
+        return
+
+    try:
+        filename = os.path.basename(cutlass.CACHE_FILE)
+        shutil.move(cutlass.CACHE_FILE, os.path.join(cache_dir(), filename))
+        log.debug("Moved CUTLASS compiled cache file to %s", cache_dir())
+    except OSError as e:
+        log.warning("Failed to move CUTLASS compiled cache file: %s", str(e))
 
 
 def _rename_cutlass_import(content: str, cutlass_modules: list[str]) -> str:
@@ -45,11 +67,21 @@ def try_import_cutlass() -> bool:
        which is the directory when developers build from source.
     """
     if config.is_fbcode():
+        try:
+            import cutlass  # type: ignore[import-not-found]
+            import cutlass_library  # type: ignore[import-not-found]
+        except ImportError as e:
+            log.warning(
+                "Failed to import CUTLASS packages in fbcode: %s, ignoring the CUTLASS backend.",
+                str(e),
+            )
+            return False
+
         return True
 
     try:
-        import cutlass  # type: ignore[import-not-found]
-        import cutlass_library  # type: ignore[import-not-found]
+        import cutlass  # type: ignore[import-not-found]  # noqa: F811
+        import cutlass_library  # type: ignore[import-not-found]  # noqa: F811
 
         cutlass_minor_vesion = int(cutlass.__version__.split(".")[1])
         if cutlass_minor_vesion < 7:
@@ -68,6 +100,7 @@ def try_import_cutlass() -> bool:
                 "source",
             )
         )
+
         return True
     except ModuleNotFoundError:
         log.debug(
@@ -278,22 +311,14 @@ def gen_ops() -> dict[Any, Any]:
 
 
 DTYPE_TO_CUTLASS_TYPE = {
-    torch.float32: "float",
-    torch.float64: "double",
-    torch.float16: "cutlass::half_t",
-    torch.int64: "int64_t",
-    torch.int32: "int32_t",
-    torch.int16: "int16_t",
-    torch.int8: "int8_t",
-    torch.uint64: "uint64_t",
-    torch.uint32: "uint32_t",
-    torch.uint16: "uint16_t",
-    torch.uint8: "uint8_t",
-    torch.bool: "bool",
-    torch.bfloat16: "cutlass::bfloat16_t",
+    **DTYPE_TO_CPP,
+    torch.float16: "__half",
+    torch.bfloat16: "__nv_bfloat16",
+    torch.float8_e4m3fn: "cutlass::float_e4m3_t",
 }
 
 
+@functools.lru_cache(32)
 def torch_dtype_to_cutlass_type(
     torch_dtype: torch.dtype,
 ) -> "cutlass_library.library.DataType":  # type: ignore[name-defined] # noqa: F821
@@ -311,6 +336,7 @@ def torch_dtype_to_cutlass_type(
         raise NotImplementedError(f"Unsupported data type: {torch_dtype=}")
 
 
+@functools.lru_cache(32)
 def dtype_match(
     torch_dtype: Optional[torch.dtype],
     cutlass_dtype: "cutlass_library.library.DataType",  # type: ignore[name-defined]  # noqa: F821
@@ -334,6 +360,8 @@ def dtype_match(
         return cutlass_dtype == cutlass_library.library.DataType.u8
     elif torch_dtype == torch.int32:
         return cutlass_dtype == cutlass_library.library.DataType.s32
+    elif torch_dtype == torch.float8_e4m3fn:
+        return cutlass_dtype == cutlass_library.library.DataType.e4m3
     else:
         return False
 
@@ -364,13 +392,14 @@ def get_accumulator_dtype(
         ]:
             torch_dtype = dtype0
 
-    if torch_dtype in (torch.float16, torch.bfloat16, torch.float):
+    if torch_dtype in (torch.float16, torch.bfloat16, torch.float, torch.float8_e4m3fn):
         return torch.float
     if torch_dtype == torch.int8:
         return torch.int32
     raise NotImplementedError(f"Unsupported data types: {input_torch_dtypes=}")
 
 
+@functools.lru_cache(32)
 def get_alignments(torch_dtype: torch.dtype) -> list[int]:
     """
     Returns all possible valid CUTLASS alignments in terms of the number of elements for a given dtype.
@@ -381,7 +410,7 @@ def get_alignments(torch_dtype: torch.dtype) -> list[int]:
         return [8, 4, 2, 1]
     elif torch_dtype == torch.float:
         return [4, 2, 1]
-    elif torch_dtype in (torch.uint8, torch.int8):
+    elif torch_dtype in (torch.uint8, torch.int8, torch.float8_e4m3fn):
         return [16, 8, 4, 2]
     elif torch_dtype == torch.int32:
         return [4, 2, 1]

@@ -2061,6 +2061,49 @@ if HAS_CUDA:
             with self.assertRaisesRegex(Exception, "custom error msg"):
                 device = x.untyped_storage()
 
+        def test_side_stream_memory_allocation(self):
+            from torch._inductor.cudagraph_trees import cudagraphify_impl
+
+            def multi_stream_allocation(args):
+                side_stream = torch.cuda.Stream()
+                side_stream.wait_stream(torch.cuda.current_stream())
+                with torch.cuda.stream(side_stream):
+                    side_stream_buffer = torch.ones(
+                        *args, device="cuda:0", dtype=torch.float32
+                    )
+                torch.cuda.current_stream().wait_stream(side_stream)
+
+                main_stream_buffer = torch.ones(
+                    *args, device="cuda:0", dtype=torch.float32
+                )
+
+                if isinstance(args, list):
+                    args.clear()
+
+                return main_stream_buffer, side_stream_buffer
+
+            graphed_multi_stream_func = cudagraphify_impl(
+                multi_stream_allocation,
+                inputs=[],
+                static_input_idxs=[],
+                is_backward=False,
+                is_inference=False,
+                device_index=0,
+                stack_traces=["dummy stack trace1", "dummy stack trace2"],
+            )
+
+            ref_out = torch.ones((2, 3), device="cuda:0", dtype=torch.float32)
+
+            for _ in range(3):
+                torch.compiler.cudagraph_mark_step_begin()
+                main_stream_buffer, side_stream_buffer = graphed_multi_stream_func(
+                    [2, 3]
+                )
+                self.assertEqual(main_stream_buffer, ref_out)
+                self.assertEqual(side_stream_buffer, ref_out)
+
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
         @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", False)
         def test_static_inputs_address_mutation_log(self):
@@ -2720,8 +2763,8 @@ if HAS_CUDA:
                 loss.backward()
                 optimizer.step()
 
-            # 2 graph partitions lead to 2 fwd cudagraphs and 2 bwd cudagraphs
-            self.assertEqual(self.get_manager().new_graph_id().id, 4)
+            # 2 graph partitions lead to 2 fwd cudagraphs and 1 bwd cudagraphs
+            self.assertEqual(self.get_manager().new_graph_id().id, 3)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_cpu_only(self):
@@ -3121,6 +3164,89 @@ if HAS_CUDA:
             run(shape_x=(3, 4), shape_y=(10, 11))
 
             self.assertEqual(self.get_manager().new_graph_id().id, 3)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_reorder_cpu_and_gpu(self):
+            def f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu):
+                x_cuda0 = x_cuda + 1
+                x_cuda1 = x_cuda0 @ weight_cuda
+                x_cuda2 = 2 * (x_cuda1 + x_cuda)
+
+                y_cpu0 = y_cpu + 1
+                y_cpu1 = y_cpu0 @ weight_cpu
+
+                z_cuda0 = z_cuda + 1
+                z_cuda1 = z_cuda0 @ weight_cuda
+                z_cuda2 = 2 * (z_cuda1 + z_cuda)
+
+                return x_cuda2, y_cpu1, z_cuda2
+
+            x_cuda = torch.randn(3, 3, device="cuda")
+            y_cpu = torch.randn(3, 3, device="cpu")
+            z_cuda = torch.randn(3, 3, device="cuda")
+            weight_cuda = torch.randn(3, 3, device="cuda")
+            weight_cpu = torch.randn(3, 3, device="cpu")
+
+            eager_out = f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu)
+
+            compiled_f = torch.compile(f, mode="reduce-overhead")
+            for _ in range(3):
+                compiled_out = compiled_f(
+                    x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu
+                )
+                self.assertEqual(eager_out, compiled_out)
+
+            # reorder merges ops on cuda into 1 graph partition
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_reorder_cpu_and_gpu_interleave(self):
+            def f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu):
+                # partition 1 on cuda, no dependency
+                x_cuda0 = x_cuda + 1
+                x_cuda1 = x_cuda0 @ weight_cuda
+                x_cuda2 = 2 * (x_cuda1 + x_cuda)
+
+                # partition 2 on cpu w/ dependency on partition 1
+                y_cpu0 = y_cpu + 1
+                x_cuda2_cpu = x_cuda2.cpu()  # adds dependency on gpu computations
+                y_cpu1 = y_cpu0 @ weight_cpu + x_cuda2_cpu
+
+                # partition 3 on cuda w/o dependency
+                z_cuda0 = z_cuda + 1
+                z_cuda1 = z_cuda0 @ weight_cuda
+                z_cuda2 = 2 * (z_cuda1 + z_cuda)
+
+                # partition 4 on cpu w/o dependency
+                y_cpu2 = y_cpu + 5
+                y_cpu3 = y_cpu2 @ weight_cpu
+
+                # partition 5 on cuda w/o dependency
+                u_cuda0 = z_cuda + 3
+                u_cuda1 = u_cuda0 @ weight_cuda
+                u_cuda2 = 2 * (u_cuda0 + u_cuda1)
+
+                return x_cuda2, y_cpu1, z_cuda2, y_cpu3, u_cuda2
+
+            x_cuda = torch.randn(3, 3, device="cuda")
+            y_cpu = torch.randn(3, 3, device="cpu")
+            z_cuda = torch.randn(3, 3, device="cuda")
+            weight_cuda = torch.randn(3, 3, device="cuda")
+            weight_cpu = torch.randn(3, 3, device="cpu")
+
+            eager_out = f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu)
+
+            compiled_f = torch.compile(f, mode="reduce-overhead")
+            for _ in range(3):
+                compiled_out = compiled_f(
+                    x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu
+                )
+                self.assertEqual(eager_out, compiled_out)
+
+            # the optimal order is
+            # [[partition 4 on cpu], [partition 1,3,5 on cuda], [partition 2 on cpu]]
+            # since partition2 depends on partition1. So we have 1 cudagraph in total.
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
         @config.patch(implicit_fallbacks=True)
         @torch._inductor.config.patch("graph_partition", True)
