@@ -79,8 +79,6 @@ def find_unimplemented_v2_calls(dynamo_dir):
                                 "context": None,
                                 "explanation": None,
                                 "hints": [],
-                                "file_path": str(file_path),
-                                "line_number": node.lineno,
                             }
 
                             for kw in node.keywords:
