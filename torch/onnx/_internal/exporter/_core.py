@@ -477,7 +477,7 @@ def _get_onnxscript_opset(opset_version: int) -> onnxscript.values.Opset:
     return onnxscript.values.Opset("", opset_version)
 
 
-def _is_onnx_op(op: torch._ops.OpOverload) -> bool:
+def _is_onnx_op(op: Any) -> bool:
     """Whether the op overload is an ONNX custom op implemented with PyTorch."""
     if not isinstance(op, torch._ops.OpOverload):
         return False
@@ -551,14 +551,14 @@ def _handle_call_function_node_with_lowering(
 
     if _is_onnx_op(node.target):
         # Handle torch.ops.onnx.* ops. These ops can be directly added to the graph
-        op_type, opset_version = _parse_onnx_op(node.target)
+        op_type, opset_version = _parse_onnx_op(node.target)  # type: ignore[arg-type]
         onnx_node = ir.Node(
             "",
             op_type,
             onnx_args,
             ir.convenience.convert_attributes(onnx_kwargs),
             name=node.name,
-            num_outputs=len(node.target._schema.returns),
+            num_outputs=len(node.target._schema.returns),  # type: ignore[union-attr]
             version=opset_version,
         )
         # Store the single node in a list to be consistent with the rest of the code for further processing
@@ -566,7 +566,7 @@ def _handle_call_function_node_with_lowering(
         if len(onnx_node.outputs) == 1:
             outputs = onnx_node.outputs[0]
         else:
-            outputs = onnx_node.outputs
+            outputs = onnx_node.outputs  # type: ignore[assignment]
     else:
         # Find the matching ONNX overload for the node
         # TODO: Log the message here to expose false positives
