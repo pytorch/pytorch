@@ -214,7 +214,7 @@ def is_dependent(constraint: Constraint) -> TypeIs[_Dependent]:
     return isinstance(constraint, _Dependent)
 
 
-T = TypeVar("T", contravariant=True)
+T = TypeVar("T", covariant=True)
 R = TypeVar("R", covariant=True)
 
 
@@ -270,7 +270,7 @@ class _DependentProperty(property, _Dependent, Generic[T, R]):
         )
 
 
-Con = TypeVar("Con", bound=Constraint)
+Con = TypeVar("Con", bound=Constraint, covariant=True)
 
 
 class _IndependentConstraint(Constraint, Generic[Con]):
@@ -280,15 +280,13 @@ class _IndependentConstraint(Constraint, Generic[Con]):
     independent entries are valid.
     """
 
-    base_constraint: Con
-    reinterpreted_batch_ndims: int
-
     def __init__(self, base_constraint: Con, reinterpreted_batch_ndims: int) -> None:
         assert isinstance(base_constraint, Constraint)
         assert isinstance(reinterpreted_batch_ndims, int)
         assert reinterpreted_batch_ndims >= 0
-        self.base_constraint = base_constraint
-        self.reinterpreted_batch_ndims = reinterpreted_batch_ndims
+
+        self.base_constraint: Final[Con] = base_constraint
+        self.reinterpreted_batch_ndims: Final[int] = reinterpreted_batch_ndims
         super().__init__()
 
     @property
@@ -329,11 +327,9 @@ class MixtureSameFamilyConstraint(Constraint, Generic[Con]):
             the :class:`~torch.distribution.MixtureSameFamily` distribution.
     """
 
-    base_constraint: Con
-
     def __init__(self, base_constraint: Con) -> None:
         assert isinstance(base_constraint, Constraint)
-        self.base_constraint = base_constraint
+        self.base_constraint: Final[Con] = base_constraint
         super().__init__()
 
     @property
@@ -395,14 +391,12 @@ class _IntegerInterval(Constraint):
     """
 
     is_discrete: ClassVar[bool] = True
-    lower_bound: Union[float, Tensor]
-    upper_bound: Union[float, Tensor]
 
     def __init__(
         self, lower_bound: Union[int, Tensor], upper_bound: Union[int, Tensor]
     ) -> None:
-        self.lower_bound = lower_bound
-        self.upper_bound = upper_bound
+        self.lower_bound: Final[Union[float, Tensor]] = lower_bound
+        self.upper_bound: Final[Union[float, Tensor]] = upper_bound
         super().__init__()
 
     def check(self, value: Tensor) -> Tensor:
@@ -424,10 +418,9 @@ class _IntegerLessThan(Constraint):
     """
 
     is_discrete: ClassVar[bool] = True
-    upper_bound: Union[float, Tensor]
 
     def __init__(self, upper_bound: Union[int, Tensor]) -> None:
-        self.upper_bound = upper_bound
+        self.upper_bound: Final[Union[float, Tensor]] = upper_bound
         super().__init__()
 
     def check(self, value: Tensor) -> Tensor:
@@ -445,10 +438,9 @@ class _IntegerGreaterThan(Constraint):
     """
 
     is_discrete: ClassVar[bool] = True
-    lower_bound: Union[float, Tensor]
 
     def __init__(self, lower_bound: Union[int, Tensor]) -> None:
-        self.lower_bound = lower_bound
+        self.lower_bound: Final[Union[float, Tensor]] = lower_bound
         super().__init__()
 
     def check(self, value: Tensor) -> Tensor:
@@ -474,10 +466,8 @@ class _GreaterThan(Constraint):
     Constrain to a real half line `(lower_bound, inf]`.
     """
 
-    lower_bound: Union[float, Tensor]
-
     def __init__(self, lower_bound: Union[float, Tensor]) -> None:
-        self.lower_bound = lower_bound
+        self.lower_bound: Final[Union[float, Tensor]] = lower_bound
         super().__init__()
 
     def check(self, value: Tensor) -> Tensor:
@@ -494,10 +484,8 @@ class _GreaterThanEq(Constraint):
     Constrain to a real half line `[lower_bound, inf)`.
     """
 
-    lower_bound: Union[float, Tensor]
-
     def __init__(self, lower_bound: Union[float, Tensor]) -> None:
-        self.lower_bound = lower_bound
+        self.lower_bound: Final[Union[float, Tensor]] = lower_bound
         super().__init__()
 
     def check(self, value: Tensor) -> Tensor:
@@ -514,10 +502,8 @@ class _LessThan(Constraint):
     Constrain to a real half line `[-inf, upper_bound)`.
     """
 
-    upper_bound: Union[float, Tensor]
-
     def __init__(self, upper_bound: Union[float, Tensor]) -> None:
-        self.upper_bound = upper_bound
+        self.upper_bound: Final[Union[float, Tensor]] = upper_bound
         super().__init__()
 
     def check(self, value: Tensor) -> Tensor:
@@ -534,14 +520,11 @@ class _Interval(Constraint):
     Constrain to a real interval `[lower_bound, upper_bound]`.
     """
 
-    lower_bound: Union[float, Tensor]
-    upper_bound: Union[float, Tensor]
-
     def __init__(
         self, lower_bound: Union[float, Tensor], upper_bound: Union[float, Tensor]
     ) -> None:
-        self.lower_bound = lower_bound
-        self.upper_bound = upper_bound
+        self.lower_bound: Final[Union[float, Tensor]] = lower_bound
+        self.upper_bound: Final[Union[float, Tensor]] = upper_bound
         super().__init__()
 
     def check(self, value: Tensor) -> Tensor:
@@ -560,14 +543,11 @@ class _HalfOpenInterval(Constraint):
     Constrain to a real interval `[lower_bound, upper_bound)`.
     """
 
-    lower_bound: Union[float, Tensor]
-    upper_bound: Union[float, Tensor]
-
     def __init__(
         self, lower_bound: Union[float, Tensor], upper_bound: Union[float, Tensor]
     ) -> None:
-        self.lower_bound = lower_bound
-        self.upper_bound = upper_bound
+        self.lower_bound: Final[Union[float, Tensor]] = lower_bound
+        self.upper_bound: Final[Union[float, Tensor]] = upper_bound
         super().__init__()
 
     def check(self, value: Tensor) -> Tensor:
@@ -717,10 +697,6 @@ class _Cat(Constraint):
     each of size `lengths[dim]`, in a way compatible with :func:`torch.cat`.
     """
 
-    cseq: list[Constraint]
-    lengths: list[int]
-    dim: int
-
     def __init__(
         self,
         cseq: Sequence[Constraint],
@@ -728,12 +704,12 @@ class _Cat(Constraint):
         lengths: Optional[Sequence[int]] = None,
     ) -> None:
         assert all(isinstance(c, Constraint) for c in cseq)
-        self.cseq = list(cseq)
+        self.cseq: Final[list[Constraint]] = list(cseq)
         if lengths is None:
             lengths = [1] * len(self.cseq)
-        self.lengths = list(lengths)
+        self.lengths: Final[list[int]] = list(lengths)
         assert len(self.lengths) == len(self.cseq)
-        self.dim = dim
+        self.dim: Final[int] = dim
         super().__init__()
 
     @property
@@ -762,13 +738,10 @@ class _Stack(Constraint):
     in a way compatible with :func:`torch.stack`.
     """
 
-    cseq: list[Constraint]
-    dim: int
-
     def __init__(self, cseq: Sequence[Constraint], dim: int = 0) -> None:
         assert all(isinstance(c, Constraint) for c in cseq)
-        self.cseq = list(cseq)
-        self.dim = dim
+        self.cseq: Final[list[Constraint]] = list(cseq)
+        self.dim: Final[int] = dim
         super().__init__()
 
     @property
