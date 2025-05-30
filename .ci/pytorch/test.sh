@@ -595,7 +595,6 @@ test_perf_for_dashboard() {
     elif [[ "${TEST_CONFIG}" == *cpu_aarch64* ]]; then
       device=cpu_aarch64
     fi
-    test_inductor_set_cpu_affinity
   elif [[ "${TEST_CONFIG}" == *cuda_a10g* ]]; then
     device=cuda_a10g
   elif [[ "${TEST_CONFIG}" == *h100* ]]; then
@@ -603,6 +602,9 @@ test_perf_for_dashboard() {
   elif [[ "${TEST_CONFIG}" == *rocm* ]]; then
     device=rocm
   fi
+
+  # Always set CPU affinity because metrics like compilation time requires CPU
+  test_inductor_set_cpu_affinity
 
   for mode in "${modes[@]}"; do
     if [[ "$mode" == "inference" ]]; then
@@ -1639,7 +1641,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     install_torchaudio cuda
   fi
   install_torchvision
-  TORCH_CUDA_ARCH_LIST="8.0;8.6" pip_install git+https://github.com/pytorch/ao.git
+  TORCH_CUDA_ARCH_LIST="8.0;8.6" install_torchao
   id=$((SHARD_NUMBER-1))
   # https://github.com/opencv/opencv-python/issues/885
   pip_install opencv-python==4.8.0.74
