@@ -160,3 +160,7 @@ class TestONNXScriptExport(common_utils.TestCase):
         )
         loop_selu_proto = onnx.load(io.BytesIO(saved_model.getvalue()))
         self.assertEqual(len(loop_selu_proto.functions), 1)
+
+
+if __name__ == "__main__":
+    common_utils.run_tests()
