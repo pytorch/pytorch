@@ -687,12 +687,13 @@ class TestDraftExport(TestCase):
         x_usage = torch.cuda.memory_allocated(device)
 
         # draft export peak memory usage
-        ep = draft_export(Foo(), (x,), strict=False)
+        draft_export(Foo(), (x,), strict=False)
         peak_mem_usage = torch.cuda.memory_stats(device)["allocated_bytes.all.peak"]
 
         # right now it's actually exactly 4x;
         # I guess original tensor, 2 tensors per add op, 1 for clone stored in node.meta["val"]
         self.assertTrue((peak_mem_usage - base_usage) <= (x_usage - base_usage) * 4.0)
+
 
 if __name__ == "__main__":
     run_tests()
