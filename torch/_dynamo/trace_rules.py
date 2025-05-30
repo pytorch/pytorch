@@ -68,6 +68,7 @@ from .variables import (
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
+    CommunicationFunctionVariable,
 )
 from .variables.base import VariableTracker
 
@@ -367,6 +368,9 @@ manual_torch_name_rule_map: dict[
     "torch.sparse_csc_tensor": SkipFunctionVariable,
     "torch.sparse_csr_tensor": SkipFunctionVariable,
     "torch.sparse_compressed_tensor": SkipFunctionVariable,
+    # Specially handle system-level communication functions 
+    "torch.distributed.distributed_c10d.send": CommunicationFunctionVariable,
+    "torch.distributed.distributed_c10d.recv": CommunicationFunctionVariable,
     "torch._C._autograd._unsafe_set_version_counter": TorchInGraphFunctionVariable,
     "torch.xpu.get_rng_state": SkipFunctionVariable,
     "torch.xpu.set_rng_state": SkipFunctionVariable,
