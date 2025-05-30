@@ -1768,13 +1768,11 @@ def cp_flex_attention_dispatch_mode(
     # NOTE: if we know that there will only be one block_mask in the model, we can
     # memorize this cp_block_mask in the context instead of hitting cache every time
     cp_block_mask = mode._sharder.get_cp_block_mask(mode._sharder._block_mask)
+    device_mesh = mode._sharder._mesh
 
     seq_dim = 2
-    sharding = Shard(seq_dim)
-    k_dist = DTensor.from_local(key, mode._sharder._mesh, [sharding])
-    v_dist = DTensor.from_local(value, mode._sharder._mesh, [sharding])
-    k_global = k_dist.full_tensor()
-    v_global = v_dist.full_tensor()
+    k_global = mode._sharder.unshard(key, device_mesh, seq_dim)
+    v_global = mode._sharder.unshard(value, device_mesh, seq_dim)
 
     # TODO: add kv reorder
 
