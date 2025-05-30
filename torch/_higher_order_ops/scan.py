@@ -13,6 +13,7 @@ from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
     check_meta_consistency,
     first_slice_copy,
+    FunctionalizeCtxWrapper,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
@@ -858,19 +859,14 @@ def scan_fake_tensor_mode(mode, combine_fn, init, xs, additional_inputs):
 
 @scan_op.py_functionalize_impl
 def scan_functionalize(ctx, combine_fn, init, xs, additional_inputs):
-    from torch._higher_order_ops.utils import (
-        _check_alias_and_mutation,
-        _maybe_run_with_interpreter,
-    )
+    from torch._higher_order_ops.utils import _check_alias_and_mutation
 
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_init = ctx.unwrap_tensors(init)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
 
     with ctx.redispatch_to_next():
-        functional_combine_fn = ctx.functionalize(
-            _maybe_run_with_interpreter(combine_fn)
-        )
+        functional_combine_fn = FunctionalizeCtxWrapper(ctx, combine_fn)
         sample_unwrapped_xs_sliced = [first_slice_copy(inp) for inp in unwrapped_xs]
         sample_inputs = list(
             itertools.chain(

@@ -4,6 +4,7 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     autograd_not_implemented,
+    FunctionalizeCtxWrapper,
     reenter_make_fx,
     unique_graph_id,
 )
@@ -94,7 +95,7 @@ def hints_wrapper_functionalize(ctx, body_fn, args, kwargs, hints):
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
     unwrapped_hints = ctx.unwrap_tensors(hints)
     with ctx.redispatch_to_next():
-        functional_body_fn = ctx.functionalize(body_fn)
+        functional_body_fn = FunctionalizeCtxWrapper(ctx, body_fn)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         _check_alias_and_mutation(
             body_fn, unwrapped_args, "hints_wrapper", pre_dispatch
