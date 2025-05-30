@@ -143,12 +143,13 @@ WelfordDataLN cuWelfordOnlineSum(
   }
 }
 
-template<typename U, bool rms_norm> __device__
+template<bool rms_norm> __device__
 WelfordDataLN cuWelfordCombine(
   const WelfordDataLN dataB,
   const WelfordDataLN dataA
 ) {
   if constexpr (!rms_norm){
+    using U = decltype(dataB.count);
     U delta = dataB.mean - dataA.mean;
     U count = dataA.count + dataB.count;
     U mean, sigma2;
@@ -187,13 +188,13 @@ __device__ WelfordDataLN compute_stats(
       vec_t data = X_vec[i];
       #pragma unroll
       for (int ii=0; ii < vec_size; ii++){
-        wd = cuWelfordOnlineSum<T, rms_norm>(static_cast<acc_t>(data.val[ii]), wd);
+        wd = cuWelfordOnlineSum<acc_t, rms_norm>(static_cast<acc_t>(data.val[ii]), wd);
       }
     }
     // intra-warp reduction
     for (int offset = (C10_WARP_SIZE >> 1); offset > 0; offset >>= 1) {
         WelfordDataLN wdB{WARP_SHFL_DOWN(wd.mean, offset), WARP_SHFL_DOWN(wd.sigma2, offset), WARP_SHFL_DOWN(wd.count, offset)};
-        wd = cuWelfordCombine<T, rms_norm>(wd, wdB);
+        wd = cuWelfordCombine<rms_norm>(wd, wdB);
     }
     // threadIdx.x == 0 has correct values for each warp
     // inter-warp reductions
@@ -214,7 +215,7 @@ __device__ WelfordDataLN compute_stats(
           WelfordDataLN wdB{meansigmabuf[2*threadIdx.y],
                           meansigmabuf[2*threadIdx.y+1],
                           countbuf[threadIdx.y]};
-          wd = cuWelfordCombine<T, rms_norm>(wd, wdB);
+          wd = cuWelfordCombine<rms_norm>(wd, wdB);
         }
         __syncthreads();
       }
