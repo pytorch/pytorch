@@ -3183,12 +3183,13 @@ class TestHelperModules:
             x = self.adaptive_avg_pool2d(x)
             return x
 
+
     class ConvWithBNRelu(torch.nn.Module):
-        def __init__(self, relu, dim=2, bn=True, bias=True):
+        def __init__(self, relu, dim=2, bn=True, bias=True, padding=0):
             super().__init__()
-            convs = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d}
-            bns = {1: torch.nn.BatchNorm1d, 2: torch.nn.BatchNorm2d}
-            self.conv = convs[dim](3, 3, 3, bias=bias)
+            convs = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
+            bns = {1: torch.nn.BatchNorm1d, 2: torch.nn.BatchNorm2d, 3: torch.nn.BatchNorm3d}
+            self.conv = convs[dim](3, 3, 3, bias=bias, padding=padding)
 
             if bn:
                 self.bn = bns[dim](3)
