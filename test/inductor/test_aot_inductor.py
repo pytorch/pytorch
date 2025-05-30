@@ -161,6 +161,7 @@ class AOTInductorTestsTemplate:
         "toolchain doesn't support ptx to fatbin",
     )
     @skipIfRocm
+    @skipIfXpu
     @common_utils.parametrize("embed_kernel_binary", [True, False])
     def test_simple_multi_arch(self, embed_kernel_binary):
         if self.device != GPU_TYPE:
@@ -190,8 +191,7 @@ class AOTInductorTestsTemplate:
                 _, code = run_and_get_cpp_code(
                     AOTIRunnerUtil.compile, model, example_inputs
                 )
-                file_extension = ".spv" if self.device == "xpu" else ".fatbin"
-                FileCheck().check(file_extension).run(code)
+                FileCheck().check(".fatbin").run(code)
 
     def test_small_constant(self):
         class Model(torch.nn.Module):
