@@ -690,7 +690,7 @@ class _PositiveDefinite(_Symmetric):
         return torch.linalg.cholesky_ex(value).info.eq(0)
 
 
-class _Cat(Constraint):
+class _Cat(Constraint, Generic[Con]):
     """
     Constraint functor that applies a sequence of constraints
     `cseq` at the submatrices at dimension `dim`,
@@ -699,12 +699,12 @@ class _Cat(Constraint):
 
     def __init__(
         self,
-        cseq: Sequence[Constraint],
+        cseq: Sequence[Con],
         dim: int = 0,
         lengths: Optional[Sequence[int]] = None,
     ) -> None:
         assert all(isinstance(c, Constraint) for c in cseq)
-        self.cseq: Final[list[Constraint]] = list(cseq)
+        self.cseq: Final[list[Con]] = list(cseq)
         if lengths is None:
             lengths = [1] * len(self.cseq)
         self.lengths: Final[list[int]] = list(lengths)
@@ -731,16 +731,16 @@ class _Cat(Constraint):
         return torch.cat(checks, self.dim)
 
 
-class _Stack(Constraint):
+class _Stack(Constraint, Generic[Con]):
     """
     Constraint functor that applies a sequence of constraints
     `cseq` at the submatrices at dimension `dim`,
     in a way compatible with :func:`torch.stack`.
     """
 
-    def __init__(self, cseq: Sequence[Constraint], dim: int = 0) -> None:
+    def __init__(self, cseq: Sequence[Con], dim: int = 0) -> None:
         assert all(isinstance(c, Constraint) for c in cseq)
-        self.cseq: Final[list[Constraint]] = list(cseq)
+        self.cseq: Final[list[Con]] = list(cseq)
         self.dim: Final[int] = dim
         super().__init__()
 
