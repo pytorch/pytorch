@@ -86,6 +86,11 @@ pexpr = PythonPrinter().doprint
 all_prefixes = OrderedSet(["z", "y", "x", "r0_", "r1_"])
 
 
+def get_max_tiles(default: int = 2) -> int:
+    max_tiles = torch._inductor.config.triton.max_tiles
+    return max_tiles if max_tiles is not None else default
+
+
 @dataclasses.dataclass
 class IterationRanges:
     """
@@ -2160,7 +2165,7 @@ class SIMDScheduling(BaseScheduling):
                 )
             )
 
-        if torch._inductor.config.triton.max_tiles == 3 and reduction_numel == 1:
+        if get_max_tiles(default=3) == 3 and reduction_numel == 1:
             for vars_to_use in itertools.combinations(overlapping_iter_vars, 2):
                 score_split.append(
                     (
@@ -2193,7 +2198,7 @@ class SIMDScheduling(BaseScheduling):
             ):
                 # we always include default reduction numel == 1, dont include
                 tiling_len = len(cand.tiling) - (1 if reduction_numel == 1 else 0)
-                if tiling_len > torch._inductor.config.triton.max_tiles:
+                if tiling_len > get_max_tiles(default=3):
                     perf_hint_log.info(
                         "Found optimal tiling with %s tiles but torch._inductor.config.triton.max_tiles "
                         "set to %s. Consider increasing",
@@ -2287,7 +2292,7 @@ class SIMDScheduling(BaseScheduling):
 
         if (
             not is_pointwise and not config.triton.tile_reductions
-        ) or config.triton.max_tiles <= 1:
+        ) or get_max_tiles(default=2) <= 1:
             # Emit a perf hint in case we miss an opportunity to tile a reduction.
             if perf_hint_log.level <= logging.WARNING:
                 for node in EnableReduction.filter(node_schedule):
@@ -2322,7 +2327,7 @@ class SIMDScheduling(BaseScheduling):
             for candidate_tiling, score in candidate_tiles.most_common()
         ]
 
-        if config.triton.max_tiles >= 3 and is_pointwise:
+        if get_max_tiles(default=2) >= 3 and is_pointwise:
             # Consider adding a third dimension of tiling, but only
             # when a1 is a multiple of b1; otherwise, you have a lot
             # of stragglers which is annoying to generate code for.
