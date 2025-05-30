@@ -43,6 +43,8 @@ from typing import (
 )
 from typing_extensions import deprecated, NamedTuple, Self
 
+from torch.torch_version import TorchVersion as _TorchVersion
+
 
 __all__ = [
     "PyTree",
@@ -170,15 +172,23 @@ SERIALIZED_TYPE_TO_PYTHON_TYPE: dict[str, type[Any]] = {}
 # NB: we try really hard to not import _cxx_pytree (which depends on optree)
 # as much as possible. This is for isolation: a user who is not using C++ pytree
 # shouldn't pay for it, and it helps makes things like cpython upgrades easier.
+_optree_minimum_version = _TorchVersion("0.13.0")
 try:
     _optree_version = importlib.metadata.version("optree")
 except importlib.metadata.PackageNotFoundError:
-    # optree was not imported
+    # No optree package found
     _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = False
+    _optree_version = _TorchVersion("0.0.0a0")
 else:
-    # optree was imported
-    _cxx_pytree_exists = True
-    _cxx_pytree_dynamo_traceable = True
+    _optree_version = _TorchVersion(_optree_version)
+    if _optree_version < _optree_minimum_version:
+        # optree package less than our required minimum version.
+        # Pretend the optree package doesn't exist.
+        # NB: We will raise ImportError if the user directly tries to
+        # `import torch.utils._cxx_pytree` (look in that file for the check).
+        _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = False
+    else:
+        _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = True
 
 _cxx_pytree_imported = False
 _cxx_pytree_pending_imports: list[Any] = []
@@ -1202,6 +1212,26 @@ class TreeSpec:
             start = end
 
         return unflatten_fn(child_pytrees, self.context)
+
+    def __hash__(self) -> int:
+        node_type = self.type
+        if node_type is defaultdict:
+            default_factory, dict_context = self.context
+            hashable_context = (default_factory, tuple(dict_context))
+        elif node_type in (dict, OrderedDict):
+            hashable_context = tuple(self.context)
+        elif node_type is None or node_type in BUILTIN_TYPES:
+            hashable_context = self.context
+        elif isinstance(self.context, ConstantNode):
+            hashable_context = self.context.value
+        else:
+            # The context for user-defined node types might not be hashable.
+            # Ignore it for hashing.
+            # This does not break the correctness that equal objects imply the
+            # same hash. This might increase the hash collision rate, but we
+            # don't care about that.
+            hashable_context = None
+        return hash((node_type, hashable_context, tuple(self.children_specs)))
 
 
 # NOTE: subclassing a dataclass is subtle. In order to enable reasoning about

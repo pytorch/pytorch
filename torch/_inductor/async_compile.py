@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import atexit
 import functools
+import json
 import logging
 import multiprocessing
 import os
@@ -60,6 +61,8 @@ kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 
 log = logging.getLogger(__name__)
 
+_triton_kernel_metrics: Optional[dict[str, dict[str, Any]]] = None
+
 
 def pre_fork_setup():
     """
@@ -87,18 +90,39 @@ def caching_device_properties():
 
 
 def _compile_start() -> None:
-    global _t0
+    global _t0, _triton_kernel_metrics
     if _t0 is None:
         _t0 = time()
+    if _triton_kernel_metrics is None:
+        _triton_kernel_metrics = {}
 
 
 def _compile_end() -> None:
-    global _cumulative_compile_time, _t0
+    global _cumulative_compile_time, _t0, _triton_kernel_metrics
     if _t0 is not None:
         t1 = time()
         _cumulative_compile_time += t1 - _t0
         _t0 = None
         # print("CUMULATIVE COMPILE TIME", _cumulative_compile_time)
+    if _triton_kernel_metrics:
+        # Log triton kernel info
+        sorted_info = dict(sorted(_triton_kernel_metrics.items()))
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "triton_kernel_info",
+                "encoding": "json",
+            },
+            payload_fn=lambda: json.dumps(sorted_info),
+        )
+        _triton_kernel_metrics = None
+
+
+def _add_triton_kernel_info(kernel_name: str, info: dict[str, Any]):
+    global _triton_kernel_metrics
+    # Must be called between _compile_start and _compile_end
+    if _triton_kernel_metrics is not None:
+        _triton_kernel_metrics[kernel_name] = info
 
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -314,22 +338,29 @@ class AsyncCompile:
             counters["inductor"]["async_compile_cache_hit"] += 1
             # Set reload_kernel_from_src properly based on source_code
             if isinstance(future, StaticAutotunerFuture):
+                # Remove the future now that we've cache hit
+                CompiledTritonKernels.remove_future(source_code)
                 future.reload_kernel_from_src = reload_kernel_in_parent
             if is_parallel:
                 return future
             else:
                 return future.result()
 
+        # Cache miss
         if is_parallel:
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.
             env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
             extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
+            extra_config = {
+                "use_static_cuda_launcher": torch._inductor.config.use_static_cuda_launcher
+            }
 
             task = self.process_pool().submit(
                 _worker_compile_triton,
                 load_kernel,
                 extra_env,
+                extra_config,
             )
 
             def get_result() -> CachingAutotuner:
@@ -338,11 +369,15 @@ class AsyncCompile:
                 # so it can't be used again
                 kernel.set_compile_info(compile_id, is_backward)
                 CompiledTritonKernels.remove_future(source_code)
+
                 kernel.precompile(
                     warm_cache_only=False,
                     reload_kernel=reload_kernel_in_parent,
                     static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                 )
+                info = kernel.autotune_cache_info or {}
+                info["compile_time_us"] = elapsed_us
+                _add_triton_kernel_info(kernel_name, info)
                 get_metrics_context().add_top_n(
                     "triton_kernel_compile_times_us", kernel_name, elapsed_us
                 )
@@ -357,6 +392,7 @@ class AsyncCompile:
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="triton_compile_time_us",
                 log_waitcounter=True,
+                waitcounter_name_override="compile_triton",
             ):
                 start_ns = time_ns()
                 _set_triton_ptxas_path()
@@ -370,6 +406,9 @@ class AsyncCompile:
                 get_metrics_context().add_top_n(
                     "triton_kernel_compile_times_us", kernel_name, elapsed_us
                 )
+                info = kernel.autotune_cache_info or {}
+                info["compile_time_us"] = elapsed_us
+                _add_triton_kernel_info(kernel_name, info)
                 return kernel
 
     def multi_kernel(self, *args, **kwargs) -> Any:
@@ -442,6 +481,7 @@ class AsyncCompile:
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="triton_compile_time_us",
                 log_waitcounter=True,
+                waitcounter_name_override="compile_triton",
             ):
                 self._wait_futures(scope)
 
@@ -463,7 +503,8 @@ class AsyncCompile:
             if config.verbose_progress and not isinstance(pbar, _Faketqdm):
                 pbar.set_postfix_str(key)
             try:
-                scope[key] = result.result()
+                kernel = result.result()
+                scope[key] = kernel
             except BrokenProcessPool as e:
                 raise RuntimeError(
                     "A compilation subprocess exited unexpectedly. This "

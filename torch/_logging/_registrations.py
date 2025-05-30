@@ -26,6 +26,10 @@ register_artifact(
     "cudagraphs",
     "Logs information from wrapping inductor generated code with cudagraphs.",
 )
+register_artifact(
+    "codecache",
+    "Logs information about inductor's code cache",
+)
 
 register_log("dynamic", DYNAMIC)
 register_log("torch", "torch")
@@ -70,6 +74,10 @@ register_artifact(
     "Prints the dynamo traced graph (prior to AOTDispatch) in a table. If you prefer python code use `graph_code` instead. ",
 )
 register_artifact("graph_code", "Like `graph`, but gives you the Python code instead.")
+register_artifact(
+    "graph_code_verbose",
+    "Verbose FX pass logs, e.g. from tensorify_python_scalars and runtime_assert.",
+)
 register_artifact(
     "graph_sizes", "Prints the sizes of all FX nodes in the dynamo graph."
 )
@@ -215,6 +223,12 @@ register_artifact(
 register_artifact(
     "graph_region_expansion",
     "Logs detailed steps of the duplicate graph region tracker expansion algorithm",
+    off_by_default=True,
+)
+
+register_artifact(
+    "inductor_metrics",
+    "Logs Inductor metrics, such as num_bytes, nodes_num_elem, node_runtimes",
     off_by_default=True,
 )
 

@@ -289,8 +289,10 @@ void Engine::stop() {
   stopped_ = true;
   // Under some conditions, autograd threads can hang on shutdown
   // Do not wait for them to shutdown indefinitely but rely on timeout
-  auto wait_duration_str = getenv("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
-  auto wait_duration = wait_duration_str ? std::atof(wait_duration_str) : 10.0;
+  auto wait_duration_str =
+      c10::utils::get_env("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
+  auto wait_duration =
+      wait_duration_str ? std::atof(wait_duration_str->c_str()) : 10.0;
   bool noBackward = true;
   for (auto& queue : device_ready_queues_) {
     noBackward = noBackward && queue->empty();
@@ -1063,12 +1065,31 @@ void Engine::evaluate_function(
     Node* func,
     InputBuffer& inputs,
     const std::shared_ptr<ReadyQueue>& cpu_ready_queue) {
-  // The InputBuffer::adds that supplied incoming grads took pains to
-  // ensure they're safe to consume in the context of the present
-  // func's stream (if applicable). So we guard onto that stream
-  // before working with the grads in any capacity.
+  // Locally set the current stream to func's associated stream
   auto opt_parent_stream = (*func).stream();
   c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
+
+  // Ensure that the incoming gradients are ready
+  for (size_t pos = 0; pos < inputs.ready_events.size(); ++pos) {
+    if (!inputs.buffer[pos].defined()) {
+      continue;
+    }
+    const auto device = inputs.buffer[pos].device();
+    // TODO: Use at::accelerator::isAccelerator(device->type()) instead
+    bool is_accelerator =
+        device.is_cuda() || device.is_mtia() || device.is_privateuseone();
+    if (!is_accelerator) {
+      continue;
+    }
+    TORCH_INTERNAL_ASSERT(inputs.ready_events[pos].has_value());
+    TORCH_INTERNAL_ASSERT(inputs.ready_streams[pos].has_value());
+    TORCH_INTERNAL_ASSERT(opt_parent_stream.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    if (opt_parent_stream.value() != inputs.ready_streams[pos].value()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      opt_parent_stream->wait(inputs.ready_events[pos].value());
+    }
+  }
 
   // If exec_info_ is not empty, we have to instrument the execution
   auto& exec_info_ = graph_task->exec_info_;
@@ -1305,8 +1326,8 @@ auto Engine::execute(
 
   auto graph_task = std::make_shared<GraphTask>(
       /* keep_graph */ keep_graph,
-      /* create_graph */ create_graph,
-      /* depth */ not_reentrant_backward_call ? 0 : total_depth + 1,
+      /* grad_mode */ create_graph,
+      /* reentrant_depth */ not_reentrant_backward_call ? 0 : total_depth + 1,
       /* cpu_ready_queue */ local_ready_queue,
       /* graph_roots */ std::move(temp_roots));
 
@@ -1327,8 +1348,6 @@ auto Engine::execute(
 
   if (compiled_autograd != nullptr) {
     // see [Note: Compiled Autograd]
-    TORCH_CHECK(
-        !create_graph, "compiled_autograd does not support create_graph");
     _thread_check.release();
     GraphTaskGuard guard(graph_task);
     CheckpointValidGuard cpvguard(graph_task);

@@ -1,39 +1,22 @@
 # mypy: allow-untyped-defs
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 import sympy
 
 import torch
 from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
+from torch._inductor.utils import sympy_product
 from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import ChoiceCaller, Layout
-from ..utils import get_num_sms, TMA_DESCRIPTOR_SIZE, use_aten_gemm_kernels
+from ..ir import _IntLike, Layout, TensorBox
+from ..utils import get_num_sms, TMA_DESCRIPTOR_SIZE
 
 
 log = logging.getLogger(__name__)
-
-
-def should_fallback_to_aten(choices: list[ChoiceCaller]) -> bool:
-    if len(choices) == 0 and not use_aten_gemm_kernels():
-        if inductor_config.autotune_fallback_to_aten:
-            log.warning(
-                "No choices for GEMM, using ATen backend as fallback. "
-                "This behavior is being deprecated. Please add include Aten in max_autotune_gemm_backends."
-            )
-            return True
-        else:
-            log.warning(
-                "No choices for GEMM, chose not to fallback to ATen backend. "
-                "To temporarily change this behavior, set autotune_fallback_to_aten to True "
-                "via TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN=1, but this knob is being deprecated. "
-                "The long term fix is to include Aten in max_autotune_gemm_backends."
-            )
-            return False
-    return False
 
 
 @SymbolicGridFn
@@ -52,6 +35,11 @@ def persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
         1,
         1,
     )
+
+
+@SymbolicGridFn
+def persistent_grouped_mm_grid(m, n, meta):
+    return (meta["NUM_SMS"], 1, 1)
 
 
 def acc_type(dtype):
@@ -259,3 +247,40 @@ def _is_static_problem(layout: Layout) -> tuple[bool, bool]:
         numel *= dim
     nonzero = numel > 0
     return static_shape, nonzero
+
+
+def check_supported_striding(mat_a: TensorBox, mat_b: TensorBox) -> None:
+    def is_row_major(stride: Sequence[_IntLike]) -> bool:
+        return stride[-1] == 1
+
+    def is_col_major(stride: Sequence[_IntLike]) -> bool:
+        return stride[-2] == 1
+
+    def has_zero_dim(size: Sequence[_IntLike]) -> bool:
+        return bool(size[0] == 0 or size[1] == 0)
+
+    # Check mat_a (self) stride requirements
+    torch._check(
+        is_row_major(mat_a.get_stride()) or has_zero_dim(mat_a.get_size()),
+        lambda: f"mat_a must be row_major, got stride {mat_a.get_stride()}",
+    )
+
+    # Check mat_b stride requirements
+    torch._check(
+        is_col_major(mat_b.get_stride()) or has_zero_dim(mat_b.get_size()),
+        lambda: f"mat_b must be col_major, got stride {mat_b.get_stride()}",
+    )
+
+
+def is_batch_stride_largest(mat1, mat2, layout) -> bool:
+    """
+    Checking if the batch stride is the largest in the stride.
+    """
+    sizes = [mat1.get_size(), mat2.get_size(), layout.size]
+    strides = [mat1.get_stride(), mat2.get_stride(), layout.stride]
+    for size, stride in zip(sizes, strides):
+        assert len(size) == len(stride) == 3, "Expect 3D tensors"
+        if stride[0] != sympy_product(size[1:]):
+            return False
+
+    return True

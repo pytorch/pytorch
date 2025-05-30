@@ -40,6 +40,7 @@ class GuardFail(NamedTuple):
 @dataclasses.dataclass(frozen=True)
 class GuardFilterEntry:
     name: str
+    has_value: bool
     value: object
     guard_type: str
     derived_guard_types: tuple[str, ...]

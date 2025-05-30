@@ -27,8 +27,10 @@ import enum
 import functools
 import importlib
 import inspect
+import io
 import logging
 import math
+import pickle
 import sys
 import textwrap
 import types
@@ -37,7 +39,7 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
 from weakref import ReferenceType
 
 import torch
@@ -57,15 +59,16 @@ from torch._C._dynamo.guards import (
     RootGuardManager,
 )
 from torch._dynamo.source import (
+    get_global_source_name,
+    get_local_source_name,
     IndexedSource,
     is_from_flatten_script_object_source,
-    is_from_global_source,
     is_from_local_source,
     is_from_optimizer_source,
     TensorProperty,
     TensorPropertySource,
 )
-from torch._dynamo.utils import CompileEventLogger
+from torch._dynamo.utils import CompileEventLogger, get_metrics_context
 from torch._guards import (
     CompileContext,
     CompileId,
@@ -80,15 +83,18 @@ from torch._guards import (
 from torch._logging import structured
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
+    _CppShapeGuardsHelper,
+    _ShapeGuardsHelper,
     EqualityConstraint,
     is_symbolic,
     SYMPY_INTERP,
 )
+from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
 
-from . import config, convert_frame, exc, mutation_guard
+from . import config, convert_frame, exc
 from .eval_frame import set_guard_error_hook
 from .source import (
     AttrProxySource,
@@ -103,6 +109,7 @@ from .source import (
     FlattenScriptObjectSource,
     FloatTensorSource,
     FSDPNNModuleSource,
+    GenericAttrSource,
     GetItemSource,
     GlobalSource,
     GlobalStateSource,
@@ -164,6 +171,8 @@ except ModuleNotFoundError:
 
 if TYPE_CHECKING:
     from sympy import Symbol
+
+    from torch._dynamo.output_graph import OutputGraphGuardsState
 
 
 log = logging.getLogger(__name__)
@@ -470,7 +479,11 @@ def get_verbose_code_part(code_part: str, guard: Guard) -> str:
                     extra = f"  # {format_frame(fs, line=True)}"
                     break
         elif guard.stack:
-            extra = f"  # {format_frame(guard.stack.summary()[-1])}"
+            summary = guard.stack.summary()
+            if len(summary) > 0:
+                extra = f"  # {format_frame(summary[-1])}"
+            else:
+                extra = "  # <unknown>"
     return f"{code_part:<60}{extra}"
 
 
@@ -482,21 +495,21 @@ def get_verbose_code_parts(
     return [get_verbose_code_part(code_part, guard) for code_part in code_parts]
 
 
+def convert_int_to_concrete_values(dim) -> Optional[int]:
+    if not is_symbolic(dim):
+        return dim
+    else:
+        assert isinstance(dim, torch.SymInt)
+        return dim.node.maybe_as_int()
+
+
 def convert_to_concrete_values(size_or_stride):
-    converted: list[Optional[int]] = []
-    for dim in size_or_stride:
-        if not is_symbolic(dim):
-            converted.append(dim)
-        else:
-            assert isinstance(dim, torch.SymInt)
-            converted.append(dim.node.maybe_as_int())
-    return converted
+    return [convert_int_to_concrete_values(dim) for dim in size_or_stride]
 
 
-def get_tensor_guard_code_part(value, name, sizes, strides):
-    pytype = type(value)
+def get_tensor_guard_code_part(value, name, sizes, strides, pytype, dispatch_keys):
     dispatch_key = (
-        torch._C._dispatch_keys(value) | torch._C._dispatch_tls_local_include_set()
+        dispatch_keys | torch._C._dispatch_tls_local_include_set()
     ) - torch._C._dispatch_tls_local_exclude_set()
     dtype = value.dtype
     device_index = value.device.index
@@ -518,6 +531,14 @@ def get_key_index(dct, key):
 
 def get_key_index_source(source, index):
     return f"list(dict.keys({source}))[{index}]"
+
+
+def raise_local_type_error(obj: Any) -> NoReturn:
+    raise TypeError(
+        f"Type {type(obj)} for object {obj} cannot be saved "
+        + "into torch.compile() package since it's defined in local scope. "
+        + "Please define the class at global scope (top level of a module)."
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -618,6 +639,7 @@ class GuardBuilder(GuardBuilderBase):
         global_scope: dict[str, object],
         guard_manager: GuardManagerWrapper,
         check_fn_manager: CheckFunctionManager,
+        serialization_mode: Optional[str] = None,
     ):
         self.f_code = f_code
         self.id_ref = id_ref
@@ -657,8 +679,8 @@ class GuardBuilder(GuardBuilderBase):
         # to access the same object - self._module["param"] is same as
         # self.param.
         self.key_order_guarded_dict_ids = set()
-        for source_name in self.check_fn_manager.output_graph.guard_on_key_order:
-            self.key_order_guarded_dict_ids.add(id(self.get(source_name)))
+        for source in self.check_fn_manager.output_graph.guard_on_key_order:
+            self.key_order_guarded_dict_ids.add(id(self.get(source.name())))
 
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and guard_manager and is used to
@@ -670,6 +692,7 @@ class GuardBuilder(GuardBuilderBase):
             str, torch._C._dynamo.guards.GuardManager
         ] = {}
         self._cached_duplicate_input_guards: set[tuple[str, str]] = set()
+        self.serialization_mode = serialization_mode
 
     def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
@@ -968,28 +991,20 @@ class GuardBuilder(GuardBuilderBase):
             # duplicate names in the case of cells: a name can be both local and cell
             # and will take up 2 slots of the frame's localsplus. The correct behavior
             # is to refer to the cell, which has a higher index.
-            if config.enable_cpp_framelocals_guard_eval:
-                framelocals_names_reversed = code_framelocals_names_reversed_cached(
-                    self.f_code
-                )
-                framelocals_idx = (
-                    len(framelocals_names_reversed)
-                    - framelocals_names_reversed.index(source.local_name)
-                    - 1
-                )
-                out = root_guard_manager.framelocals_manager(
-                    key=(source.local_name, framelocals_idx),
-                    source=source_name,
-                    example_value=example_value,
-                    guard_manager_enum=guard_manager_enum,
-                )
-            else:
-                out = root_guard_manager.dict_getitem_manager(
-                    key=source.local_name,
-                    source=source_name,
-                    example_value=example_value,
-                    guard_manager_enum=guard_manager_enum,
-                )
+            framelocals_names_reversed = code_framelocals_names_reversed_cached(
+                self.f_code
+            )
+            framelocals_idx = (
+                len(framelocals_names_reversed)
+                - framelocals_names_reversed.index(source.local_name)
+                - 1
+            )
+            out = root_guard_manager.framelocals_manager(
+                key=(source.local_name, framelocals_idx),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, GlobalSource):
             # Global manager accepts a dict but it is not a DictGuardManager
             # because globals dict is big and we typically guard on a very
@@ -1044,6 +1059,14 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, GradSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.grad_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, GenericAttrSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.generic_getattr_manager(
+                attr=source.member,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
@@ -1432,7 +1455,12 @@ class GuardBuilder(GuardBuilderBase):
 
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
-        t = type(self.get(guard.name))
+        value = self.get(guard.name)
+        t = type(value)
+        if self.serialization_mode == "save":
+            if t.__qualname__ != t.__name__:
+                raise_local_type_error(value)
+
         obj_id = self.id_ref(t, f"type({guard.name})")
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
         self._set_guard_export_info(guard, [code])
@@ -1442,6 +1470,10 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def DICT_VERSION(self, guard: Guard):
+        if self.serialization_mode == "save":
+            raise torch._dynamo.exc.PackageError(
+                "DICT_VERSION guard cannot be serialized."
+            )
         # ___check_dict_version is same as `dict_version(x) == y`
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
@@ -1496,6 +1528,8 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def ID_MATCH(self, guard: Guard):
+        if self.serialization_mode == "save":
+            raise torch._dynamo.exc.PackageError("ID_MATCH guard cannot be serialized.")
         # ___check_obj_id is same as `id(x) == y`
         if isinstance(guard.originating_source, TypeSource):
             # optional optimization to produce cleaner/faster guard code
@@ -1549,20 +1583,10 @@ class GuardBuilder(GuardBuilderBase):
     def NAME_MATCH(self, guard: Guard):
         self._guard_on_attribute(guard, "__name__", GuardBuilder.EQUALS_MATCH)
 
-    def DATA_PTR_MATCH(self, guard: Guard):
-        # C++ guard has the type check internally
-        obj = self.get(guard.name)
-        code = f"{self.arg_ref(guard)}.data_ptr() == {obj.data_ptr()}"
-        self._set_guard_export_info(guard, [code])
-
-        self.get_guard_manager(guard).add_data_ptr_guard(
-            obj, get_verbose_code_parts(code, guard)
-        )
-
     def DUAL_LEVEL(self, guard: Guard):
         # Invalidate dual level if current dual level is different than the one
         # in the fx graph
-        dual_level = torch.autograd.forward_ad._current_level
+        dual_level = self.check_fn_manager.output_graph.dual_level
         code = [f"torch.autograd.forward_ad._current_level == {dual_level}"]
         self._set_guard_export_info(guard, [code])
         # TODO(anijain2305) - Consider this moving this guard to C++
@@ -1578,7 +1602,7 @@ class GuardBuilder(GuardBuilderBase):
     def FUNCTORCH_STACK_MATCH(self, guard: Guard):
         # Invalidate functorch code if current level is different than
         # the one when FX graph was generated
-        cis = torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters()
+        cis = self.check_fn_manager.output_graph.functorch_layers
         states = [ci.get_state() for ci in cis]
         code = [f"torch._functorch.pyfunctorch.compare_functorch_state({states})"]
         self._set_guard_export_info(guard, code)
@@ -1588,6 +1612,33 @@ class GuardBuilder(GuardBuilderBase):
 
         def fn(x):
             return compare_fn(states)
+
+        self.guard_manager.root.add_lambda_guard(
+            fn, get_verbose_code_parts(code, guard)
+        )
+
+    def AUTOGRAD_SAVED_TENSORS_HOOKS(self, guard: Guard):
+        get_hooks = torch._functorch._aot_autograd.utils.top_saved_tensors_hooks
+        are_inline_hooks = (
+            torch._functorch._aot_autograd.utils.saved_tensors_hooks_are_inlineable
+        )
+
+        def hooks_ids_fn(hooks):
+            if not are_inline_hooks(hooks):
+                return None
+
+            pack_hook, unpack_hook = hooks
+            return tuple(map(id, hooks))
+
+        guard_hooks_ids = hooks_ids_fn(get_hooks())
+
+        code = [
+            f"torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == {guard_hooks_ids}"
+        ]
+        self._set_guard_export_info(guard, code)
+
+        def fn(x):
+            return guard_hooks_ids == hooks_ids_fn(get_hooks())
 
         self.guard_manager.root.add_lambda_guard(
             fn, get_verbose_code_parts(code, guard)
@@ -1654,6 +1705,7 @@ class GuardBuilder(GuardBuilderBase):
         if torch.distributed.is_available():
             from torch.distributed.device_mesh import DeviceMesh
             from torch.distributed.tensor.placement_types import (
+                _StridedShard,
                 Partial,
                 Replicate,
                 Shard,
@@ -1664,7 +1716,12 @@ class GuardBuilder(GuardBuilderBase):
                 Replicate,
                 Partial,
                 DeviceMesh,
+                _StridedShard,
             )
+
+        from torch.export.dynamic_shapes import _IntWrapper
+
+        ok_types = ok_types + (_IntWrapper,)
 
         import torch.utils._pytree as pytree
 
@@ -1723,6 +1780,11 @@ class GuardBuilder(GuardBuilderBase):
             self.EQUALS_MATCH(guard)
 
     def NN_MODULE(self, guard: Guard):
+        # don't support this in serialization because it uses unsupported ID_MATCH
+        if self.serialization_mode == "save":
+            raise torch._dynamo.exc.PackageError(
+                "NN_MODULE guard cannot be serialized."
+            )
         self.ID_MATCH(guard)
         val = self.get(guard.name)
         if hasattr(val, "training"):
@@ -1741,10 +1803,20 @@ class GuardBuilder(GuardBuilderBase):
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
+        # don't support this in serialization because it uses unsupported ID_MATCH
+        if self.serialization_mode == "save":
+            raise torch._dynamo.exc.PackageError(
+                "FUNCTION_MATCH guard cannot be serialized."
+            )
         return self.ID_MATCH(guard)
 
     def CLOSURE_MATCH(self, guard: Guard):
         """matches a closure by __code__ id."""
+        # don't support this in serialization because it uses unsupported FUNCTION_MATCH
+        if self.serialization_mode == "save":
+            raise torch._dynamo.exc.PackageError(
+                "CLOSURE_MATCH guard cannot be serialized."
+            )
         val = self.get(guard.name)
         # Strictly only want user-defined functions
         if type(val) == types.FunctionType and hasattr(val, "__code__"):
@@ -1754,9 +1826,6 @@ class GuardBuilder(GuardBuilderBase):
             self.FUNCTION_MATCH(guard)
 
     def BUILTIN_MATCH(self, guard: Guard):
-        return self.FUNCTION_MATCH(guard)
-
-    def PYMODULE_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
 
     def SEQUENCE_LENGTH(self, guard):
@@ -1821,6 +1890,10 @@ class GuardBuilder(GuardBuilderBase):
 
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     def DUPLICATE_INPUT(self, guard, source_b):
+        if self.serialization_mode == "save":
+            raise torch._dynamo.exc.PackageError(
+                "DUPLICATE_INPUT guard cannot be serialized yet."
+            )
         ref_a = self.arg_ref(guard)
         ref_b = self.arg_ref(source_b.name())
 
@@ -1847,6 +1920,10 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def WEAKREF_ALIVE(self, guard):
+        if self.serialization_mode == "save":
+            raise torch._dynamo.exc.PackageError(
+                "WEAKREF_ALIVE guard cannot be serialized."
+            )
         code = [f"{self.arg_ref(guard)} is not None"]
 
         self._set_guard_export_info(guard, code)
@@ -1896,9 +1973,6 @@ class GuardBuilder(GuardBuilderBase):
             return
         self.SEQUENCE_LENGTH(guard)
 
-    def OBJECT_MUTATION(self, guard: Guard):
-        mutation_guard.watch(self.get(guard.name), self.check_fn_manager)
-
     def GRAD_MODE(self, guard: Guard):
         pass  # we always guard on this via GlobalStateGuard()
 
@@ -1914,9 +1988,10 @@ class GuardBuilder(GuardBuilderBase):
     def DEFAULT_DEVICE(self, guard: Guard):
         """Guard on CURRENT_DEVICE per torch.utils._device"""
         assert guard.source is GuardSource.GLOBAL
-        import torch.utils._device as m
 
-        code = [f"utils_device.CURRENT_DEVICE == {m.CURRENT_DEVICE!r}"]
+        code = [
+            f"utils_device.CURRENT_DEVICE == {self.check_fn_manager.output_graph.current_device!r}"
+        ]
         self._set_guard_export_info(guard, code)
 
         self.get_guard_manager(guard).add_default_device_guard(
@@ -1924,90 +1999,114 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def SHAPE_ENV(self, guard: Guard):
-        # Let's handle ShapeEnv guards.  To do this, we will resolve
-        # shape variables to sources from tracked_fakes.  This must happen after
-        # tensor checks.
         assert guard.name == ""
         output_graph = self.check_fn_manager.output_graph
-        # NB: self.output_graph can be None in the debug_nops tests
-        fs = output_graph.tracked_fakes
-        input_contexts = [a.symbolic_context for a in fs]
-
-        def get_sources(t_id, dim):
-            # Looks up base sources mapped to a tensor id and uses them to create
-            # sources for the corresponding tensor dimension.
-            return [
-                TensorPropertySource(source, TensorProperty.SIZE, dim)
-                for source in output_graph.tracked_fakes_id_to_source[t_id]
-            ]
-
-        if output_graph.export_constraints:
-            names: dict[str, tuple[int, int]] = {}
-            source_pairs: list[tuple[Source, Source]] = []
-            derived_equalities: list[  # type: ignore[type-arg]
-                tuple[Source, Union[Source, Symbol], Callable]
-            ] = []
-            phantom_symbols: dict[str, Symbol] = {}
-            relaxed_sources: set[Source] = set()
-            for constraint in output_graph.export_constraints:
-                if constraint.t_id in output_graph.tracked_fakes_id_to_source:
-                    torch.export.dynamic_shapes._process_equalities(
-                        constraint,
-                        get_sources,
-                        output_graph.shape_env,
-                        names,
-                        source_pairs,
-                        derived_equalities,
-                        phantom_symbols,
-                        relaxed_sources,
-                    )
-                else:
-                    log.warning("Untracked tensor used in export constraints")
-            equalities_inputs = EqualityConstraint(
-                source_pairs=source_pairs,
-                derived_equalities=derived_equalities,
-                phantom_symbols=list(phantom_symbols.values()),
-                relaxed_sources=relaxed_sources,
-                warn_only=False,
-            )
+        if self.serialization_mode == "load":
+            assert self.check_fn_manager.shape_code_parts is not None
+            shape_code_parts = self.check_fn_manager.shape_code_parts
+            python_code_parts = shape_code_parts.python_code_parts
+            verbose_code_parts = shape_code_parts.verbose_code_parts
+            if shape_code_parts.cpp_code_parts is not None:
+                cpp_code_parts = shape_code_parts.cpp_code_parts
+            python_fallback = shape_code_parts.python_fallback
         else:
-            equalities_inputs = None
+            # Let's handle ShapeEnv guards.  To do this, we will resolve
+            # shape variables to sources from tracked_fakes.  This must happen after
+            # tensor checks.
+            # NB: self.output_graph can be None in the debug_nops tests
+            fs = output_graph.tracked_fakes
+            input_contexts = [a.symbolic_context for a in fs]
 
-        def _get_code_parts(langs):
-            return output_graph.shape_env.produce_guards_verbose(
-                [a.fake for a in fs],
-                [a.source for a in fs],
-                input_contexts=input_contexts,
-                equalities_inputs=equalities_inputs,
-                source_ref=self.source_ref,
-                # Export keeps static.
-                ignore_static=(not self.check_fn_manager.output_graph.export),
-                langs=langs,
-            )
+            def get_sources(t_id, dim):
+                # Looks up base sources mapped to a tensor id and uses them to create
+                # sources for the corresponding tensor dimension.
+                return [
+                    TensorPropertySource(source, TensorProperty.SIZE, dim)
+                    for source in output_graph.tracked_fakes_id_to_source[t_id]
+                ]
 
-        if config.enable_cpp_symbolic_shape_guards:
-            try:
-                # For exporting we need the python code parts
-                python_code_parts, verbose_code_parts, cpp_code_parts = _get_code_parts(
-                    ("python", "verbose_python", "cpp")
+            if output_graph.export_constraints:
+                names: dict[str, tuple[int, int]] = {}
+                source_pairs: list[tuple[Source, Source]] = []
+                derived_equalities: list[  # type: ignore[type-arg]
+                    tuple[Source, Union[Source, Symbol], Callable]
+                ] = []
+                phantom_symbols: dict[str, Symbol] = {}
+                relaxed_sources: set[Source] = set()
+                for constraint in output_graph.export_constraints:
+                    if constraint.t_id in output_graph.tracked_fakes_id_to_source:
+                        torch.export.dynamic_shapes._process_equalities(
+                            constraint,
+                            get_sources,
+                            output_graph.shape_env,
+                            names,
+                            source_pairs,
+                            derived_equalities,
+                            phantom_symbols,
+                            relaxed_sources,
+                        )
+                    else:
+                        log.warning("Untracked tensor used in export constraints")
+                equalities_inputs = EqualityConstraint(
+                    source_pairs=source_pairs,
+                    derived_equalities=derived_equalities,
+                    phantom_symbols=list(phantom_symbols.values()),
+                    relaxed_sources=relaxed_sources,
+                    warn_only=False,
                 )
-                python_fallback = False
-            except OverflowError:
-                # Cannot use int64_t
+            else:
+                equalities_inputs = None
+
+            def _get_code_parts(langs):
+                return output_graph.shape_env.produce_guards_verbose(
+                    [a.fake for a in fs],
+                    [a.source for a in fs],
+                    input_contexts=input_contexts,
+                    equalities_inputs=equalities_inputs,
+                    source_ref=self.source_ref,
+                    # Export keeps static.
+                    ignore_static=(not self.check_fn_manager.output_graph.export),
+                    langs=langs,
+                )
+
+            if config.enable_cpp_symbolic_shape_guards:
+                try:
+                    # For exporting we need the python code parts
+                    python_code_parts, verbose_code_parts, cpp_code_parts = (
+                        _get_code_parts(("python", "verbose_python", "cpp"))
+                    )
+                    python_fallback = False
+                except OverflowError:
+                    # Cannot use int64_t
+                    python_fallback = True
+                    python_code_parts, verbose_code_parts = _get_code_parts(
+                        ("python", "verbose_python")
+                    )
+            else:
                 python_fallback = True
                 python_code_parts, verbose_code_parts = _get_code_parts(
                     ("python", "verbose_python")
                 )
-        else:
-            python_fallback = True
-            python_code_parts, verbose_code_parts = _get_code_parts(
-                ("python", "verbose_python")
+
+            # When exporting, we may work with the shape constraints some more in
+            # postprocessing, so don't freeze yet
+            if not self.check_fn_manager.output_graph.export:
+                output_graph.shape_env.freeze()
+
+        if self.serialization_mode == "save":
+            # For SHAPE_ENV we want to skip serializing the entire ShapeEnv so instead
+            # we directly serialize the generated code here.
+            maybe_cpp_code_parts = locals().get("cpp_code_parts")
+            assert maybe_cpp_code_parts is None or isinstance(
+                maybe_cpp_code_parts, _CppShapeGuardsHelper
+            )
+            self.check_fn_manager.shape_code_parts = ShapeCodeParts(
+                python_code_parts=python_code_parts,
+                verbose_code_parts=verbose_code_parts,
+                cpp_code_parts=maybe_cpp_code_parts,
+                python_fallback=python_fallback,
             )
 
-        # When exporting, we may work with the shape constraints some more in
-        # postprocessing, so don't freeze yet
-        if not self.check_fn_manager.output_graph.export:
-            output_graph.shape_env.freeze()
         for code in python_code_parts.exprs:
             self._set_guard_export_info(guard, [code])
 
@@ -2141,7 +2240,22 @@ class GuardBuilder(GuardBuilderBase):
                 value = value()
 
             value = value if value is not None else self.get(guard.name)
+
+            pytype = type(value)
+            dispatch_keys = torch._C._dispatch_keys(value)
+            if isinstance(value, torch._subclasses.FakeTensor):
+                if value.pytype is not None:
+                    pytype = value.pytype
+                if value.dispatch_keys is not None:
+                    dispatch_keys = value.dispatch_keys
+
             assert isinstance(value, torch.Tensor)
+
+            if config.log_compilation_metrics and isinstance(value, torch.nn.Parameter):
+                metrics_context = get_metrics_context()
+                metrics_context.increment("param_numel", value.numel())
+                metrics_context.increment("param_bytes", value.nbytes)
+                metrics_context.increment("param_count", 1)
 
             tensor_name = self.arg_ref(guard)
             # [Note - On Export Tensor Guards]
@@ -2192,7 +2306,7 @@ class GuardBuilder(GuardBuilderBase):
                 # But we deliberately take this soundness hit because this
                 # usecase is quite rare and there is substantial reduction in
                 # guard overhead.
-                # For numpy tensors, since those are ephemeral, we dont have to
+                # For numpy tensors, since those are ephemeral, we don't have to
                 # insert aliasing guards on them
                 if not (
                     config.skip_no_tensor_aliasing_guards_on_parameters
@@ -2211,7 +2325,9 @@ class GuardBuilder(GuardBuilderBase):
                 stride = convert_to_concrete_values(metadata["stride"])
 
                 verbose_code_parts = get_verbose_code_parts(
-                    get_tensor_guard_code_part(value, tensor_name, size, stride),
+                    get_tensor_guard_code_part(
+                        value, tensor_name, size, stride, pytype, dispatch_keys
+                    ),
                     guard,
                 )
                 guard_manager.add_tensor_match_guard(
@@ -2220,6 +2336,8 @@ class GuardBuilder(GuardBuilderBase):
                     stride,
                     tensor_name,
                     verbose_code_parts,
+                    pytype,
+                    dispatch_keys,
                 )
 
                 # We consider TENSOR_MATCH guard to be important enough to be
@@ -2452,6 +2570,160 @@ class DeletedGuardManagerWrapper(GuardManagerWrapper):
         self.diff_guard_root = None
 
 
+@dataclasses.dataclass
+class ShapeCodeParts:
+    python_code_parts: _ShapeGuardsHelper
+    verbose_code_parts: _ShapeGuardsHelper
+    cpp_code_parts: Optional[_CppShapeGuardsHelper]
+    python_fallback: bool
+
+
+@dataclasses.dataclass
+class GuardsState:
+    output_graph: OutputGraphGuardsState
+    shape_code_parts: Optional[ShapeCodeParts]
+
+
+class GuardsStatePickler(pickle.Pickler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fake_mode = torch._subclasses.FakeTensorMode()
+        self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
+
+    @classmethod
+    def _unpickle_module(cls, state):
+        mod = torch.nn.Module()
+        mod.__setstate__(state)
+        return mod
+
+    @classmethod
+    def _unpickle_tensor(cls, meta_tensor, device, pytype, dispatch_keys_raw):
+        fake_mode = torch._subclasses.FakeTensorMode()
+        tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
+        return tensor_converter.from_meta_and_device(
+            fake_mode,
+            meta_tensor,
+            device,
+            pytype,
+            torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw),
+        )
+
+    @classmethod
+    def _unpickle_traceable_wrapper_subclass(
+        cls, meta_tensor, device, pytype, dispatch_keys_raw, ctx, inner_data
+    ):
+        # Unpickle the inner tensor components. These could also be subclass instances.
+        inner_tensors = {}
+        for attr, unpickle_func, unpickle_func_args in inner_data:
+            inner_tensors[attr] = unpickle_func(*unpickle_func_args)
+
+        outer_size, outer_stride = meta_tensor.shape, meta_tensor.stride()
+        out = type(meta_tensor).__tensor_unflatten__(
+            inner_tensors, ctx, outer_size, outer_stride
+        )
+        out.pytype = pytype
+        out.dispatch_keys = torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw)
+        return out
+
+    @classmethod
+    def _unpickle_python_module(cls, alias: str):
+        return importlib.import_module(alias)
+
+    @classmethod
+    def _unpickle_dispatch_key_set(cls, raw_repr: int):
+        return torch._C.DispatchKeySet.from_raw_repr(raw_repr)
+
+    @classmethod
+    def _unpickle_functorch_interpreter(cls, json: bytes):
+        return torch._C._functorch.CInterpreter.deserialize(json)
+
+    @classmethod
+    def _unpickle_mapping_proxy(cls, d):
+        return types.MappingProxyType(d)
+
+    def reducer_override(self, obj):
+        import sympy
+
+        if isinstance(obj, torch.Tensor) and obj.device.type != "meta":
+            from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+            if is_traceable_wrapper_subclass(obj):
+                # inner_data is a list of tuples of:
+                #   (inner attr name, unpickle func, tuple of func inputs)
+                # This supports traceable wrapper subclass inner tensors.
+                inner_data = []
+                attrs, ctx = obj.__tensor_flatten__()
+                # recursively call for inner tensor components
+                for attr in attrs:
+                    inner = getattr(obj, attr)
+                    func, args_tuple = self.reducer_override(inner)
+                    inner_data.append((attr, func, args_tuple))
+
+                return type(self)._unpickle_traceable_wrapper_subclass, (
+                    torch.empty_like(obj, device="meta"),
+                    obj.device,
+                    type(obj),
+                    torch._C._dispatch_keys(obj).raw_repr(),
+                    ctx,
+                    inner_data,
+                )
+
+            return type(self)._unpickle_tensor, (
+                torch.empty_like(obj, device="meta"),
+                obj.device,
+                type(obj),
+                torch._C._dispatch_keys(obj).raw_repr(),
+            )
+
+        elif isinstance(obj, torch.nn.Module):
+            if type(obj).__qualname__ == type(obj).__name__:
+                return NotImplemented
+            if obj.__class__.__getstate__ == torch.nn.Module.__getstate__:
+                return type(self)._unpickle_module, (obj.__getstate__(),)
+
+        elif inspect.ismodule(obj):
+            return type(self)._unpickle_python_module, (obj.__name__,)
+
+        elif isinstance(obj, torch._C.DispatchKeySet):
+            return type(self)._unpickle_dispatch_key_set, (obj.raw_repr(),)
+
+        elif isinstance(obj, torch._C._functorch.CInterpreter):
+            return type(self)._unpickle_functorch_interpreter, (obj.serialize(),)
+
+        elif (
+            inspect.isclass(obj)
+            and issubclass(obj, sympy.Function)
+            and hasattr(obj, "_torch_handler_name")
+        ):
+            assert hasattr(obj, "_torch_unpickler")
+            return obj._torch_unpickler, (obj._torch_handler_name,)
+
+        elif isinstance(obj, torch.SymInt):
+            raise RuntimeError(f"Cannot serialize SymInt {obj} (node: {obj.node})")
+
+        elif isinstance(obj, types.MappingProxyType):
+            return type(self)._unpickle_mapping_proxy, (obj.copy(),)
+
+        if type(obj).__qualname__ != type(obj).__name__:
+            raise torch._dynamo.exc.PackageError(
+                f"Type {type(obj)} for object {obj} cannot be saved "
+                + "into torch.compile() package since it's defined in local scope. "
+                + "Please define the class at global scope (top level of a module)."
+            )
+
+        return NotImplemented
+
+
+def pickle_guards_state(state: GuardsState) -> bytes:
+    buf = io.BytesIO()
+    pickler = GuardsStatePickler(buf)
+    try:
+        pickler.dump(state)
+    except AttributeError as e:
+        raise torch._dynamo.exc.PackageError(str(e)) from e
+    return buf.getvalue()
+
+
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that constitutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
@@ -2467,6 +2739,8 @@ class CheckFunctionManager:
         guard_filter_fn: Optional[
             Callable[[list[GuardFilterEntry]], list[bool]]
         ] = None,
+        guards_serialization_mode: Optional[str] = None,
+        shape_code_parts: Optional[ShapeCodeParts] = None,
     ):
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
@@ -2476,34 +2750,46 @@ class CheckFunctionManager:
         )
         self.output_graph = output_graph
 
+        # Only used for serialization.
+        self.shape_code_parts = shape_code_parts
+
         # NB: Until we trace device contexts, we need to use the stack recorded at the beginning of tracing
         # in case a set default device call was made in the graph.
         self.torch_function_mode_stack = (
             output_graph.torch_function_mode_stack if output_graph else None
         )
+        self.guards_serialization_mode = guards_serialization_mode
 
         if not justknobs_check("pytorch/compiler:guard_nn_modules"):
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
 
         sorted_guards = sorted(guards or (), key=Guard.sort_key)
         builder, guard_manager = self.build_guards(
-            sorted_guards, existing_diff_guard_sources, f_code, output_graph
+            sorted_guards,
+            existing_diff_guard_sources,
+            f_code,
+            output_graph,
+            None if guard_filter_fn else self.guards_serialization_mode,
         )
 
         if guard_filter_fn:
 
             def make_guard_filter_entry(guard):
+                MISSING = object()
                 name = strip_local_scope(guard.name)
                 if name == "":
-                    value = None
+                    has_value = False
+                    value = MISSING
                 else:
+                    has_value = True
                     value = builder.get(guard.name)
-                is_global = is_from_global_source(guard.originating_source)
+                is_global = get_global_source_name(guard.originating_source) is not None
                 guard_fn = guard.create_fn
                 if isinstance(guard_fn, functools.partial):
                     guard_fn = guard.create_fn.func
                 return GuardFilterEntry(
                     name=name,
+                    has_value=has_value,
                     value=value,
                     guard_type=guard_fn.__name__,
                     derived_guard_types=tuple(guard.guard_types)
@@ -2523,7 +2809,11 @@ class CheckFunctionManager:
             ]
             # Redo the guards because filtering relies on the results from the last guard builder.
             builder, guard_manager = self.build_guards(
-                sorted_guards, existing_diff_guard_sources, f_code, output_graph
+                sorted_guards,
+                existing_diff_guard_sources,
+                f_code,
+                output_graph,
+                self.guards_serialization_mode,
             )
 
         self.guard_manager = guard_manager
@@ -2547,7 +2837,7 @@ class CheckFunctionManager:
         # TODO(anijain2305, ydwu4) - Skipping export because of following test
         # python -s test/dynamo/test_export.py -k test_export_with_symbool_inputs
         latency = 0.0
-        if not output_graph.export:
+        if not output_graph.export and self.guards_serialization_mode != "load":
             if not self.guard_manager.check(output_graph.local_scope):
                 reasons = get_guard_fail_reason_helper(
                     self.guard_manager,  # type: ignore[arg-type]
@@ -2580,6 +2870,74 @@ class CheckFunctionManager:
             # account for, we simply increment at the toplevel instead.
             CompileEventLogger.increment_toplevel("guard_latency_us", int(latency))
 
+        self.guards_state: Optional[bytes] = None
+        if self.guards_serialization_mode == "save":
+            used_global_vars = set()
+            used_local_vars = set()
+
+            def prune_variable(source):
+                if name := get_global_source_name(source):
+                    assert isinstance(name, str)
+                    used_global_vars.add(name)
+                elif name := get_local_source_name(source):
+                    assert isinstance(name, str)
+                    used_local_vars.add(name)
+
+            output_graph_guards_state = self.output_graph.dump_guards_state()
+            # Only serialize the global variables that are actually used in guards.
+            for guard in sorted_guards:
+                prune_variable(guard.originating_source)
+            for source in self.output_graph.guard_on_key_order:
+                prune_variable(source)
+
+            def normalize_create_fn(x):
+                if isinstance(x, functools.partial):
+
+                    def _ref(x):
+                        if isinstance(x, (TensorWeakRef, weakref.ref)):
+                            return x()
+                        return x
+
+                    new_args = tuple(_ref(a) for a in x.args)
+                    new_keywords = {k: _ref(v) for k, v in x.keywords.items()}
+                    return functools.partial(x.func, *new_args, **new_keywords)
+
+                return x
+
+            output_graph_guards_state = dataclasses.replace(
+                output_graph_guards_state,
+                local_scope={
+                    k: v
+                    for k, v in output_graph_guards_state.local_scope.items()
+                    if k in used_local_vars
+                },
+                global_scope={
+                    k: v
+                    for k, v in output_graph_guards_state.global_scope.items()
+                    if k in used_global_vars
+                },
+                _guards=torch._guards.GuardsSet(
+                    {
+                        dataclasses.replace(
+                            guard,
+                            obj_weakref=None,
+                            guarded_class_weakref=None,
+                            create_fn=normalize_create_fn(guard.create_fn),
+                        )
+                        for guard in sorted_guards
+                    }
+                ),
+                input_source_to_sizes_strides=pytree.tree_map(
+                    convert_int_to_concrete_values,
+                    output_graph_guards_state.input_source_to_sizes_strides,
+                ),
+            )
+            guards_state = GuardsState(
+                output_graph=output_graph_guards_state,
+                shape_code_parts=self.shape_code_parts,
+            )
+            self.guards_state = pickle_guards_state(guards_state)
+
         # TODO: don't do the string rep, do something more structured here
         torch._logging.trace_structured(
             "dynamo_cpp_guards_str",
@@ -2602,6 +2960,7 @@ class CheckFunctionManager:
         existing_diff_guard_sources,
         f_code,
         output_graph,
+        serialization_mode=None,
     ):
         guard_manager = GuardManagerWrapper()
         guard_manager.diff_guard_sources = existing_diff_guard_sources
@@ -2627,6 +2986,7 @@ class CheckFunctionManager:
             output_graph.global_scope,
             guard_manager,
             self,
+            serialization_mode,
         )
 
         # Break retain cycle. See test_release_scope_memory
@@ -2746,9 +3106,7 @@ class CheckFunctionManager:
             )
 
         aotautograd_guards: list[GuardEnvExpr] = (
-            self.output_graph.tracing_context.guards_context.aotautograd_guards
-            if self.output_graph
-            else []
+            self.output_graph.aotautograd_guards if self.output_graph else []
         )
 
         # TODO(anijain2305) - There is a duplicate logic in Dynamo to find
@@ -2878,10 +3236,16 @@ def build_guard_function(code_parts, closure_args) -> tuple[str, str]:
     from torch._inductor.utils import IndentedBuffer
 
     csepass = PyExprCSEPass()
-    csepass.count(code_parts)
+    try:
+        csepass.count(code_parts)
 
-    def replace(expr: str) -> tuple[list[str], str]:
-        return csepass.replace(expr)
+        def replace(expr: str) -> tuple[list[str], str]:
+            return csepass.replace(expr)
+    except RecursionError:
+        # If we hit recursion limits during CSE analysis, fall back to a no-op replace function
+        # This can happen with extremely complex guard expressions
+        def replace(expr: str) -> tuple[list[str], str]:
+            return [], expr
 
     # Generate the inner body of the guard function.
     # i.e. if-chain of the guard expressions.
@@ -2920,8 +3284,8 @@ def is_recompiles_verbose_enabled():
 
 
 # this will only be used if cpp guards are disabled
-def make_torch_function_mode_stack_guard(intial_stack):
-    types = [type(x) for x in intial_stack]
+def make_torch_function_mode_stack_guard(initial_stack):
+    types = [type(x) for x in initial_stack]
 
     def check_torch_function_mode_stack():
         cur_stack = get_torch_function_mode_stack()

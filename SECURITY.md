@@ -3,6 +3,7 @@
  - [**Reporting a Vulnerability**](#reporting-a-vulnerability)
  - [**Using Pytorch Securely**](#using-pytorch-securely)
    - [Untrusted models](#untrusted-models)
+   - [TorchScript models](#torchscript-models)
    - [Untrusted inputs](#untrusted-inputs)
    - [Data privacy](#data-privacy)
    - [Using distributed features](#using-distributed-features)
@@ -37,6 +38,10 @@ Important Note: The trustworthiness of a model is not binary. You must always de
 [^data-poisoning-sources]: To understand risks of utilization of data from unknown sources, read the following Cornell papers on Data poisoning:
     https://arxiv.org/abs/2312.04748
     https://arxiv.org/abs/2401.05566
+
+### TorchScript models
+
+TorchScript models should treated the same way as locally executable code from an unknown source. Only run TorchScript models if you trust the provider. Please note, that tools for introspecting TorchScript models (such as `torch.utils.model_dump`) may also execute partial or full code stored in those models, therefore they should be used only if you trust the provider of the binary you are about to load.
 
 ### Untrusted inputs during training and prediction
 

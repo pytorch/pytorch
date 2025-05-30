@@ -607,6 +607,9 @@ class AvgPool1d(_AvgPoolNd):
         When ceil_mode=True, sliding windows are allowed to go off-bounds if they start within the left padding
         or the input. Sliding windows that would start in the right padded region are ignored.
 
+    .. note::
+        pad should be at most half of effective kernel size.
+
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding` can each be
     an ``int`` or a one-element tuple.
 
@@ -687,6 +690,9 @@ class AvgPool2d(_AvgPoolNd):
     Note:
         When ceil_mode=True, sliding windows are allowed to go off-bounds if they start within the left padding
         or the input. Sliding windows that would start in the right padded region are ignored.
+
+    .. note::
+        pad should be at most half of effective kernel size.
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding` can either be:
 
@@ -796,6 +802,9 @@ class AvgPool3d(_AvgPoolNd):
     Note:
         When ceil_mode=True, sliding windows are allowed to go off-bounds if they start within the left padding
         or the input. Sliding windows that would start in the right padded region are ignored.
+
+    .. note::
+        pad should be at most half of effective kernel size.
 
     The parameters :attr:`kernel_size`, :attr:`stride` can either be:
 

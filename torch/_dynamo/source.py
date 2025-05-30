@@ -244,6 +244,30 @@ class AttrSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class GenericAttrSource(ChainedSource):
+    member: str
+
+    def __post_init__(self):
+        assert self.base, "Can't construct an AttrSource without a valid base source"
+        if "." in self.member:
+            member_parts = self.member.split(".")
+            object.__setattr__(
+                self, "base", AttrSource(self.base, ".".join(member_parts[:-1]))
+            )
+            object.__setattr__(self, "member", member_parts[-1])
+
+    def reconstruct(self, codegen: "PyCodegen"):
+        codegen(self.base)
+        codegen.extend_output(codegen.create_load_attrs(self.member))
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"object.__getattribute__({self.base.name()}, {self.member!r})"
+
+
+@dataclasses.dataclass(frozen=True)
 class LocalCellSource(Source):
     """
     Conceptually, this class is `LocalSource` for cell objects implicitly
@@ -835,26 +859,54 @@ class BackwardStateSource(Source):
         return GuardSource.BACKWARD_STATE
 
 
-def is_from_local_source(source: Source, *, only_allow_input=False):
+def get_local_source_name(source: Source, *, only_allow_input=False) -> Optional[str]:
     if isinstance(source, ChainedSource):
-        return is_from_local_source(source.base, only_allow_input=only_allow_input)
+        return get_local_source_name(source.base, only_allow_input=only_allow_input)
     if not isinstance(source, LocalSource):
-        return False
+        return None
     if only_allow_input and not source.is_input:
-        return False
-    return True
+        return None
+    return source.local_name
 
 
-def is_from_global_source(source: Source):
+def is_from_local_source(source: Source, *, only_allow_input=False):
+    return get_local_source_name(source, only_allow_input=only_allow_input) is not None
+
+
+def is_from_global_source(source: Source) -> bool:
+    return get_global_source_name(source) is not None
+
+
+def get_global_source_name(source: Source) -> Optional[str]:
     if isinstance(source, ChainedSource):
-        return is_from_global_source(source.base)
-    return isinstance(source, GlobalSource)
+        return get_global_source_name(source.base)
+    if not isinstance(source, GlobalSource):
+        return None
+    return source.global_name
+
+
+def is_from_nonlocal_source(source: Source):
+    if isinstance(source, ChainedSource):
+        return is_from_nonlocal_source(source.base)
+    return (
+        isinstance(source, LocalSource)
+        and source.is_derefed_cell_contents
+        and not source.is_input
+    )
 
 
 def is_from_source(source: Source, target: Source):
     if isinstance(source, ChainedSource):
         return is_from_source(source.base, target)
     return source == target
+
+
+def is_from_unspecialized_nn_module_source(source: Source):
+    if isinstance(source, UnspecializedNNModuleSource):
+        return True
+    if isinstance(source, ChainedSource):
+        return is_from_unspecialized_nn_module_source(source.base)
+    return False
 
 
 def is_from_unspecialized_param_buffer_source(source: Source):
