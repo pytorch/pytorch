@@ -33,7 +33,7 @@ The following constraints are implemented:
 """
 
 from collections.abc import Sequence
-from typing import Callable, Final, Generic, Optional, TypeVar, Union
+from typing import Callable, ClassVar, Final, Generic, Optional, TypeVar, Union
 from typing_extensions import TypeAlias, TypeIs
 
 import torch
@@ -369,7 +369,7 @@ class _Boolean(Constraint):
     Constrain to the two values `{0, 1}`.
     """
 
-    is_discrete: bool = True
+    is_discrete: ClassVar[bool] = True
 
     def check(self, value: Tensor) -> Tensor:
         return (value == 0) | (value == 1)
@@ -394,7 +394,7 @@ class _IntegerInterval(Constraint):
     Constrain to an integer interval `[lower_bound, upper_bound]`.
     """
 
-    is_discrete: bool = True
+    is_discrete: ClassVar[bool] = True
     lower_bound: Union[float, Tensor]
     upper_bound: Union[float, Tensor]
 
@@ -423,7 +423,7 @@ class _IntegerLessThan(Constraint):
     Constrain to an integer interval `(-inf, upper_bound]`.
     """
 
-    is_discrete: bool = True
+    is_discrete: ClassVar[bool] = True
     upper_bound: Union[float, Tensor]
 
     def __init__(self, upper_bound: Union[int, Tensor]) -> None:
@@ -444,7 +444,7 @@ class _IntegerGreaterThan(Constraint):
     Constrain to an integer interval `[lower_bound, inf)`.
     """
 
-    is_discrete: bool = True
+    is_discrete: ClassVar[bool] = True
     lower_bound: Union[float, Tensor]
 
     def __init__(self, lower_bound: Union[int, Tensor]) -> None:
@@ -587,7 +587,7 @@ class _Simplex(Constraint):
     Specifically: `x >= 0` and `x.sum(-1) == 1`.
     """
 
-    event_dim: int = 1
+    event_dim: ClassVar[int] = 1
 
     def check(self, value: Tensor) -> Tensor:
         return torch.all(value >= 0, dim=-1) & ((value.sum(-1) - 1).abs() < 1e-6)
@@ -602,8 +602,8 @@ class _Multinomial(Constraint):
     this may be strengthened to ``value.sum(-1) == upper_bound``.
     """
 
-    is_discrete: bool = True
-    event_dim: int = 1
+    is_discrete: ClassVar[bool] = True
+    event_dim: ClassVar[int] = 1
 
     def __init__(self, upper_bound: Union[int, Tensor]) -> None:
         self.upper_bound = upper_bound
@@ -617,7 +617,7 @@ class _LowerTriangular(Constraint):
     Constrain to lower-triangular square matrices.
     """
 
-    event_dim: int = 2
+    event_dim: ClassVar[int] = 2
 
     def check(self, value: Tensor) -> Tensor:
         value_tril = value.tril()
@@ -629,7 +629,7 @@ class _LowerCholesky(Constraint):
     Constrain to lower-triangular square matrices with positive diagonals.
     """
 
-    event_dim: int = 2
+    event_dim: ClassVar[int] = 2
 
     def check(self, value: Tensor) -> Tensor:
         value_tril = value.tril()
@@ -647,7 +647,7 @@ class _CorrCholesky(Constraint):
     row vector being of unit length.
     """
 
-    event_dim: int = 2
+    event_dim: ClassVar[int] = 2
 
     def check(self, value: Tensor) -> Tensor:
         tol = (
@@ -663,7 +663,7 @@ class _Square(Constraint):
     Constrain to square matrices.
     """
 
-    event_dim: int = 2
+    event_dim: ClassVar[int] = 2
 
     def check(self, value: Tensor) -> Tensor:
         return torch.full(
