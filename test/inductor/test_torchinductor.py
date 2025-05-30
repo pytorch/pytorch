@@ -2696,6 +2696,12 @@ class CommonTemplate:
 
         self.common(fn, (torch.randint(4, (4,)),))
 
+    def test_clamp_type_promotion_non_tensor(self):
+        def fn(a):
+            return a.clamp(min=1.5), a.clamp(min=2)
+
+        self.common(fn, (torch.randint(4, (4,)),))
+
     @skip_if_gpu_halide
     @xfail_if_triton_cpu
     def test_dist(self):

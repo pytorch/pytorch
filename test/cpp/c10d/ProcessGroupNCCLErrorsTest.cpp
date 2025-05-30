@@ -179,7 +179,12 @@ class ProcessGroupNCCLNoHeartbeatCaught
       int rank,
       int size,
       c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts)
-      : ProcessGroupNCCLTimedOutErrors(store, rank, size, std::move(opts)) {}
+      : ProcessGroupNCCLTimedOutErrors(store, rank, size, std::move(opts)) {
+    // Override the heartbeat monitor function to make sure that we capture
+    // the exception in the monitor thread because we cannot try-catch it in
+    // the main thread and we set a flag for the main thread to check.
+    heartbeatMonitor_ = std::make_unique<TestHeartbeatMonitor>(this);
+  }
 
   std::mutex& getWatchdogMutex() {
     return workMetaListMutex_;
@@ -195,18 +200,22 @@ class ProcessGroupNCCLNoHeartbeatCaught
     asyncDebugDump.wait();
   }
 
- protected:
-  // Override the heartbeat monitor function to make sure that we capture
-  // the exception in the monitor thread because we cannot try-catch it in
-  // the main thread and we set a flag for the main thread to check.
-  void heartbeatMonitor() override {
-    try {
-      c10d::ProcessGroupNCCL::heartbeatMonitor();
-    } catch (std::runtime_error& e) {
-      hasMonitorThreadCaughtError_ = true;
-    }
-  }
+  class TestHeartbeatMonitor : public c10d::ProcessGroupNCCL::HeartbeatMonitor {
+   public:
+    using HeartbeatMonitor::HeartbeatMonitor;
 
+    void runLoop() override {
+      try {
+        c10d::ProcessGroupNCCL::HeartbeatMonitor::runLoop();
+      } catch (std::runtime_error& e) {
+        // Safe cast because we know it's a ProcessGroupNCCLNoHeartbeatCaught
+        auto* pg = static_cast<ProcessGroupNCCLNoHeartbeatCaught*>(pg_);
+        pg->hasMonitorThreadCaughtError_ = true;
+      }
+    }
+  };
+
+ protected:
   // It's really hard to unit test std::abort. So we override it instead.
   // Commented this override, we do see process aborted with core dump without
   // this override.
