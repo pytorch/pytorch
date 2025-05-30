@@ -1,9 +1,11 @@
-#include <ATen/miopen/Exceptions.h>
-#include <ATen/miopen/Handle.h>
 #include <ATen/hip/detail/DeviceThreadHandles.h>
+#include <ATen/miopen/Handle.h>
 #include <c10/hip/HIPStream.h>
 
-namespace at { namespace native {
+#include <ATen/hip/Exceptions.h>
+#include <ATen/miopen/Exceptions.h>
+
+namespace at::native {
 namespace {
 
 void createMIOpenHandle(miopenHandle_t *handle) {
@@ -11,30 +13,33 @@ void createMIOpenHandle(miopenHandle_t *handle) {
 }
 
 void destroyMIOpenHandle(miopenHandle_t handle) {
-// this is because of something dumb in the ordering of
-// destruction. Sometimes atexit, the cuda context (or something)
-// would already be destroyed by the time this gets destroyed. It
-// happens in fbcode setting. @colesbury and I decided to not destroy
-// the handle as a workaround.
-//   - @soumith
-//
-// Further note: this is now disabled globally, because we are seeing
-// the same issue as mentioned above in CUDA 11 CI.
-//   - @zasdfgbnm
-//
-// #ifdef NO_MIOPEN_DESTROY_HANDLE
-// #else
-//   miopenDestroy(handle);
-// #endif
+  // this is because of something dumb in the ordering of
+  // destruction. Sometimes atexit, the cuda context (or something)
+  // would already be destroyed by the time this gets destroyed. It
+  // happens in fbcode setting. @colesbury and I decided to not destroy
+  // the handle as a workaround.
+  //   - @soumith
+  //
+  // Further note: this is now disabled globally, because we are seeing
+  // the same issue as mentioned above in CUDA 11 CI.
+  //   - @zasdfgbnm
+  //
+  // #ifdef NO_MIOPEN_DESTROY_HANDLE
+  // #else
+  //   miopenDestroy(handle);
+  // #endif
 }
 
-using MIOpenPoolType = at::cuda::DeviceThreadHandlePool<miopenHandle_t, createMIOpenHandle, destroyMIOpenHandle>;
+using MIOpenPoolType = at::cuda::DeviceThreadHandlePool<
+    miopenHandle_t,
+    createMIOpenHandle,
+    destroyMIOpenHandle>;
 
 } // namespace
 
 miopenHandle_t getMiopenHandle() {
-  int device;
-  HIP_CHECK(hipGetDevice(&device));
+  c10::DeviceIndex device = 0;
+  AT_CUDA_CHECK(at::cuda::GetDevice(&device));
 
   // Thread local PoolWindows are lazily-initialized
   // to avoid initialization issues that caused hangs on Windows.
@@ -50,4 +55,4 @@ miopenHandle_t getMiopenHandle() {
   return handle;
 }
 
-}} // namespace at::native
+} // namespace at::native

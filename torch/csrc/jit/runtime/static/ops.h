@@ -33,7 +33,7 @@ TORCH_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 
 #define REGISTER_OPERATOR_FUNCTOR(name, id, ...)             \
   struct SROperatorFunctor_##id : public SROperatorFunctor { \
-    const SROpFunctor fn = __VA_ARGS__;                      \
+    SROpFunctor fn = __VA_ARGS__;                            \
     SROperator Generate(Node* n) override {                  \
       return fn(n);                                          \
     }                                                        \
@@ -43,7 +43,7 @@ TORCH_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 TORCH_DECLARE_REGISTRY(SRNativeOperatorRegistry, SROperatorFunctor);
 #define REGISTER_NATIVE_OPERATOR_FUNCTOR(name, id, ...)            \
   struct SRNativeOperatorFunctor_##id : public SROperatorFunctor { \
-    const SROpFunctor fn = __VA_ARGS__;                            \
+    SROpFunctor fn = __VA_ARGS__;                                  \
     SROperator Generate(Node* n) override {                        \
       return fn(n);                                                \
     }                                                              \
