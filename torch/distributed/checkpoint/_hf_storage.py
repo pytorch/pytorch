@@ -5,15 +5,12 @@ import json
 import os
 import queue
 import struct
-from typing import Optional
+from typing import Any, Optional
 
 import fsspec  # type: ignore[import-untyped]
 
 from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
-from torch.distributed.checkpoint._hf_planner import (
-    _FqnToFileMapping,
-    _HuggingFaceLoadPlanner,
-)
+from torch.distributed.checkpoint._hf_planner import _HuggingFaceLoadPlanner
 from torch.distributed.checkpoint.filesystem import SerializationFormat
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
@@ -37,7 +34,8 @@ __all__ = ["_HuggingFaceStorageWriter", "_HuggingFaceStorageReader"]
 
 _metadata_fn: str = "model.safetensors.index.json"
 
-FILE_NAME = "model-{cpt_idx}-of-{num_shards}"
+FILE_NAME = "model-{cpt_idx}-of-{num_files}"
+SHARDED_FILE_NAME = "shard-{shard_idx}-model-{cpt_idx}-of-{num_files}"
 SUFFIX = ".safetensors"
 
 
@@ -50,17 +48,21 @@ class _HuggingFaceStorageWriter(FsspecWriter):
     def __init__(
         self,
         path: str,
-        fqn_to_index_mapping: dict[str, int],
+        fqn_to_index_mapping: Optional[dict[str, int]] = None,
         token: Optional[str] = None,
+        save_sharded: bool = False,
     ) -> None:
         """
         Initialize the huggingface writer pointing to path.
 
         Args:
             path: hf directory where the checkpoint will be written to. Should begin with hf://.
-            token: The token to use to authenticate with huggingface hub.
             fqn_to_index_mapping: A mapping from tensor FQN to the index of the file that the tensor should be written to.
-                              Indices are from 1 to N, where N is the number of files.
+                              Indices are from 1 to N, where N is the number of files. If not provided,
+                              the tensors will be written to a single file.
+            token: The token to use to authenticate with huggingface hub.
+            save_sharded: If True, save the checkpoint as a sharded checkpoint where every rank saves its own shard.
+                        Default is False which assumes full tensors are being saved.
 
         """
         from huggingface_hub import HfFileSystem  # type: ignore[import-not-found]
@@ -79,16 +81,21 @@ class _HuggingFaceStorageWriter(FsspecWriter):
                 path=path,
                 serialization_format=SerializationFormat.SAFETENSORS,
             )
-        self._fqn_to_index_mapping: dict[str, int] = fqn_to_index_mapping
-
-    def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
-        plan = super().prepare_local_plan(plan)
-        return dataclasses.replace(
-            plan, storage_data=_FqnToFileMapping(self._fqn_to_index_mapping)
-        )
+        self._fqn_to_index_mapping: Optional[dict[str, int]] = fqn_to_index_mapping
+        self._save_sharded = save_sharded
 
     def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
-        return plans
+        new_plans = []
+        for i, plan in enumerate(plans, start=1):
+            storage_data = {}
+            if self._fqn_to_index_mapping is not None:
+                storage_data["fqn_to_file_mapping"] = self._fqn_to_index_mapping
+            if self._save_sharded:
+                storage_data["shard_index"] = i
+
+            new_plans.append(dataclasses.replace(plan, storage_data=storage_data))
+
+        return new_plans
 
     def write_data(
         self,
@@ -101,14 +108,20 @@ class _HuggingFaceStorageWriter(FsspecWriter):
             return fut
 
         # storage_plan is a map from key to file index
-        storage_plan: dict[str, int] = plan.storage_data.fqn_to_file_index_mapping
+        storage_data: dict[str, Any] = plan.storage_data
+        storage_plan: Optional[dict[str, int]] = None
+        shard_index: Optional[int] = None
+        if "fqn_to_file_mapping" in storage_data:
+            storage_plan = storage_data["fqn_to_file_mapping"]
+        if "shard_index" in storage_data:
+            shard_index = storage_data["shard_index"]
 
         buckets = self._split_by_storage_plan(storage_plan, plan.items)
-        highest_index = max(storage_plan.values())
+        highest_index = max(storage_plan.values()) if storage_plan is not None else 1
 
         file_queue: queue.Queue = queue.Queue()
         for file_index, write_items in buckets.items():
-            file_name = self._gen_file_name(file_index, highest_index)
+            file_name = self._gen_file_name(file_index, highest_index, shard_index)
             file_queue.put(
                 (self.fs.concat_path(self.path, file_name), file_name, write_items)
             )
@@ -116,6 +129,9 @@ class _HuggingFaceStorageWriter(FsspecWriter):
         return super()._write_data(planner, file_queue)
 
     def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
+        if self._save_sharded:
+            return
+
         metadata_to_write = {}
         storage_md = {}
         total_size = 0
@@ -132,9 +148,12 @@ class _HuggingFaceStorageWriter(FsspecWriter):
             json.dump(metadata_to_write, metadata_file, indent=2)
 
     def _split_by_storage_plan(
-        self, storage_plan: dict[str, int], items: list[WriteItem]
+        self, storage_plan: Optional[dict[str, int]], items: list[WriteItem]
     ) -> dict[int, list[WriteItem]]:
         # storage_plan is a map from key to index
+        if storage_plan is None:
+            return {1: items}
+
         buckets = {}
         for item in items:
             key = item.index.fqn
@@ -146,13 +165,18 @@ class _HuggingFaceStorageWriter(FsspecWriter):
 
         return buckets
 
-    def _gen_file_name(self, index: int, largest_index: int) -> str:
-        return (
-            FILE_NAME.format(
-                cpt_idx=f"{index}".zfill(5), num_shards=f"{largest_index}".zfill(5)
+    def _gen_file_name(self, index: int, largest_index: int, shard_index: Optional[int]) -> str:
+        if shard_index is not None:
+            return SHARDED_FILE_NAME.format(
+                shard_idx=f"{shard_index}".zfill(5), cpt_idx=f"{index}".zfill(5), num_files=f"{largest_index}".zfill(5)
+            ) + SUFFIX
+        else:
+            return (
+                FILE_NAME.format(
+                cpt_idx=f"{index}".zfill(5), num_files=f"{largest_index}".zfill(5)
+                )
+                + SUFFIX
             )
-            + SUFFIX
-        )
 
     @property
     def metadata_path(self) -> str:
