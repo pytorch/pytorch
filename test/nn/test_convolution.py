@@ -2133,7 +2133,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         arg_values=[
             subtest(arg_values=(2), name="ConvTranspose2d"),
             subtest(
-                arg_values=(3), name="ConvTranspose3d", decorators=[expectedFailureMPS]
+                arg_values=(3), name="ConvTranspose3d"
             ),
         ],
     )
