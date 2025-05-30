@@ -65,6 +65,10 @@ class CTypeGen:
             return torch._C.AnyType.get()
         elif isinstance(obj, torch.SymInt):
             return torch._C.SymIntType.get()
+        elif isinstance(obj, torch.SymBool):
+            return torch._C.SymBoolType.get()
+        elif isinstance(obj, torch.SymFloat):
+            return torch._C.SymBoolType.get()
         return torch._C._jit_try_infer_type(obj).type()
 
 
