@@ -914,11 +914,11 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
                 "Efficient attention backward cannot handle dropout when "
                 "the batch size exceeds (", MAX_BATCH_SIZE, ").");
   }
-  grad_out_.transpose_(1, 2);
-  query.transpose_(1, 2);
-  key.transpose_(1, 2);
-  value.transpose_(1, 2);
-  out.transpose_(1, 2);
+  auto grad_out_t = grad_out_.transpose(1, 2);
+  auto query_t = query.transpose(1, 2);
+  auto key_t = key.transpose(1, 2);
+  auto value_t = value.transpose(1, 2);
+  auto out_t = out.transpose(1, 2);
 
   auto process_chunk = [&](const Tensor& grad_out_chunk,
                           const Tensor& query_chunk,
@@ -937,8 +937,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
   // Will add with signauter changes for dropout and bias
   // We are only handling Dense inputs, but this should be passed
   // from forward to backward
-  int64_t max_seqlen_q = query_chunk.size(1);
-  int64_t max_seqlen_k = key_chunk.size(1);
+  int64_t max_seqlen_q = query_chunk.size(2);
+  int64_t max_seqlen_k = key_chunk.size(2);
 
   sdp::CustomMaskType custom_mask_type = causal
     ? sdp::CustomMaskType::CausalFromTopLeft
@@ -996,21 +996,24 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
     if (grad_input_mask[2]) {
       final_grad_v = create_strided_output(value);
     }
+    if (grad_input_mask[3] && attn_bias.defined()) {
+      final_grad_bias = at::zeros_like(attn_bias);
+    }
 
     for (int64_t start = 0; start < batch_size; start += MAX_BATCH_SIZE) {
       int64_t end = std::min(start + MAX_BATCH_SIZE, batch_size);
 
-      Tensor grad_out_chunk = grad_out_.slice(0, start, end);
-      Tensor query_chunk = query.slice(0, start, end);
-      Tensor key_chunk = key.slice(0, start, end);
-      Tensor value_chunk = value.slice(0, start, end);
+      Tensor grad_out_chunk = grad_out_t.slice(0, start, end);
+      Tensor query_chunk = query_t.slice(0, start, end);
+      Tensor key_chunk = key_t.slice(0, start, end);
+      Tensor value_chunk = value_t.slice(0, start, end);
       Tensor attn_bias_chunk;
       if (attn_bias.defined()) {
         attn_bias_chunk = attn_bias.slice(0, start, end);
       } else {
         attn_bias_chunk.reset();
       }
-      Tensor out_chunk = out.slice(0, start, end);
+      Tensor out_chunk = out_t.slice(0, start, end);
       Tensor logsumexp_chunk = logsumexp.numel() > 0 ? logsumexp.slice(0, start, end) : logsumexp;
 
       auto [chunk_grad_q, chunk_grad_k, chunk_grad_v, chunk_grad_bias] =
@@ -1043,7 +1046,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
     if (attn_bias.defined()) {
       attn_bias_opt = attn_bias;
     }
-    return process_chunk(grad_out_, query, key, value, attn_bias_opt, out, logsumexp);
+    return process_chunk(grad_out_t, query_t, key_t, value_t, attn_bias_opt, out_t, logsumexp);
   }
 }
 
