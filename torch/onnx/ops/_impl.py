@@ -6,7 +6,7 @@ import torch
 
 _T = typing.TypeVar("_T", bound=Callable)
 
-_ONNX_DECOMP_TABLE = {}
+_ONNX_DECOMP_TABLE: dict[Any, Callable] = {}
 
 
 def onnx_aten_decomp_table() -> dict[Any, Callable]:
@@ -18,12 +18,11 @@ def _onnx_op(op_type: str, opset_version: int) -> Callable[[_T], _T]:
     """Decorator to register an ONNX operator with a custom implementation."""
 
     def decorator(func: _T) -> _T:
+        overload = f"opset{opset_version}"
         torch_op = torch.library.custom_op(
-            f"onnx::{op_type}.opset{opset_version}", mutates_args=()
+            f"onnx::{op_type}.{overload}", mutates_args=()
         )(func)
-        _ONNX_DECOMP_TABLE[
-            getattr(getattr(torch.ops.onnx, op_type), f"opset{opset_version}")
-        ] = func
+        _ONNX_DECOMP_TABLE[getattr(getattr(torch.ops.onnx, op_type), overload)] = func
         # Use the same implementation for the fake implementation
         # This is possible because we use pure aten ops to implement ONNX ops
         torch_op.register_fake(func)
