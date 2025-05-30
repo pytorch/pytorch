@@ -384,7 +384,7 @@ class GuardManagerWrapper:
 
     def populate_code_parts_for_debugging(self):
         # This should be called when the guard manager is fully populated
-        tensor_aliasing_guard_seen = False
+        relational_guards_seen = set()
 
         def get_code_parts(leaf_guard):
             code_parts = []
@@ -394,12 +394,12 @@ class GuardManagerWrapper:
             return code_parts
 
         def visit(mgr):
-            nonlocal tensor_aliasing_guard_seen
+            nonlocal relational_guards_seen
             for guard in mgr.get_leaf_guards():
-                if isinstance(guard, torch._C._dynamo.guards.NO_TENSOR_ALIASING):  # type: ignore[attr-defined]
-                    if not tensor_aliasing_guard_seen:
+                if isinstance(guard, torch._C._dynamo.guards.RelationalGuard):  # type: ignore[attr-defined]
+                    if guard not in relational_guards_seen:
                         self.code_parts.extend(get_code_parts(guard))
-                        tensor_aliasing_guard_seen = True
+                        relational_guards_seen.add(guard)
                 else:
                     self.code_parts.extend(get_code_parts(guard))
 
@@ -2100,11 +2100,17 @@ class GuardBuilder(GuardBuilderBase):
             assert maybe_cpp_code_parts is None or isinstance(
                 maybe_cpp_code_parts, _CppShapeGuardsHelper
             )
+            maybe_shape_env_sources = (
+                []
+                if maybe_cpp_code_parts is None
+                else list(maybe_cpp_code_parts.source_to_symbol.keys())
+            )
             self.check_fn_manager.shape_code_parts = ShapeCodeParts(
                 python_code_parts=python_code_parts,
                 verbose_code_parts=verbose_code_parts,
                 cpp_code_parts=maybe_cpp_code_parts,
                 python_fallback=python_fallback,
+                shape_env_sources=maybe_shape_env_sources,
             )
 
         for code in python_code_parts.exprs:
@@ -2178,6 +2184,7 @@ class GuardBuilder(GuardBuilderBase):
 
                 func_str = textwrap.dedent(
                     f"""
+                #include <algorithm>
                 #include <cstdint>
                 #include <cmath>
                 #include <c10/util/generic_math.h>
@@ -2576,6 +2583,7 @@ class ShapeCodeParts:
     verbose_code_parts: _ShapeGuardsHelper
     cpp_code_parts: Optional[_CppShapeGuardsHelper]
     python_fallback: bool
+    shape_env_sources: list[Source]
 
 
 @dataclasses.dataclass
@@ -2886,7 +2894,13 @@ class CheckFunctionManager:
             output_graph_guards_state = self.output_graph.dump_guards_state()
             # Only serialize the global variables that are actually used in guards.
             for guard in sorted_guards:
-                prune_variable(guard.originating_source)
+                if isinstance(guard.originating_source, ShapeEnvSource):
+                    assert self.shape_code_parts
+                    for source in self.shape_code_parts.shape_env_sources:
+                        prune_variable(source)
+                else:
+                    prune_variable(guard.originating_source)
+
             for source in self.output_graph.guard_on_key_order:
                 prune_variable(source)
 
