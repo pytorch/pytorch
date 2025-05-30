@@ -4250,7 +4250,17 @@ class Scheduler:
         )
 
         candidate_symbols = filter_symbols(candidate_symbols)
-        return OrderedSet(V.graph.sizevars.simplify(s) for s in candidate_symbols)
+
+        res: OrderedSet[sympy.Symbol] = OrderedSet()
+        for s in candidate_symbols:
+            symplified_s = V.graph.sizevars.simplify(s)
+            # skip when s is simplified to an Integer
+            if isinstance(symplified_s, sympy.Symbol):
+                res.add(symplified_s)
+            else:
+                assert isinstance(symplified_s, sympy.Integer)
+
+        return res
 
     def get_graph_partition_signature(
         self, partitions: list[PartitionType], skip_cudagraphs: list[bool]
