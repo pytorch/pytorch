@@ -14835,11 +14835,11 @@ if RUN_GPU:
 
             for shape in (2, 3):
                 torch.manual_seed(42)
-                eager_x = torch.randn(shape, 2, device="cuda")
-                eager_w = torch.randn(2, 2, device="cuda", requires_grad=True)
+                eager_x = torch.randn(shape, 2, device=self.device)
+                eager_w = torch.randn(2, 2, device=self.device, requires_grad=True)
                 torch.manual_seed(42)
-                compiled_x = torch.randn(shape, 2, device="cuda")
-                compiled_w = torch.randn(2, 2, device="cuda", requires_grad=True)
+                compiled_x = torch.randn(shape, 2, device=self.device)
+                compiled_w = torch.randn(2, 2, device=self.device, requires_grad=True)
 
                 f(eager_x, eager_w).sum().backward()
                 compiled_f(compiled_x, compiled_w).sum().backward()
