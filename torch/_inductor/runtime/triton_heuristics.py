@@ -1541,6 +1541,10 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             launch_enter = knobs.runtime.launch_enter_hook
             launch_exit = knobs.runtime.launch_exit_hook
 
+        import math as math_lib
+
+        import torch as torch_lib
+
         scope = {
             "grid_meta": cfg.kwargs,
             "bin": binary,
@@ -1571,6 +1575,8 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             ),
             "function": get_first_attr(binary, "function", "cu_function"),
             "runner": get_first_attr(binary, "run", "c_wrapper"),
+            "math": math_lib,
+            "torch": torch_lib,
         }
 
         if not hasattr(binary, "launch_metadata"):
