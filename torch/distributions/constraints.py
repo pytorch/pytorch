@@ -331,7 +331,7 @@ class _Boolean(Constraint):
     Constrain to the two values `{0, 1}`.
     """
 
-    is_discrete = True
+    is_discrete: bool = True
 
     def check(self, value: Tensor) -> Tensor:
         return (value == 0) | (value == 1)
@@ -342,8 +342,8 @@ class _OneHot(Constraint):
     Constrain to one-hot vectors.
     """
 
-    is_discrete = True
-    event_dim = 1
+    is_discrete: bool = True
+    event_dim: int = 1
 
     def check(self, value: Tensor) -> Tensor:
         is_boolean = (value == 0) | (value == 1)
@@ -356,7 +356,9 @@ class _IntegerInterval(Constraint):
     Constrain to an integer interval `[lower_bound, upper_bound]`.
     """
 
-    is_discrete = True
+    is_discrete: bool = True
+    lower_bound: Union[float, Tensor]
+    upper_bound: Union[float, Tensor]
 
     def __init__(
         self, lower_bound: Union[int, Tensor], upper_bound: Union[int, Tensor]
@@ -383,7 +385,8 @@ class _IntegerLessThan(Constraint):
     Constrain to an integer interval `(-inf, upper_bound]`.
     """
 
-    is_discrete = True
+    is_discrete: bool = True
+    upper_bound: Union[float, Tensor]
 
     def __init__(self, upper_bound: Union[int, Tensor]) -> None:
         self.upper_bound = upper_bound
@@ -403,7 +406,8 @@ class _IntegerGreaterThan(Constraint):
     Constrain to an integer interval `[lower_bound, inf)`.
     """
 
-    is_discrete = True
+    is_discrete: bool = True
+    lower_bound: Union[float, Tensor]
 
     def __init__(self, lower_bound: Union[int, Tensor]) -> None:
         self.lower_bound = lower_bound
@@ -432,6 +436,8 @@ class _GreaterThan(Constraint):
     Constrain to a real half line `(lower_bound, inf]`.
     """
 
+    lower_bound: Union[float, Tensor]
+
     def __init__(self, lower_bound: Union[float, Tensor]) -> None:
         self.lower_bound = lower_bound
         super().__init__()
@@ -449,6 +455,8 @@ class _GreaterThanEq(Constraint):
     """
     Constrain to a real half line `[lower_bound, inf)`.
     """
+
+    lower_bound: Union[float, Tensor]
 
     def __init__(self, lower_bound: Union[float, Tensor]) -> None:
         self.lower_bound = lower_bound
@@ -468,6 +476,8 @@ class _LessThan(Constraint):
     Constrain to a real half line `[-inf, upper_bound)`.
     """
 
+    upper_bound: Union[float, Tensor]
+
     def __init__(self, upper_bound: Union[float, Tensor]) -> None:
         self.upper_bound = upper_bound
         super().__init__()
@@ -485,6 +495,9 @@ class _Interval(Constraint):
     """
     Constrain to a real interval `[lower_bound, upper_bound]`.
     """
+
+    lower_bound: Union[float, Tensor]
+    upper_bound: Union[float, Tensor]
 
     def __init__(
         self, lower_bound: Union[float, Tensor], upper_bound: Union[float, Tensor]
@@ -508,6 +521,9 @@ class _HalfOpenInterval(Constraint):
     """
     Constrain to a real interval `[lower_bound, upper_bound)`.
     """
+
+    lower_bound: Union[float, Tensor]
+    upper_bound: Union[float, Tensor]
 
     def __init__(
         self, lower_bound: Union[float, Tensor], upper_bound: Union[float, Tensor]
@@ -533,7 +549,7 @@ class _Simplex(Constraint):
     Specifically: `x >= 0` and `x.sum(-1) == 1`.
     """
 
-    event_dim = 1
+    event_dim: int = 1
 
     def check(self, value: Tensor) -> Tensor:
         return torch.all(value >= 0, dim=-1) & ((value.sum(-1) - 1).abs() < 1e-6)
@@ -548,8 +564,8 @@ class _Multinomial(Constraint):
     this may be strengthened to ``value.sum(-1) == upper_bound``.
     """
 
-    is_discrete = True
-    event_dim = 1
+    is_discrete: bool = True
+    event_dim: int = 1
 
     def __init__(self, upper_bound: Union[int, Tensor]) -> None:
         self.upper_bound = upper_bound
@@ -563,7 +579,7 @@ class _LowerTriangular(Constraint):
     Constrain to lower-triangular square matrices.
     """
 
-    event_dim = 2
+    event_dim: int = 2
 
     def check(self, value: Tensor) -> Tensor:
         value_tril = value.tril()
@@ -575,7 +591,7 @@ class _LowerCholesky(Constraint):
     Constrain to lower-triangular square matrices with positive diagonals.
     """
 
-    event_dim = 2
+    event_dim: int = 2
 
     def check(self, value: Tensor) -> Tensor:
         value_tril = value.tril()
@@ -593,7 +609,7 @@ class _CorrCholesky(Constraint):
     row vector being of unit length.
     """
 
-    event_dim = 2
+    event_dim: int = 2
 
     def check(self, value: Tensor) -> Tensor:
         tol = (
@@ -609,7 +625,7 @@ class _Square(Constraint):
     Constrain to square matrices.
     """
 
-    event_dim = 2
+    event_dim: int = 2
 
     def check(self, value: Tensor) -> Tensor:
         return torch.full(
@@ -663,6 +679,10 @@ class _Cat(Constraint):
     each of size `lengths[dim]`, in a way compatible with :func:`torch.cat`.
     """
 
+    cseq: list[Constraint]
+    lengths: list[int]
+    dim: int
+
     def __init__(
         self,
         cseq: Sequence[Constraint],
@@ -703,6 +723,9 @@ class _Stack(Constraint):
     `cseq` at the submatrices at dimension `dim`,
     in a way compatible with :func:`torch.stack`.
     """
+
+    cseq: list[Constraint]
+    dim: int
 
     def __init__(self, cseq: Sequence[Constraint], dim: int = 0) -> None:
         assert all(isinstance(c, Constraint) for c in cseq)
