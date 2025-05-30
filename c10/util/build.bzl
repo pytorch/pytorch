@@ -36,6 +36,7 @@ def define_targets(rules):
             ":bit_cast",
             "//c10/macros",
             "@fmt",
+            "@moodycamel//:moodycamel",
         ] + rules.select({
             "//c10:using_gflags": ["@com_github_gflags_gflags//:gflags"],
             "//conditions:default": [],
