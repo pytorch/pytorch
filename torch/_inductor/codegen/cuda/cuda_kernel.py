@@ -8,10 +8,12 @@ from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 
 from sympy import Expr, symbols
 
+import torch._inductor.config as config
 from torch import dtype as torch_dtype
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.scheduler import BaseSchedulerNode
-from torch._inductor.utils import Placeholder
+from torch._inductor.utils import do_bench_using_profiling, Placeholder
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from .cutlass_utils import DTYPE_TO_CUTLASS_TYPE
 
@@ -32,6 +34,7 @@ from ...ir import (
 from ...utils import sympy_product
 from ...virtualized import V
 from ..common import (
+    CSEVariable,
     IndentedBuffer,
     Kernel,
     OpOverrides,
@@ -240,7 +243,6 @@ class CUDATemplateKernel(CUDAKernel):
         inputs: list[IRNode],
         outputs: list[IRNode],
         epilogue_inputs: list[IRNode],
-        epilogue_outputs: list[IRNode],
         names_str: str = "",
         input_reorder: Optional[list[int]] = None,
     ) -> str:
@@ -258,7 +260,7 @@ class CUDATemplateKernel(CUDAKernel):
                            In this case, the `input_reorder` would be [2, 0, 1].
         """
         names = [x.strip() for x in names_str.strip().split(",")]
-        if len(inputs) + len(outputs) != len(names):
+        if len(inputs) + len(epilogue_inputs) + len(outputs) != len(names):
             raise RuntimeError(
                 f"{len(inputs) + len(outputs)=} != {len(names)=}, {inputs=}, {outputs=}, {names=}"
             )
@@ -286,13 +288,6 @@ class CUDATemplateKernel(CUDAKernel):
             if node is not None:
                 self.named_nodes[name] = node
                 self.args.output_buffers[node.get_name()] = name
-
-        for epilogue_output in epilogue_outputs:
-            if epilogue_output is not None:
-                self.named_nodes[epilogue_output.get_name()] = epilogue_output
-                self.args.output_buffers[epilogue_output.get_name()] = (
-                    epilogue_output.get_name()
-                )
 
         arg_defs, *_ = self.args.cpp_argdefs(DTYPE_TO_CUTLASS_TYPE)
 
@@ -542,6 +537,12 @@ class CUDATemplateKernel(CUDAKernel):
                 f"At least 1 stride should be 1. Strides: {node.get_stride()=}"
             )
 
+    def load(self, name: str, index: Expr, mode: Any = None) -> CSEVariable:
+        """
+        Mock load function for memory planning to optimize allocations properly.
+        """
+        return self.create_cse_var(name, bounds=ValueRanges.unknown())
+
     def store(self, name: str, index: Expr, value: Any, mode: Any = None) -> None:
         """
         Mock store function for memory planning to optimize allocations properly.
@@ -572,6 +573,7 @@ class CUDATemplateCaller(ChoiceCaller):
             tuple[CUDATemplateKernel, functools.partial[str]],
         ],
         bmreq: CUDABenchmarkRequest,
+        supports_epilogue_fusion: bool,
         template: "CUDATemplate",  # type: ignore[name-defined]
         info_kwargs: Optional[
             dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]
@@ -582,6 +584,7 @@ class CUDATemplateCaller(ChoiceCaller):
         self.category = category
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq
+        self.supports_epilogue_fusion = supports_epilogue_fusion
         self.template = template
         self.info_kwargs = info_kwargs
 
@@ -591,9 +594,10 @@ class CUDATemplateCaller(ChoiceCaller):
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(
-            *args, out=out
-        )  # @TODO: Hack for ensuring that Cutlass Kernel is preferred
+        if config.profile_bandwidth_with_do_bench_using_profiling:
+            algo = self.bmreq.make_run_fn(*args, out=out)
+            return do_bench_using_profiling(algo)
+        return self.bmreq.benchmark(*args, out=out)
 
     def __str__(self) -> str:
         return f"CUDATemplateCaller(source_file={self.bmreq.source_file})"
@@ -626,6 +630,7 @@ class CUDATemplateCaller(ChoiceCaller):
                 "instruction_shape": str(
                     op.tile_description.math_instruction.instruction_shape
                 ),
+                "swizzle": str(self.info_kwargs["swizzle"]),
             }
         else:
             return {"backend": "CUDA", "op_type": "unknown"}
@@ -638,6 +643,7 @@ class CUDATemplateCaller(ChoiceCaller):
                 inputs=self.input_nodes,
                 make_kernel_render=self.make_kernel_render,
                 workspace_size=self.bmreq.workspace_size,
+                supports_epilogue_fusion=self.supports_epilogue_fusion,
                 template=self.template,
             )
         )
