@@ -5754,6 +5754,12 @@ def full_like(
     layout = a.layout if layout is None else layout
     device = a.device if device is None else device
 
+    if memory_format == torch.preserve_format:
+        for m in (torch.contiguous_format, torch.channels_last, torch.channels_last_3d):
+            if a.is_contiguous(memory_format=m):
+                memory_format = m
+                break
+
     if memory_format != torch.preserve_format:
         return torch.full(
             a.shape,
