@@ -84,7 +84,7 @@ def from_dlpack(
 
         device (torch.device or str or None): An optional PyTorch device
             specifying where to place the new tensor. If None (default), the
-            new tensor will be on the same device as ``ext_tensor``. 
+            new tensor will be on the same device as ``ext_tensor``.
 
         copy (bool or None): An optional boolean indicating whether or not to copy
             ``self``. If None, PyTorch will copy only if necessary.
