@@ -712,8 +712,9 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
     from torch._higher_order_ops.utils import _check_alias_and_mutation
 
     hop_instance = HopInstance.create(cond_op, pred, true_fn, false_fn, inputs)
-    print(hop_instance._schema)
-    if can_auto_functionalize(hop_instance):
+    # For now, we only support auto-functionalization for cond when using python
+    # functionalization mode
+    if can_auto_functionalize(hop_instance) and hasattr(ctx, "mode"):
         return do_auto_functionalize_v2(
             ctx.mode,
             hop_instance,

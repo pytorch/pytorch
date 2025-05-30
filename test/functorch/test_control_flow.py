@@ -5037,7 +5037,7 @@ class GraphModule(torch.nn.Module):
         return (getitem,)
 
     class cond_true_0(torch.nn.Module):
-        def forward(self, l_args_1_, l_ctx_saved_tensors_0_):
+        def forward(self, l_args_1_: "f32[4]", l_ctx_saved_tensors_0_: "f32[4]"):
             l_args_1__1 = l_args_1_
             l_ctx_saved_tensors_0__1 = l_ctx_saved_tensors_0_
 
@@ -5049,7 +5049,7 @@ class GraphModule(torch.nn.Module):
             return (mul,)
 
     class cond_false_0(torch.nn.Module):
-        def forward(self, l_args_1_, l_ctx_saved_tensors_0_):
+        def forward(self, l_args_1_: "f32[4]", l_ctx_saved_tensors_0_: "f32[4]"):
             l_args_1__1 = l_args_1_
             l_ctx_saved_tensors_0__1 = l_ctx_saved_tensors_0_
 
@@ -7767,7 +7767,7 @@ class GraphModule(torch.nn.Module):
         return (add, add_1, lt, ones)
 
     class cond_fn_0(torch.nn.Module):
-        def forward(self, unbacked_symint: "Sym(u0)", l_x_: "f32[s77, s27]", s27, s77):
+        def forward(self, unbacked_symint: "Sym(u0)", l_x_: "f32[s77, s27]", s27: "Sym(s27)", s77: "Sym(s77)"):
             s27_1 = s27
             s77_1 = s77
 
@@ -7778,7 +7778,7 @@ class GraphModule(torch.nn.Module):
             return lt
 
     class body_fn_0(torch.nn.Module):
-        def forward(self, unbacked_symint: "Sym(u0)", l_x_: "f32[s77, s27]", s27, s77):
+        def forward(self, unbacked_symint: "Sym(u0)", l_x_: "f32[s77, s27]", s27: "Sym(s27)", s77: "Sym(s77)"):
             s27_1 = s27
             s77_1 = s77
 
@@ -8066,7 +8066,7 @@ class GraphModule(torch.nn.Module):
         return (getitem_10, getitem_11, add, add_1, add_2, add_3, add_4, add_5, out_x)
 
     class cond_fn_0(torch.nn.Module):
-        def forward(self, unbacked_symint: "Sym(u0)", unbacked_symint_0: "Sym(u1)", unbacked_symint_1: "Sym(u2)", unbacked_symint_2: "Sym(u3)", unbacked_symint_3: "Sym(u4)", child: "f32[s77, s27]", s27, s77):
+        def forward(self, unbacked_symint: "Sym(u0)", unbacked_symint_0: "Sym(u1)", unbacked_symint_1: "Sym(u2)", unbacked_symint_2: "Sym(u3)", unbacked_symint_3: "Sym(u4)", child: "f32[s77, s27]", s27: "Sym(s27)", s77: "Sym(s77)"):
             s27_1 = s27
             s77_1 = s77
 
@@ -8077,7 +8077,7 @@ class GraphModule(torch.nn.Module):
             return lt
 
     class body_fn_0(torch.nn.Module):
-        def forward(self, unbacked_symint: "Sym(u0)", unbacked_symint_0: "Sym(u1)", unbacked_symint_1: "Sym(u2)", unbacked_symint_2: "Sym(u3)", unbacked_symint_3: "Sym(u4)", child: "f32[s77, s27]", s27, s77):
+        def forward(self, unbacked_symint: "Sym(u0)", unbacked_symint_0: "Sym(u1)", unbacked_symint_1: "Sym(u2)", unbacked_symint_2: "Sym(u3)", unbacked_symint_3: "Sym(u4)", child: "f32[s77, s27]", s27: "Sym(s27)", s77: "Sym(s77)"):
             s27_1 = s27
             s77_1 = s77
 
@@ -8483,7 +8483,7 @@ class GraphModule(torch.nn.Module):
         return (sub,)
 
     class cond_true_0(torch.nn.Module):
-        def forward(self, l_x_, s94, s17_true_branch, getitem_2_false_branch, l_z__false_branch):
+        def forward(self, l_x_: "f32[s17, s94]", s94: "Sym(s94)", s17_true_branch: "Sym(s17)", getitem_2_false_branch: "Sym(s17)", l_z__false_branch: "f32[s17, s94]"):
             l_x__1 = l_x_
             s94_1 = s94
 
@@ -8493,7 +8493,7 @@ class GraphModule(torch.nn.Module):
             return (clone,)
 
     class cond_false_0(torch.nn.Module):
-        def forward(self, l_x_, s94, s17_true_branch, getitem_2_false_branch, l_z__false_branch):
+        def forward(self, l_x_: "f32[s17, s94]", s94: "Sym(s94)", s17_true_branch: "Sym(s17)", getitem_2_false_branch: "Sym(s17)", l_z__false_branch: "f32[s17, s94]"):
             l_x__1 = l_x_
             s94_1 = s94
 
