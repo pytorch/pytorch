@@ -39,6 +39,7 @@ from torch._C._functorch import (
     maybe_get_level,
     peek_interpreter_stack,
 )
+from torch._dispatch.python import enable_python_dispatcher
 from torch._logging import trace_structured
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -1297,7 +1298,10 @@ class MetaConverter(Generic[_TensorT]):
             assert t.view_func is not None
             # NB: we do NOT suppress guards here, we need to remove ephemeral
             # sources
-            fake_t = t.view_func.apply(t, base, symint_visitor_fn, tensor_visitor_fn)
+            with enable_python_dispatcher():
+                fake_t = t.view_func.apply(
+                    t, base, symint_visitor_fn, tensor_visitor_fn
+                )
 
             # Ensure the output has symbolic shapes according to the outer symbolic context.
             # These checks should simplify out any symbols created for closed-over view func

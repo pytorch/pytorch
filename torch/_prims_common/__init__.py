@@ -281,7 +281,7 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
 
     expected_stride = 1
     for x, y in reversed(tuple(zip(a.shape, a.stride()))):
-        # Skips checking strides when a dimension has length 1
+        # Skips checking strides when a dimension has length 1.
         if maybe_guard_or_false(x == 1):
             continue
 
