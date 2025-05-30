@@ -210,10 +210,15 @@ class CUDAAllocator : public DeviceAllocator {
   virtual void init(int device_count) = 0;
   virtual double getMemoryFraction(c10::DeviceIndex device) = 0;
   virtual void setMemoryFraction(double fraction, c10::DeviceIndex device) = 0;
+  virtual void emptyCache(MempoolId_t mempool_id = {0, 0}) = 0;
   virtual void enable(bool value) = 0;
   virtual bool isEnabled() const = 0;
   virtual void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) = 0;
   virtual void* getBaseAllocation(void* ptr, size_t* size) = 0;
+  virtual void recordStream(const DataPtr&, CUDAStream stream) = 0;
+  virtual c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
+  virtual void resetAccumulatedStats(c10::DeviceIndex device) = 0;
+  virtual void resetPeakStats(c10::DeviceIndex device) = 0;
   virtual SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0}) = 0;
   virtual void beginAllocateToPool(
       c10::DeviceIndex device,
