@@ -586,6 +586,34 @@ class ConstDictKeySource(ChainedSource):
         return True
 
 
+@dataclasses.dataclass(frozen=True)
+class SetGetItemSource(ChainedSource):
+    index: int
+
+    def __post_init__(self):
+        from .variables import ConstantVariable
+
+        assert ConstantVariable.is_literal(self.index)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def reconstruct(self, codegen: "PyCodegen"):
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(utils.__name__, "set_getitem")
+        )
+        codegen(self.base)
+        codegen.append_output(codegen.create_load_const(self.index))
+        codegen.extend_output(create_call_function(2, False))
+
+    def name(self):
+        # sorting by the hash gives an ordering we can rely on
+        return f"sorted({self.base.name()}, key=hash)[{self.index!r}]"
+
+    def is_dict_key(self):
+        return False
+
+
 # Used to access an item from the dictionary
 @dataclasses.dataclass(frozen=True)
 class DictGetItemSource(ChainedSource):

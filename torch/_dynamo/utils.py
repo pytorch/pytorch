@@ -2530,6 +2530,11 @@ def dict_keys_getitem(d, n):
     return next(itertools.islice(dict_class.keys(d), n, n + 1))
 
 
+def set_getitem(s, n):
+    # Mimic set.__getitem__ by sorting the set using the hash
+    return sorted(s, key=hash)[n]
+
+
 def enum_repr(value, local):
     # enum class can override __str__ method. Use __class__ and name attribute
     # to extract the class name and key name.

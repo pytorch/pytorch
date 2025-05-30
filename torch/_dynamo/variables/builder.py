@@ -112,6 +112,7 @@ from ..source import (
     NumpyTensorSource,
     OptimizerSource,
     RandomValueSource,
+    SetGetItemSource,
     Source,
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
@@ -750,6 +751,31 @@ class VariableBuilder:
             var = TorchFunctionModeVariable(value, source=self.source)
             self.tx.output.side_effects.track_object_existing(value, var)
             return var
+        elif istype(value, set):
+            if any(isinstance(x, torch.Tensor) for x in value):
+                unimplemented_v2(
+                    gb_type="Attempted to wrap a set with tensors",
+                    context="Python set containing torch.Tensor elements",
+                    explanation=(
+                        "Dynamo cannot trace sets of tensors. To get a stable ordering, "
+                        "Dynamo needs to sort the set using the hash of each element. "
+                        "However, for tensors, the hash is their object ID, which "
+                        "is not stable during symbolic execution."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+
+            # The dictionary gives a ordering for the set items
+            L = sorted(value, key=hash)
+            items = [
+                LazyVariableTracker.create(v, source=SetGetItemSource(self.source, i))
+                for i, v in enumerate(L)
+            ]
+            result = SetVariable(items, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, frozenset) and all(
             (
                 # For DBR quantization, we could get a frozenset of torch funcs.
