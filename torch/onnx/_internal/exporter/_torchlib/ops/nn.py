@@ -97,7 +97,7 @@ def aten_scaled_dot_product_attention_23(
             )
         Y, _, _, _ = op23.Attention(
             query, key, value, attn_mask=attn_mask, scale=scale, q_num_heads=query.shape[3], kv_num_heads=key.shape[3],
-            is_causal=(1 if is_causal else 0)
+            is_causal=is_causal
         )
         return Y
 
