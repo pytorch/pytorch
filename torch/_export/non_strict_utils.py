@@ -888,6 +888,32 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
     """
 
     def _override(self, func, args, kwargs):
+
+        # For data-dependent safe semantics, assumes indices are in-bounds for slicing
+        def _assume_standard_slice(size, start, end):
+            start = 0 if start is None else start
+            end = size if end is None else end
+            torch._check(
+                start >= 0,
+                f"Expected slice start index to be 0 <= index <= {size}, but received {start}",
+            )
+            torch._check(
+                start <= size,
+                f"Expected slice start index to be 0 <= index <= {size}, but received {start}",
+            )
+            torch._check(
+                end >= 0,
+                f"Expected slice end index to be 0 <= index <= {size}, but received {end}",
+            )
+            torch._check(
+                end <= size,
+                f"Expected slice end index to be 0 <= index <= {size}, but received {end}",
+            )
+            torch._check(
+                start <= end,
+                f"Expected non-negative slice length, but received [{start}, {end}]",
+            )
+
         if torch.distributed.is_available():
             from torch.distributed._functional_collectives import (
                 REDUCE_OP_TO_STR,
@@ -920,7 +946,7 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                 for a in pytree.tree_flatten(args[0])[0]
             ):
                 return torch._refs.tensor, args, kwargs
-        if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):
+        if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):                
 
             def rewrite(dim, item):
                 # Redirect to torch.select for indexing.
@@ -928,11 +954,13 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                     return dim, (torch.select, [dim, item])
                 # Redirect to torch.ops.aten.slice for slicing.
                 if isinstance(item, slice):
+                    _assume_standard_slice(args[0].size(dim), item.start, item.stop)
                     return dim + 1, (
                         torch.ops.aten.slice,
                         [dim, item.start, item.stop, item.step or 1],
                     )
                 # Otherwise do nothing.
+                return None
 
             items = args[1] if isinstance(args[1], tuple) else (args[1],)
             dim = 0
@@ -952,6 +980,10 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                 return t
 
             return run, [], {}
+
+        if func is torch.narrow:
+            tensor, dim, start, length = args
+            _assume_standard_slice(tensor.size(dim), start, start + length)
 
         return func, args, kwargs
 

@@ -379,6 +379,21 @@ class TestDynamismExpression(TestCase):
         ):
             ep.module()(torch.tensor([3]))
 
+    def test_unbacked_slice_nonstrict(self):
+        class Foo(torch.nn.Module):
+            def forward(self, xs, y):
+                u0, u1, u2, u3 = xs.tolist()
+                return y[u0:u1], torch.narrow(y, 0, u2, u3)
+
+        xs = torch.tensor([3, 7, 1, 6])
+        y = torch.randn(12)
+        mod = Foo()
+        ep = export(mod, (xs, y), strict=False)
+        for eager_out, ep_out in zip(mod(xs, y), ep.module()(xs, y)):
+            self.assertTrue(torch.allclose(eager_out, ep_out))
+        with self.assertRaises(RuntimeError):
+            ep.module()(torch.tensor([-1, 7, 1, 6]), y)
+
     def test_export_assume_static_by_default(self):
         class Module(torch.nn.Module):
             def forward(self, x: torch.Tensor):
