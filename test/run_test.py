@@ -427,6 +427,7 @@ TESTS_NOT_USING_GRADCHECK = [
     "dynamo/test_recompile_ux",
     "inductor/test_compiled_optimizers",
     "inductor/test_cutlass_backend",
+    "inductor/test_max_autotune",
     "inductor/test_select_algorithm",
     "inductor/test_smoke",
     "test_quantization",
