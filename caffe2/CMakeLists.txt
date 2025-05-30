@@ -275,6 +275,11 @@ if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)
       "${TORCH_SRC_DIR}/csrc/lazy/generated/RegisterLazy.cpp"
     )
   endif()
+  if(USE_MPS)
+    list(APPEND GENERATED_CXX_TORCH
+      "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_mps.cpp"
+    )
+  endif()
 endif()
 
 set(GENERATED_H_TORCH
@@ -703,6 +708,8 @@ list(APPEND Caffe2_CPU_SRCS ${TORCH_SRCS})
 
 if(USE_MPS)
   list(APPEND Caffe2_CPU_SRCS ${Caffe2_MPS_SRCS})
+  list(APPEND Caffe2_CPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/shim_mps.cpp)
+  list(APPEND Caffe2_CPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_runner/model_container_runner_mps.cpp)
   if(CAN_COMPILE_METAL)
       file(TOUCH ${CMAKE_BINARY_DIR}/aten/src/ATen/metallib_dummy.cpp)
       list(APPEND Caffe2_CPU_SRCS ${CMAKE_BINARY_DIR}/aten/src/ATen/metallib_dummy.cpp)
@@ -1733,6 +1740,10 @@ if(USE_ROCM)
     endforeach()
   endif()
 
+  if(WIN32)
+    list(APPEND HIP_CXX_FLAGS "-fms-extensions")
+  endif()
+
   # Call again since Caffe2_HIP_INCLUDE is extended with ATen include dirs.
   hip_include_directories(${Caffe2_HIP_INCLUDE})
 
@@ -1939,9 +1950,12 @@ if(BUILD_TEST)
         set(HIP_HIPCC_FLAGS ${BASE_HIPCC_FLAGS})
         set_source_files_properties(${test_src} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
         hip_add_executable(${test_name} "${test_src}")
-        set_target_properties(${test_name} PROPERTIES LINKER_LANGUAGE CXX HIP_ARCHITECTURES ${PYTORCH_ROCM_ARCH})
+        set_target_properties(${test_name} PROPERTIES HIP_ARCHITECTURES ${PYTORCH_ROCM_ARCH})
       else()
         add_executable(${test_name} "${test_src}")
+      endif()
+      if(test_src MATCHES "^.*\.hip$")
+        set_target_properties(${test_name} PROPERTIES LINKER_LANGUAGE CXX)
       endif()
       target_link_libraries(${test_name} torch_library gtest_main)
       target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)

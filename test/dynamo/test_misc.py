@@ -5931,7 +5931,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         from functorch.experimental.control_flow import cond
 
         def true_fn(x):
-            return x
+            return x.clone()
 
         def false_fn(x):
             return x.sin()
@@ -7921,6 +7921,34 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         self.assertEqual(counter.frame_count, 1)
 
+    @torch.compiler.config.patch(unbacked_sources="L['x']")
+    def test_unbacked_sources_tensor(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x * x
+
+        fn(torch.randn(0))
+        fn(torch.randn(1))
+        fn(torch.randn(2))
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(unbacked_sources="L['x']")
+    def test_unbacked_sources_scalar(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x * x
+
+        fn(0)
+        fn(1)
+        fn(2)
+
+        self.assertEqual(counter.frame_count, 1)
+
     @torch.compiler.config.patch(dynamic_sources="L['x']")
     def test_dynamic_sources_graph_break(self):
         counter = CompileCounter()
@@ -8390,6 +8418,17 @@ utils_device.CURRENT_DEVICE == None""".split(
         ref = fn(x, y)
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
+
+    def test_recursion_depth_guards(self):
+        @torch.compile(dynamic=True)
+        def foo(*args, **kwargs):
+            if sum(args) == 0:
+                return 0
+            return 1
+
+        args = list(range(2000))
+        foo(*args)
+        # Previously would have crashed
 
     @dataclasses.dataclass
     class CSETestCase:

@@ -29,6 +29,7 @@ import inspect
 import itertools
 import sys
 import types
+import warnings
 from collections.abc import Sequence
 from types import FunctionType
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
@@ -445,6 +446,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # Handle patch_dynamo_config call
+
         if self.fn is torch._dynamo.patch_dynamo_config:
             try:
                 args_const = [arg.as_python_constant() for arg in args]
@@ -1388,6 +1390,13 @@ class SkipFunctionVariable(VariableTracker):
                     "Remove the `torch._dynamo.graph_break()` call.",
                 ],
             )
+        elif self.value is torch._dynamo.skip_frame:
+            skip_frame_msg = kwargs.get("msg", None)
+            if skip_frame_msg:
+                skip_frame_msg = skip_frame_msg.as_python_constant()
+            raise SkipFrame(
+                f"Skip frame due to `torch._dynamo.skip_frame()`. Message: {skip_frame_msg}"
+            )
         else:
             if config.dont_skip_tracing:
                 from .builder import SourcelessBuilder
@@ -1534,6 +1543,12 @@ class WrapperUserFunctionVariable(VariableTracker):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        if hasattr(self.wrapper_obj, "cache_info"):
+            warnings.warn(
+                "Dynamo detected a call to a `functools.lru_cache` wrapped function."
+                "Dynamo currently ignores `functools.lru_cache` and directly traces the wrapped function."
+                "`functools.lru_cache` wrapped functions that read outside state may not be traced soundly."
+            )
         return variables.UserFunctionVariable(
             polyfills.getattr_and_trace
         ).call_function(
