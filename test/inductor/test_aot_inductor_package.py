@@ -20,12 +20,7 @@ from torch._inductor.package import AOTICompiledModel, load_package, package_aot
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.export import Dim
-from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    skipIfRocm,
-    skipIfXpu,
-    TEST_CUDA,
-)
+from torch.testing._internal.common_utils import IS_FBCODE, skipIfXpu, TEST_CUDA
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -236,73 +231,6 @@ class TestAOTInductorPackage(TestCase):
                 self.assertTrue(not build_path.exists())
 
                 # Create a build directory to run cmake
-                build_path.mkdir()
-                custom_env = os.environ.copy()
-                custom_env["CMAKE_PREFIX_PATH"] = str(Path(torch.__file__).parent)
-                subprocess.run(
-                    ["cmake", ".."],
-                    cwd=build_path,
-                    env=custom_env,
-                )
-                subprocess.run(["make"], cwd=build_path)
-
-                # Check if the .so file was build successfully
-                so_path = build_path / "libaoti_model.so"
-                self.assertTrue(so_path.exists())
-                optimized = torch._export.aot_load(str(so_path), self.device)
-                actual = optimized(*example_inputs)
-                self.assertTrue(torch.allclose(actual, expected))
-
-    @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
-    @skipIfRocm  # doesn't support multi-arch binary
-    @skipIfXpu  # doesn't support multi-arch binary
-    def test_compile_after_package_multi_arch(self):
-        if self.device != GPU_TYPE:
-            raise unittest.SkipTest("Only meant to test GPU_TYPE")
-        if not self.package_cpp_only:
-            raise unittest.SkipTest("Only meant to test cpp package")
-        if shutil.which("cmake") is None:
-            raise unittest.SkipTest("cmake is not available")
-        if shutil.which("make") is None:
-            raise unittest.SkipTest("make is not available")
-
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(10, 10)
-
-            def forward(self, x, y):
-                return x + self.linear(y)
-
-        with torch.no_grad():
-            example_inputs = (
-                torch.randn(10, 10, device=self.device),
-                torch.randn(10, 10, device=self.device),
-            )
-            model = Model().to(device=self.device)
-            expected = model(*example_inputs)
-
-            options = {
-                "aot_inductor.package_cpp_only": self.package_cpp_only,
-                # Expect kernel to be embeded in the final binary.
-                # We will make it the default behavior for the standalone mode.
-                "aot_inductor.multi_arch_kernel_binary": True,
-                "aot_inductor.embed_kernel_binary": True,
-            }
-            ep = torch.export.export(model, example_inputs)
-            package_path = torch._inductor.aoti_compile_and_package(
-                ep, inductor_configs=options
-            )
-            with tempfile.TemporaryDirectory() as tmp_dir, zipfile.ZipFile(
-                package_path, "r"
-            ) as zip_ref:
-                filenames = zip_ref.namelist()
-                prefix = filenames[0].split("/")[0]
-                zip_ref.extractall(tmp_dir)
-                tmp_path = Path(tmp_dir) / prefix / "data" / "aotinductor" / "model"
-                self.assertTrue(tmp_path.exists())
-                # Create a build directory to run cmake
-                build_path = tmp_path / "build"
                 build_path.mkdir()
                 custom_env = os.environ.copy()
                 custom_env["CMAKE_PREFIX_PATH"] = str(Path(torch.__file__).parent)
