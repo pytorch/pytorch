@@ -11913,6 +11913,26 @@ def forward(self, x, b_t, y):
         self.assertEqual(mod.foo, ep.module().foo)
         self.assertEqual(mod(torch.ones(4, 4)), ep.module()(torch.ones(4, 4)))
 
+    def test_unbacked_scalar_constructor(self):
+        class Foo(torch.nn.Module):
+            def forward(self, u, zuf, b):
+                return (
+                    torch.tensor([u.item()]),
+                    torch.tensor([zuf.item()]),
+                    torch.tensor([b.item()]),
+                )
+
+        mod = Foo()
+        inps = (torch.tensor([3]), torch.tensor([3.14]), torch.tensor([True]))
+        ep = torch.export.export(mod, inps)
+        for eager_out, ep_out in zip(mod(*inps), ep.module()(*inps)):
+            self.assertTrue(torch.allclose(eager_out, ep_out))
+
+        # test with other inputs
+        inps = (torch.tensor([5]), torch.tensor([-1.2]), torch.tensor([False]))
+        for eager_out, ep_out in zip(mod(*inps), ep.module()(*inps)):
+            self.assertTrue(torch.allclose(eager_out, ep_out))
+
     def test_symint_tensor_return(self):
         class Module(torch.nn.Module):
             def forward(self, x):
