@@ -203,11 +203,9 @@ do
     case "$1" in
     11.8) install_118; prune_118
         ;;
-    12.4) install_124; prune_124
+    12.6|12.6.*) install_126; prune_126
         ;;
-    12.6) install_126; prune_126
-        ;;
-    12.8) install_128;
+    12.8|12.8.*) install_128;
         ;;
     *) echo "bad argument $1"; exit 1
         ;;
