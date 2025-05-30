@@ -123,7 +123,7 @@ class Constraint:
             when computing validity.
     """
 
-    is_discrete: bool = False  # Default to continuous.
+    is_discrete: ClassVar[bool] = False  # Default to continuous.
     event_dim: int = 0  # Default to univariate.
 
     def check(self, value: Tensor) -> Tensor:
