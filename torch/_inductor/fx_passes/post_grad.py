@@ -1357,7 +1357,7 @@ def find_gpu_device(args: Sequence[Any]) -> Optional[torch.device]:
     return None
 
 
-def move_cpu_scalar_tensor_to_cuda(gm: torch.fx.GraphModule):
+def move_cpu_scalar_tensor_to_cuda(gm: torch.fx.GraphModule) -> None:
     """
     Move CPU scalar tensor to CUDA device. Specifically, for every
     `call_function` node, we check if it contains any gpu args. If so,
@@ -1369,7 +1369,7 @@ def move_cpu_scalar_tensor_to_cuda(gm: torch.fx.GraphModule):
     # data movement
     cpu_to_gpu: dict[torch.fx.Node, torch.fx.Node] = {}
 
-    def get_gpu_arg(arg: torch.fx.Node):
+    def get_gpu_arg(arg: torch.fx.Node) -> torch.fx.Node:
         if arg in cpu_to_gpu:
             arg_gpu = cpu_to_gpu[arg]
         else:
