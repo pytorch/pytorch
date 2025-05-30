@@ -1139,6 +1139,10 @@ class CachingAutotuner(KernelInterface):
                 f"{k}={v}" for (k, v) in launcher.config.kwargs.items()
             )
 
+            if self.device_props.type == "cuda":
+                from torch._C import _cuda_getStreamId as getStreamId
+                stream = getStreamId(stream)
+
             profiler_kwargs = {
                 "kernel_file": (self.filename or ""),
                 "kernel_hash": self.kernel_hash,
