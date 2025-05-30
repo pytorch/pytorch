@@ -5438,7 +5438,9 @@ def new_subgroups(
             f"The arg 'group_size' ({group_size}) must not exceed the world size ({world_size})"
         )
     if world_size % group_size != 0:
-        raise ValueError("The world size must be divisible by 'group_size'")
+        raise ValueError(
+            f"The world size ({world_size}) must be divisible by '{group_size=}'"
+        )
 
     # TODO: Use itertools.batched(get_process_group_ranks(group=group), group_size) instead when Python 3.12 is supported.
     ranks = get_process_group_ranks(group=group or _get_default_group())
