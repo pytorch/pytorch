@@ -166,5 +166,6 @@ class TestFakeSparsity(TestCase):
         y_hat = model_trace(x)
         self.assertEqual(y_hat, y)
 
+
 if __name__ == "__main__":
     raise_on_run_directly("test/test_ao_sparsity.py")

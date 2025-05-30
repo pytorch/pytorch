@@ -175,5 +175,6 @@ class TestBaseDataScheduler(TestCase):
             assert scheduler1.base_param[name] == scheduler2.base_param[name]
             assert scheduler1._last_param[name] == scheduler2._last_param[name]
 
+
 if __name__ == "__main__":
     raise_on_run_directly("test/test_ao_sparsity.py")

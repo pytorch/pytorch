@@ -28,7 +28,11 @@ from torch.testing._internal.common_pruning import (
     SimpleConv2d,
     SimpleLinear,
 )
-from torch.testing._internal.common_utils import raise_on_run_directly, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 DEVICES = {
@@ -1084,6 +1088,7 @@ class TestFPGMPruner(TestCase):
             self._test_update_mask_on_multiple_layer(
                 expected_conv1, expected_conv2, device
             )
+
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_ao_sparsity.py")

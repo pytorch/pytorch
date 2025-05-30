@@ -787,5 +787,6 @@ class TestQuantizationUtils(TestCase):
         assert abs(sl_emb_seq_0 - 0.80) <= 0.05  # +- 5% leeway
         assert abs(sl_emb_seq_1 - 0.80) <= 0.05  # +- 5% leeway
 
+
 if __name__ == "__main__":
     raise_on_run_directly("test/test_ao_sparsity.py")

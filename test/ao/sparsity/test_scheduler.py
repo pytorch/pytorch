@@ -191,5 +191,6 @@ class TestCubicScheduler(TestCase):
             msg="Sparsity level is not reaching the target level afer delta_t * n steps ",
         )
 
+
 if __name__ == "__main__":
     raise_on_run_directly("test/test_ao_sparsity.py")

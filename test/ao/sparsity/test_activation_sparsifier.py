@@ -9,7 +9,11 @@ from torch.ao.pruning._experimental.activation_sparsifier.activation_sparsifier 
     ActivationSparsifier,
 )
 from torch.ao.pruning.sparsifier.utils import module_to_fqn
-from torch.testing._internal.common_utils import raise_on_run_directly, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 class Model(nn.Module):
@@ -399,6 +403,7 @@ class TestActivationSparsifier(TestCase):
 
         # check state_dict() after squash_mask()
         self._check_state_dict(activation_sparsifier)
+
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_ao_sparsity.py")

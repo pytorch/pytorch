@@ -479,5 +479,6 @@ class TestNearlyDiagonalSparsifier(TestCase):
                     else:
                         assert mask[row, col] == 0
 
+
 if __name__ == "__main__":
     raise_on_run_directly("test/test_ao_sparsity.py")

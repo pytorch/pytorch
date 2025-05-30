@@ -283,6 +283,7 @@ class TestQlinearPackedParams(TestCase):
             packed_params_data_with_int32_indices(packed_params_data_2b),
         )
 
+
 if __name__ == "__main__":
     raise RuntimeError(
         "This test is not currently used and should be "

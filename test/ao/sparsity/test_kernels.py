@@ -19,11 +19,16 @@ from torch.testing._internal.common_quantized import (
     qengine_is_qnnpack,
     qengine_is_x86,
 )
-from torch.testing._internal.common_utils import raise_on_run_directly, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 # TODO: Once more test files are created, move the contents to a ao folder.
 logger = logging.getLogger(__name__)
+
 
 class TestQuantizedSparseKernels(TestCase):
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")

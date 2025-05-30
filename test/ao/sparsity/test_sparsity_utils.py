@@ -141,5 +141,6 @@ class TestSparsityUtilFunctions(TestCase):
             self.assertEqual(arg_info["tensor_name"], "baz")
             self.assertEqual(arg_info["tensor_fqn"], "foo.bar.baz")
 
+
 if __name__ == "__main__":
     raise_on_run_directly("test/test_ao_sparsity.py")
