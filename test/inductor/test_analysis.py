@@ -231,13 +231,11 @@ def _pointwise_test_model(device, dtype, compile=True):
         mat4 = T(M, N)
         pointwise_output = torch.add(mat3, mat4).sin()
         return pointwise_output
-
     if compile:
         return torch.compile(
             model, options={"benchmark_kernel": True, "profile_bandwidth": True}
         )
     return model
-
 
 prefix = ["profile.py"]
 
@@ -619,7 +617,6 @@ class TestAnalysis(TestCase):
         self.assertTrue(seen_bmm)
         self.assertTrue(seen_baddbmm)
         self.assertTrue(seen_conv)
-
     @skipIf(not SM70OrLater, "Requires sm70")
     @dtypes(torch.float, torch.float16)
     @parametrize(
