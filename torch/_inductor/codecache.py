@@ -1916,12 +1916,7 @@ class AotCodeCompiler:
                 "use_relative_path": use_relative_path,
                 "vec_isa": picked_vec_isa,
             }
-            # If we're packaging via CMake, we build the whole code at max optimization.
-            wrapper_build_options = CppTorchDeviceOptions(
-                compile_only=True,
-                **compile_command,
-            )
-            kernel_build_options = CppTorchDeviceOptions(
+            build_options = CppTorchDeviceOptions(
                 compile_only=True,
                 **compile_command,
             )
@@ -1931,23 +1926,17 @@ class AotCodeCompiler:
                 header_file = _get_cpp_wrapper_header(
                     device_type, aot_mode=graph.aot_mode
                 )
-                wrapper_build_options.precompiled_header = _precompile_header(
+                build_options.precompiled_header = _precompile_header(
                     header_file,
                     cpp_command,
                     **compile_command,
                 )
-                if cpp_prefix := _get_cpp_prefix_header(device_type):
-                    kernel_build_options.precompiled_header = _precompile_header(
-                        cpp_prefix,
-                        cpp_command,
-                        **compile_command,
-                    )
 
             wrapper_builder = CppBuilder(
                 name=str(wrapper_path_operator.stem),
                 sources=wrapper_path,
                 output_dir=str(wrapper_path_operator.parent),
-                BuildOption=wrapper_build_options,
+                BuildOption=build_options,
             )
             wrapper_compile_cmd = wrapper_builder.get_command_line()
             wrapper_o = wrapper_builder.get_target_file_path()
@@ -1956,7 +1945,7 @@ class AotCodeCompiler:
                 name=str(kernel_path_operator.stem),
                 sources=kernel_path,
                 output_dir=str(wrapper_path_operator.parent),
-                BuildOption=kernel_build_options,
+                BuildOption=build_options,
             )
             kernel_compile_cmd = kernel_builder.get_command_line()
             kernel_o = kernel_builder.get_target_file_path()
@@ -1970,7 +1959,7 @@ class AotCodeCompiler:
                         f"{wrapper_path_operator.stem}_compile_flags.json"
                     )
                 )
-                wrapper_build_options.save_flags_to_json(compile_flags)
+                build_options.save_flags_to_json(compile_flags)
                 generated_files.append(compile_flags)
                 wrapper_builder.save_compile_cmd_to_cmake(cmake_path, device_type)
                 wrapper_builder.save_src_to_cmake(cmake_path, wrapper_path)
@@ -1978,13 +1967,13 @@ class AotCodeCompiler:
             else:
                 try:
                     wrapper_builder.build()
+                    kernel_builder.build()
                 except (exc.CppCompileError, SkipFrame) as e:
                     if " is too big to optimize" in str(e):
                         raise RuntimeError(
                             "Please use torch._inductor.config.aot_inductor.compile_wrapper_opt_level = 'O0' flag."
                         ) from e
                     raise e
-                kernel_builder.build()
 
             if not use_mmap_weights:
                 aot_constants = serialized_weights

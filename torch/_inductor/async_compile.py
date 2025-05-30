@@ -220,6 +220,11 @@ class CompiledTritonKernels:
 
 
 class AsyncCompile:
+    """AsyncCompile manages asynchronous, multithreaded compilation for a number of
+    different compilation backends.  In general, if config.compile_threads is 1 or less,
+    compilation will happen sychronously.  Values greater than 1 may be (but are not
+    guaranteed to be) compiled in parallel."""
+
     def __init__(self) -> None:
         pass
 

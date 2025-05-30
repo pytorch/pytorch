@@ -34,7 +34,7 @@ log: logging.Logger = logging.getLogger(__name__)
 
 def test_cpu():
     try:
-        CppCodeCache.load("")
+        CppCodeCache.load(("",))
         return not IS_FBCODE
     except (
         CalledProcessError,
