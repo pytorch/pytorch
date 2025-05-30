@@ -3,7 +3,7 @@ import os
 import subprocess
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, cast, Optional
+from typing import Any, cast, Optional, Union
 
 import requests
 
@@ -189,8 +189,6 @@ def find_old_whl(workflow_id: str, build_environment: str, sha: str) -> bool:
     return False
 
 
-
-
 def unzip_artifact_and_replace_files() -> None:
     # Unzip the artifact and replace files
     subprocess.check_output(
@@ -204,21 +202,20 @@ def unzip_artifact_and_replace_files() -> None:
     old_version = f"+git{merge_base[:7]}"
     new_version = f"+git{head_sha[:7]}"
 
-    def move_to_new_version(file: str) -> None:
+    def move_to_new_version(file: Union[str, Path]) -> None:
         # Rename file with old_version to new_version
         subprocess.check_output(
-            ["mv", file, file.replace(old_version, new_version)],
+            ["mv", file, str(file).replace(old_version, new_version)],
             stderr=subprocess.DEVNULL,
         )
 
-    def move_content_to_new_version(file: str) -> None:
+    def move_content_to_new_version(file: Union[str, Path]) -> None:
         # Replace the old version in the file with the new version
-        with open(file, "r") as f:
+        with open(file) as f:
             content = f.read()
             content = content.replace(old_version, new_version)
         with open(file, "w") as f:
             f.write(content)
-
 
     # Rename wheel into zip
     wheel_path = Path("artifacts/dist").glob("*.whl")
@@ -240,10 +237,8 @@ def unzip_artifact_and_replace_files() -> None:
 
         for file in Path(f"artifacts/dist/{new_path.stem}").glob(
             "*.dist-info/**",
-            recursive=True,
         ):
             move_content_to_new_version(file)
-
 
         # Should only be one, but Im
         for file in Path(f"artifacts/dist/{new_path.stem}").glob(
