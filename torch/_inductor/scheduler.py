@@ -4249,7 +4249,8 @@ class Scheduler:
             *(get_input_node_symbols(node) for _, node in input_nodes.items())
         )
 
-        return filter_symbols(candidate_symbols)
+        candidate_symbols = filter_symbols(candidate_symbols)
+        return OrderedSet(V.graph.sizevars.simplify(s) for s in candidate_symbols)
 
     def get_graph_partition_signature(
         self, partitions: list[PartitionType], skip_cudagraphs: list[bool]
