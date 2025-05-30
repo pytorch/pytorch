@@ -2,6 +2,10 @@
 
 import os
 import sys
+<<<<<<< HEAD
+=======
+import time
+>>>>>>> 6f829d23b08 (Script for consolidation of sharded safetensor files)
 
 import torch
 import torch.distributed.checkpoint as dist_cp
@@ -21,10 +25,19 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 class TestConsolidateHFSafeTensors(DTensorTestBase):
     def _create_d_tensors(self) -> None:
+<<<<<<< HEAD
+=======
+        # Create a custom test case with overlapping shards
+        # One shard has values 0-11, the other has values 8-15
+>>>>>>> 6f829d23b08 (Script for consolidation of sharded safetensor files)
         global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
         mesh_shape = (self.world_size,)
         mesh_1d = init_device_mesh(self.device_type, mesh_shape)
         
+<<<<<<< HEAD
+=======
+        
+>>>>>>> 6f829d23b08 (Script for consolidation of sharded safetensor files)
         # Create local tensor with row-wise sharding
         rows_per_rank = global_tensor.shape[0] // self.world_size
         start_row = self.rank * rows_per_rank
