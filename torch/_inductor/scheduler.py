@@ -4254,11 +4254,8 @@ class Scheduler:
         res: OrderedSet[sympy.Symbol] = OrderedSet()
         for s in candidate_symbols:
             symplified_s = V.graph.sizevars.simplify(s)
-            # skip when s is simplified to an Integer
-            if isinstance(symplified_s, sympy.Symbol):
-                res.add(symplified_s)
-            else:
-                assert isinstance(symplified_s, sympy.Integer)
+            # use free_symbols only when s is simplified to an Integer or expr
+            res.update(symplified_s.free_symbols)
 
         return res
 
