@@ -5718,9 +5718,27 @@ def full(
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-    return torch.fill(e, fill_value)  # type: ignore[arg-type]
+    return prims.fill(e, fill_value)  # type: ignore[arg-type]
 
 
+def _get_shape_stride_like(
+    a: TensorLikeType, layout: torch.layout
+) -> tuple[ShapeType, StrideType]:
+    assert layout == torch.strided
+
+    physical_layout = utils.compute_elementwise_output_logical_to_physical_perm(a)
+    shape = a.shape
+
+    p_strides = utils.make_contiguous_strides_for([shape[l] for l in physical_layout])
+    strides = [0] * len(shape)
+    for p, l in enumerate(physical_layout):
+        strides[l] = p_strides[p]
+
+    return (a.shape, strides)
+
+
+@register_decomposition(aten.full_like)
+@out_wrapper()
 def full_like(
     a: TensorLikeType,
     fill_value: NumberType,
@@ -5732,16 +5750,34 @@ def full_like(
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
 ) -> TensorLikeType:
-    e = torch.empty_like(
-        a,
-        dtype=dtype,
-        layout=layout,
-        device=device,
-        pin_memory=pin_memory,
-        requires_grad=requires_grad,
-        memory_format=memory_format,
+    dtype = a.dtype if dtype is None else dtype
+    layout = a.layout if layout is None else layout
+    device = a.device if device is None else device
+
+    if memory_format == torch.preserve_format:
+        for m in (torch.contiguous_format, torch.channels_last, torch.channels_last_3d):
+            if a.is_contiguous(memory_format=m):
+                memory_format = m
+                break
+
+    if memory_format != torch.preserve_format:
+        return torch.full(
+            a.shape,
+            fill_value,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            requires_grad=requires_grad,
+        ).to(memory_format=memory_format)
+
+    shape, stride = _get_shape_stride_like(a, layout)
+    result = full(
+        a.shape, fill_value, dtype=dtype, device=device, requires_grad=requires_grad
     )
-    return fill(e, fill_value)
+    if stride:
+        return result.as_strided(shape, stride).clone()
+    else:
+        return result
 
 
 @register_decomposition(aten.zeros_like)

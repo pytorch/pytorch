@@ -24589,6 +24589,10 @@ python_ref_db = [
         ),
     ),
     PythonRefInfo(
+        "_refs.full_like",
+        torch_opinfo_name="full_like",
+    ),
+    PythonRefInfo(
         "_refs.randn",
         torch_opinfo_name="randn",
         op=lambda *args, **kwargs: wrapper_set_seed(refs.randn, *args, **kwargs),
