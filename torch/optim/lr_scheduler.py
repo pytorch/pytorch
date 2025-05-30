@@ -173,7 +173,14 @@ class LRScheduler:
         raise NotImplementedError
 
     def step(self, epoch: Optional[int] = None) -> None:
-        """Perform a step."""
+        """Adjust the learning rate of the optimizer.
+
+        Args:
+            epoch (int, optional): The index of the training epoch. Default: None.
+
+                .. deprecated:: 1.3
+                    The ``epoch`` parameter is being deprecated, use ``lr_scheduler.step()``.
+        """
         # Raise a warning if old pattern is detected
         # https://github.com/pytorch/pytorch/issues/20124
         if self._step_count == 1:
@@ -1329,8 +1336,17 @@ class ReduceLROnPlateau(LRScheduler):
         self.cooldown_counter = 0
         self.num_bad_epochs = 0
 
-    def step(self, metrics: SupportsFloat, epoch=None) -> None:  # type: ignore[override]
-        """Perform a step."""
+    def step(self, metrics: SupportsFloat, epoch: Optional[int] = None) -> None:  # type: ignore[override]
+        """
+        Adjust the learning rate of the optimizer.
+
+        Args:
+            metrics (SupportsFloat): Monitored metric used to determine whether the learning rate should be adjusted.
+            epoch (int, optional): The index of the training epoch. Default: None.
+
+                .. deprecated:: 1.3
+                    The ``epoch`` parameter is being deprecated, use ``lr_scheduler.step()``.
+        """
         # convert `metrics` to float, in case it's a zero-dim Tensor
         current = float(metrics)
         if epoch is None:
@@ -1775,8 +1791,14 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         ]
 
     @override
-    def step(self, epoch=None) -> None:
-        """Step could be called after every batch update.
+    def step(self, epoch: Optional[int] = None) -> None:
+        """Adjust the learning rate of the optimizer.
+
+        Args:
+            epoch (int, optional): The index of the training epoch. Default: None.
+
+                .. deprecated:: 1.3
+                    The ``epoch`` parameter is being deprecated, use ``lr_scheduler.step()``.
 
         Example:
             >>> # xdoctest: +SKIP("Undefined vars")
