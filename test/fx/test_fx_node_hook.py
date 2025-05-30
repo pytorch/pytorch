@@ -90,6 +90,7 @@ class TestFXNodeHook(TestCase):
         assert gm._erase_node_hooks == []
         assert gm._replace_hooks == []
 
+
 if __name__ == "__main__":
     raise RuntimeError(
         "This test is not currently used and should be "

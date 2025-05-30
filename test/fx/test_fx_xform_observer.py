@@ -179,6 +179,7 @@ class TestGraphTransformObserver(TestCase):
         self.assertEqual(len(gm2._erase_node_hooks), 0)
         self.assertEqual(len(gm2._deepcopy_hooks), 0)
 
+
 if __name__ == "__main__":
     raise RuntimeError(
         "This test is not currently used and should be "

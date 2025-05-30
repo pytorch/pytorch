@@ -109,6 +109,7 @@ class TestShapeInference(unittest.TestCase):
         input_tensors = [torch.randn(1, 1)]
         infer_shape(gm, input_tensors)
 
+
 if __name__ == "__main__":
     raise RuntimeError(
         "This test is not currently used and should be "

@@ -168,6 +168,7 @@ class TestFXNodeSource(TestCase):
                 CREATE_STR,
             )
 
+
 if __name__ == "__main__":
     raise RuntimeError(
         "This test is not currently used and should be "
