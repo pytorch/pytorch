@@ -942,6 +942,7 @@ class CppGemmTemplate(CppTemplate):
                             > 25  # for vertical, too larger of B make negative impact to L2 reuse
                         )
                     )
+                    and (num_threads and Mt_blocks * Nt_blocks >= 8 and Mt_blocks * Nt_blocks < 256)
                 ):
                     Mc_blocks, Nc_blocks, Kc_blocks = _Mc_blocks, _Nc_blocks, _Kc_blocks
                     horizontal_transverse = True
