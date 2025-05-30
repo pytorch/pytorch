@@ -13408,6 +13408,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 "Fail for triton cpu backend with error: https://gist.github.com/shunting314/a873fb32b6b7b5a437f44280ae86839f"
             )
 
+        if self.device == "cpu":
+            raise unittest.SkipTest(
+                "The test fails some times on CI: "
+                "https://github.com/pytorch/pytorch/actions/runs/15333913377/job/43153170162. "
+                "Skip for now."
+            )
+
         size = (30000, 100000)
 
         # rand rather than randn since the mean for the latter is close to 0
