@@ -33,7 +33,7 @@ The following constraints are implemented:
 """
 
 from collections.abc import Sequence
-from typing import Callable, Generic, Optional, TypeVar, Union
+from typing import Callable, Final, Generic, Optional, TypeVar, Union
 from typing_extensions import TypeAlias, TypeIs
 
 import torch
@@ -41,7 +41,40 @@ from torch import Tensor
 
 
 __all__ = [
+    # Classes
     "Constraint",
+    "MixtureSameFamilyConstraint",
+    # Type Aliases
+    "Dependent",
+    "DependentProperty",
+    "Independent",
+    "Boolean",
+    "OneHot",
+    "NonNegativeInteger",
+    "PositiveInteger",
+    "IntegerInterval",
+    "Real",
+    "RealVector",
+    "Positive",
+    "NonNegative",
+    "GreaterThan",
+    "GreaterThanEq",
+    "LessThan",
+    "Multinomial",
+    "UnitInterval",
+    "Interval",
+    "HalfOpenInterval",
+    "Simplex",
+    "LowerTriangular",
+    "LowerCholesky",
+    "CorrCholesky",
+    "Square",
+    "Symmetric",
+    "PositiveSemidefinite",
+    "PositiveDefinite",
+    "Cat",
+    "Stack",
+    # Constraint Classes / Instances
     "boolean",
     "cat",
     "corr_cholesky",
@@ -57,7 +90,6 @@ __all__ = [
     "less_than",
     "lower_cholesky",
     "lower_triangular",
-    "MixtureSameFamilyConstraint",
     "multinomial",
     "nonnegative",
     "nonnegative_integer",
@@ -758,37 +790,6 @@ class _Stack(Constraint):
         )
 
 
-# Public interface.
-dependent = _Dependent()
-dependent_property = _DependentProperty
-independent = _IndependentConstraint
-boolean = _Boolean()
-one_hot = _OneHot()
-nonnegative_integer = _IntegerGreaterThan(0)
-positive_integer = _IntegerGreaterThan(1)
-integer_interval = _IntegerInterval
-real = _Real()
-real_vector = independent(real, 1)
-positive = _GreaterThan(0.0)
-nonnegative = _GreaterThanEq(0.0)
-greater_than = _GreaterThan
-greater_than_eq = _GreaterThanEq
-less_than = _LessThan
-multinomial = _Multinomial
-unit_interval = _Interval(0.0, 1.0)
-interval = _Interval
-half_open_interval = _HalfOpenInterval
-simplex = _Simplex()
-lower_triangular = _LowerTriangular()
-lower_cholesky = _LowerCholesky()
-corr_cholesky = _CorrCholesky()
-square = _Square()
-symmetric = _Symmetric()
-positive_semidefinite = _PositiveSemidefinite()
-positive_definite = _PositiveDefinite()
-cat = _Cat
-stack = _Stack
-
 # Type aliases.
 Dependent: TypeAlias = _Dependent
 DependentProperty: TypeAlias = _DependentProperty
@@ -819,3 +820,34 @@ PositiveSemidefinite: TypeAlias = _PositiveSemidefinite
 PositiveDefinite: TypeAlias = _PositiveDefinite
 Cat: TypeAlias = _Cat
 Stack: TypeAlias = _Stack
+
+# Public interface.
+dependent: Final[Dependent] = _Dependent()
+dependent_property = _DependentProperty
+independent = _IndependentConstraint
+boolean: Final[Boolean] = _Boolean()
+one_hot: Final[OneHot] = _OneHot()
+nonnegative_integer: Final[NonNegativeInteger] = _IntegerGreaterThan(0)
+positive_integer: Final[PositiveInteger] = _IntegerGreaterThan(1)
+integer_interval = _IntegerInterval
+real: Final[Real] = _Real()
+real_vector: Final[RealVector] = independent(real, 1)
+positive: Final[Positive] = _GreaterThan(0.0)
+nonnegative: Final[NonNegative] = _GreaterThanEq(0.0)
+greater_than = _GreaterThan
+greater_than_eq = _GreaterThanEq
+less_than = _LessThan
+multinomial = _Multinomial
+unit_interval: Final[UnitInterval] = _Interval(0.0, 1.0)
+interval = _Interval
+half_open_interval = _HalfOpenInterval
+simplex: Final[Simplex] = _Simplex()
+lower_triangular: Final[LowerTriangular] = _LowerTriangular()
+lower_cholesky: Final[LowerCholesky] = _LowerCholesky()
+corr_cholesky: Final[CorrCholesky] = _CorrCholesky()
+square: Final[Square] = _Square()
+symmetric: Final[Symmetric] = _Symmetric()
+positive_semidefinite: Final[PositiveSemidefinite] = _PositiveSemidefinite()
+positive_definite: Final[PositiveDefinite] = _PositiveDefinite()
+cat = _Cat
+stack = _Stack
