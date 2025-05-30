@@ -2184,6 +2184,7 @@ class GuardBuilder(GuardBuilderBase):
 
                 func_str = textwrap.dedent(
                     f"""
+                #include <algorithm>
                 #include <cstdint>
                 #include <cmath>
                 #include <c10/util/generic_math.h>
