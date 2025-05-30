@@ -63,9 +63,15 @@ struct DeviceStats {
 
 namespace c10 {
 
+using CaptureId_t = unsigned long long;
+
+// first is set if the instance is created by Graph mode capture_begin.
+// second is set if the instance is created by Graph mode graph_pool_handle.
+using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
+
 struct C10_API DeviceAllocator : public c10::Allocator {
   virtual bool initialized() = 0;
-  virtual void emptyCache() = 0;
+  virtual void emptyCache(MempoolId_t mempool_id = {0, 0}) = 0;
   virtual void recordStream(const DataPtr&, c10::Stream stream) = 0;
   virtual CachingDeviceAllocator::DeviceStats getDeviceStats(
       c10::DeviceIndex device) = 0;
