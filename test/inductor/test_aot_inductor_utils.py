@@ -16,7 +16,7 @@ from torch._dynamo.testing import same
 from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.common_utils import run_tests, IS_FBCODE
 from torch.testing._internal.inductor_utils import clone_preserve_strides_offset
 from torch.utils import _pytree as pytree
 
@@ -290,3 +290,6 @@ def code_check_count(
             target_count,
             exactly=True,
         ).run(src_code)
+
+if __name__ == "__main__":
+    run_tests()
