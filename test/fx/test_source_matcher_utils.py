@@ -16,6 +16,7 @@ from torch.fx.passes.utils.source_matcher_utils import (
     get_source_partitions,
 )
 from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
     instantiate_parametrized_tests,
     parametrize,
     skipIfTorchDynamo,
@@ -481,3 +482,6 @@ class TestSourceMatcher(JitTestCase):
 
 
 instantiate_parametrized_tests(TestSourceMatcher)
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_fx.py")
