@@ -27,6 +27,7 @@ import torch.nn as nn
 import torch.optim
 import torch.utils.data
 from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall
+from torch._inductor.utils import is_big_gpu
 from torch.autograd.profiler import KinetoStepTracker, profile as _profile
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
@@ -3027,6 +3028,53 @@ aten::mm""",
             assert len(key_averages) == 3
             assert "Overload Name" in key_averages.table()
             validate_json(prof)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requries CUDA")
+    def test_profiler_debug_autotuner(self):
+        """
+        This test makes sure that profiling events will be present when the kernel is run using the DebugAutotuner.
+        """
+        if not is_big_gpu():
+            raise unittest.SkipTest("requires large gpu to max-autotune")
+        in1 = torch.randn((256, 512), device="cuda", dtype=torch.float16)
+        in2 = torch.randn((512, 768), device="cuda", dtype=torch.float16)
+
+        def mm():
+            return torch.mm(in1, in2)
+
+        pb_mm = torch.compile(
+            mm,
+            options={
+                "benchmark_kernel": True,
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "profile_bandwidth": True,
+            },
+        )
+        comp_mm = torch.compile(
+            mm,
+            options={
+                "benchmark_kernel": True,
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
+        )
+
+        with profile() as prof1:
+            pb_mm()
+        with profile() as prof2:
+            comp_mm()
+
+        def names(prof):
+            return {
+                ev.name
+                for ev in prof.events()
+                if "mm" in ev.name or "triton" in ev.name
+            }
+
+        n1 = names(prof1)
+        n2 = names(prof2)
+        self.assertEqual(n1, n2)
 
 
 if __name__ == "__main__":
