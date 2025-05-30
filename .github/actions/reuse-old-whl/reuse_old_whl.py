@@ -190,6 +190,10 @@ def unzip_artifact_and_replace_files() -> None:
         subprocess.check_output(
             ["unzip", "-o", new_path, "-d", f"artifacts/dist/{new_path.stem}"],
         )
+
+        # Remove the old wheel (which is now a zip file)
+        os.remove(new_path)
+
         # Copy python files into the artifact
         subprocess.check_output(
             ["rsync", "-avz", "torch", f"artifacts/dist/{new_path.stem}"],
