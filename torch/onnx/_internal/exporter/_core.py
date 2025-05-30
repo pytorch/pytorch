@@ -569,7 +569,6 @@ def _handle_call_function_node_with_lowering(
             outputs = onnx_node.outputs
     else:
         # Find the matching ONNX overload for the node
-        # NOTE: Create different registries for different ONNX opset versions
         # TODO: Log the message here to expose false positives
         onnx_function, message = _dispatching.dispatch(node, registry)
 
