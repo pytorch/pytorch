@@ -1046,9 +1046,21 @@ def is_numpy_float_type(value):
     )
 
 
+@overload
+def is_lru_cache_wrapped_function(
+    value: Callable[..., T],
+) -> TypeGuard[functools._lru_cache_wrapper[Any]]: ...
+
+
+@overload
 def is_lru_cache_wrapped_function(
     value: Any,
-) -> TypeGuard[functools._lru_cache_wrapper]:
+) -> TypeGuard[functools._lru_cache_wrapper[Any]]: ...
+
+
+def is_lru_cache_wrapped_function(
+    value: Any,
+) -> bool:
     return isinstance(value, functools._lru_cache_wrapper) and is_function(
         inspect.getattr_static(value, "__wrapped__")
     )
@@ -1165,7 +1177,7 @@ def istensor(obj):
     return istype(obj, tensor_list)
 
 
-def is_lazy_module(mod: Any) -> TypeIs[LazyModuleMixin]:
+def is_lazy_module(mod):
     return isinstance(mod, LazyModuleMixin)
 
 
@@ -2152,15 +2164,8 @@ def preserve_rng_state():
 
 
 def is_jit_model(
-    model0: Any,
-) -> TypeIs[
-    Union[
-        torch.jit._trace.TopLevelTracedModule,
-        torch.jit._script.RecursiveScriptModule,
-        torch.jit.ScriptFunction,
-        torch.jit.ScriptModule,
-    ]
-]:
+    model0,
+):
     return isinstance(
         model0,
         (
