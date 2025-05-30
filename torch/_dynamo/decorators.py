@@ -524,7 +524,7 @@ class _DimRange:
 
 
 @forbid_in_graph
-def mark_unbacked(t, index, strict=False):
+def mark_unbacked(t, index, strict=False, specialize_on=None):
     """
     Mark a tensor as having an unbacked dim.  This changes the semantics of operations,
     we will always report the size does not equal zero/one, we will turn asserts
@@ -547,8 +547,13 @@ def mark_unbacked(t, index, strict=False):
             t._dynamo_strict_unbacked_indices.add(index)
             return
 
+        if not hasattr(t, "_specialized_on"):
+            t._specialize_on = {}
+
         if not hasattr(t, "_dynamo_unbacked_indices"):
             t._dynamo_unbacked_indices = set()
+
+        t._specialize_on[index] = specialize_on if specialize_on is not None else []
         t._dynamo_unbacked_indices.add(index)
         return
 
@@ -558,7 +563,7 @@ def mark_unbacked(t, index, strict=False):
 
 
 @forbid_in_graph
-def mark_dynamic(t, index, *, min=None, max=None):
+def mark_dynamic(t, index, *, min=None, max=None, specialize_on=None):
     """
     Mark a tensor as having a dynamic dim and set corresponding min and max range for the dim.
 
@@ -581,6 +586,20 @@ def mark_dynamic(t, index, *, min=None, max=None):
     4) Attempts to trace this function will explicitly raise. As such, all calls to mark_dynamic must be made
     before torch.compile.
 
+    5) If specialize_on is passed in, we will perform a single generic Dynamo trace followed by
+    multiple specialized compilations in addition to a single generic compilation. NB: For now we only support
+    per dimension specialization, or in other words we do not generate a cross product of specializations.
+    At runtime, we will dispatch to a specialized compiled region if the input matches the specialization criteria.
+
+    For example:
+        mark_dynamic(..., specialize_on=[
+            lambda x: x == 8,
+            lambda x: x == 16
+        ])
+
+    This approach results in one Dynamo trace and two backend compilations. When the input dimension equals 8 or 16
+    at runtime, execution will be directed to the specialized compiled region. Performance measurements indicate
+    2-8x speedups depending on the specific specialization and model architecture.
     """
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror mark_dynamic() on all inner tensors with same dim as t
@@ -593,14 +612,20 @@ def mark_dynamic(t, index, *, min=None, max=None):
         if not hasattr(t, "_dynamo_dynamic_indices"):
             t._dynamo_dynamic_indices = set()
             t._dynamo_dynamic_range = set()
+
+        if not hasattr(t, "_specialize_on"):
+            t._specialize_on = {}
+
         # TODO(voz): Should we bounds check?
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))
+        t._specialize_on[index] = specialize_on if specialize_on is not None else []
         return
 
     assert isinstance(index, (list, tuple))
     for i in index:
         mark_dynamic(t, i, min=min, max=max)
+        mark_dynamic(t, i, min=min, max=max, specialize_on=specialize_on)
 
 
 @forbid_in_graph
