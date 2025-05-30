@@ -80,7 +80,7 @@ if(HIP_FOUND)
   find_package_and_print_version(hip REQUIRED CONFIG)
   # Find ROCM version for checks. UNIX filename is rocm_version.h, Windows is hip_version.h
   if(UNIX)
-    find_package_and_print_version(rocm-core REQUIRED CONFIG)
+    find_package_and_print_version(rocm-core CONFIG)
     find_file(ROCM_VERSION_HEADER_PATH NAMES rocm_version.h
       HINTS ${rocm_core_INCLUDE_DIR}/rocm-core /usr/include)
   else() # Win32
