@@ -56,6 +56,7 @@ from torch.testing._internal.inductor_utils import (
     requires_gpu,
     requires_triton,
 )
+from torch.testing._internal.logging_utils import multiple_logs_to_string
 from torch.testing._internal.triton_utils import requires_cuda
 
 
@@ -2119,6 +2120,90 @@ class TestFxGraphCacheHashing(TestCase):
             pickler.dumps(details1),
             pickler.dumps(details3),
         )
+
+    def test_hash_private_config_changes(self):
+        """
+        Test that private config settings affect hashes.
+        """
+        with config.patch({"_micro_pipeline_tp": False}):
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+        with config.patch({"_micro_pipeline_tp": True}):
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        self.assertEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details2),
+        )
+        self.assertNotEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details3),
+        )
+
+    def test_non_serializable_custom_passes_causes_cache_miss(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 4))
+
+            def forward(self, x):
+                return x @ self.param
+
+        mod1 = Mod()
+        mod_compiled = torch.compile(mod1)
+        with torch.no_grad():
+            x = torch.rand(4, 4)
+            # miss
+            mod_compiled(x)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            # hit
+            torch._dynamo.reset()
+            mod_compiled(x)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            torch._dynamo.reset()
+            counters.clear()
+
+            # hit
+            mod_compiled(x)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            with config.patch({"_fuse_ddp_communication_passes": ["new_pass_foo_bar"]}):
+                # miss (private config changed)
+                torch._dynamo.reset()
+                mod_compiled(x)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+                torch._dynamo.reset()
+                counters.clear()
+
+            (codecache_stream,), ctx = multiple_logs_to_string(
+                "torch._inductor.codecache", "codecache"
+            )
+            with ctx(), config.patch(
+                {"_fuse_ddp_communication_passes": [lambda *args: None]}
+            ):
+                # bypass (custom pass is not serializable)
+                mod_compiled(x)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 1)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+                counters.clear()
+            # assert that our bypass is explicit
+            codecache_logs = codecache_stream.getvalue().strip()
+            self.assertTrue(
+                "Bypassing FX Graph Cache because 'Unsupported _fuse_ddp_communication_pass'"
+                in codecache_logs
+            )
 
     def test_hash_custom_passes(self):
         """

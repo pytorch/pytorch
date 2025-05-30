@@ -1260,6 +1260,18 @@ class PythonWrapperCodegen(CodeGen):
 
     def generate_return(self, output_refs: list[str]) -> None:
         if output_refs:
+            if config.nan_asserts:
+                self.wrapper_call.writeline(
+                    "return_vars = (" + ", ".join(output_refs) + ", )"
+                )
+                self.wrapper_call.writeline("for var in return_vars:")
+                self.wrapper_call.do_indent()
+                self.wrapper_call.writeline("if isinstance(var, torch.Tensor):")
+                self.wrapper_call.do_indent()
+                self.wrapper_call.writeline("assert not var.isnan().any().item()")
+                self.wrapper_call.writeline("assert not var.isinf().any().item()")
+                self.wrapper_call.do_unindent(2)
+
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
         else:
             self.wrapper_call.writeline("return ()")
@@ -1399,12 +1411,11 @@ class PythonWrapperCodegen(CodeGen):
         self,
         buf_name: str,
         python_kernel_name: str,
-        cpp_kernel_name: str,
-        codegen_args: list[str],
-        op_overload: Optional[torch._ops.OpOverload] = None,
-        raw_args=None,
-        outputs=None,
-    ):
+        codegen_args: Sequence[str],
+        op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
+        raw_args: Sequence[Any],
+        outputs: Sequence[ir.Buffer],
+    ) -> None:
         self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(codegen_args)})")
 
     def generate(self, is_inference):
