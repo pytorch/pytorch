@@ -130,7 +130,7 @@ def check_changed_files(sha: str) -> bool:
         ).strip().split()
     )
     if removed_files:
-        print(f"Removed files between {sha} and HEAD: {removed_files}")
+        print(f"Removed files between {sha} and HEAD: {removed_files}, cannot reuse old whl")
         return False
 
     changed_files = (
