@@ -719,6 +719,10 @@ class CommDebugMode(TorchDispatchMode):
             # adds collective count to parent modules
             # TODO (xilunwu): this is a temporary hack to unblock the issue
             # in tracking flex_attention_backward. Need to fix it later on.
+            # The issue happens when we call flex_attention_backward which
+            # sets ``self.advanced_module_tracker.name`` to "<lambda>" and
+            # ``self.advanced_module_tracker.module_parents_dict["<lambda>"]``
+            # results in KeyError.
             if self.advanced_module_tracker.name != "<lambda>":
                 for par in self.advanced_module_tracker.module_parents_dict[
                     self.advanced_module_tracker.name
