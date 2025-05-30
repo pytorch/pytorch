@@ -10,7 +10,6 @@ import importlib.resources
 import io
 import itertools
 import json
-import logging
 import os
 import pickle
 import pkgutil
@@ -152,7 +151,7 @@ _IS_WINDOWS = sys.platform == "win32"
 LOCK_TIMEOUT = 600
 
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
-log = logging.getLogger(__name__)
+log = torch._logging.getArtifactLogger(__name__, "codecache")
 
 
 def use_re_build() -> bool:
@@ -407,9 +406,9 @@ def get_path(
 def get_hash(
     content: Union[str, bytes], extra: str = "", hash_type: str = "code"
 ) -> str:
-    if hash_type == "code":
+    if hash_type in {"amdgcn", "code", "ptx"}:
         return code_hash(content, extra)
-    if hash_type in ["cubin", "hsaco", "spv"]:
+    if hash_type in {"cubin", "hsaco", "spv"}:
         return code_hash(repr(content))
     raise AssertionError(f"Unknown hash type {hash_type}")
 
@@ -420,11 +419,13 @@ def write(
     extra: str = "",
     hash_type: str = "code",
     specified_dir: str = "",
+    key: Optional[str] = None,
 ) -> tuple[str, str]:
-    # use striped content to compute hash so we don't end up with different
-    # hashes just because the content begins/ends with different number of
-    # spaces.
-    key: str = get_hash(content.strip(), extra, hash_type)
+    if key is None:
+        # use striped content to compute hash so we don't end up with different
+        # hashes just because the content begins/ends with different number of
+        # spaces.
+        key = get_hash(content.strip(), extra, hash_type)
     basename, _subdir, path = get_path(key, extension, specified_dir)
     if not os.path.exists(path):
         write_atomic(path, content, make_dirs=True)
@@ -880,7 +881,7 @@ class FxGraphHashDetails:
         # Also hash on various system info (including the triton compiler version).
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
-        self.inductor_config = config.save_config_portable()
+        self.inductor_config = config.save_config_portable(ignore_private_configs=False)
         # Custom post grad passes should provide an ID to hash.
         self.post_grad_custom_pre_pass = self._get_custom_pass_detail(
             config.post_grad_custom_pre_pass
@@ -888,6 +889,36 @@ class FxGraphHashDetails:
         self.post_grad_custom_post_pass = self._get_custom_pass_detail(
             config.post_grad_custom_post_pass
         )
+        self._pre_fusion_custom_pass = self._get_custom_pass_detail_unsafe(
+            config._pre_fusion_custom_pass
+        )
+        self._fuse_ddp_communication_passes = self._get_custom_pass_detail_unsafe(
+            config._fuse_ddp_communication_passes
+        )
+
+    # This is mainly added to handle these two inductor configs, which are (unfortunately)
+    # sometimes cache safe:
+    # - _pre_fusion_custom_pass
+    # - _fuse_ddp_communication_passes
+    # Their types can be found in `torch/_inductor/config.py`, but:
+    # - if they are string names, we can cache them safely (one is by default)
+    # - if any of them are set to custom callables, we will need to cache miss
+    # Future work is for someone to find any places where these functions are used
+    # and force them to be of type CustomGraphPass, so we can guarantee serialization.
+    def _get_custom_pass_detail_unsafe(self, custom_pass: Any) -> Optional[Any]:
+        if not custom_pass:
+            return None
+        if isinstance(custom_pass, list):
+            return [self._get_custom_pass_detail_unsafe(x) for x in custom_pass]
+        if isinstance(custom_pass, str):
+            return custom_pass
+        if isinstance(custom_pass, CustomGraphPass):
+            return custom_pass.uuid()
+        if callable(custom_pass):
+            # Returning None is safe here because we raise an explicit bypass error
+            # later if we detect these passes are set to callables
+            return None
+        raise AssertionError(f"unknown config type: {str(type(custom_pass))}")
 
     def _get_custom_pass_detail(
         self, custom_pass: CustomGraphPassType
@@ -1365,6 +1396,14 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         for p in (config.post_grad_custom_pre_pass, config.post_grad_custom_post_pass):
             if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
                 raise BypassFxGraphCache("Unsupported post grad custom pass")
+        # We should find any users of _pre_fusion_custom_pass and _fuse_ddp_communication_passes
+        # and ensure they are not passing us raw callables
+        if config._pre_fusion_custom_pass is not None:
+            if not isinstance(config._pre_fusion_custom_pass, CustomGraphPass):
+                raise BypassFxGraphCache("Unsupported _pre_fusion_custom_pass")
+        for p in config._fuse_ddp_communication_passes:
+            if callable(p) and not isinstance(p, CustomGraphPass):
+                raise BypassFxGraphCache("Unsupported _fuse_ddp_communication_pass")
 
         # Freezing can embed constants that wouldn't be static across runs.
         if has_frozen_params(gm) and not torch._utils_internal.justknobs_check(
@@ -1544,28 +1583,60 @@ class CudaKernelParamCache:
     cache_clear = staticmethod(cache.clear)
 
     @classmethod
-    def set(cls, key: str, params: dict[str, str], cubin: str, bin_type: str) -> None:
-        _, path = write(
+    def set(
+        cls,
+        key: str,
+        params: dict[str, Optional[str]],
+        cubin: str,
+        bin_type: str,
+        asm: Optional[str] = None,
+        asm_type: Optional[str] = None,
+    ) -> None:
+        basename = None
+        if config.aot_inductor.package_cpp_only:
+            assert config.triton.unique_kernel_names, (
+                "package_cpp_only requires triton kernel names to be unique"
+            )
+            assert params["mangled_name"], "Missing kernel name"
+            basename = params["mangled_name"]
+
+        _, bin_path = write(
             cubin,
             bin_type,
             hash_type=bin_type,
             specified_dir=split_aot_inductor_output_path(
                 config.aot_inductor.output_path
             )[0],
+            key=basename,
         )
-        if config.aot_inductor.package_cpp_only:
-            assert config.triton.unique_kernel_names, (
-                "package_cpp_only requires triton kernel names to be unique"
+        # Retrieve the basename again in case it is a generated hashcode
+        basename, _ = get_name_and_dir_from_output_file_path(bin_path)
+
+        if config.aot_inductor.emit_multi_arch_kernel:
+            assert bin_type == "cubin", "emit_multi_arch_kernel only supported in CUDA"
+            base_path, _ = os.path.splitext(bin_path)
+            bin_path = base_path + ".fatbin"
+
+        asm_path: str = ""
+        if (
+            config.aot_inductor.emit_multi_arch_kernel
+            or config.aot_inductor.package_cpp_only
+        ):
+            assert asm, "Missing kernel assembly code"
+            assert asm_type, "Missing kernel assembly type"
+            _, asm_path = write(
+                asm,
+                asm_type,
+                hash_type=asm_type,
+                specified_dir=split_aot_inductor_output_path(
+                    config.aot_inductor.output_path
+                )[0],
+                # make sure asm file has the same basename
+                key=basename,
             )
-            dir_name = os.path.dirname(path)
-            _, ext = os.path.splitext(path)
-            # Construct the new full path
-            new_path = os.path.join(dir_name, params["mangled_name"] + ext)
-            os.rename(path, new_path)
-            path = new_path
 
-        params[get_cpp_wrapper_cubin_path_name()] = path
-
+        params[get_cpp_wrapper_cubin_path_name()] = bin_path
+        params["asm"] = asm_path
         cls.cache[key] = params
 
     @classmethod
@@ -1939,7 +2010,7 @@ class AotCodeCompiler:
                 )
                 wrapper_build_options.save_flags_to_json(compile_flags)
                 generated_files.append(compile_flags)
-                wrapper_builder.save_compile_cmd_to_cmake(cmake_path)
+                wrapper_builder.save_compile_cmd_to_cmake(cmake_path, device_type)
                 wrapper_builder.save_src_to_cmake(cmake_path, wrapper_path)
                 generated_files.append(cmake_path)
             else:
@@ -2007,13 +2078,37 @@ class AotCodeCompiler:
                 for entry in gpu_codecache.cache.values()
                 if entry.output_path.endswith(".o")
             ]
+            if gpu_kernels_o:
+                assert not config.aot_inductor.emit_multi_arch_kernel, (
+                    "TODO: add emit_multi_arch_kernel support for cutlass kernels"
+                )
 
             cubins_o = []
-            if config.aot_inductor.embed_cubin:
-                # Embed cubin files into .so using objcopy
-                ld, objcopy = get_ld_and_objcopy(use_relative_path)
-                for kernel_name, value in CudaKernelParamCache.cache.items():
-                    cubin_file = value[get_cpp_wrapper_cubin_path_name()]
+            asm_files = []
+            ld, objcopy = get_ld_and_objcopy(use_relative_path)
+            for kernel_name, value in CudaKernelParamCache.cache.items():
+                if asm_file := value["asm"]:
+                    asm_files.append(asm_file)
+
+                cubin_file = value[get_cpp_wrapper_cubin_path_name()]
+                if config.aot_inductor.emit_multi_arch_kernel:
+                    current_arch = _nvcc_arch_as_compile_option()
+                    cmd = (
+                        f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
+                        # Include PTX with the minimum arch as SM80
+                        "-gencode arch=compute_80,code=compute_80 "
+                    )
+                    if config.aot_inductor.emit_current_arch_binary:
+                        # Include SASS for the current specific arch, to avoid
+                        # CUDA JIT compilation overhead. In theory, we could do
+                        # this for all archs that are newer than the current arch.
+                        cmd += f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
+                    subprocess.run(
+                        cmd.split(), capture_output=True, text=True, check=True
+                    )
+
+                if config.aot_inductor.embed_kernel_binary:
+                    # Embed cubin files into model.so using objcopy
                     cubins_o.append(
                         convert_cubin_to_obj(cubin_file, kernel_name, ld, objcopy)
                     )
@@ -2061,7 +2156,6 @@ class AotCodeCompiler:
 
                 # If we only want to package the cpp, then we need to save the
                 # weights separately into a bin, and we also need to prevent compiling the so
-
                 if use_mmap_weights:
                     weight_file = str(
                         wrapper_path_operator.with_name(
@@ -2073,15 +2167,26 @@ class AotCodeCompiler:
                         f_weights.write(struct.pack("q", magic_number))
 
                     generated_files.append(weight_file)
+                else:
+                    # TODO: unify to alway use mmap_weights
+                    generated_files.append(consts_o)
+                    so_builder.save_src_to_cmake(cmake_path, consts_o)
 
-                obj_srcs = [consts_o, *gpu_kernels_o, *cubins_o]
-                generated_files.extend(obj_srcs)
-                for obj in obj_srcs:
-                    so_builder.save_src_to_cmake(cmake_path, obj)
+                if config.aot_inductor.emit_multi_arch_kernel:
+                    so_builder.save_kernel_asm_to_cmake(cmake_path, asm_files)
+                    generated_files.extend(asm_files)
+                else:
+                    obj_srcs = [*gpu_kernels_o, *cubins_o]
+                    generated_files.extend(obj_srcs)
+                    for obj in obj_srcs:
+                        so_builder.save_src_to_cmake(cmake_path, obj)
+
                 so_builder.save_link_cmd_to_cmake(cmake_path)
             else:
                 so_builder.build()
                 for o_file in obj_srcs:
+                    if o_file in gpu_kernels_o:
+                        continue
                     # Remove these as they are not needed anymore
                     os.remove(o_file)
 
@@ -3326,13 +3431,18 @@ def _nvcc_host_compiler_options() -> list[str]:
     ]
 
 
-def _nvcc_compiler_options() -> list[str]:
+def _nvcc_arch_as_compile_option() -> str:
     arch = cuda_env.get_cuda_arch()
     if arch == "90":
         # Required by cutlass compilation.
-        arch = "90a"
+        return "90a"
     if arch == "100":
-        arch = "100a"
+        return "100a"
+    return arch
+
+
+def _nvcc_compiler_options() -> list[str]:
+    arch = _nvcc_arch_as_compile_option()
     code = [f"sm_{arch}", f"compute_{arch}"]
     if config.cuda.enable_cuda_lto:
         code += [f"lto_{arch}"]
