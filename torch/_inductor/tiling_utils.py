@@ -13,6 +13,7 @@ from torch._inductor import config
 from torch._inductor.dependencies import index_vars_no_squeeze
 from torch._inductor.utils import sympy_product, sympy_subs
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import Identity
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
@@ -463,7 +464,14 @@ def extract_normalized_read_writes(
         for buf in all_output_names
         if not V.graph.scheduler.can_buffer_be_removed_through_fusion(buf, op_names)
     )
-    inputs = OrderedSet(dep.name for dep in node.read_writes.reads)
+    inputs = OrderedSet(
+        dep.name
+        for dep in node.read_writes.reads
+        if not V.graph.scheduler.can_buffer_be_removed_through_fusion(
+            dep.name, op_names
+        )
+    )
+
     pointwise_numel: sympy.Expr = node.group[1][0]
     red_numel: sympy.Expr = node.group[1][1]
 
@@ -487,12 +495,21 @@ def extract_normalized_read_writes(
             continue
 
         body = n._body
+
+        # TODO - not handled well. indirect loads will not be coalesced,
+        # need to account for that in analysis.
+        if body.indirect_vars:
+            return None
+
         n_reads: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
         n_writes: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
 
+        # TODO - will the names for all the inputs/outputs accurately
+        # reflect mutation, or do I need to remap with mutation_real_name
         for inp in inputs:
             for expr in body.get_all_read_expr(inp):
                 n_reads[expr].add(inp)
+
         for out in outputs:
             for expr in body.get_all_write_expr(out):
                 n_writes[expr].add(out)
@@ -525,8 +542,18 @@ def extract_normalized_read_writes(
             return_getters_groups,
         )
 
-        n_reads_new = {sympy_subs(read, var_map): v for read, v in n_reads.items()}
-        n_writes_new = {sympy_subs(write, var_map): v for write, v in n_writes.items()}
+        # We create Identity sympy.Functions to prevent expansion to int64,
+        # unwrap for tiling analysis.
+        def remove_identity(expr):
+            return expr.replace(Identity, lambda x: x)
+
+        n_reads_new = {
+            sympy_subs(remove_identity(read), var_map): v for read, v in n_reads.items()
+        }
+        n_writes_new = {
+            sympy_subs(remove_identity(write), var_map): v
+            for write, v in n_writes.items()
+        }
 
         for expr, buf_names in n_reads_new.items():
             reads[expr] |= buf_names
@@ -627,12 +654,20 @@ def analyze_memory_coalescing(
     uncoalesced_addrs: dict[sympy.Expr, int] = Counter()
 
     for memory_expr, buf_names in itertools.chain(reads.items(), writes.items()):
+        # skip memory deps with indirect vars - todo: better handling
+        indirect_expr = bool(
+            memory_expr.free_symbols - norm_read_writes.var_ranges.keys()
+        )
+
+        if indirect_expr:
+            continue
+
         size = get_score(memory_expr, var_ranges)
-        # TODO - handle indirect
         if size == 0:
             continue
 
         maybe_coalesced_var = find_coalesced_var(memory_expr, var_ranges)
+
         byte_multipler = 0
         for buf_name in buf_names:
             if buf := V.graph.try_get_buffer(buf_name):
