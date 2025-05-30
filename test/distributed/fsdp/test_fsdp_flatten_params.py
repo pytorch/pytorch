@@ -664,6 +664,7 @@ class TestFlattenParams(FSDPTest):
             use_orig_params=True,
         )
 
+        # Copied from https://github.com/huggingface/accelerate/blob/main/src/accelerate/accelerator.py#L1679-1719
         for fsdp_module in FSDP.fsdp_modules(fsdp_model):
             if not fsdp_module._has_params:
                 continue
