@@ -142,7 +142,7 @@ class _HuggingFaceStorageWriter(FsspecWriter):
 
         file_queue: queue.Queue = queue.Queue()
         for file_index, write_items in buckets.items():
-            file_name = self._gen_file_name(file_index, highest_index, shard_index)
+            file_name = _gen_file_name(file_index, highest_index, shard_index)
             file_queue.put(
                 (self.fs.concat_path(self.path, file_name), file_name, write_items)
             )
@@ -185,19 +185,6 @@ class _HuggingFaceStorageWriter(FsspecWriter):
                 buckets[idx].append(item)
 
         return buckets
-
-    def _gen_file_name(self, index: int, largest_index: int, shard_index: Optional[int]) -> str:
-        if shard_index is not None:
-            return SHARDED_FILE_NAME.format(
-                shard_idx=f"{shard_index}".zfill(5), cpt_idx=f"{index}".zfill(5), num_files=f"{largest_index}".zfill(5)
-            ) + SUFFIX
-        else:
-            return (
-                FILE_NAME.format(
-                cpt_idx=f"{index}".zfill(5), num_files=f"{largest_index}".zfill(5)
-                )
-                + SUFFIX
-            )
 
     @property
     def metadata_path(self) -> str:
@@ -340,6 +327,19 @@ class _HuggingFaceStorageReader(FsspecReader):
 
         return metadata
 
+def _gen_file_name(index: int, largest_index: int, shard_index: Optional[int] = None) -> str:
+        if shard_index is not None:
+            return SHARDED_FILE_NAME.format(
+                shard_idx=f"{shard_index}".zfill(5), cpt_idx=f"{index}".zfill(5), num_files=f"{largest_index}".zfill(5)
+            ) + SUFFIX
+        else:
+            return (
+                FILE_NAME.format(
+                cpt_idx=f"{index}".zfill(5), num_files=f"{largest_index}".zfill(5)
+                )
+                + SUFFIX
+            )
+
 
 def _get_safetensors_file_metadata(file_bytes: io.IOBase) -> Any:
     # this uses the same logic that's done in HF code base
@@ -360,3 +360,10 @@ def _get_dtype(dtype: str) -> torch.dtype:
         dtype = torch.get_default_dtype
 
     return dtype
+
+def _get_dcp_custom_metadata(metadata: Any) -> Optional[Any]:
+    if DEFAULT_EXTRA_METADATA_KEY in metadata:
+        custom_metadata = metadata[DEFAULT_EXTRA_METADATA_KEY]
+        if CUSTOM_METADATA_KEY in custom_metadata:
+            return json.loads(custom_metadata[CUSTOM_METADATA_KEY])
+    return None
