@@ -5,6 +5,7 @@ import os
 import unittest
 
 import numpy as np
+import sympy
 
 import torch
 from torch import nn
@@ -445,9 +446,9 @@ class LoopOrderingTest(TestCase):
         M, K = 4096, 4096
 
         input_tensor = torch.randn(
-            M, K, device="cuda", dtype=ref_dtype, requires_grad=False
+            M, K, device=GPU_TYPE, dtype=ref_dtype, requires_grad=False
         )
-        scale = torch.Tensor([10.0]).to("cuda")
+        scale = torch.Tensor([10.0]).to(GPU_TYPE)
 
         E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
 
@@ -638,7 +639,10 @@ class MemoryCoalescingTest(MockSchedulerTest):
             def foo(x, y):
                 return x + y
 
-            foo(torch.rand([4, 4], device="cuda"), torch.rand([4, 4], device="cuda").T)
+            foo(
+                torch.rand([4, 4], device=GPU_TYPE),
+                torch.rand([4, 4], device=GPU_TYPE).T,
+            )
 
     def test_remapped_reads_split(self):
         from torch._inductor import tiling_utils
@@ -677,7 +681,10 @@ class MemoryCoalescingTest(MockSchedulerTest):
                     (y.T + 1).flatten()
                 )
 
-            foo(torch.rand([6, 6], device="cuda"), torch.rand([6, 6], device="cuda").T)
+            foo(
+                torch.rand([6, 6], device=GPU_TYPE),
+                torch.rand([6, 6], device=GPU_TYPE).T,
+            )
 
     def test_reduction_pointwise(self):
         # test one pw var, one red var
@@ -718,7 +725,8 @@ class MemoryCoalescingTest(MockSchedulerTest):
                 return out.sum(dim=1)
 
             foo(
-                torch.rand(256, 256, device="cuda"), torch.rand(256, 256, device="cuda")
+                torch.rand(256, 256, device=GPU_TYPE),
+                torch.rand(256, 256, device=GPU_TYPE),
             )
 
     def test_reduction_no_pointwise(self):
@@ -741,7 +749,74 @@ class MemoryCoalescingTest(MockSchedulerTest):
             def foo(x):
                 return x.sum()
 
-            foo(torch.rand(1024, device="cuda"))
+            foo(torch.rand(1024, device=GPU_TYPE))
+
+    def test_coalescing(self):
+        from torch._inductor import tiling_utils
+
+        # Define symbolic variables
+        i, j, n, m = sympy.symbols("i j n m", integer=True)
+
+        # Test cases: (expression, var_ranges, expected_result)
+        test_cases = [
+            # Simple direct case
+            (i + j * 5, {i: 10, j: 8}, i),
+            # Floor division case
+            (i + FloorDiv(j, 2), {i: 4, j: 8}, i),
+            # Modular indexing
+            (i * 10 + ModularIndexing(j, 1, 3), {i: 5, j: 10}, j),
+            # Case with no coalescing variable
+            (i * 2 + j * 3, {i: 8, j: 5}, None),
+            # Division case
+            (i / 2, {i: 10}, None),
+            # More complex floor division
+            (j + FloorDiv(i, 3), {i: 6, j: 12}, j),
+            # Addition inside modular indexing
+            (ModularIndexing(i + 3, 1, 5), {i: 8, j: 12}, i),
+        ]
+
+        for expr, var_ranges, expected in test_cases:
+            # Test the function
+            result = tiling_utils.find_coalesced_var(expr, var_ranges)
+            self.assertEqual(result, expected)
+
+    @parametrize("downcast_transposed_v", (False, True))
+    def test_tiled_coalesce_analysis(self, downcast_transposed_v):
+        # test one pw var, one red var
+        from torch._inductor import tiling_utils
+
+        def fn(nodes):
+            self.assertTrue(len(nodes) == 1)
+
+            coalesce_analysis = tiling_utils.analyze_memory_coalescing(nodes[0])
+
+            i_vars = coalesce_analysis.norm_read_writes.index_vars
+
+            # because output is contiguous, second dimension should
+            # coalesce twice as many bytes as first dimension
+            # if not downcasted
+            # if downcasted, should be equal, bc larger dtype size
+            cont_reads = coalesce_analysis.coalesced_by_var[i_vars[1]]
+            t_reads = coalesce_analysis.coalesced_by_var[i_vars[0]]
+
+            if not downcast_transposed_v:
+                self.assertEqual(cont_reads, t_reads * 2)
+            else:
+                self.assertEqual(cont_reads, t_reads)
+
+            return nodes
+
+        with torch._inductor.config.patch(_post_fusion_custom_pass=fn), torch.no_grad():
+
+            @torch.compile()
+            def foo(x, y):
+                return x + y.to(x.dtype)
+
+            y_dtype = torch.float if not downcast_transposed_v else torch.float64
+            foo(
+                torch.rand(256, 256, device=GPU_TYPE),
+                torch.rand(256, 256, device=GPU_TYPE, dtype=y_dtype).T,
+            )
 
 
 if __name__ == "__main__":
