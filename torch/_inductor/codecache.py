@@ -10,7 +10,6 @@ import importlib.resources
 import io
 import itertools
 import json
-import logging
 import os
 import pickle
 import pkgutil
@@ -152,7 +151,7 @@ _IS_WINDOWS = sys.platform == "win32"
 LOCK_TIMEOUT = 600
 
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
-log = logging.getLogger(__name__)
+log = torch._logging.getArtifactLogger(__name__, "codecache")
 
 
 def use_re_build() -> bool:
