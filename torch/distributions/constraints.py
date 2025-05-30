@@ -381,7 +381,7 @@ class _OneHot(Constraint):
     """
 
     is_discrete: ClassVar[bool] = True
-    event_dim: int = 1
+    event_dim: ClassVar[int] = 1
 
     def check(self, value: Tensor) -> Tensor:
         is_boolean = (value == 0) | (value == 1)
