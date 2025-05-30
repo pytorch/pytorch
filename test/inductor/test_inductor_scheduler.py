@@ -79,7 +79,7 @@ class TestScheduler(TestCase):
         for op, example_inputs, kwargs in tc:
             comp = torch.compile(op)
             torch._dynamo.reset()
-            with fresh_cache():
+            with fresh_inductor_cache():
                 comp(*example_inputs, **kwargs)
             self.assertEqual(metrics.num_bytes_accessed, 0)
             self.assertEqual(any(m[1] for m in metrics.node_runtimes), False)
@@ -110,7 +110,7 @@ class TestScheduler(TestCase):
 
             comp = torch.compile(op)
             torch._dynamo.reset()
-            with fresh_cache():
+            with fresh_inductor_cache():
                 comp(*example_inputs, **kwargs)
             self.assertEqual(enba, metrics.num_bytes_accessed)
             nonzero_node_runtimes = sum(1 for x in metrics.node_runtimes if x[1] != 0)
