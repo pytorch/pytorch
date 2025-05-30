@@ -26,10 +26,12 @@ from torch._prims_common import (
     BoolLike,
     corresponding_complex_dtype,
     corresponding_real_dtype,
+    definitely_contiguous,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
     IntLike,
+    is_contiguous,
     make_contiguous_strides_for,
     Number,
     suggest_memory_format,
@@ -202,16 +204,18 @@ def linalg_cross(self, other, *, dim=-1):
 
 # This function is python match of computeStride_impl in TensorUtils.cpp
 def _compute_stride(old_shape, old_stride, new_shape, size_oblivious=True):
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        guard_or_true,
-        sym_eq,
-    )
+    from torch.fx.experimental.symbolic_shapes import sym_eq
 
-    # if size_oblivious is False, throw data dependent errors for unbacked.
-    if not size_oblivious:
-        guard_or_false = id
-        guard_or_true = id
+    guard_or_false = (
+        id
+        if not size_oblivious
+        else torch.fx.experimental.symbolic_shapes.guard_or_false
+    )
+    guard_or_true = (
+        id
+        if not size_oblivious
+        else torch.fx.experimental.symbolic_shapes.guard_or_true
+    )
 
     if len(old_shape) == 0:
         return [1] * len(new_shape)
@@ -317,7 +321,7 @@ def _view_meta(a, *shape, size_oblivious_enabled=True):
     if len(shape) == len(a.shape) and statically_known_true(sym_eq(shape, a.shape)):
         return view_of(a)
 
-    if a.definitely_contiguous() if size_oblivious_enabled else a.is_contiguous():
+    if definitely_contiguous(a) if size_oblivious_enabled else is_contiguous(a):
         return a.as_strided(shape, utils.make_contiguous_strides_for(shape))
 
     if (
