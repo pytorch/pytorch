@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from collections.abc import Iterator, Sequence
 from typing import Union
 
@@ -62,7 +63,7 @@ class FileListerIterDataPipe(IterDataPipe[str]):
                 path, self.masks, self.recursive, self.abspath, self.non_deterministic
             )
 
-    def __len__(self) -> int:
+    def __len__(self):
         if self.length == -1:
             raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
         return self.length
