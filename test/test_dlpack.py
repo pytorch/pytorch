@@ -293,7 +293,7 @@ class TestTorchDlPack(TestCase):
     def test_max_version(self, device):
         def capsule_name(kwargs):
             is_versioned = "max_version" in kwargs and kwargs["max_version"][0] >= 1
-            return "dltensor_versioned" if is_versioned(kwargs) else "dltensor"
+            return "dltensor_versioned" if is_versioned else "dltensor"
 
         def test(device, **kwargs):
             inp = make_tensor((5,), dtype=torch.float32, device=device)
@@ -301,7 +301,9 @@ class TestTorchDlPack(TestCase):
             # Make sure we are actually using the (un)versioned DLPack tensor, based on the
             # informed keyword arguments.
             capsule = inp.__dlpack__(**kwargs)
-            self.assertRegex(str(capsule), f"""capsule object "{capsule_name(kwargs)}" at""")
+            self.assertRegex(
+                str(capsule), f"""capsule object "{capsule_name(kwargs)}" at"""
+            )
 
             out = torch.from_dlpack(capsule)
             self.assertEqual(inp, out)
