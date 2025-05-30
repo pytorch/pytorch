@@ -38,5 +38,6 @@ class TestMetaKernel(TestCase):
         with self.assertRaisesRegex(RuntimeError, ".*not a lazy tensor.*"):
             _ = torch.tensor([1], device="cpu") + torch.tensor([1], device="lazy")
 
+
 if __name__ == "__main__":
     run_tests()

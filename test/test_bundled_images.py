@@ -93,6 +93,7 @@ class TestBundledImages(TestCase):
             self.assertEqual(raw_data.shape, im2_tensor.shape)
             self.assertEqual(raw_data, im2_tensor, atol=0.1, rtol=1e-01)
 
+
 if __name__ == "__main__":
     raise RuntimeError(
         "This test is not currently used and should be "
