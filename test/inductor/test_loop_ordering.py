@@ -526,7 +526,7 @@ class LoopOrderingTest(TestCase):
         "triton.unique_kernel_names": True,
         "loop_ordering_after_fusion": True,
         "triton.max_tiles": 3,
-        "test_configs.global_tiling_analysis": True,
+        "triton.global_tiling_analysis": True,
     }
 )
 @instantiate_parametrized_tests
@@ -908,7 +908,7 @@ layouts = ("cont", "NHWC", "T")
     {
         "triton.unique_kernel_names": True,
         "loop_ordering_after_fusion": True,
-        "test_configs.global_tiling_analysis": True,
+        "triton.global_tiling_analysis": True,
         "triton.max_tiles" : 3,
     }
 )
