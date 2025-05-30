@@ -325,7 +325,7 @@ test_python_smoke() {
 }
 
 test_h100_distributed() {
-  #Tests for distributed tests at H100
+  # Distributed tests at H100
   time python test/run_test.py --include distributed/_composable/test_composability/test_pp_composability.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
