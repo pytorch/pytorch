@@ -189,12 +189,36 @@ def find_old_whl(workflow_id: str, build_environment: str, sha: str) -> bool:
     return False
 
 
+
+
 def unzip_artifact_and_replace_files() -> None:
     # Unzip the artifact and replace files
     subprocess.check_output(
         ["unzip", "-o", "artifacts.zip", "-d", "artifacts"],
     )
     os.remove("artifacts.zip")
+
+    head_sha = get_head_sha()
+    merge_base = get_merge_base()
+
+    old_version = f"+git{merge_base[:7]}"
+    new_version = f"+git{head_sha[:7]}"
+
+    def move_to_new_version(file: str) -> None:
+        # Rename file with old_version to new_version
+        subprocess.check_output(
+            ["mv", file, file.replace(old_version, new_version)],
+            stderr=subprocess.DEVNULL,
+        )
+
+    def move_content_to_new_version(file: str) -> None:
+        # Replace the old version in the file with the new version
+        with open(file, "r") as f:
+            content = f.read()
+            content = content.replace(old_version, new_version)
+        with open(file, "w") as f:
+            f.write(content)
+
 
     # Rename wheel into zip
     wheel_path = Path("artifacts/dist").glob("*.whl")
@@ -212,11 +236,27 @@ def unzip_artifact_and_replace_files() -> None:
             ["rsync", "-avz", "torch", f"artifacts/dist/{new_path.stem}"],
         )
 
+        move_content_to_new_version(f"artifacts/dist/{new_path.stem}/torch/version.py")
+
+        for file in Path(f"artifacts/dist/{new_path.stem}").glob(
+            "*.dist-info/**",
+            recursive=True,
+        ):
+            move_content_to_new_version(file)
+
+
+        # Should only be one, but Im
+        for file in Path(f"artifacts/dist/{new_path.stem}").glob(
+            "*.dist-info",
+        ):
+            move_to_new_version(file)
+
         # Zip the wheel back
         subprocess.check_output(
             ["zip", "-r", f"{new_path.stem}.zip", "."],
             cwd=f"artifacts/dist/{new_path.stem}",
         )
+
         subprocess.check_output(
             [
                 "mv",
@@ -224,6 +264,9 @@ def unzip_artifact_and_replace_files() -> None:
                 f"artifacts/dist/{new_path.stem}.whl",
             ],
         )
+
+        # Rename to the new version
+        move_to_new_version(f"artifacts/dist/{new_path.stem}.whl")
 
         # Remove the extracted folder
         subprocess.check_output(
@@ -280,9 +323,9 @@ def can_reuse_whl(args: argparse.Namespace) -> bool:
         print("Issue #153759 is open, rebuild whl")
         return False
 
-    if not check_changed_files(get_merge_base()):
-        print("Cannot use old whl due to the changed files, rebuild whl")
-        return False
+    # if not check_changed_files(get_merge_base()):
+    #     print("Cannot use old whl due to the changed files, rebuild whl")
+    #     return False
 
     workflow_id = get_workflow_id(args.run_id)
     if workflow_id is None:
