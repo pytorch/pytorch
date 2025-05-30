@@ -137,8 +137,14 @@ inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
 #endif
 
   // storageOffset
-  TORCH_CHECK(
-      storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
+  if constexpr (std::is_same_v<T, c10::SymInt>) {
+    TORCH_SYM_CHECK(
+      storage_offset.sym_ge(0), "Tensor: invalid storage offset ", storage_offset);
+  }
+  else {
+    TORCH_CHECK(
+        storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
+  }
 
   // set_storage_{device} (except set_storage_meta__symint)
   // will (unsafely) set the storage offset and then call resize_impl that
