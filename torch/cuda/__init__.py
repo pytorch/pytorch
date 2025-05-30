@@ -1872,6 +1872,7 @@ __all__ = [
     "memory_summary",
     "memory_usage",
     "MemPool",
+    "MemPoolContext",
     "use_mem_pool",
     "temperature",
     "power_draw",
