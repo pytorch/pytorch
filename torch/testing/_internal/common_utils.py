@@ -871,6 +871,11 @@ def enable_profiling_mode_for_profiling_tests():
             torch._C._jit_set_profiling_executor(old_prof_exec_state)
             torch._C._get_graph_executor_optimize(old_prof_mode_state)
 
+def raise_on_run_directly(file_to_call):
+    raise RuntimeError("This test file is not meant to be run directly, "
+                       f"use:\n\n\tpython {file_to_call} TESTNAME\n\n"
+                       "instead.")
+
 @contextmanager
 def enable_profiling_mode():
     old_prof_exec_state = torch._C._jit_set_profiling_executor(True)

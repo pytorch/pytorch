@@ -12,6 +12,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     NoTest,
+    raise_on_run_directly,
     skipCUDANonDefaultStreamIf,
     skipIfRocm,
     TEST_CUDA,
@@ -35,13 +36,6 @@ TEST_LARGE_TENSOR = TEST_CUDA
 if TEST_CUDA:
     torch.ones(1).cuda()  # initialize cuda context
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 5e9
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestCUDA(JitTestCase):
@@ -698,3 +692,7 @@ class TestCUDA(JitTestCase):
         FileCheck().check("cuda::_maybe_exchange_device(").run(g)
         torch._C._jit_pass_inline(g)
         FileCheck().check("cuda::_maybe_exchange_device(").run(g)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")
