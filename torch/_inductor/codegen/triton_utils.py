@@ -114,8 +114,17 @@ def signature_to_meta(
 ) -> dict[str, str]:
     if indices is None:
         indices = list(range(len(signature)))
+
+    def _decide_tl_dtype(arg):
+        # Even if the ks0 symbol itself is within tl.int32 range, it's
+        # risky to use tl.int32 dtype since we may have ks0*ks1 later
+        # for kernels like torch.mean when dynamic shape is enabled.
+        if isinstance(arg, SizeArg) and arg.name.startswith("ks"):
+            return "tl.int64"
+        return size_dtype
+
     return {
-        argdefs[i].name: signature_of(arg, size_dtype=size_dtype)
+        argdefs[i].name: signature_of(arg, size_dtype=_decide_tl_dtype(arg))
         for i, arg in zip(indices, signature)
     }
 
