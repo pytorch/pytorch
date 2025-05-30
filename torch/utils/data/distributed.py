@@ -1,6 +1,6 @@
 import math
 from collections.abc import Iterator
-from typing import Optional, TypeVar
+from typing import Optional, TypeVar, Sequence
 
 import torch
 import torch.distributed as dist
@@ -147,4 +147,118 @@ class DistributedSampler(Sampler[_T_co]):
         Args:
             epoch (int): Epoch number.
         """
+        self.epoch = epoch
+
+
+class DistributedWeightedRandomSampler(Sampler[_T_co]):
+    """Sampler that applies weighted random sampling across multiple distributed processes.
+
+    This sampler combines the behavior of `WeightedRandomSampler` (sampling based on weights)
+    and `DistributedSampler` (splitting data across multiple processes).
+
+    Args:
+        weights (sequence): A sequence of weights, not necessarily summing up to one.
+        num_samples (int): Total number of samples across all processes.
+        num_replicas (int, optional): Number of processes in distributed training.
+        rank (int, optional): Rank of the current process within num_replicas.
+        replacement (bool, optional): If True, samples are drawn with replacement.
+        shuffle (bool, optional): If True, shuffle indices before applying weights.
+        seed (int, optional): Random seed for reproducibility.
+
+    Example:
+        >>> import torch
+        >>> from torch.utils.data import DataLoader
+        >>> from torch.utils.data.distributed import DistributedSampler
+        >>> dataset = list(range(10))
+        >>> weights = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+        >>> sampler = DistributedWeightedRandomSampler(weights, num_samples=5, num_replicas=2, rank=0)
+        >>> loader = DataLoader(dataset, sampler=sampler, batch_size=2)
+        >>> for epoch in range(start_epoch, n_epochs):
+        >>>     sampler.set_epoch(epoch)
+        >>>     for batch in loader:
+        >>>         print(batch)  # Each process gets a subset of the sampled indices
+    """
+
+    def __init__(
+        self,
+        weights: Sequence[float],
+        num_samples: int,
+        num_replicas: Optional[int] = None,
+        rank: int = None,
+        replacement: bool = True,
+        shuffle: bool = True,
+        seed: int = 0
+    ) -> None:
+        if num_replicas is None:
+            if not dist.is_available():
+                raise RuntimeError("Requires distributed package to be available")
+            num_replicas = dist.get_world_size()
+        if rank is None:
+            if not dist.is_available():
+                raise RuntimeError("Requires distributed package to be available")
+            rank = dist.get_rank()
+            
+        if len(weights) == 0:
+            raise ValueError("Weights must be a non-empty sequence.")
+        if any(w < 0 for w in weights):
+            raise ValueError("Weights must be non-negative.")
+
+        self.weights = torch.as_tensor(weights, dtype=torch.double)
+        self.num_samples = num_samples  # total
+        self.num_replicas = num_replicas
+        self.rank = rank
+        self.num_samples_per_proc = self._compute_num_samples_per_rank()
+        self.replacement = replacement
+        self.shuffle = shuffle
+        self.seed = seed
+        self.epoch = 0
+
+    def __iter__(self) -> Iterator[int]:
+        g = torch.Generator()
+        g.manual_seed(self.seed + self.epoch)
+
+        # Optional shuffling indices and weights before sampling
+        indices = torch.arange(len(self.weights))
+        if self.shuffle:
+            perm = torch.randperm(len(indices), generator=g)  # Generate permutation
+            indices = indices[perm]  # Shuffle indices
+            weights = self.weights[perm]  # Shuffle weights in the same order
+        else:
+            weights = self.weights
+
+        # Perform weighted sampling
+        sampled_indices = torch.multinomial(
+            weights, self.num_samples, self.replacement, generator=g
+        )
+        
+        # Map sampled indices back to original dataset indices
+        sampled_indices = indices[sampled_indices]
+
+        # Distribute samples across processes
+        # sampled_indices = sampled_indices[self.rank:self.num_samples_per_proc * self.num_replicas:self.num_replicas]
+        start_index = sum(
+            self.num_samples // self.num_replicas + (1 if r < self.num_samples % self.num_replicas else 0)
+            for r in range(self.rank)
+        )
+        end_index = start_index + self.num_samples_per_proc
+        sampled_indices = sampled_indices[start_index:end_index]
+        if len(sampled_indices) != self.num_samples_per_proc:
+            raise RuntimeError(
+                f"Expected {self.num_samples_per_proc} samples per process, "
+                f"but got {len(sampled_indices)}."
+            )
+
+        return iter(sampled_indices.tolist())
+
+    def __len__(self) -> int:
+        return self.num_samples_per_proc
+    
+    def _compute_num_samples_per_rank(self):
+        # Distribute samples as evenly as possible
+        base = self.num_samples // self.num_replicas
+        extras = self.num_samples % self.num_replicas
+        return base + (1 if self.rank < extras else 0)
+
+    def set_epoch(self, epoch: int) -> None:
+        """Sets the epoch for deterministic shuffling."""
         self.epoch = epoch
