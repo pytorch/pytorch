@@ -16,9 +16,9 @@ from torch.fx.passes.utils.source_matcher_utils import (
     get_source_partitions,
 )
 from torch.testing._internal.common_utils import (
-    raise_on_run_directly,
     instantiate_parametrized_tests,
     parametrize,
+    raise_on_run_directly,
     skipIfTorchDynamo,
 )
 from torch.testing._internal.jit_utils import JitTestCase

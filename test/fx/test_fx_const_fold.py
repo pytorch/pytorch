@@ -707,5 +707,6 @@ class TestConstFold(TestCase):
         fold_result = mod_folded(in_x, in_y)
         self.assertTrue(torch.equal(fold_result, base_result))
 
+
 if __name__ == "__main__":
     raise_on_run_directly("test/test_fx.py")

@@ -229,5 +229,6 @@ class TestPassManager(TestCase):
         with self.assertRaisesRegex(Exception, error_msg):
             pm(traced_m)
 
+
 if __name__ == "__main__":
     raise_on_run_directly("test/test_fx.py")
