@@ -247,5 +247,6 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         x_s = ((self.rank + 1) * torch.ones(int(row), 5, device=device)).cos()
         self.assertEqual(x.grad, x_s)
 
+
 if __name__ == "__main__":
     run_tests()

@@ -116,5 +116,6 @@ class TestCollectiveUtils(MultiProcessTestCase):
         with self.assertRaisesRegex(Exception, expected_exception):
             all_gather(data_or_fn=func)
 
+
 if __name__ == "__main__":
     run_tests()

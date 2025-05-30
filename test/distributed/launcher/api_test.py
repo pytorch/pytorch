@@ -412,6 +412,7 @@ class ElasticLaunchTest(unittest.TestCase):
             rdzv_handler_mock.shutdown.assert_called_once()
             record_event_mock.assert_called_once()
 
+
 if __name__ == "__main__":
     raise RuntimeError(
         "This test is not currently used and should be "
