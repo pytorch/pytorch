@@ -1879,7 +1879,8 @@ void scaled_gemm(
 #else
   // rowwise isn't supported using older hipblaslt
   TORCH_INTERNAL_ASSERT(use_rowwise == false, "rowwise scaled_gemm not supported with older hipblaslt");
-#endif  // if defined(USE_ROCM)
+#endif
+#endif // defined(USE_ROCM)
   computeDesc.setAttribute(matmulDescA, mat1_scale_ptr);
   computeDesc.setAttribute(matmulDescB, mat2_scale_ptr);
   if (result_scale_ptr != nullptr) {
