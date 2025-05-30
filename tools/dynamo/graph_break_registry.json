@@ -7,10 +7,7 @@
     "Hints": [
       "Ensure the attribute accessed via `super()` is a standard method or function."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/misc.py",
-    "Line": 372,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1002": {
     "Version": "v1.0",
@@ -20,10 +17,7 @@
     "Hints": [
       "Avoid this call or move it outside `torch.compile` regione"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/tensor.py",
-    "Line": 808,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1003": {
     "Version": "v1.0",
@@ -33,10 +27,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 680,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1004": {
     "Version": "v1.0",
@@ -44,12 +35,9 @@
     "Context": "",
     "Explanation": "Dynamo cannot compile traced graphs while in a try block.",
     "Hints": [
-      "This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/output_graph.py",
-    "Line": 1140,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1005": {
     "Version": "v1.0",
@@ -59,10 +47,7 @@
     "Hints": [
       "Call a generator from inside of a non-generator Python function and  compile that function instead."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/convert_frame.py",
-    "Line": 554,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1006": {
     "Version": "v1.0",
@@ -72,10 +57,7 @@
     "Hints": [
       "Ensure the object is tracked by Dynamo's side effect system."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/misc.py",
-    "Line": 286,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1007": {
     "Version": "v1.0",
@@ -85,10 +67,7 @@
     "Hints": [
       "Write the str method in Python"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 1307,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1008": {
     "Version": "v1.0",
@@ -96,10 +75,7 @@
     "Context": "module: {module_name}, qualname: {qualname}, skip reason: {reason}",
     "Explanation": "explanation",
     "Hints": "hints",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/functions.py",
-    "Line": 1470,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1009": {
     "Version": "v1.0",
@@ -109,10 +85,7 @@
     "Hints": [
       "Ensure the `nn.Module` subclass instance has called `super().__init__()`."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/guards.py",
-    "Line": 1789,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1010": {
     "Version": "v1.0",
@@ -120,10 +93,7 @@
     "Context": "qualname: {fn_qualname}, name: {func.get_name()},  filename: `{func.get_filename()}`, skip reason: {result.reason}",
     "Explanation": "Dynamo developers have intentionally marked that the function `{fn_qualname}`  should not be traced.",
     "Hints": "hints",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 3787,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1011": {
     "Version": "v1.0",
@@ -131,10 +101,7 @@
     "Context": "Attempted to inline a SkipFunctionVariable {func}",
     "Explanation": "Attempted to inline a function that was previously determined to be marked as intentionally skipped.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 3829,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1012": {
     "Version": "v1.0",
@@ -144,10 +111,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/side_effects.py",
-    "Line": 209,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1013": {
     "Version": "v1.0",
@@ -157,10 +121,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 1422,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1014": {
     "Version": "v1.0",
@@ -170,10 +131,7 @@
     "Hints": [
       "This happens in dict/list comprehensions"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 1412,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1015": {
     "Version": "v1.0",
@@ -181,10 +139,7 @@
     "Context": "",
     "Explanation": "Dynamo attempted to build a representation of a torch.utils.hooks.RemovableHandle,  which is not supported. This happens because the RemovableHandle was created in another frame.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builder.py",
-    "Line": 526,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1016": {
     "Version": "v1.0",
@@ -192,12 +147,9 @@
     "Context": "str(value)",
     "Explanation": "Dynamo does not support RNN, GRU, or LSTM.",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builder.py",
-    "Line": 1661,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1017": {
     "Version": "v1.0",
@@ -205,12 +157,9 @@
     "Context": "",
     "Explanation": "torch.compile does not support sparse Tensors",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builder.py",
-    "Line": 1932,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1018": {
     "Version": "v1.0",
@@ -218,10 +167,7 @@
     "Context": "",
     "Explanation": "torch.compile does not support strided NestedTensor",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builder.py",
-    "Line": 1916,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1019": {
     "Version": "v1.0",
@@ -229,10 +175,7 @@
     "Context": "",
     "Explanation": "Directly using invoke_subgraph is not supported. Use mark_compile_region",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builder.py",
-    "Line": 936,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1020": {
     "Version": "v1.0",
@@ -240,12 +183,9 @@
     "Context": "",
     "Explanation": "Unbacked SymInt input is not supported yet.",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builder.py",
-    "Line": 1065,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1021": {
     "Version": "v1.0",
@@ -253,10 +193,7 @@
     "Context": "",
     "Explanation": "We cannot reconstruct a torch.autograd.Function's context object.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/side_effects.py",
-    "Line": 625,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1022": {
     "Version": "v1.0",
@@ -266,10 +203,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 2695,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1023": {
     "Version": "v1.0",
@@ -279,10 +213,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 2703,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1024": {
     "Version": "v1.0",
@@ -290,10 +221,7 @@
     "Context": "typestr(value)",
     "Explanation": "Import result is not a Python module.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 1640,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1025": {
     "Version": "v1.0",
@@ -301,10 +229,7 @@
     "Context": "call_method {self} {name} {args} {kwargs}",
     "Explanation": "Failed to compare {self} with {other}, \" + f\"because {other} is not a Python constant or its mutation check fails.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/base.py",
-    "Line": 510,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1026": {
     "Version": "v1.0",
@@ -312,10 +237,7 @@
     "Context": "",
     "Explanation": "Received StopIteration when handling generator.throw/close. This is not supported.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 1815,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1027": {
     "Version": "v1.0",
@@ -325,10 +247,7 @@
     "Hints": [
       "Remove the `torch._dynamo.graph_break()` call."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/functions.py",
-    "Line": 1385,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1028": {
     "Version": "v1.0",
@@ -338,10 +257,7 @@
     "Hints": [
       "Avoid this constructor call or move it outside  `torch.compile` regione"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/tensor.py",
-    "Line": 1481,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1029": {
     "Version": "v1.0",
@@ -349,12 +265,9 @@
     "Context": "str(fake_tensor)",
     "Explanation": "TensorVariable is missing a fake example_value.",
     "Hints": [
-      "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/utils.py",
-    "Line": 2562,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1030": {
     "Version": "v1.0",
@@ -364,10 +277,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 2095,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1031": {
     "Version": "v1.0",
@@ -375,10 +285,7 @@
     "Context": "msg",
     "Explanation": "Manually triggered ComptimeContext graph break with message {msg}.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/comptime.py",
-    "Line": 194,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1032": {
     "Version": "v1.0",
@@ -386,10 +293,7 @@
     "Context": "str(cause.func)",
     "Explanation": "Operator `{cause.func}` has a non-Tensor output  whose value is dependent on the data of Tensor inputs.",
     "Hints": "hints",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/utils.py",
-    "Line": 3229,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1033": {
     "Version": "v1.0",
@@ -401,10 +305,7 @@
       "Remove the assert statement.",
       "Move the assert statement outside of any context managers in order to graph break with  partial graph compilation (if fullgraph=False)."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 641,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1034": {
     "Version": "v1.0",
@@ -412,10 +313,7 @@
     "Context": "method: {x}, result: {result}",
     "Explanation": "Attempted to perform data-dependent branching on a user-defined  object with a __bool__ method that did not return a constant.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 756,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1035": {
     "Version": "v1.0",
@@ -425,10 +323,7 @@
     "Hints": [
       "Enable tracing of dynamic shape operators with  `torch._dynamo.config.capture_dynamic_output_shape_ops = True`"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/utils.py",
-    "Line": 3240,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1036": {
     "Version": "v1.0",
@@ -438,10 +333,7 @@
     "Hints": [
       "Please report an issue to PyTorch"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/utils.py",
-    "Line": 3250,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1037": {
     "Version": "v1.0",
@@ -449,12 +341,9 @@
     "Context": "SliceVariable start: {start}, stop: {stop}, step: {step}",
     "Explanation": "Creating slices with Tensor arguments is not supported.  e.g. `l[:x]`, where `x` is a 1-element tensor.",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/lists.py",
-    "Line": 1026,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1038": {
     "Version": "v1.0",
@@ -462,10 +351,7 @@
     "Context": "Limit type: {limit_type}",
     "Explanation": "Dynamo attempted to recompile the code object too many times,  exceeding the {limit_type} cache size limit. Giving up on compiling as the compile time tradeoff is likely not  worth the performance gain.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/convert_frame.py",
-    "Line": 1021,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1039": {
     "Version": "v1.0",
@@ -476,10 +362,7 @@
       "Consider using the debug context to change user code to avoid aliasing.",
       "Please open an issue."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/higher_order_ops.py",
-    "Line": 826,
-    "Has_dynamic": true
+    "From_exc": null
   },
   "GB1040": {
     "Version": "v1.0",
@@ -490,10 +373,7 @@
       "Consider using the debug context to change user code to avoid mutation.",
       "Please open an issue."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/higher_order_ops.py",
-    "Line": 812,
-    "Has_dynamic": true
+    "From_exc": null
   },
   "GB1041": {
     "Version": "v1.0",
@@ -501,10 +381,7 @@
     "Context": "",
     "Explanation": "invoke_subgraph does not support non user function variable",
     "Hints": "graph_break_hints.SUPPORTABLE",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/higher_order_ops.py",
-    "Line": 3333,
-    "Has_dynamic": true
+    "From_exc": null
   },
   "GB1042": {
     "Version": "v1.0",
@@ -512,10 +389,7 @@
     "Context": "",
     "Explanation": "msg +   + err_epilogue",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/output_graph.py",
-    "Line": 2017,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1043": {
     "Version": "v1.0",
@@ -523,10 +397,7 @@
     "Context": "",
     "Explanation": "torch.compile does not support strided NestedTensor",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builder.py",
-    "Line": 2950,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1044": {
     "Version": "v1.0",
@@ -534,12 +405,9 @@
     "Context": "",
     "Explanation": "tensor.is_inference() is not supported",
     "Hints": [
-      "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/tensor.py",
-    "Line": 722,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1045": {
     "Version": "v1.0",
@@ -547,12 +415,9 @@
     "Context": "",
     "Explanation": "torch.is_inference_mode_enabled() is not supported",
     "Hints": [
-      "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/torch.py",
-    "Line": 535,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1046": {
     "Version": "v1.0",
@@ -560,12 +425,9 @@
     "Context": "func: {func}, arg: {v}",
     "Explanation": "An argument to an inlined function was not successfully converted to a VariableTracker.",
     "Hints": [
-      "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 3858,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1047": {
     "Version": "v1.0",
@@ -573,10 +435,7 @@
     "Context": "",
     "Explanation": "str(e)",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/output_graph.py",
-    "Line": 2059,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1048": {
     "Version": "v1.0",
@@ -586,10 +445,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 2086,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1049": {
     "Version": "v1.0",
@@ -599,10 +455,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 2118,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1050": {
     "Version": "v1.0",
@@ -610,10 +463,7 @@
     "Context": "",
     "Explanation": "Dynamo attempted to trace the same frame 100+ times.  Giving up on compiling as the compile time tradeoff is likely not  worth the performance gain.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/convert_frame.py",
-    "Line": 831,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1051": {
     "Version": "v1.0",
@@ -621,10 +471,7 @@
     "Context": "",
     "Explanation": "Dynamo only supports FSDP with use_orig_params=True",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builder.py",
-    "Line": 1675,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1052": {
     "Version": "v1.0",
@@ -634,10 +481,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/constant.py",
-    "Line": 240,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1053": {
     "Version": "v1.0",
@@ -645,10 +489,7 @@
     "Context": "call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}",
     "Explanation": "Missing `as_proxy()` implementation for some arg/kwarg.",
     "Hints": "[]",
-    "From_exc": "e",
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/utils.py",
-    "Line": 1173,
-    "Has_dynamic": false
+    "From_exc": "e"
   },
   "GB1054": {
     "Version": "v1.0",
@@ -658,10 +499,7 @@
     "Hints": [
       "Don't mutate `.data` on this tensor, or move  the mutation out of `torch.compile` region"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 2115,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1055": {
     "Version": "v1.0",
@@ -671,10 +509,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 1775,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1056": {
     "Version": "v1.0",
@@ -684,10 +519,7 @@
     "Hints": [
       "Don't mutate attribute '{name}' on tensors, or  move the mutation out of `torch.compile` region"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 2180,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1057": {
     "Version": "v1.0",
@@ -700,10 +532,7 @@
       "If you are attempting to call a logging function (e.g. `print`),  you can try adding it to `torch._dynamo.config.reorderable_logging_functions`.",
       "Please report an issue to PyTorch."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 951,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1058": {
     "Version": "v1.0",
@@ -713,10 +542,7 @@
     "Hints": [
       "Avoid calling `TestCase.{name}`.  Please report an issue to PyTorch."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 2016,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1059": {
     "Version": "v1.0",
@@ -726,10 +552,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 2427,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1060": {
     "Version": "v1.0",
@@ -739,10 +562,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 2595,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1061": {
     "Version": "v1.0",
@@ -752,10 +572,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 2560,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1062": {
     "Version": "v1.0",
@@ -763,10 +580,7 @@
     "Context": "str(e.reason)",
     "Explanation": "msg",
     "Hints": "[]",
-    "From_exc": "e",
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/utils.py",
-    "Line": 2706,
-    "Has_dynamic": false
+    "From_exc": "e"
   },
   "GB1063": {
     "Version": "v1.0",
@@ -774,10 +588,7 @@
     "Context": "",
     "Explanation": "Graph breaks in an inlined call are not supported.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 4052,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1064": {
     "Version": "v1.0",
@@ -787,10 +598,7 @@
     "Hints": [
       "Move the offending context manager(s) to outside the compiled region."
     ],
-    "From_exc": "excp",
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 834,
-    "Has_dynamic": false
+    "From_exc": "excp"
   },
   "GB1065": {
     "Version": "v1.0",
@@ -798,10 +606,7 @@
     "Context": "",
     "Explanation": "This is not supported.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/side_effects.py",
-    "Line": 190,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1066": {
     "Version": "v1.0",
@@ -811,10 +616,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 1612,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1067": {
     "Version": "v1.0",
@@ -824,10 +626,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/lists.py",
-    "Line": 140,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1068": {
     "Version": "v1.0",
@@ -835,10 +634,7 @@
     "Context": "str(func)",
     "Explanation": "Attempted to inline a function with the `__self__` attribute.  Dynamo is expected to decompose method calls into function calls with a `self` argument.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 3739,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1069": {
     "Version": "v1.0",
@@ -848,10 +644,7 @@
     "Hints": [
       "Ensure you do not modify input tensor in place."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/torch.py",
-    "Line": 1224,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1070": {
     "Version": "v1.0",
@@ -859,10 +652,7 @@
     "Context": "",
     "Explanation": "This is not supported.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/output_graph.py",
-    "Line": 2344,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1071": {
     "Version": "v1.0",
@@ -870,10 +660,7 @@
     "Context": "Higher order op name: {self.source_target}",
     "Explanation": "This is not supported.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/output_graph.py",
-    "Line": 2310,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1072": {
     "Version": "v1.0",
@@ -883,10 +670,7 @@
     "Hints": [
       "Move the class definition out of the compiled region."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 2818,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1073": {
     "Version": "v1.0",
@@ -896,10 +680,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 3048,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1074": {
     "Version": "v1.0",
@@ -907,12 +688,9 @@
     "Context": "expected length: {inst.argval}, actual: {len(val)}",
     "Explanation": "{seq} unpacked to a list for the UNPACK_SEQUENCE bytecode  (i.e. `a, b, c = d`) with unexpected length.",
     "Hints": [
-      "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 2568,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1075": {
     "Version": "v1.0",
@@ -923,10 +701,7 @@
       "make sure definition of {fn_name} is outside ",
       "`torch.compile` region"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/functions.py",
-    "Line": 485,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1076": {
     "Version": "v1.0",
@@ -934,12 +709,9 @@
     "Context": "CALL_INTRINSIC_1 operand: {inst.argval}",
     "Explanation": "No handler implemented for CALL_INTRINSIC_1 {inst.argval} instruction.",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 3081,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1077": {
     "Version": "v1.0",
@@ -947,12 +719,9 @@
     "Context": "str(node)",
     "Explanation": "`FakeTensor` example value was required for {node} but not available.",
     "Hints": [
-      "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/utils.py",
-    "Line": 3090,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1078": {
     "Version": "v1.0",
@@ -960,10 +729,7 @@
     "Context": "",
     "Explanation": "make_error_message(\"attribute not defined\")",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/utils.py",
-    "Line": 3373,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1079": {
     "Version": "v1.0",
@@ -973,10 +739,7 @@
     "Hints": [
       "Do not trace code that produces the `{opname}` bytecode instruction  (see https://docs.python.org/3/library/dis.html for bytecode semantics)."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 952,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1080": {
     "Version": "v1.0",
@@ -986,10 +749,7 @@
     "Hints": [
       "Enable compiled autograd by setting torch._dynamo.config.compiled_autograd = True."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/distributed.py",
-    "Line": 353,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1081": {
     "Version": "v1.0",
@@ -999,10 +759,7 @@
     "Hints": [
       "Ensure the attribute name is a string literal or a constant variable."
     ],
-    "From_exc": "exc",
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/misc.py",
-    "Line": 275,
-    "Has_dynamic": false
+    "From_exc": "exc"
   },
   "GB1082": {
     "Version": "v1.0",
@@ -1012,10 +769,7 @@
     "Hints": [
       "Ensure the `forward` method is defined as a regular  function or instance method."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/misc.py",
-    "Line": 767,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1083": {
     "Version": "v1.0",
@@ -1023,10 +777,7 @@
     "Context": "guard_as_python_constant {self}",
     "Explanation": "Failed to convert {self} into a Python constant.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/base.py",
-    "Line": 349,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1084": {
     "Version": "v1.0",
@@ -1034,10 +785,7 @@
     "Context": "",
     "Explanation": "make_error_message(e)",
     "Hints": "hints",
-    "From_exc": "e",
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/utils.py",
-    "Line": 3399,
-    "Has_dynamic": false
+    "From_exc": "e"
   },
   "GB1085": {
     "Version": "v1.0",
@@ -1047,10 +795,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 1914,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1086": {
     "Version": "v1.0",
@@ -1058,12 +803,9 @@
     "Context": "str(raised_exception)",
     "Explanation": "observed_exn_gb_explanation + \" This graph break is unexpected.\"",
     "Hints": [
-      "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 1940,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1087": {
     "Version": "v1.0",
@@ -1073,10 +815,7 @@
     "Hints": [
       "{import_suggestion}see  https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0  for how to fix"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/utils.py",
-    "Line": 3274,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1088": {
     "Version": "v1.0",
@@ -1086,10 +825,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/side_effects.py",
-    "Line": 235,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1089": {
     "Version": "v1.0",
@@ -1100,10 +836,7 @@
       "If Dynamo is attempting to trace a return statement and your code is attempting to return a variable  that Dynamo cannot reconstruct, then remove it from the return statement.",
       "Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have  reconstruction rules may be fundamentally unreconstructable."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/codegen.py",
-    "Line": 347,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1090": {
     "Version": "v1.0",
@@ -1111,12 +844,9 @@
     "Context": "str(source)",
     "Explanation": "Dynamo has no bytecode reconstruction implemented for {type(source)} variable {source}.",
     "Hints": [
-      "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/codegen.py",
-    "Line": 204,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1091": {
     "Version": "v1.0",
@@ -1124,10 +854,7 @@
     "Context": "TOS type: {typestr(tos)}",
     "Explanation": "Attempted to SEND with unsupported type {typestr(tos)}.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 4248,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1092": {
     "Version": "v1.0",
@@ -1137,10 +864,7 @@
     "Hints": [
       "Avoid setting '__traceback__' on exception objects  within traced code, or set it to None."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/misc.py",
-    "Line": 466,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1093": {
     "Version": "v1.0",
@@ -1148,10 +872,7 @@
     "Context": "",
     "Explanation": "Dynamo has determined when encountering an unsupported  STORE_ATTR instruction (i.e. `obj.attr = val`) that it should not compile the partial graph.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 2353,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1094": {
     "Version": "v1.0",
@@ -1161,10 +882,7 @@
     "Hints": [
       "Don't use a deque with `maxlen` specified."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/side_effects.py",
-    "Line": 774,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1095": {
     "Version": "v1.0",
@@ -1174,10 +892,7 @@
     "Hints": [
       "Remove the `torch.compiler.disable` call"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/functions.py",
-    "Line": 1372,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1096": {
     "Version": "v1.0",
@@ -1187,10 +902,7 @@
     "Hints": [
       "Remove the `torch.compiler.disable` call"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 3753,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1097": {
     "Version": "v1.0",
@@ -1198,10 +910,7 @@
     "Context": "name",
     "Explanation": "This is not supported.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 1520,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1098": {
     "Version": "v1.0",
@@ -1209,10 +918,7 @@
     "Context": "inst.argval",
     "Explanation": "This is not supported.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 4120,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1099": {
     "Version": "v1.0",
@@ -1223,10 +929,7 @@
       "Avoid calling {name} of tensor subclass in torch.compile region",
       "Renaming method `{name}` of type {self.class_type}"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/torch_function.py",
-    "Line": 739,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1100": {
     "Version": "v1.0",
@@ -1234,10 +937,7 @@
     "Context": "",
     "Explanation": "This is not supported.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 2208,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1101": {
     "Version": "v1.0",
@@ -1245,10 +945,7 @@
     "Context": "",
     "Explanation": "This is not supported.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 2226,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1102": {
     "Version": "v1.0",
@@ -1258,10 +955,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/functions.py",
-    "Line": 473,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1103": {
     "Version": "v1.0",
@@ -1269,10 +963,7 @@
     "Context": "TypeError {node.target}: {cause}",
     "Explanation": "",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/utils.py",
-    "Line": 3295,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1104": {
     "Version": "v1.0",
@@ -1283,10 +974,7 @@
       "Ensure the attribute exists in the parent class.",
       "Check the arguments passed to `super()`."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/misc.py",
-    "Line": 144,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1105": {
     "Version": "v1.0",
@@ -1294,12 +982,9 @@
     "Context": "call_function {self} {args} {kwargs}",
     "Explanation": "Unexpected failure in invoking function during accumulate.  Failed running func {func}({item}{acc})",
     "Hints": [
-      "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": "e",
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/iter.py",
-    "Line": 133,
-    "Has_dynamic": false
+    "From_exc": "e"
   },
   "GB1106": {
     "Version": "v1.0",
@@ -1307,12 +992,9 @@
     "Context": "call_function {self} {args} {kwargs}",
     "Explanation": "Unexpected failure in invoking function during groupby",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": "e",
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/iter.py",
-    "Line": 232,
-    "Has_dynamic": false
+    "From_exc": "e"
   },
   "GB1107": {
     "Version": "v1.0",
@@ -1320,12 +1002,9 @@
     "Context": "{value_type.__module__}.{value_type.__qualname__}",
     "Explanation": "SourcelessBuilder.create does not know how to wrap {value_type}",
     "Hints": [
-      "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builder.py",
-    "Line": 3409,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1108": {
     "Version": "v1.0",
@@ -1335,10 +1014,7 @@
     "Hints": [
       "Ensure your nn.Module instance has called `super().__init__()`."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builder.py",
-    "Line": 1629,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1109": {
     "Version": "v1.0",
@@ -1346,10 +1022,7 @@
     "Context": "",
     "Explanation": "Should only be encountered while implementing generator support.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 4183,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1110": {
     "Version": "v1.0",
@@ -1359,10 +1032,7 @@
     "Hints": [
       "Dynamo does not really define unspecialized nn.Module very well."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/nn_module.py",
-    "Line": 1044,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1111": {
     "Version": "v1.0",
@@ -1372,10 +1042,7 @@
     "Hints": [
       "This branch is not supposed to be reachable."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/base.py",
-    "Line": 92,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1112": {
     "Version": "v1.0",
@@ -1383,10 +1050,7 @@
     "Context": "code name: {code.co_name}, args: {args}",
     "Explanation": "Attempted to inline {code.co_name} where first argument (self) is not a user-defined object.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 3868,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1113": {
     "Version": "v1.0",
@@ -1396,10 +1060,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/iter.py",
-    "Line": 98,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1114": {
     "Version": "v1.0",
@@ -1409,10 +1070,7 @@
     "Hints": [
       "Make sure the arguments to itertools.accumulate are correct."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/iter.py",
-    "Line": 108,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1115": {
     "Version": "v1.0",
@@ -1422,10 +1080,7 @@
     "Hints": [
       "Make sure the arguments to itertools.groupby are correct."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/iter.py",
-    "Line": 190,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1116": {
     "Version": "v1.0",
@@ -1433,12 +1088,9 @@
     "Context": "call_setattr {self} {name}",
     "Explanation": "Dynamo does not support setting the attribute  '{name}' on tracked exception objects. Only `__context__`,  `__cause__`, `__suppress_context__`, and `__traceback__` are supported.",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/misc.py",
-    "Line": 478,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1117": {
     "Version": "v1.0",
@@ -1448,10 +1100,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/lists.py",
-    "Line": 351,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1118": {
     "Version": "v1.0",
@@ -1461,10 +1110,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/lists.py",
-    "Line": 1060,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1119": {
     "Version": "v1.0",
@@ -1474,10 +1120,7 @@
     "Hints": [
       "Ensure that the `saved_tensors` attribute is properly  initialized before calling `save_for_backward`.  `save_for_backward` only supported on a newly constructed `torch.autograd.function.FunctionCtx`."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/misc.py",
-    "Line": 947,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1120": {
     "Version": "v1.0",
@@ -1485,12 +1128,9 @@
     "Context": "call_method {self} {name}",
     "Explanation": "Dynamo does not support calling the method  `{name}` on `autograd.Function` context objects. Supported  methods are `__setattr__`, `save_for_backward` and  `mark_non_differentiable`.",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/misc.py",
-    "Line": 937,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1121": {
     "Version": "v1.0",
@@ -1500,10 +1140,7 @@
     "Hints": [
       "Ensure the method is decorated with `@staticmethod`  or `@classmethod` if it's meant to be called on the class."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/misc.py",
-    "Line": 843,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1122": {
     "Version": "v1.0",
@@ -1514,10 +1151,7 @@
       "Avoid using the unsupported context manager.",
       "File an issue to PyTorch. Simple context managers can potentially be supported,  but note that context managers can't be supported in general"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 2961,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1123": {
     "Version": "v1.0",
@@ -1525,12 +1159,9 @@
     "Context": "call_method {self} {name} {args}",
     "Explanation": "Missing dynamo support for converting {value} into a list for slice assignment.",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/lists.py",
-    "Line": 474,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1124": {
     "Version": "v1.0",
@@ -1540,10 +1171,7 @@
     "Hints": [
       "Remove the custom `jvp` method if possible."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/misc.py",
-    "Line": 705,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1125": {
     "Version": "v1.0",
@@ -1554,10 +1182,7 @@
       "Remove the custom `vjp` method if possible.",
       "Use standard `backward` instead if applicable."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/misc.py",
-    "Line": 690,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1126": {
     "Version": "v1.0",
@@ -1568,10 +1193,7 @@
       "Avoid calling `{self.debug_repr()}` in your code.",
       "Please report an issue to PyTorch."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/base.py",
-    "Line": 464,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1127": {
     "Version": "v1.0",
@@ -1579,10 +1201,7 @@
     "Context": "source: {self.source}",
     "Explanation": "Dynamo determined that a graph break should occur  when calling `{self.source.name()}`. Reason: {self.msg}",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/misc.py",
-    "Line": 538,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1128": {
     "Version": "v1.0",
@@ -1590,10 +1209,7 @@
     "Context": "",
     "Explanation": "msg",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 3493,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1129": {
     "Version": "v1.0",
@@ -1603,10 +1219,7 @@
     "Hints": [
       "Avoid calling `hasattr({self.__class__.__name__}, {name})` in your code."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/base.py",
-    "Line": 448,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1130": {
     "Version": "v1.0",
@@ -1614,10 +1227,7 @@
     "Context": "inspect_parameter_names {self}",
     "Explanation": "Dynamo does not know how to trace the function `{self.debug_repr()}`",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/base.py",
-    "Line": 438,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1131": {
     "Version": "v1.0",
@@ -1625,12 +1235,9 @@
     "Context": "call_function {self} {args} {kwargs}",
     "Explanation": "Dynamo does not know how to trace  itertools.groupby with key type: {str(type(key))}.  We only support grouping keys that are constants (int, float, str, etc.)",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/iter.py",
-    "Line": 178,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1132": {
     "Version": "v1.0",
@@ -1638,10 +1245,7 @@
     "Context": "call_method: {self} {name} {args} {kwargs}",
     "Explanation": "Dynamo does not support getitem on  `nn.Module` with non-constant key.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/nn_module.py",
-    "Line": 803,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1133": {
     "Version": "v1.0",
@@ -1651,10 +1255,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/iter.py",
-    "Line": 79,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1134": {
     "Version": "v1.0",
@@ -1664,10 +1265,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/iter.py",
-    "Line": 164,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1135": {
     "Version": "v1.0",
@@ -1675,10 +1273,7 @@
     "Context": "call_method {self} {name} {args} {kwargs}",
     "Explanation": "Dynamo does not know how to trace method `{name}` of class `{self.python_type_name()}`",
     "Hints": "hints",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/base.py",
-    "Line": 550,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1136": {
     "Version": "v1.0",
@@ -1688,10 +1283,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/base.py",
-    "Line": 573,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1137": {
     "Version": "v1.0",
@@ -1702,10 +1294,7 @@
       "Refactor your code so that `{name}` (type `{typestr(subobj)}`) is not an attribute of `{typestr(base)}`",
       "Currently supported attribute types are methods, classmethods, staticmethods,  properties, constants, and tensors."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/nn_module.py",
-    "Line": 408,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1138": {
     "Version": "v1.0",
@@ -1713,12 +1302,9 @@
     "Context": "call_method {self} {name} {args} {kwargs}",
     "Explanation": "Dynamo encountered a super().__init__() call  on {objvar} that resolved to a `torch.nn.Module.__init__()`  call that we cannot trace.",
     "Hints": [
-      "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/misc.py",
-    "Line": 204,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1139": {
     "Version": "v1.0",
@@ -1728,10 +1314,7 @@
     "Hints": [
       "Avoid accessing {name} of tensor subclass in torch.compile region"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/torch_function.py",
-    "Line": 633,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1140": {
     "Version": "v1.0",
@@ -1742,10 +1325,7 @@
       "Avoid accessing {name} of tensor subclass in torch.compile region",
       "Renaming attribute `{name}` of type {self.class_type}"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/torch_function.py",
-    "Line": 698,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1141": {
     "Version": "v1.0",
@@ -1753,10 +1333,7 @@
     "Context": "call_method {self} {name}",
     "Explanation": "Dynamo only supports the `queue_callback` method  on a torch._C._ImperativeEngine instance, but found: `{name}`.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/misc.py",
-    "Line": 1029,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1142": {
     "Version": "v1.0",
@@ -1764,10 +1341,7 @@
     "Context": "call_method {self} {name}",
     "Explanation": "queue_callback() is only supported when  Compiled Autograd is enabled with fullgraph=True.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/misc.py",
-    "Line": 1021,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1143": {
     "Version": "v1.0",
@@ -1775,12 +1349,9 @@
     "Context": "str(name)",
     "Explanation": "Dynamo doesn't support tracing the {method_name} method.  We currently support wait, record, synchronize, and query.",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/ctx_manager.py",
-    "Line": 1347,
-    "Has_dynamic": true
+    "From_exc": null
   },
   "GB1144": {
     "Version": "v1.0",
@@ -1790,10 +1361,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 2245,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1145": {
     "Version": "v1.0",
@@ -1801,12 +1369,9 @@
     "Context": "flags: {inst.argval}",
     "Explanation": "Attempted to call a variadic function (CALL_FUNCTION_EX) with bad flags {inst.argval}",
     "Hints": [
-      "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 2168,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1146": {
     "Version": "v1.0",
@@ -1814,12 +1379,9 @@
     "Context": "cellvar: {cellvar}, value: {value}",
     "Explanation": "Dynamo doesn't support writing to immutable/sourceless cell variables.",
     "Hints": [
-      "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/side_effects.py",
-    "Line": 219,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1147": {
     "Version": "v1.0",
@@ -1827,10 +1389,7 @@
     "Context": "attempted to jump with {value}",
     "Explanation": "_explanation",
     "Hints": "_hints",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 809,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1148": {
     "Version": "v1.0",
@@ -1838,12 +1397,9 @@
     "Context": "str(args)",
     "Explanation": "Dynamo only supports asserts with string messages",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 812,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1149": {
     "Version": "v1.0",
@@ -1851,12 +1407,9 @@
     "Context": "{self.fn}, {args=}, {kwargs=}",
     "Explanation": "`torch.compile` doesn't support `async_op=True for {self.fn}",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/functions.py",
-    "Line": 1628,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1150": {
     "Version": "v1.0",
@@ -1864,10 +1417,7 @@
     "Context": "",
     "Explanation": "Compiled autograd doesn't work with `torch.export`.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/output_graph.py",
-    "Line": 569,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1151": {
     "Version": "v1.0",
@@ -1877,10 +1427,7 @@
     "Hints": [
       "Ensure your call to cast() has exactly 2 arguments."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 1621,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1152": {
     "Version": "v1.0",
@@ -1888,12 +1435,9 @@
     "Context": "isinstance({arg}, {isinstance_type})",
     "Explanation": "Dynamo doesn't have a rule to determine the type of argument {arg}",
     "Hints": [
-      "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 1772,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1153": {
     "Version": "v1.0",
@@ -1903,10 +1447,7 @@
     "Hints": [
       "Move usage of this function out of `torch.compile` region"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/functions.py",
-    "Line": 337,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1154": {
     "Version": "v1.0",
@@ -1914,12 +1455,9 @@
     "Context": "attempted to run function {fn} with arguments {args}",
     "Explanation": "Encountered exception when attempting to constant fold.",
     "Hints": [
-      "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": "exc",
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 910,
-    "Has_dynamic": false
+    "From_exc": "exc"
   },
   "GB1155": {
     "Version": "v1.0",
@@ -1929,10 +1467,7 @@
     "Hints": [
       "Avoid calling copy.deepcopy()"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 2325,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1156": {
     "Version": "v1.0",
@@ -1940,10 +1475,7 @@
     "Context": "obj: {obj}; variable type: {type(obj)}",
     "Explanation": "Dataclass fields handling fails for {obj}. Expected it to be a user-defined object.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builder.py",
-    "Line": 2445,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1157": {
     "Version": "v1.0",
@@ -1951,12 +1483,9 @@
     "Context": "tensor dtype: {value.dtype}; grad dtype: {safe_grad(value).dtype}",
     "Explanation": "Inconsistent dtype between tensor and its gradient.  This can happen in FSDP and crashes meta tensor creation.",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builder.py",
-    "Line": 1944,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1158": {
     "Version": "v1.0",
@@ -1966,10 +1495,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 2371,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1159": {
     "Version": "v1.0",
@@ -1980,10 +1506,7 @@
       "Manually convert the argument to a list.",
       "Ensure all keys are hashable."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 1673,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1160": {
     "Version": "v1.0",
@@ -1993,10 +1516,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 1292,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1161": {
     "Version": "v1.0",
@@ -2004,10 +1524,7 @@
     "Context": "str(value)",
     "Explanation": "Exception encountered when attempting to convert numpy.ndarray to Tensor",
     "Hints": "[]",
-    "From_exc": "e",
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builder.py",
-    "Line": 2065,
-    "Has_dynamic": false
+    "From_exc": "e"
   },
   "GB1162": {
     "Version": "v1.0",
@@ -2017,10 +1534,7 @@
     "Hints": [
       "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builder.py",
-    "Line": 802,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1163": {
     "Version": "v1.0",
@@ -2028,12 +1542,9 @@
     "Context": "{fn}",
     "Explanation": "`torch.compile` can't trace `functools.wraps` on functions defined outside the compile region",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/functions.py",
-    "Line": 1668,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1164": {
     "Version": "v1.0",
@@ -2041,12 +1552,9 @@
     "Context": "var_getattr {self} {name}",
     "Explanation": "Dynamo does not know how to access an attribute  on an `nn.Module` instance that lacks a source. This is  usually an internal error in Dynamo.",
     "Hints": [
-      "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/nn_module.py",
-    "Line": 322,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1165": {
     "Version": "v1.0",
@@ -2054,10 +1562,7 @@
     "Context": "getattr({obj}, {name}, {default})",
     "Explanation": "Intentionally graph breaking on getattr() on a nn.Module  with a pending mutation",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 1952,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1166": {
     "Version": "v1.0",
@@ -2067,10 +1572,7 @@
     "Hints": [
       "Ensure the name argument of getattr() is a string"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 1928,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1167": {
     "Version": "v1.0",
@@ -2080,10 +1582,7 @@
     "Hints": [
       "Supported args are Tensors, and functions/nn.Modules/user-defined objects  from outside the compiled region."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 2313,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1168": {
     "Version": "v1.0",
@@ -2091,10 +1590,7 @@
     "Context": "next({self})",
     "Explanation": "Has reached internal Dynamo max iterator limit: {MAX_ITERATOR_LIMIT}",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/iter.py",
-    "Line": 375,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1169": {
     "Version": "v1.0",
@@ -2102,12 +1598,9 @@
     "Context": "invalid args to {self_handler}: {args} {kwargs}",
     "Explanation": "Encountered TypeError when trying to handle op {fn.__name__}",
     "Hints": [
-      "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 874,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1170": {
     "Version": "v1.0",
@@ -2115,12 +1608,9 @@
     "Context": "isinstance({arg}, {isinstance_type})",
     "Explanation": "User-defined object with C extensions can have torch.Tensor  attributes; intentionally graph breaking.",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 1814,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1171": {
     "Version": "v1.0",
@@ -2130,10 +1620,7 @@
     "Hints": [
       "Make sure your arguments are types."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 1876,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1172": {
     "Version": "v1.0",
@@ -2143,10 +1630,7 @@
     "Hints": [
       "Check if the key exists in the dictionary before accessing it."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/dicts.py",
-    "Line": 350,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1173": {
     "Version": "v1.0",
@@ -2156,10 +1640,7 @@
     "Hints": [
       "Avoid using self referential list"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builder.py",
-    "Line": 1482,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1174": {
     "Version": "v1.0",
@@ -2170,10 +1651,7 @@
       "Avoid modifying dictionaries that might be referenced by mapping proxy objects",
       "Or avoid using the mapping proxy objects after modifying its underlying dictionary"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/dicts.py",
-    "Line": 675,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1175": {
     "Version": "v1.0",
@@ -2183,10 +1661,7 @@
     "Hints": [
       "Use a mapping proxy constructed in the same `torch.compile` region."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/dicts.py",
-    "Line": 637,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1176": {
     "Version": "v1.0",
@@ -2194,10 +1669,7 @@
     "Context": "",
     "Explanation": "Missing BUILD_SET bytecode handler (for testing purposes).",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/symbolic_convert.py",
-    "Line": 2410,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1177": {
     "Version": "v1.0",
@@ -2205,12 +1677,9 @@
     "Context": "{args=}, {kwargs=}",
     "Explanation": "`torch.compile` only support certain input types for namedtuple",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/functions.py",
-    "Line": 1701,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1178": {
     "Version": "v1.0",
@@ -2218,10 +1687,7 @@
     "Context": "call_method: {self} {name} {args} {kwargs}",
     "Explanation": "Dynamo does not support calling  method `{name}` of ``nn.Module`` {module} with non-constant arguments.",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/nn_module.py",
-    "Line": 610,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1179": {
     "Version": "v1.0",
@@ -2231,10 +1697,7 @@
     "Hints": [
       "Ensure your dict_keys keys are constants (e.g. int, float, strings)"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builder.py",
-    "Line": 1443,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1180": {
     "Version": "v1.0",
@@ -2244,10 +1707,7 @@
     "Hints": [
       "Ensure your mappingproxy keys are constants (e.g. int, float, strings)"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builder.py",
-    "Line": 548,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1181": {
     "Version": "v1.0",
@@ -2255,12 +1715,9 @@
     "Context": "as_proxy {self}",
     "Explanation": "Dynamo requires the autograd.Function context  to be initialized with a proxy.",
     "Hints": [
-      "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/misc.py",
-    "Line": 913,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1182": {
     "Version": "v1.0",
@@ -2268,12 +1725,9 @@
     "Context": "setattr({obj}, {name}, {val})",
     "Explanation": "setattr() on Tensor.requires_grad not supported.  Mutating requires_grad can introduce a new leaf from non-leaf or vice versa in  the middle of the graph, which AOTAutograd does not currently know how to handle.",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 2103,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1183": {
     "Version": "v1.0",
@@ -2283,10 +1737,7 @@
     "Hints": [
       "Use something else as the key."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/lists.py",
-    "Line": 515,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1184": {
     "Version": "v1.0",
@@ -2294,10 +1745,7 @@
     "Context": "example_value type: {typestr(example_value)}; op: {proxy.node.op}; target: {proxy.node.target}",
     "Explanation": "torch.* ops that return a non-Tensor cannot be traced into the Dynamo FX graph output",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builder.py",
-    "Line": 2846,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1185": {
     "Version": "v1.0",
@@ -2305,12 +1753,9 @@
     "Context": "str(self)",
     "Explanation": "Dynamo doesn't support compiling a region that returns  a torch.autograd._unsafe_preserve_version_counter context manager.",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/ctx_manager.py",
-    "Line": 1077,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1186": {
     "Version": "v1.0",
@@ -2320,10 +1765,7 @@
     "Hints": [
       "Set USE_DISTRIBUTED=1 to enable it when building PyTorch from source."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/distributed.py",
-    "Line": 59,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1187": {
     "Version": "v1.0",
@@ -2333,10 +1775,7 @@
     "Hints": [
       "Avoid defining `__getattribute__` in your module."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/nn_module.py",
-    "Line": 249,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1188": {
     "Version": "v1.0",
@@ -2346,10 +1785,7 @@
     "Hints": [
       "Avoid using objects with non-standard __getattr__ methods  within the compiled region. If possible, implement  __getattr__ as a standard Python function."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/nn_module.py",
-    "Line": 288,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1189": {
     "Version": "v1.0",
@@ -2357,12 +1793,9 @@
     "Context": "str(self)",
     "Explanation": "Dynamo doesn't support compiling a region that returns a torch.profiler context manager.",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/ctx_manager.py",
-    "Line": 953,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1190": {
     "Version": "v1.0",
@@ -2370,12 +1803,9 @@
     "Context": "partial tensor op: {self} {args} {kwargs}",
     "Explanation": "Dynamo does not know how to trace builtin operator {self.fn} with tensor arguments",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 1123,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1191": {
     "Version": "v1.0",
@@ -2383,12 +1813,9 @@
     "Context": "{op.__name__}({left}, {right})",
     "Explanation": "Dynamo does not support the comparison op {op.__name__}  with SymNode arguments {left}, {right}",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 2394,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1192": {
     "Version": "v1.0",
@@ -2396,12 +1823,9 @@
     "Context": "{op.__name__}({left}, {right})",
     "Explanation": "Dynamo does not support the comparison op {op.__name__}  with Tensor arguments {left}, {right}",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 2354,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1193": {
     "Version": "v1.0",
@@ -2409,12 +1833,9 @@
     "Context": "grid type = {type(grid)}",
     "Explanation": "`torch.compile` only supports list-like grid for check_grid",
     "Hints": [
-      "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/functions.py",
-    "Line": 1983,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1194": {
     "Version": "v1.0",
@@ -2424,10 +1845,7 @@
     "Hints": [
       "Consider using a regular dictionary instead"
     ],
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/dicts.py",
-    "Line": 605,
-    "Has_dynamic": false
+    "From_exc": null
   },
   "GB1195": {
     "Version": "v1.0",
@@ -2435,9 +1853,6 @@
     "Context": "",
     "Explanation": "Dynamo does not support tracing builtin index() on a Tensor",
     "Hints": "[]",
-    "From_exc": null,
-    "File_path": "/data/users/ssubbarao8/pytorch/torch/_dynamo/variables/builtin.py",
-    "Line": 1469,
-    "Has_dynamic": false
+    "From_exc": null
   }
 }
