@@ -287,10 +287,7 @@ select = [
 ]
 
 [variant.default-priorities]
- # the plugins corresponding to these namespaces will be auto-installed at installation
-namespace = ["fictional_hw", "fictional_tech"]  # optional - if empty nothing is auto-installed
-feature = []                                    # optional - Can be skipped if empty - 95%+ packages won't ever need
-property = []                                   # optional - Can be skipped if empty - 95%+ packages won't ever need
+namespace = ["nvidia"]
 
 [variant.providers.nvidia]
 requires = ["nvidia-variant-provider>=0.0.1,<1.0.0"]
