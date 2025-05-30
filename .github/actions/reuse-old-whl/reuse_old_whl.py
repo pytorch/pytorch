@@ -127,10 +127,14 @@ def check_changed_files(sha: str) -> bool:
             ["git", "diff", "--name-only", sha, "HEAD", "--diff-filter=D"],
             text=True,
             stderr=subprocess.DEVNULL,
-        ).strip().split()
+        )
+        .strip()
+        .split()
     )
     if removed_files:
-        print(f"Removed files between {sha} and HEAD: {removed_files}, cannot reuse old whl")
+        print(
+            f"Removed files between {sha} and HEAD: {removed_files}, cannot reuse old whl"
+        )
         return False
 
     changed_files = (
