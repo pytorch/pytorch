@@ -7383,7 +7383,7 @@ def forward(self, x):
         ):
             ep.module()(torch.tensor([3, 6, 5]))
         with self.assertRaisesRegex(
-            RuntimeError, r".* expression Eq\(u2, 5\) & \(4 <= u1\) & \(u1 <= 8\) .*"
+            RuntimeError, r".* expression u2 <= 5 .*"
         ):
             ep.module()(torch.tensor([6, 6, 6]))
 
