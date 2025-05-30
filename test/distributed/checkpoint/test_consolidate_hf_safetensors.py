@@ -2,10 +2,6 @@
 
 import os
 import sys
-<<<<<<< HEAD
-=======
-import time
->>>>>>> 6f829d23b08 (Script for consolidation of sharded safetensor files)
 
 import torch
 import torch.distributed.checkpoint as dist_cp
@@ -23,27 +19,19 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
+
 class TestConsolidateHFSafeTensors(DTensorTestBase):
     def _create_d_tensors(self) -> None:
-<<<<<<< HEAD
-=======
-        # Create a custom test case with overlapping shards
-        # One shard has values 0-11, the other has values 8-15
->>>>>>> 6f829d23b08 (Script for consolidation of sharded safetensor files)
         global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
         mesh_shape = (self.world_size,)
         mesh_1d = init_device_mesh(self.device_type, mesh_shape)
-        
-<<<<<<< HEAD
-=======
-        
->>>>>>> 6f829d23b08 (Script for consolidation of sharded safetensor files)
+
         # Create local tensor with row-wise sharding
         rows_per_rank = global_tensor.shape[0] // self.world_size
         start_row = self.rank * rows_per_rank
         end_row = start_row + rows_per_rank
         local_tensor = global_tensor[start_row:end_row].clone()
-        
+
         # Create DTensor with row-wise sharding
         dtensor = DTensor.from_local(
             local_tensor,
@@ -52,13 +40,13 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
             shape=global_tensor.shape,
             stride=(4, 1),
         )
-        
+
         # Create local tensor with column-wise sharding
         cols_per_rank = global_tensor.shape[1] // self.world_size
         start_col = self.rank * cols_per_rank
         end_col = start_col + cols_per_rank
         local_tensor_col = global_tensor[:, start_col:end_col].clone()
-        
+
         # Create DTensor with column-wise sharding
         dtensor_col = DTensor.from_local(
             local_tensor_col,
@@ -67,15 +55,16 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
             shape=global_tensor.shape,
             stride=(4, 1),
         )
-        
+
         state_dict_to_save = {"dtensor": dtensor, "dtensor_col": dtensor_col}
         dist_cp.save(
             state_dict=state_dict_to_save,
-            storage_writer=dist_cp._HuggingFaceStorageWriter(path=self.temp_dir, save_sharded=True),
+            storage_writer=dist_cp._HuggingFaceStorageWriter(
+                path=self.temp_dir, save_sharded=True
+            ),
         )
         dist.barrier()
         os.sync()
-
 
     @with_comms
     @with_temp_dir
@@ -94,10 +83,10 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
         self._create_d_tensors()
 
         global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
-            
+
         if self.rank == 0:
             consolidate_safetensors_files(checkpoint_dir, output_dir)
-                
+
             file_path = os.path.join(output_dir, "model-00001-of-00001.safetensors")
             loaded_dict = safetensors.torch.load_file(file_path)
             self.assertEqual(loaded_dict.keys(), {"dtensor", "dtensor_col"})
@@ -122,14 +111,16 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
         self._create_d_tensors()
 
         global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
-            
+
         if self.rank == 0:
             fqn_to_index_mapping = {"dtensor": 1, "dtensor_col": 2}
-            consolidate_safetensors_files(checkpoint_dir, output_dir, fqn_to_index_mapping)
-            
+            consolidate_safetensors_files(
+                checkpoint_dir, output_dir, fqn_to_index_mapping
+            )
+
             file1_path = os.path.join(output_dir, "model-00001-of-00002.safetensors")
             file2_path = os.path.join(output_dir, "model-00002-of-00002.safetensors")
-            
+
             loaded_dict = safetensors.torch.load_file(file1_path)
             self.assertEqual(loaded_dict.keys(), {"dtensor"})
             self.assertTrue(torch.equal(loaded_dict["dtensor"], global_tensor))
@@ -138,7 +129,7 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
             self.assertEqual(loaded_dict_col.keys(), {"dtensor_col"})
             self.assertTrue(torch.equal(loaded_dict_col["dtensor_col"], global_tensor))
         dist.barrier()
-        
-        
+
+
 if __name__ == "__main__":
     run_tests()
