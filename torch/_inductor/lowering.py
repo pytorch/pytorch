@@ -3162,7 +3162,6 @@ def _full(fill_value, device, dtype, size):
     )
 
 
-@register_lowering(aten.full_like, type_promotion_kind=None)
 def full_like(x, fill_value, **kwargs):
     return create_tensor_like(tensor_constructor(fill_value))(x, **kwargs)
 
@@ -6092,6 +6091,27 @@ def mutate_to(changed, val, unsafe_alias=False):
 @register_lowering(aten.fill_)
 def fill_(x, fill_value):
     return mutate_to(x, full_like(x, fill_value))
+
+
+@register_lowering(prims.fill, type_promotion_kind=None)
+def prims_fill(x, fill_value):
+    dtype = x.get_dtype()
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=dtype,
+        inner_fn=lambda _: ops.constant(fill_value, dtype),
+        ranges=list(x.get_size()),
+    )
+
+
+@register_lowering(prims.full, type_promotion_kind=None)
+def prims_full(shape, fill_value, *, dtype, device, requires_grad):
+    return Pointwise.create(
+        device=device,
+        dtype=dtype,
+        inner_fn=lambda _: ops.constant(fill_value, dtype),
+        ranges=list(shape),
+    )
 
 
 @register_lowering(aten.copy_, type_promotion_kind=None)
