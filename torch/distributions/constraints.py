@@ -124,7 +124,7 @@ class Constraint:
     """
 
     is_discrete: ClassVar[bool] = False  # Default to continuous.
-    event_dim: int = 0  # Default to univariate.
+    event_dim: ClassVar[int] = 0  # Default to univariate.
 
     def check(self, value: Tensor) -> Tensor:
         """
