@@ -16,6 +16,8 @@ def get_source_segment(source, node):
 Normalizes string literals by removing formatting artifacts and escape sequences.
 Handles f-strings, quotes, newlines, and other syntax elements for cleaner output.
 """
+
+
 def clean_string(s):
     if s is None:
         return None
@@ -33,7 +35,7 @@ def clean_string(s):
     return s
 
 
-## Expands hint references to their actual values from graph_break_hints.
+# Expands hint references to their actual values from graph_break_hints.
 def expand_hints(hints):
     import inspect
 
