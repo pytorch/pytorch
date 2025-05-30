@@ -17,7 +17,7 @@
 
 namespace torch::instruction_counter {
 
-long start() {
+static long start() {
 #if !defined(__linux__)
   throw std::runtime_error("This systems seems not to be Linux");
 #else
@@ -48,7 +48,7 @@ long start() {
 #endif
 }
 
-uint64_t end(int fd) {
+static uint64_t end(int fd) {
 #if !defined(__linux__)
   throw std::runtime_error("This systems seems not to be Linux");
 #else

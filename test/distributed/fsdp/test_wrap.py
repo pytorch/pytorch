@@ -395,6 +395,19 @@ class TestFSDPWrap(FSDPTest):
             loss.backward()
             optim.step()
 
+    @skip_if_lt_x_gpu(1)
+    def test_zero_argument(self):
+        class ZeroArguModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.a = torch.tensor([1.0])
+
+            def forward(self):
+                return self.a
+
+        model = FSDP(ZeroArguModel())
+        self.assertEqual(model(), torch.tensor([1.0]))
+
 
 class TestAutoWrap(TestCase):
     def setUp(self) -> None:

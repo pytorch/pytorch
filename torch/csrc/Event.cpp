@@ -28,7 +28,7 @@ static PyObject* THPEvent_pynew(
   unsigned char interprocess = 0;
 
   static torch::PythonArgParser parser({
-      "Event(Device device=None, *, bool enable_timing=True, bool blocking=False, bool interprocess=False)",
+      "Event(Device device=None, *, bool enable_timing=False, bool blocking=False, bool interprocess=False)",
   });
 
   torch::ParsedArgs<4> parsed_args;
@@ -39,7 +39,7 @@ static PyObject* THPEvent_pynew(
   if (!device.has_value()) {
     device = at::Device(at::getAccelerator(false).value_or(at::kCPU));
   }
-  enable_timing = r.toBoolWithDefault(1, true);
+  enable_timing = r.toBoolWithDefault(1, false);
   blocking = r.toBoolWithDefault(2, false);
   interprocess = r.toBoolWithDefault(3, false);
 

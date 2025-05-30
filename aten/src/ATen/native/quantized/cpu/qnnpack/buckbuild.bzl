@@ -464,6 +464,7 @@ def define_qnnpack(third_party, labels = []):
         apple_sdks = (IOS, MACOSX, APPLETVOS),
         compiler_flags = [
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
+            "-Wno-unused-command-line-argument",
         ],
         fbobjc_preprocessor_flags = [
             "-DQNNP_PRIVATE=",

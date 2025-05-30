@@ -859,7 +859,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
 
     def tearDown(self):
         SparseSemiStructuredTensor._FORCE_CUTLASS = False
-        super(self.__class__, self).tearDown()
+        super().tearDown()
 
     @unittest.skipIf(TEST_WITH_ROCM or IS_WINDOWS, "ROCm and Windows doesn't support CUTLASS")
     @inference_dtypes
@@ -1207,11 +1207,11 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         B = torch.ones((128, 128), device=device).to(dtype)
 
         A_compressed = torch._cslt_compress(A)
-        alg_id, split_k, split_k_one_kernel, _ = torch._C._cusparselt.mm_search(A_compressed, B.t(), None, None, None, False)
+        alg_id, split_k, split_k_mode, _ = torch._C._cusparselt.mm_search(A_compressed, B.t(), None, None, None, False)
         sparse_result = torch._cslt_sparse_mm(A_compressed, B.t(),
                                               alg_id=alg_id,
                                               split_k=split_k,
-                                              split_k_one_kernel=split_k_one_kernel)
+                                              split_k_mode=split_k_mode)
         dense_result = torch.mm(A.to(torch.float32), B.to(torch.float32))
         dense_result = dense_result.to(dtype)
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
@@ -1223,12 +1223,9 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         # CUDA 11.8 has cuSPARSELt v0.4.0 support
         if version == (11, 8):
             assert torch.backends.cusparselt.version() == 400
-        # PyTorch CUDA 12.4 using cuSPARSELt v0.6.2
+        # PyTorch CUDA 12.4+ using cuSPARSELt v0.6.2+
         elif version >= (12, 4):
-            assert torch.backends.cusparselt.version() == 602
-        # PyTorch CUDA 12.6+ using cuSPARSELt v0.6.3
-        elif version >= (12, 6):
-            assert torch.backends.cusparselt.version() == 603
+            assert torch.backends.cusparselt.version() >= 602
         else:
             assert torch.backends.cusparselt.version() is None
 

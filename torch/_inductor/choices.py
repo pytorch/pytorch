@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import typing
-from typing import Any, Generator, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -23,6 +23,7 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
     from functools import partial
 
     from triton import Config as TritonConfig
@@ -36,8 +37,7 @@ if TYPE_CHECKING:
 class Sortable(typing.Protocol):
     """Anything that can be used as a list.sort() key (int/tuple/etc)"""
 
-    def __lt__(self, other: typing.Self) -> bool:
-        ...
+    def __lt__(self, other: typing.Self) -> bool: ...
 
 
 class InductorChoices:
@@ -186,7 +186,9 @@ class InductorChoices:
         # to pick the faster one.
         if config.triton.multi_kernel:
             threshold *= 16
-        return V.graph.sizevars.statically_known_leq(features.reduction_numel, threshold)  # type: ignore[arg-types]
+        return V.graph.sizevars.statically_known_leq(
+            features.reduction_numel, threshold
+        )  # type: ignore[arg-types]
 
     @staticmethod
     def want_no_x_dim(features: SIMDKernelFeatures) -> bool:

@@ -96,7 +96,9 @@ Reducer::Reducer(
     bool find_unused_parameters,
     bool gradient_as_bucket_view,
     std::unordered_map<size_t, std::string> param_names,
-    int64_t first_bucket_bytes_cap)
+    int64_t first_bucket_bytes_cap,
+    bool skip_all_reduce_unused_params,
+    bool use_python_reducer)
     : params_(std::move(params)),
       process_group_(std::move(process_group)),
       expect_sparse_gradients_(std::move(expect_sparse_gradients)),
@@ -111,14 +113,17 @@ Reducer::Reducer(
       num_bwd_calls_(0),
       first_autograd_hook_called_(false),
       num_buckets_ready_(0),
+      num_buckets_reduced_(0),
       has_rebuilt_bucket_(false),
       bucket_bytes_cap_(bucket_bytes_cap),
       div_factor_(kUnsetDivFactor),
       static_graph_(false),
+      skip_all_reduce_unused_params_(skip_all_reduce_unused_params),
       comm_hook_(nullptr),
       ddp_debug_level_(debug_level()),
       param_names_(std::move(param_names)),
-      first_bucket_bytes_cap_(first_bucket_bytes_cap) {
+      first_bucket_bytes_cap_(first_bucket_bytes_cap),
+      use_python_reducer_(use_python_reducer) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_INTERNAL_ASSERT(!params_.empty(), "Expected at least one parameter.");
 
@@ -183,21 +188,24 @@ Reducer::Reducer(
 #endif
       // Hook to execute after the gradient accumulator has executed.
       hooks_.emplace_back(
-          grad_accumulator->add_post_hook(
-              std::make_unique<torch::autograd::utils::LambdaPostHook>(
-                  [this, variable_index](
-                      const torch::autograd::variable_list& outputs,
-                      const torch::autograd::variable_list& /* unused */) {
+          grad_accumulator->add_post_hook(std::make_unique<
+                                          torch::autograd::utils::
+                                              LambdaPostHook>(
+              [this, variable_index](
+                  const torch::autograd::variable_list& outputs,
+                  const torch::autograd::variable_list& /* unused */) {
 #ifndef _WIN32
-                    this->rpc_context_.set(
-                        ThreadLocalDistAutogradContext::getContextPtr());
+                this->rpc_context_.set(
+                    ThreadLocalDistAutogradContext::getContextPtr());
 #endif
-                    this->autograd_hook(variable_index);
-                    return outputs;
-                  },
-                  [=](torch::autograd::CompiledNodeArgs& args) {
-                    // Make post_hook an noop if compiled_autograds is enabled.
-                  })),
+                this->autograd_hook(variable_index);
+                return outputs;
+              },
+              [this](torch::autograd::CompiledNodeArgs& args) {
+                TORCH_CHECK(
+                    this->use_python_reducer_,
+                    "Compiled autograd is not compatible with C++ DDP Reducer, please use torch._dynamo.config.optimize_ddp=\"python_reducer\".");
+              })),
           grad_accumulator);
 
       // Map raw function pointer to parameter index.
@@ -1018,6 +1026,22 @@ std::vector<at::Tensor> Reducer::get_variables_for_bucket(
   }
 }
 
+bool Reducer::is_unused_bucket(Bucket& bucket) {
+  for (const auto& variable_index : bucket.variable_indices) {
+    if (std::find(
+            unused_parameters_.begin(),
+            unused_parameters_.end(),
+            variable_index) == unused_parameters_.end()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool Reducer::should_skip_all_reduce_bucket(Bucket& bucket) {
+  return is_unused_bucket(bucket) && skip_all_reduce_unused_params_;
+}
+
 // Called when the bucket at the specified index is ready to be reduced.
 void Reducer::mark_bucket_ready(size_t bucket_index) {
   TORCH_INTERNAL_ASSERT(bucket_index >= next_bucket_);
@@ -1038,7 +1062,10 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
       record_backward_comm_start_time();
     }
     auto& bucket = buckets_[next_bucket_];
-    all_reduce_bucket(bucket);
+    if (!should_skip_all_reduce_bucket(bucket)) {
+      all_reduce_bucket(bucket);
+      num_buckets_reduced_++;
+    }
   }
 }
 
@@ -1169,11 +1196,10 @@ void Reducer::initialize_buckets(
       // Check if we can use comm-optimized memory pool to allocate tensor
       c10::intrusive_ptr<Backend> backend = nullptr;
       // An environment variable to disable comm-optimized memory pool.
-      // Default is 0, which means comm-optimized memory pool is enabled.
-      // Users can set it to 1 in case of seeing regression or OOM (because this
-      // comm MemPool may not share space with regular compute MemPool).
+      // Default is 1 for now (disabled).
+      // TODO: turn it on by default once we have more confidence on it.
       bool ddpDisableCommMem =
-          (getCvarString({"DDP_DISABLE_COMM_MEM"}, "0") == "1");
+          (getCvarString({"DDP_DISABLE_COMM_MEM"}, "1") == "1");
       try {
         backend = process_group_->getDefaultBackend();
       } catch (...) {
@@ -1184,7 +1210,7 @@ void Reducer::initialize_buckets(
             << "Reducer: default comm backend not found, skipping bucket memory optimization";
       }
       if (ddpDisableCommMem == 0 && backend != nullptr &&
-          backend->supportsTensorAlloc()) {
+          backend->supportsTensorAlloc(options.device().index())) {
         // Comm-optimized memory pool is available, use it to allocate tensor
         LOG(INFO)
             << "Reducer: found comm-optimized memory allocator, using it to create bucket";
@@ -1355,6 +1381,8 @@ void Reducer::reset_bucket_counting() {
   // Reset num_buckets_ready_ at the beginning of backward computation
   // in each iteration.
   num_buckets_ready_ = 0;
+
+  num_buckets_reduced_ = 0;
 
   for (auto& bucket : buckets_) {
     bucket.pending = bucket.variables.size();
@@ -1642,10 +1670,16 @@ void Reducer::finalize_backward() {
   // flattened `gradients` tensor.
   for (auto& bucket : buckets_) {
     // See Note [DDP Communication Hook]
-    TORCH_INTERNAL_ASSERT(
-        bucket.future_work,
-        "Expected bucket.future_work not to be null. "
-        "This may indicate that communication hook was not properly installed.");
+    // It is possible that the bucket all_reduce is skipped if the bucket is
+    // unused bucket and skip_all_reduce_unused_params_ is true.
+    if (bucket.future_work == nullptr) {
+      TORCH_INTERNAL_ASSERT(
+          skip_all_reduce_unused_params_,
+          "currently only support to skip all reduce for unused params "
+          "when skip_all_reduce_unused_params_ is true.");
+      continue;
+    }
+
     bucket.future_work->wait();
     auto future_result = comm_hook_ == nullptr
         ? detail::parseCppCommHookResult(bucket.future_work->value())
@@ -1814,6 +1848,11 @@ void Reducer::sync_bucket_indices(
   indices_accessor_Index = 0;
   for (const auto i : c10::irange(num_buckets)) {
     const auto& bucket_size = bucket_sizes_accessor[static_cast<int64_t>(i)];
+    TORCH_CHECK_WITH(
+        IndexError,
+        bucket_size >= 0 && bucket_size <= indices_accessor.size(0),
+        "received invalid bucket_size, was abort called?");
+
     std::vector<size_t> bucket;
     bucket.reserve(bucket_size);
     for (const auto j : c10::irange(bucket_size)) {
@@ -2316,14 +2355,14 @@ void verify_params_across_processes(
     }
   }
 
-  auto metadata_dev = metadata.clone().to(params[0].device());
-  std::vector<at::Tensor> vec{metadata_dev};
+  metadata = metadata.to(params[0].device());
+  std::vector<at::Tensor> vec{metadata};
   process_group->broadcast(vec)->wait();
 
   // Technically, process 0 doesn't need to double-check metadata, because it
   // was the source.  But no harm keeping work aligned.
   auto control = at::empty({static_cast<long>(i)}, options);
-  control.copy_(metadata_dev, /*non_blocking=*/false);
+  control.copy_(metadata, /*non_blocking=*/false);
   auto control_accessor = control.accessor<int64_t, 1>();
   i = 0;
   for (const auto p : c10::irange(params.size())) {

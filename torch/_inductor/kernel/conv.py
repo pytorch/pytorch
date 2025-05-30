@@ -17,10 +17,10 @@ from ..lowering import (
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
+    SymbolicGridFn,
     TritonTemplate,
 )
 from ..utils import (
-    ceildiv,
     is_ones,
     is_zeros,
     pad_listlike,
@@ -43,18 +43,20 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
 
-def conv2d_grid(n, c, h, w, meta):
+@SymbolicGridFn
+def conv2d_grid(n, c, h, w, meta, *, cdiv):
     return (
-        ceildiv(n * h * w, meta["BLOCK_M"]),
-        ceildiv(c, meta["BLOCK_N"]),
+        cdiv(n * h * w, meta["BLOCK_M"]),
+        cdiv(c, meta["BLOCK_N"]),
         meta["GROUPS"],
     )
 
 
-def conv3d_grid(n, c, d, h, w, meta):
+@SymbolicGridFn
+def conv3d_grid(n, c, d, h, w, meta, *, cdiv):
     return (
-        ceildiv(n * d * h * w, meta["BLOCK_M"]),
-        ceildiv(c, meta["BLOCK_N"]),
+        cdiv(n * d * h * w, meta["BLOCK_M"]),
+        cdiv(c, meta["BLOCK_N"]),
         meta["GROUPS"],
     )
 
@@ -618,7 +620,7 @@ def convolution(
                     PADDING_W=padding[1],
                     GROUPS=groups,
                     # TODO(jansel): try unroll for bigger kernels once fixed:
-                    #               https://github.com/openai/triton/issues/1254
+                    #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=is_ones(kernel_shape),
                     ALLOW_TF32=torch.backends.cudnn.allow_tf32,
                     num_stages=cfg.num_stages,
@@ -641,7 +643,7 @@ def convolution(
                     PADDING_W=padding[2],
                     GROUPS=groups,
                     # TODO(jansel): try unroll for bigger kernels once fixed:
-                    #               https://github.com/openai/triton/issues/1254
+                    #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=is_ones(kernel_shape),
                     ALLOW_TF32=torch.backends.cudnn.allow_tf32,
                     num_stages=cfg.num_stages,

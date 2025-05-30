@@ -616,6 +616,10 @@ class DistributedDataParallel(Module, Joinable):
                     as these named params will be ignored by DDP reducer.
         param_to_hook_all_reduce (torch.nn.Parameter): a parameter to hook delayed all reduce
                     of parameters specified in ``delay_all_reduce_named_params``.
+        skip_all_reduce_unused_params: When set to True, DDP will skip reducing unused parameters.
+                    This requires that unused parameters remain the same across all ranks throughout
+                    the entire training process. If this condition is not met, it may cause
+                    desynchronization and result in training hang.
 
 
     Attributes:
@@ -649,9 +653,13 @@ class DistributedDataParallel(Module, Joinable):
         param_to_hook_all_reduce=None,
         mixed_precision: Optional[_MixedPrecision] = None,
         device_mesh=None,
+        skip_all_reduce_unused_params=False,
     ):
         super().__init__()
         Joinable.__init__(self)
+        self._use_python_reducer = (
+            torch._dynamo.utils.get_optimize_ddp_mode() == "python_reducer"
+        )
         self.logger: Optional[dist.Logger] = None
         if bool(delay_all_reduce_named_params is not None) != bool(
             param_to_hook_all_reduce is not None
@@ -826,6 +834,8 @@ class DistributedDataParallel(Module, Joinable):
             if self._delay_all_reduce_all_params:
                 return
 
+        self.skip_all_reduce_unused_params = skip_all_reduce_unused_params
+
         # Build parameters for reducer.
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
 
@@ -908,11 +918,6 @@ class DistributedDataParallel(Module, Joinable):
         # True. The hooks will be deregistered if compiled_autograd is not
         # enabled.
         self._accum_grad_hooks: list[RemovableHandle] = []
-        optimize_ddp = torch._dynamo.config._get_optimize_ddp_mode()
-        self._use_python_reducer = optimize_ddp in (
-            "python_reducer",
-            "python_reducer_without_compiled_forward",
-        )
         if self._use_python_reducer:
             torch._inductor.config._fuse_ddp_communication = True
             torch._inductor.config._fuse_ddp_bucket_size = bucket_cap_mb
@@ -922,10 +927,7 @@ class DistributedDataParallel(Module, Joinable):
                 "torch.nn.parallel.distributed"
             )
             torch._dynamo.trace_rules.get_legacy_mod_inlinelist.cache_clear()
-        self._force_to_disable_cpp_reducer = (
-            optimize_ddp == "python_reducer_without_compiled_forward"
-        )
-        if self._use_python_reducer:
+            # NOTE: we should init these lazily
             self._register_accum_grad_hook()
 
         # Whether or not DDPSink performs a clone.
@@ -1226,6 +1228,8 @@ class DistributedDataParallel(Module, Joinable):
                 if self.bucket_bytes_cap_default
                 else self.bucket_bytes_cap
             ),
+            self.skip_all_reduce_unused_params,
+            self._use_python_reducer,
         )
 
         self.logger = dist.Logger(self.reducer)
@@ -1496,20 +1500,9 @@ class DistributedDataParallel(Module, Joinable):
         self._setup_in_backward_optimizers()
         self._lazy_init_ran = True
 
-    def _should_disable_cpp_reducer(self) -> bool:
-        return self._use_python_reducer and (
-            torch.compiler.is_compiling() or self._force_to_disable_cpp_reducer
-        )
-
     def _pre_forward(self, *inputs, **kwargs):
-        if self._should_disable_cpp_reducer():
+        if self._use_python_reducer:
             return inputs, kwargs
-
-        # Disable the python reducer if compiled_autograd is not enabled.
-        if self._accum_grad_hooks:
-            for h in self._accum_grad_hooks:
-                h.remove()
-            self._accum_grad_hooks.clear()
 
         if not self._lazy_init_ran and not torch.compiler.is_compiling():
             self._lazy_init()
@@ -1527,7 +1520,8 @@ class DistributedDataParallel(Module, Joinable):
         work = Join.notify_join_context(self)
         if work:
             self.reducer._set_forward_pass_work_handle(
-                work, self._divide_by_initial_world_size  # type: ignore[arg-type]
+                work,
+                self._divide_by_initial_world_size,  # type: ignore[arg-type]
             )
 
         # Calling _rebuild_buckets before forward computation,
@@ -1577,7 +1571,7 @@ class DistributedDataParallel(Module, Joinable):
             return inputs, kwargs
 
     def _post_forward(self, output):
-        if self._should_disable_cpp_reducer():
+        if self._use_python_reducer:
             return output
 
         if self._delay_all_reduce_all_params:
@@ -2243,7 +2237,6 @@ class DistributedDataParallel(Module, Joinable):
         if hook.__name__ in ["bf16_compress_hook", "bf16_compress_wrapper_hook"]:
             cuda_supported = (
                 torch.version.cuda is not None
-                and int(torch.version.cuda.split(".")[0]) >= 11
             ) or torch.version.hip is not None
             nccl_supported = (
                 dist.is_available()

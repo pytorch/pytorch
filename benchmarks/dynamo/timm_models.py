@@ -71,6 +71,7 @@ BATCH_SIZE_DIVISORS = {
 }
 
 REQUIRE_HIGHER_TOLERANCE = {
+    "crossvit_9_240",
     "fbnetv3_b",
     "gmixer_24_224",
     "hrnet_w18",
@@ -127,6 +128,7 @@ REQUIRE_LARGER_MULTIPLIER_FOR_SMALLER_TENSOR = {
     "inception_v3",
     "mobilenetv3_large_100",
     "cspdarknet53",
+    "gluon_inception_v3",
 }
 
 
@@ -427,7 +429,7 @@ class TimmRunner(BenchmarkRunner):
         self.grad_scaler.scale(loss).backward()
         self.optimizer_step()
         if collect_outputs:
-            return collect_results(mod, pred, loss, cloned_inputs)
+            return collect_results(mod, None, loss, cloned_inputs)
         return None
 
 

@@ -137,7 +137,13 @@ class CooperativeReductionTests(TestCase):
         source_code = self.run_and_check(fn, args)
         if "async_compile.multi_kernel" in source_code:
             return
-        self.assertEqual(source_code.count("triton_helpers.x_grid_barrier"), 16)
+
+        # With online softmax, the computation of max and sum are done
+        # jointly and they share a single barrier call.
+        expected_num_barrier = 8 if config.online_softmax else 16
+        self.assertEqual(
+            source_code.count("triton_helpers.x_grid_barrier"), expected_num_barrier
+        )
         self.assertEqual(source_code.count("empty_strided_cuda"), 5)
 
     def test_reduce_split(self):

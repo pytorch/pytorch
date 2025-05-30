@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from typing_extensions import assert_never
 
 from torchgen import local
 from torchgen.api.types import (
@@ -37,7 +38,6 @@ from torchgen.model import (
     TensorOptionsArguments,
     Type,
 )
-from torchgen.utils import assert_never
 
 
 if TYPE_CHECKING:
@@ -181,7 +181,9 @@ def returntype_type(t: Type, *, mutable: bool) -> CType:
         elif t.name == BaseTy.Scalar:
             return BaseCType(scalarT)
     elif isinstance(t, ListType):
-        assert not mutable, "Native functions should never return a mutable tensor list. They should return void."
+        assert not mutable, (
+            "Native functions should never return a mutable tensor list. They should return void."
+        )
         elem = returntype_type(t.elem, mutable=False)
         assert t.size is None, f"fixed size list returns not supported: {t}"
         return VectorCType(elem)

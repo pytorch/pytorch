@@ -4,6 +4,7 @@ import itertools
 import textwrap
 from dataclasses import dataclass
 from typing import Literal, TYPE_CHECKING
+from typing_extensions import assert_never
 
 import torchgen.api.cpp as cpp
 import torchgen.api.meta as meta
@@ -36,7 +37,7 @@ from torchgen.model import (
     SchemaKind,
     TensorOptionsArguments,
 )
-from torchgen.utils import assert_never, mapMaybe, Target
+from torchgen.utils import mapMaybe, Target
 
 
 if TYPE_CHECKING:
@@ -65,6 +66,8 @@ def gen_registration_headers(
     elif backend_index.dispatch_key == DispatchKey.XPU:
         # XPU specific, this header resides in third_party/torch-xpu-ops
         headers.append("#include <ATen/xpu/EmptyTensor.h>")
+    elif backend_index.dispatch_key == DispatchKey.MTIA:
+        headers.append("#include <ATen/native/mtia/EmptyTensor.h>")
     elif per_operator_headers:
         headers += [
             "#include <ATen/ops/empty.h>",
@@ -91,6 +94,7 @@ def gen_empty_impl_names(
         DispatchKey.CUDA,
         DispatchKey.MPS,
         DispatchKey.XPU,
+        DispatchKey.MTIA,
     ):
         dispatch = str(backend_index.dispatch_key).lower()
         empty_impl = f"at::detail::empty_{dispatch}"
@@ -332,7 +336,7 @@ class RegisterDispatchKey:
                 f"{copy_op}(std::get<{i}>({func_res}), {ret_name});"
                 for i, ret_name in enumerate(return_names)
             )
-            returns = f'{sig.returns_type().cpp_type()}({", ".join(return_names)})'
+            returns = f"{sig.returns_type().cpp_type()}({', '.join(return_names)})"
         elif len(return_names) == 1:
             ret_name = return_names[0]
             updates = f"{copy_op}({func_res}, {ret_name});"
@@ -448,7 +452,7 @@ class RegisterDispatchKey:
                 def generate_defn(cpp_sig: CppSignature) -> str:
                     return f"""
 {cpp_sig.defn()} {{
-return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
+return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
 }}
 """
 
@@ -644,6 +648,7 @@ if (C10_UNLIKELY(maybe_proxy.has_value())) {
                 DispatchKey.CUDA,
                 DispatchKey.MPS,
                 DispatchKey.XPU,
+                DispatchKey.MTIA,
                 DispatchKey.CompositeExplicitAutogradNonFunctional,
             )
             return f"""{maybe_set_guard_line}
@@ -722,6 +727,8 @@ resize_out(out, sizes, strides, options);
             # TODO: Move to OptionalMPSGuard.
             guard_field = "c10::OptionalDeviceGuard guard_;"
         elif self.backend_index.dispatch_key == DispatchKey.XPU:
+            guard_field = "c10::OptionalDeviceGuard guard_;"
+        elif self.backend_index.dispatch_key == DispatchKey.MTIA:
             guard_field = "c10::OptionalDeviceGuard guard_;"
         else:
             guard_field = ""
@@ -802,7 +809,7 @@ resize_out(out, sizes, strides, options);
             def generate_defn(cpp_sig: CppSignature) -> str:
                 return f"""
 {cpp_sig.defn()} {{
-return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
+return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
 }}
 """
 
@@ -986,12 +993,15 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             # For an overview of what this template code looks like, see
             # https://github.com/pytorch/rfcs/pull/9
             return f"""\
-{self.gen_class(
-f, k,
-class_name=class_name,
-parent_class=parent_class,
-generate_super=self.g.out.structured_inherits is not None
-)}
+{
+                self.gen_class(
+                    f,
+                    k,
+                    class_name=class_name,
+                    parent_class=parent_class,
+                    generate_super=self.g.out.structured_inherits is not None,
+                )
+            }
 
 {sig.defn()} {{
 {sig_body_str}

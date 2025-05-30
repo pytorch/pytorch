@@ -2,7 +2,8 @@ import functools
 import itertools
 import operator
 import typing
-from typing import Any, Callable, List, Optional, Sequence, Tuple, Union
+from collections.abc import Sequence
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch._inductor.runtime.runtime_utils
@@ -275,7 +276,7 @@ def should_pad_bench_key(
     input: Optional[Tensor] = None,
     is_base_time_key: bool = False,
 ) -> str:
-    def tensor_key(t: Tensor) -> Tuple[torch.Size, Tuple[int, ...], torch.dtype]:
+    def tensor_key(t: Tensor) -> tuple[torch.Size, tuple[int, ...], torch.dtype]:
         return (t.shape, t.stride(), t.dtype)
 
     tf32_key = (
@@ -325,7 +326,7 @@ def should_exclude_padding_time(match: Match, arg_name: str) -> bool:
     if not fetch_fake_tensors(match, (arg_name,))[0].is_contiguous():
         return False
 
-    # TODO - see issue https://githpub.com/pytorch/pytorch/issues/128889
+    # TODO - see issue https://github.com/pytorch/pytorch/issues/128889
     # We would only able to completely plan these out if we were only doing
     # first dimension padding. non-first we would still need a copy
     # because these outputs are fixed dense.
@@ -389,7 +390,7 @@ def should_pad_mm_bf16(dtype: torch.dtype, M: int, N: int, K: int) -> bool:
 def should_pad_bench(*args: Any, **kwargs: Any) -> bool:
     with dynamo_timed(
         "pad_mm_benchmark",
-        log_pt2_compile_event=True,
+        log_pt2_compile_event=False,
         dynamo_compile_column_us="compile_time_autotune_time_us",
     ):
         return _should_pad_bench(*args, **kwargs)
@@ -436,8 +437,8 @@ def _should_pad_bench(
             return False
 
         def realize_symbols(
-            ds: Union[torch.Size, Tuple[torch.SymInt, ...]]
-        ) -> List[int]:
+            ds: Union[torch.Size, tuple[torch.SymInt, ...]],
+        ) -> list[int]:
             return [d if isinstance(d, int) else d.node.hint for d in ds]
 
         if any(

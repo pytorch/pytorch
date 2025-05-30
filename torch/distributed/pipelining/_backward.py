@@ -196,19 +196,20 @@ def stage_backward_input(
             torch.ones_like(stage_output) for stage_output in stage_outputs_or_loss
         ]
 
+    # Some inputs may not be used or may not require gradients, so we filter them out
+    input_values = [inp for inp in input_values if inp.requires_grad]
     dinputs = torch.autograd.grad(
         stage_outputs_or_loss,
         inputs=input_values,
         grad_outputs=output_grads,
         retain_graph=True,
     )
-
-    # update the gradients for inputs
-    for i, inp in enumerate(input_values):
+    # Update the gradients for inputs
+    for inp, dinput in zip(input_values, dinputs):
         if inp.grad is None:
-            inp.grad = dinputs[i]
+            inp.grad = dinput
         else:
-            inp.grad += dinputs[i]
+            inp.grad += dinput
 
     # stage_outputs_or_loss are not used in backwards after this point, so we can safely remove it from the autograd graph
     # this allows autograd to clear up the graph dedicated for this tensor and free up significant memory
@@ -306,17 +307,17 @@ def stage_backward(
             if isinstance(output_val, torch.Tensor):
                 if not output_val.requires_grad and output_val.grad_fn is None:
                     return
-                assert isinstance(
-                    grad_val, (torch.Tensor, type(None))
-                ), f"Expected Tensor or None gradient but got {type(grad_val)}"
+                assert isinstance(grad_val, (torch.Tensor, type(None))), (
+                    f"Expected Tensor or None gradient but got {type(grad_val)}"
+                )
                 stage_output_tensors.append(output_val)
                 output_grad_tensors.append(grad_val)
             elif isinstance(output_val, (tuple, list)):
                 if grad_val is None:
                     return
-                assert isinstance(
-                    grad_val, (tuple, list)
-                ), f"grad_value expected to have type {type(output_val)} but got {type(grad_val)}"
+                assert isinstance(grad_val, (tuple, list)), (
+                    f"grad_value expected to have type {type(output_val)} but got {type(grad_val)}"
+                )
                 assert len(output_val) == len(grad_val)
                 for ov, gv in zip(output_val, grad_val):
                     extract_tensors_with_grads(
@@ -350,7 +351,8 @@ def stage_backward(
         )
 
         torch.autograd.backward(
-            stage_output_tensors, grad_tensors=output_grad_tensors  # type: ignore[arg-type]
+            stage_output_tensors,
+            grad_tensors=output_grad_tensors,  # type: ignore[arg-type]
         )
 
         # Extract gradients wrt the input values

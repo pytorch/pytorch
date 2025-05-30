@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/SafePyObject.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/forward_grad.h>
 #include <torch/csrc/autograd/saved_variable_hooks.h>
@@ -51,6 +52,15 @@ class TORCH_API SavedVariable {
 
   bool has_hooks() const {
     return (bool)hooks_;
+  }
+
+  // Used by compiled autograd
+  std::optional<std::pair<c10::SafePyObject, c10::SafePyObject>>
+  retrieve_unpack_hook_data() const {
+    if (!hooks_) {
+      return std::nullopt;
+    }
+    return hooks_->retrieve_unpack_hook_data();
   }
 
  private:

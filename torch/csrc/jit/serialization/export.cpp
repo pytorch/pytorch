@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
@@ -414,7 +415,7 @@ class GraphEncoder {
   static constexpr size_t ParamSizeThresholdForExternalStorage = 1024;
 };
 
-onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
+static onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
   switch (at_type) {
     case at::kDouble:
       return onnx::TensorProto_DataType_DOUBLE;
@@ -459,7 +460,7 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
   }
 }
 
-onnx::AttributeProto_AttributeType ATenAttributeKindToOnnxAttributeType(
+static onnx::AttributeProto_AttributeType ATenAttributeKindToOnnxAttributeType(
     AttributeKind at_kind,
     const jit::Symbol name) {
   switch (at_kind) {

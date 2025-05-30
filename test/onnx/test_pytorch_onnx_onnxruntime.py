@@ -12630,12 +12630,12 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         actual_std = np.std(ort_out)
         actual_mean = np.mean(ort_out)
 
-        assert (
-            abs(abs(actual_mean) - expected_mean) <= expected_mean * 0.1
-        ), "the gap of mean between ort outputs and expected one is unacceptable."
-        assert (
-            abs(abs(actual_std) - expected_std) <= expected_std * 0.1
-        ), "the gap of variance between ort outputs and expected one is unacceptable."
+        assert abs(abs(actual_mean) - expected_mean) <= expected_mean * 0.1, (
+            "the gap of mean between ort outputs and expected one is unacceptable."
+        )
+        assert abs(abs(actual_std) - expected_std) <= expected_std * 0.1, (
+            "the gap of variance between ort outputs and expected one is unacceptable."
+        )
 
     @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -12661,12 +12661,12 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         actual_std = np.std(ort_out)
         actual_mean = np.mean(ort_out)
 
-        assert (
-            abs(abs(actual_mean) - expected_mean) <= expected_mean * 0.1
-        ), "the gap of mean between ort outputs and expected one is unacceptable."
-        assert (
-            abs(abs(actual_std) - expected_std) <= expected_std * 0.1
-        ), "the gap of variance between ort outputs and expected one is unacceptable."
+        assert abs(abs(actual_mean) - expected_mean) <= expected_mean * 0.1, (
+            "the gap of mean between ort outputs and expected one is unacceptable."
+        )
+        assert abs(abs(actual_std) - expected_std) <= expected_std * 0.1, (
+            "the gap of variance between ort outputs and expected one is unacceptable."
+        )
 
     @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -12705,15 +12705,15 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         actual_max = np.max(ort_out)
         actual_mean = np.mean(ort_out)
 
-        assert (
-            actual_min >= expected_min
-        ), "the minimum value of ort outputs is out of scope."
-        assert (
-            actual_max <= expected_max
-        ), "the maximum value of ort outputs is out of scope."
-        assert (
-            abs(actual_mean - expected_mean) <= expected_mean * 0.05
-        ), "the mean value of ort outputs is out of scope."
+        assert actual_min >= expected_min, (
+            "the minimum value of ort outputs is out of scope."
+        )
+        assert actual_max <= expected_max, (
+            "the maximum value of ort outputs is out of scope."
+        )
+        assert abs(actual_mean - expected_mean) <= expected_mean * 0.05, (
+            "the mean value of ort outputs is out of scope."
+        )
 
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_sequence_to_int(self):

@@ -356,13 +356,14 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_,
     computed_sizes[static_cast<size_t>(sparse_dim + d)] = values.size(d + 1);
   }
 
-  return at::_sparse_coo_tensor_with_dims_and_tensors(
-      sparse_dim,
-      dense_dim,
-      computed_sizes,
+  return at::native::_sparse_coo_tensor_unsafe(
       indices,
       values,
-      values.options().layout(kSparse),
+      computed_sizes,
+      optTypeMetaToScalarType(options.dtype_opt()),
+      options.layout_opt(),
+      options.device_opt(),
+      options.pinned_memory_opt(),
       is_coalesced);
 }
 
@@ -795,7 +796,7 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
 
   if (t.layout() == at::kSparse) {
     if (!t._nnz()) {
-      auto res = mask.clone().to(t.device(), t.scalar_type());
+      auto res = mask.to(t.device(), t.scalar_type(), /*non_blocking=*/false, /*copy=*/true);
       res._values().zero_();
       return res;
     }

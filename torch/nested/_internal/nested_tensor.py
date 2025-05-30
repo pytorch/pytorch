@@ -107,7 +107,7 @@ class NestedTensor(torch.Tensor):
         stride = values.stride()
         _strides = (ragged_size * stride[r], *stride)
 
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        r = torch.Tensor._make_wrapper_subclass(
             cls,
             _size,
             _strides,
@@ -200,9 +200,17 @@ class NestedTensor(torch.Tensor):
     def _max_seqlen_tensor(self) -> Optional[torch.Tensor]:
         return self._metadata_cache.get("max_seqlen", None)
 
+    @_max_seqlen_tensor.setter
+    def _max_seqlen_tensor(self, val: Optional[torch.Tensor]) -> None:
+        self._metadata_cache["max_seqlen"] = val
+
     @property
     def _min_seqlen_tensor(self) -> Optional[torch.Tensor]:
         return self._metadata_cache.get("min_seqlen", None)
+
+    @_min_seqlen_tensor.setter
+    def _min_seqlen_tensor(self, val: Optional[torch.Tensor]) -> None:
+        self._metadata_cache["min_seqlen"] = val
 
     # These are old private @property accessors that are kept around for internal BC
     # reasons. TODO: Remove these!
@@ -233,7 +241,7 @@ class NestedTensor(torch.Tensor):
         )
         if self.grad_fn:
             grad_fn_str = f", grad_fn={self.grad_fn}"
-        return f"NestedTensor(size={self._size}, offsets={self._offsets}{grad_fn_str}, contiguous={self._lengths is None})"
+        return f"NestedTensor(size={self._size}, offsets={self._offsets}{grad_fn_str}, contiguous={self.is_contiguous()})"
 
     # TODO: Remove this in favor of the default tensor subclass serialization logic.
     # We don't do this today because of https://github.com/pytorch/pytorch/issues/125622.

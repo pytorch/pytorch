@@ -4,19 +4,19 @@
 
 import copy
 from itertools import chain
-from typing import Any, Dict
+from typing import Any
 
 import torch
 import torch.nn as nn
 from torch.distributed._sharded_tensor import ShardedTensor
 from torch.distributed._state_dict_utils import _gather_state_dict
-from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.state_dict import (
     _PG,
     _STATE,
     set_state_dict,
     StateDictOptions,
 )
+from torch.distributed.tensor import DTensor
 
 
 class VerifyStateDictMixin:
@@ -164,7 +164,7 @@ class FusionEmbeddingWithModifier(FusionEmbeddingWithHook):
     # _fqn_modifiers is a private function as a contract between DSD. When users change the state_dict
     # keys, they need to provide a mapping from the new key to the original key. This is used to ensure
     # consistency between the state_dict keys and fqn.
-    def _fqn_modifiers(self) -> Dict[str, str]:
+    def _fqn_modifiers(self) -> dict[str, str]:
         return {
             "weight": "embedding",
         }

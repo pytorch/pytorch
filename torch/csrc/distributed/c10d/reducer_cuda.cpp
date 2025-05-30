@@ -80,7 +80,7 @@ class CudaTimer : public Timer {
   }
 };
 
-C10_REGISTER_TYPED_CLASS(TimerRegistry, c10::kCUDA, CudaTimer);
+C10_REGISTER_TYPED_CLASS(TimerRegistry, c10::kCUDA, CudaTimer)
 
 } // namespace
 } // namespace c10d

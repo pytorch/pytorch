@@ -1,6 +1,7 @@
 import collections
 import copy
 import dataclasses
+import functools
 import inspect
 import logging
 import threading
@@ -24,6 +25,7 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.experimental.symbolic_shapes import guard_scalar
+from torch.types import IntLikeType
 
 
 if TYPE_CHECKING:
@@ -70,9 +72,9 @@ log = logging.getLogger("torch._dynamo")
 TMADescriptorMetadata = dict[
     str,  # kernel parameter name
     tuple[
-        list[Union[int, SymInt]],  # dims
-        list[Union[int, SymInt]],  # block_dims
-        Union[int, SymInt],  # element_size
+        list[IntLikeType],  # dims
+        list[IntLikeType],  # block_dims
+        IntLikeType,  # element_size
     ],
 ]
 
@@ -156,6 +158,11 @@ class Op:
     fn_call_name: Optional[str]
     args: list[Union[Param, Intermediate]]
     ret: Intermediate = dataclasses.field(repr=False)
+    # used for scf.yield: see [Note: scf.yield fix-up]
+    sub_idx: Optional[int] = None
+    # used for tt.elementwise_inline_asm
+    # `is_pure = True` assumes the asm block has no side-effects
+    is_pure: bool = False
 
     def __post_init__(self) -> None:
         if self.name == "tt.call":
@@ -252,8 +259,28 @@ def generate_ttir(
                 get_triton_attrs_descriptor_version()
                 == TritonAttrsDescriptorVersion.V4_DICT
             )
+            # specialize_impl switched to create_specialize_impl in https://github.com/triton-lang/triton/pull/6099
+            if hasattr(triton.runtime.jit, "create_specialize_impl"):
+                try:
+                    # Latest versions of Triton take specialize_extra as an arg to create_specialize_impl
+                    specialize_impl = triton.runtime.jit.create_specialize_impl(
+                        specialize_extra=backend.get_arg_specialization
+                    )
+                except TypeError:  # Unknown arg `specialize_extra`
+                    # Older versions of Triton take specialize_extra as an arg to specialize_impl
+                    specialize_impl = functools.partial(
+                        triton.runtime.jit.create_specialize_impl(),
+                        specialize_extra=backend.get_arg_specialization,
+                    )
+            else:
+                from triton.runtime.jit import specialize_impl as specialize_impl_orig
+
+                specialize_impl = functools.partial(
+                    specialize_impl_orig,
+                    specialize_extra=backend.get_arg_specialization,
+                )
+
             from triton._utils import find_paths_if, get_iterable_path
-            from triton.runtime.jit import specialize_impl
 
             # logic is copied from: binder = create_function_from_signature(self.signature, self.params, backend)
             attrvals = []
@@ -263,7 +290,6 @@ def generate_ttir(
                 else:
                     spec = specialize_impl(
                         arg,
-                        specialize_extra=backend.get_arg_specialization,
                         is_const=kp.is_const,
                         specialize_value=not kp.do_not_specialize,
                         align=not kp.do_not_specialize_on_alignment,
@@ -505,9 +531,59 @@ def ttir_to_functions(
                             op_stack[parent_block_id][op_result].extend(child_ops)
 
                 scf_results = [Intermediate(idx) for idx in result_ids]
-                for scf_result in scf_results:
+
+                if return_ops and all(
+                    (op.name == "scf.yield" and len(result_ids) == len(op.args))
+                    for op in return_ops
+                ):
+                    # [Note: scf.yield fix-up]
+                    #
+                    # TL;DR: if our scf.yield takes N args, then we'll create N scf.yield ops to handle each of the
+                    # args.
+                    #
+                    #      **Context**:
+                    # During mutation analysis, the analysis pass will identify mutating ops (e.g. tt.store)
+                    # and then DFS upwards towards the parameters of the function. Specifically, the analysis pass
+                    # looks at the mutated arg in tt.store; then looks for its source ops; and then recurses on the
+                    # arguments to each of the source ops.
+                    #
+                    # In the case of scf.if/scf.for, we may have multiple return ops, each passed as an arg
+                    # to scf.yield:
+                    #
+                    # %18:2 = scf.if %... -> (!tt.ptr<f32>, !tt.ptr<f32>) {
+                    #   ...
+                    #   scf.yield %1, %2
+                    # } else {
+                    #   scf.yield %3, %4
+                    # }
+                    #
+                    # And for each of the returns of the scf.if, we'd naively assign the source op of each of the
+                    # return values to be the scf.yields. But the scf.yields take _all_ the returns as arguments.
+                    # Therefore, if _any_ of the return values of the scf.if are mutated, then the analysis pass
+                    # would mark _all_ of the yield args as mutated.
+                    #
+                    #      **Solution**:
+                    # For the purposes of this analysis pass, we create N yield ops - one for each
+                    # return-val/yield-arg. In the example above, we'll have two scf.yield's for each branch of the
+                    # scf.if.
+
                     for return_op in return_ops:
-                        op_stack[parent_block_id][scf_result].append(return_op)
+                        for i, (scf_result, yield_arg) in enumerate(
+                            zip(scf_results, return_op.args)
+                        ):
+                            sub_yield_op = Op(
+                                return_op.name,
+                                return_op.fn_call_name,
+                                [yield_arg],
+                                return_op.ret,
+                                sub_idx=i,
+                            )
+                            op_stack[parent_block_id][scf_result].append(sub_yield_op)
+
+                else:
+                    for scf_result in scf_results:
+                        for return_op in return_ops:
+                            op_stack[parent_block_id][scf_result].append(return_op)
             else:
                 raise RuntimeError(
                     f"Unknown blocked function: {name}. Can't capture the TTIR."
@@ -520,14 +596,22 @@ def ttir_to_functions(
                 Intermediate(operand) for operand in operand_ids
             ]
             block_ops = op_stack[parent_block_id]
+
+            is_pure = False
+            # Handle the case for tt.elementwise_inline_asm to set `is_pure` for mutation analysis
+            if name == "tt.elementwise_inline_asm":
+                is_pure = op.get_bool_attr("pure")
+
             if result_ids:
                 for result_id in result_ids:
                     res = Intermediate(result_id)
-                    block_ops[res].append(Op(name, callee, args, res))
+                    block_ops[res].append(Op(name, callee, args, res, is_pure=is_pure))
             else:
                 next_fake_intermediate -= 1
                 fake_res = Intermediate(next_fake_intermediate)
-                block_ops[fake_res].append(Op(name, callee, args, fake_res))
+                block_ops[fake_res].append(
+                    Op(name, callee, args, fake_res, is_pure=is_pure)
+                )
 
     ttir_module.walk(mlir_to_functions)
 
@@ -588,7 +672,14 @@ def analyze_kernel_mutations(
     ops = functions[fn_name]
     for op_list in ops.values():
         for op in op_list:
+            # If we encounter an operation with effects that cannot be reliably analyzed
+            # (e.g. `tt.elementwise_inline_asm`), we assume it does not mutate any input parameters.
             if op.name in UNKNOWN_OPS:
+                if op.name == "tt.elementwise_inline_asm" and op.is_pure:
+                    log.warning(
+                        "TTIR mutation analysis: Skipping pure tt.elementwise_inline_asm op (is_pure=True)"
+                    )
+                    continue
                 raise RuntimeError(
                     f"ttir analysis hit an op we do not know how to analyze: {op.name}"
                 )
@@ -1383,7 +1474,13 @@ class TritonHOPifier:
             new_var = type(variable)(new_kernel, None, variable.grid)
             return self.call_triton_kernel(new_var, args, kwargs, tx)
 
-        SPECIAL_CONFIG_NAMES = {"num_warps", "num_stages", "num_ctas"}
+        SPECIAL_CONFIG_NAMES = {
+            "num_warps",
+            "num_stages",
+            "num_ctas",
+            "num_consumer_groups",
+            "num_buffers_warp_spec",
+        }
 
         # move special config names to configs out of kwargs
         special_kwargs = {}
@@ -1653,6 +1750,27 @@ class TracingTritonHOPifier(TritonHOPifier):
         # normalize to tuple
         return tuple(grid)
 
+    def store_non_graphable_args(
+        self,
+        combined_args: dict[str, Any],
+    ) -> tuple[dict, int]:
+        """
+        Some args cannot be stored in the FX graph.
+        Put them in the side table.
+        """
+
+        def is_graphable(val: Any) -> bool:
+            return isinstance(val, (fx.node.base_types, fx.Node))
+
+        non_graphable_args = {
+            k: v for k, v in combined_args.items() if not is_graphable(v)
+        }
+        graphable_args = {k: v for k, v in combined_args.items() if is_graphable(v)}
+
+        constant_args_idx = kernel_side_table.add_constant_args(non_graphable_args)
+
+        return graphable_args, constant_args_idx
+
     def call_HOP(
         self,
         variable: "TraceableTritonKernelWrapper",
@@ -1663,15 +1781,8 @@ class TracingTritonHOPifier(TritonHOPifier):
         assert tx is None
         assert isinstance(variable, TraceableTritonKernelWrapper)
 
-        def is_graphable(val: Any) -> bool:
-            return isinstance(val, fx.node.base_types)
+        graphable_args, constant_args_idx = self.store_non_graphable_args(combined_args)
 
-        non_graphable_args = {
-            k: v for k, v in combined_args.items() if not is_graphable(v)
-        }
-        graphable_args = {k: v for k, v in combined_args.items() if is_graphable(v)}
-
-        constant_args_idx = kernel_side_table.add_constant_args(non_graphable_args)
         assert isinstance(variable.kernel_idx, int)
         return triton_kernel_wrapper_mutation(
             kernel_idx=variable.kernel_idx,

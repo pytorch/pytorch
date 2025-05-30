@@ -5,7 +5,8 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
+from torch.onnx._internal._lazy_import import onnxscript_ir as ir
+from torch.onnx._internal.exporter import _constants
 
 
 if TYPE_CHECKING:
@@ -89,7 +90,9 @@ def rename_axis(model: ir.Model, rename_mapping: dict[str, str]) -> None:
             value.shape = ir.Shape(new_shape)
 
 
-def add_torchlib_common_imports(model: ir.Model) -> None:
+def add_torchlib_common_imports(
+    model: ir.Model, opset_version: int = _constants.TORCHLIB_OPSET
+) -> None:
     """Hack to add torchlib common imports to the model."""
 
     try:
@@ -98,9 +101,11 @@ def add_torchlib_common_imports(model: ir.Model) -> None:
 
         model.opset_imports["pkg.onnxscript.torch_lib.common"] = 1
         rank_func = ir.serde.deserialize_function(common_ops.Rank.to_function_proto())
+        rank_func.opset_imports[""] = opset_version
         is_scalar_func = ir.serde.deserialize_function(
             common_ops.IsScalar.to_function_proto()
         )
+        is_scalar_func.opset_imports[""] = opset_version
         model.functions[rank_func.identifier()] = rank_func
         model.functions[is_scalar_func.identifier()] = is_scalar_func
     except Exception:
@@ -115,8 +120,7 @@ def _maybe_set_opset_version(
         # Already set
         return
     if domain == _ONNX_DOMAIN:
-        # Set the default opset version for ONNX operators
-        opset_imports[domain] = onnxscript_apis.torchlib_opset_version()
+        opset_imports[domain] = _constants.TORCHLIB_OPSET
         return
     if version is None:
         # We don't know the opset version, so set it to 1

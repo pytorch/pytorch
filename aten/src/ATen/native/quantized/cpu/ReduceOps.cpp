@@ -26,7 +26,7 @@ DEFINE_DISPATCH(qmean_inner_dim_stub);
 DEFINE_DISPATCH(qstd_inner_dim_stub);
 
 // If mean/std is taken in the innermost dims, the fast path can be used.
-inline bool is_innnermost_dim(
+static inline bool is_innnermost_dim(
     const Tensor& self,
     OptionalIntArrayRef opt_dim) {
   if (!opt_dim.has_value()) {
@@ -43,7 +43,7 @@ inline bool is_innnermost_dim(
   return is_innermost;
 }
 
-inline bool is_mean_inner_dim_fast_path(
+static inline bool is_mean_inner_dim_fast_path(
     const Tensor& self,
     OptionalIntArrayRef opt_dim,
     std::optional<ScalarType> opt_dtype) {
@@ -172,7 +172,7 @@ Tensor mean_quantized_cpu(
 }
 
 // qstd
-inline bool is_std_inner_dim_fast_path(
+static inline bool is_std_inner_dim_fast_path(
     const Tensor& self,
     OptionalIntArrayRef dim,
     const std::optional<Scalar>& correction) {

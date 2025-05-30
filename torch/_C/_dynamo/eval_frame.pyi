@@ -1,6 +1,6 @@
 import enum
 import types
-from typing import Literal, overload
+from typing import overload
 
 from torch._dynamo.types import DynamoCallback, DynamoGuardHook
 
@@ -9,7 +9,9 @@ def set_skip_guard_eval_unsafe(value: bool) -> bool: ...
 def get_eval_frame_callback() -> DynamoCallback: ...
 def reset_code(code: types.CodeType) -> None: ...
 def unsupported(obj1: object, obj2: object) -> object: ...
-def skip_code(code: types.CodeType) -> None: ...
+def set_code_exec_strategy(
+    code: types.CodeType, strategy: _FrameExecStrategy
+) -> None: ...
 def set_guard_error_hook(hook: DynamoGuardHook) -> None: ...
 def raise_sigtrap() -> None: ...
 
@@ -21,10 +23,10 @@ class _CacheEntry:
 class _ExtraState:
     def invalidate(self, cache_entry: _CacheEntry, guard_manager: object) -> None: ...
 
-class _FrameAction(enum.Enum):
-    DEFAULT: Literal[0]
-    SKIP: Literal[1]
-    RUN_ONLY: Literal[2]
+class _FrameAction(enum.IntEnum):
+    DEFAULT = 0
+    SKIP = 1
+    RUN_ONLY = 2
 
 class _FrameExecStrategy:
     cur_action: _FrameAction

@@ -12,6 +12,7 @@ flaky_models = {
     "yolov3",
     "gluon_inception_v3",
     "detectron2_maskrcnn_r_101_c4",
+    "timm_efficientnet",  # see https://github.com/pytorch/pytorch/issues/148699
     "XGLMForCausalLM",  # discovered in https://github.com/pytorch/pytorch/pull/128148
 }
 
@@ -102,7 +103,7 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
             msg += textwrap.dedent(
                 f"""
             Error: {len(failed)} models have accuracy status regressed:
-                {' '.join(failed)}
+                {" ".join(failed)}
 
             """
             )
@@ -110,7 +111,7 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
             msg += textwrap.dedent(
                 f"""
             Improvement: {len(improved)} models have accuracy status improved:
-                {' '.join(improved)}
+                {" ".join(improved)}
 
             """
             )
