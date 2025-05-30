@@ -141,7 +141,7 @@ jobs:
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==78.1.0 pybind11==2.13.1 auditwheel wheel
           (
             set +e
-            docker exec -t "${container_name}" command -v pip
+            docker exec -t "${container_name}" bash -c "command -v pip ; exit $?"
           )
           has_pip=$?
           if $has_pip ; then
