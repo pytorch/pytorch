@@ -25,7 +25,7 @@ from torch.distributed.fsdp import (
     OffloadPolicy,
     register_fsdp_forward_method,
 )
-from torch.distributed.tensor import DTensor, init_device_mesh, Shard
+from torch.distributed.tensor import DTensor, init_device_mesh, Replicate, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -529,6 +529,39 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         self.assertEqual(ref_root_loss, root_loss)
         self.assertEqual(ref_nonroot_loss, nonroot_loss)
         self.assertEqual(ref_model(inp).sum(), model(inp).sum())
+
+    @skip_if_lt_x_gpu(4)
+    def test_root_reshard_after_forward(self):
+        self.run_subtests(
+            {
+                "reshard_after_forward": [True, False, 2],
+            },
+            self._test_root_reshard_after_forward,
+        )
+
+    def _test_root_reshard_after_forward(self, reshard_after_forward: Union[bool, int]):
+        torch.manual_seed(42)
+        lin_dim = 32
+        model = MLP(lin_dim, torch.device("cpu"))
+        fully_shard(model.in_proj, reshard_after_forward=reshard_after_forward)
+        fully_shard(model, reshard_after_forward=reshard_after_forward)
+        for param in model.parameters():
+            self.assertTrue(isinstance(param, DTensor))
+        inp = torch.randn((8, lin_dim), device=torch.device("cuda"))
+        loss = model(inp).sum()
+        for param in model.parameters():
+            if reshard_after_forward is True:
+                self.assertTrue(isinstance(param, DTensor))
+            elif reshard_after_forward is False:
+                self.assertFalse(isinstance(param, DTensor))
+            else:
+                self.assertTrue(isinstance(param, DTensor))
+                self.assertEqual(param.device_mesh.ndim, 2)
+                placements = param.placements
+                self.assertEqual(len(placements), 2)
+                self.assertEqual(placements[0], Replicate())
+                self.assertEqual(placements[1], Shard(0))
+        loss.backward()
 
     @skip_if_lt_x_gpu(2)
     def test_multi_forward_module(self):
