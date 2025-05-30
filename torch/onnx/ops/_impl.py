@@ -48,7 +48,7 @@ def rotary_embedding(
     if len(input.shape) == 3:
         hidden_size = input.shape[2]
         assert num_heads != 0
-        head_size = int(hidden_size / num_heads)
+        head_size = hidden_size // num_heads
         new_shape = [batch_size, sequence_length, num_heads, head_size]
         input = torch.reshape(input, new_shape)
     assert len(input.shape) == 4
@@ -60,7 +60,7 @@ def rotary_embedding(
         rotary_embedding_dim = head_size
     x_rotate = input[:, :, :, :rotary_embedding_dim]
     x_not_rotate = input[:, :, :, rotary_embedding_dim:]
-    rotary_embedding_dim_half = int(rotary_embedding_dim / 2)
+    rotary_embedding_dim_half = rotary_embedding_dim // 2
 
     # Retrieve sin and cos caches using position ids
     if position_ids is not None:
