@@ -69,6 +69,7 @@ from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
 from .utils import (
     ceildiv,
+    do_bench_using_profiling,
     FakeIndentedBuffer,
     get_dtype_size,
     is_gpu,
@@ -1777,6 +1778,9 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None
+        if config.profile_bandwidth_with_do_bench_using_profiling:
+            algo = self.bmreq.make_run_fn(*args, out=out)
+            return do_bench_using_profiling(algo)
         return self.bmreq.benchmark(*args, out=out)
 
     def precompile(self):
@@ -1860,6 +1864,8 @@ class ExternKernelCaller(ChoiceCaller):
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
+            if config.profile_bandwidth_with_do_bench_using_profiling:
+                return do_bench_using_profiling(lambda: algo(*args))
             return benchmarker.benchmark(algo, args, {})
 
     def to_callable(self):
@@ -2065,6 +2071,24 @@ def create_precompile_key(
     )
 
 
+# Args to FeedbackFunctions
+# timings: mapping from choices to the benchmark time
+# name: name of the op
+# input_nodes: list of input ir.py Nodes
+# choices: list of choices
+# profiled time: Callable that returns a dict mapping from choices to the profiled time
+FeedbackFunction = Callable[
+    [
+        dict[ChoiceCaller, float],
+        str,
+        list[Any],
+        list[ChoiceCaller],
+        Callable[[], dict[ChoiceCaller, float]],
+    ],
+    None,
+]
+
+
 class AlgorithmSelectorCache(PersistentCache):
     """
     A persistent cache for algorithm selection results used in autotuning of GEMMs
@@ -2085,11 +2109,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # of a particular key
         self.precompile_cache: dict[str, Callable[[], None]] = {}
         # list of callbacks that are called after benchmarking
-        self.feedback_saver_fns: list[
-            Callable[
-                [dict[ChoiceCaller, float], str, list[Any], list[ChoiceCaller]], None
-            ]
-        ] = []
+        self.feedback_saver_fns: list[FeedbackFunction] = []
 
         clear_on_fresh_inductor_cache(self)
 
@@ -2120,9 +2140,6 @@ class AlgorithmSelectorCache(PersistentCache):
             return_multi_template = False
 
         # TODO - assert that we have not mutating kernels here
-
-        # TODO(nmacchioni): remove once CI tests are fixed
-        choices = [choice for choice in choices if choice is not None]
 
         if config.test_configs.autotune_choice_name_regex is not None:
             choices = [
@@ -2236,8 +2253,28 @@ class AlgorithmSelectorCache(PersistentCache):
                     name, input_nodes, timings, autotune_elapse, precompile_elapse
                 )
 
+            def profiler_bench_function():
+                # we're not running through the normal caching autotuner method here because we want to avoid returning
+                # the cached value.
+                # Avoid benchmarking in a separate process because it's not easy to signal to the TuningProcess that we
+                # should use the profiler.
+                with config.patch(
+                    profile_bandwidth_with_do_bench_using_profiling=True,
+                    autotune_in_subproc=False,
+                ):
+                    return self.make_benchmark_fn(
+                        choices, input_nodes, layout, input_gen_fns
+                    )(choices)
+
             for feedback_fn in self.feedback_saver_fns:
-                feedback_fn(timings, name, input_nodes, choices)
+                # re-benchmarking the same choices with profiler is a bit expensive, so pass it in as a thunk.
+                feedback_fn(
+                    timings,
+                    name,
+                    input_nodes,
+                    choices,
+                    profiler_bench_function,
+                )
 
             return timings
 
@@ -2917,12 +2954,7 @@ class AlgorithmSelectorCache(PersistentCache):
             ),
         )
 
-    def add_feedback_saver(
-        self,
-        fn: Callable[
-            [dict[ChoiceCaller, float], str, list[Any], list[ChoiceCaller]], None
-        ],
-    ):
+    def add_feedback_saver(self, fn: FeedbackFunction):
         self.feedback_saver_fns.append(fn)
 
 
@@ -2946,7 +2978,7 @@ def autotune_select_algorithm(*args, **kwargs):
 
 
 def add_feedback_saver(
-    fn: Callable[[dict[ChoiceCaller, float], str, list[Any], list[ChoiceCaller]], None],
+    fn: FeedbackFunction,
 ):
     global _ALGORITHM_SELECTOR_CACHE
     if _ALGORITHM_SELECTOR_CACHE is None:
