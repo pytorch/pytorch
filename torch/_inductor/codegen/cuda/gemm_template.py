@@ -436,7 +436,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         )
         self.alpha = alpha
         self.beta = beta
-        assert len(input_nodes) == 2 or len(input_nodes) == 3 or len(input_nodes) == 4
+        assert len(input_nodes) >= 2 and len(input_nodes) <= 5
         assert self._are_inputs_layout_compatible(
             [node.get_layout() for node in input_nodes]
         )
@@ -1042,8 +1042,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         # to make op mutable without affecting others
         op = copy.deepcopy(op)
-        if Bias is not None:
-            assert Bias.get_layout().dtype == X.get_layout().dtype
+        is_scaled_mm = len(self.input_nodes) in (4, 5)
+        if Bias is not None and not is_scaled_mm:
+            assert Bias.get_dtype() == X.get_dtype()
             # This might have been set to void during filtering, when the assumption was still that there's no C
             # operand
             op.C.element = op.A.element
@@ -1064,7 +1065,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 op = self.swap_XW(op)
                 should_swap_xw = True
 
-        is_scaled_mm = len(self.input_nodes) == 4
         if epilogue_nodes or is_scaled_mm:
             if epilogue_nodes:
                 (
@@ -1103,6 +1103,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 ) = scaled_mm_evt(
                     self.input_nodes[2].get_name(),
                     self.input_nodes[3].get_name(),
+                    Bias.get_name() if Bias else None,
                     Y.get_name(),
                 )
 
@@ -1128,8 +1129,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             inputs = [
                 X,
                 W,
-                Bias,
                 *epilogue_inputs,  # type: ignore[list-item]
+                Bias,
                 Y,
                 *extra_inputs,
             ]
@@ -1308,7 +1309,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         Returns:
             bool: True if layouts are GEMM compatible, otherwise False.
         """
-        assert len(layouts) == 2 or len(layouts) == 3 or len(layouts) == 4
+        assert len(layouts) >= 2 and len(layouts) <= 5
         # Check if A and B are compatible
         A_layout, B_layout = layouts[:2]
         if len(A_layout.size) < 1:
@@ -1488,7 +1489,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         self,
         op: "cutlass_gemm_op.GemmOperation" = None,  # type: ignore[name-defined]  # noqa: F821
     ) -> tuple[Optional[Buffer], list[Optional[Buffer]], list[str]]:
-        Bias = None if len(self.input_nodes) in (2, 4) else self.input_nodes[2]
+        Bias = self.input_nodes[2] if len(self.input_nodes) == 3 else None
         inputs: list[Optional[Buffer]] = []
         names: list[str] = []
         return (Bias, inputs, names)
