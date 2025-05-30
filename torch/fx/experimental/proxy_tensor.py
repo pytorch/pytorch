@@ -494,7 +494,9 @@ def maybe_enable_thunkify() -> Generator[None, None, None]:
 # grad_fn, _base (_base actually may be set due to recursive call to
 # ADInplaceOrView, but you shouldn't rely on it.)
 def set_meta(proxy: Proxy, val: _ExtractValType) -> Proxy:
-    proxy.node.meta["val"] = extract_val(val, include_real=(proxy.node.op == "placeholder"))
+    proxy.node.meta["val"] = extract_val(
+        val, include_real=(proxy.node.op == "placeholder")
+    )
 
     with _enable_thunkify(proxy.tracer):  # type: ignore[arg-type]
         # Best effort tensor_meta setting; prefer using val!
