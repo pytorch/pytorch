@@ -3180,6 +3180,7 @@ def get_ld_library_path() -> str:
     return path
 
 
+
 def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
     from torch._inductor.codegen.wrapper import SubgraphPythonWrapperCodegen
 
@@ -3276,3 +3277,49 @@ def is_mkldnn_fp16_supported(device_type: str) -> bool:
         # match "xpu", "xpu:0", "xpu:1", etc.
         return True
     return False
+
+def tabulate_2d(elements: Sequence[Sequence[T]], headers: Sequence[T]) -> str:
+    widths = [len(str(e)) for e in headers]
+    for row in elements:
+        assert len(row) == len(headers)
+        for i, e in enumerate(row):
+            widths[i] = max(widths[i], len(str(e)))
+    lines = []
+    lines.append("|".join(f" {h:{w}} " for h, w in zip(headers, widths)))
+    #              widths          whitespace      horizontal separators
+    total_width = sum(widths) + (len(widths) * 2) + (len(widths) - 1)
+    lines.append("-" * total_width)
+    for row in elements:
+        lines.append("|".join(f" {e:{w}} " for e, w in zip(row, widths)))
+    return "\n".join(lines)
+
+
+def zip_dicts(
+    dict1: dict[KeyType, ValType],
+    dict2: dict[KeyType, ValType],
+    d1_default: ValType = None,
+    d2_default: ValType = None,
+) -> Generator[tuple[KeyType, ValType, ValType], None, None]:
+    """
+    Zip two dictionaries together, replacing missing keys with default values.
+
+    Args:
+        dict1 (dict): The first dictionary.
+        dict2 (dict): The second dictionary.
+        d1_default (Any): the default value for the first dictionary
+        d2_default (Any): the default value for the second dictionary
+
+    Yields:
+        tuple: A tuple containing the key, the value from dict1 (or d1_default if missing),
+               and the value from dict2 (or d2_default if missing).
+    """
+    # Find the union of all keys
+    all_keys = OrderedSet(dict1.keys()) | OrderedSet(dict2.keys())
+
+    # Iterate over all keys
+    for key in all_keys:
+        # Get the values from both dictionaries, or default if missing
+        value1 = dict1.get(key, d1_default)
+        value2 = dict2.get(key, d2_default)
+
+        yield key, value1, value2
