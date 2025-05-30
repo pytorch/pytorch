@@ -236,7 +236,14 @@ def hop_schema_from_fx_node(node):
         elif isinstance(
             arg, (torch.fx.immutable_collections.immutable_list, list, tuple)
         ):
-            example_inputs.append([_collect_example_val(x) for x in arg])
+            example_inputs.append(
+                [
+                    _collect_example_val(x)
+                    if isinstance(x, (torch.fx.Node, torch.fx.node.Node))
+                    else x
+                    for x in arg
+                ]
+            )
         else:
             raise RuntimeError(f"Unsupported arg type {type(arg)}")
 

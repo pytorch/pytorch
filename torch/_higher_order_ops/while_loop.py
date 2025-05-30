@@ -372,7 +372,12 @@ def while_loop_fake_tensor_mode(
         #   body_fn(it, nz):
         #     return it+1. nz.sin() + 1,
         # There's no new unbacked symints allocated in subgraph, so we're safe.
-        with mode.shape_env.ignore_fresh_unbacked_symbols():
+        ctx = (
+            contextlib.nullcontext()
+            if mode.shape_env is None
+            else mode.shape_env.ignore_fresh_unbacked_symbols()
+        )
+        with ctx:
             # body_fn return output with the same pytree and tensor meta data as carried_inputs
             # so we could just return the output after one iteration.
             body_outs = body_fn(*carried_inputs, *additional_inputs)
