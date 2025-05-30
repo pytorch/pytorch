@@ -113,9 +113,9 @@ class MpsMemoryLeakCheck:
         self.caching_allocator_before = torch.mps.current_allocated_memory()
         self.driver_before = torch.mps.driver_allocated_memory()
 
-    def __exit__(self, exec_type, exec_value, traceback):
+    def __exit__(self, exc_type, exc_value, traceback):
         # Don't check for leaks if an exception was thrown
-        if exec_type is not None:
+        if exc_type is not None:
             return
         # Compares caching allocator before/after statistics
         # An increase in allocated memory is a discrepancy indicating a possible memory leak
@@ -6824,6 +6824,39 @@ class TestMPS(TestCaseMPS):
         helper((2, 3, 3), -1, [1, 2])
         helper((), 0, [0])
         helper((5), 0, [])
+
+    def test_index_copy_non_contiguous(self):
+        def helper(shape, dim, index):
+            dest_cpu = torch.randn(shape)
+            dest = dest_cpu.clone().to('mps')
+
+            dest_cpu = dest_cpu.transpose(0, 1)
+            dest = dest.transpose(0, 1)
+            dim = 1 if dim == 0 else 0 if dim == 1 else dim
+
+            src_shape = list(dest_cpu.shape)
+            src_shape[dim] = len(index)
+            src_cpu = torch.randn(src_shape)
+            src = src_cpu.clone().to('mps')
+
+            idx_cpu = torch.tensor(index, dtype=torch.long)
+            idx_mps = idx_cpu.clone().to('mps')
+
+            dest_cpu.index_copy_(dim, idx_cpu, src_cpu)
+            dest.index_copy_(dim, idx_mps, src)
+            self.assertEqual(dest, dest_cpu)
+
+        test_cases = [
+            ((2, 8, 4, 5), 0, [1]),
+            ((8, 8, 4, 5), 0, [0, 3, 2, 7, 6]),
+            ((2, 8, 4, 5), 1, [0, 3, 2, 7, 6]),
+            ((2, 8, 4, 5), 2, [3, 0, 1]),
+            ((2, 8, 4, 5), 3, [2, 3, 0]),
+            ((2, 3, 3), -1, [1, 2])
+        ]
+
+        for args in test_cases:
+            helper(*args)
 
     def test_index_select_scalar(self):
         def helper(value, dim, index, idx_dtype=torch.int32):
