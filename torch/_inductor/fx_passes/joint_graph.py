@@ -5,6 +5,7 @@ import logging
 import operator
 import typing
 from collections import Counter
+from collections.abc import Sequence
 from typing import Any, Union
 
 import torch
@@ -13,10 +14,7 @@ import torch.utils._pytree as pytree
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch._inductor.utils import get_gpu_type
-from torch.fx.experimental.symbolic_shapes import (
-    _guard_sizes_oblivious,
-    statically_known_true,
-)
+from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
@@ -241,6 +239,40 @@ class UniformValueConstantFolder(ConstantFolder):
                 aten.slice,
             ]
         )
+
+        self._add_peephole_patterns()
+
+    def _add_peephole_patterns(self) -> None:
+        """
+        Add peephole patterns for nodes where we can infer constant value even if some inputs
+        of the node are unknown.
+        """
+        for op in itertools.chain(
+            self.module.graph.find_nodes(  # type: ignore[operator, union-attr]
+                op="call_function", target=torch.ops.aten.mul.Tensor
+            ),
+            self.module.graph.find_nodes(  # type: ignore[operator, union-attr]
+                op="call_function", target=torch.ops.aten.mul.Scalar
+            ),
+        ):
+            tensor_val = op.meta.get("val", None)
+            if not isinstance(tensor_val, torch.Tensor):
+                continue
+
+            def is_zero_int(arg: Any) -> bool:
+                return isinstance(arg, int) and arg == 0
+
+            if not any(is_zero_int(a) for a in op.args):
+                continue
+
+            t = torch.full(
+                [1],  # shape
+                0,  # value
+                dtype=tensor_val.dtype,
+                device=tensor_val.device,
+                pin_memory=False,
+            )
+            self.add_node_replacement(op, t)
 
     def _support_dynamic_shape(self):
         return True
@@ -661,6 +693,21 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
         match.erase_nodes()
 
 
+def definitely_equal(
+    lhs_sizes: Sequence[Union[torch.SymInt, bool]],
+    rhs_sizes: Sequence[Union[torch.SymInt, bool]],
+) -> bool:
+    """
+    Leverage guard_or_false to compare if two lists of int/symint are equal.
+    Useful to compare sizes, strides etc.
+    """
+
+    return len(lhs_sizes) == len(rhs_sizes) and all(
+        guard_or_false(lhs_item == rhs_item)
+        for lhs_item, rhs_item in zip(lhs_sizes, rhs_sizes)
+    )
+
+
 @register_graph_pattern(
     CallFunction(torch.ops.aten.view.default, KeywordArg("arg"), KeywordArg("size")),
     pass_dict=patterns,
@@ -669,7 +716,7 @@ def pointless_view(match: Match, arg, size):
     """Remove no-op view"""
     node = match.output_node()
     arg_size = list(node.args[0].meta["val"].shape)  # type: ignore[union-attr]
-    if _guard_sizes_oblivious(size, arg_size):
+    if definitely_equal(size, arg_size):
         node.replace_all_uses_with(node.args[0])  # type: ignore[arg-type]
         match.erase_nodes()
 
@@ -688,7 +735,7 @@ def pointless_view_pair(match: Match, arg, size1, size2):
     """
     node = match.output_node()
     arg_size = list(arg.meta["val"].shape)
-    if _guard_sizes_oblivious(arg_size, size2):
+    if definitely_equal(arg_size, size2):
         node.replace_all_uses_with(arg)
         match.erase_nodes()
 
