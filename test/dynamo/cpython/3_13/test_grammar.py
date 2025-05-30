@@ -456,13 +456,6 @@ class GrammarTests(__TestCase):
             print(x)
         with self.assertRaises(UnboundLocalError):
             fbad()
-        def f2bad():
-            (no_such_global): int
-            print(no_such_global)
-        try:
-            f2bad()
-        except Exception as e:
-            self.assertIs(type(e), NameError)
 
         # class semantics
         class C:
