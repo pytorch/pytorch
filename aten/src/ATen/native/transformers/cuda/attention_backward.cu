@@ -24,6 +24,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/zeros_like.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/_flash_attention_backward.h>
 #include <ATen/ops/_flash_attention_backward_native.h>
@@ -964,7 +965,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
           scale,
           std::nullopt);  // num_split_keys
   return std::make_tuple(
-      grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2), grad_bias);
+      grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2), std::move(grad_bias));
   };
 
   // process in chunks if batch size exceeds maximum
@@ -982,7 +983,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
       for (int i = 1; i < dim; i++) {
         sizes.push_back(tensor.size(i));
       }
-      return at::empty_strided(sizes, tensor.strides(), tensor.options());
+      return at::empty_strided(std::move(sizes), tensor.strides(), tensor.options());
     };
 
     if (grad_input_mask[0]) {
