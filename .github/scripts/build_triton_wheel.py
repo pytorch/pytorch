@@ -102,7 +102,7 @@ def build_triton(
             print("ROCm libraries setup for triton installation...")
 
         check_call(
-            [sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir, env=env
+            [sys.executable, "../setup.py", "bdist_wheel"], cwd=triton_pythondir, env=env
         )
 
         whl_path = next(iter((triton_pythondir / "dist").glob("*.whl")))
