@@ -33,7 +33,6 @@ from torch.testing._internal.common_utils import (
     IS_S390X,
     IS_ARM64,
     parametrize,
-    skipIfTorchDynamo,
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import (
