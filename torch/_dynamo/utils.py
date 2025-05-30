@@ -726,7 +726,7 @@ def dynamo_timed(
         time_spent_ns = end_ns - start_ns
         compilation_time_metrics[key].append(time_spent_ns / 1e9)
         chromium_log.log_event_end(
-            event_name, end_ns, {}, start_ns, log_pt2_compile_event, compile_id
+            event_name, end_ns, {}, start_ns, log_pt2_compile_event, compile_id,
         )
         if dynamo_compile_column_us:
             # TODO: the events that we capture in calculate_time_spent() seem a little
