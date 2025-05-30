@@ -1719,7 +1719,10 @@ class Tensor(torch._C.TensorBase):
                 "Can't export tensors with layout other than torch.strided"
             )
 
-        if self.device.type == "cuda" and self.device != torch.cuda.current_device():
+        if (
+            self.device.type == "cuda"
+            and self.device.index != torch.cuda.current_device()
+        ):
             raise BufferError(
                 "Can't export tensors on a different CUDA device. "
                 f"Expected: {self.device}. "
@@ -1737,20 +1740,16 @@ class Tensor(torch._C.TensorBase):
             is_rocm = torch.version.hip is not None
             is_cuda = not is_rocm
 
-            if (
-                stream is None
-                or (is_rocm and stream == 0)
-                or (is_cuda and stream == 1)
-            ):
+            if stream is None or (is_rocm and stream == 0) or (is_cuda and stream == 1):
                 stream = torch.cuda.default_stream()
             else:
                 if is_cuda and stream == 2:
                     raise BufferError("per-thread default stream is not supported.")
 
                 device_str = "CUDA" if is_cuda else "ROCm"
-                assert (is_cuda and stream != 0) or (is_rocm and stream not in (1, 2)), (
-                    f"unsupported stream on {device_str}: {stream}."
-                )
+                assert (is_cuda and stream != 0) or (
+                    is_rocm and stream not in (1, 2)
+                ), f"unsupported stream on {device_str}: {stream}."
 
                 stream = torch.cuda.ExternalStream(stream)
 
@@ -1762,7 +1761,6 @@ class Tensor(torch._C.TensorBase):
                 stream.wait_event(event)
         elif self.device.type == "cpu":
             assert stream is None, "stream should be None on cpu."
-
 
         if self.device.type == "xla":
             import torch_xla
