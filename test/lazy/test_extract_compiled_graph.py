@@ -208,5 +208,6 @@ class OptimizeTest(unittest.TestCase):
     test_return_dup_tensor = maketest(ModuleReturnDupTensor)
     test_inplace_update = maketest(ModuleInplaceUpdate)
 
+
 if __name__ == "__main__":
     run_tests()
