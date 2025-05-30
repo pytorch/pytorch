@@ -2,7 +2,6 @@ import typing
 from typing import Any, Callable, Optional
 
 import torch
-import torch.fx
 
 
 _T = typing.TypeVar("_T", bound=Callable)
