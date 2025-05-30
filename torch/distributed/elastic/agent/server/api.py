@@ -71,7 +71,7 @@ class WorkerSpec:
         tee: tees the specified std stream(s) to console + file,
              selectively tee for a particular local rank by passing a map,
              takes precedence over ``redirects`` settings.
-
+        event_log_handler: handler for logging events. Can be a special value: 'null' to (discard events), 'console' to (stream  'stdout', or 'stderr'). custom loggers can be registered via the 'torch.distributed.elastic.events.handlers"
     """
 
     role: str
@@ -86,6 +86,7 @@ class WorkerSpec:
     master_port: Optional[int] = None
     master_addr: Optional[str] = None
     local_addr: Optional[str] = None
+    event_log_handler: str = "null"
 
     def __post_init__(self):
         assert self.local_world_size > 0
