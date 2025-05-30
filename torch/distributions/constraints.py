@@ -380,7 +380,7 @@ class _OneHot(Constraint):
     Constrain to one-hot vectors.
     """
 
-    is_discrete: bool = True
+    is_discrete: ClassVar[bool] = True
     event_dim: int = 1
 
     def check(self, value: Tensor) -> Tensor:
