@@ -7,8 +7,9 @@ from __future__ import annotations
 
 from typing import Optional, TYPE_CHECKING
 
-if TYPE_CHECKING: from onnxscript.values import Opset
-from onnxscript.onnx_opset import opset18 as op18, opset20 as op20, opset21 as op21, opset23 as op23
+if TYPE_CHECKING:
+    from onnxscript.values import Opset
+from onnxscript.onnx_opset import opset20 as op20, opset21 as op21, opset23 as op23
 
 import torch
 from torch.onnx._internal._lazy_import import onnxscript_ir as ir
@@ -96,7 +97,7 @@ def aten_scaled_dot_product_attention_23(
             )
         Y, _, _, _ = op23.Attention(
             query, key, value, attn_mask=attn_mask, scale=scale, q_num_heads=query.shape[3], kv_num_heads=key.shape[3],
-            is_causal=(1 if is_causal == True else 0)
+            is_causal=(1 if is_causal else 0)
         )
         return Y
 
