@@ -184,8 +184,7 @@ void CUDAPluggableAllocator::setMemoryFraction(
   }
 }
 
-void CUDAPluggableAllocator::emptyCache(
-    /*unused*/ c10::cuda::MempoolId_t mempool_id) {
+void CUDAPluggableAllocator::emptyCache() {
   if (reset_fn_) {
     return reset_fn_();
   }
@@ -238,8 +237,8 @@ void CUDAPluggableAllocator::resetPeakStats(c10::DeviceIndex device) {
       "If you need it, please file an issue describing your use case.");
 }
 
-c10::cuda::CUDACachingAllocator::SnapshotInfo CUDAPluggableAllocator::snapshot(
-    c10::cuda::MempoolId_t mempool_id) {
+c10::cuda::CUDACachingAllocator::SnapshotInfo CUDAPluggableAllocator::
+    snapshot() {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support snapshot. "

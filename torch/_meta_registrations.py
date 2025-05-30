@@ -322,14 +322,14 @@ def _view_meta(a, *shape, size_oblivious_enabled=True):
         return view_of(a)
 
     if definitely_contiguous(a) if size_oblivious_enabled else is_contiguous(a):
-        return a.as_strided(shape, utils.make_contiguous_strides_for(shape))
+        strides = utils.make_contiguous_strides_for(shape)
+        return a.as_strided(shape, strides)
 
-    if (
-        new_strides := _compute_stride(
-            a.size(), a.stride(), shape, size_oblivious=size_oblivious_enabled
-        )
-        is not None
-    ):
+    new_strides = _compute_stride(
+        a.size(), a.stride(), shape, size_oblivious=size_oblivious_enabled
+    )
+    
+    if new_strides is not None:
         return a.as_strided(shape, new_strides)
 
     # If we fail to do size oblivious view, and backed_size_oblivious was on.
