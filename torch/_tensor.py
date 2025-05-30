@@ -1707,7 +1707,7 @@ class Tensor(torch._C.TensorBase):
             dl_device (tuple[DLDeviceType, int] or None): An optional tuple specifying
                 in which device the exported DLPack capsule should be on. If None (default),
                 the exported DLPack capsule will be on the same device as ``self``.
-            
+
             copy (bool or None): An optional boolean indicating whether or not to copy
                 ``self``. If None, PyTorch will copy only if necessary.
         """
@@ -1725,15 +1725,23 @@ class Tensor(torch._C.TensorBase):
         # so we prohibit exporting tensors that would lose their properties like
         # requires_grad and having the conjugate bit set.
         if self.requires_grad:
-            raise BufferError("Can't export tensors that require gradient, use tensor.detach()")
+            raise BufferError(
+                "Can't export tensors that require gradient, use tensor.detach()"
+            )
         if self.is_conj():
             raise BufferError("Can't export tensors with the conjugate bit set")
         if self.layout != torch.strided:
-            raise BufferError("Can't export tensors with layout other than torch.strided")
-        if self.device.type == "cuda" and self.device != torch.cuda.current_device():
             raise BufferError(
-                "Can't export tensors on a different CUDA device. "
-                f"Expected: {self.device}. "
+                "Can't export tensors with layout other than torch.strided"
+            )
+
+        if (
+            self.device.type == "cuda"
+            and self.device.index != torch.cuda.current_device()
+        ):
+            raise BufferError(
+                "Can't export tensors on a different CUDA device index. "
+                f"Expected: {self.device.index}. "
                 f"Current device: {torch.cuda.current_device()}."
             )
 
@@ -1748,20 +1756,16 @@ class Tensor(torch._C.TensorBase):
             is_rocm = torch.version.hip is not None
             is_cuda = not is_rocm
 
-            if (
-                stream is None
-                or (is_rocm and stream == 0)
-                or (is_cuda and stream == 1)
-            ):
+            if stream is None or (is_rocm and stream == 0) or (is_cuda and stream == 1):
                 stream = torch.cuda.default_stream()
             else:
                 if is_cuda and stream == 2:
                     raise BufferError("per-thread default stream is not supported.")
 
                 device_str = "CUDA" if is_cuda else "ROCm"
-                assert (is_cuda and stream != 0) or (is_rocm and stream not in (1, 2)), (
-                    f"unsupported stream on {device_str}: {stream}."
-                )
+                assert (is_cuda and stream != 0) or (
+                    is_rocm and stream not in (1, 2)
+                ), f"unsupported stream on {device_str}: {stream}."
 
                 stream = torch.cuda.ExternalStream(stream)
 
@@ -1773,7 +1777,6 @@ class Tensor(torch._C.TensorBase):
                 stream.wait_event(event)
         elif self.device.type == "cpu":
             assert stream is None, "stream should be None on cpu."
-
 
         if self.device.type == "xla":
             import torch_xla

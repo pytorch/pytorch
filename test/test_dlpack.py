@@ -262,7 +262,9 @@ class TestTorchDlPack(TestCase):
     def test_dlpack_invalid_rocm_streams(self, device):
         # Test that we correctly raise errors on unsupported ROCm streams.
         def test(x, stream):
-            with self.assertRaisesRegex(AssertionError, r"unsupported stream on ROCm: \d"):
+            with self.assertRaisesRegex(
+                AssertionError, r"unsupported stream on ROCm: \d"
+            ):
                 x.__dlpack__(stream=stream)
 
         x = make_tensor((5,), dtype=torch.float32, device=device)
@@ -292,30 +294,31 @@ class TestTorchDlPack(TestCase):
         with torch.device(dev0):
             x = make_tensor((5,), dtype=torch.float32, device=dev0)
 
-        with self.assertRaisesRegex(BufferError, r"Can't export tensors on a different CUDA device"):
+        with self.assertRaisesRegex(
+            BufferError, r"Can't export tensors on a different CUDA device"
+        ):
             with torch.device(dev1):
                 x.__dlpack__()
-
 
     # TODO: add interchange tests once NumPy 1.22 (dlpack support) is required
     @skipMeta
     def test_dlpack_export_requires_grad(self):
         x = torch.zeros(10, dtype=torch.float32, requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError, r"require gradient"):
+        with self.assertRaisesRegex(BufferError, r"require gradient"):
             x.__dlpack__()
 
     @skipMeta
     def test_dlpack_export_is_conj(self):
         x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
         y = torch.conj(x)
-        with self.assertRaisesRegex(RuntimeError, r"conjugate bit"):
+        with self.assertRaisesRegex(BufferError, r"conjugate bit"):
             y.__dlpack__()
 
     @skipMeta
     def test_dlpack_export_non_strided(self):
         x = torch.sparse_coo_tensor([[0]], [1], size=(1,))
         y = torch.conj(x)
-        with self.assertRaisesRegex(RuntimeError, r"strided"):
+        with self.assertRaisesRegex(BufferError, r"strided"):
             y.__dlpack__()
 
     @skipMeta
@@ -348,7 +351,7 @@ class TestTorchDlPack(TestCase):
     def test_max_version(self, device):
         def capsule_name(kwargs):
             is_versioned = "max_version" in kwargs and kwargs["max_version"][0] >= 1
-            return "dltensor_versioned" if is_versioned(kwargs) else "dltensor"
+            return "dltensor_versioned" if is_versioned else "dltensor"
 
         def test(device, **kwargs):
             inp = make_tensor((5,), dtype=torch.float32, device=device)
@@ -356,7 +359,9 @@ class TestTorchDlPack(TestCase):
             # Make sure we are actually using the (un)versioned DLPack tensor, based on the
             # informed keyword arguments.
             capsule = inp.__dlpack__(**kwargs)
-            self.assertRegex(str(capsule), f"""capsule object "{capsule_name(kwargs)}" at""")
+            self.assertRegex(
+                str(capsule), f"""capsule object "{capsule_name(kwargs)}" at"""
+            )
 
             out = torch.from_dlpack(capsule)
             self.assertEqual(inp, out)
@@ -451,7 +456,7 @@ class TestTorchDlPack(TestCase):
     @skipMeta
     @onlyCUDA
     def test_needs_copy_error(self, device):
-        with self.assertRaisesRegex(ValueError, "cannot move tensor from .*"):
+        with self.assertRaisesRegex(ValueError, r"cannot move .* tensor from .*"):
             self._test_from_dlpack(device, out_device="cpu", copy=False)
 
     @skipMeta
