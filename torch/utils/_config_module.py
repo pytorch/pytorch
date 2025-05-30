@@ -508,9 +508,13 @@ class ConfigModule(ModuleType):
             protocol=2,
         )
 
-    def save_config_portable(self) -> dict[str, Any]:
+    def save_config_portable(
+        self, *, ignore_private_configs: bool = True
+    ) -> dict[str, Any]:
         """Convert config to portable format"""
-        prefixes = ["_"]
+        prefixes = []
+        if ignore_private_configs:
+            prefixes.append("_")
         prefixes.extend(getattr(self, "_cache_config_ignore_prefix", []))
         return self._get_dict(ignored_prefixes=prefixes)
 
