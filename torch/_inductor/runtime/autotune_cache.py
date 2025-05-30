@@ -17,7 +17,6 @@ from torch.compiler._cache import (
     CacheArtifactManager,
 )
 from torch.utils._triton import has_triton
-from torch._inductor.runtime.runtime_utils import triton_hash_to_path_key
 
 from ..remote_cache import (
     create_cache,
