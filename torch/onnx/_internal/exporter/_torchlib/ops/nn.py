@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
-from onnxscript.values import Opset
+if TYPE_CHECKING: from onnxscript.values import Opset
 from onnxscript.onnx_opset import opset18 as op18, opset20 as op20, opset21 as op21, opset23 as op23
 
 import torch
