@@ -1454,6 +1454,11 @@ class VariableBuilder:
             if value.dynamism is None or value.dynamism.type == _DimHintType.STATIC:
                 return self.wrap_symint(value.val)
             elif value.dynamism.type == _DimHintType.DYNAMIC:
+                log.debug(
+                    "%s marked %s via IntWrapper",
+                    self.source.name(),
+                    DimDynamic.DYNAMIC,
+                )
                 return self.wrap_symint(
                     value.val,
                     dynamism=DimDynamic.DYNAMIC,
@@ -1462,6 +1467,11 @@ class VariableBuilder:
                     ),
                 )
             elif value.dynamism.type == _DimHintType.AUTO:
+                log.debug(
+                    "%s marked %s via IntWrapper",
+                    self.source.name(),
+                    DimDynamic.DYNAMIC,
+                )
                 return self.wrap_symint(value.val, dynamism=DimDynamic.DYNAMIC)
             else:
                 raise RuntimeError(f"Undefined dynamism {value.dynamism}")
@@ -1767,7 +1777,12 @@ class VariableBuilder:
         if type(value) is int:
             # allowlist has higher precedence over specialization control.
             if is_dynamic_source(self.source.name()):
-                return self.wrap_symint(value, True)
+                log.debug("%s marked dynamic via source whitelist", self.source.name())
+                return self.wrap_symint(value, dynamism=DimDynamic.DYNAMIC)
+
+            if is_unbacked_source(self.source.name()):
+                log.debug("%s marked unbacked via source whitelist", self.source.name())
+                return self.wrap_symint(value, dynamism=DimDynamic.SIZE_LIKE_UNBACKED)
 
             if not config.specialize_int:
                 # unspecializing int by default, but still
@@ -2117,7 +2132,6 @@ class VariableBuilder:
     def wrap_symint(
         self,
         value,
-        is_forced_allow_list_dynamic=False,
         dynamism: Optional[DimDynamic] = None,
         context: Optional[SymIntSymbolicContext] = None,
     ):
@@ -2165,12 +2179,8 @@ class VariableBuilder:
             if isinstance(base_source, ChainedSource):
                 base_source = base_source.get_base()
 
-            if dynamism == DimDynamic.DYNAMIC:
-                log.debug("%s marked %s via IntWrapper", self.source.name(), dynamism)
+            if dynamism is not None:
                 dynamic_dim = dynamism
-            elif is_forced_allow_list_dynamic:
-                log.debug("%s marked dynamic via source whitelist", self.source.name())
-                dynamic_dim = DimDynamic.DYNAMIC
             elif (
                 config.automatic_dynamic_shapes
                 and frame_state_entry.scalar is auto_dynamic
@@ -2938,6 +2948,68 @@ def is_dynamic_source(source_name: str) -> bool:
     return False
 
 
+def record_automatic_dynamic(
+    tx: "InstructionTranslator", name: str, e: torch.Tensor
+) -> FrameStateSizeEntry:
+    # This mimics stride inference algorithm in _create_symbolic_sizes_strides_storage_offset
+    ex_size = e.size()
+    if not is_sparse_any(e):
+        ex_stride = e.stride()
+        dim = e.dim()
+
+        stride = [None] * dim
+        pending = [(ex_stride[i], -i) for i in range(dim)]
+        pending.sort(key=_nested_int_aware_sort)
+        candidates = {}
+        for i_stride, neg_i in pending:
+            i = -neg_i
+            stride[i] = candidates.get(i_stride, i_stride)
+            candidates.setdefault(i_stride * ex_size[i], InferStride(i))
+    else:
+        stride = []
+
+    return process_automatic_dynamic(
+        tx, name, FrameStateSizeEntry.make_tensor(tuple(ex_size), tuple(stride))
+    )
+
+
+_UNBACKED_SOURCES: Optional[set[str]] = None
+_UNBACKED_SOURCES_CONFIG_HASH: Optional[int] = None
+
+
+def get_unbacked_sources() -> set[str]:
+    global _UNBACKED_SOURCES, _UNBACKED_SOURCES_CONFIG_HASH
+
+    current_hash = hash(torch.compiler.config.unbacked_sources)
+
+    # If we have already calculated the sources and the config hasn't changed, return cached result
+    if _UNBACKED_SOURCES is not None and _UNBACKED_SOURCES_CONFIG_HASH == current_hash:
+        return _UNBACKED_SOURCES
+
+    # Config has changed or first time, (re)calculate the sources
+    _UNBACKED_SOURCES = {
+        s
+        for s in torch.compiler.config.unbacked_sources.replace(" ", "").split(",")
+        if s
+    }
+    _UNBACKED_SOURCES_CONFIG_HASH = current_hash
+
+    return _UNBACKED_SOURCES
+
+
+def is_unbacked_source(source_name: str) -> bool:
+    unbacked_sources = get_unbacked_sources()
+    for pattern in unbacked_sources:
+        if pattern == source_name or re.match(pattern, source_name):
+            log.debug(
+                "%s was marked unbacked due to unbacked source allowlist pattern: %s",
+                source_name,
+                pattern,
+            )
+            return True
+    return False
+
+
 # Performs automatic dynamic dim determination.
 # Returns a SymbolicContext
 def _automatic_dynamic(
@@ -2994,6 +3066,7 @@ def _automatic_dynamic(
         )
 
     if static_shapes and not is_dynamic_source(name):
+        record_automatic_dynamic(tx, name, e)
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
@@ -3023,27 +3096,7 @@ def _automatic_dynamic(
         )
 
     # Prep for automatic dynamic
-
-    # This mimics stride inference algorithm in _create_symbolic_sizes_strides_storage_offset
-    ex_size = e.size()
-    if not is_sparse_any(e):
-        ex_stride = e.stride()
-        dim = e.dim()
-
-        stride = [None] * dim
-        pending = [(ex_stride[i], -i) for i in range(dim)]
-        pending.sort(key=_nested_int_aware_sort)
-        candidates = {}
-        for i_stride, neg_i in pending:
-            i = -neg_i
-            stride[i] = candidates.get(i_stride, i_stride)
-            candidates.setdefault(i_stride * ex_size[i], InferStride(i))
-    else:
-        stride = []
-
-    frame_state_entry = process_automatic_dynamic(
-        tx, name, FrameStateSizeEntry.make_tensor(tuple(ex_size), tuple(stride))
-    )
+    frame_state_entry = record_automatic_dynamic(tx, name, e)
 
     # TODO: index export_constraints ahead of time so we don't have to
     # do a linear scan every time here
@@ -3129,6 +3182,11 @@ def _automatic_dynamic(
             automatic_dynamic_size = True
             automatic_dynamic_stride = True
 
+        if is_unbacked_source(name):
+            log.debug("%s marked unbacked via source whitelist", name)
+            automatic_dynamic_size = True
+            automatic_dynamic_stride = True
+
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
 
         # We will process constraints first, as they will imply that we
@@ -3179,7 +3237,7 @@ def _automatic_dynamic(
         constraint_sizes.append(constraint_size)
         constraint_strides.append(constraint_stride)
 
-        if marked_unbacked:
+        if marked_unbacked or is_unbacked_source(name):
             dynamic_size = DimDynamic.SIZE_LIKE_UNBACKED
         elif (
             constraint_size is not None
