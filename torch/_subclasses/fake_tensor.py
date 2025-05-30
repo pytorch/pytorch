@@ -1764,9 +1764,17 @@ class FakeTensorMode(TorchDispatchMode):
         entry_for_synth_output = _DispatchCacheValidEntry(
             output_infos=(entry,), is_output_tuple=False
         )
-        synth_output = self._output_from_cache_entry(
-            state, entry_for_synth_output, key, func, args
-        )
+
+        from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
+
+        try:
+            synth_output = self._output_from_cache_entry(
+                state, entry_for_synth_output, key, func, args
+            )
+        except GuardOnDataDependentSymNode as e:
+            # We can't cache this - it's data-dependent.
+            # An example: aten.select(t, 0, u0)
+            raise _BypassDispatchCache("data-dependent operation") from e
 
         # Make sure the dispatch_key_set from the synthesized output tensor will
         # be the same.
@@ -1975,7 +1983,7 @@ class FakeTensorMode(TorchDispatchMode):
             elif a is None:
                 assert b is None
             elif isinstance(a, torch.SymInt):
-                assert a is b
+                assert isinstance(b, torch.SymInt) and a.node is b.node
             elif isinstance(a, torch.Tensor):
                 assert isinstance(b, torch.Tensor)
                 assert_metadata_eq(assert_eq, a, b)
@@ -1992,6 +2000,7 @@ class FakeTensorMode(TorchDispatchMode):
         try:
             assert_helper(true_output, output)
         except Exception as e:
+            assert_helper(true_output, output)
             raise RuntimeError(
                 f"FakeTensor cache crosscheck failure: func={func}, "
                 f"args={args}, kwargs={kwargs}"
