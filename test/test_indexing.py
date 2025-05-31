@@ -866,6 +866,18 @@ class TestIndexing(TestCase):
             )
             self.assertEqual(len(w), 1)
 
+    def test_list_indices(self, device):
+        N = 1000
+        t = torch.randn(N, device=device) 
+        # Set window size
+        W = 10
+        # Generate a list of lists, containing overlapping window indices
+        indices = [range(i, i + W) for i in range(0, N - W)]
+
+        for i in [len(indices), 100, 32, 31]:
+            windowed_data = t[indices[:i]]
+            self.assertEqual(windowed_data.shape, (i, W))      
+
     def test_bool_indices_accumulate(self, device):
         mask = torch.zeros(size=(10,), dtype=torch.bool, device=device)
         y = torch.ones(size=(10, 10), device=device)
