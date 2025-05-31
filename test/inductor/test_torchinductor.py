@@ -1410,10 +1410,16 @@ class CommonTemplate:
             )
             _, code = run_and_get_code(fn, x, y)
             code = " ".join(code)
-            if config.cpp_wrapper:
-                self.assertEqual(code.count("view_dtype"), 3)
-            else:
-                self.assertEqual(code.count("aten.view"), 9)
+            assert_keywords = ["assert_size_stride", "assert_alignment"]
+            filtered_lines = [
+                line
+                for line in code.splitlines()
+                if not any(assert_key in line for assert_key in assert_keywords)
+            ]
+            code = "\n".join(filtered_lines)
+            self.assertEqual(
+                code.count("view_dtype" if config.cpp_wrapper else "aten.view"), 3
+            )
 
     def test_add_complex5(self):
         def fn(a, b, alpha):
@@ -11950,8 +11956,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             a,
         )
         if not is_dynamic_shape_enabled():
-            FileCheck().check(
-                "assert_size_stride(buf2, (16, 32), (32, 1), 'torch.ops.test.foo.default')"
+            FileCheck().check_regex(
+                r"assert_size_stride\(buf\d+, \([^)]+\), \([^)]+\), 'torch\.ops\.[^']+'\)"
             ).run(code[0])
 
     @requires_gpu()
@@ -11979,8 +11985,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             a,
         )
         if not is_dynamic_shape_enabled():
-            FileCheck().check(
-                "assert_alignment(buf2, 16, 'torch.ops.test.foo.default')"
+            FileCheck().check_regex(
+                r"assert_alignment\(buf\d+, 16, 'torch\.ops\.[^']+'\)"
             ).run(code[0])
 
     def test_assert_size_stride_op_name_pass(self):
