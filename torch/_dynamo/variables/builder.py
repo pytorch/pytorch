@@ -116,6 +116,7 @@ from ..source import (
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
     UnspecializedBuiltinNNModuleSource,
+    UnspecializedNNModuleSource,
 )
 from ..utils import (
     _extract_tensor_dict,
@@ -1757,8 +1758,9 @@ class VariableBuilder:
                 result = UnspecializedBuiltinNNModuleVariable(value, source=new_source)
                 install_guard(new_source.make_guard(GuardBuilder.TYPE_MATCH))
             else:
-                self.install_guards(GuardBuilder.TYPE_MATCH)
-                result = UnspecializedNNModuleVariable(value, source=self.source)
+                new_source = UnspecializedNNModuleSource(self.source)
+                result = UnspecializedNNModuleVariable(value, source=new_source)
+                install_guard(new_source.make_guard(GuardBuilder.TYPE_MATCH))
 
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
