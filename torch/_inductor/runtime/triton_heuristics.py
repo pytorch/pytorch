@@ -784,7 +784,13 @@ class CachingAutotuner(KernelInterface):
             )
             # reset to zero before evaluating any config
             self.reset_to_zero_args(*args, **kwargs)
+            expected_arg_count = launcher.__code__.co_argcount - 1
             args_with_constexprs = self._get_args_with_constexprs(cloned_args, launcher)
+            if len(args_with_constexprs) != expected_arg_count:
+                raise TypeError(
+                    f"CachingAutotuner argument mismatch: expected {expected_arg_count} arguments, "
+                    f"but got {args_with_constexprs}. Please check the kernel definition and launcher invocation."
+                )
             launcher(
                 *args_with_constexprs,
                 **cloned_kwargs,
