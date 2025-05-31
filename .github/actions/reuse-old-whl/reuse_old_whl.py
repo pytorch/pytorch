@@ -211,7 +211,10 @@ def unzip_artifact_and_replace_files() -> None:
         )
 
     def move_content_to_new_version(file: Union[str, Path]) -> None:
+        # Check if is a file
         print(file)
+        if os.path.isdir(file):
+            return
         # Replace the old version in the file with the new version
         with open(file) as f:
             content = f.read()
