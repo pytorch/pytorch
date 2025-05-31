@@ -1123,6 +1123,8 @@ class CachingAutotuner(KernelInterface):
             ret["kernel_name"] = self.inductor_meta["kernel_name"]
         if "kernel_flop" in self.inductor_meta:
             ret["kernel_flop"] = self.inductor_meta["kernel_flop"]
+        if "kernel_num_gb" in self.inductor_meta:
+            ret["kernel_num_gb"] = self.inductor_meta["kernel_num_gb"]
         return ret
 
     def run(

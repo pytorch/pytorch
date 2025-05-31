@@ -329,7 +329,7 @@ _dtype_map = {
 class KernelStats:
     flops: int
     bw: float
-    latency: float
+    latency: float # us
     achieved_flops: float
     achieved_bandwidth: float
 
@@ -345,7 +345,7 @@ class Device:
     stats: KernelNameMap
 
     def __repr__(self) -> str:
-        return f"Device({self.name}, {self.index})"
+        return f"Device({self.name}, {self.index}): {self.info}"
 
 
 DeviceMap = dict[int, Device]
@@ -449,11 +449,11 @@ class JsonProfile:
             if "cat" not in event or "args" not in event or event["cat"] != "kernel":
                 continue
             dev = self._devices[event["args"]["device"]]
-            dur = event["dur"]
+            dur = event["dur"] # us
             if "kernel_flop" in event["args"]:
                 assert dur != 0
-                # 1000ms/s * flop / ms
-                op_flops = 1e3 * event["args"]["kernel_flop"] / dur
+                # 1,000,000us/s * flop / us
+                op_flops = event["args"]["kernel_flop"] / (dur / 1e6)
                 if op_flops == 0:
                     achieved_flops = 0
                 else:
@@ -465,8 +465,8 @@ class JsonProfile:
 
             if "kernel_num_gb" in event["args"]:
                 assert dur != 0
-                # 1000ms/s * gb / ms = gb/s
-                op_gbps = 1e3 * event["args"]["kernel_num_gb"] / dur
+                # 1,000,000us/s * gb  = gb/s
+                op_gbps = event["args"]["kernel_num_gb"] / (dur / 1e6)
                 achieved_bandwidth = 100 * op_gbps / dev.info.dram_bw_gbs
             else:
                 op_gbps = 0
@@ -488,8 +488,8 @@ class JsonProfile:
             "Kernel Name",
             "Kernel Count",
             "FLOPS",
-            "bw gbps",
-            "Dur (ms)",
+            "Kernel Reads (GB)",
+            "Dur (us)",
             "Achieved FLOPS %",
             "Achieved Bandwidth %",
         ]

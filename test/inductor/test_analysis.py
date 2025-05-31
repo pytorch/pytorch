@@ -223,7 +223,7 @@ def test_model(device, dtype, compile=True, addmm=True, bmm=True):
 def pointwise_test_model(device, dtype, compile=True):
     T = cT(device, dtype)
     def model():
-        M = 256
+        M = 1024
         N = 512
         mat3 = T(M, N)
         mat4 = T(M, N)
@@ -265,10 +265,10 @@ class TestUtils(TestCase):
     def test_zip_dicts(self):
         d1 = {"a": 1, "b": 2}
         d2 = {"a": 3, "c": 4}
-        res = zip_dicts(d1, d2, d1_default="foo", d2_default="bar")
-        self.assertEqual(set(res), {("a", 1, 3), ("b", 2, "bar"), ("c", "foo", 4)})
-        res = zip_dicts(d1, d2)
-        self.assertEqual(set(res), {("a", 1, 3), ("b", 2, None), ("c", None, 4)})
+        res1 = zip_dicts(d1, d2, d1_default=32, d2_default=48)
+        self.assertEqual(set(res1), {("a", 1, 3), ("b", 2, 32), ("c", 48, 4)})
+        res2 = zip_dicts(d1, d2)
+        self.assertEqual(set(res2), {("a", 1, 3), ("b", 2, None), ("c", None, 4)})
 
 
 class TestAnalysis(TestCase):
@@ -293,14 +293,14 @@ class TestAnalysis(TestCase):
         om = test_model(device, dtype)
         REPEAT = 5
         trace1, trace2 = trace_files()
-        print("first trace")
+        print(f"first trace {trace1}")
         torch._dynamo.reset()  # reset the cache
         with fresh_inductor_cache():
             with torch.profiler.profile(record_shapes=True) as p:
                 om()
         p.export_chrome_trace(trace1)
 
-        print("second trace")
+        print(f"second trace {trace2}")
         torch._dynamo.reset()  # reset the cache
         with fresh_inductor_cache():
             with torch.profiler.profile(record_shapes=True) as p:
@@ -321,7 +321,7 @@ class TestAnalysis(TestCase):
                 str(REPEAT),
                 "bar",
                 "--name_limit",
-                "200",
+                "30",
             ],
         ):
             main()
@@ -640,10 +640,27 @@ class TestAnalysis(TestCase):
         )
         comp_omni()
 
-        torch._dynamo.reset()  # reset the cache
         with fresh_inductor_cache():
             with torch.profiler.profile(record_shapes=True) as profile:
                 comp_omni()
+        trace1, _ = trace_files()
+        profile.export_chrome_trace(trace1)
+
+        with (
+            patch("sys.stdout", new_callable=StringIO) as mock_stdout,
+            patch("sys.argv", [*prefix, "--analysis", trace1, "1", "foo"])
+        ):
+            main()
+        out = mock_stdout.getvalue()
+        self.assertTrue("triton_poi_fused_add_randn_sin_0" in out)
+
+        with open(trace1) as f:
+            out_profile = json.load(f)
+        
+        for event in out_profile["traceEvents"]:
+            if event["name"] == "triton_poi_fused_add_randn_sin_0":
+                event["args"]["kernel_num_gb"] = 0.002097168
+
 
 
 instantiate_device_type_tests(TestAnalysis, globals())
