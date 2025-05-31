@@ -890,8 +890,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         self.nn_module_stack_source = self.source
 
     def _wrap_source(self, attr_source):
-        if not isinstance(attr_source, UnspecializedNNModuleSource):
-            return UnspecializedNNModuleSource(attr_source)
+        # the vt is already wrapped with UnspecializedNNModuleSource
         return attr_source
 
     def get_nn_module_stack_source(self):
