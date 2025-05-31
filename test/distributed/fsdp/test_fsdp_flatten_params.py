@@ -45,7 +45,7 @@ class TestFlattenParams(FSDPTest):
 
     def _get_default_config(self):
         return {
-            "device": torch.device("cuda"),
+            "device": torch.device(torch.accelerator.current_accelerator()),
             "sharding_strategy": HandleShardingStrategy.FULL_SHARD,
             "offload_params": False,
             "mp_param_dtype": None,

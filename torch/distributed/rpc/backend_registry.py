@@ -152,8 +152,10 @@ def _tensorpipe_construct_rpc_backend_options_handler(
 
 
 def _tensorpipe_validate_devices(devices, device_count):
+    device = torch.accelerator.current_accelerator()
+    device_type = device.type if device is not None else "cpu"
     return all(
-        d.type == "cpu" or (d.type == "cuda" and 0 <= d.index < device_count)
+        d.type == "cpu" or (d.type == device_type and 0 <= d.index < device_count)
         for d in devices
     )
 
@@ -277,9 +279,10 @@ def _get_device_infos():
 
     agent = cast(TensorPipeAgent, api._get_current_rpc_agent())
     opts = agent._get_backend_options()
-    device_count = torch.cuda.device_count()
-    if torch.cuda.is_available() and opts.devices:
-        torch.cuda.init()
+    device_count = torch.accelerator.device_count()
+    if torch.accelerator.is_available() and opts.devices:
+        mod = torch.get_device_module(torch.accelerator.current_accelerator())
+        mod.init()
     return device_count, opts.device_maps, opts.devices
 
 
@@ -304,7 +307,7 @@ def _set_devices_and_reverse_device_map(agent):
         else:
             opts = agent._get_backend_options()
             device_count, device_map, devices = (
-                torch.cuda.device_count(),
+                torch.accelerator.device_count(),
                 opts.device_maps,
                 opts.devices,
             )
@@ -348,7 +351,7 @@ def _tensorpipe_init_backend_handler(
             f"`rpc_backend_options` must be a `TensorPipeRpcBackendOptions`. {rpc_backend_options}"
         )
 
-    device_count = torch.cuda.device_count()
+    device_count = torch.accelerator.device_count()
 
     is_static_group = True if world_size else False
     # world_size is specified so this is a static group (ranks cannot join and leave)
@@ -366,13 +369,14 @@ def _tensorpipe_init_backend_handler(
             group,
         )
 
-        if torch.cuda.is_available() and devices:
-            # It's necessary to initialize PyTorch CUDA states here (e.g.,
+        if torch.accelerator.is_available() and devices:
+            # It's necessary to initialize PyTorch GPU states here (e.g.,
             # CUDACachingAllocator). If this is missing, we could hit errors like
             # "allocator not initialized", because other processes might send
-            # CUDA-related RPC request to this process before user code in this
-            # process initializes its PyTorch CUDA states.
-            torch.cuda.init()
+            # GPU-related RPC request to this process before user code in this
+            # process initializes its PyTorch GPU states.
+            mod = torch.get_device_module(torch.accelerator.current_accelerator())
+            mod.init()
 
         # TODO: add try-except and destroy _agent in all processes if any fails.
         agent = TensorPipeAgent(

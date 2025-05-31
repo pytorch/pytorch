@@ -17,7 +17,8 @@ from torch.testing._internal.common_fsdp import (
     patch_all_gather,
     patch_reduce_scatter,
 )
-from torch.testing._internal.common_utils import get_cycles_per_ms, run_tests, TEST_HPU
+
+from torch.testing._internal.common_utils import get_cycles_per_ms, run_tests, TEST_HPU, TEST_XPU
 
 
 device_type = torch.device(get_devtype())
@@ -45,6 +46,7 @@ class TestFullyShardOverlap(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_HPU, "Sleep is not supported on HPU")
+    @unittest.skipIf(TEST_XPU, "Sleep is not supported on XPU")
     def test_fully_shard_training_overlap(self):
         torch.manual_seed(42)
 
@@ -66,6 +68,7 @@ class TestFullyShardOverlap(FSDPTest):
         def delay_collective():
             # Share a stream so that all-gather and reduce-scatter block each
             # other like in `ProcessGroupNCCL`
+
             comm_stream.wait_stream(
                 torch.get_device_module(device_type).current_stream()
             )
@@ -158,6 +161,7 @@ class TestFullyShardOverlap(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_HPU, "Sleep is not supported on HPU")
+    @unittest.skipIf(TEST_XPU, "Sleep is not supported on XPU")
     def test_fully_shard_post_optim_event_overlap(self):
         torch.manual_seed(42)
 

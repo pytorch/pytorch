@@ -129,6 +129,9 @@ class TestFullyShardCompile(FSDPTest):
     def skipTestForOldSm(self):
         # Assumption: This test class is only run on GPU. See `HAS_GPU` check at
         # the top of the class.
+        # XPU is not applicable in this function
+        if device_type == 'xpu':
+            return
         device = torch.device(
             device_type.type,
             self.rank % torch.get_device_module(device_type).device_count(),

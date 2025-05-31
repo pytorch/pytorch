@@ -20,12 +20,13 @@ from torch.testing._internal.common_fsdp import (
     get_devtype,
     MLP,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_XPU
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
 )
 
+device_type = torch.accelerator.current_accelerator().type
 
 device_type = torch.device(get_devtype())
 

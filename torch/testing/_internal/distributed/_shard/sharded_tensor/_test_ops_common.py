@@ -13,36 +13,38 @@ from torch.distributed._shard.sharding_spec._internals import (
     get_split_size,
 )
 
+_dev = torch.accelerator.current_accelerator()
+DEVICE_TYPE = _dev.type if _dev is not None else "cuda"
 
 def generate_chunk_sharding_specs_for_test(sharding_dim):
     return [
         ChunkShardingSpec(
             dim=sharding_dim,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{DEVICE_TYPE}:0",
+                f"rank:1/{DEVICE_TYPE}:1",
+                f"rank:2/{DEVICE_TYPE}:2",
+                f"rank:3/{DEVICE_TYPE}:3",
             ],
         ),
         # Test different ordering. (Case 1)
         ChunkShardingSpec(
             dim=sharding_dim,
             placements=[
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
+                f"rank:2/{DEVICE_TYPE}:2",
+                f"rank:3/{DEVICE_TYPE}:3",
+                f"rank:0/{DEVICE_TYPE}:0",
+                f"rank:1/{DEVICE_TYPE}:1",
             ],
         ),
         # Test different ordering. (Case 2)
         ChunkShardingSpec(
             dim=sharding_dim,
             placements=[
-                "rank:3/cuda:3",
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
+                f"rank:3/{DEVICE_TYPE}:3",
+                f"rank:0/{DEVICE_TYPE}:0",
+                f"rank:1/{DEVICE_TYPE}:1",
+                f"rank:2/{DEVICE_TYPE}:2",
             ],
         ),
     ]
@@ -55,22 +57,22 @@ def generate_enumerable_sharding_specs_for_test():
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:0/cuda:0",
+                    placement=f"rank:0/{DEVICE_TYPE}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:1/cuda:1",
+                    placement=f"rank:1/{DEVICE_TYPE}:1",
                 ),
                 ShardMetadata(
                     shard_offsets=[0, 5],
                     shard_sizes=[5, 5],
-                    placement="rank:2/cuda:2",
+                    placement=f"rank:2/{DEVICE_TYPE}:2",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 5],
                     shard_sizes=[5, 5],
-                    placement="rank:3/cuda:3",
+                    placement=f"rank:3/{DEVICE_TYPE}:3",
                 ),
             ]
         )
