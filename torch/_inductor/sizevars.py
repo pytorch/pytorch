@@ -28,7 +28,7 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 
-def _statically_known_true(
+def statically_known_true(
     shape_env: ShapeEnv,
     expr: Union[sympy.Basic, bool],
     axioms: Optional[tuple[sympy.Expr]] = None,
@@ -308,7 +308,7 @@ class SizeVarAllocator:
     # Those are similar to statically_known_true in symbolic_shapes but operate on sympy expressions 
     # instead of symnodes.
     def statically_known_true(self, expr: Union[sympy.Basic, bool]) -> bool:
-        return _statically_known_true(self.shape_env, expr)
+        return statically_known_true(self.shape_env, expr)
 
     def statically_known_equals(
         self, left: Union[Expr, int], right: Union[Expr, int]
