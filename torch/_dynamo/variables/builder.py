@@ -2852,6 +2852,9 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     elif isinstance(example_value, float) or proxy.node.target in ["hex", "__round__"]:
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
+    elif isinstance(example_value, int) and proxy.node.target in [torch._C._functorch._vmap_increment_nesting, torch._C._functorch._vmap_decrement_nesting]:
+        set_example_value(proxy.node, example_value)
+        return ConstantVariable.create(example_value, **options)
     else:
         unimplemented_v2(
             gb_type="torch.* op returned non-Tensor",

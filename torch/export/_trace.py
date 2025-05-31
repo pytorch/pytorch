@@ -2027,6 +2027,10 @@ def _export_for_training(
 
     original_state_dict = _get_original_state_dict(mod)
 
+    # Load the functorch decomp here 
+    from torch._functorch.vmap import lazy_load_decompositions
+    lazy_load_decompositions()
+
     # Call the appropriate export function based on the strictness of tracing.
     export_func = _strict_export if strict else _non_strict_export
 

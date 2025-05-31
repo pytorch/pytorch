@@ -29,7 +29,7 @@ def mocked_serder_export_strict(*args, **kwargs):
 
 
 def mocked_serder_export_non_strict(*args, **kwargs):
-    ep = export(*args, **kwargs)
+    ep = export(*args, **kwargs)    
     buffer = io.BytesIO()
     save(ep, buffer)
     buffer.seek(0)
