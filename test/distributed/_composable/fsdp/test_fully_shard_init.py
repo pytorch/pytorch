@@ -1322,5 +1322,33 @@ class TestFullyShardOldImport(FSDPTestMultiThread):
         model(inp).sum().backward()
 
 
+class TestFullyShardMixedDtypeParam(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    def test_mixed_dtypes_no_grad_param(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # no grad params with different dtypes
+                self.w_fp8 = torch.nn.Parameter(
+                    torch.empty((256, 256), dtype=torch.float8_e4m3fn),
+                    requires_grad=False,
+                )
+                self.w_fp32 = torch.nn.Parameter(
+                    torch.empty((256, 256), dtype=torch.float32)
+                )
+
+            def forward(self, input):
+                return
+
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        model = Model()
+        fully_shard(model, mesh=mesh)
+        model(0)
+
+
 if __name__ == "__main__":
     run_tests()
