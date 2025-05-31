@@ -396,7 +396,15 @@ AOT_DISPATCH_TESTS = [
 ]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
-CPP_TESTS = [test for test in TESTS if test.startswith(CPP_TEST_PREFIX)]
+
+
+def _is_cpp_test(test):
+    # Note: tests underneath cpp_extensions are different from other cpp tests
+    # in that they utilize the usual python test infrastructure.
+    return test.startswith(CPP_TEST_PREFIX) and not test.startswith("cpp_extensions")
+
+
+CPP_TESTS = [test for test in TESTS if _is_cpp_test(test)]
 
 TESTS_REQUIRING_LAPACK = [
     "distributions/test_constraints",
@@ -467,7 +475,7 @@ def run_test(
     stepcurrent_key = test_file
 
     is_distributed_test = test_file.startswith(DISTRIBUTED_TEST_PREFIX)
-    is_cpp_test = test_file.startswith(CPP_TEST_PREFIX)
+    is_cpp_test = _is_cpp_test(test_file)
     # NB: Rerun disabled tests depends on pytest-flakefinder and it doesn't work with
     # pytest-cpp atm. We also don't have support to disable C++ test yet, so it's ok
     # to just return successfully here
@@ -510,7 +518,7 @@ def run_test(
             )
         )
         unittest_args.extend(test_module.get_pytest_args())
-        replacement = {"-f": "-x"}
+        replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
 
     if options.showlocals:
@@ -543,7 +551,7 @@ def run_test(
         # case such as coverage for C++ test. So just returning ok makes sense
         return 0
 
-    if test_file.startswith(CPP_TEST_PREFIX):
+    if is_cpp_test:
         # C++ tests are not the regular test directory
         if CPP_TESTS_DIR:
             cpp_test = os.path.join(
@@ -1591,6 +1599,13 @@ def get_selected_tests(options) -> list[str]:
                 "functorch/test_memory_efficient_fusion",
                 "torch_np/numpy_tests/core/test_multiarray",
             ]
+        )
+
+    if sys.version_info[:2] < (3, 13):
+        # Skip tests for older Python versions as they may use syntax or features
+        # not supported in those versions
+        options.exclude.extend(
+            [test for test in selected_tests if test.startswith("dynamo/cpython/3_13/")]
         )
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
