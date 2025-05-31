@@ -5220,8 +5220,10 @@ Here are the ways to call ``to``:
 
 .. note::
 
-    Converting ``torch.inf`` to integers is undefined behavior,
-    which may produce inconsistent results across different platforms.
+    According to `C++ type conversion rules <https://en.cppreference.com/w/cpp/language/implicit_conversion.html>`_,
+    converting floating point value to integer type will truncate the fractional part.
+    If the truncated value cannot fit into the target type (e.g., casting ``torch.inf`` to ``torch.long``),
+    the behavior is undefined and the result may vary across platforms.
 
 .. method:: to(device=None, dtype=None, non_blocking=False, copy=False, memory_format=torch.preserve_format) -> Tensor
    :noindex:
