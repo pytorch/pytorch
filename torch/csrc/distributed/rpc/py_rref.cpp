@@ -87,11 +87,12 @@ TypePtr tryInferTypeWithTypeHint(
   // because it will try to script the class that value is in instance of, and
   // this should be avoided.
   py::bool_ can_compile = py::module::import("torch._jit_internal")
-                              .attr("can_compile_class")(value.get_type());
+                              .attr("can_compile_class")(py::type::of(value));
 
   if (py::cast<bool>(can_compile)) {
-    py::object existing_ty = py::module::import("torch.jit._state")
-                                 .attr("_get_script_class")(value.get_type());
+    py::object existing_ty =
+        py::module::import("torch.jit._state")
+            .attr("_get_script_class")(py::type::of(value));
 
     if (existing_ty.is_none()) {
       return PyObjectType::get();
