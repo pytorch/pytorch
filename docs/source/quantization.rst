@@ -1359,6 +1359,17 @@ Please take a look at `Limitations of Symbolic Tracing <https://pytorch.org/docs
 .. py:module:: torch.ao.quantization.quantizer.xnnpack_quantizer_utils
 .. py:module:: torch.ao.quantization.stubs
 .. py:module:: torch.ao.quantization.utils
+.. py:module:: torch.ao.quantization.experimental.adaround_fake_quantize
+.. py:module:: torch.ao.quantization.experimental.adaround_loss
+.. py:module:: torch.ao.quantization.experimental.adaround_optimization
+.. py:module:: torch.ao.quantization.experimental.APoT_tensor
+.. py:module:: torch.ao.quantization.experimental.apot_utils
+.. py:module:: torch.ao.quantization.experimental.fake_quantize_function
+.. py:module:: torch.ao.quantization.experimental.fake_quantize
+.. py:module:: torch.ao.quantization.experimental.linear
+.. py:module:: torch.ao.quantization.experimental.observer
+.. py:module:: torch.ao.quantization.experimental.qconfig
+.. py:module:: torch.ao.quantization.experimental.quantizer
 .. py:module:: torch.nn.intrinsic.modules.fused
 .. py:module:: torch.nn.intrinsic.qat.modules.conv_fused
 .. py:module:: torch.nn.intrinsic.qat.modules.linear_fused
