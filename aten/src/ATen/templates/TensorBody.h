@@ -355,6 +355,10 @@ class TORCH_API Tensor: public TensorBase {
     return to(options().device(c10::DeviceType::Metal), /*non_blocking*/ false, /*copy*/ false);
   }
 
+  Tensor mps() const {
+    return to(options().device(c10::DeviceType::MPS), /*non_blocking*/ false, /*copy*/ false);
+  }
+
   Tensor meta() const {
     return to(options().device(c10::DeviceType::Meta), /*non_blocking*/ false, /*copy*/ false);
   }
