@@ -572,6 +572,9 @@ max_epilogue_benchmarked_choices = 1
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
+# how far a node may be fused with another node
+max_fusion_proximity = 64
+
 # max number of inputs to generate cat as a pointwise op with masked laods
 max_pointwise_cat_inputs = 8
 
