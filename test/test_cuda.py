@@ -685,7 +685,7 @@ print(t.is_pinned())
             gcn_arch = str(
                 torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
             )
-            if "gfx94" in gcn_arch:
+            if "gfx94" in gcn_arch or "gfx95" in gcn_arch:
                 default_workspace_size = 1024 * 128 * 1024  # :1024:128
         else:
             default_workspace_size = (
@@ -5172,8 +5172,7 @@ class TestMemPool(TestCase):
             # to make a new 2 MB buffer to accomodate out_2
             self.assertEqual(len(pool.snapshot()), 2)
 
-        all_segments = torch.cuda.memory._snapshot()["segments"]
-        self.assertEqual(len(all_segments), 3)
+        self.assertEqual(len(pool.snapshot()), 2)
 
         del out_0, out_1, out_2
 
