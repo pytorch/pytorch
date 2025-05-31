@@ -68,7 +68,7 @@ jobs:
           pytorch-linux-jammy-xpu-2025.0-py3,
           pytorch-linux-jammy-xpu-2025.1-py3,
           pytorch-linux-jammy-py3-clang15-asan,
-          pytorch-linux-jammy-py3-clang18-asan,
+          pytorch-linux-jammy-py3-clang20-asan,
           pytorch-linux-focal-py3-clang10-onnx,
           pytorch-linux-focal-linter,
           pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter,

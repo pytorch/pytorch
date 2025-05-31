@@ -8,8 +8,12 @@ if [ -n "$CLANG_VERSION" ]; then
     # work around ubuntu apt-get conflicts
     sudo apt-get -y -f install
     wget --no-check-certificate -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+    apt-add-repository "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy main"
     if [[ $CLANG_VERSION == 18 ]]; then
       apt-add-repository "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main"
+    fi
+    if [[ $CLANG_VERSION == 20 ]]; then
+      apt-add-repository "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-20 main"
     fi
   fi
 
