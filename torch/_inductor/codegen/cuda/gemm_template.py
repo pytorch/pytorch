@@ -436,7 +436,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         )
         self.alpha = alpha
         self.beta = beta
-        assert len(input_nodes) >= 2 and len(input_nodes) <= 5
+        assert 2 <= len(input_nodes) <= 5
         assert self._are_inputs_layout_compatible(
             [node.get_layout() for node in input_nodes]
         )
