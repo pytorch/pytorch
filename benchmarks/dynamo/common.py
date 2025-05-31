@@ -3631,7 +3631,7 @@ def run(runner, args, original_dir=None):
 
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
-        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.benchmark = True
         torch.backends.cuda.matmul.allow_tf32 = False
         torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(False)
 
