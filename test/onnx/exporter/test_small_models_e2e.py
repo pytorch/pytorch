@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import logging
 
-import transformers
 import pytest
+import transformers
 from onnxscript import ir
 
 import torch
@@ -633,7 +633,9 @@ class DynamoExporterTest(common_utils.TestCase):
     def test_graph_attention_opset_23(self):
         class Model(torch.nn.Module):
             def forward(self, query, key, value):
-                return torch.nn.functional.scaled_dot_product_attention(query, key, value)
+                return torch.nn.functional.scaled_dot_product_attention(
+                    query, key, value
+                )
 
         query = torch.rand(32, 8, 128, 64, dtype=torch.float16)
         key = torch.rand(32, 8, 128, 64, dtype=torch.float16)
@@ -646,7 +648,9 @@ class DynamoExporterTest(common_utils.TestCase):
     def test_graph_accuracy_attention_opset_23(self):
         class Model(torch.nn.Module):
             def forward(self, query, key, value):
-                return torch.nn.functional.scaled_dot_product_attention(query, key, value)
+                return torch.nn.functional.scaled_dot_product_attention(
+                    query, key, value
+                )
 
         query = torch.rand(32, 8, 128, 64, dtype=torch.float16)
         key = torch.rand(32, 8, 128, 64, dtype=torch.float16)

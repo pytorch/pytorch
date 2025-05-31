@@ -53,7 +53,9 @@ def aten_group_norm(
     )
 
 
-@onnx_impl(aten.scaled_dot_product_attention.default, trace_only=True, opset_introduced=23)
+@onnx_impl(
+    aten.scaled_dot_product_attention.default, trace_only=True, opset_introduced=23
+)
 def aten_scaled_dot_product_attention_23(
     query: TFloat,
     key: TFloat,
@@ -72,9 +74,19 @@ def aten_scaled_dot_product_attention_23(
 
     Attempts to convert SDPA to Attention onnx op and fallbacks to an onnx graph equivivalent to the following PyTorch code::
         scale_factor = 1 / math.sqrt(Q.size(-1)) if scale is None else scale
-        attn_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0) if is_causal else attn_mask
-        attn_mask = attn_mask.masked_fill(not attn_mask, -float('inf')) if attn_mask.dtype==torch.bool else attn_mask
-        attn_weight = torch.softmax((Q @ K.transpose(-2, -1) * scale_factor) + attn_mask, dim=-1)
+        attn_mask = (
+            torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
+            if is_causal
+            else attn_mask
+        )
+        attn_mask = (
+            attn_mask.masked_fill(not attn_mask, -float("inf"))
+            if attn_mask.dtype == torch.bool
+            else attn_mask
+        )
+        attn_weight = torch.softmax(
+            (Q @ K.transpose(-2, -1) *  attn_mask, dim=-1
+        )
         attn_weight = torch.dropout(attn_weight, dropout_p)
         return attn_weight @ V
 
@@ -88,16 +100,25 @@ def aten_scaled_dot_product_attention_23(
     # Attention onnx op can only handle non-training scenarios where dropout is disabled.
     if dropout_p == 0:
         if enable_gqa:
-            assert (query.shape[1] > (key.shape[1] == value.shape[1]) and query.shape[1] % key.shape[1] == 0), (
+            assert (
+                query.shape[1] > (key.shape[1] == value.shape[1])
+                and query.shape[1] % key.shape[1] == 0
+            ), (
                 "SDPA (GQA or MQA) requires q_num_heads > kv_num_heads & q_num_heads % kv_num_heads == 0"
             )
         else:
-            assert (query.shape[1] == key.shape[1] == value.shape[1]), (
+            assert query.shape[1] == key.shape[1] == value.shape[1], (
                 "SDPA (MHA) requires q_num_heads = kv_num_heads"
             )
         Y, _, _, _ = op23.Attention(
-            query, key, value, attn_mask=attn_mask, scale=scale, q_num_heads=query.shape[3], kv_num_heads=key.shape[3],
-            is_causal=is_causal
+            query,
+            key,
+            value,
+            attn_mask=attn_mask,
+            scale=scale,
+            q_num_heads=query.shape[3],
+            kv_num_heads=key.shape[3],
+            is_causal=is_causal,
         )
         return Y
 
@@ -142,7 +163,7 @@ def _causal_attention_mask(query: TFloat, key: TFloat, op: Opset) -> TFloat:
     Equivalent to::
         mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
         attn_mask = torch.zeros(L, S, dtype=torch.float)
-        attn_mask = attn_mask.masked_fill(not mask, -float('inf'))
+        attn_mask = attn_mask.masked_fill(not mask, -float("inf"))
 
     Args:
         query: Tensor of shape [..., L, E]
@@ -195,13 +216,17 @@ def _aten_scaled_dot_product_attention_no_mask_onnx(
     )
     key_squeezed = op.Reshape(key, key_squeezed_shape)
     key_squeezed_transposed = op.Transpose(key_squeezed, perm=[0, 2, 1])
-    key_transposed_shape = op.Concat(key_first_dims, key_last_dim, key_second_last_dim, axis=0)
+    key_transposed_shape = op.Concat(
+        key_first_dims, key_last_dim, key_second_last_dim, axis=0
+    )
     key_transposed = op.Reshape(key_squeezed_transposed, key_transposed_shape)
 
     # https://github.com/pytorch/pytorch/blob/12da0c70378b5be9135c6fda62a9863bce4a4818/aten/src/ATen/native/transformers/attention.cpp#L653
     # Scale q, k before matmul for stability see https://tinyurl.com/sudb9s96 for math
     query_scaled = op.Mul(query, op.Sqrt(scale))
-    key_transposed_scaled = op.Mul(key_transposed, op.CastLike(op.Sqrt(scale), key_transposed))
+    key_transposed_scaled = op.Mul(
+        key_transposed, op.CastLike(op.Sqrt(scale), key_transposed)
+    )
     attn_weight = op.Softmax(
         op.MatMul(query_scaled, key_transposed_scaled),
         axis=-1,
@@ -231,7 +256,9 @@ def _aten_scaled_dot_product_attention_float_mask_onnx(
     )
     key_squeezed = op.Reshape(key, key_squeezed_shape)
     key_squeezed_transposed = op.Transpose(key_squeezed, perm=[0, 2, 1])
-    key_transposed_shape = op.Concat(key_first_dims, key_last_dim, key_second_last_dim, axis=0)
+    key_transposed_shape = op.Concat(
+        key_first_dims, key_last_dim, key_second_last_dim, axis=0
+    )
     key_transposed = op.Reshape(key_squeezed_transposed, key_transposed_shape)
 
     # https://github.com/pytorch/pytorch/blob/12da0c70378b5be9135c6fda62a9863bce4a4818/aten/src/ATen/native/transformers/attention.cpp#L653
