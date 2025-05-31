@@ -1,8 +1,5 @@
 # Owner(s): ["module: unknown"]
 
-
-import logging
-
 import torch
 from torch.ao.pruning.sparsifier.utils import (
     fqn_to_module,
@@ -18,12 +15,8 @@ from torch.testing._internal.common_quantization import (
     SingleLayerLinearModel,
     TwoLayerLinearModel,
 )
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
 
-
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
 
 model_list = [
     ConvModel,
@@ -147,3 +140,7 @@ class TestSparsityUtilFunctions(TestCase):
             self.assertEqual(arg_info["module_fqn"], "foo.bar")
             self.assertEqual(arg_info["tensor_name"], "baz")
             self.assertEqual(arg_info["tensor_fqn"], "foo.bar.baz")
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_ao_sparsity.py")
