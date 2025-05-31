@@ -806,19 +806,6 @@ class ScanAutogradOp(torch.autograd.Function):
 
 @scan_op.py_autograd_impl
 def scan_autograd(combine_fn, init, xs, additional_inputs):
-    if not any(
-        el.requires_grad
-        for el in (tuple(init) + tuple(xs) + additional_inputs)
-        if isinstance(el, torch.Tensor)
-    ):
-        with torch._C._AutoDispatchBelowAutograd():
-            return scan_op(
-                combine_fn,
-                init,
-                xs,
-                additional_inputs,
-            )
-
     num_leaves_init = len(init)
     num_leaves_xs = len(xs)
     num_additional_inputs = len(additional_inputs)
