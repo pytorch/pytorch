@@ -13,7 +13,7 @@ namespace six {
 // by a pytorch operator.
 
 inline bool isStructSeq(pybind11::handle input) {
-  return pybind11::cast<std::string>(pybind11::type::of(input).attr(
+  return pybind11::cast<std::string>(pybind11::type::handle_of(input).attr(
              "__module__")) == "torch.return_types";
 }
 

@@ -299,7 +299,7 @@ static py::object maybe_get_registered_torch_dispatch_rule(
 #endif
   auto result = find_torch_dispatch_rule(
       py::reinterpret_borrow<py::object>(torch_api_function),
-      py::type::of(torch_dispatch_object));
+      py::type::handle_of(torch_dispatch_object));
   return result;
 }
 
@@ -350,7 +350,7 @@ static py::object dispatch_on_subclass(
         auto py_arg = py::reinterpret_borrow<py::object>(arg);
         ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
             torch_function.ptr(),
-            py::type::of(py_arg).ptr(),
+            py::type::handle_of(py_arg).ptr(),
             torch_api_function,
             py_types.ptr(),
             args,

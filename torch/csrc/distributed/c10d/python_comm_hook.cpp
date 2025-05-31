@@ -28,7 +28,7 @@ c10::intrusive_ptr<c10::ivalue::Future> PythonCommHook::runHook(
   try {
     return py_fut.cast<std::shared_ptr<torch::jit::PythonFutureWrapper>>()->fut;
   } catch (const py::cast_error& e) {
-    auto type = py::type::of(py_fut);
+    auto type = py::type::handle_of(py_fut);
     auto errMsg = c10::str(
         e.what(),
         ". DDP communication hook's callback must return a "
