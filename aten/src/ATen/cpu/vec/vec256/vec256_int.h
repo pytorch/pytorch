@@ -23,7 +23,9 @@ struct Vectorizedi {
   }
 
  public:
-  Vectorizedi() {}
+  Vectorizedi() {
+    values = _mm256_setzero_si256();
+  }
   Vectorizedi(__m256i v) : values(v) {}
   operator __m256i() const {
     return values;
@@ -53,7 +55,9 @@ class Vectorized<int64_t> : public Vectorizedi {
     return 4;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() {}
+  Vectorized() {
+    values = _mm256_setzero_si256();
+  }
   Vectorized(int64_t v) {
     values = _mm256_set1_epi64x(v);
   }
