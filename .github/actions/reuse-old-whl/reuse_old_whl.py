@@ -1,6 +1,8 @@
 import argparse
 import os
+import shutil
 import subprocess
+import zipfile
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast, Optional
@@ -190,10 +192,8 @@ def find_old_whl(workflow_id: str, build_environment: str, sha: str) -> bool:
 
 
 def unzip_artifact_and_replace_files() -> None:
-    # Unzip the artifact and replace files
-    subprocess.check_output(
-        ["unzip", "-o", "artifacts.zip", "-d", "artifacts"],
-    )
+    with zipfile.ZipFile("artifacts.zip", "r") as zipf:
+        zipf.extractall("artifacts")
     os.remove("artifacts.zip")
 
     # Rename wheel into zip
@@ -203,42 +203,49 @@ def unzip_artifact_and_replace_files() -> None:
         os.rename(path, new_path)
         print(f"Renamed {path} to {new_path}")
         print(new_path.stem)
-        # Unzip the wheel
-        subprocess.check_output(
-            ["unzip", "-o", new_path, "-d", f"artifacts/dist/{new_path.stem}"],
-        )
+        with zipfile.ZipFile(new_path, "r") as zipf:
+            zipf.extractall(f"artifacts/dist/{new_path.stem}")
 
         # Remove the old wheel (which is now a zip file)
         os.remove(new_path)
 
         # Copy python files into the artifact
-        subprocess.check_output(
-            ["rsync", "-avz", "torch", f"artifacts/dist/{new_path.stem}"],
-        )
+        dst = f"artifacts/dist/{new_path.stem}/torch"
+        if os.path.exists(dst):
+            shutil.rmtree(dst)
+        shutil.copytree("torch", dst)
 
         # Zip the wheel back
-        subprocess.check_output(
-            ["zip", "-r", f"{new_path.stem}.zip", "."],
-            cwd=f"artifacts/dist/{new_path.stem}",
-        )
-        subprocess.check_output(
-            [
-                "mv",
-                f"artifacts/dist/{new_path.stem}/{new_path.stem}.zip",
-                f"artifacts/dist/{new_path.stem}.whl",
-            ],
+        # Create zip file of the wheel contents
+        with zipfile.ZipFile(
+            f"artifacts/dist/{new_path.stem}.zip", "w", zipfile.ZIP_DEFLATED
+        ) as zipf:
+            for root, _, files in os.walk(f"artifacts/dist/{new_path.stem}"):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(
+                        file_path, f"artifacts/dist/{new_path.stem}"
+                    )
+                    zipf.write(file_path, arcname)
+
+        # Move zip to wheel location
+        os.rename(
+            f"artifacts/dist/{new_path.stem}.zip", f"artifacts/dist/{new_path.stem}.whl"
         )
 
         # Remove the extracted folder
-        subprocess.check_output(
-            ["rm", "-rf", f"artifacts/dist/{new_path.stem}"],
-        )
+        shutil.rmtree(f"artifacts/dist/{new_path.stem}")
 
     # Rezip the artifact
-    subprocess.check_output(["zip", "-r", "artifacts.zip", "."], cwd="artifacts")
-    subprocess.check_output(
-        ["mv", "artifacts/artifacts.zip", "."],
-    )
+    with zipfile.ZipFile("artifacts/artifacts.zip", "w", zipfile.ZIP_DEFLATED) as zipf:
+        for root, _, files in os.walk("artifacts"):
+            for file in files:
+                file_path = os.path.join(root, file)
+                arcname = os.path.relpath(file_path, "artifacts")
+                zipf.write(file_path, arcname)
+
+    # Move final zip to root
+    os.rename("artifacts/artifacts.zip", "artifacts.zip")
     return None
 
 
