@@ -7,8 +7,6 @@ from __future__ import annotations
 
 from typing import Optional, TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from onnxscript.values import Opset
 from onnxscript.onnx_opset import opset20 as op20, opset21 as op21, opset23 as op23
 
 import torch
@@ -16,6 +14,8 @@ from torch.onnx._internal._lazy_import import onnxscript_ir as ir
 from torch.onnx._internal.exporter._torchlib._tensor_typing import TFloat, TReal
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 
+if TYPE_CHECKING:
+    from onnxscript.values import Opset
 
 aten = torch.ops.aten
 
