@@ -277,6 +277,27 @@ CI_PRESERVE_COMPILE_DEBUG = {
 }
 
 
+class DispatchLog(torch.utils._python_dispatch.TorchDispatchMode):
+    def convert_to_meta_tensor(self, t):
+        return torch.empty_like(t, device='meta')
+    
+    def convert_arg(self, arg):
+        if isinstance(arg, torch.Tensor):
+                return self.convert_to_meta_tensor(arg)
+        elif isinstance(arg, list) or isinstance(arg, tuple):
+            meta_ = []
+            for a in arg:
+                if isinstance(a, torch.Tensor):
+                    meta_.append(self.convert_to_meta_tensor(a))
+                else:
+                    meta_.append(a)
+            return meta_
+        elif isinstance(arg, dict):
+            raise RuntimeError('Corversion of dict is not supported')
+        else:
+            return arg
+
+
 @functools.lru_cache(maxsize=1)
 def load_yaml_file(filename):
     filepath = os.path.join(os.path.dirname(__file__), filename)
