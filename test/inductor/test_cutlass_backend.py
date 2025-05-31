@@ -1654,7 +1654,7 @@ class TestCutlassBackend(TestCase):
             ),
         ),
     )
-    @parametrize("has_bias", (False,))
+    @parametrize("has_bias", (False, True))
     @parametrize("use_fast_accum", (False,))
     def test_fp8_rowwise_scaling(
         self,
@@ -1726,7 +1726,7 @@ class TestCutlassBackend(TestCase):
             ),
         ),
     )
-    @parametrize("has_bias", (False,))
+    @parametrize("has_bias", (False, True))
     @parametrize("use_fast_accum", (False,))
     def test_fp8_tensorwise_scaling(
         self,
