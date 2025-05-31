@@ -1972,11 +1972,27 @@ class BenchmarkRunner:
             batch_size = self.decay_batch_exp(batch_size)
         return 1
 
+    """
     def run_n_iterations(self, mod, inputs, model_iter_fn):
         n = self.args.iterations
         for _ in range(n - 1):
             model_iter_fn(mod, inputs, collect_outputs=False)
         return model_iter_fn(mod, inputs, collect_outputs=True)
+    """
+
+    # """ # **SR**
+    def run_n_iterations(self, mod, inputs, model_iter_fn):
+        n = self.args.iterations
+        for _ in range(n - 1):
+            torch.compiler.cudagraph_mark_step_begin()  # <-- Add this
+            model_iter_fn(mod, inputs, collect_outputs=False)
+            torch.cuda.synchronize()  # <-- And this
+        
+        torch.compiler.cudagraph_mark_step_begin()  # <-- Add this
+        result = model_iter_fn(mod, inputs, collect_outputs=True)
+        torch.cuda.synchronize()  # <-- And this
+        return result
+    # """
 
     @torch._disable_dynamo(recursive=True)
     def optimizer_zero_grad(self, mod):
@@ -2260,10 +2276,36 @@ class BenchmarkRunner:
                         )
                         new_result = optimized_model_iter_fn(model_copy, example_inputs)
                 else:
+                    """
                     optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
                     new_result = self.run_n_iterations(
                         model_copy, example_inputs, optimized_model_iter_fn
                     )
+                    """
+                    # """# let's unroll self.run_n_iterations in here: # **SR**
+                    def f(mod, inputs, model_iter_fn):
+                        print("STRICT CUDAGRAPH")
+                        n = self.args.iterations
+                        for _ in range(n - 1):
+                            print("F: CALLING MODEL_ITER_FN", _)
+                            # torch.compiler.cudagraph_mark_step_begin()  # <-- Add this
+                            res=model_iter_fn(mod, inputs, collect_outputs=False)
+                            # torch.cuda.synchronize()  # <-- And this (not necessary)
+                        
+                        # torch.compiler.cudagraph_mark_step_begin()  # <-- Add this
+                        print("F: CALLING MODEL_ITER_FN (AGAIN)")
+                        result = model_iter_fn(mod, inputs, collect_outputs=True)
+                        # torch.cuda.synchronize()  # <-- And this
+                        return result
+
+                    cmp=optimize_ctx( # this encapsulates torch.compile with some parameters
+                        self.model_iter_fn # aka self.forward_pass
+                    )
+                    new_result = f(
+                        model_copy, example_inputs, cmp
+                    )
+                    # """
+
             except Exception as e:
                 log.exception("")
                 print(
