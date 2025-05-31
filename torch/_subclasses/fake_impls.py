@@ -1059,12 +1059,10 @@ def make_fast_binary_impl(
 
 # disable the python dispatcher to avoid decomposing detach() further
 # (proxy_mode should still decompose detach() though)
-def fast_detach(fake_mode, x, include_real=False):
+def fast_detach(fake_mode, x):
     with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
         out = torch.ops.aten.detach.default(x)
-    if include_real:
-        return FakeTensor(fake_mode, out, x.device, real_tensor=x.real_tensor)
-    return FakeTensor(fake_mode, out, x.device)
+    return FakeTensor(fake_mode, out, x.device, real_tensor=x.real_tensor)
 
 
 @functools.lru_cache(None)
