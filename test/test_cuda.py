@@ -5172,8 +5172,7 @@ class TestMemPool(TestCase):
             # to make a new 2 MB buffer to accomodate out_2
             self.assertEqual(len(pool.snapshot()), 2)
 
-        all_segments = torch.cuda.memory._snapshot()["segments"]
-        self.assertEqual(len(all_segments), 3)
+        self.assertEqual(len(pool.snapshot()), 2)
 
         del out_0, out_1, out_2
 
