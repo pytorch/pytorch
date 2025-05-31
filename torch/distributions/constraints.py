@@ -33,7 +33,18 @@ The following constraints are implemented:
 """
 
 from collections.abc import Sequence
-from typing import Callable, ClassVar, Final, Generic, Optional, TypeVar, Union
+from typing import (
+    Callable,
+    ClassVar,
+    Final,
+    Generic,
+    Optional,
+    overload,
+    Self,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 from typing_extensions import TypeAlias, TypeIs
 
 import torch
@@ -253,6 +264,13 @@ class _DependentProperty(property, _Dependent, Generic[T, R]):
     ) -> None:
         property.__init__(self, fn)
         _Dependent.__init__(self, is_discrete=is_discrete, event_dim=event_dim)
+
+    if TYPE_CHECKING:
+        # Needed because subclassing property is not fully supported in mypy
+        @overload  # type: ignore[no-overload-impl]
+        def __get__(self, instance: None, owner: type, /) -> Self: ...
+        @overload
+        def __get__(self, instance: T, owner: Optional[type] = None, /) -> R: ...  # type: ignore[misc]
 
     _T = TypeVar("_T", contravariant=True)
     _R = TypeVar("_R", covariant=True)
