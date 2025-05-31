@@ -30,6 +30,20 @@ jobs:
         ]}
     secrets: inherit
 
+  linux-jammy-cpu-py3_9-gcc11-inductor-build-amd:
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    name: linux-jammy-cpu-py3.9-gcc11-inductor
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-jammy-py3.9-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
+      # Use metal host for benchmark jobs
+      test-matrix: |
+        { include: [
+          { config: "inductor-micro-benchmark-cpu-x86", shard: 1, num_shards: 1, runner: "linux.24xlarge.amd", owners: ["oncall:pt2"] },
+        ]}
+    secrets: inherit
+
   linux-jammy-cpu-py3_9-gcc11-inductor-micro-benchmark-test:
     name: linux-jammy-cpu-py3.9-gcc11-inductor
     uses: ./.github/workflows/_linux-test.yml

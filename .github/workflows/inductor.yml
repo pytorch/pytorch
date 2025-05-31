@@ -96,6 +96,28 @@ jobs:
       allow-reuse-old-whl: true
     secrets: inherit
 
+  linux-jammy-cpu-py3_9-gcc11-inductor-build-amd:
+    name: linux-jammy-cpu-py3.9-gcc11-inductor
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      build-environment: linux-jammy-py3.9-gcc11-build
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      sync-tag: linux-jammy-cpu-py3_9-gcc11-inductor-build
+      test-matrix: |
+        { include: [
+          { config: "cpu_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.8xlarge.amd" },
+          { config: "cpu_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amd" },
+          { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amd" },
+          { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "linux.8xlarge.amd" },
+          { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "linux.8xlarge.amd" },
+          { config: "dynamic_cpu_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.8xlarge.amd" },
+          { config: "dynamic_cpu_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amd" },
+          { config: "inductor_torchbench_cpu_smoketest_perf", shard: 1, num_shards: 1, runner: "linux.24xlarge.amd" },
+        ]}
+    secrets: inherit
+
   linux-jammy-cpu-py3_9-gcc11-inductor-test:
     name: linux-jammy-cpu-py3.9-gcc11-inductor
     uses: ./.github/workflows/_linux-test.yml
