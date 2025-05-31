@@ -47,6 +47,10 @@ endif()
 enable_language(CUDA)
 if("X${CMAKE_CUDA_STANDARD}" STREQUAL "X" )
   set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
+  # CUDA 11 doesn't support C++ 20.
+  if(CMAKE_CXX_STANDARD STREQUAL 20)
+    set(CMAKE_CUDA_STANDARD 17)
+  endif()
 endif()
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
