@@ -248,7 +248,7 @@ if __name__ == "__main__":
         stream.record_event(end_event)
         torch.xpu.synchronize()
         if int(torch.version.xpu) >= 20250000:
-            start_event.elapsed_time(end_event)
+            self.assertGreater(start_event.elapsed_time(end_event), 0)
         else:
             with self.assertRaisesRegex(
                 NotImplementedError,
@@ -299,7 +299,7 @@ if __name__ == "__main__":
         self.assertNotEqual(event1.event_id, event2.event_id)
         self.assertEqual(c_xpu.cpu(), a + b)
         if int(torch.version.xpu) >= 20250000:
-            event1.elapsed_time(event2)
+            self.assertGreater(event1.elapsed_time(event2), 0)
         else:
             with self.assertRaisesRegex(
                 NotImplementedError,
