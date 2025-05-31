@@ -6,10 +6,18 @@ which are exportable to ONNX.
 
 from __future__ import annotations
 
+
+__all__ = [
+    "symbolic",
+    "symbolic_multi_out",
+    "rotary_embedding",
+]
+
+
 from typing import TYPE_CHECKING
 
 import torch
-from torch.onnx.ops import _symbolic_impl
+from torch.onnx.ops import _impl, _symbolic_impl
 
 
 if TYPE_CHECKING:
@@ -255,4 +263,25 @@ def symbolic_multi_out(
         metadata_props_values=metadata_props.values() if metadata_props else [],
         domain=domain,
         version=version,
+    )
+
+
+def rotary_embedding(
+    input: torch.Tensor,
+    cos_cache: torch.Tensor,
+    sin_cache: torch.Tensor,
+    position_ids: torch.Tensor | None = None,
+    *,
+    interleaved: bool = False,
+    num_heads: int = 0,
+    rotary_embedding_dim: int = 0,
+) -> torch.Tensor:
+    return _impl.rotary_embedding(
+        input,
+        cos_cache,
+        sin_cache,
+        position_ids=position_ids,
+        interleaved=interleaved,
+        num_heads=num_heads,
+        rotary_embedding_dim=rotary_embedding_dim,
     )
