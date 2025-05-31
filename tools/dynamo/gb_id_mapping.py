@@ -56,6 +56,34 @@ def expand_hints(hints):
     return expanded_hints
 
 
+"""
+    Extracts and returns the value of a keyword argument from an AST node.
+
+    This function handles different types of AST nodes:
+    - If the node is a constant, it returns the constant value.
+    - If the node is an f-string, it reconstructs the string by
+      evaluating formatted values and concatenating them with string literals.
+    - For other types, it cleans the source segment to remove formatting artifacts.
+
+"""
+
+
+def extract_info_from_keyword(source, kw):
+    param_source = get_source_segment(source, kw.value)
+    if isinstance(kw.value, ast.Constant):
+        return kw.value.value
+    elif isinstance(kw.value, ast.JoinedStr):
+        evaluated_context = []
+        for value in kw.value.values:
+            if isinstance(value, ast.FormattedValue):
+                evaluated_context.append(f"{{{ast.unparse(value.value)}}}")
+            elif isinstance(value, ast.Constant):
+                evaluated_context.append(value.value)
+        return "".join(evaluated_context)
+    else:
+        return clean_string(param_source)
+
+
 def find_unimplemented_v2_calls(dynamo_dir):
     results = []
     dynamo_dir = Path(dynamo_dir)
@@ -85,11 +113,7 @@ def find_unimplemented_v2_calls(dynamo_dir):
 
                             for kw in node.keywords:
                                 if kw.arg in info:
-                                    param_source = get_source_segment(source, kw.value)
-                                    if isinstance(kw.value, ast.Constant):
-                                        info[kw.arg] = kw.value.value
-                                    else:
-                                        info[kw.arg] = clean_string(param_source)
+                                    info[kw.arg] = extract_info_from_keyword(source, kw)
 
                             if info["gb_type"] is None:
                                 continue
@@ -140,7 +164,7 @@ def create_registry(dynamo_dir, registry_path):
 def main():
     parser = argparse.ArgumentParser(description="Manage graph break registry.")
     parser.add_argument(
-        "--dynamo-dir",
+        "--dynamo_dir",
         type=str,
         default=str(Path(__file__).parent.parent.parent / "torch" / "_dynamo"),
         help="Directory to search for unimplemented_v2 calls.",
