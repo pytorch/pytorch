@@ -697,7 +697,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
             k_splits = get_k_splits(m, n, k)
             for k_split in k_splits:
-                if not V.graph.sizevars.is_expr_static_and_true(
+                if not V.graph.sizevars.statically_known_true(
                     sympy.Eq(sympy.Mod(k, k_split), 0)
                 ):
                     continue
