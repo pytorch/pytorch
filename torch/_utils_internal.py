@@ -211,7 +211,7 @@ def is_fb_unit_test() -> bool:
 
 
 @functools.lru_cache(None)
-def max_clock_rate():
+def max_clock_rate_mhz():
     if not torch.version.hip:
         from triton.testing import nvsmi
 
