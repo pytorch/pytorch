@@ -1186,7 +1186,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(KeyError, d.pop, "c")
         self.assertRaises(TypeError, d.pop)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_popitem(self):
         d = self.thetype({"a": 1})
