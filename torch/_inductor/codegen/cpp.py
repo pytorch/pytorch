@@ -2844,7 +2844,7 @@ class CppVecKernel(CppKernel):
             # use welford_helper for vec kernel
             assert self.reduction_depth is not None
             reduction_size = functools.reduce(
-                lambda x, y: x * y, self.ranges[self.reduction_depth :]
+                operator.mul, self.ranges[self.reduction_depth :]
             )
             welford_helper_val = self.welford_helper_cse.generate(
                 self.compute, f"reduction {reduction_key}", write=False
