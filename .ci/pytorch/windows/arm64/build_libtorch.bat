@@ -2,8 +2,8 @@
 
 :: environment variables
 set CMAKE_BUILD_TYPE=%BUILD_TYPE%
-:: set CMAKE_C_COMPILER_LAUNCHER=sccache
-:: set CMAKE_CXX_COMPILER_LAUNCHER=sccache
+set CMAKE_C_COMPILER_LAUNCHER=sccache
+set CMAKE_CXX_COMPILER_LAUNCHER=sccache
 set libuv_ROOT=%DEPENDENCIES_DIR%\libuv\install
 set MSSdk=1
 if defined PYTORCH_BUILD_VERSION (
@@ -43,10 +43,9 @@ pip install -r requirements.txt
 set DISTUTILS_USE_SDK=1
 
 :: start sccache server and reset sccache stats
-:: disable sccache because of debug file bug
-:: sccache --start-server
-:: sccache --zero-stats
-:: sccache --show-stats
+sccache --start-server
+sccache --zero-stats
+sccache --show-stats
  
 :: Prepare the environment
 mkdir libtorch
