@@ -62,7 +62,6 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    SM90OrLater,
     xfailIfDistributedNotSupported,
 )
 from torch.testing._internal.common_utils import (
@@ -418,11 +417,12 @@ class TestDynamismExpression(TestCase):
 
         inputs = (torch.arange(10), torch.tensor(2))
 
-        # Without transforming the unbacked int expression, we can't export.
-        with self.assertRaisesRegex(
-            RuntimeError, escape("Could not guard on data-dependent expression")
-        ):
-            export(Module(identity), inputs, strict=True)
+        # See https://github.com/pytorch/pytorch/issues/154574
+        # # Without transforming the unbacked int expression, we can't export.
+        # with self.assertRaisesRegex(
+        #     RuntimeError, escape("Could not guard on data-dependent expression")
+        # ):
+        #     export(Module(identity), inputs, strict=True)
 
         # It works if we transform the whole unbacked int expression into
         # an unbacked int.
@@ -3830,6 +3830,20 @@ def forward(self, x):
             str(ep_for_training.range_constraints.values()),
             str(ep_for_real.range_constraints.values()),
         )
+
+    def test_unbacked_unsqueeze(self):
+        class Unsqueeze(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1 = xs.tolist()
+                x = torch.zeros(1, u0 + u1).contiguous()
+                return x.unsqueeze(-1)
+
+        mod = Unsqueeze()
+        x = torch.tensor([5, 6])
+        ep = export(mod, (x,), strict=False)
+        self.assertTrue(torch.allclose(mod(x), ep.module()(x)))
+        x = torch.tensor([1, 2])
+        self.assertTrue(torch.allclose(mod(x), ep.module()(x)))
 
     def test_export_for_training_with_container_type(self):
         class Foo(torch.nn.Module):
@@ -11900,6 +11914,26 @@ def forward(self, x, b_t, y):
         self.assertEqual(mod.foo, ep.module().foo)
         self.assertEqual(mod(torch.ones(4, 4)), ep.module()(torch.ones(4, 4)))
 
+    def test_unbacked_scalar_constructor(self):
+        class Foo(torch.nn.Module):
+            def forward(self, u, zuf, b):
+                return (
+                    torch.tensor([u.item()]),
+                    torch.tensor([zuf.item()]),
+                    torch.tensor([b.item()]),
+                )
+
+        mod = Foo()
+        inps = (torch.tensor([3]), torch.tensor([3.14]), torch.tensor([True]))
+        ep = torch.export.export(mod, inps)
+        for eager_out, ep_out in zip(mod(*inps), ep.module()(*inps)):
+            self.assertTrue(torch.allclose(eager_out, ep_out))
+
+        # test with other inputs
+        inps = (torch.tensor([5]), torch.tensor([-1.2]), torch.tensor([False]))
+        for eager_out, ep_out in zip(mod(*inps), ep.module()(*inps)):
+            self.assertTrue(torch.allclose(eager_out, ep_out))
+
     def test_symint_tensor_return(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -14406,17 +14440,21 @@ def forward(self, q, k, v):
     _scaled_dot_product_flash_attention = torch.ops.aten._scaled_dot_product_flash_attention.default(q, k, v, 0.0, True, scale = 0.125);  q = k = v = None
     getitem = _scaled_dot_product_flash_attention[0];  _scaled_dot_product_flash_attention = None
     return (getitem,)"""
-        # TODO(eqy): this needs to stay in sync with default SDPA priority order
-        if (False and SM90OrLater) and not torch.version.hip:
+        try:
+            self.assertExpectedInline(
+                ep.graph_module.code.strip(),
+                code_str,
+            )
+        except AssertionError:
             code_str = """\
 def forward(self, q, k, v):
     _scaled_dot_product_cudnn_attention = torch.ops.aten._scaled_dot_product_cudnn_attention.default(q, k, v, None, False, 0.0, True);  q = k = v = None
     getitem = _scaled_dot_product_cudnn_attention[0];  _scaled_dot_product_cudnn_attention = None
     return (getitem,)"""
-        self.assertExpectedInline(
-            ep.graph_module.code.strip(),
-            code_str,
-        )
+            self.assertExpectedInline(
+                ep.graph_module.code.strip(),
+                code_str,
+            )
 
     def test_int_list_output(self):
         class M(torch.nn.Module):
