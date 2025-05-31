@@ -34,6 +34,29 @@ macro(custom_protobuf_find)
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
   if(MSVC)
+    foreach(
+      flag_var
+      CMAKE_C_FLAGS
+      CMAKE_C_FLAGS_DEBUG
+      CMAKE_C_FLAGS_RELEASE
+      CMAKE_C_FLAGS_MINSIZEREL
+      CMAKE_C_FLAGS_RELWITHDEBINFO
+      CMAKE_CXX_FLAGS
+      CMAKE_CXX_FLAGS_DEBUG
+      CMAKE_CXX_FLAGS_RELEASE
+      CMAKE_CXX_FLAGS_MINSIZEREL
+      CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+      # Replace /Zi and /ZI with /Z7
+      if(MSVC_Z7_OVERRIDE)
+        if(${flag_var} MATCHES "/Z[iI]")
+          string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
+        endif()
+        if(${flag_var} MATCHES "[-]Zi")
+          string(REGEX REPLACE "[-Zi]" "/Z7" ${flag_var} "${${flag_var}}")
+        endif()
+      endif(MSVC_Z7_OVERRIDE)
+    endforeach(flag_var)
+
     foreach(flag_var
         CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
         CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
@@ -41,15 +64,24 @@ macro(custom_protobuf_find)
         string(REGEX REPLACE "/Z[iI7]" "" ${flag_var} "${${flag_var}}")
       endif()
     endforeach(flag_var)
-    if(MSVC_Z7_OVERRIDE)
-      foreach(flag_var
-          CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELWITHDEBINFO
-          CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELWITHDEBINFO)
-        if(${flag_var} MATCHES "/Z[iI]")
-          string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
-        endif()
-      endforeach(flag_var)
-    endif(MSVC_Z7_OVERRIDE)
+
+    foreach(
+      flag_var
+      CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO
+      CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO
+      CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO
+      CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO
+      CMAKE_SHARED_LINKER_FLAGS_DEBUG
+      CMAKE_STATIC_LINKER_FLAGS_DEBUG
+      CMAKE_EXE_LINKER_FLAGS_DEBUG
+      CMAKE_MODULE_LINKER_FLAGS_DEBUG)
+      # Switch off incremental linking in debug/relwithdebinfo builds
+      if(${flag_var} MATCHES "/INCREMENTAL" AND NOT ${flag_var} MATCHES
+                                                "/INCREMENTAL:NO")
+        string(REGEX REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" ${flag_var}
+                             "${${flag_var}}")
+      endif()
+    endforeach(flag_var)
   endif(MSVC)
 
   if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
