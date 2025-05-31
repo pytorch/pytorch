@@ -547,6 +547,9 @@ struct Vectorized {
   Vectorized<T> exp_u20() const {
     return map(std::exp);
   }
+  Vectorized<T> fexp_u20() const {
+    return map(std::exp);
+  }
   Vectorized<T> frac() const {
     return *this - this->trunc();
   }
