@@ -1,9 +1,11 @@
-# mypy: allow-untyped-defs
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
+from typing_extensions import Self
 
 from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.gamma import Gamma
+from torch.types import _size
 
 
 __all__ = ["Chi2"]
@@ -25,7 +27,9 @@ class Chi2(Gamma):
         df (float or Tensor): shape parameter of the distribution
     """
 
-    arg_constraints = {"df": constraints.positive}
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
+        "df": constraints.positive,
+    }
 
     def __init__(
         self,
@@ -34,7 +38,7 @@ class Chi2(Gamma):
     ) -> None:
         super().__init__(0.5 * df, 0.5, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(Chi2, _instance)
         return super().expand(batch_shape, new)
 

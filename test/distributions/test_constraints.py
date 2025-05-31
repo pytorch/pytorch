@@ -1,14 +1,20 @@
 # Owner(s): ["module: distributions"]
 
+from typing import TypeVar, Union
+from typing_extensions import TypeAlias, Unpack
+
 import pytest
 
 import torch
 from torch.distributions import biject_to, constraints, transform_to
+from torch.distributions.constraints import Constraint
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests
 
 
-EXAMPLES = [
+Value: TypeAlias = Union[list[float], list[list[float]], list[list[list[float]]]]
+
+EXAMPLES: list[tuple[Constraint, bool, Value]] = [
     (constraints.symmetric, False, [[2.0, 0], [2.0, 2]]),
     (constraints.positive_semidefinite, False, [[2.0, 0], [2.0, 2]]),
     (constraints.positive_definite, False, [[2.0, 0], [2.0, 2]]),
@@ -53,7 +59,7 @@ EXAMPLES = [
     ),
 ]
 
-CONSTRAINTS = [
+CONSTRAINTS: list[Union[tuple[Constraint], tuple[type[Constraint], Unpack[tuple]]]] = [
     (constraints.real,),
     (constraints.real_vector,),
     (constraints.positive,),
@@ -82,11 +88,19 @@ CONSTRAINTS = [
 ]
 
 
-def build_constraint(constraint_fn, args, is_cuda=False):
-    if not args:
-        return constraint_fn
-    t = torch.cuda.DoubleTensor if is_cuda else torch.DoubleTensor
-    return constraint_fn(*(t(x) if isinstance(x, list) else x for x in args))
+C = TypeVar("C", bound=Constraint)
+
+
+def build_constraint(
+    constraint_fn: Union[C, type[C]],
+    args: tuple,
+    is_cuda: bool = False,
+) -> C:
+    if isinstance(constraint_fn, type):
+        t = torch.cuda.DoubleTensor if is_cuda else torch.DoubleTensor  # type: ignore[attr-defined]
+        return constraint_fn(*(t(x) if isinstance(x, list) else x for x in args))
+    assert not args
+    return constraint_fn
 
 
 @pytest.mark.parametrize(("constraint_fn", "result", "value"), EXAMPLES)
@@ -99,8 +113,13 @@ def build_constraint(constraint_fn, args, is_cuda=False):
         ),
     ],
 )
-def test_constraint(constraint_fn, result, value, is_cuda):
-    t = torch.cuda.DoubleTensor if is_cuda else torch.DoubleTensor
+def test_constraint(
+    constraint_fn: Constraint,
+    result: bool,
+    value: Value,
+    is_cuda: bool,
+) -> None:
+    t = torch.cuda.DoubleTensor if is_cuda else torch.DoubleTensor  # type: ignore[attr-defined]
     assert constraint_fn.check(t(value)).all() == result
 
 
@@ -116,7 +135,11 @@ def test_constraint(constraint_fn, result, value, is_cuda):
         ),
     ],
 )
-def test_biject_to(constraint_fn, args, is_cuda):
+def test_biject_to(
+    constraint_fn: Union[Constraint, type[Constraint]],
+    args: tuple,
+    is_cuda: bool,
+) -> None:
     constraint = build_constraint(constraint_fn, args, is_cuda=is_cuda)
     try:
         t = biject_to(constraint)
@@ -157,7 +180,11 @@ def test_biject_to(constraint_fn, args, is_cuda):
         ),
     ],
 )
-def test_transform_to(constraint_fn, args, is_cuda):
+def test_transform_to(
+    constraint_fn: Union[Constraint, type[Constraint]],
+    args: tuple,
+    is_cuda: bool,
+) -> None:
     constraint = build_constraint(constraint_fn, args, is_cuda=is_cuda)
     t = transform_to(constraint)
     if constraint_fn is constraints.corr_cholesky:

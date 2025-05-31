@@ -1,11 +1,12 @@
-# mypy: allow-untyped-defs
-from typing import Optional
+from typing import Any, ClassVar, Optional
+from typing_extensions import Self
 
 import torch
 from torch import Tensor
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.exp_family import ExponentialFamily
 from torch.types import _size
 
@@ -14,7 +15,9 @@ __all__ = ["Dirichlet"]
 
 
 # This helper is exposed for testing.
-def _Dirichlet_backward(x, concentration, grad_output):
+def _Dirichlet_backward(
+    x: Tensor, concentration: Tensor, grad_output: Tensor
+) -> Tensor:
     total = concentration.sum(-1, True).expand_as(concentration)
     grad = torch._dirichlet_grad(x, concentration, total)
     return grad * (grad_output - (x * grad_output).sum(-1, True))
@@ -22,14 +25,14 @@ def _Dirichlet_backward(x, concentration, grad_output):
 
 class _Dirichlet(Function):
     @staticmethod
-    def forward(ctx, concentration):
+    def forward(ctx: Any, concentration: Tensor) -> Tensor:
         x = torch._sample_dirichlet(concentration)
         ctx.save_for_backward(x, concentration)
         return x
 
     @staticmethod
-    @once_differentiable
-    def backward(ctx, grad_output):
+    @once_differentiable  # type: ignore[misc]
+    def backward(ctx: Any, grad_output: Tensor) -> Tensor:
         x, concentration = ctx.saved_tensors
         return _Dirichlet_backward(x, concentration, grad_output)
 
@@ -50,11 +53,13 @@ class Dirichlet(ExponentialFamily):
             (often referred to as alpha)
     """
 
-    arg_constraints = {
+    arg_constraints: ClassVar[dict[str, Constraint]] = {
         "concentration": constraints.independent(constraints.positive, 1)
     }
-    support = constraints.simplex
-    has_rsample = True
+    support: ClassVar[constraints.Simplex] = constraints.simplex
+    has_rsample: bool = True
+
+    concentration: Tensor
 
     def __init__(
         self,
@@ -69,7 +74,7 @@ class Dirichlet(ExponentialFamily):
         batch_shape, event_shape = concentration.shape[:-1], concentration.shape[-1:]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(Dirichlet, _instance)
         batch_shape = torch.Size(batch_shape)
         new.concentration = self.concentration.expand(batch_shape + self.event_shape)
@@ -84,7 +89,7 @@ class Dirichlet(ExponentialFamily):
         concentration = self.concentration.expand(shape)
         return _Dirichlet.apply(concentration)
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         return (
@@ -116,7 +121,7 @@ class Dirichlet(ExponentialFamily):
             / (con0.pow(2) * (con0 + 1))
         )
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         k = self.concentration.size(-1)
         a0 = self.concentration.sum(-1)
         return (
@@ -130,5 +135,5 @@ class Dirichlet(ExponentialFamily):
     def _natural_params(self) -> tuple[Tensor]:
         return (self.concentration,)
 
-    def _log_normalizer(self, x):
+    def _log_normalizer(self, x: Tensor) -> Tensor:
         return x.lgamma().sum(-1) - torch.lgamma(x.sum(-1))
