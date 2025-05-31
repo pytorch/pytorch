@@ -723,6 +723,8 @@ C++ code. You need to `pip install ninja` to generate accurate
 information for the code in `torch/csrc`. More information at:
 - https://sarcasm.github.io/notes/dev/compilation-database.html
 
+If you are using `clangd`, it's recommended to install the latest release from: https://github.com/clangd/clangd/releases/latest. Older system versions may cause crashes or issues parsing `.clang-format` (e.g., unknown keys like `Macros`).
+
 ### Make no-op build fast
 
 #### Use Ninja
