@@ -23,7 +23,7 @@ from typing import Optional, TYPE_CHECKING, Union
 import torch.nn
 from torch.utils._ordered_set import OrderedSet
 
-from . import graph_break_hints, utils
+from . import config, graph_break_hints, utils
 from .bytecode_transformation import (
     add_push_null,
     add_push_null_call_function_ex,
@@ -613,15 +613,17 @@ class PyCodegen:
             if arg.source is not None:
                 collect_temp_source(arg.source)
 
-        # Record the pregraph bytecode start
-        self.add_push_null(
-            lambda: self.load_import_from(
-                utils.__name__, "record_pregraph_bytecode_enter"
+        cm_var = None
+        if config.record_pre_graph_bytecode_in_traces:
+            # Record the pregraph bytecode start
+            self.add_push_null(
+                lambda: self.load_import_from(
+                    utils.__name__, "record_pregraph_bytecode_enter"
+                )
             )
-        )
-        self.extend_output(create_call_function(0, False))
-        cm_var = self.new_var()
-        self.store(cm_var)
+            self.extend_output(create_call_function(0, False))
+            cm_var = self.new_var()
+            self.store(cm_var)
 
         for arg in graphargs:
             if arg.pass_arg_as_tensor:
@@ -638,15 +640,17 @@ class PyCodegen:
             else:
                 self.call_reconstruct(arg)
 
-        # Record the pregraph bytecode end
-        self.add_push_null(
-            lambda: self.load_import_from(
-                utils.__name__, "record_pregraph_bytecode_exit"
+        if config.record_pre_graph_bytecode_in_traces:
+            # Record the pregraph bytecode end
+            self.add_push_null(
+                lambda: self.load_import_from(
+                    utils.__name__, "record_pregraph_bytecode_exit"
+                )
             )
-        )
-        self.extend_output([self.create_load(cm_var)])
-        self.extend_output(create_call_function(1, False))
-        self.pop_top()
+            assert cm_var is not None
+            self.extend_output([self.create_load(cm_var)])
+            self.extend_output(create_call_function(1, False))
+            self.pop_top()
 
         self.extend_output(create_call_function(len(graphargs), False))
 
