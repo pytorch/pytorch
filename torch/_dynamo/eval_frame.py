@@ -705,6 +705,7 @@ class _TorchDynamoContext:
                 try:
                     return fn(*args, **kwargs)
                 except Unsupported as e:
+                    set_eval_frame(None)
                     if config.verbose:
                         raise
                     # strip internal tracebacks from causes
@@ -714,6 +715,7 @@ class _TorchDynamoContext:
                         cur_exn = cur_exn.__cause__
                     raise e.with_traceback(None) from e.__cause__  # User compiler error
                 except ShortenTraceback as e:
+                    set_eval_frame(None)
                     # Failures in the backend likely don't have useful
                     # data in the TorchDynamo frames, so we strip them out.
                     raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
@@ -1028,6 +1030,7 @@ def _optimize(
     guard_export_fn=None,
     guard_fail_fn=None,
     guard_filter_fn=None,
+    frame_traced_fn=None,
     disable=False,
     dynamic=None,
 ) -> Union[OptimizeContext, _NullDecorator]:
@@ -1067,6 +1070,7 @@ def _optimize(
         guard_export_fn=guard_export_fn,
         guard_fail_fn=guard_fail_fn,
         guard_filter_fn=guard_filter_fn,
+        frame_traced_fn=frame_traced_fn,
     )
     torch._C._log_api_usage_once("torch._dynamo.optimize")
     if (

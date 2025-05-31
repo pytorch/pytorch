@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
@@ -29,6 +28,7 @@ __all__ = [
 ]
 
 T = TypeVar("T", bound=Module)
+_V = TypeVar("_V")
 
 
 # Copied from torch.nn.modules.module, required for a custom __repr__ for ModuleList
@@ -121,7 +121,7 @@ class Sequential(Module):
             for idx, module in enumerate(args):
                 self.add_module(str(idx), module)
 
-    def _get_item_by_idx(self, iterator, idx) -> T:  # type: ignore[misc, type-var]
+    def _get_item_by_idx(self, iterator: Iterable[_V], idx: int) -> _V:
         """Get the idx-th item of the iterator."""
         size = len(self)
         idx = operator.index(idx)
@@ -131,7 +131,7 @@ class Sequential(Module):
         return next(islice(iterator, idx, None))
 
     @_copy_to_script_wrapper
-    def __getitem__(self, idx: Union[slice, int]) -> Union[Sequential, T]:
+    def __getitem__(self, idx: Union[slice, int]) -> Union[Sequential, Module]:
         if isinstance(idx, slice):
             return self.__class__(OrderedDict(list(self._modules.items())[idx]))
         else:
@@ -227,7 +227,7 @@ class Sequential(Module):
             return self
 
     @_copy_to_script_wrapper
-    def __dir__(self):
+    def __dir__(self) -> list[str]:
         keys = super().__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
@@ -410,7 +410,7 @@ class ModuleList(Module):
             combined.add_module(str(i), module)
         return combined
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Return a custom repr for ModuleList that compresses repeated module representations."""
         list_of_reprs = [repr(item) for item in self]
         if len(list_of_reprs) == 0:
@@ -443,7 +443,7 @@ class ModuleList(Module):
         return main_str
 
     @_copy_to_script_wrapper
-    def __dir__(self):
+    def __dir__(self) -> list[str]:
         keys = super().__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
@@ -580,17 +580,17 @@ class ModuleDict(Module):
         return v
 
     @_copy_to_script_wrapper
-    def keys(self) -> Iterable[str]:
+    def keys(self) -> container_abcs.KeysView[str]:
         r"""Return an iterable of the ModuleDict keys."""
         return self._modules.keys()
 
     @_copy_to_script_wrapper
-    def items(self) -> Iterable[tuple[str, Module]]:
+    def items(self) -> container_abcs.ItemsView[str, Module]:
         r"""Return an iterable of the ModuleDict key/value pairs."""
         return self._modules.items()
 
     @_copy_to_script_wrapper
-    def values(self) -> Iterable[Module]:
+    def values(self) -> container_abcs.ValuesView[Module]:
         r"""Return an iterable of the ModuleDict values."""
         return self._modules.values()
 
@@ -716,7 +716,7 @@ class ParameterList(Module):
     def __iadd__(self, parameters: Iterable[Any]) -> Self:
         return self.extend(parameters)
 
-    def __dir__(self):
+    def __dir__(self) -> list[str]:
         keys = super().__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
@@ -930,7 +930,7 @@ class ParameterDict(Module):
         """
         return ParameterDict((k, default) for k in keys)
 
-    def keys(self) -> Iterable[str]:
+    def keys(self) -> container_abcs.KeysView[str]:
         r"""Return an iterable of the ParameterDict keys."""
         return self._keys.keys()
 

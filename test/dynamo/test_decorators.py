@@ -845,6 +845,30 @@ If the above doesn't work, please subtmit an issue to GitHub.
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 6)
 
+    def test_skip_frame(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            x = x + 1
+            torch._dynamo.skip_frame()
+            return x + 1
+
+        inp = torch.ones(3, 3)
+        self.assertEqual(fn(inp), inp + 2)
+        self.assertEqual(cnts.frame_count, 0)
+
+        @torch.compile(backend=cnts)
+        def gn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            x = x + 1
+            torch._dynamo.skip_frame()
+            return x + 1
+
+        self.assertEqual(gn(inp), inp + 3)
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_disable_recursive_false(self):
         def fn2(x):
             return x + 1
@@ -1469,11 +1493,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
 
         @torch.compile(backend="eager")
         def g(x):
-            # cause a skipped frame
-            try:
-                torch._dynamo.graph_break()
-            except Exception:
-                pass
+            torch._dynamo.skip_frame()
             # NOTE: torch._dynamo.is_compiling() will get traced
             # and return true. torch.compiler.is_compiling() is skipped
             # and will return false.
@@ -1680,7 +1700,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
         @torch.compile(backend=cnts, fullgraph=True)
         def f1(x):
             x = x + 1
-            with torch._dynamo.set_fullgraph(fullgraph=False):
+            with torch._dynamo.set_fullgraph(False):
                 torch._dynamo.graph_break()
             return x + 2
 
@@ -1691,7 +1711,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
         @torch.compile(backend=cnts)
         def f2(x):
             x = x + 1
-            with torch._dynamo.set_fullgraph(fullgraph=True):
+            with torch._dynamo.set_fullgraph(True):
                 torch._dynamo.graph_break()
             return x + 2
 
@@ -1701,7 +1721,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
         @torch.compile(backend=cnts, fullgraph=True)
         def f3(x):
             x = x + 1
-            with torch._dynamo.set_fullgraph(fullgraph=False):
+            with torch._dynamo.set_fullgraph(False):
                 torch._dynamo.graph_break()
                 x = x + 2
                 torch._dynamo.graph_break()
@@ -1719,17 +1739,107 @@ If the above doesn't work, please subtmit an issue to GitHub.
         @torch.compile(backend=cnts, fullgraph=True)
         def f4(x):
             x = x + 1
-            with torch._dynamo.set_fullgraph(fullgraph=False):
-                # cause a skipped frame
-                try:
-                    torch._dynamo.graph_break()
-                except Exception:
-                    pass
+            with torch._dynamo.set_fullgraph(False):
+                torch._dynamo.skip_frame()
                 return inner_f4(x)
 
         cnts.clear()
         self.assertEqual(f4(inp), inp + 7)
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_set_fullgraph_nested(self):
+        # set_fullgraph in a nested frame
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.set_fullgraph(False)
+        def inner_f5(x):
+            x = x + 2
+            torch._dynamo.graph_break()
+            return x + 4
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f5(x):
+            x = x + 1
+            return inner_f5(x)
+
+        inp = torch.ones(3)
+        self.assertEqual(f5(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 4)
+
+        def inner_f6(x):
+            x = x + 2
+            with torch._dynamo.set_fullgraph(False):
+                torch._dynamo.graph_break()
+            return x + 4
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f6(x):
+            x = x + 1
+            return inner_f6(x)
+
+        cnts.clear()
+        self.assertEqual(f6(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 3)
+
+        def inner_f7(x):
+            x = x + 2
+            with torch._dynamo.set_fullgraph(True):
+                torch._dynamo.graph_break()
+            return x + 4
+
+        @torch.compile(backend=cnts, fullgraph=False)
+        def f7(x):
+            x = x + 1
+            return inner_f7(x)
+
+        with self.assertRaises(Unsupported):
+            f7(inp)
+
+    def test_set_fullgraph_nested_with_skip(self):
+        # set_fullgraph in a nested frame with a skipped frame in between
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.set_fullgraph(False)
+        def inner2_f8(x):
+            x = x + 2
+            torch._dynamo.graph_break()
+            return x + 4
+
+        def inner1_f8(x):
+            with torch._dynamo.set_fullgraph(False):
+                torch._dynamo.skip_frame()
+            return inner2_f8(x)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f8(x):
+            x = x + 1
+            return inner1_f8(x)
+
+        inp = torch.ones(3)
+        self.assertEqual(f8(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 4)
+
+        def inner2_f9(x):
+            x = x + 2
+            with torch._dynamo.set_fullgraph(True):
+                torch._dynamo.graph_break()
+            return x + 4
+
+        @torch._dynamo.disable(recursive=False)
+        def inner1_f9(x):
+            return inner2_f9(x)
+
+        @torch.compile(backend=cnts, fullgraph=False)
+        def f9(x):
+            x = x + 1
+            return inner1_f9(x)
+
+        with self.assertRaises(Unsupported):
+            f9(inp)
+
+        # test export with set_fullgraph(False) still errors
+
+        # test more deeply nested set_fullgraph decorated functions
 
 
 if __name__ == "__main__":
