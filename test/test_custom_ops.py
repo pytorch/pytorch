@@ -24,6 +24,7 @@ import torch.utils.cpp_extension
 from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import CustomOp, infer_schema
+from torch._dynamo.exc import Unsupported
 from torch._library.fake_profile import (
     generate_yaml_from_profiles,
     load_op_profiles,
@@ -46,6 +47,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_WINDOWS,
+    munge_exc,
     parametrize,
     run_tests,
     scoped_load_inline,
@@ -1776,23 +1778,26 @@ def forward(self, x_1):
         counters.clear()
         cnt = torch._dynamo.testing.CompileCounter()
 
-        @torch.compile(backend=cnt)
+        @torch.compile(backend=cnt, fullgraph=True)
         def f(x):
             return numpy_nonzero(x.clone()).clone()
 
-        f(torch.randn(10))
+        with self.assertRaises(Unsupported) as cm:
+            f(torch.randn(10))
 
-        self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(next(iter(counters["graph_break"].values())), 1)
         self.assertExpectedInline(
-            next(iter(counters["graph_break"].keys())).replace(";", "\n"),
+            munge_exc(cm.exception, skip=0),
             """\
 Dynamic shape operator
   Explanation: Operator `_torch_testing.numpy_nonzero.default`'s output shape depends on input Tensor data.
   Hint: Enable tracing of dynamic shape operators with `torch._dynamo.config.capture_dynamic_output_shape_ops = True`
 
   Developer debug context: _torch_testing.numpy_nonzero.default
-""",
+
+
+from user code:
+   File "test_custom_ops.py", line N, in f
+    return numpy_nonzero(x.clone()).clone()""",
         )
 
     # pre-existing problem: torch.compile(dynamic=True) will, by default,
