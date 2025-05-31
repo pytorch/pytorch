@@ -5127,7 +5127,7 @@ class TestMemPool(TestCase):
             # allocate memory with ncclMemAlloc
             with torch.cuda.use_mem_pool(pool):
                 x = torch.arange(1024 * 1024 * 2, device="cuda")
-            # Note: pool will be destroyed upon function return, but y, which
+            # Note: pool will be destroyed upon function return, but x, which
             # was allocated via the pool is still alive.
             return x
 
