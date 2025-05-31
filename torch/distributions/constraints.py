@@ -40,12 +40,11 @@ from typing import (
     Generic,
     Optional,
     overload,
-    Self,
     TYPE_CHECKING,
     TypeVar,
     Union,
 )
-from typing_extensions import TypeAlias, TypeIs
+from typing_extensions import Self, TypeAlias, TypeIs
 
 import torch
 from torch import Tensor
