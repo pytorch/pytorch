@@ -448,8 +448,7 @@ class ConstDictVariable(VariableTracker):
             assert len(args) == 1
             return self.getitem_const_raise_exception_if_absent(tx, args[0])
         elif name == "items":
-            # assert not (args or kwargs)
-            if len(args):
+            if args or kwargs:
                 raise_args_mismatch(tx, name)
             self.install_dict_keys_match_guard()
             if self.source:
@@ -461,29 +460,25 @@ class ConstDictVariable(VariableTracker):
             self.install_dict_keys_match_guard()
             if self.source:
                 tx.output.guard_on_key_order.add(self.source)
-            # assert not (args or kwargs)
             return DictKeysVariable(self)
         elif name == "values":
-            if len(args):
+            if args or kwargs:
                 raise_args_mismatch(tx, name)
             self.install_dict_keys_match_guard()
             if self.source:
                 tx.output.guard_on_key_order.add(self.source)
-            if len(args):
+            if args or kwargs:
                 raise_observed_exception(TypeError, tx)
-            # assert not (args or kwargs)
             return DictValuesVariable(self)
         elif name == "copy":
             self.install_dict_keys_match_guard()
-            if len(args):
+            if args or kwargs:
                 raise_args_mismatch(tx, name)
-            # assert not (args or kwargs)
             return self.clone(
                 items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
             )
         elif name == "__len__":
-            # assert not (args or kwargs)
-            if len(args):
+            if args or kwargs:
                 raise_args_mismatch(tx, name)
             self.install_dict_keys_match_guard()
             return ConstantVariable.create(len(self.items))
@@ -502,15 +497,6 @@ class ConstDictVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             self.items.__delitem__(Hashable(args[0]))
             return ConstantVariable.create(None)
-        # elif name in ("pop", "get") and len(args) in (1, 2) and args[0] not in self:
-        #     # missing item, return the default value. Install no DICT_CONTAINS guard.
-        #     self.install_dict_contains_guard(tx, args)
-        #     if len(args) == 1:
-        #         if name == "pop":
-        #             raise_observed_exception(KeyError, tx)
-        #         return ConstantVariable(None)
-        #     else:
-        #         return args[1]
         elif name == "get":
             if len(args) not in (1, 2):
                 raise_args_mismatch(tx, name)
@@ -519,6 +505,7 @@ class ConstDictVariable(VariableTracker):
                 raise_unhashable(args[0])
 
             if args[0] not in self:
+                self.install_dict_contains_guard(tx, args)
                 if len(args) == 1:
                     # if default is not given, return None
                     return ConstantVariable.create(None)
@@ -543,19 +530,9 @@ class ConstDictVariable(VariableTracker):
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
-        elif name == "popitem" and self.is_mutable():
-            if len(args):
-                raise_args_mismatch(tx, name)
-            self.should_reconstruct_all = True
-            tx.output.side_effects.mutation(self)
-            if not self.items:
-                raise_observed_exception(KeyError, tx)
-            k, v = self.items.popitem()
-            return variables.TupleVariable([k.vt, v])
-            # return ConstantVariable.create(self.items.popitem())
         elif name == "clear":
-            if len(args):
-                raise_observed_exception(TypeError, tx)
+            if args or kwargs:
+                raise_args_mismatch(tx, name)
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.clear()
@@ -587,9 +564,6 @@ class ConstDictVariable(VariableTracker):
                 return ConstantVariable.create(None)
             else:
                 return super().call_method(tx, name, args, kwargs)
-        # elif name in ("get", "__getattr__") and args[0] in self:
-        #     # Key guarding - Nothing to do.
-        #     return self.getitem_const(tx, args[0])
         elif name == "__contains__":
             if not len(args):
                 raise_args_mismatch(tx, name)
@@ -1165,20 +1139,3 @@ class DictItemsVariable(DictViewVariable):
 
     def python_type(self):
         return dict_items
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: list["VariableTracker"],
-        kwargs: dict[str, "VariableTracker"],
-    ) -> "VariableTracker":
-        if name in cmp_name_to_op_mapping:
-            if not isinstance(args[0], DictItemsVariable):
-                return ConstantVariable.create(NotImplemented)
-            return ConstantVariable.create(
-                cmp_name_to_op_mapping[name](
-                    self.dv_dict.items.items(), args[0].dv_dict.items.items()
-                )
-            )
-        return super().call_method(tx, name, args, kwargs)

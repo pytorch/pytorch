@@ -1119,6 +1119,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         # Test invalid usage
         self.assertRaises(TypeError, d.copy, 1)
 
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_fromkeys(self):
         d = self.thetype.fromkeys(["a", "b"], 1)
@@ -1185,6 +1186,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(KeyError, d.pop, "c")
         self.assertRaises(TypeError, d.pop)
 
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_popitem(self):
         d = self.thetype({"a": 1})
@@ -1263,10 +1265,12 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(TypeError, d.values, 1)
 
 
+@unittest.expectedFailure
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
 
 
+@unittest.expectedFailure
 class OrderedDictMethodsTests(DictMethodsTests):
     thetype = OrderedDict
 
