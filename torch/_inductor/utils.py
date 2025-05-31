@@ -3296,11 +3296,11 @@ def tabulate_2d(elements: Sequence[Sequence[T]], headers: Sequence[T]) -> str:
 
 
 def zip_dicts(
-    dict1: dict[KeyType, ValType],
-    dict2: dict[KeyType, ValType],
+    dict1: Mapping[KeyType, ValType],
+    dict2: Mapping[KeyType, ValType],
     d1_default: ValType = None,
     d2_default: ValType = None,
-) -> Generator[tuple[KeyType, ValType, ValType], None, None]:
+) -> Generator[tuple[KeyType, ValType | None, ValType | None], None, None]:
     """
     Zip two dictionaries together, replacing missing keys with default values.
 
