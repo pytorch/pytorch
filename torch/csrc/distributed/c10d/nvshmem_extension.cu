@@ -18,6 +18,8 @@ static StoreExchange storeExchange = StoreExchange("nvshmem_ext");
 
 #define THREADS_PER_BLOCK 512
 
+constexpr int MiB = 1024 * 1024;
+
 // Bootstrap based on user's setting for NCCL
 // Long term, this may be a bit unclean; short term, it improves UX
 void maybe_initialize_env_vars() {
@@ -280,15 +282,20 @@ at::Tensor nvshmem_all_to_all_vdev(
   // Up to 2 MB -> 2 blocks
   // Up to 4 MB -> 4 blocks
   // More -> 8 blocks
+  // The tuning for `num_blocks` below multiplies these numbers by world_size
+  // (e.g. 8 -> 8 * 8). If world_size is smaller, we simply shift the blocks
+  // towards data parallelism. (There may be room for improvement here)
   auto input_size = input.numel() * input.element_size();
-  const int max_blocks_per_peer = input_size < 1024 * 1024 ? 1 :
-      (input_size < 2 * 1024 * 1024 ? 2 :
-      (input_size < 4 * 1024 * 1024 ? 4 : 8));
+  int num_blocks = input_size < MiB ? 8 :
+      (input_size < 2 * MiB ? 16 :
+      (input_size < 4 * MiB ? 32 : 64));
 
   // Inter-node: limit the total the number of blocks to 8 which is able to
   // drive 57 GB/s bandwidth in test, enough to drive a 400 Gb/s NIC.
   // TODO: better intra vs inter detection, currently it is based on world_size
-  int num_blocks = world_size > 8 ? 8 : max_blocks_per_peer * world_size;
+  if (world_size > 8) {
+    num_blocks = std::min(num_blocks, 8);
+  }
 
   // Stride at dim 0 (assuming input is contiguous, TODO)
   size_t stride_bytes = input.stride(0) * input.element_size();
