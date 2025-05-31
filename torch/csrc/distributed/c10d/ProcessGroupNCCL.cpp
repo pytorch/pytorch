@@ -57,32 +57,6 @@ const std::map<ReduceOp::RedOpType, ncclRedOp_t> ncclOp = {
 #endif // NCCL_HAS_AVG
 };
 
-// NCCL type typing
-std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
-    {at::kChar, ncclInt8},
-    {at::kByte, ncclUint8},
-    {at::kFloat, ncclFloat},
-    {at::kDouble, ncclDouble},
-    {at::kInt, ncclInt32},
-    {at::kLong, ncclInt64},
-    {at::kHalf, ncclHalf},
-    {at::kBool, ncclUint8},
-#ifdef NCCL_SUPPORTS_FP8
-    {at::kFloat8_e5m2, ncclFloat8e5m2},
-    {at::kFloat8_e4m3fn, ncclFloat8e4m3},
-#else
-    {at::kFloat8_e5m2, ncclUint8},
-    {at::kFloat8_e4m3fn, ncclUint8},
-#endif
-    // NVIDIA GPUs does not support the UZ version standing for "no negative
-    // zero".  See https://onnx.ai/onnx/technical/float8.html
-    {at::kFloat8_e4m3fnuz, ncclUint8},
-    {at::kFloat8_e5m2fnuz, ncclUint8},
-#if HAS_NCCL_BF16_DATATYPE
-    {at::kBFloat16, ncclBfloat16},
-#endif // HAS_NCCL_BF16_DATATYPE
-};
-
 inline bool isUnsupportedFloat8(at::ScalarType t) {
   return (
       t == at::ScalarType::Float8_e5m2fnuz ||
@@ -92,17 +66,6 @@ inline bool isUnsupportedFloat8(at::ScalarType t) {
       || t == at::ScalarType::Float8_e5m2 || t == at::ScalarType::Float8_e4m3fn
 #endif
   );
-}
-
-// Helper function that gets the data type and issues error if not supported
-ncclDataType_t getNcclDataType(at::ScalarType type) {
-  auto it = ncclDataType.find(type);
-  TORCH_CHECK_WITH(
-      TypeError,
-      it != ncclDataType.end(),
-      "Input tensor data type is not supported for NCCL process group: ",
-      type);
-  return it->second;
 }
 
 bool complexViewAsRealAllowed(const ReduceOp& reduceOp) {
@@ -1139,9 +1102,12 @@ bool ProcessGroupNCCL::useNonblocking() {
     useNonblocking_ = nbEnv;
   }
   // 3rd priority: automatically use nonblocking if we are in eager init mode
-  else if (getBoundDeviceId()) {
-    useNonblocking_ = true;
-  }
+  // Note: this automatic selection is disabled in torch 2.7.1 to work around a
+  // hang in NCCL 2.26 in non-blocking mode. We can revisit if NCCL fixes the
+  // bug. See https://github.com/pytorch/pytorch/issues/153960
+  // else if (getBoundDeviceId()) {
+  //   useNonblocking_ = true;
+  // }
   // 4th priority: otherwise, nonblocking = false to preserve old behavior
   else {
     useNonblocking_ = false;
@@ -1220,8 +1186,7 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
   // We must ensure we're listening for allocator trace events in order to
   // register future segments allocated in this pool (this call is idempotent).
   attachAllocatorHooks();
-  auto ctx = c10::cuda::MemPoolContext(pool);
-  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(pool->id());
   for (const auto& segmentInfo : snapshot.segments) {
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == pool->device(),
@@ -1255,8 +1220,7 @@ void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
     auto iter = ncclCommMemPoolMap.find(ncclComm);
     iter->second.erase(pool->id());
   }
-  auto ctx = c10::cuda::MemPoolContext(pool);
-  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(pool->id());
   for (const auto& segmentInfo : snapshot.segments) {
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == pool->device(),
@@ -2525,15 +2489,16 @@ void ProcessGroupNCCL::runHookLoop() {
         // Hook might grab GIL, unlock first to prevent deadlock
         lock.unlock();
 
+        auto timeFinished = std::chrono::system_clock::now();
         auto timeStarted =
-            std::chrono::system_clock::now() +
-            std::chrono::duration_cast<std::chrono::system_clock::duration>(
+            timeFinished +
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                 work.workStartTime_ - std::chrono::steady_clock::now());
         onCompletionHook_(std::make_shared<WorkInfo>(
             work.retrieveOpType(), // OpType
             work.getSequencenumber(), // seq
             timeStarted, // timeStarted
-            std::chrono::system_clock::now(), // timeFinished
+            timeFinished, // timeFinished
             std::chrono::duration<float, std::milli>(
                 work.getDuration()) // activeDuration
             ));
@@ -5605,9 +5570,12 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
   }
 
   // Allocate tensor under this MemPool's context
-  auto ctx = c10::cuda::MemPoolContext(memPool_.get());
+  auto tid = std::this_thread::get_id();
   c10::cuda::CUDACachingAllocator::beginAllocateToPool(
-      memPool_->device(), memPool_->id(), [](cudaStream_t) { return true; });
+      memPool_->device(), memPool_->id(), [=](cudaStream_t) {
+        auto current_tid = std::this_thread::get_id();
+        return current_tid == tid;
+      });
   at::Tensor tensor = at::empty({size}, options);
   c10::cuda::CUDACachingAllocator::endAllocateToPool(
       memPool_->device(), memPool_->id());
