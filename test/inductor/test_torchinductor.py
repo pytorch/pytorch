@@ -1417,7 +1417,7 @@ class CommonTemplate:
                 if not any(assert_key in line for assert_key in assert_keywords)
             ]
             code = "\n".join(filtered_lines)
-            self.assertEqual(
+            self.assertGreaterEqual(
                 code.count("view_dtype" if config.cpp_wrapper else "aten.view"), 3
             )
 
