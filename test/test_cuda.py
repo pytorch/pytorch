@@ -5121,7 +5121,6 @@ class TestMemPool(TestCase):
         self.assertEqual(called_dummy_alloc.value, 0)
         self.assertEqual(called_dummy_free.value, 0)
 
-
         def f():
             pool = torch.cuda.MemPool(allocator.allocator())
 
@@ -5139,7 +5138,6 @@ class TestMemPool(TestCase):
         del x
         torch.cuda.empty_cache()
         self.assertEqual(called_dummy_free.value, 321)
-
 
     def test_mempool_with_allocator(self):
         pool = torch.cuda.MemPool()
