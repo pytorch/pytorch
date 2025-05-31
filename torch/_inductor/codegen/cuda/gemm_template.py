@@ -1098,20 +1098,26 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
                 epilogue_inputs = [name_to_buffer[name] for name in input_names]
                 outputs = [name_to_buffer[name] for name in output_names]
-            else:  # Scaled MM, we read the two scale matrices and write a single output
+            else:  # Scaled MM, we read the two scale matrices (and optional bias) and write a single output
+                bias = None if len(self.input_nodes) < 5 else self.input_nodes[4]
+                bias_name = bias.get_name() if bias else None
+
                 (
                     evt_read_names,
                     var_name_to_buffer_name,
                     evt_py_code,
                 ) = scaled_mm_evt(
-                    self.input_nodes[2].get_name(),
-                    self.input_nodes[3].get_name(),
+                    self.input_nodes[2].get_name(),  # scale_A
+                    self.input_nodes[3].get_name(),  # scale_B
+                    bias_name,
                     Y.get_name(),
                 )
 
                 input_names = list(evt_read_names)
                 output_names = []  # We only need Y
                 epilogue_inputs = [self.input_nodes[2], self.input_nodes[3]]
+                if bias:
+                    epilogue_inputs.append(bias)
                 outputs = []
 
             acc_dtype = cutlass_utils.get_accumulator_dtype(
@@ -1130,8 +1136,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             inputs = [
                 X,
                 W,
-                *epilogue_inputs,  # type: ignore[list-item]
                 Bias,
+                *epilogue_inputs,  # type: ignore[list-item]
                 Y,
                 *extra_inputs,
             ]
