@@ -19,10 +19,10 @@ concurrency:
 jobs:
   build-windows-magma:
     if: github.repository_owner == 'pytorch'
-    runs-on: windows-2019
+    runs-on: windows-2022
     strategy:
       matrix:
-        cuda_version: ["128", "126", "118"]
+        cuda_version: ["129", "128", "126"]
         config: ["Release", "Debug"]
     env:
       CUDA_VERSION: ${{ matrix.cuda_version }}
