@@ -855,7 +855,6 @@ torch.cuda.synchronize()
             inp = torch.randn(16, 0, 20, 32, device=device)
             avgpool(inp)
 
-    @expectedFailureMPS  # max_pool3d_with_indices not supported on MPS
     def test_pooling_shape(self, device):
         """Test the output shape calculation for pooling functions"""
 
@@ -1939,7 +1938,6 @@ torch.cuda.synchronize()
         helper(nn.AdaptiveAvgPool2d((2**6, 2**6)))
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
-    @expectedFailureMPS
     @dtypes(torch.float)
     def test_pool_invalid_size(self, device, dtype):
         for op in ("max", "avg"):
