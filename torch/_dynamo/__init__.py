@@ -32,6 +32,7 @@ from .decorators import (
     run,
     set_fullgraph,
     set_stance,
+    skip_frame,
     substitute_in_graph,
 )
 from .eval_frame import (
@@ -85,6 +86,7 @@ __all__ = [
     "run",
     "set_fullgraph",
     "set_stance",
+    "skip_frame",
     "substitute_in_graph",
 ]
 
