@@ -707,7 +707,6 @@ def compile_fx_inner(
                 dynamo_compile_column_us="inductor_cumulative_compile_time_us",
             )
         )
-        stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
         stack.enter_context(with_fresh_cache_if_config())
         stack.enter_context(DebugContext())
         CompileEventLogger.pt2_compile(
@@ -1201,6 +1200,8 @@ class _InProcessFxCompile(FxCompile):
                     include_device=True,
                     fast_sympy_print=True,
                 )
+                # "after_post_grad_graph" is used in inductor provenance
+                # tracking highlighter front-end.
                 trace_structured(
                     "artifact",
                     metadata_fn=lambda: {
@@ -1711,7 +1712,7 @@ def cudagraphify_impl(
             graph.replay()
             return static_outputs
 
-    return align_inputs_from_check_idxs(run, check_input_idxs)
+    return align_inputs_from_check_idxs(run, check_input_idxs, OrderedSet())
 
 
 def compile_fx_aot(
@@ -2061,6 +2062,8 @@ def compile_fx(
         # having AOTAutograd trace it.
         # TODO: Get rid of this?
         if isinstance(model_, GraphModule):
+            # "before_pre_grad_graph" is used in inductor provenance
+            # tracking highlighter front-end.
             trace_structured(
                 "artifact",
                 metadata_fn=lambda: {

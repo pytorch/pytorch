@@ -69,6 +69,7 @@ from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
 from .utils import (
     ceildiv,
+    do_bench_using_profiling,
     FakeIndentedBuffer,
     get_dtype_size,
     is_gpu,
@@ -1542,7 +1543,7 @@ class TritonTemplate(KernelTemplate):
         # capability doesn't support them.  This is a bug in Triton, but for now we'll
         # patch around it here.  See https://github.com/triton-lang/triton/issues/3011
         # for one example issue with this problem.
-        if not torch.cuda.is_tf32_supported():
+        if torch.cuda.is_available() and not torch.cuda.is_tf32_supported():
             kwargs["ALLOW_TF32"] = "False"
 
         if call_sizes is None:
@@ -1777,6 +1778,9 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None
+        if config.profile_bandwidth_with_do_bench_using_profiling:
+            algo = self.bmreq.make_run_fn(*args, out=out)
+            return do_bench_using_profiling(algo)
         return self.bmreq.benchmark(*args, out=out)
 
     def precompile(self):
@@ -1860,6 +1864,8 @@ class ExternKernelCaller(ChoiceCaller):
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
+            if config.profile_bandwidth_with_do_bench_using_profiling:
+                return do_bench_using_profiling(lambda: algo(*args))
             return benchmarker.benchmark(algo, args, {})
 
     def to_callable(self):
@@ -2065,6 +2071,24 @@ def create_precompile_key(
     )
 
 
+# Args to FeedbackFunctions
+# timings: mapping from choices to the benchmark time
+# name: name of the op
+# input_nodes: list of input ir.py Nodes
+# choices: list of choices
+# profiled time: Callable that returns a dict mapping from choices to the profiled time
+FeedbackFunction = Callable[
+    [
+        dict[ChoiceCaller, float],
+        str,
+        list[Any],
+        list[ChoiceCaller],
+        Callable[[], dict[ChoiceCaller, float]],
+    ],
+    None,
+]
+
+
 class AlgorithmSelectorCache(PersistentCache):
     """
     A persistent cache for algorithm selection results used in autotuning of GEMMs
@@ -2085,11 +2109,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # of a particular key
         self.precompile_cache: dict[str, Callable[[], None]] = {}
         # list of callbacks that are called after benchmarking
-        self.feedback_saver_fns: list[
-            Callable[
-                [dict[ChoiceCaller, float], str, list[Any], list[ChoiceCaller]], None
-            ]
-        ] = []
+        self.feedback_saver_fns: list[FeedbackFunction] = []
 
         clear_on_fresh_inductor_cache(self)
 
@@ -2120,9 +2140,6 @@ class AlgorithmSelectorCache(PersistentCache):
             return_multi_template = False
 
         # TODO - assert that we have not mutating kernels here
-
-        # TODO(nmacchioni): remove once CI tests are fixed
-        choices = [choice for choice in choices if choice is not None]
 
         if config.test_configs.autotune_choice_name_regex is not None:
             choices = [
@@ -2184,7 +2201,7 @@ class AlgorithmSelectorCache(PersistentCache):
             # Initialize the suprocess pool so it will warmup early.
             torch._inductor.autotune_process.get_tuning_process_pool()
 
-        def do_autotuning(precompile_fn):
+        def do_autotuning(choices, precompile_fn):
             precompile_start_ts = time.time()
             with dynamo_timed(
                 f"{name}_template_precompiling",
@@ -2195,6 +2212,19 @@ class AlgorithmSelectorCache(PersistentCache):
             precompile_elapse = time.time() - precompile_start_ts
             log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
 
+            candidates = self.prescreen_choices(choices)
+            if candidates:
+                prescreening_start_ts = time.time()
+                timings = self.lookup(
+                    candidates,
+                    name,
+                    inputs_key,
+                    autotune,
+                )
+                choices = self.prune_choices_postscreen(choices, timings)
+                prescreening_elapse = time.time() - prescreening_start_ts
+                log.debug("Prescreening elapsed time: %.02fs", prescreening_elapse)
+
             autotune_start_ts = time.time()
             timings = self.lookup(
                 choices,
@@ -2202,6 +2232,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 inputs_key,
                 autotune,
             )
+
             autotune_elapse = time.time() - autotune_start_ts
             log.debug("Autotuning elapsed time: %.02fs", autotune_elapse)
 
@@ -2222,8 +2253,28 @@ class AlgorithmSelectorCache(PersistentCache):
                     name, input_nodes, timings, autotune_elapse, precompile_elapse
                 )
 
+            def profiler_bench_function():
+                # we're not running through the normal caching autotuner method here because we want to avoid returning
+                # the cached value.
+                # Avoid benchmarking in a separate process because it's not easy to signal to the TuningProcess that we
+                # should use the profiler.
+                with config.patch(
+                    profile_bandwidth_with_do_bench_using_profiling=True,
+                    autotune_in_subproc=False,
+                ):
+                    return self.make_benchmark_fn(
+                        choices, input_nodes, layout, input_gen_fns
+                    )(choices)
+
             for feedback_fn in self.feedback_saver_fns:
-                feedback_fn(timings, name, input_nodes, choices)
+                # re-benchmarking the same choices with profiler is a bit expensive, so pass it in as a thunk.
+                feedback_fn(
+                    timings,
+                    name,
+                    input_nodes,
+                    choices,
+                    profiler_bench_function,
+                )
 
             return timings
 
@@ -2237,7 +2288,7 @@ class AlgorithmSelectorCache(PersistentCache):
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
 
             def get_timings():
-                timings = do_autotuning(precompile_fn)
+                timings = do_autotuning(choices, precompile_fn)
                 min_extern_choice = float("inf")
                 for choice, timing in timings.items():
                     if isinstance(choice, ExternKernelCaller):
@@ -2272,8 +2323,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 )
             )
 
-        # TODO - dont want to precompile if we have a cache hit
-        timings = do_autotuning(precompile_fn)
+        timings = do_autotuning(choices, precompile_fn)
         if timings == {} or choices[0] not in timings:
             return choices[0].output_node()
 
@@ -2652,6 +2702,77 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
     @staticmethod
+    def prescreen_choices(
+        choices: list[ChoiceCaller],
+    ) -> list[ChoiceCaller]:
+        """
+        Add prescreening phase. Motivation is to reduce the number of autotuning needed,
+        for example, when there are runtime params.
+        """
+        # prescreen cutlass
+        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+
+        candidates = []
+        if (
+            config.cuda.cutlass_prescreening
+            and len(config.cuda.cutlass_max_profiling_swizzle_options) > 1
+        ):
+            candidates.extend(
+                [
+                    c
+                    for c in choices
+                    if isinstance(c, CUDATemplateCaller)
+                    # hardcoded to only look at swizzle=2
+                    if c.info_dict().get("swizzle") == "2"
+                ]
+            )
+
+        # skip prescreening if the number of candidates is too small
+        if len(candidates) < 10:
+            return []
+
+        return candidates  # type: ignore[return-value]
+
+    @staticmethod
+    def prune_choices_postscreen(
+        choices: list[ChoiceCaller],
+        candidate_timings: dict[ChoiceCaller, float],
+    ) -> list[ChoiceCaller]:
+        """
+        Prune the choices after prescreening.
+        """
+        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+
+        if len(candidate_timings) < 10:
+            return []
+
+        log.debug("Before pruning using prescreening timings, %d choices", len(choices))
+        sorted_candidates = sorted(
+            candidate_timings.keys(), key=lambda choice: candidate_timings[choice]
+        )
+        num_to_keep = max(int(math.sqrt(len(choices)) / 4), 8)
+
+        # prune choices based on prescreening timings
+        candidates_to_prune = OrderedSet(
+            candidate.hash_key() for candidate in sorted_candidates[num_to_keep:]
+        )
+        for candidate in sorted_candidates[:num_to_keep]:
+            if candidate_timings[candidate] == float("inf"):
+                candidates_to_prune.add(candidate.hash_key())
+            else:
+                if isinstance(candidate, CUDATemplateCaller):
+                    candidate.bmreq.ensure_dll_loaded()
+
+        choices = [
+            choice
+            for choice in choices
+            if choice.hash_key() not in candidates_to_prune  # type: ignore[attr-defined]
+        ]
+
+        log.debug("After pruning using prescreening timings, %d choices", len(choices))
+        return choices
+
+    @staticmethod
     def log_results(
         name: str,
         input_nodes: list[ir.IRNode],
@@ -2833,12 +2954,7 @@ class AlgorithmSelectorCache(PersistentCache):
             ),
         )
 
-    def add_feedback_saver(
-        self,
-        fn: Callable[
-            [dict[ChoiceCaller, float], str, list[Any], list[ChoiceCaller]], None
-        ],
-    ):
+    def add_feedback_saver(self, fn: FeedbackFunction):
         self.feedback_saver_fns.append(fn)
 
 
@@ -2862,7 +2978,7 @@ def autotune_select_algorithm(*args, **kwargs):
 
 
 def add_feedback_saver(
-    fn: Callable[[dict[ChoiceCaller, float], str, list[Any], list[ChoiceCaller]], None],
+    fn: FeedbackFunction,
 ):
     global _ALGORITHM_SELECTOR_CACHE
     if _ALGORITHM_SELECTOR_CACHE is None:
