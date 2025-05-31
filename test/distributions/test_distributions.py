@@ -3375,7 +3375,7 @@ class TestDistributions(DistributionsTestCase):
 
         for dtype in [torch.float, torch.double, torch.bfloat16, torch.float16]:
             for lambd in [0.2, 0.5, 1.0, 1.5, 2.0, 5.0]:
-                sample_len = 50000
+                sample_len = 110_000
                 mean_var(lambd, torch.rand(sample_len, dtype=dtype))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
@@ -3386,6 +3386,7 @@ class TestDistributions(DistributionsTestCase):
                 Exponential(rate),
                 scipy.stats.expon(scale=1.0 / rate),
                 f"Exponential(rate={rate})",
+                num_samples=110_000,
             )
 
     @set_default_dtype(torch.double)
@@ -3543,6 +3544,7 @@ class TestDistributions(DistributionsTestCase):
                 Pareto(scale, alpha),
                 scipy.stats.pareto(alpha, scale=scale),
                 f"Pareto(scale={scale}, alpha={alpha})",
+                num_samples=110_000,
             )
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
