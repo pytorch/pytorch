@@ -122,6 +122,10 @@ if TEST_TENSORBOARD:
     from torch.utils.tensorboard._pytorch_graph import graph
     from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
     from torch.utils.tensorboard.summary import int_to_half, tensor_proto
+else:
+    # Dummy for parametrization
+    class DataType:
+        DT_FLOAT, DT_HALF, DT_BFLOAT16, DT_INT32 = [None] * 4
 
 
 class TestTensorBoardPyTorchNumpy(BaseTestCase):
