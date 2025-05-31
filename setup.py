@@ -267,6 +267,12 @@ from setuptools.dist import Distribution
 
 cwd = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, cwd)
+os.environ["PYTHONPATH"] = os.pathsep.join(
+    [
+        cwd,
+        os.getenv("PYTHONPATH", ""),
+    ]
+).rstrip(os.pathsep)
 
 from tools.build_pytorch_libs import build_pytorch
 from tools.generate_torch_version import get_torch_version
