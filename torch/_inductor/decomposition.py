@@ -119,6 +119,7 @@ decomps_to_exclude = [
     aten.embedding_dense_backward,  # we fall back on xpu
     aten.index_add,  # we conditionally call this decomp
     aten.glu,  # inductor lowers this directly
+    aten.swiglu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
     aten.slice_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
     aten.split.Tensor,  # inductor lowers this directly
