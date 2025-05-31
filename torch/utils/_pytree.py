@@ -38,10 +38,11 @@ from typing import (
     Optional,
     overload,
     Protocol,
+    TYPE_CHECKING,
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, NamedTuple, Self
+from typing_extensions import deprecated, NamedTuple, Self, TypeIs
 
 from torch.torch_version import TorchVersion as _TorchVersion
 
@@ -1261,6 +1262,39 @@ class LeafSpec(TreeSpec):
 _LEAF_SPEC = LeafSpec()
 
 
+if TYPE_CHECKING:
+    import torch.utils._cxx_pytree as cxx
+
+
+def _is_pytreespec_instance(obj: Any) -> TypeIs[Union[TreeSpec, "cxx.TreeSpec"]]:
+    if isinstance(obj, TreeSpec):
+        return True
+    if "torch.utils._cxx_pytree" in sys.modules:
+        # The C++ pytree module is not always available, so we check if it is loaded.
+        # If the C++ pytree module is loaded, we can check if the treespec
+        # is an instance of the C++ TreeSpec class.
+        from torch.utils._cxx_pytree import TreeSpec as CxxTreeSpec
+
+        if isinstance(obj, CxxTreeSpec):
+            return True
+    return False
+
+
+def _ensure_python_treespec_instance(
+    treespec: Union[TreeSpec, "cxx.TreeSpec"]
+) -> TreeSpec:
+    if isinstance(treespec, TreeSpec):
+        return treespec
+
+    if not _is_pytreespec_instance(treespec):
+        raise TypeError(
+            f"Expected `treespec` to be an instance of "
+            f"PyTreeSpec but got item of type {type(treespec)}."
+        )
+    dummy_tree = treespec.unflatten([0] * treespec.num_leaves)
+    return tree_structure(dummy_tree)
+
+
 def tree_flatten(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -1291,10 +1325,10 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
     """Given a list of values and a TreeSpec, builds a pytree.
     This is the inverse operation of `tree_flatten`.
     """
-    if not isinstance(treespec, TreeSpec):
+    if not _is_pytreespec_instance(treespec):
         raise TypeError(
-            f"tree_unflatten(leaves, treespec): Expected `treespec` to be "
-            f"instance of TreeSpec but got item of type {type(treespec)}.",
+            f"Expected `treespec` to be an instance of "
+            f"PyTreeSpec but got item of type {type(treespec)}."
         )
     return treespec.unflatten(leaves)
 
@@ -1748,33 +1782,30 @@ def _broadcast_to_and_flatten(
     treespec: TreeSpec,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> Optional[list[Any]]:
-    assert isinstance(treespec, TreeSpec)
+    def broadcast_prefix(
+        prefix_tree: PyTree,
+        full_tree: PyTree,
+        is_leaf: Optional[Callable[[PyTree], bool]] = None,
+    ) -> list[Any]:
+        result: list[Any] = []
 
-    if tree_is_leaf(tree, is_leaf=is_leaf):
-        return [tree] * treespec.num_leaves
-    if treespec.is_leaf():
+        def add_leaves(x: Any, subtree: PyTree) -> None:
+            subtreespec = tree_structure(subtree, is_leaf=is_leaf)
+            result.extend([x] * subtreespec.num_leaves)
+
+        tree_map_(
+            add_leaves,
+            prefix_tree,
+            full_tree,
+            is_leaf=is_leaf,
+        )
+        return result
+
+    full_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
+    try:
+        return broadcast_prefix(tree, full_tree, is_leaf=is_leaf)
+    except ValueError:
         return None
-    node_type = _get_node_type(tree)
-    if node_type != treespec.type:
-        return None
-
-    flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-    child_pytrees, ctx = flatten_fn(tree)
-
-    # Check if the Node is different from the spec
-    if len(child_pytrees) != treespec.num_children or ctx != treespec.context:
-        return None
-
-    # Recursively flatten the children
-    result: list[Any] = []
-    for child, child_spec in zip(child_pytrees, treespec.children_specs):
-        flat = _broadcast_to_and_flatten(child, child_spec, is_leaf=is_leaf)
-        if flat is not None:
-            result += flat
-        else:
-            return None
-
-    return result
 
 
 @dataclasses.dataclass
@@ -1875,11 +1906,7 @@ _SUPPORTED_PROTOCOLS[1] = _ProtocolFn(_treespec_to_json, _json_to_treespec)
 
 
 def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
-    if not isinstance(treespec, TreeSpec):
-        raise TypeError(
-            f"treespec_dumps(treespec, protocol): Expected `treespec` to be instance of "
-            f"TreeSpec but got item of type {type(treespec)}.",
-        )
+    treespec = _ensure_python_treespec_instance(treespec)
 
     if protocol is None:
         protocol = DEFAULT_TREESPEC_SERIALIZATION_PROTOCOL
