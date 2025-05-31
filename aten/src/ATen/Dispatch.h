@@ -801,7 +801,8 @@ inline at::ScalarType scalar_type(at::ScalarType s) {
   AT_DISPATCH_SWITCH(                                \
       TYPE,                                          \
       NAME,                                          \
-      AT_PRIVATE_CASE_TYPE_USING_HINT(               \
-          at::ScalarType::Int, index_t, __VA_ARGS__) \
-          AT_PRIVATE_CASE_TYPE_USING_HINT(           \
-              at::ScalarType::Long, index_t, __VA_ARGS__))
+      AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Char, index_t, __VA_ARGS__) \
+      AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Byte, index_t, __VA_ARGS__) \
+      AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Short, index_t, __VA_ARGS__) \
+      AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Int, index_t, __VA_ARGS__)  \
+      AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Long, index_t, __VA_ARGS__))
