@@ -196,6 +196,26 @@ PyObject* THCPModule_getCurrentStream_raw(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THCPModule_getStreamId(
+    PyObject* /* unused */,
+    PyObject* stream_ptr) {
+  HANDLE_TH_ERRORS
+
+  cudaStream_t stream = nullptr;
+  TORCH_CHECK(
+      stream = (cudaStream_t)THPUtils_unpackLong(stream_ptr),
+      "invalid stream pointer")
+  unsigned long long stream_id = 0;
+  #if defined(CUDA_VERSION) && CUDA_VERSION >= 12000
+    // an equivalent StreamGetId is not available in HIP yet so we need to make
+    // sure we're only using it a CUDA env. Else we just return 0 for now.
+    cudaStreamGetId(stream, &stream_id);
+  #endif
+  return THPUtils_packInt64(stream_id);
+
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_getDefaultStream_wrap(
     PyObject* /* unused */,
     PyObject* device_index) {
@@ -1968,6 +1988,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_getCurrentStream_raw,
      METH_O,
      nullptr},
+    {"_cuda_getStreamId", THCPModule_getStreamId, METH_O, nullptr},
     {"_cuda_getDefaultStream",
      THCPModule_getDefaultStream_wrap,
      METH_O,
