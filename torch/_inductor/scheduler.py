@@ -4076,10 +4076,52 @@ class Scheduler:
 
     def should_partition(self, node: BaseSchedulerNode) -> bool:
         """Return True if we should partition the inductor graph on this node"""
+
+        def is_non_gpu_tensor(buf: Any) -> bool:
+            if isinstance(buf, torch.Tensor) and not is_gpu(buf.device.type):
+                return True
+
+            return False
+
+        def is_non_gpu_tensor_box(buf: Any) -> bool:
+            if (
+                isinstance(buf, ir.TensorBox)
+                and (device := buf.get_device())
+                and not is_gpu(device.type)
+            ):
+                return True
+
+            return False
+
+        def read_write_non_gpu_data(node: BaseSchedulerNode) -> bool:
+            for dep in node.read_writes.reads | node.read_writes.writes:
+                name = dep.name
+
+                if (inp := V.graph.graph_inputs.get(name, None)) is not None:
+                    if is_non_gpu_tensor_box(inp):
+                        return True
+                elif (buf := self.name_to_buf.get(name, None)) is not None:
+                    if is_non_gpu_tensor_box(buf):
+                        return True
+                elif (tensor := V.graph.constants.get(name, None)) is not None:
+                    if is_non_gpu_tensor(tensor):
+                        return True
+                else:
+                    assert name in V.graph.torchbind_constants, (
+                        f"Expected all dependences to be either graph_inputs, "
+                        f"name_to_buf, constants, or torchbind_constants, "
+                        f"but found: {dep}"
+                    )
+
+            return False
+
         if isinstance(node, FusedSchedulerNode):
             return any(self.should_partition(snode) for snode in node.snodes)
 
         if not node.is_gpu():
+            return True
+
+        if read_write_non_gpu_data(node):
             return True
 
         if node.node is None:
