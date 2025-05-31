@@ -67,6 +67,7 @@ if torch.backends.mps.is_available():
             "H",
             "hsplit",
             "imag",
+            "index_copy",
             "index_select",
             "isfinite",
             "isinf",
