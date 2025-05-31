@@ -44,7 +44,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Self, TypeAlias, TypeIs
+from typing_extensions import Self, TypeIs
 
 import torch
 from torch import Tensor
@@ -56,7 +56,6 @@ __all__ = [
     "MixtureSameFamilyConstraint",
     # Type Aliases
     "Dependent",
-    "DependentProperty",
     "Independent",
     "Boolean",
     "OneHot",
@@ -147,7 +146,7 @@ class Constraint:
         return self.__class__.__name__[1:] + "()"
 
 
-class _Dependent(Constraint):
+class Dependent(Constraint):
     """
     Placeholder for variables whose support depends on other variables.
     These variables obey no simple coordinate-wise constraints.
@@ -182,7 +181,7 @@ class _Dependent(Constraint):
 
     def __call__(
         self, *, is_discrete: bool = NotImplemented, event_dim: int = NotImplemented
-    ) -> "_Dependent":
+    ) -> "Dependent":
         """
         Support for syntax to customize static attributes::
 
@@ -192,13 +191,13 @@ class _Dependent(Constraint):
             is_discrete = self._is_discrete
         if event_dim is NotImplemented:
             event_dim = self._event_dim
-        return _Dependent(is_discrete=is_discrete, event_dim=event_dim)
+        return Dependent(is_discrete=is_discrete, event_dim=event_dim)
 
     def check(self, x: Tensor) -> Tensor:
         raise ValueError("Cannot determine validity of dependent constraint")
 
 
-def is_dependent(constraint: Constraint) -> TypeIs[_Dependent]:
+def is_dependent(constraint: Constraint) -> TypeIs[Dependent]:
     """
     Checks if ``constraint`` is a ``_Dependent`` object.
 
@@ -221,14 +220,14 @@ def is_dependent(constraint: Constraint) -> TypeIs[_Dependent]:
         >>>     if is_dependent(constraint):
         >>>         continue
     """
-    return isinstance(constraint, _Dependent)
+    return isinstance(constraint, Dependent)
 
 
 T = TypeVar("T", covariant=True)
 R = TypeVar("R", covariant=True)
 
 
-class _DependentProperty(property, _Dependent, Generic[T, R]):
+class _DependentProperty(property, Dependent, Generic[T, R]):
     """
     Decorator that extends @property to act like a `Dependent` constraint when
     called on a class and act like a property when called on an object.
@@ -262,7 +261,7 @@ class _DependentProperty(property, _Dependent, Generic[T, R]):
         event_dim: int = NotImplemented,
     ) -> None:
         property.__init__(self, fn)
-        _Dependent.__init__(self, is_discrete=is_discrete, event_dim=event_dim)
+        Dependent.__init__(self, is_discrete=is_discrete, event_dim=event_dim)
 
     if TYPE_CHECKING:
         # Needed because subclassing property is not fully supported in mypy
@@ -289,7 +288,7 @@ class _DependentProperty(property, _Dependent, Generic[T, R]):
 Con = TypeVar("Con", bound=Constraint, covariant=True)
 
 
-class _IndependentConstraint(Constraint, Generic[Con]):
+class Independent(Constraint, Generic[Con]):
     """
     Wraps a constraint by aggregating over ``reinterpreted_batch_ndims``-many
     dims in :meth:`check`, so that an event is valid only if all its
@@ -376,7 +375,7 @@ class MixtureSameFamilyConstraint(Constraint, Generic[Con]):
         return f"{self.__class__.__name__}({repr(self.base_constraint)})"
 
 
-class _Boolean(Constraint):
+class Boolean(Constraint):
     """
     Constrain to the two values `{0, 1}`.
     """
@@ -387,7 +386,7 @@ class _Boolean(Constraint):
         return (value == 0) | (value == 1)
 
 
-class _OneHot(Constraint):
+class OneHot(Constraint):
     """
     Constrain to one-hot vectors.
     """
@@ -401,7 +400,7 @@ class _OneHot(Constraint):
         return is_boolean.all(-1) & is_normalized
 
 
-class _IntegerInterval(Constraint):
+class IntegerInterval(Constraint):
     """
     Constrain to an integer interval `[lower_bound, upper_bound]`.
     """
@@ -428,7 +427,7 @@ class _IntegerInterval(Constraint):
         return fmt_string
 
 
-class _IntegerLessThan(Constraint):
+class IntegerLessThan(Constraint):
     """
     Constrain to an integer interval `(-inf, upper_bound]`.
     """
@@ -448,7 +447,7 @@ class _IntegerLessThan(Constraint):
         return fmt_string
 
 
-class _IntegerGreaterThan(Constraint):
+class IntegerGreaterThan(Constraint):
     """
     Constrain to an integer interval `[lower_bound, inf)`.
     """
@@ -468,7 +467,17 @@ class _IntegerGreaterThan(Constraint):
         return fmt_string
 
 
-class _Real(Constraint):
+class NonNegativeInteger(IntegerGreaterThan):
+    def __init__(self) -> None:
+        super().__init__(lower_bound=0)
+
+
+class PositiveInteger(IntegerGreaterThan):
+    def __init__(self) -> None:
+        super().__init__(lower_bound=1)
+
+
+class Real(Constraint):
     """
     Trivially constrain to the extended real line `[-inf, inf]`.
     """
@@ -477,7 +486,7 @@ class _Real(Constraint):
         return value == value  # False for NANs.
 
 
-class _GreaterThan(Constraint):
+class GreaterThan(Constraint):
     """
     Constrain to a real half line `(lower_bound, inf]`.
     """
@@ -495,7 +504,7 @@ class _GreaterThan(Constraint):
         return fmt_string
 
 
-class _GreaterThanEq(Constraint):
+class GreaterThanEq(Constraint):
     """
     Constrain to a real half line `[lower_bound, inf)`.
     """
@@ -513,7 +522,7 @@ class _GreaterThanEq(Constraint):
         return fmt_string
 
 
-class _LessThan(Constraint):
+class LessThan(Constraint):
     """
     Constrain to a real half line `[-inf, upper_bound)`.
     """
@@ -531,7 +540,42 @@ class _LessThan(Constraint):
         return fmt_string
 
 
-class _Interval(Constraint):
+class LessThanEq(Constraint):
+    """
+    Constrain to a real half line `(-inf, upper_bound]`.
+    """
+
+    upper_bound: Union[float, Tensor]
+
+    def __init__(self, upper_bound: Union[float, Tensor]) -> None:
+        self.upper_bound = upper_bound
+        super().__init__()
+
+    def check(self, value: Tensor) -> Tensor:
+        return value <= self.upper_bound
+
+    def __repr__(self) -> str:
+        fmt_string = self.__class__.__name__[1:]
+        fmt_string += f"(upper_bound={self.upper_bound})"
+        return fmt_string
+
+
+class Positive(GreaterThan):
+    def __init__(self) -> None:
+        super().__init__(lower_bound=0.0)
+
+
+class NonNegative(GreaterThanEq):
+    def __init__(self) -> None:
+        super().__init__(lower_bound=0.0)
+
+
+class Negative(LessThan):
+    def __init__(self) -> None:
+        super().__init__(upper_bound=0.0)
+
+
+class Interval(Constraint):
     """
     Constrain to a real interval `[lower_bound, upper_bound]`.
     """
@@ -554,7 +598,16 @@ class _Interval(Constraint):
         return fmt_string
 
 
-class _HalfOpenInterval(Constraint):
+class UnitInterval(Interval):
+    """
+    Constrain to the unit interval `[0, 1]`.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(lower_bound=0.0, upper_bound=1.0)
+
+
+class HalfOpenInterval(Constraint):
     """
     Constrain to a real interval `[lower_bound, upper_bound)`.
     """
@@ -577,7 +630,7 @@ class _HalfOpenInterval(Constraint):
         return fmt_string
 
 
-class _Simplex(Constraint):
+class Simplex(Constraint):
     """
     Constrain to the unit simplex in the innermost (rightmost) dimension.
     Specifically: `x >= 0` and `x.sum(-1) == 1`.
@@ -589,7 +642,7 @@ class _Simplex(Constraint):
         return torch.all(value >= 0, dim=-1) & ((value.sum(-1) - 1).abs() < 1e-6)
 
 
-class _Multinomial(Constraint):
+class Multinomial(Constraint):
     """
     Constrain to nonnegative integer values summing to at most an upper bound.
 
@@ -608,7 +661,7 @@ class _Multinomial(Constraint):
         return (x >= 0).all(dim=-1) & (x.sum(dim=-1) <= self.upper_bound)
 
 
-class _LowerTriangular(Constraint):
+class LowerTriangular(Constraint):
     """
     Constrain to lower-triangular square matrices.
     """
@@ -620,7 +673,7 @@ class _LowerTriangular(Constraint):
         return (value_tril == value).view(value.shape[:-2] + (-1,)).min(-1)[0]
 
 
-class _LowerCholesky(Constraint):
+class LowerCholesky(Constraint):
     """
     Constrain to lower-triangular square matrices with positive diagonals.
     """
@@ -637,7 +690,7 @@ class _LowerCholesky(Constraint):
         return lower_triangular & positive_diagonal
 
 
-class _CorrCholesky(Constraint):
+class CorrCholesky(Constraint):
     """
     Constrain to lower-triangular square matrices with positive diagonals and each
     row vector being of unit length.
@@ -651,10 +704,10 @@ class _CorrCholesky(Constraint):
         )  # 10 is an adjustable fudge factor
         row_norm = torch.linalg.norm(value.detach(), dim=-1)
         unit_row_norm = (row_norm - 1.0).abs().le(tol).all(dim=-1)
-        return _LowerCholesky().check(value) & unit_row_norm
+        return LowerCholesky().check(value) & unit_row_norm
 
 
-class _Square(Constraint):
+class Square(Constraint):
     """
     Constrain to square matrices.
     """
@@ -670,7 +723,7 @@ class _Square(Constraint):
         )
 
 
-class _Symmetric(_Square):
+class Symmetric(Square):
     """
     Constrain to Symmetric square matrices.
     """
@@ -682,7 +735,7 @@ class _Symmetric(_Square):
         return torch.isclose(value, value.mT, atol=1e-6).all(-2).all(-1)
 
 
-class _PositiveSemidefinite(_Symmetric):
+class PositiveSemidefinite(Symmetric):
     """
     Constrain to positive-semidefinite matrices.
     """
@@ -694,7 +747,7 @@ class _PositiveSemidefinite(_Symmetric):
         return torch.linalg.eigvalsh(value).ge(0).all(-1)
 
 
-class _PositiveDefinite(_Symmetric):
+class PositiveDefinite(Symmetric):
     """
     Constrain to positive-definite matrices.
     """
@@ -706,7 +759,7 @@ class _PositiveDefinite(_Symmetric):
         return torch.linalg.cholesky_ex(value).info.eq(0)
 
 
-class _Cat(Constraint, Generic[Con]):
+class Cat(Constraint, Generic[Con]):
     """
     Constraint functor that applies a sequence of constraints
     `cseq` at the submatrices at dimension `dim`,
@@ -747,7 +800,7 @@ class _Cat(Constraint, Generic[Con]):
         return torch.cat(checks, self.dim)
 
 
-class _Stack(Constraint, Generic[Con]):
+class Stack(Constraint, Generic[Con]):
     """
     Constraint functor that applies a sequence of constraints
     `cseq` at the submatrices at dimension `dim`,
@@ -779,64 +832,49 @@ class _Stack(Constraint, Generic[Con]):
         )
 
 
-# Type aliases.
-Dependent: TypeAlias = _Dependent
-DependentProperty: TypeAlias = _DependentProperty
-Independent: TypeAlias = _IndependentConstraint[Con]
-Boolean: TypeAlias = _Boolean
-OneHot: TypeAlias = _OneHot
-NonNegativeInteger: TypeAlias = _IntegerGreaterThan
-PositiveInteger: TypeAlias = _IntegerGreaterThan
-IntegerInterval: TypeAlias = _IntegerInterval
-Real: TypeAlias = _Real
-RealVector: TypeAlias = _IndependentConstraint[_Real]
-Positive: TypeAlias = _GreaterThan
-NonNegative: TypeAlias = _GreaterThanEq
-GreaterThan: TypeAlias = _GreaterThan
-GreaterThanEq: TypeAlias = _GreaterThanEq
-LessThan: TypeAlias = _LessThan
-Multinomial: TypeAlias = _Multinomial
-UnitInterval: TypeAlias = _Interval
-Interval: TypeAlias = _Interval
-HalfOpenInterval: TypeAlias = _HalfOpenInterval
-Simplex: TypeAlias = _Simplex
-LowerTriangular: TypeAlias = _LowerTriangular
-LowerCholesky: TypeAlias = _LowerCholesky
-CorrCholesky: TypeAlias = _CorrCholesky
-Square: TypeAlias = _Square
-Symmetric: TypeAlias = _Symmetric
-PositiveSemidefinite: TypeAlias = _PositiveSemidefinite
-PositiveDefinite: TypeAlias = _PositiveDefinite
-Cat: TypeAlias = _Cat
-Stack: TypeAlias = _Stack
+class RealVector(Independent[Real]):
+    """
+    Constrain to a real vector of a given size.
+    """
 
-# Public interface.
-dependent: Final[Dependent] = _Dependent()
+    def __init__(self) -> None:
+        super().__init__(Real(), reinterpreted_batch_ndims=1)
+
+
+dependent: Final[Dependent] = Dependent()
+# value constraints
+real: Final[Real] = Real()
+boolean: Final[Boolean] = Boolean()
+# interval constraints
+nonnegative_integer: Final[NonNegativeInteger] = NonNegativeInteger()
+positive_integer: Final[PositiveInteger] = PositiveInteger()
+nonnegative: Final[NonNegative] = NonNegative()
+positive: Final[Positive] = Positive()
+unit_interval: Final[UnitInterval] = UnitInterval()
+# vector constraints
+one_hot: Final[OneHot] = OneHot()
+simplex: Final[Simplex] = Simplex()
+real_vector: Final[RealVector] = RealVector()
+# matrix constraints
+lower_triangular: Final[LowerTriangular] = LowerTriangular()
+lower_cholesky: Final[LowerCholesky] = LowerCholesky()
+corr_cholesky: Final[CorrCholesky] = CorrCholesky()
+square: Final[Square] = Square()
+symmetric: Final[Symmetric] = Symmetric()
+positive_semidefinite: Final[PositiveSemidefinite] = PositiveSemidefinite()
+positive_definite: Final[PositiveDefinite] = PositiveDefinite()
+
+
+# aliases
 dependent_property = _DependentProperty
-independent = _IndependentConstraint
-boolean: Final[Boolean] = _Boolean()
-one_hot: Final[OneHot] = _OneHot()
-nonnegative_integer: Final[NonNegativeInteger] = _IntegerGreaterThan(0)
-positive_integer: Final[PositiveInteger] = _IntegerGreaterThan(1)
-integer_interval = _IntegerInterval
-real: Final[Real] = _Real()
-real_vector: Final[RealVector] = independent(real, 1)
-positive: Final[Positive] = _GreaterThan(0.0)
-nonnegative: Final[NonNegative] = _GreaterThanEq(0.0)
-greater_than = _GreaterThan
-greater_than_eq = _GreaterThanEq
-less_than = _LessThan
-multinomial = _Multinomial
-unit_interval: Final[UnitInterval] = _Interval(0.0, 1.0)
-interval = _Interval
-half_open_interval = _HalfOpenInterval
-simplex: Final[Simplex] = _Simplex()
-lower_triangular: Final[LowerTriangular] = _LowerTriangular()
-lower_cholesky: Final[LowerCholesky] = _LowerCholesky()
-corr_cholesky: Final[CorrCholesky] = _CorrCholesky()
-square: Final[Square] = _Square()
-symmetric: Final[Symmetric] = _Symmetric()
-positive_semidefinite: Final[PositiveSemidefinite] = _PositiveSemidefinite()
-positive_definite: Final[PositiveDefinite] = _PositiveDefinite()
-cat = _Cat
-stack = _Stack
+independent = Independent
+interval = Interval
+half_open_interval = HalfOpenInterval
+cat = Cat
+stack = Stack
+greater_than = GreaterThan
+greater_than_eq = GreaterThanEq
+less_than = LessThan
+multinomial = Multinomial
+integer_interval = IntegerInterval
+mixture_same_family = MixtureSameFamilyConstraint
