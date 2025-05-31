@@ -436,9 +436,6 @@ class VariableBuilder:
 
         vt = self._wrap(value)
 
-        # TODO - Find places where source is not applied during the VT creation.
-        if vt.source is None:
-            vt.source = self.source
         if (
             self._can_lift_attrs_to_inputs(vt)
             and value not in self.tx.output.side_effects
@@ -2133,6 +2130,10 @@ class VariableBuilder:
             example_strong_ref=tensor_value,
         )
         proxy.node.meta["grapharg"] = grapharg
+
+        # TODO - Why do we need to set the source of the np ndarray vt back to
+        # original source. Many tests fails.
+        numpy_ndarray_variable.source = self.source
 
         return numpy_ndarray_variable
 
