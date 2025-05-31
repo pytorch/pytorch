@@ -240,7 +240,18 @@ Tensor& abs_out_mps(const Tensor& self, Tensor& output) {
 }
 
 Tensor& logical_not_out_mps(const Tensor& self, Tensor& output) {
-  auto bool_self = self.to(ScalarType::Bool);
+  Tensor self_ = self;
+  if (c10::impl::cow::is_cow_data_ptr(self_.storage().data_ptr())) {
+    // TODO: For some reason, if `self` is COW and we don't clone it here, COW
+    // data gets mutated without materialization in the test `test/test_mps.py
+    // TestConsistencyMPS.test_output_grad_match__unsafe_masked_index_mps_float32`.
+    // Need to find out where the data is getting mutated. Another weird thing
+    // is that just materializing the data does not fix the issue, we have to
+    // eager clone it. This might mean that MPS COW materialization is not
+    // working exactly right in some situations.
+    self_ = self_.clone();
+  }
+  auto bool_self = self_.to(ScalarType::Bool);
   mps::unary_op(bool_self, output, "logical_not_out_mps", [](MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
     return [mpsGraph notWithTensor:inputTensor name:nil];
   });
