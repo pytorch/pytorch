@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 # cmake_policy(SET CMP0022 NEW) cmake_policy(SET CMP0023 NEW)
 
 # Use compiler ID "AppleClang" instead of "Clang" for XCode. Not setting this
@@ -6,7 +6,6 @@ cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 # one is detected as "AppleClang".
 cmake_policy(SET CMP0010 NEW)
 cmake_policy(SET CMP0025 NEW)
-cmake_policy(SET CMP0126 OLD)
 
 # Enables CMake to set LTO on compilers other than Intel.
 cmake_policy(SET CMP0069 NEW)
@@ -587,7 +586,6 @@ if(MSVC)
         string(REGEX REPLACE "/MT" "/MD" ${flag_var} "${${flag_var}}")
       endif()
     endif()
-    set(${flag_var} "${${flag_var}} /FS")
 
     # /bigobj increases number of sections in .obj file, which is needed to link
     # against libraries in Python 2.7 under Windows For Visual Studio

@@ -1729,7 +1729,7 @@ class CppBuilder:
         definitions = " ".join(self._build_option.get_definitions())
         contents = textwrap.dedent(
             f"""
-            cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
+            cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
             project(aoti_model LANGUAGES CXX)
             set(CMAKE_CXX_STANDARD 17)
 
