@@ -2167,10 +2167,12 @@ def meta__pdist_backward(grad: Tensor, self: Tensor, p: float, pdist: Tensor) ->
 @register_meta([aten.baddbmm.default, aten.baddbmm.out])
 @out_wrapper(exact_dtype=True)
 def meta_baddbmm(self, batch1, batch2, *, beta=1, alpha=1):
+    from torch.fx.experimental.symbolic_shapes import guard_or_true, sym_eq
+
     dim1 = batch1.size(0)
     dim2 = batch1.size(1)
     dim3 = batch2.size(2)
-    if self.shape != (dim1, dim2, dim3):
+    if guard_or_true(torch.sym_not(sym_eq(self.shape, (dim1, dim2, dim3)))):
         self = self.expand((dim1, dim2, dim3))
     torch._check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor")
     torch._check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
