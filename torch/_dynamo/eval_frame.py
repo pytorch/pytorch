@@ -1016,6 +1016,7 @@ def _optimize(
     guard_export_fn=None,
     guard_fail_fn=None,
     guard_filter_fn=None,
+    frame_traced_fn=None,
     disable=False,
     dynamic=None,
 ) -> Union[OptimizeContext, _NullDecorator]:
@@ -1055,6 +1056,7 @@ def _optimize(
         guard_export_fn=guard_export_fn,
         guard_fail_fn=guard_fail_fn,
         guard_filter_fn=guard_filter_fn,
+        frame_traced_fn=frame_traced_fn,
     )
     torch._C._log_api_usage_once("torch._dynamo.optimize")
     if (
