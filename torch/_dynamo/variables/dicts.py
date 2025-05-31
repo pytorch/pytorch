@@ -530,6 +530,16 @@ class ConstDictVariable(VariableTracker):
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
+        elif name == "popitem" and self.is_mutable():
+            if len(args):
+                raise_args_mismatch(tx, name)
+            self.should_reconstruct_all = True
+            tx.output.side_effects.mutation(self)
+            if not self.items:
+                msg = ConstantVariable.create(f"popitem(): dictionary is empty")
+                raise_observed_exception(KeyError, tx, args=[msg])
+            k, v = self.items.popitem()
+            return variables.TupleVariable([k.vt, v])
         elif name == "clear":
             if args or kwargs:
                 raise_args_mismatch(tx, name)
