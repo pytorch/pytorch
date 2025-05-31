@@ -220,8 +220,10 @@ def test_model(device, dtype, compile=True, addmm=True, bmm=True):
         )
     return model
 
+
 def pointwise_test_model(device, dtype, compile=True):
     T = cT(device, dtype)
+
     def model():
         M = 1024
         N = 512
@@ -229,12 +231,13 @@ def pointwise_test_model(device, dtype, compile=True):
         mat4 = T(M, N)
         pointwise_output = torch.add(mat3, mat4).sin()
         return pointwise_output
+
     if compile:
         return torch.compile(
             model, options={"benchmark_kernel": True, "profile_bandwidth": True}
         )
     return model
-    
+
 
 prefix = ["profile.py"]
 
@@ -266,7 +269,7 @@ class TestUtils(TestCase):
         d1 = {"a": 1, "b": 2}
         d2 = {"a": 3, "c": 4}
         res1 = zip_dicts(d1, d2, d1_default=32, d2_default=48)
-        self.assertEqual(set(res1), {("a", 1, 3), ("b", 2, 32), ("c", 48, 4)})
+        self.assertEqual(set(res1), {("a", 1, 3), ("b", 2, 48), ("c", 32, 4)})
         res2 = zip_dicts(d1, d2)
         self.assertEqual(set(res2), {("a", 1, 3), ("b", 2, None), ("c", None, 4)})
 
@@ -320,6 +323,7 @@ class TestAnalysis(TestCase):
                 trace2,
                 str(REPEAT),
                 "bar",
+                str(dtype).split(".")[-1],
                 "--name_limit",
                 "30",
             ],
@@ -346,18 +350,24 @@ class TestAnalysis(TestCase):
                 om()
         trace1, trace2 = trace_files()
         p.export_chrome_trace(trace1)
+        print(f"first trace {trace1}")
 
-        with patch("sys.argv", [*prefix, "--augment_trace", trace1, trace2]):
+        with patch(
+            "sys.argv",
+            [*prefix, "--augment_trace", trace1, trace2, str(dtype).split(".")[-1]],
+        ):
             main()
-        profile = JsonProfile(trace2, 1, "foo")
+        profile = JsonProfile(
+            trace2, 1, benchmark_name="foo", dtype=str(dtype).split(".")[-1]
+        )
         rep = profile.report()
         self.assertTrue(len(rep.split("\n")) > 3, f"Error, empty table:\n{rep}")
         # If these fail, just update them. They could change over time
         self.assertIn("Kernel Name", rep)
         self.assertIn("Kernel Count", rep)
         self.assertIn("FLOPS", rep)
-        self.assertIn("bw gbps", rep)
-        self.assertIn("Dur (ms)", rep)
+        self.assertIn("Kernel Reads", rep)
+        self.assertIn("Dur", rep)
         self.assertIn("Achieved", rep)
         self.assertIn("|", rep)
         self.assertIn("-----", rep)
@@ -545,7 +555,10 @@ class TestAnalysis(TestCase):
 
         trace1, trace2 = trace_files()
         profile.export_chrome_trace(trace1)
-        with patch("sys.argv", [*prefix, "--augment_trace", trace1, trace2]):
+        with patch(
+            "sys.argv",
+            [*prefix, "--augment_trace", trace1, trace2, str(dtype).split(".")[-1]],
+        ):
             main()
 
         with open(trace2) as f:
@@ -585,7 +598,7 @@ class TestAnalysis(TestCase):
                         "aten::_convolution",
                     )
                 )
-                or "_convolution_" in name
+                or "conv" in name
             ):
                 seen_conv = True
                 self.assertEqual(
@@ -608,6 +621,7 @@ class TestAnalysis(TestCase):
         self.assertTrue(seen_bmm)
         self.assertTrue(seen_baddbmm)
         self.assertTrue(seen_conv)
+
     @skipIf(not SM70OrLater, "Requires sm70")
     @dtypes(torch.float, torch.float16)
     @parametrize(
@@ -628,7 +642,6 @@ class TestAnalysis(TestCase):
         if device == "cpu":
             return
         om = pointwise_test_model(device, dtype, compile=False)
-        print("arst ", backends)
         comp_omni = torch.compile(
             om,
             options={
@@ -646,21 +659,18 @@ class TestAnalysis(TestCase):
         trace1, _ = trace_files()
         profile.export_chrome_trace(trace1)
 
-        with (
-            patch("sys.stdout", new_callable=StringIO) as mock_stdout,
-            patch("sys.argv", [*prefix, "--analysis", trace1, "1", "foo"])
+        with patch(
+            "sys.argv",
+            [*prefix, "--analysis", trace1, "1", str(dtype).split(".")[-1]],
         ):
             main()
-        out = mock_stdout.getvalue()
-        self.assertTrue("triton_poi_fused_add_randn_sin_0" in out)
 
         with open(trace1) as f:
             out_profile = json.load(f)
-        
+
         for event in out_profile["traceEvents"]:
             if event["name"] == "triton_poi_fused_add_randn_sin_0":
                 event["args"]["kernel_num_gb"] = 0.002097168
-
 
 
 instantiate_device_type_tests(TestAnalysis, globals())

@@ -38,6 +38,7 @@ adapters_map: dict[str, AdapterType] = {}
 def parse_list(lst: str) -> list[int]:
     lst = lst.replace("[", "").replace("]", "")
     substrings = lst.split(",")
+
     return [int(substring.strip()) for substring in substrings]
 
 
@@ -60,6 +61,17 @@ def register_adapter(
     return decorator
 
 
+@register_adapter(["_slow_conv2d_forward"])
+def _slow_conv2d_adapter(
+    shapes: tuple[Any, ...], concrete: tuple[Any, ...]
+) -> tuple[tuple[Any], dict[Any, Any]]:
+    tmp = list(shapes)
+    tmp.append(False)
+    tmp2 = list(concrete)
+    tmp2[3] = tmp2[4]
+    return conv_adapter(tuple(tmp), tuple(tmp2))
+
+
 @register_adapter(["convolution", "_convolution", "cudnn_convolution"])
 def conv_adapter(
     shapes: tuple[Any, ...], concrete: tuple[Any, ...]
@@ -71,7 +83,7 @@ def conv_adapter(
         transposed = bool(tmp[6])
         tmp[6] = transposed
 
-    kwargs = {}
+    kwargs: dict[Any, Any] = {}
     if not transposed:
         # calculate output shape if not transposed.
         def conv_out_dims(x: int, kernel: int, stride: int) -> int:
@@ -84,7 +96,7 @@ def conv_adapter(
         out = [inp[0], w[0]] + out_x_y  # we only need the xy values
         kwargs["out_val"] = out
 
-    return tuple(tmp[:-1]), kwargs
+    return tuple(tmp), kwargs
 
 
 def default_adapter(
@@ -130,7 +142,7 @@ def _parse_kernel_name(name: str) -> Optional[str]:
     """
     if name.startswith(ATEN_PREFIX):
         return name[len(ATEN_PREFIX) :]
-    elif "convolution" in name:
+    elif "conv" in name:
         return "convolution"
     elif "addmm" in name:
         return "addmm"
@@ -251,13 +263,20 @@ def _estimate_gb(event: dict[str, Any]) -> float:
         return (
             B * mm_formula(M, N, K, mul_type_size) + add_in_size * add_type_size
         ) / 1e9
-    elif op_name in ["convolution", "_convolution", "cudnn_convolution"]:
+    elif op_name in [
+        "convolution",
+        "_convolution",
+        "cudnn_convolution",
+        "_slow_conv2d_forward",
+    ]:
         concrete = event["args"]["Concrete Inputs"]
 
         def conv_out_dim(x: int, kernel: int, stride: int) -> int:
             return (x - kernel) // stride + 1
 
-        stride = parse_list(concrete[3])
+        stride = parse_list(
+            concrete[3] if op_name != "_slow_conv2d_forward" else concrete[4]
+        )
         inp = input_shapes[0]
         w = input_shapes[1]
         out_x_y = [conv_out_dim(*args) for args in zip(inp[2:], w[2:], stride)]
@@ -317,11 +336,16 @@ def _augment_trace_helper(data: dict[str, Any]) -> dict[str, Any]:
 
 _dtype_map = {
     "float": torch.float,
+    "float32": torch.float,
     "int": torch.int,
+    "int8": torch.int8,
+    "int16": torch.int16,
+    "int32": torch.int,
     "long": torch.long,
     "long int": torch.long,
     "bfloat16": torch.bfloat16,
     "float16": torch.float16,
+    "float64": torch.double,
 }
 
 
@@ -329,7 +353,7 @@ _dtype_map = {
 class KernelStats:
     flops: int
     bw: float
-    latency: float # us
+    latency: float  # us
     achieved_flops: float
     achieved_bandwidth: float
 
@@ -360,6 +384,7 @@ class JsonProfile:
         path: str,
         nruns: int,
         benchmark_name: Optional[str] = None,
+        dtype: Optional[torch.dtype | str] = None,
     ):
         """
         Convienence class for running common operations on chrome/perfetto json traces.
@@ -370,9 +395,18 @@ class JsonProfile:
             self.events = self.data["traceEvents"]
         self.nruns = nruns
         self.benchmark_name = benchmark_name
+        if dtype is None:
+            self.dtype = None
+        elif isinstance(dtype, torch.dtype):
+            self.dtype = dtype
+        else:
+            if dtype in _dtype_map:
+                self.dtype = _dtype_map[dtype]
+            else:
+                self.dtype = None
         self._create_devices()
 
-    def convert_dtype(self, event: dict[str, Any]) -> torch.dtype:
+    def convert_dtype(self, event: dict[str, Any]) -> torch.dtype | None:
         """
         Each op has a list of dtypes for each input arg. We need to convert these into a single dtype for flop estimation.
         Issues:
@@ -390,7 +424,7 @@ class JsonProfile:
             elif "float16" in event["name"]:
                 return torch.float16
             else:
-                return torch.float
+                return None
 
         input_sizes = event["args"]["Input Dims"]
         input_types = event["args"]["Input type"]
@@ -449,7 +483,7 @@ class JsonProfile:
             if "cat" not in event or "args" not in event or event["cat"] != "kernel":
                 continue
             dev = self._devices[event["args"]["device"]]
-            dur = event["dur"] # us
+            dur = event["dur"]  # us
             if "kernel_flop" in event["args"]:
                 assert dur != 0
                 # 1,000,000us/s * flop / us
@@ -457,8 +491,13 @@ class JsonProfile:
                 if op_flops == 0:
                     achieved_flops = 0
                 else:
-                    dtype = self.convert_dtype(event)
+                    dtype = self.convert_dtype(event) or self.dtype
+                    if dtype is None:
+                        raise RuntimeError(
+                            "dtype is not found on tensor and default dtype is not set"
+                        )
                     achieved_flops = 100 * op_flops / (1e12 * dev.info.tops[dtype])
+
             else:
                 op_flops = 0
                 achieved_flops = 0
@@ -548,6 +587,8 @@ class JsonProfile:
             d1_default=["Empty"] * t1_length,
             d2_default=["Empty"] * t2_length,
         ):
+            assert row1 is not None
+            assert row2 is not None
             new_rows[key] = row1 + row2
         return new_headers, new_rows
 
@@ -582,6 +623,8 @@ class JsonProfile:
             for device_idx, t1, t2 in zip_dicts(
                 self_tables, other_tables, d1_default=None, d2_default=None
             ):
+                assert t1 is not None
+                assert t2 is not None
                 table_headers, table_rows = self._combine_tables(
                     t1, self_name, t2, other_name
                 )
@@ -614,9 +657,17 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--diff",
-        nargs=6,
-        metavar=("input_file1", "nruns1", "name1", "input_file2", "nruns2", "name2"),
-        help="Two json traces to compare with, specified as <file1> <nruns1> <name1> <file2> <nruns2> <name2>",
+        nargs=7,
+        metavar=(
+            "input_file1",
+            "nruns1",
+            "name1",
+            "input_file2",
+            "nruns2",
+            "name2",
+            "dtype",
+        ),
+        help="Two json traces to compare with, specified as <file1> <nruns1> <name1> <file2> <nruns2> <name2> <dtype>",
     )
     parser.add_argument(
         "--name_limit",
@@ -626,37 +677,44 @@ def main() -> None:
     parser.add_argument(
         "--augment_trace",
         "-a",
-        type=str,
-        nargs=2,
-        metavar=("input_file", "output_file"),
+        nargs=3,
+        metavar=("input_file", "output_file", "dtype"),
         help="Augment a trace with inductor meta information. Provide input and output file paths.",
     )
     parser.add_argument(
         "--analysis",
         nargs=3,
-        metavar=("input_file", "nruns", "name"),
-        help="Run analysis on a single trace, specified as <file> <nruns> <name>",
+        metavar=("input_file", "nruns", "dtype"),
+        help="Run analysis on a single trace, specified as <file> <nruns> <dtype>",
     )
     args = parser.parse_args()
 
     if args.diff:
-        p1 = JsonProfile(args.diff[0], int(args.diff[1]), args.diff[2])
+        p1 = JsonProfile(
+            args.diff[0], int(args.diff[1]), args.diff[2], dtype=args.diff[6]
+        )
         p1.augment_trace()
-        p2 = JsonProfile(args.diff[3], int(args.diff[4]), args.diff[5])
+        p2 = JsonProfile(
+            args.diff[3], int(args.diff[4]), args.diff[5], dtype=args.diff[6]
+        )
         p2.augment_trace()
         if args.name_limit:
             print(p1.report(p2, name_limit=args.name_limit))
         else:
             print(p1.report(p2))
     if args.analysis:
-        p1 = JsonProfile(args.analysis[0], args.analysis[1], args.analysis[2])
+        p1 = JsonProfile(
+            args.analysis[0],
+            args.analysis[1],
+            dtype=args.analysis[2],
+        )
         p1.augment_trace()
         if args.name_limit:
             print(p1.report(name_limit=args.name_limit))
         else:
             print(p1.report())
     if args.augment_trace:
-        p = JsonProfile(args.augment_trace[0], 1)
+        p = JsonProfile(args.augment_trace[0], 1, dtype=args.augment_trace[2])
         p.augment_trace()
         p.dump(args.augment_trace[1])
 
