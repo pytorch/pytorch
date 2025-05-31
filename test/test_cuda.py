@@ -1387,6 +1387,8 @@ except RuntimeError as e:
             for e in errors:
                 if "device-side assert triggered" not in str(e):
                     self.fail(e)
+                if e.error_code != 710:  # cudaErrorAssert == 710
+                    self.fail(e)
 
     @staticmethod
     def _test_index_bounds_cuda(idx):
