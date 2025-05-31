@@ -101,7 +101,7 @@ def aten_scaled_dot_product_attention_23(
     if dropout_p == 0:
         if enable_gqa:
             assert (
-                query.shape[1] > (key.shape[1] == value.shape[1])
+                query.shape[1] > key.shape[1] == value.shape[1]
                 and query.shape[1] % key.shape[1] == 0
             ), (
                 "SDPA (GQA or MQA) requires q_num_heads > kv_num_heads & q_num_heads % kv_num_heads == 0"
