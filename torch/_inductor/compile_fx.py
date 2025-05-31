@@ -745,6 +745,9 @@ def _compile_fx_inner(
         from torch.fx._lazy_graph_module import _LazyGraphModule
 
         _LazyGraphModule.force_recompile(gm)
+        compile_id = torch._guards.CompileContext.current_compile_id()
+        with dynamo_timed("backward no-op", log_pt2_compile_event=True):
+            CompileEventLogger.pt2_compile("backward no-op", compile_id=compile_id)
         return make_boxed_func(gm.forward)
 
     static_input_idxs: Sequence[int] = graph_kwargs.setdefault("static_input_idxs", ())
