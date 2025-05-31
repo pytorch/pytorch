@@ -38,6 +38,7 @@ adapters_map: dict[str, AdapterType] = {}
 def parse_list(lst: str) -> list[int]:
     lst = lst.replace("[", "").replace("]", "")
     substrings = lst.split(",")
+
     return [int(substring.strip()) for substring in substrings]
 
 
@@ -478,7 +479,6 @@ class JsonProfile:
             if "cat" not in event or "args" not in event or event["cat"] != "kernel":
                 continue
             dev = self._devices[event["args"]["device"]]
-
             dur = event["dur"]  # us
             if "kernel_flop" in event["args"]:
                 assert dur != 0
