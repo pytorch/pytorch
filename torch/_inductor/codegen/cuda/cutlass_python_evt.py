@@ -226,7 +226,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         return dict(self.var_name_to_buffer_name)
 
     def get_reads(self) -> list[str]:
-        return list(self.reads)
+        return list(self.reads.difference(self.store_name_to_value.keys()))
 
     def get_writes(self) -> list[str]:
         return list(self.store_name_to_value.keys())
