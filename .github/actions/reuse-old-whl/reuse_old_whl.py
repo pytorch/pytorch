@@ -203,10 +203,12 @@ def unzip_artifact_and_replace_files() -> None:
     new_version = f"+git{head_sha[:7]}"
 
     def move_to_new_version(file: Union[str, Path]) -> None:
-        print(file)
+        recursive = []
+        if os.path.isdir(file):
+            recursive = ["-r"]
         # Rename file with old_version to new_version
         subprocess.check_output(
-            ["mv", file, str(file).replace(old_version, new_version)],
+            ["mv", file, str(file).replace(old_version, new_version)] + recursive,
             stderr=subprocess.DEVNULL,
         )
 
