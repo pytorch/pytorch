@@ -105,7 +105,7 @@ static hipblasStatus_t rocBLASStatusToHIPStatus(rocblas_status error)
       " but got ",                            \
       X)
 
-namespace {
+namespace at::cuda::blas {
 
 static cublasOperation_t _cublasOpFromChar(char op) {
   // NOLINTNEXTLINE(bugprone-switch-missing-default-case)
@@ -124,7 +124,7 @@ static cublasOperation_t _cublasOpFromChar(char op) {
       "_cublasOpFromChar input should be 't', 'n' or 'c' but got `", op, "`");
 }
 
-static void _cublasAdjustLdLevel2(int64_t m, int64_t n, int64_t* lda) {
+void _cublasAdjustLdLevel2(int64_t m, int64_t n, int64_t* lda) {
   // Note: leading dimensions generally are checked that they are > 0
   // and at least as big the result requires (even if the value won't
   // be used).
@@ -138,7 +138,7 @@ static void _cublasAdjustLdLevel2(int64_t m, int64_t n, int64_t* lda) {
     *lda = std::max<int64_t>(m, 1);
 }
 
-static void _cublasAdjustLdLevel3(
+void _cublasAdjustLdLevel3(
     char transa,
     char transb,
     int64_t m,
@@ -217,7 +217,7 @@ static size_t _parseChosenWorkspaceSize() {
   return workspace_size * 1024;
 }
 
-static size_t _getWorkspaceSize() {
+size_t _getWorkspaceSize() {
   static size_t workspace_size = _parseChosenWorkspaceSize();
   return workspace_size;
 }
@@ -1426,19 +1426,19 @@ inline void gemm_tunable(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(DType, C_Dtype)) {
   bool transb_ = ((transb != 'n') && (transb != 'N'));
 
   if (transa_ && transb_) {
-    static tunable::GemmTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::T> gemm{};
+    static tunable::GemmTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::T> gemm{&params};
     gemm(&params);
   }
   else if (transa_ && !transb_) {
-    static tunable::GemmTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::N> gemm{};
+    static tunable::GemmTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::N> gemm{&params};
     gemm(&params);
   }
   else if (!transa_ && transb_) {
-    static tunable::GemmTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::T> gemm{};
+    static tunable::GemmTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::T> gemm{&params};
     gemm(&params);
   }
   else if (!transa_ && !transb_) {
-    static tunable::GemmTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::N> gemm{};
+    static tunable::GemmTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::N> gemm{&params};
     gemm(&params);
   }
   else {
