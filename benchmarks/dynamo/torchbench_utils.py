@@ -4,17 +4,19 @@
 
 import os
 import sys
-import torch
 from os.path import abspath, exists
+
+import torch
 
 
 def _reassign_parameters(model):
     """Reassign tensors to parameters for torch_geometric models.
-    
+
     torch_geometric models register parameter as tensors due to
     https://github.com/pyg-team/pytorch_geometric/blob/master/torch_geometric/nn/dense/linear.py#L158-L168
     Since it is unusual thing to do, we just reassign them to parameters
     """
+
     def state_dict_hook(module, destination, prefix, local_metadata):
         for name, param in module.named_parameters():
             if isinstance(destination[name], torch.Tensor) and not isinstance(
@@ -27,7 +29,7 @@ def _reassign_parameters(model):
 
 def setup_torchbench_cwd():
     """Set up the current working directory for TorchBench.
-    
+
     Returns:
         str: The original directory path before changing to TorchBench directory.
     """
@@ -59,10 +61,10 @@ def setup_torchbench_cwd():
 
 def process_hf_reformer_output(out):
     """Process HuggingFace Reformer model output.
-    
+
     Args:
         out: Model output list
-        
+
     Returns:
         List with second (unstable) output element removed
     """
@@ -73,10 +75,10 @@ def process_hf_reformer_output(out):
 
 def process_hf_whisper_output(out):
     """Process HuggingFace Whisper model output.
-    
+
     Args:
         out: Model output
-        
+
     Returns:
         Processed output with logits removed from first element
     """

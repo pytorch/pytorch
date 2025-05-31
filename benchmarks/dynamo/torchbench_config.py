@@ -10,11 +10,11 @@ except ImportError:
 
 class TorchBenchConfig:
     """Manages configuration properties for TorchBench benchmarks."""
-    
+
     def __init__(self, args):
         self.args = args
         self._cached_config = None
-    
+
     @property
     def _config(self):
         if self._cached_config is None:

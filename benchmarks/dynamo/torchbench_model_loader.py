@@ -6,15 +6,20 @@ import gc
 import importlib
 import os
 import re
-import torch
 from collections import namedtuple
 
-from .torchbench_utils import _reassign_parameters
+import torch
+
+
+try:
+    from .torchbench_utils import _reassign_parameters
+except ImportError:
+    from torchbench_utils import _reassign_parameters
 
 
 class TorchBenchModelLoader:
     """Handles loading and setup of TorchBench models."""
-    
+
     def __init__(self, config, args):
         self.config = config
         self.args = args
@@ -28,14 +33,14 @@ class TorchBenchModelLoader:
         extra_args=None,
     ):
         """Load and set up a TorchBench model.
-        
+
         Args:
             device: Device to load the model on
             model_name: Name of the model to load
             batch_size: Batch size for the model (optional)
             part: Model part to load (optional)
             extra_args: Additional arguments (optional)
-            
+
         Returns:
             Tuple of (device, model_name, model, example_inputs, batch_size)
         """
@@ -45,7 +50,7 @@ class TorchBenchModelLoader:
             )
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
-        
+
         # Import the model module
         module = self._import_model_module(model_name)
         benchmark_cls = getattr(module, "Model", None)
@@ -69,26 +74,45 @@ class TorchBenchModelLoader:
 
         # Create benchmark instance
         benchmark = self._create_benchmark_instance(
-            benchmark_cls, model_name, device, batch_size, extra_args, is_training, use_eval_mode
+            benchmark_cls,
+            model_name,
+            device,
+            batch_size,
+            extra_args,
+            is_training,
+            use_eval_mode,
         )
-        
+
+        if model_name == "vision_maskrcnn" and is_training:
+            use_eval_mode = True
+
         # Get model and example inputs
         model, example_inputs = benchmark.get_module()
-        
+
         # Handle model-specific setup
-        self._handle_model_specific_setup(model_name, model, example_inputs, device, batch_size, is_training, use_eval_mode)
-        
+        self._handle_model_specific_setup(
+            model_name,
+            model,
+            example_inputs,
+            device,
+            batch_size,
+            is_training,
+            use_eval_mode,
+        )
+
         # Final setup
         gc.collect()
         batch_size = benchmark.batch_size
-        
+
         # Handle specific input transformations
-        example_inputs = self._transform_example_inputs(model_name, example_inputs, batch_size, device)
+        example_inputs = self._transform_example_inputs(
+            model_name, example_inputs, batch_size, device
+        )
 
         if self.args.trace_on_xla:
             # work around for: https://github.com/pytorch/xla/issues/4174
             import torch_xla  # noqa: F401
-            
+
         return device, benchmark.name, model, example_inputs, batch_size
 
     def _import_model_module(self, model_name):
@@ -112,7 +136,11 @@ class TorchBenchModelLoader:
     def _configure_batch_size(self, model_name, batch_size, is_training):
         """Configure the batch size for the model."""
         cant_change_batch_size = (
-            not getattr(self._get_benchmark_cls_for_name(model_name), "ALLOW_CUSTOMIZE_BSIZE", True)
+            not getattr(
+                self._get_benchmark_cls_for_name(model_name),
+                "ALLOW_CUSTOMIZE_BSIZE",
+                True,
+            )
             or model_name in self.config._config["dont_change_batch_size"]
         )
         if cant_change_batch_size:
@@ -132,8 +160,10 @@ class TorchBenchModelLoader:
 
         # Control the memory footprint for few models
         if self.args.accuracy and model_name in self.config._accuracy["max_batch_size"]:
-            batch_size = min(batch_size, self.config._accuracy["max_batch_size"][model_name])
-            
+            batch_size = min(
+                batch_size, self.config._accuracy["max_batch_size"][model_name]
+            )
+
         return batch_size
 
     def _get_benchmark_cls_for_name(self, model_name):
@@ -145,6 +175,7 @@ class TorchBenchModelLoader:
             # Return a dummy class with default behavior if we can't import
             class DummyBenchmark:
                 ALLOW_CUSTOMIZE_BSIZE = True
+
             return DummyBenchmark
 
     def _handle_special_model_configs(self, model_name):
@@ -156,10 +187,19 @@ class TorchBenchModelLoader:
         if model_name == "sam_fast":
             self.args.amp = True
             # Need to call setup_amp from the runner if available
-            if hasattr(self, '_runner') and hasattr(self._runner, 'setup_amp'):
+            if hasattr(self, "_runner") and hasattr(self._runner, "setup_amp"):
                 self._runner.setup_amp()
 
-    def _create_benchmark_instance(self, benchmark_cls, model_name, device, batch_size, extra_args, is_training, use_eval_mode):
+    def _create_benchmark_instance(
+        self,
+        benchmark_cls,
+        model_name,
+        device,
+        batch_size,
+        extra_args,
+        is_training,
+        use_eval_mode,
+    ):
         """Create the benchmark instance with appropriate parameters."""
         if model_name == "vision_maskrcnn" and is_training:
             # Output of vision_maskrcnn model is a list of bounding boxes,
@@ -176,7 +216,6 @@ class TorchBenchModelLoader:
                 extra_args=extra_args,
                 model_kwargs=model_kwargs,
             )
-            use_eval_mode = True
         elif is_training:
             benchmark = benchmark_cls(
                 test="train",
@@ -193,7 +232,16 @@ class TorchBenchModelLoader:
             )
         return benchmark
 
-    def _handle_model_specific_setup(self, model_name, model, example_inputs, device, batch_size, is_training, use_eval_mode):
+    def _handle_model_specific_setup(
+        self,
+        model_name,
+        model,
+        example_inputs,
+        device,
+        batch_size,
+        is_training,
+        use_eval_mode,
+    ):
         """Handle model-specific setup after model creation."""
         if model_name in [
             "basic_gnn_edgecnn",
@@ -235,7 +283,7 @@ class TorchBenchModelLoader:
             assert example_inputs[0].shape[0] == batch_size
         elif model_name == "vision_maskrcnn":
             batch_size = 1
-            
+
         return example_inputs
 
     def iter_model_names(self, args):
