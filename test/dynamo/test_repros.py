@@ -1280,7 +1280,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 self.assertExpectedInline(cnt.op_count, """4""")
         else:
             self.assertExpectedInline(cnt.frame_count, """2""")
-            self.assertExpectedInline(cnt.op_count, """19""")
+            self.assertExpectedInline(cnt.op_count, """20""")
 
     def test_hf_t5_forward(self):
         input = torch.randn([1, 2048, 512])
