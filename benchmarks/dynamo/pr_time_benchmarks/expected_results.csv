@@ -2,7 +2,7 @@ add_loop_eager,compile_time_instruction_count,2953000000,0.015
 
 
 
-add_loop_eager_dynamic,compile_time_instruction_count,5738000000,0.025
+add_loop_eager_dynamic,compile_time_instruction_count,4300194436,0.025
 
 
 
@@ -10,7 +10,7 @@ add_loop_inductor,compile_time_instruction_count,29370000000,0.015
 
 
 
-add_loop_inductor_dynamic_gpu,compile_time_instruction_count,44490000000,0.025
+add_loop_inductor_dynamic_gpu,compile_time_instruction_count,38747844521,0.025
 
 
 
