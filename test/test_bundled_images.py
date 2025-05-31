@@ -92,3 +92,10 @@ class TestBundledImages(TestCase):
             im2_tensor = torch.ops.fb.image_decode_to_NCHW(byte_tensor, weight, bias)
             self.assertEqual(raw_data.shape, im2_tensor.shape)
             self.assertEqual(raw_data, im2_tensor, atol=0.1, rtol=1e-01)
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )
