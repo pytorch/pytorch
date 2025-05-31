@@ -9,6 +9,7 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <string_view>
 #include <variant>
 
 namespace c10 {
@@ -287,9 +288,14 @@ struct TORCH_API RecordFunction {
   explicit RecordFunction(RecordScope scope = RecordScope::FUNCTION);
   explicit RecordFunction(StepCallbacks&& step_callbacks);
 
-  template <typename F>
+  using schema_ref_t = std::reference_wrapper<const c10::FunctionSchema>;
+  static std::string_view extractName(std::string_view fn) {
+    return fn;
+  }
+  static std::string_view extractName(const schema_ref_t& fn);
+
   void before(
-      F fn,
+      std::string_view fn,
       c10::ArrayRef<const c10::IValue> args,
       int64_t current_sequence_nr = -1) {
     if (!isActive()) {
@@ -299,9 +305,8 @@ struct TORCH_API RecordFunction {
     before(fn, current_sequence_nr);
   }
 
-  template <typename F>
   void before(
-      F fn,
+      std::string_view fn,
       c10::ArrayRef<const c10::IValue> args,
       const std::unordered_map<std::string, IValue>* kwargs,
       int64_t current_sequence_nr = -1) {
@@ -309,12 +314,11 @@ struct TORCH_API RecordFunction {
       return;
     }
     kwinputs_ = *kwargs;
-    before(std::move(fn), args, current_sequence_nr);
+    before(fn, args, current_sequence_nr);
   }
 
-  template <typename F>
   void before(
-      F fn,
+      std::string_view fn,
       const std::unordered_map<std::string, IValue>* kwargs,
       int64_t current_sequence_nr = -1) {
     if (!isActive()) {
@@ -324,20 +328,18 @@ struct TORCH_API RecordFunction {
     before(fn, current_sequence_nr);
   }
 
-  template <typename F>
   void before(
-      F fn,
+      std::string_view fn,
       const std::vector<IValue>* args,
       int64_t current_sequence_nr = -1) {
     before(
-        std::move(fn),
+        fn,
         c10::ArrayRef<const c10::IValue>(args->data(), args->size()),
         current_sequence_nr);
   }
 
-  template <typename F>
   void before(
-      F fn,
+      std::string_view fn,
       const std::vector<IValue>* args,
       const std::unordered_map<std::string, IValue>* kwargs,
       int64_t current_sequence_nr = -1) {
@@ -426,10 +428,7 @@ struct TORCH_API RecordFunction {
 
   // before functions initialize RecordFunction members and call
   // start callbacks
-  using schema_ref_t = std::reference_wrapper<const c10::FunctionSchema>;
-  void before(const char* name, int64_t sequence_nr = -1);
-  void before(std::string name, int64_t sequence_nr = -1);
-  void before(schema_ref_t schema, int64_t sequence_nr = -1);
+  void before(std::string_view name, int64_t sequence_nr = -1);
 
   // Sets node ID for distributed profiling
   static void setDefaultNodeId(int64_t defaultNodeId);
@@ -553,10 +552,10 @@ TORCH_API std::optional<StepCallbacks> getStepCallbacksUnlessEmpty(
     RecordScope scope);
 
 namespace detail {
-template <typename Inputs, typename F, typename... Args>
+template <typename Inputs, typename... Args>
 void record_function_with_scope(
     RecordFunction& guard,
-    F fn,
+    std::string_view fn,
     const Inputs& inputs,
     Args&&... args) {
   if (guard.needsInputs()) {
@@ -569,10 +568,10 @@ void record_function_with_scope(
   }
 }
 
-template <typename Inputs, typename F, typename... Args>
+template <typename Inputs, typename... Args>
 void record_function_with_scope_and_debug_handle(
     RecordFunction& guard,
-    F fn,
+    std::string_view fn,
     int64_t debug_handle,
     const Inputs& inputs,
     Args&&... args) {
@@ -587,30 +586,28 @@ void record_function_with_scope_and_debug_handle(
   }
 }
 
-template <typename F, typename... Args>
+template <typename... Args>
 void record_function_with_scope(
     RecordFunction& guard,
-    F fn,
+    std::string_view fn,
     c10::ArrayRef<const c10::IValue> inputs,
     Args&&... args) {
   return record_function_with_scope<
       c10::ArrayRef<const c10::IValue>,
-      F,
-      Args...>(guard, std::move(fn), inputs, std::forward<Args>(args)...);
+      Args...>(guard, fn, inputs, std::forward<Args>(args)...);
 }
 
-template <typename F, typename... Args>
+template <typename... Args>
 void record_function_with_scope_and_debug_handle(
     RecordFunction& guard,
-    F fn,
+    std::string_view fn,
     int64_t debug_handle,
     c10::ArrayRef<const c10::IValue> inputs,
     Args&&... args) {
   return record_function_with_scope_and_debug_handle<
       c10::ArrayRef<const c10::IValue>,
-      F,
       Args...>(
-      guard, std::move(fn), debug_handle, inputs, std::forward<Args>(args)...);
+      guard, fn, debug_handle, inputs, std::forward<Args>(args)...);
 }
 
 } // namespace detail
@@ -620,7 +617,7 @@ void record_function_with_scope_and_debug_handle(
   at::RecordFunction guard(scope);                         \
   if (guard.isActive()) {                                  \
     ::at::detail::record_function_with_scope(              \
-        guard, fn, inputs, ##__VA_ARGS__);                 \
+        guard, at::RecordFunction::extractName(fn), inputs, ##__VA_ARGS__);                 \
   }
 
 #define RECORD_FUNCTION_WITH_SCOPE_INPUTS_OUTPUTS( \
@@ -628,9 +625,9 @@ void record_function_with_scope_and_debug_handle(
   at::RecordFunction guard(scope);                 \
   if (guard.isActive()) {                          \
     if (guard.needsInputs()) {                     \
-      guard.before(fn, inputs, ##__VA_ARGS__);     \
+      guard.before(at::RecordFunction::extractName(fn), inputs, ##__VA_ARGS__);     \
     } else {                                       \
-      guard.before(fn, ##__VA_ARGS__);             \
+      guard.before(at::RecordFunction::extractName(fn), ##__VA_ARGS__);             \
     }                                              \
     if (guard.needsOutputs()) {                    \
       guard.setOutputs(outputs);                   \

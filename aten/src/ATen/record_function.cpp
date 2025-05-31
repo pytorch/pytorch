@@ -724,36 +724,14 @@ uint64_t RecordFunction::currentThreadId() {
   return current_thread_id_;
 }
 
-void RecordFunction::before(const char* name, int64_t sequence_nr) {
-  fn_ = name;
-  sequence_nr_ = sequence_nr;
-  is_nccl_meta_ = (std::strcmp(name, kParamCommsCallName.c_str()) == 0);
-
-#ifndef NDEBUG
-  inputs_valid_ = true;
-#endif
-  runStartCallbacks();
-  invalidateInputs();
+std::string_view RecordFunction::extractName(const schema_ref_t& fn) {
+  return fn.get().name();
 }
 
-void RecordFunction::before(std::string name, int64_t sequence_nr) {
+void RecordFunction::before(std::string_view name, int64_t sequence_nr) {
   is_nccl_meta_ = (name == kParamCommsCallName);
-  fn_ = std::move(name);
+  fn_ = std::string(name);
   sequence_nr_ = sequence_nr;
-
-#ifndef NDEBUG
-  inputs_valid_ = true;
-#endif
-  runStartCallbacks();
-  invalidateInputs();
-}
-
-void RecordFunction::before(
-    RecordFunction::schema_ref_t schema,
-    int64_t sequence_nr) {
-  sequence_nr_ = sequence_nr;
-  fn_ = schema;
-  is_nccl_meta_ = (schema.get().name() == kParamCommsCallName);
 
 #ifndef NDEBUG
   inputs_valid_ = true;
