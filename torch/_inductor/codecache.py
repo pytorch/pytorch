@@ -140,6 +140,7 @@ if TYPE_CHECKING:
     from concurrent.futures import Future
 
     from .compile_fx import _CompileFxKwargs
+    from .cpp_builder import BuildOptionsBase
     from .graph import GraphLowering
     from .ir import ChoiceCaller
     from .output_code import CompiledFxGraphConstants, OutputCode
@@ -1916,7 +1917,13 @@ class AotCodeCompiler:
                 "use_relative_path": use_relative_path,
                 "vec_isa": picked_vec_isa,
             }
-            build_options = CppTorchDeviceOptions(
+            # If we're packaging via CMake, we build the whole code at max optimization.
+            wrapper_build_options = CppTorchDeviceOptions(
+                compile_only=True,
+                min_optimize=not config.aot_inductor.package_cpp_only,
+                **compile_command,
+            )
+            kernel_build_options = CppTorchDeviceOptions(
                 compile_only=True,
                 **compile_command,
             )
@@ -1926,17 +1933,24 @@ class AotCodeCompiler:
                 header_file = _get_cpp_wrapper_header(
                     device_type, aot_mode=graph.aot_mode
                 )
-                build_options.precompiled_header = _precompile_header(
+                wrapper_build_options.precompiled_header = _precompile_header(
                     header_file,
                     cpp_command,
+                    min_optimize=not config.aot_inductor.package_cpp_only,
                     **compile_command,
                 )
+                if cpp_prefix := _get_cpp_prefix_header(device_type):
+                    kernel_build_options.precompiled_header = _precompile_header(
+                        cpp_prefix,
+                        cpp_command,
+                        **compile_command,
+                    )
 
             wrapper_builder = CppBuilder(
                 name=str(wrapper_path_operator.stem),
                 sources=wrapper_path,
                 output_dir=str(wrapper_path_operator.parent),
-                BuildOption=build_options,
+                BuildOption=wrapper_build_options,
             )
             wrapper_compile_cmd = wrapper_builder.get_command_line()
             wrapper_o = wrapper_builder.get_target_file_path()
@@ -1945,7 +1959,7 @@ class AotCodeCompiler:
                 name=str(kernel_path_operator.stem),
                 sources=kernel_path,
                 output_dir=str(wrapper_path_operator.parent),
-                BuildOption=build_options,
+                BuildOption=kernel_build_options,
             )
             kernel_compile_cmd = kernel_builder.get_command_line()
             kernel_o = kernel_builder.get_target_file_path()
@@ -1959,7 +1973,7 @@ class AotCodeCompiler:
                         f"{wrapper_path_operator.stem}_compile_flags.json"
                     )
                 )
-                build_options.save_flags_to_json(compile_flags)
+                wrapper_build_options.save_flags_to_json(compile_flags)
                 generated_files.append(compile_flags)
                 wrapper_builder.save_compile_cmd_to_cmake(cmake_path, device_type)
                 wrapper_builder.save_src_to_cmake(cmake_path, wrapper_path)
@@ -1967,13 +1981,13 @@ class AotCodeCompiler:
             else:
                 try:
                     wrapper_builder.build()
-                    kernel_builder.build()
                 except (exc.CppCompileError, SkipFrame) as e:
                     if " is too big to optimize" in str(e):
                         raise RuntimeError(
                             "Please use torch._inductor.config.aot_inductor.compile_wrapper_opt_level = 'O0' flag."
                         ) from e
                     raise e
+                kernel_builder.build()
 
             if not use_mmap_weights:
                 aot_constants = serialized_weights
@@ -2352,15 +2366,14 @@ class CppCodeCache:
     @classmethod
     def load_async(
         cls,
-        code: Sequence[str],
+        main_code: str,
         device_type: str = "cpu",
         submit_fn: Optional[Callable[[Callable[..., Any]], Future[Any]]] = None,
         extra_flags: Sequence[str] = (),
+        optimized_code: Optional[str] = None,
     ) -> Any:
         """Compile and load a C++ library.  Returns a callable that returns the loaded
         library."""
-        assert len(code) > 0
-
         compile_command = {
             **cls.cpp_compile_command_flags,
             "device_type": device_type,
@@ -2371,17 +2384,33 @@ class CppCodeCache:
 
         _set_gpu_runtime_env()  # cpp_extension consults the env
 
-        # Do compilation and linking in one step if the code argument only contains one
-        # source file (as a micro-optimization).
-        do_link = len(code) > 1
-        build_option = CppTorchDeviceOptions(compile_only=do_link, **compile_command)
-        hashable_cmd_line = CppBuilder(
-            name="o", sources="i", BuildOption=build_option
-        ).get_command_line()
+        # Note the distinction between the two booleans.  We do minimal optimization if
+        # the optimized_code argument is present at all, since that's how the user of
+        # this function opts in, but we do compilation and linking in one step if the
+        # optimized_code argument is empty (as a micro-optimization).
+        main_build_option = CppTorchDeviceOptions(
+            compile_only=bool(optimized_code),
+            min_optimize=optimized_code is not None,
+            **compile_command,
+        )
+        optimized_build_option = CppTorchDeviceOptions(
+            compile_only=True, **compile_command
+        )
 
-        # The same code compiled in different source files and linked together should
-        # result in the same hash.  This is whitespace sensitive, though.
-        key = get_hash("\n".join(code), extra=hashable_cmd_line)
+        def get_hashable_command_line(build_option: BuildOptionsBase) -> str:
+            """Writing the code to file will calculate a hash, which we need to vary if
+            the command line flags change.  This implements a mostly-generic way of
+            validating that."""
+            return CppBuilder(
+                name="o", sources="i", BuildOption=build_option
+            ).get_command_line()
+
+        main_cmd_line = get_hashable_command_line(main_build_option)
+        optimized_cmd_line = get_hashable_command_line(optimized_build_option)
+
+        key, main_path = write(
+            main_code, "main.cpp", extra=f"{optimized_code!r} {main_cmd_line}"
+        )
         if key not in cls.cache:
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
             future: Optional[Future[Any]] = None
@@ -2390,39 +2419,60 @@ class CppCodeCache:
             # if requested, pre-compile any headers
             if config.cpp_cache_precompile_headers and not _IS_WINDOWS:
                 if header := cls._get_uncompiled_header(device_type):
-                    build_option.precompiled_header = _precompile_header(
+                    main_build_option.precompiled_header = _precompile_header(
                         header,
-                        hashable_cmd_line,
+                        main_cmd_line,
+                        min_optimize=optimized_code is not None,
                         **compile_command,
                     )
 
-            name, output_dir = None, None
-            builders: list[CppBuilder] = []
-            for c in code:
-                _, c_path = write(c, "cpp", extra=hashable_cmd_line)
-                c_name, c_output_dir = get_name_and_dir_from_output_file_path(c_path)
-                # The name and output directory of the first source file we process will
-                # control the rest.
-                if not name:
-                    name, output_dir = c_name, c_output_dir
+                # Currently, the optimized_code field is only used for cpp kernel code,
+                # so go ahead and precompile the relevant header here.  Revisit this
+                # decision if that ever changes.
+                if optimized_code and (header := _get_cpp_prefix_header(device_type)):
+                    optimized_build_option.precompiled_header = _precompile_header(
+                        header,
+                        optimized_cmd_line,
+                        **compile_command,
+                    )
 
+            main_name, main_output_dir = get_name_and_dir_from_output_file_path(
+                main_path
+            )
+            builders = [
+                CppBuilder(
+                    name=main_name,
+                    sources=main_path,
+                    BuildOption=main_build_option,
+                    output_dir=main_output_dir,
+                )
+            ]
+            if optimized_code:
+                _, optimized_path = write(
+                    optimized_code,
+                    "optimized.cpp",
+                    extra=optimized_cmd_line,
+                    specified_dir=main_output_dir,
+                )
+                optimized_name, _ = get_name_and_dir_from_output_file_path(
+                    optimized_path
+                )
                 builders.append(
                     CppBuilder(
-                        name=c_name,
-                        sources=c_path,
-                        BuildOption=build_option,
-                        output_dir=output_dir,  # type: ignore[arg-type]
+                        name=optimized_name,
+                        sources=optimized_path,
+                        BuildOption=optimized_build_option,
+                        output_dir=main_output_dir,
                     )
                 )
-            assert name is not None and output_dir is not None
 
-            if do_link:
+                # linking
                 builders.append(
                     CppBuilder(
-                        name=name,
+                        name=main_name,
                         sources=[b.get_target_file_path() for b in builders],
                         BuildOption=CppTorchDeviceOptions(**compile_command),
-                        output_dir=output_dir,
+                        output_dir=main_output_dir,
                     )
                 )
 
@@ -2616,20 +2666,23 @@ class CppPythonBindingsCodeCache(CppCodeCache):
     def load_pybinding_async(
         cls,
         argtypes: Sequence[str],
-        code: Sequence[str],
+        main_code: str,
         device_type: str = "cpu",
         num_outputs: int = -1,
         submit_fn: Optional[Callable[[Callable[..., Any]], Future[Any]]] = None,
         extra_flags: Sequence[str] = (),
+        kernel_code: Optional[str] = None,
     ) -> Any:
         """
         Wrap a C++ function in fast Python bindings.
 
         Args:
             argtypes: The types of args to ENTRY_FUNCTION(), e.g. ["float*", "long"]
-            code: C++ source code iterable.  The first entry must contain
-                ENTRY_FUNCTION().  Individual entries will be built asynchronously in
-                parallel, then linked together.
+            main_code: C++ source code containing ENTRY_FUNCTION().  Will be built at
+                -O3 if kernel_code is None (to maximize performance in any kernels that
+                are present), or -O1 otherwise (to minimize compile time).
+            kernel_code: If present, C++ source code that will be built at -O3 and
+                linked to main_code.
 
         Returns:
             A python version of ENTRY_FUNCTION()
@@ -2644,12 +2697,12 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             entry_func=cls.entry_function,
             extra_parse_arg=cls.extra_parse_arg.format(array_len=num_outputs),
         )
-        code = (code[0] + suffix, *code[1:])
         get_result = cls.load_async(
-            code,
+            main_code + suffix,
             device_type,
             submit_fn=submit_fn,
             extra_flags=extra_flags,
+            optimized_code=kernel_code,
         )
         result = None
 
@@ -3006,7 +3059,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             binding_types.append("uintptr_t")  # stream
         bindings_future = cls.load_pybinding_async(
             binding_types,
-            (cls._codegen_glue(meta, headerfile),),
+            cls._codegen_glue(meta, headerfile),
             extra_flags=(libfile, cls.build_standalone_runtime()),
             # jobs.append doesn't match the signature for submit_fn, but in this case it
             # still works, since there's only a single file to compile

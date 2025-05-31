@@ -200,7 +200,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 from {torch._inductor.async_compile.__name__} import AsyncCompile
 
                 async_compile = AsyncCompile()
-                src_code = [
+                cpp_wrapper_src = (
                 r'''
                 """
             )
@@ -1089,21 +1089,27 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return
 
         # Close the wrapper code block, then write any kernel definitions.
-        result.splice("''',\n")
+        result.splice("'''\n)")
         if self.kernel_declarations:
-            result.splice("r'''")
+            result.splice("\nkernel_src = (\nr'''")
             result.splice(self.kernel_declarations.getvalue())
-            result.splice("''',")
-        result.splice("]")
+            result.splice("'''\n)")
+        else:
+            result.splice(
+                """
+                kernel_src = ''
+                """
+            )
 
         # cpp entry function for JIT with cpp wrapper
         result.splice(
             f"""
             inductor_entry = async_compile.cpp_wrapper(
                 argtypes=["std::vector<AtenTensorHandle>"],
-                code=src_code,
+                main_code=cpp_wrapper_src,
                 device_type="{self.device}",
                 num_outputs={len(V.graph.graph_outputs)},
+                kernel_code=kernel_src,
             )
             async_compile.wait(globals())
             del async_compile
@@ -2542,7 +2548,7 @@ if (!custom_op_wrapper) {
             return "int64_t"
         elif isinstance(
             type_, (torch.BoolType, torch.SymBoolType, torch.EnumType)
-        ) or repr(type_) in ("Layout", "MemoryFormat", "ScalarType"):
+        ) or repr(type_) in ("ScalarType", "Layout", "MemoryFormat"):
             return "int32_t"
         elif isinstance(type_, torch.FloatType):
             return "double"

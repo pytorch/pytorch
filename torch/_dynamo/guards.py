@@ -2200,7 +2200,7 @@ class GuardBuilder(GuardBuilderBase):
                     func_str,
                     verbose_code_parts.exprs,
                 )
-                clib = CppCodeCache.load((func_str,))
+                clib = CppCodeCache.load(func_str)
                 cguard = ctypes.cast(clib.guard, ctypes.c_void_p).value
                 assert cguard
             except torch._inductor.exc.InvalidCxxCompiler:

@@ -51,8 +51,6 @@ from torch.utils._triton import has_triton_package
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from torch._inductor.runtime.hints import HalideMeta
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
@@ -220,11 +218,6 @@ class CompiledTritonKernels:
 
 
 class AsyncCompile:
-    """AsyncCompile manages asynchronous, multithreaded compilation for a number of
-    different compilation backends.  In general, if config.compile_threads is 1 or less,
-    compilation will happen sychronously.  Values greater than 1 may be (but are not
-    guaranteed to be) compiled in parallel."""
-
     def __init__(self) -> None:
         pass
 
@@ -426,26 +419,24 @@ class AsyncCompile:
     def cpp(self, source_code: str):
         kernel_code_log.info("CPP Kernel:\n%s", source_code)
         if get_compile_threads() <= 1:
-            return CppCodeCache.load((source_code,)).kernel
+            return CppCodeCache.load(source_code).kernel
         else:
-            get_result = CppCodeCache.load_async((source_code,), submit_fn=self.submit)
+            get_result = CppCodeCache.load_async(source_code, submit_fn=self.submit)
             return LambdaFuture(lambda: get_result().kernel)
 
     def cpp_pybinding(self, argtypes: list[str], source_code: str):
         kernel_code_log.info("CPP+Bindings Kernel:\n%s", source_code)
         if get_compile_threads() <= 1:
-            return CppPythonBindingsCodeCache.load_pybinding(argtypes, (source_code,))
+            return CppPythonBindingsCodeCache.load_pybinding(argtypes, source_code)
         else:
             get_result = CppPythonBindingsCodeCache.load_pybinding_async(
-                argtypes, (source_code,), submit_fn=self.submit
+                argtypes, source_code, submit_fn=self.submit
             )
             return LambdaFuture(get_result)
 
     def cpp_wrapper(self, *args, **kwargs) -> Any:
-        # Don't incure the overhead of concurrency if there's only one source file to
-        # build.
-        code: Sequence[str] = args[2] if len(args) >= 2 else kwargs["code"]
-        if get_compile_threads() <= 1 or len(code) < 2:
+        # Don't incure the overhead of concurrency if there's no kernel code to build.
+        if get_compile_threads() <= 1 or not kwargs.get("kernel_code", None):
             return CppWrapperCodeCache.load_pybinding(*args, **kwargs)
 
         kwargs["submit_fn"] = self.submit
