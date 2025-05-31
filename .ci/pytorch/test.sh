@@ -1562,7 +1562,8 @@ test_operator_benchmark() {
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
   $TASKSET python -m benchmark_all_test --device "$1" --tag-filter "$2" \
-      --output-dir "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv"
+      --output-csv "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
+      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.json" \
 
   pip_install pandas
   python check_perf_csv.py \
