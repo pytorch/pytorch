@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch._ops import ops
 from torch.nn.common_types import _size_1_t
+from torch.nn.modules.conv import PaddingMode
 from torch.nn.modules.utils import _pair, _single, _triple
 from torch.nn.utils import fuse_conv_bn_weights
 
@@ -401,7 +402,7 @@ class Conv1d(_ConvNd):
         dilation: _size_1_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",
+        padding_mode: PaddingMode = "zeros",
         device=None,
         dtype=None,
     ):
