@@ -403,7 +403,7 @@ disable_decompose_k = os.environ.get("TORCHINDUCTOR_DISABLE_DECOMPOSE_K") == "1"
 autotune_num_choices_displayed: Optional[int] = 10
 
 # enable inductor graph partition to allow multiple inductor graphs for the same dynamo graph
-graph_partition = False
+graph_partition = True if not is_fbcode() else False
 
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations

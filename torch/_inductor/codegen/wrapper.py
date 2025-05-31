@@ -48,6 +48,7 @@ from ..utils import (
     DelayReplaceLine,
     get_benchmark_name,
     IndentedBuffer,
+    is_codegen_graph_partition_subgraph,
     LineContext,
     set_kernel_post_grad_provenance_tracing,
     sympy_product,
@@ -891,10 +892,7 @@ class PythonWrapperCodegen(CodeGen):
 
         self.write_header()
 
-        if not (
-            isinstance(self, SubgraphPythonWrapperCodegen)
-            and self.partition_signatures is not None
-        ):
+        if not is_codegen_graph_partition_subgraph(self):
             # See [Note: Removed Graph Partition Arguments]
             self.write_prefix()
 
@@ -1057,8 +1055,7 @@ class PythonWrapperCodegen(CodeGen):
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
             )
 
-    @cache_on_self
-    def write_get_raw_stream_header_once(self) -> None:
+    def write_get_raw_stream_header(self) -> None:
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.writeline(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
@@ -1067,6 +1064,10 @@ class PythonWrapperCodegen(CodeGen):
             self.imports.writeline(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
             )
+
+    @cache_on_self
+    def write_get_raw_stream_header_once(self) -> None:
+        self.write_get_raw_stream_header()
 
     def add_meta_once(self, meta: TritonMetaParams) -> str:
         meta = repr(meta)
@@ -1248,6 +1249,9 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_autotune_calls.writeline(
                 V.graph.device_ops.set_device(device_idx)
             )
+            if is_codegen_graph_partition_subgraph(self):
+                # Need get_raw_stream for subgraph
+                self.write_get_raw_stream_header()
             self.kernel_autotune_calls.writeline(
                 f"stream{device_idx} = get_raw_stream({device_idx})"
             )
@@ -3278,7 +3282,9 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self,
     ) -> dict[str, Union[ir.TensorBox, ir.TorchBindObject, sympy.Expr]]:
         if signature := self.partition_signatures:
-            inputs = signature.input_nodes
+            inputs = signature.input_nodes | {
+                str(s): s for s in signature.symbol_inputs
+            }
         else:
             inputs = V.graph.graph_inputs
         return inputs

@@ -3259,6 +3259,8 @@ class PyCodeCache:
     ) -> Optional[list[dict[str, Any]]]:
         if path not in cls.linemaps:
             return None
+        if len(cls.linemaps[path]) == 0:
+            return None
         # [(starting_line, <fx node>), ...]
         lines, nodes = cls.linemaps[path]
         p = bisect_right(lines, lineno)
