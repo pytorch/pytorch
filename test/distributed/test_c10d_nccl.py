@@ -56,6 +56,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_SANDCASTLE,
     MI300_ARCH,
     parametrize,
     retry_on_connect_failures,
@@ -286,13 +287,15 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # These tests are expected to throw SIGABRT(6); adding the negative sign
         # bc the test return code is actually -6
+        # But if we are in Sandcastle, `skip_but_pass_in_sandcastle` would return 0.
+        TEST_NAN_ASSERT_RETURN = 0 if IS_SANDCASTLE else -signal.SIGABRT
         self.special_return_code_checks = {
-            self.test_nan_assert_float16.__wrapped__: -signal.SIGABRT,
-            self.test_nan_assert_float32.__wrapped__: -signal.SIGABRT,
-            self.test_nan_assert_float64.__wrapped__: -signal.SIGABRT,
-            self.test_nan_assert_bfloat16.__wrapped__: -signal.SIGABRT,
-            self.test_nan_assert_float8_e4m3fn.__wrapped__: -signal.SIGABRT,
-            self.test_nan_assert_float8_e5m2.__wrapped__: -signal.SIGABRT,
+            self.test_nan_assert_float16.__wrapped__: TEST_NAN_ASSERT_RETURN,
+            self.test_nan_assert_float32.__wrapped__: TEST_NAN_ASSERT_RETURN,
+            self.test_nan_assert_float64.__wrapped__: TEST_NAN_ASSERT_RETURN,
+            self.test_nan_assert_bfloat16.__wrapped__: TEST_NAN_ASSERT_RETURN,
+            self.test_nan_assert_float8_e4m3fn.__wrapped__: TEST_NAN_ASSERT_RETURN,
+            self.test_nan_assert_float8_e5m2.__wrapped__: TEST_NAN_ASSERT_RETURN,
         }
 
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests

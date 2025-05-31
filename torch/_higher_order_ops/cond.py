@@ -15,12 +15,11 @@ from torch._C._functorch import (
     is_batchedtensor,
     maybe_get_bdim,
 )
-from torch._dispatch.python import suspend_functionalization
 from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
-    _maybe_reenter_make_fx,
     _maybe_run_with_interpreter,
     _set_compilation_env,
+    materialize_as_graph,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
@@ -29,17 +28,13 @@ from torch._higher_order_ops.utils import (
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
     _temp_remove_pre_dispatch_torch_function_mode,
-    disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
 from torch.utils._python_dispatch import _get_current_dispatch_mode
-
-from .utils import _from_fun
 
 
 log = logging.getLogger(__name__)
@@ -194,36 +189,6 @@ def cond(
             return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
                 pred, true_fn, false_fn, operands
             )
-
-
-def materialize_as_graph(
-    fn: Callable,
-    args: tuple[Any],
-    include_key_set: Optional[torch._C.DispatchKeySet] = None,
-    exclude_key_set: Optional[torch._C.DispatchKeySet] = None,
-    force_enable_grad=False,
-) -> torch.fx.GraphModule:
-    if include_key_set is None:
-        include_key_set = torch._C._dispatch_tls_local_include_set()
-    if exclude_key_set is None:
-        exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
-
-    @torch._dynamo.disable(recursive=True, reason=None)
-    def _materialize_as_graph_inner():
-        with suspend_functionalization(), disable_functional_mode():
-            with disable_proxy_modes_tracing():
-                unfunc_t = [_from_fun(arg) for arg in args]
-        with contextlib.ExitStack() as stack:
-            stack.enter_context(
-                torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
-            )
-            if force_enable_grad:
-                stack.enter_context(torch.enable_grad())
-            return _maybe_reenter_make_fx(fn)(*unfunc_t)
-
-    gm = _materialize_as_graph_inner()
-    assert gm is not None
-    return gm
 
 
 def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
