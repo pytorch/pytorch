@@ -1,10 +1,15 @@
-torch
-=====
+# torch
+```{eval-rst}
 .. automodule:: torch
-.. currentmodule:: torch
+```
 
-Tensors
--------
+```{eval-rst}
+.. currentmodule:: torch
+```
+
+
+## Tensors
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -24,25 +29,27 @@ Tensors
     set_printoptions
     set_flush_denormal
 
-.. _tensor-creation-ops:
+```
 
-Creation Ops
-~~~~~~~~~~~~
+(tensor-creation-ops)=
+### Creation Ops
 
-.. note::
-    Random sampling creation ops are listed under :ref:`random-sampling` and
+```{note}
+Random sampling creation ops are listed under {ref}`random-sampling` and
     include:
-    :func:`torch.rand`
-    :func:`torch.rand_like`
-    :func:`torch.randn`
-    :func:`torch.randn_like`
-    :func:`torch.randint`
-    :func:`torch.randint_like`
-    :func:`torch.randperm`
-    You may also use :func:`torch.empty` with the :ref:`inplace-random-sampling`
-    methods to create :class:`torch.Tensor` s with values sampled from a broader
+    {func}`torch.rand`
+    {func}`torch.rand_like`
+    {func}`torch.randn`
+    {func}`torch.randn_like`
+    {func}`torch.randint`
+    {func}`torch.randint_like`
+    {func}`torch.randperm`
+    You may also use {func}`torch.empty` with the {ref}`inplace-random-sampling`
+    methods to create {class}`torch.Tensor` s with values sampled from a broader
     range of distributions.
+```
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -81,10 +88,11 @@ Creation Ops
     polar
     heaviside
 
-.. _indexing-slicing-joining:
+```
 
-Indexing, Slicing, Joining, Mutating Ops
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+(indexing-slicing-joining)=
+### Indexing, Slicing, Joining, Mutating Ops
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -140,32 +148,33 @@ Indexing, Slicing, Joining, Mutating Ops
     vstack
     where
 
-.. _accelerators:
+```
 
-Accelerators
-----------------------------------
-Within the PyTorch repo, we define an "Accelerator" as a :class:`torch.device` that is being used
+(accelerators)=
+## Accelerators
+Within the PyTorch repo, we define an "Accelerator" as a {class}`torch.device` that is being used
 alongside a CPU to speed up computation. These device use an asynchronous execution scheme,
-using :class:`torch.Stream` and :class:`torch.Event` as their main way to perform synchronization.
+using {class}`torch.Stream` and {class}`torch.Event` as their main way to perform synchronization.
 We also assume that only one such accelerator can be available at once on a given host. This allows
 us to use the current accelerator as the default device for relevant concepts such as pinned memory,
 Stream device_type, FSDP, etc.
 
-As of today, accelerator devices are (in no particular order) :doc:`"CUDA" <cuda>`, :doc:`"MTIA" <mtia>`,
-:doc:`"XPU" <xpu>`, :doc:`"MPS" <mps>`, "HPU", and PrivateUse1 (many device not in the PyTorch repo itself).
+As of today, accelerator devices are (in no particular order) {doc}`"CUDA" <cuda>`, {doc}`"MTIA" <mtia>`,
+{doc}`"XPU" <xpu>`, {doc}`"MPS" <mps>`, "HPU", and PrivateUse1 (many device not in the PyTorch repo itself).
 
 Many tools in the PyTorch Ecosystem use fork to create subprocesses (for example dataloading
 or intra-op parallelism), it is thus important to delay as much as possible any
 operation that would prevent further forks. This is especially important here as most accelerator's initialization has such effect.
-In practice, you should keep in mind that checking :func:`torch.accelerator.current_accelerator`
+In practice, you should keep in mind that checking {func}`torch.accelerator.current_accelerator`
 is a compile-time check by default, it is thus always fork-safe.
 On the contrary, passing the ``check_available=True`` flag to this function or calling
-:func:`torch.accelerator.is_available()` will usually prevent later fork.
+{func}`torch.accelerator.is_available()` will usually prevent later fork.
 
 Some backends provide an experimental opt-in option to make the runtime availability
 check fork-safe. When using the CUDA device ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` can be
 used for example.
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -173,20 +182,22 @@ used for example.
     Stream
     Event
 
-.. _generators:
+```
 
-Generators
-----------------------------------
+(generators)=
+## Generators
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     Generator
 
-.. _random-sampling:
+```
 
-Random sampling
-----------------------------------
+(random-sampling)=
+## Random sampling
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -197,15 +208,18 @@ Random sampling
     get_rng_state
     set_rng_state
 
+```
+
 .. autoattribute:: torch.default_generator
    :annotation:  Returns the default CPU torch.Generator
 
-.. The following doesn't actually seem to exist.
+<!-- The following doesn't actually seem to exist. -->
    https://github.com/pytorch/pytorch/issues/27780
-   .. autoattribute:: torch.cuda.default_generators
+<!-- autoattribute:: torch.cuda.default_generators -->
       :annotation:  If cuda is available, returns a tuple of default CUDA torch.Generator-s.
                     The number of CUDA torch.Generator-s returned is equal to the number of
                     GPUs available in the system.
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -222,24 +236,24 @@ Random sampling
     randn_like
     randperm
 
-.. _inplace-random-sampling:
+```
 
-In-place random sampling
-~~~~~~~~~~~~~~~~~~~~~~~~
+(inplace-random-sampling)=
+### In-place random sampling
 
 There are a few more in-place random sampling functions defined on Tensors as well. Click through to refer to their documentation:
 
-- :func:`torch.Tensor.bernoulli_` - in-place version of :func:`torch.bernoulli`
-- :func:`torch.Tensor.cauchy_` - numbers drawn from the Cauchy distribution
-- :func:`torch.Tensor.exponential_` - numbers drawn from the exponential distribution
-- :func:`torch.Tensor.geometric_` - elements drawn from the geometric distribution
-- :func:`torch.Tensor.log_normal_` - samples from the log-normal distribution
-- :func:`torch.Tensor.normal_` - in-place version of :func:`torch.normal`
-- :func:`torch.Tensor.random_` - numbers sampled from the discrete uniform distribution
-- :func:`torch.Tensor.uniform_` - numbers sampled from the continuous uniform distribution
+- {func}`torch.Tensor.bernoulli_` - in-place version of {func}`torch.bernoulli`
+- {func}`torch.Tensor.cauchy_` - numbers drawn from the Cauchy distribution
+- {func}`torch.Tensor.exponential_` - numbers drawn from the exponential distribution
+- {func}`torch.Tensor.geometric_` - elements drawn from the geometric distribution
+- {func}`torch.Tensor.log_normal_` - samples from the log-normal distribution
+- {func}`torch.Tensor.normal_` - in-place version of {func}`torch.normal`
+- {func}`torch.Tensor.random_` - numbers sampled from the discrete uniform distribution
+- {func}`torch.Tensor.uniform_` - numbers sampled from the continuous uniform distribution
 
-Quasi-random sampling
-~~~~~~~~~~~~~~~~~~~~~
+### Quasi-random sampling
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -247,8 +261,10 @@ Quasi-random sampling
 
     quasirandom.SobolEngine
 
-Serialization
-----------------------------------
+```
+
+## Serialization
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -256,8 +272,10 @@ Serialization
     save
     load
 
-Parallelism
-----------------------------------
+```
+
+## Parallelism
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -267,40 +285,42 @@ Parallelism
     get_num_interop_threads
     set_num_interop_threads
 
-.. _torch-rst-local-disable-grad:
+```
 
-Locally disabling gradient computation
---------------------------------------
-The context managers :func:`torch.no_grad`, :func:`torch.enable_grad`, and
-:func:`torch.set_grad_enabled` are helpful for locally disabling and enabling
-gradient computation. See :ref:`locally-disable-grad` for more details on
+(torch-rst-local-disable-grad)=
+## Locally disabling gradient computation
+The context managers {func}`torch.no_grad`, {func}`torch.enable_grad`, and
+{func}`torch.set_grad_enabled` are helpful for locally disabling and enabling
+gradient computation. See {ref}`locally-disable-grad` for more details on
 their usage.  These context managers are thread local, so they won't
 work if you send work to another thread using the ``threading`` module, etc.
 
-Examples::
+Examples:
+```
+>>> x = torch.zeros(1, requires_grad=True)
+>>> with torch.no_grad():
+... y = x * 2
+>>> y.requires_grad
+False
 
-  >>> x = torch.zeros(1, requires_grad=True)
-  >>> with torch.no_grad():
-  ...     y = x * 2
-  >>> y.requires_grad
-  False
+>>> is_train = False
+>>> with torch.set_grad_enabled(is_train):
+... y = x * 2
+>>> y.requires_grad
+False
 
-  >>> is_train = False
-  >>> with torch.set_grad_enabled(is_train):
-  ...     y = x * 2
-  >>> y.requires_grad
-  False
+>>> torch.set_grad_enabled(True)  # this can also be used as a function
+>>> y = x * 2
+>>> y.requires_grad
+True
 
-  >>> torch.set_grad_enabled(True)  # this can also be used as a function
-  >>> y = x * 2
-  >>> y.requires_grad
-  True
+>>> torch.set_grad_enabled(False)
+>>> y = x * 2
+>>> y.requires_grad
+False
+```
 
-  >>> torch.set_grad_enabled(False)
-  >>> y = x * 2
-  >>> y.requires_grad
-  False
-
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -312,20 +332,26 @@ Examples::
     autograd.grad_mode.inference_mode
     is_inference_mode_enabled
 
-Math operations
----------------
+```
 
-Constants
-~~~~~~~~~~~~~~~~~~~~~~
+## Math operations
 
-======================================= ===========================================
-``inf``                                     A floating-point positive infinity. Alias for :attr:`math.inf`.
-``nan``                                     A floating-point "not a number" value. This value is not a legal number. Alias for :attr:`math.nan`.
-======================================= ===========================================
+### Constants
 
-Pointwise Ops
-~~~~~~~~~~~~~~~~~~~~~~
+```{list-table}
 
+* - `inf`
+  - A floating-point positive infinity.
+    Alias for {attr}`math.inf`.
+* - `nan`
+  - A floating-point "not a number" value.
+    This value is not a legal number.
+    Alias for {attr}`math.nan`.
+```
+
+### Pointwise Ops
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -439,8 +465,10 @@ Pointwise Ops
     trunc
     xlogy
 
-Reduction Ops
-~~~~~~~~~~~~~~~~~~~~~~
+```
+
+### Reduction Ops
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -475,8 +503,10 @@ Reduction Ops
     var_mean
     count_nonzero
 
-Comparison Ops
-~~~~~~~~~~~~~~~~~~~~~~
+```
+
+### Comparison Ops
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -511,10 +541,10 @@ Comparison Ops
     sort
     topk
     msort
+```
 
-
-Spectral Ops
-~~~~~~~~~~~~~~~~~~~~~~
+### Spectral Ops
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -526,11 +556,11 @@ Spectral Ops
     hamming_window
     hann_window
     kaiser_window
+```
 
+### Other Operations
 
-Other Operations
-~~~~~~~~~~~~~~~~~~~~~~
-
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -591,10 +621,10 @@ Other Operations
     view_as_complex
     resolve_conj
     resolve_neg
+```
 
-
-BLAS and LAPACK Operations
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+### BLAS and LAPACK Operations
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -639,14 +669,16 @@ BLAS and LAPACK Operations
     cumulative_trapezoid
     triangular_solve
     vdot
+```
 
-Foreach Operations
-~~~~~~~~~~~~~~~~~~
+### Foreach Operations
 
-.. warning::
-    This API is in beta and subject to future changes.
+```{warning}
+This API is in beta and subject to future changes.
     Forward-mode AD is not supported.
+```
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -706,9 +738,10 @@ Foreach Operations
     _foreach_trunc
     _foreach_trunc_
     _foreach_zero_
+```
 
-Utilities
-----------------------------------
+## Utilities
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -730,17 +763,26 @@ Utilities
     vmap
     _assert
 
-Symbolic Numbers
-----------------
+```
+
+## Symbolic Numbers
+
+```{eval-rst}
 .. autoclass:: SymInt
     :members:
+```
 
+```{eval-rst}
 .. autoclass:: SymFloat
     :members:
+```
 
+```{eval-rst}
 .. autoclass:: SymBool
     :members:
+```
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -754,54 +796,70 @@ Symbolic Numbers
     sym_ite
     sym_sum
 
-Export Path
--------------
+```
+
+## Export Path
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
-.. warning::
-    This feature is a prototype and may have compatibility breaking changes in the future.
+```
+
+```{warning}
+This feature is a prototype and may have compatibility breaking changes in the future.
+```
 
     export
     generated/exportdb/index
 
-Control Flow
-------------
+## Control Flow
 
-.. warning::
-    This feature is a prototype and may have compatibility breaking changes in the future.
+```{warning}
+This feature is a prototype and may have compatibility breaking changes in the future.
+```
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     cond
 
-Optimizations
--------------
+```
+
+## Optimizations
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     compile
 
-`torch.compile documentation <https://pytorch.org/docs/main/torch.compiler.html>`__
+```
 
-Operator Tags
-------------------------------------
+[torch.compile documentation](https://pytorch.org/docs/main/torch.compiler.html)_
+
+## Operator Tags
+```{eval-rst}
 .. autoclass:: Tag
     :members:
+```
 
+```{eval-rst}
 .. Empty submodules added only for tracking.
 .. py:module:: torch.contrib
 .. py:module:: torch.utils.backcompat
+```
 
-.. This module is only used internally for ROCm builds.
+<!-- This module is only used internally for ROCm builds. -->
+```{eval-rst}
 .. py:module:: torch.utils.hipify
+```
 
-.. This module needs to be documented. Adding here in the meantime
-.. for tracking purposes
+<!-- This module needs to be documented. Adding here in the meantime
+for tracking purposes -->
+```{eval-rst}
 .. py:module:: torch.utils.model_dump
 .. py:module:: torch.utils.viz
 .. py:module:: torch.functional
@@ -814,3 +872,4 @@ Operator Tags
 .. py:module:: torch.torch_version
 .. py:module:: torch.types
 .. py:module:: torch.version
+```
