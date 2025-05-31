@@ -436,6 +436,9 @@ class VariableBuilder:
 
         vt = self._wrap(value)
 
+        if vt.source is None:
+            vt.source = self.source
+
         if (
             self._can_lift_attrs_to_inputs(vt)
             and value not in self.tx.output.side_effects
