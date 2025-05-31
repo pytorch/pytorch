@@ -332,36 +332,39 @@ class Backend(str):  # noqa: SLOT000
         .. note:: This support of 3rd party backend is experimental and subject to change.
 
         """
+        DEFAULT_DEVICES = ["cpu", "cuda"]
+
         # This takes care of CUSTOM Out-of-tree backend types, update in backend_list indicates availability
         if not hasattr(Backend, name.upper()):
             setattr(Backend, name.upper(), name.lower())
         if name.lower() not in Backend.backend_list:
             Backend.backend_list.append(name.lower())
 
-        if devices is not None:
-            for device in devices:
-                if device != "cpu" and device != "cuda":
-                    Backend.default_device_backend_map[device] = name.lower()
-        Backend.backend_type_map[name.lower()] = ProcessGroup.BackendType.CUSTOM
-
-        # Update device capability matrix in Backend class
         if devices is None:
-            # This is more of a backward support for groups like `threaded`:
-            # assume default devices "cpu" and "cuda", but warn
+            devices_list = DEFAULT_DEVICES
             warnings.warn(
                 f"Device capability of {name} unspecified, assuming `cpu` and "
                 "`cuda`. Please specify it via the `devices` argument of "
                 "`register_backend`."
-            )
-            Backend.backend_capability[name.lower()] = ["cpu", "cuda"]
+                )
         elif isinstance(devices, str):
-            # Single device string specified. Simply convert to list.
-            Backend.backend_capability[name.lower()] = [devices]
+            devices_list = [devices]
+        elif isinstance(devices, (list, tuple)):
+            devices_list = list(devices)
         else:
-            Backend.backend_capability[name.lower()] = devices
+            raise TypeError(
+                f"`devices` must be a string or a list/tuple, but got: {devices}"
+            )
+
+        for device in devices_list:
+            if device not in DEFAULT_DEVICES:
+                Backend.default_device_backend_map[device] = name.lower()
+    
+        Backend.backend_type_map[name.lower()] = ProcessGroup.BackendType.CUSTOM
+
+        Backend.backend_capability[name.lower()] = devices_list
 
         Backend._plugins[name.upper()] = Backend._BackendPlugin(func, extended_api)
-
 
 class BackendConfig:
     """Backend configuration class."""
