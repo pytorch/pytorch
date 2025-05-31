@@ -1839,7 +1839,69 @@ If the above doesn't work, please subtmit an issue to GitHub.
 
         # test export with set_fullgraph(False) still errors
 
-        # test more deeply nested set_fullgraph decorated functions
+    def test_set_fullgraph_export(self):
+        @torch._dynamo.set_fullgraph(False)
+        def inner(x):
+            x = x + 2
+            torch._dynamo.graph_break()
+            return x + 4
+
+        def f(x):
+            x = x + 1
+            return inner(x)
+
+        with self.assertRaises(Unsupported):
+            torch._dynamo.export(f)(torch.ones(3))
+
+    def test_set_fullgraph_nested_deep(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def inner1_f1(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        def inner2_f1(x):
+            return inner1_f1(x)
+
+        def inner3_f1(x):
+            with torch._dynamo.set_fullgraph(False):
+                return inner2_f1(x)
+
+        def inner4_f1(x):
+            return inner3_f1(x)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f1(x):
+            x = x + 4
+            return inner4_f1(x)
+
+        inp = torch.ones(3)
+        self.assertEqual(f1(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 4)
+
+        def inner1_f2(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        def inner2_f2(x):
+            return inner1_f2(x)
+
+        def inner3_f2(x):
+            with torch._dynamo.set_fullgraph(True):
+                return inner2_f2(x)
+
+        def inner4_f2(x):
+            return inner3_f2(x)
+
+        @torch.compile(backend=cnts, fullgraph=False)
+        def f2(x):
+            x = x + 4
+            return inner4_f2(x)
+
+        with self.assertRaises(Unsupported):
+            f2(inp)
 
 
 if __name__ == "__main__":
