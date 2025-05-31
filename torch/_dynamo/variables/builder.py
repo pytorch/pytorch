@@ -115,6 +115,7 @@ from ..source import (
     Source,
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
+    UnspecializedBuiltinNNModuleSource,
 )
 from ..utils import (
     _extract_tensor_dict,
@@ -434,7 +435,10 @@ class VariableBuilder:
             return cached_vt
 
         vt = self._wrap(value)
-        vt.source = self.source
+
+        # TODO - Find places where source is not applied during the VT creation.
+        if vt.source is None:
+            vt.source = self.source
         if (
             self._can_lift_attrs_to_inputs(vt)
             and value not in self.tx.output.side_effects
@@ -1714,7 +1718,6 @@ class VariableBuilder:
                 value = value.get_base()
                 self.source = AttrProxySource(self.source)
 
-            self.install_guards(GuardBuilder.TYPE_MATCH)
             if torch._dynamo.config.inline_inbuilt_nn_modules:
                 freezing = is_parameter_freezing()
 
@@ -1749,11 +1752,15 @@ class VariableBuilder:
                     # this will get cleaned up once compile ends
                     self.tx.output.nn_modules[self.name] = value
 
-            if value.__module__.startswith(("torch.nn.", "torch.ao.")) or getattr(
-                value.__class__, "_dynamo_marked_static", False
-            ):
-                result = UnspecializedBuiltinNNModuleVariable(value, source=self.source)
+            if (
+                value.__module__.startswith(("torch.nn.modules", "torch.ao."))
+                and not value.__module__.startswith("torch.nn.modules.container")
+            ) or getattr(value.__class__, "_dynamo_marked_static", False):
+                new_source = UnspecializedBuiltinNNModuleSource(self.source)
+                result = UnspecializedBuiltinNNModuleVariable(value, source=new_source)
+                install_guard(new_source.make_guard(GuardBuilder.TYPE_MATCH))
             else:
+                self.install_guards(GuardBuilder.TYPE_MATCH)
                 result = UnspecializedNNModuleVariable(value, source=self.source)
 
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
