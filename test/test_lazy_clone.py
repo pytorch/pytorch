@@ -56,6 +56,13 @@ class TestLazyCloneDeviceType(TestCase):
     @skipCUDAIf(True, "Does not work for CUDA")
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     @skipXLA
+    @parametrize(
+        "op",
+        [
+            "_lazy_clone",
+            "to",
+        ],
+    )
     @parametrize("materialize_first", ("src", "dest"))
     @parametrize(
         "case",
@@ -67,7 +74,7 @@ class TestLazyCloneDeviceType(TestCase):
             "from_1_to_0",
         ],
     )
-    def test_interdevice_materialize(self, device, materialize_first, case):
+    def test_interdevice_materialize(self, device, op, materialize_first, case):
         src_device, dest_device = self.get_src_dest_devices(case, device)
 
         src_device_check = torch.empty(0, device=src_device).device
@@ -76,7 +83,17 @@ class TestLazyCloneDeviceType(TestCase):
 
         a = torch.randn(10, device=src_device, pin_memory=pin_memory)
         orig_data_ptr = torch._C._data_address_resolve_unified(a)
-        b = a._lazy_clone(device=dest_device)
+
+        if op == "_lazy_clone":
+            b = a._lazy_clone(device=dest_device)
+        elif op == "to":
+            if torch.device(device).type != "mps" or case == "to_same_device":
+                self.skipTest(
+                    "op='to' only runs if device='mps' and if source and dest devices differ"
+                )
+            b = a.to(device=dest_device)
+        else:
+            raise AssertionError(f"op='{op}' not recognized")
 
         self.assertEqual(a.device, src_device_check)
         self.assertEqual(b.device, dest_device_check)
@@ -147,6 +164,13 @@ class TestLazyCloneDeviceType(TestCase):
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     @skipXLA
     @parametrize(
+        "op",
+        [
+            "_lazy_clone",
+            "to",
+        ],
+    )
+    @parametrize(
         "case",
         [
             "to_cpu",
@@ -156,7 +180,7 @@ class TestLazyCloneDeviceType(TestCase):
             "from_1_to_0",
         ],
     )
-    def test_interdevice_read(self, device, case):
+    def test_interdevice_read(self, device, op, case):
         src_device, dest_device = self.get_src_dest_devices(case, device)
 
         src_device_check = torch.empty(0, device=src_device).device
@@ -168,7 +192,16 @@ class TestLazyCloneDeviceType(TestCase):
         a.copy_(orig_tensor)
 
         orig_data_ptr = torch._C._data_address_resolve_unified(a)
-        b = a._lazy_clone(device=dest_device)
+        if op == "_lazy_clone":
+            b = a._lazy_clone(device=dest_device)
+        elif op == "to":
+            if torch.device(device).type != "mps" or case == "to_same_device":
+                self.skipTest(
+                    "op='to' only runs if device='mps' and if source and dest devices differ"
+                )
+            b = a.to(device=dest_device)
+        else:
+            raise AssertionError(f"op='{op}' not recognized")
 
         self.assertEqual(a.device, src_device_check)
         self.assertEqual(b.device, dest_device_check)
@@ -245,6 +278,31 @@ class TestLazyCloneDeviceType(TestCase):
         self.assertEqual(a, b)
         self.assertEqual(a, c)
         self.assertEqual(b, c)
+
+    @skipCUDAIf(True, "Does not work for CUDA")
+    @skipXLA
+    def test_to_compile(self, device):
+        pin_memory = torch.device(device).type == "mps"
+
+        @torch.compile
+        def fn(x):
+            x = x + 1
+            x = x + 2
+            x = x.to(device=device)
+            x = x + 3
+            x = x + 4
+            x = x.cpu()
+            x = x + 5
+            x = x + 6
+            x = x.to(device=device)
+            x = x + 7
+            x = x + 8
+            x = x.cpu()
+            x = x + 9
+            x = x + 10
+            return x
+
+        fn(torch.randn([2, 2, 10], pin_memory=pin_memory))
 
 
 instantiate_device_type_tests(TestLazyCloneDeviceType, globals(), allow_mps=True)

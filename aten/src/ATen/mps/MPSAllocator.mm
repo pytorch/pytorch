@@ -859,19 +859,22 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
     } else if (isSharedBufferCPUPtr(dest)) {
       TORCH_INTERNAL_ASSERT(isSharedBufferCPUPtr(src));
     }
+
     if (isSharedBufferCPUPtr(dest)) {
       default_copy_data(dest, src, count);
     } else {
-      id<MTLBuffer> src_buffer = __builtin_bit_cast(id<MTLBuffer>, src);
-      id<MTLBuffer> dest_buffer = __builtin_bit_cast(id<MTLBuffer>, dest);
-      MPSStream* stream = getCurrentMPSStream();
-      id<MTLCommandQueue> commandQueue = stream->commandQueue();
-      id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
-      id<MTLBlitCommandEncoder> encoder = [commandBuffer blitCommandEncoder];
-      [encoder copyFromBuffer:src_buffer sourceOffset:0 toBuffer:dest_buffer destinationOffset:0 size:count];
-      [encoder endEncoding];
-      [commandBuffer commit];
-      [commandBuffer waitUntilCompleted];
+      @autoreleasepool {
+        id<MTLBuffer> src_buffer = __builtin_bit_cast(id<MTLBuffer>, src);
+        id<MTLBuffer> dest_buffer = __builtin_bit_cast(id<MTLBuffer>, dest);
+        MPSStream* stream = getCurrentMPSStream();
+        id<MTLCommandQueue> commandQueue = stream->commandQueue();
+        id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
+        id<MTLBlitCommandEncoder> encoder = [commandBuffer blitCommandEncoder];
+        [encoder copyFromBuffer:src_buffer sourceOffset:0 toBuffer:dest_buffer destinationOffset:0 size:count];
+        [encoder endEncoding];
+        [commandBuffer commit];
+        [commandBuffer waitUntilCompleted];
+      }
     }
   }
 

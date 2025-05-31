@@ -235,6 +235,15 @@ def threshold_backward(grad_output: Tensor, self: Tensor, threshold: float):
     return torch.where(self <= threshold, 0, grad_output)
 
 
+@register_decomposition(aten._lazy_clone.default)
+def _lazy_clone(x, device=None):
+    if device is None:
+        return x.clone()
+
+    else:
+        return torch._prims.device_put(x, device, non_blocking=False)
+
+
 @register_decomposition(aten.leaky_relu_backward)
 @out_wrapper("grad_input")
 @pw_cast_for_opmath
