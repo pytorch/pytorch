@@ -5218,6 +5218,11 @@ Here are the ways to call ``to``:
     Args:
         {memory_format}
 
+.. note::
+
+    Converting ``torch.inf`` to integers is undefined behavior,
+    which may produce inconsistent results across different platforms.
+
 .. method:: to(device=None, dtype=None, non_blocking=False, copy=False, memory_format=torch.preserve_format) -> Tensor
    :noindex:
 
