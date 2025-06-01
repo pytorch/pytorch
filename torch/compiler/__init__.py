@@ -289,8 +289,9 @@ def set_stance(
               dynamism from the first two invocations instead of wasting a static compile on
               the first invocation.
             - "aot_eager_then_compile": Run the first invocation with AOT eager to get memory
-              benefits, then compile on subsequent calls. Like eager_then_compile, this improves
-              handling of dynamic shapes by avoiding an initial static compile.
+              benefits from activation checkpointing, then compile on subsequent calls. Like
+              eager_then_compile, this improves handling of dynamic shapes by avoiding an
+              initial static compile.
 
 
         skip_guard_eval_unsafe: A flag to run only differentiating guards.
