@@ -117,7 +117,7 @@ class EnumEncoder(json.JSONEncoder):
         if isinstance(obj, Enum):
             return {
                 "__enum__": True,
-                "fqn": f"{obj.__class__.__module__}.{obj.__class__.__qualname__}",
+                "fqn": f"{obj.__class__.__module__}:{obj.__class__.__qualname__}",
                 "name": obj.name,
             }
         return super().default(obj)
@@ -1842,9 +1842,12 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
 
 def enum_object_hook(obj: dict[str, Any]) -> Any:
     if "__enum__" in obj:
-        modname, _, classname = obj["fqn"].rpartition(".")
+        modname, _, classname = obj["fqn"].partition(":")
         mod = importlib.import_module(modname)
-        enum_cls = getattr(mod, classname)
+        enum_cls = mod
+        for attr in classname.split("."):
+            enum_cls = getattr(enum_cls, attr)
+        enum_cls = cast(type[Enum], enum_cls)
         return enum_cls[obj["name"]]
     return obj
 
