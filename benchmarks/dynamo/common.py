@@ -726,7 +726,9 @@ def timed(
     time_total = 0
     # Dont collect outputs to correctly measure timing
     for _ in range(times):
-        if batch_size:
+        # If batch_size is 1, it too often collides with other non batch size
+        # dimensions resulting in errors.
+        if batch_size and batch_size > 1:
             # Calculate new batch size by varying the original batch size by up to 20%
             # Ensure it's at least greater than 1
             variation = random.uniform(0.8, 1.2)
