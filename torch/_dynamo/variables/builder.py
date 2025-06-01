@@ -1757,11 +1757,17 @@ class VariableBuilder:
                 value.__module__.startswith(("torch.nn.modules", "torch.ao."))
                 and not value.__module__.startswith("torch.nn.modules.container")
             ) or getattr(value.__class__, "_dynamo_marked_static", False):
-                new_source = UnspecializedBuiltinNNModuleSource(self.source)
+                new_source = self.source
+                if config.inline_inbuilt_nn_modules:
+                    # Export corner case - look at test_repros.py test_inlining_cornercase
+                    new_source = UnspecializedBuiltinNNModuleSource(self.source)
                 result = UnspecializedBuiltinNNModuleVariable(value, source=new_source)
                 install_guard(new_source.make_guard(GuardBuilder.TYPE_MATCH))
             else:
-                new_source = UnspecializedNNModuleSource(self.source)
+                new_source = self.source
+                if config.inline_inbuilt_nn_modules:
+                    # Export corner case - look at test_repros.py test_inlining_cornercase
+                    new_source = UnspecializedNNModuleSource(self.source)
                 result = UnspecializedNNModuleVariable(value, source=new_source)
                 install_guard(new_source.make_guard(GuardBuilder.TYPE_MATCH))
 
