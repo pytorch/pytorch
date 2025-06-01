@@ -128,7 +128,7 @@ Naively implemented, this is too restrictive: most PyTorch programs will immedia
 - Even if nontrivial compute is needed, sometimes a property is never actually queried at all. Making these precomputed properties lazy allows us to avoid guarding on an unbacked symbolic integer unless it is actually needed.
 - The data in an integer tensor is generally not known to be non-negative. However, we provide an API ``constrain_range`` whereby a user can specify that a size is bounded above and below by known limits.
 
-Similar to the dynamic APIs, there are corresponding unbacked APIs: namely you can use mark_unbacked instead of mark_dynamic and TORCH_COMPILE_UNBACKED_SOURCES instead of TORCH_COMPILE_DYNAMIC_SOURCES to tell the compiler to mark an input as unbacked.
+Similar to the dynamic APIs, there are corresponding unbacked APIs: namely you can use mark_unbacked instead of ``mark_dynamic`` and ``TORCH_COMPILE_UNBACKED_SOURCES`` instead of ``TORCH_COMPILE_DYNAMIC_SOURCES`` to tell the compiler to mark an input as unbacked.
 
 In future versions of PT2 (beyond PT2.1), we will extend our reasoning system
 to infer that an unbacked symbolic integer is size-like based on usage.  For
