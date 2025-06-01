@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import argparse
 import collections
 import contextlib
@@ -726,7 +727,10 @@ def timed(
     # Dont collect outputs to correctly measure timing
     for _ in range(times):
         if batch_size:
-            new_batch_size = torch.randint(1, 33, ()).item()
+            # Calculate new batch size by varying the original batch size by up to 20%
+            # Ensure it's at least greater than or equal to 1
+            variation = random.uniform(0.8, 1.2)
+            new_batch_size = max(2, int(batch_size * variation))
             example_inputs = tree_map_only(
                 torch.Tensor, lambda x: vary_batch(x, new_batch_size), example_inputs
             )
