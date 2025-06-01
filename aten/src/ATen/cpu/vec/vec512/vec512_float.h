@@ -32,9 +32,7 @@ class Vectorized<float> {
   static constexpr size_type size() {
     return 16;
   }
-  Vectorized() {
-    values = _mm512_setzero_ps();
-  }
+  Vectorized() {}
   Vectorized(__m512 v) : values(v) {}
   Vectorized(float val) {
     values = _mm512_set1_ps(val);
@@ -696,27 +694,11 @@ Vectorized<float> inline fmadd(
 }
 
 template <>
-Vectorized<float> inline fnmadd(
-    const Vectorized<float>& a,
-    const Vectorized<float>& b,
-    const Vectorized<float>& c) {
-  return _mm512_fnmadd_ps(a, b, c);
-}
-
-template <>
 Vectorized<float> inline fmsub(
     const Vectorized<float>& a,
     const Vectorized<float>& b,
     const Vectorized<float>& c) {
   return _mm512_fmsub_ps(a, b, c);
-}
-
-template <>
-Vectorized<float> inline fnmsub(
-    const Vectorized<float>& a,
-    const Vectorized<float>& b,
-    const Vectorized<float>& c) {
-  return _mm512_fnmsub_ps(a, b, c);
 }
 
 // TODO: rewrite with ATEN vectorized (need to add unpack and shuffle)
