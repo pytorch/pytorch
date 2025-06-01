@@ -32,6 +32,7 @@ The following constraints are implemented:
 - ``constraints.unit_interval``
 """
 
+from abc import abstractmethod
 from collections.abc import Sequence
 from typing import (
     Callable,
@@ -55,7 +56,7 @@ __all__ = [
     "Constraint",
     "MixtureSameFamilyConstraint",
     # Type Aliases
-    "Dependent",
+    "_Dependent",
     "Independent",
     "Boolean",
     "OneHot",
@@ -132,10 +133,16 @@ class Constraint:
             when computing validity.
     """
 
-    is_discrete: ClassVar[bool] = False  # Default to continuous.
-    event_dim: ClassVar[int] = 0  # Default to univariate.
+    @property
+    def is_discrete(self) -> bool:
+        return False
 
-    def check(self, value: Tensor) -> Tensor:
+    @property
+    def event_dim(self) -> int:
+        return 0
+
+    @abstractmethod
+    def check(self, value: Tensor, /) -> Tensor:
         """
         Returns a byte tensor of ``sample_shape + batch_shape`` indicating
         whether each event in value satisfies this constraint.
@@ -143,10 +150,10 @@ class Constraint:
         raise NotImplementedError
 
     def __repr__(self) -> str:
-        return self.__class__.__name__[1:] + "()"
+        return f"{self.__class__.__name__}()"
 
 
-class Dependent(Constraint):
+class _Dependent(Constraint):
     """
     Placeholder for variables whose support depends on other variables.
     These variables obey no simple coordinate-wise constraints.
@@ -168,20 +175,20 @@ class Dependent(Constraint):
         super().__init__()
 
     @property
-    def is_discrete(self) -> bool:  # type: ignore[override]
+    def is_discrete(self) -> bool:
         if self._is_discrete is NotImplemented:
             raise NotImplementedError(".is_discrete cannot be determined statically")
         return self._is_discrete
 
     @property
-    def event_dim(self) -> int:  # type: ignore[override]
+    def event_dim(self) -> int:
         if self._event_dim is NotImplemented:
             raise NotImplementedError(".event_dim cannot be determined statically")
         return self._event_dim
 
     def __call__(
         self, *, is_discrete: bool = NotImplemented, event_dim: int = NotImplemented
-    ) -> "Dependent":
+    ) -> "_Dependent":
         """
         Support for syntax to customize static attributes::
 
@@ -191,13 +198,13 @@ class Dependent(Constraint):
             is_discrete = self._is_discrete
         if event_dim is NotImplemented:
             event_dim = self._event_dim
-        return Dependent(is_discrete=is_discrete, event_dim=event_dim)
+        return _Dependent(is_discrete=is_discrete, event_dim=event_dim)
 
     def check(self, x: Tensor) -> Tensor:
         raise ValueError("Cannot determine validity of dependent constraint")
 
 
-def is_dependent(constraint: Constraint) -> TypeIs[Dependent]:
+def is_dependent(constraint: Constraint) -> TypeIs[_Dependent]:
     """
     Checks if ``constraint`` is a ``_Dependent`` object.
 
@@ -220,14 +227,14 @@ def is_dependent(constraint: Constraint) -> TypeIs[Dependent]:
         >>>     if is_dependent(constraint):
         >>>         continue
     """
-    return isinstance(constraint, Dependent)
+    return isinstance(constraint, _Dependent)
 
 
 T = TypeVar("T", covariant=True)
 R = TypeVar("R", covariant=True)
 
 
-class _DependentProperty(property, Dependent, Generic[T, R]):
+class _DependentProperty(property, _Dependent, Generic[T, R]):
     """
     Decorator that extends @property to act like a `Dependent` constraint when
     called on a class and act like a property when called on an object.
@@ -261,7 +268,7 @@ class _DependentProperty(property, Dependent, Generic[T, R]):
         event_dim: int = NotImplemented,
     ) -> None:
         property.__init__(self, fn)
-        Dependent.__init__(self, is_discrete=is_discrete, event_dim=event_dim)
+        _Dependent.__init__(self, is_discrete=is_discrete, event_dim=event_dim)
 
     if TYPE_CHECKING:
         # Needed because subclassing property is not fully supported in mypy
@@ -273,16 +280,25 @@ class _DependentProperty(property, Dependent, Generic[T, R]):
     _T = TypeVar("_T", contravariant=True)
     _R = TypeVar("_R", covariant=True)
 
-    def __call__(self, fn: Callable[[_T], _R], /) -> "_DependentProperty[_T, _R]":  # type: ignore[override]
+    def __call__(
+        self,
+        fn: Optional[Callable[[_T], _R]] = None,
+        /,
+        *,
+        is_discrete: bool = NotImplemented,
+        event_dim: int = NotImplemented,
+    ) -> "_DependentProperty[_T, _R]":
         """
         Support for syntax to customize static attributes::
 
             @constraints.dependent_property(is_discrete=True, event_dim=1)
             def support(self): ...
         """
-        return _DependentProperty(
-            fn, is_discrete=self._is_discrete, event_dim=self._event_dim
-        )
+        if is_discrete is NotImplemented:
+            is_discrete = self._is_discrete
+        if event_dim is NotImplemented:
+            event_dim = self._event_dim
+        return _DependentProperty(fn, is_discrete=is_discrete, event_dim=event_dim)
 
 
 Con = TypeVar("Con", bound=Constraint, covariant=True)
@@ -305,11 +321,11 @@ class Independent(Constraint, Generic[Con]):
         super().__init__()
 
     @property
-    def is_discrete(self) -> bool:  # type: ignore[override]
+    def is_discrete(self) -> bool:
         return self.base_constraint.is_discrete
 
     @property
-    def event_dim(self) -> int:  # type: ignore[override]
+    def event_dim(self) -> int:
         return self.base_constraint.event_dim + self.reinterpreted_batch_ndims
 
     def check(self, value: Tensor) -> Tensor:
@@ -326,7 +342,7 @@ class Independent(Constraint, Generic[Con]):
         return result
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__[1:]}({repr(self.base_constraint)}, {self.reinterpreted_batch_ndims})"
+        return f"{self.__class__.__name__}({self.base_constraint!r}, {self.reinterpreted_batch_ndims})"
 
 
 class MixtureSameFamilyConstraint(Constraint, Generic[Con]):
@@ -348,11 +364,11 @@ class MixtureSameFamilyConstraint(Constraint, Generic[Con]):
         super().__init__()
 
     @property
-    def is_discrete(self) -> bool:  # type: ignore[override]
+    def is_discrete(self) -> bool:
         return self.base_constraint.is_discrete
 
     @property
-    def event_dim(self) -> int:  # type: ignore[override]
+    def event_dim(self) -> int:
         return self.base_constraint.event_dim
 
     def check(self, value: Tensor) -> Tensor:
@@ -372,7 +388,10 @@ class MixtureSameFamilyConstraint(Constraint, Generic[Con]):
         return result
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({repr(self.base_constraint)})"
+        return f"{self.__class__.__name__}({self.base_constraint!r})"
+
+
+# value constraints --------------------------------------------------------------------
 
 
 class Boolean(Constraint):
@@ -386,18 +405,16 @@ class Boolean(Constraint):
         return (value == 0) | (value == 1)
 
 
-class OneHot(Constraint):
+class Real(Constraint):
     """
-    Constrain to one-hot vectors.
+    Trivially constrain to the extended real line `[-inf, inf]`.
     """
-
-    is_discrete: ClassVar[bool] = True
-    event_dim: ClassVar[int] = 1
 
     def check(self, value: Tensor) -> Tensor:
-        is_boolean = (value == 0) | (value == 1)
-        is_normalized = value.sum(-1).eq(1)
-        return is_boolean.all(-1) & is_normalized
+        return value == value.real  # False for NANs.
+
+
+# interval constraints -------------------------------------------------------------------
 
 
 class IntegerInterval(Constraint):
@@ -420,11 +437,8 @@ class IntegerInterval(Constraint):
         )
 
     def __repr__(self) -> str:
-        fmt_string = self.__class__.__name__[1:]
-        fmt_string += (
-            f"(lower_bound={self.lower_bound}, upper_bound={self.upper_bound})"
-        )
-        return fmt_string
+        lower_bound, upper_bound = self.lower_bound, self.upper_bound
+        return f"{self.__class__.__name__}({lower_bound=}, {upper_bound=})"
 
 
 class IntegerLessThan(Constraint):
@@ -442,9 +456,8 @@ class IntegerLessThan(Constraint):
         return (value % 1 == 0) & (value <= self.upper_bound)
 
     def __repr__(self) -> str:
-        fmt_string = self.__class__.__name__[1:]
-        fmt_string += f"(upper_bound={self.upper_bound})"
-        return fmt_string
+        upper_bound = self.upper_bound
+        return f"{self.__class__.__name__}({upper_bound=})"
 
 
 class IntegerGreaterThan(Constraint):
@@ -462,9 +475,8 @@ class IntegerGreaterThan(Constraint):
         return (value % 1 == 0) & (value >= self.lower_bound)
 
     def __repr__(self) -> str:
-        fmt_string = self.__class__.__name__[1:]
-        fmt_string += f"(lower_bound={self.lower_bound})"
-        return fmt_string
+        lower_bound = self.lower_bound
+        return f"{self.__class__.__name__}({lower_bound=})"
 
 
 class NonNegativeInteger(IntegerGreaterThan):
@@ -475,104 +487,6 @@ class NonNegativeInteger(IntegerGreaterThan):
 class PositiveInteger(IntegerGreaterThan):
     def __init__(self) -> None:
         super().__init__(lower_bound=1)
-
-
-class Real(Constraint):
-    """
-    Trivially constrain to the extended real line `[-inf, inf]`.
-    """
-
-    def check(self, value: Tensor) -> Tensor:
-        return value == value  # False for NANs.
-
-
-class GreaterThan(Constraint):
-    """
-    Constrain to a real half line `(lower_bound, inf]`.
-    """
-
-    def __init__(self, lower_bound: Union[float, Tensor]) -> None:
-        self.lower_bound: Final[Union[float, Tensor]] = lower_bound
-        super().__init__()
-
-    def check(self, value: Tensor) -> Tensor:
-        return self.lower_bound < value
-
-    def __repr__(self) -> str:
-        fmt_string = self.__class__.__name__[1:]
-        fmt_string += f"(lower_bound={self.lower_bound})"
-        return fmt_string
-
-
-class GreaterThanEq(Constraint):
-    """
-    Constrain to a real half line `[lower_bound, inf)`.
-    """
-
-    def __init__(self, lower_bound: Union[float, Tensor]) -> None:
-        self.lower_bound: Final[Union[float, Tensor]] = lower_bound
-        super().__init__()
-
-    def check(self, value: Tensor) -> Tensor:
-        return self.lower_bound <= value
-
-    def __repr__(self) -> str:
-        fmt_string = self.__class__.__name__[1:]
-        fmt_string += f"(lower_bound={self.lower_bound})"
-        return fmt_string
-
-
-class LessThan(Constraint):
-    """
-    Constrain to a real half line `[-inf, upper_bound)`.
-    """
-
-    def __init__(self, upper_bound: Union[float, Tensor]) -> None:
-        self.upper_bound: Final[Union[float, Tensor]] = upper_bound
-        super().__init__()
-
-    def check(self, value: Tensor) -> Tensor:
-        return value < self.upper_bound
-
-    def __repr__(self) -> str:
-        fmt_string = self.__class__.__name__[1:]
-        fmt_string += f"(upper_bound={self.upper_bound})"
-        return fmt_string
-
-
-class LessThanEq(Constraint):
-    """
-    Constrain to a real half line `(-inf, upper_bound]`.
-    """
-
-    upper_bound: Union[float, Tensor]
-
-    def __init__(self, upper_bound: Union[float, Tensor]) -> None:
-        self.upper_bound = upper_bound
-        super().__init__()
-
-    def check(self, value: Tensor) -> Tensor:
-        return value <= self.upper_bound
-
-    def __repr__(self) -> str:
-        fmt_string = self.__class__.__name__[1:]
-        fmt_string += f"(upper_bound={self.upper_bound})"
-        return fmt_string
-
-
-class Positive(GreaterThan):
-    def __init__(self) -> None:
-        super().__init__(lower_bound=0.0)
-
-
-class NonNegative(GreaterThanEq):
-    def __init__(self) -> None:
-        super().__init__(lower_bound=0.0)
-
-
-class Negative(LessThan):
-    def __init__(self) -> None:
-        super().__init__(upper_bound=0.0)
 
 
 class Interval(Constraint):
@@ -591,20 +505,9 @@ class Interval(Constraint):
         return (self.lower_bound <= value) & (value <= self.upper_bound)
 
     def __repr__(self) -> str:
-        fmt_string = self.__class__.__name__[1:]
-        fmt_string += (
-            f"(lower_bound={self.lower_bound}, upper_bound={self.upper_bound})"
-        )
-        return fmt_string
-
-
-class UnitInterval(Interval):
-    """
-    Constrain to the unit interval `[0, 1]`.
-    """
-
-    def __init__(self) -> None:
-        super().__init__(lower_bound=0.0, upper_bound=1.0)
+        lower_bound = self.lower_bound
+        upper_bound = self.upper_bound
+        return f"{self.__class__.__name__}({lower_bound=}, {upper_bound=})"
 
 
 class HalfOpenInterval(Constraint):
@@ -623,11 +526,110 @@ class HalfOpenInterval(Constraint):
         return (self.lower_bound <= value) & (value < self.upper_bound)
 
     def __repr__(self) -> str:
-        fmt_string = self.__class__.__name__[1:]
-        fmt_string += (
-            f"(lower_bound={self.lower_bound}, upper_bound={self.upper_bound})"
-        )
-        return fmt_string
+        lower_bound = self.lower_bound
+        upper_bound = self.upper_bound
+        return f"{self.__class__.__name__}({lower_bound=}, {upper_bound=})"
+
+
+class UnitInterval(Interval):
+    """
+    Constrain to the unit interval `[0, 1]`.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(lower_bound=0.0, upper_bound=1.0)
+
+
+class GreaterThan(Constraint):
+    """
+    Constrain to a real half line `(lower_bound, inf]`.
+    """
+
+    def __init__(self, lower_bound: Union[float, Tensor]) -> None:
+        self.lower_bound: Final[Union[float, Tensor]] = lower_bound
+        super().__init__()
+
+    def check(self, value: Tensor) -> Tensor:
+        return self.lower_bound < value
+
+    def __repr__(self) -> str:
+        lower_bound = self.lower_bound
+        return f"{self.__class__.__name__}({lower_bound=})"
+
+
+class GreaterThanEq(Constraint):
+    """
+    Constrain to a real half line `[lower_bound, inf]`.
+    """
+
+    def __init__(self, lower_bound: Union[float, Tensor]) -> None:
+        self.lower_bound: Final[Union[float, Tensor]] = lower_bound
+        super().__init__()
+
+    def check(self, value: Tensor) -> Tensor:
+        return self.lower_bound <= value
+
+    def __repr__(self) -> str:
+        lower_bound = self.lower_bound
+        return f"{self.__class__.__name__}({lower_bound=})"
+
+
+class LessThan(Constraint):
+    """
+    Constrain to a real half line `[-inf, upper_bound)`.
+    """
+
+    def __init__(self, upper_bound: Union[float, Tensor]) -> None:
+        self.upper_bound: Final[Union[float, Tensor]] = upper_bound
+        super().__init__()
+
+    def check(self, value: Tensor) -> Tensor:
+        return value < self.upper_bound
+
+    def __repr__(self) -> str:
+        upper_bound = self.upper_bound
+        return f"{self.__class__.__name__}({upper_bound=})"
+
+
+class Positive(GreaterThan):
+    def __init__(self) -> None:
+        super().__init__(lower_bound=0.0)
+
+
+class NonNegative(GreaterThanEq):
+    def __init__(self) -> None:
+        super().__init__(lower_bound=0.0)
+
+
+class Negative(LessThan):
+    def __init__(self) -> None:
+        super().__init__(upper_bound=0.0)
+
+
+# vector constraints (event_dim=1) -----------------------------------------------------
+
+
+class RealVector(Independent[Real]):
+    """
+    Constrain to a real vector of a given size.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(Real(), reinterpreted_batch_ndims=1)
+
+
+class OneHot(Constraint):
+    """
+    Constrain to one-hot vectors.
+    """
+
+    is_discrete: ClassVar[bool] = True
+    event_dim: ClassVar[int] = 1
+
+    def check(self, value: Tensor) -> Tensor:
+        is_boolean = (value == 0) | (value == 1)
+        is_normalized = value.sum(-1).eq(1)
+        return is_boolean.all(-1) & is_normalized
 
 
 class Simplex(Constraint):
@@ -659,6 +661,9 @@ class Multinomial(Constraint):
 
     def check(self, x: Tensor) -> Tensor:
         return (x >= 0).all(dim=-1) & (x.sum(dim=-1) <= self.upper_bound)
+
+
+# matrix constraints (event_dim=2) -----------------------------------------------------
 
 
 class LowerTriangular(Constraint):
@@ -759,6 +764,9 @@ class PositiveDefinite(Symmetric):
         return torch.linalg.cholesky_ex(value).info.eq(0)
 
 
+# generic constraints ------------------------------------------------------------------
+
+
 class Cat(Constraint, Generic[Con]):
     """
     Constraint functor that applies a sequence of constraints
@@ -782,11 +790,11 @@ class Cat(Constraint, Generic[Con]):
         super().__init__()
 
     @property
-    def is_discrete(self) -> bool:  # type: ignore[override]
+    def is_discrete(self) -> bool:
         return any(c.is_discrete for c in self.cseq)
 
     @property
-    def event_dim(self) -> int:  # type: ignore[override]
+    def event_dim(self) -> int:
         return max(c.event_dim for c in self.cseq)
 
     def check(self, value: Tensor) -> Tensor:
@@ -814,11 +822,11 @@ class Stack(Constraint, Generic[Con]):
         super().__init__()
 
     @property
-    def is_discrete(self) -> bool:  # type: ignore[override]
+    def is_discrete(self) -> bool:
         return any(c.is_discrete for c in self.cseq)
 
     @property
-    def event_dim(self) -> int:  # type: ignore[override]
+    def event_dim(self) -> int:
         dim = max(c.event_dim for c in self.cseq)
         if self.dim + dim < 0:
             dim += 1
@@ -832,16 +840,6 @@ class Stack(Constraint, Generic[Con]):
         )
 
 
-class RealVector(Independent[Real]):
-    """
-    Constrain to a real vector of a given size.
-    """
-
-    def __init__(self) -> None:
-        super().__init__(Real(), reinterpreted_batch_ndims=1)
-
-
-dependent: Final[Dependent] = Dependent()
 # value constraints
 real: Final[Real] = Real()
 boolean: Final[Boolean] = Boolean()
@@ -864,9 +862,11 @@ symmetric: Final[Symmetric] = Symmetric()
 positive_semidefinite: Final[PositiveSemidefinite] = PositiveSemidefinite()
 positive_definite: Final[PositiveDefinite] = PositiveDefinite()
 
+# dependent constraints
+dependent: Final[_Dependent] = _Dependent()
+dependent_property = _DependentProperty
 
 # aliases
-dependent_property = _DependentProperty
 independent = Independent
 interval = Interval
 half_open_interval = HalfOpenInterval

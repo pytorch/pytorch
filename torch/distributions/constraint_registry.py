@@ -141,13 +141,14 @@ class ConstraintRegistry:
             `NotImplementedError` if no transform has been registered.
         """
         # Look up by Constraint subclass.
-        try:
-            factory = self._registry[type(constraint)]
-        except KeyError:
-            raise NotImplementedError(
-                f"Cannot transform {type(constraint).__name__} constraints"
-            ) from None
-        return factory(constraint)
+
+        for cls in type(constraint).__mro__:
+            factory = self._registry.get(cls)
+            if factory is not None:
+                return factory(constraint)
+        raise NotImplementedError(
+            f"Cannot transform {type(constraint).__name__} constraints"
+        ) from None
 
 
 biject_to = ConstraintRegistry()

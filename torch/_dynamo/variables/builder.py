@@ -3524,12 +3524,12 @@ class SourcelessBuilder:
             )
         )
 
-        handlers[torch.distributions.constraints._Real] = (
+        handlers[torch.distributions.constraints.Real] = (
             lambda tx, value: UserDefinedObjectVariable(
                 value, mutation_type=ValueMutationNew()
             )
         )
-        handlers[torch.distributions.constraints._Interval] = (
+        handlers[torch.distributions.constraints.Interval] = (
             lambda tx, value: UserDefinedObjectVariable(
                 value, mutation_type=ValueMutationNew()
             )
