@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import random
 import argparse
 import collections
 import contextlib
@@ -15,6 +14,7 @@ import itertools
 import json
 import logging
 import os
+import random
 import shutil
 import signal
 import subprocess
