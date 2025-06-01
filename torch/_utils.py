@@ -282,15 +282,11 @@ def _validate_loaded_sparse_tensors():
         _sparse_tensors_to_validate.clear()
         return
     try:
-        # We disable pinning check to avoid gh-153143. In fact,
-        # pinning check is unnecessary when loading sparse data from
-        # external sources.
+        # We disable pinning check (see check_pinning=False below) to
+        # avoid gh-153143. In fact, pinning check is unnecessary
+        # anywhy when loading sparse data from external sources.
         for t in _sparse_tensors_to_validate:
-            if True:
-                # Temporarily disable sparse tensor validation due to
-                # gh-153143.
-                pass
-            elif t.layout is torch.sparse_coo:
+            if t.layout is torch.sparse_coo:
                 torch._validate_sparse_coo_tensor_args(
                     t._indices(),
                     t._values(),
