@@ -116,6 +116,7 @@ from ..source import (
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
     UnspecializedBuiltinNNModuleSource,
+    UnspecializedNNModuleSource,
 )
 from ..utils import (
     _extract_tensor_dict,
@@ -1756,12 +1757,19 @@ class VariableBuilder:
                 value.__module__.startswith(("torch.nn.modules", "torch.ao."))
                 and not value.__module__.startswith("torch.nn.modules.container")
             ) or getattr(value.__class__, "_dynamo_marked_static", False):
-                new_source = UnspecializedBuiltinNNModuleSource(self.source)
+                new_source = self.source
+                if config.inline_inbuilt_nn_modules:
+                    # Export corner case - look at test_repros.py test_inlining_cornercase
+                    new_source = UnspecializedBuiltinNNModuleSource(self.source)
                 result = UnspecializedBuiltinNNModuleVariable(value, source=new_source)
                 install_guard(new_source.make_guard(GuardBuilder.TYPE_MATCH))
             else:
-                self.install_guards(GuardBuilder.TYPE_MATCH)
-                result = UnspecializedNNModuleVariable(value, source=self.source)
+                new_source = self.source
+                if config.inline_inbuilt_nn_modules:
+                    # Export corner case - look at test_repros.py test_inlining_cornercase
+                    new_source = UnspecializedNNModuleSource(self.source)
+                result = UnspecializedNNModuleVariable(value, source=new_source)
+                install_guard(new_source.make_guard(GuardBuilder.TYPE_MATCH))
 
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
