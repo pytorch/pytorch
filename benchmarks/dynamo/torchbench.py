@@ -9,14 +9,11 @@ import torch
 
 try:
     from .common import BenchmarkRunner, main
-except ImportError:
-    from common import BenchmarkRunner, main
-
-try:
     from .torchbench_config import TorchBenchConfig
     from .torchbench_model_loader import TorchBenchModelLoader
     from .torchbench_utils import process_train_model_output, setup_torchbench_cwd
 except ImportError:
+    from common import BenchmarkRunner, main
     from torchbench_config import TorchBenchConfig
     from torchbench_model_loader import TorchBenchModelLoader
     from torchbench_utils import process_train_model_output, setup_torchbench_cwd
