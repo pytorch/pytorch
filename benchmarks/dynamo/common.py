@@ -728,7 +728,7 @@ def timed(
     for _ in range(times):
         if batch_size:
             # Calculate new batch size by varying the original batch size by up to 20%
-            # Ensure it's at least greater than or equal to 1
+            # Ensure it's at least greater than 1
             variation = random.uniform(0.8, 1.2)
             new_batch_size = max(2, int(batch_size * variation))
             example_inputs = tree_map_only(
