@@ -42,6 +42,16 @@ The default dynamic behavior in PyTorch 2.1 is:
   operators; if you try it on a big model it will (1) probably crash PT2 and
   (2) run slow for no good reason.
 
+- You can whitelist specific sources to be marked as dynamic using the
+  ``TORCH_COMPILE_DYNAMIC_SOURCES`` environment variable or by setting
+  ``torch.compiler.config.dynamic_sources``. This is particularly useful for large
+  models with graph breaks, as you can maintain dynamism across graph breaks since
+  source names stay consistent. You can also use this to mark integers as dynamic.
+  The format is a comma-delimited list of source names, e.g., ``"L['x'], L['y']"``.
+  You can also use regexes, e.g., `"L\\['x.*'\\], L\\['y.*'\\]")`.
+  This whitelist takes precedence over other flags like ``dynamic=False``,
+  ``force_nn_module_property_static_shapes``, and ``force_parameter_static_shapes``.
+
 The Guard Model
 ---------------
 
