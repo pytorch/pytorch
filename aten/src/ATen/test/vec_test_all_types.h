@@ -335,7 +335,7 @@ T safe_fpt_division(T f1, T f2)
 }
 
 template<class T>
-std::enable_if_t<std::is_floating_point_v<T> || c10::is_reduced_floating_point_v<T>, bool>
+std::enable_if_t<std::is_floating_point_v<T>, bool>
 nearlyEqual(T a, T b, T tolerance) {
     if (check_both_nan<T>(a, b)) return true;
     if (check_both_big(a, b)) return true;
@@ -351,7 +351,7 @@ nearlyEqual(T a, T b, T tolerance) {
 }
 
 template<class T>
-std::enable_if_t<!std::is_floating_point_v<T> && !c10::is_reduced_floating_point_v<T>, bool>
+std::enable_if_t<!std::is_floating_point_v<T>, bool>
 nearlyEqual(T a, T b, T tolerance) {
     return a == b;
 }
@@ -849,7 +849,7 @@ public:
         {
             stream << "Arguments:\n";
             stream << "#\t " << arg0 << "\n";
-            if (argSize >= 2)
+            if (argSize == 2)
             {
                 stream << "#\t " << arg1 << "\n";
             }
@@ -1403,22 +1403,6 @@ std::enable_if_t<!is_complex<T>::value, T> local_fmsub(T a, T b, T c) {
 }
 
 template <typename T>
-std::enable_if_t<!is_complex<T>::value, T> local_fnmadd(T a, T b, T c) {
-    PreventFma noFma;
-    using op_math_t = typename OpMathType<T>::type;
-    auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
-    return static_cast<T>(noFma.add(-ab, op_math_t(c)));
-}
-
-template <typename T>
-std::enable_if_t<!is_complex<T>::value, T> local_fnmsub(T a, T b, T c) {
-    PreventFma noFma;
-    using op_math_t = typename OpMathType<T>::type;
-    auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
-    return static_cast<T>(noFma.sub(-ab, op_math_t(c)));
-}
-
-template <typename T>
 std::enable_if_t<!is_complex<T>::value, T> local_sqrt(T x) {
     return std::sqrt(x);
 }
@@ -1572,11 +1556,6 @@ int32_t widening_subtract(T val, T b) {
 template<typename T>
 T getDefaultTolerance() {
     return static_cast<T>(0.0);
-}
-
-template<>
-c10::Half getDefaultTolerance() {
-    return 1e-2;
 }
 
 template<>
