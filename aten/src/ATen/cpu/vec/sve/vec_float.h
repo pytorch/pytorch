@@ -38,9 +38,7 @@ class Vectorized<float> {
   static constexpr size_type size() {
     return VECTOR_WIDTH / sizeof(float);
   }
-  Vectorized() {
-    values = svdup_n_f32(0);
-  }
+  Vectorized() {}
   Vectorized(svfloat32_t v) : values(v) {}
   Vectorized(float val) {
     values = svdup_n_f32(val);
@@ -753,30 +751,6 @@ Vectorized<float> inline fmadd(
     const Vectorized<float>& b,
     const Vectorized<float>& c) {
   return svmad_f32_x(ptrue, a, b, c);
-}
-
-template <>
-Vectorized<float> inline fnmadd(
-    const Vectorized<float>& a,
-    const Vectorized<float>& b,
-    const Vectorized<float>& c) {
-  return svmsb_f32_x(ptrue, a, b, c);
-}
-
-template <>
-Vectorized<float> inline fmsub(
-    const Vectorized<float>& a,
-    const Vectorized<float>& b,
-    const Vectorized<float>& c) {
-  return svnmsb_f32_x(ptrue, a, b, c);
-}
-
-template <>
-Vectorized<float> inline fnmsub(
-    const Vectorized<float>& a,
-    const Vectorized<float>& b,
-    const Vectorized<float>& c) {
-  return svnmad_f32_x(ptrue, a, b, c);
 }
 
 #endif // defined(CPU_CAPABILITY_SVE)
