@@ -1648,9 +1648,9 @@ class TestCutlassBackend(TestCase):
         "shape",
         (
             (
-                16,
-                16,
-                32,
+                512,
+                128,
+                64,
             ),
         ),
     )
@@ -1720,9 +1720,9 @@ class TestCutlassBackend(TestCase):
         "shape",
         (
             (
-                16,
-                16,
-                32,
+                512,
+                128,
+                64,
             ),
         ),
     )
@@ -1788,6 +1788,72 @@ class TestCutlassBackend(TestCase):
         # the way blocks of results are accumulated (float addition not associative), so
         # setting a small absolute tolerance in these tests
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @fp8_config
+    @parametrize("float8_dtype", (torch.float8_e4m3fn,))
+    @parametrize("has_bias", (False,))
+    @parametrize("use_fast_accum", (False,))
+    def test_fp8_dynamic_shapes(
+        self,
+        float8_dtype: torch.dtype,
+        has_bias: bool,
+        use_fast_accum: bool,
+    ):
+        # Only bf16 output type is supported for row-wise scaling, not fp32
+        output_dtype: torch.dtype = torch.bfloat16
+        device = "cuda"
+        shape0 = (512, 128, 64)
+        shape1 = (256, 64, 128)
+
+        # compiling twice induces dynamic shapes
+        for shape in [shape0, shape1]:
+            M, K, N = shape  # Matmul Y = X [M, K] x W [N, K]
+            x = torch.randn(M, K, dtype=output_dtype, device=device)
+            w = torch.randn(N, K, dtype=output_dtype, device=device)
+            bias = None
+            if has_bias:
+                bias = torch.randn(N, device=device, dtype=torch.bfloat16)
+
+            # quantize weight (prior to inference)
+            w_fp8, w_inverse_scale = _quantize_rowwise(w, float8_dtype)
+            w_t_fp8 = w_fp8.t()
+            w_inverse_scale = w_inverse_scale.t()  # scale_b should be (1, N)
+
+            # quantize input x
+            x_fp8, x_inverse_scale = _quantize_rowwise(x, float8_dtype)
+
+            def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
+                y = torch._scaled_mm(
+                    x_fp8,
+                    w_t_fp8,
+                    x_inverse_scale,
+                    w_inverse_scale,
+                    bias,
+                    out_dtype=output_dtype,
+                    use_fast_accum=use_fast_accum,
+                )
+                return y
+
+            y_eager = linear(
+                x_fp8,
+                x_inverse_scale,
+                w_t_fp8,
+                w_inverse_scale,
+                bias,
+            )
+            linear_compiled = torch.compile(linear, backend="inductor")
+            y_compiled = linear_compiled(
+                x_fp8,
+                x_inverse_scale,
+                w_t_fp8,
+                w_inverse_scale,
+                bias,
+            )
+            self.assertEqual(y_eager.dtype, output_dtype)
+            self.assertEqual(y_compiled.dtype, output_dtype)
+            torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
 
 if __name__ == "__main__":

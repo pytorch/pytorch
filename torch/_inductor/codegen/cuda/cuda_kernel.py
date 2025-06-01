@@ -12,7 +12,7 @@ import torch._inductor.config as config
 from torch import dtype as torch_dtype
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.scheduler import BaseSchedulerNode
-from torch._inductor.utils import do_bench_using_profiling, Placeholder
+from torch._inductor.utils import do_bench_using_profiling, OrderedSet, Placeholder
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .cutlass_utils import DTYPE_TO_CUTLASS_TYPE
@@ -206,6 +206,7 @@ class CUDATemplateKernel(CUDAKernel):
         self.kernel_name = kernel_name
         self.runtime_arg_info = runtime_arg_info
         self.runtime_arg_values = runtime_arg_values
+        self.size_arg_values = list[str]()
 
     def check_not_null(self, node: IRNode) -> str:
         """
@@ -257,6 +258,7 @@ class CUDATemplateKernel(CUDAKernel):
                            e.g. The template might have input argument defined as [X, W, Bias],
                            and the actual input passed into this template could be [Bias, X, W].
                            In this case, the `input_reorder` would be [2, 0, 1].
+            additional_size_args: Additional size arguments for epilogue inputs
         """
         names = [x.strip() for x in names_str.strip().split(",")]
         if len(inputs) + len(outputs) != len(names):
@@ -276,17 +278,24 @@ class CUDATemplateKernel(CUDAKernel):
                 self.named_nodes[name] = node
                 self.args.input_buffers[node.get_name()] = name
 
+        free_symbols = OrderedSet([])
         for name, node in zip(names[len(inputs) : len(inputs) + len(outputs)], outputs):
             if node is not None:
                 self.named_nodes[name] = node
                 self.args.output_buffers[node.get_name()] = name
 
+                for expr in [*node.get_size(), *node.get_stride()]:
+                    if isinstance(expr, Expr):
+                        for s in expr.free_symbols:
+                            free_symbols.add(str(s))
+
         arg_defs, *_ = self.args.cpp_argdefs(DTYPE_TO_CUTLASS_TYPE)
 
         self.init_layout_args()
-        size_args = [
-            f"const int {s}" for s in ("M", "N", "K", "B", "lda", "ldb", "ldc", "ldd")
-        ]
+        size_vars = ["M", "N", "K", "B", "lda", "ldb", "ldc", "ldd"]
+        size_vars.extend(free_symbols)
+        self.size_arg_values.extend(free_symbols)
+        size_args = [f"const int {s}" for s in size_vars]
 
         runtime_arg_decls = ",".join(
             [f"{arg.ty} {arg.name}" for arg in self.runtime_arg_info]
@@ -328,6 +337,7 @@ class CUDATemplateKernel(CUDAKernel):
 
         layout_args = self.get_layout_args()
         call_args.extend(layout_args)  # type: ignore[arg-type]
+        call_args.extend(self.size_arg_values)  # type: ignore[arg-type]
         for arg in self.runtime_arg_values:
             call_args.append(arg)
         arg_types.extend("int" for a in layout_args)
