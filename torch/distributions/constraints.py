@@ -153,6 +153,9 @@ class Constraint:
         return f"{self.__class__.__name__}()"
 
 
+# dependent constraints ----------------------------------------------------------------
+
+
 class _Dependent(Constraint):
     """
     Placeholder for variables whose support depends on other variables.
@@ -301,6 +304,7 @@ class _DependentProperty(property, _Dependent, Generic[T, R]):
         return _DependentProperty(fn, is_discrete=is_discrete, event_dim=event_dim)
 
 
+# generic constraints ------------------------------------------------------------------
 Con = TypeVar("Con", bound=Constraint, covariant=True)
 
 
@@ -389,6 +393,79 @@ class MixtureSameFamilyConstraint(Constraint, Generic[Con]):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.base_constraint!r})"
+
+
+class Cat(Constraint, Generic[Con]):
+    """
+    Constraint functor that applies a sequence of constraints
+    `cseq` at the submatrices at dimension `dim`,
+    each of size `lengths[dim]`, in a way compatible with :func:`torch.cat`.
+    """
+
+    def __init__(
+        self,
+        cseq: Sequence[Con],
+        dim: int = 0,
+        lengths: Optional[Sequence[int]] = None,
+    ) -> None:
+        assert all(isinstance(c, Constraint) for c in cseq)
+        self.cseq: Final[list[Con]] = list(cseq)
+        if lengths is None:
+            lengths = [1] * len(self.cseq)
+        self.lengths: Final[list[int]] = list(lengths)
+        assert len(self.lengths) == len(self.cseq)
+        self.dim: Final[int] = dim
+        super().__init__()
+
+    @property
+    def is_discrete(self) -> bool:
+        return any(c.is_discrete for c in self.cseq)
+
+    @property
+    def event_dim(self) -> int:
+        return max(c.event_dim for c in self.cseq)
+
+    def check(self, value: Tensor) -> Tensor:
+        assert -value.dim() <= self.dim < value.dim()
+        checks = []
+        start = 0
+        for constr, length in zip(self.cseq, self.lengths):
+            v = value.narrow(self.dim, start, length)
+            checks.append(constr.check(v))
+            start = start + length  # avoid += for jit compat
+        return torch.cat(checks, self.dim)
+
+
+class Stack(Constraint, Generic[Con]):
+    """
+    Constraint functor that applies a sequence of constraints
+    `cseq` at the submatrices at dimension `dim`,
+    in a way compatible with :func:`torch.stack`.
+    """
+
+    def __init__(self, cseq: Sequence[Con], dim: int = 0) -> None:
+        assert all(isinstance(c, Constraint) for c in cseq)
+        self.cseq: Final[list[Con]] = list(cseq)
+        self.dim: Final[int] = dim
+        super().__init__()
+
+    @property
+    def is_discrete(self) -> bool:
+        return any(c.is_discrete for c in self.cseq)
+
+    @property
+    def event_dim(self) -> int:
+        dim = max(c.event_dim for c in self.cseq)
+        if self.dim + dim < 0:
+            dim += 1
+        return dim
+
+    def check(self, value: Tensor) -> Tensor:
+        assert -value.dim() <= self.dim < value.dim()
+        vs = [value.select(self.dim, i) for i in range(value.size(self.dim))]
+        return torch.stack(
+            [constr.check(v) for v, constr in zip(vs, self.cseq)], self.dim
+        )
 
 
 # value constraints --------------------------------------------------------------------
@@ -764,82 +841,14 @@ class PositiveDefinite(Symmetric):
         return torch.linalg.cholesky_ex(value).info.eq(0)
 
 
-# generic constraints ------------------------------------------------------------------
-
-
-class Cat(Constraint, Generic[Con]):
-    """
-    Constraint functor that applies a sequence of constraints
-    `cseq` at the submatrices at dimension `dim`,
-    each of size `lengths[dim]`, in a way compatible with :func:`torch.cat`.
-    """
-
-    def __init__(
-        self,
-        cseq: Sequence[Con],
-        dim: int = 0,
-        lengths: Optional[Sequence[int]] = None,
-    ) -> None:
-        assert all(isinstance(c, Constraint) for c in cseq)
-        self.cseq: Final[list[Con]] = list(cseq)
-        if lengths is None:
-            lengths = [1] * len(self.cseq)
-        self.lengths: Final[list[int]] = list(lengths)
-        assert len(self.lengths) == len(self.cseq)
-        self.dim: Final[int] = dim
-        super().__init__()
-
-    @property
-    def is_discrete(self) -> bool:
-        return any(c.is_discrete for c in self.cseq)
-
-    @property
-    def event_dim(self) -> int:
-        return max(c.event_dim for c in self.cseq)
-
-    def check(self, value: Tensor) -> Tensor:
-        assert -value.dim() <= self.dim < value.dim()
-        checks = []
-        start = 0
-        for constr, length in zip(self.cseq, self.lengths):
-            v = value.narrow(self.dim, start, length)
-            checks.append(constr.check(v))
-            start = start + length  # avoid += for jit compat
-        return torch.cat(checks, self.dim)
-
-
-class Stack(Constraint, Generic[Con]):
-    """
-    Constraint functor that applies a sequence of constraints
-    `cseq` at the submatrices at dimension `dim`,
-    in a way compatible with :func:`torch.stack`.
-    """
-
-    def __init__(self, cseq: Sequence[Con], dim: int = 0) -> None:
-        assert all(isinstance(c, Constraint) for c in cseq)
-        self.cseq: Final[list[Con]] = list(cseq)
-        self.dim: Final[int] = dim
-        super().__init__()
-
-    @property
-    def is_discrete(self) -> bool:
-        return any(c.is_discrete for c in self.cseq)
-
-    @property
-    def event_dim(self) -> int:
-        dim = max(c.event_dim for c in self.cseq)
-        if self.dim + dim < 0:
-            dim += 1
-        return dim
-
-    def check(self, value: Tensor) -> Tensor:
-        assert -value.dim() <= self.dim < value.dim()
-        vs = [value.select(self.dim, i) for i in range(value.size(self.dim))]
-        return torch.stack(
-            [constr.check(v) for v, constr in zip(vs, self.cseq)], self.dim
-        )
-
-
+# dependent constraints
+dependent: Final[_Dependent] = _Dependent()
+dependent_property = _DependentProperty
+# generic constraints
+independent = Independent
+mixture_same_family = MixtureSameFamilyConstraint
+cat = Cat
+stack = Stack
 # value constraints
 real: Final[Real] = Real()
 boolean: Final[Boolean] = Boolean()
@@ -862,19 +871,11 @@ symmetric: Final[Symmetric] = Symmetric()
 positive_semidefinite: Final[PositiveSemidefinite] = PositiveSemidefinite()
 positive_definite: Final[PositiveDefinite] = PositiveDefinite()
 
-# dependent constraints
-dependent: Final[_Dependent] = _Dependent()
-dependent_property = _DependentProperty
-
-# aliases
-independent = Independent
+# legacy aliases
 interval = Interval
 half_open_interval = HalfOpenInterval
-cat = Cat
-stack = Stack
 greater_than = GreaterThan
 greater_than_eq = GreaterThanEq
 less_than = LessThan
 multinomial = Multinomial
 integer_interval = IntegerInterval
-mixture_same_family = MixtureSameFamilyConstraint
