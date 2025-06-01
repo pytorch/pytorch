@@ -965,15 +965,19 @@ def default_partition(
     saved_sym_nodes = []
 
     for node in joint_module.graph.nodes:
+        # Checks if a node is actually a tuple. Can be simplified to just an isinstance check if we always use faketensors.
+        # this is copied from the min-cut partitioner to be consistent
+        is_non_tensor_node = (
+            "val" not in node.meta and "tensor_meta" not in node.meta
+        ) or ("val" in node.meta and not isinstance(node.meta["val"], torch.Tensor))
+
         if node.name not in forward_node_names:
             continue
         if is_sym_node(node):
             # Symints must be kept separate from tensors so that PythonFunction only calls
             # save_for_backward on tensors and stashes symints in autograd .ctx
             saved_sym_nodes.append(node)
-        elif (
-            "tensor_meta" not in node.meta and "val" not in node.meta
-        ) and node.op == "call_function":
+        elif is_non_tensor_node and node.op == "call_function":
             # Since we can't save tuple of tensor values, we need to flatten out what we're saving
             users = node.users
             assert all(user.target == operator.getitem for user in users)
