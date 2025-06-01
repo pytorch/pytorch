@@ -1018,9 +1018,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     Writes to ./speedups.csv
     """
-    # if args.dynamic_shapes:
-    #     return speedup_experiment_ds(args, model_iter_fn, model, example_inputs)
-
     timings = np.zeros((args.repeat, 2), np.float64)
     # if we randomize the input, we should also check the result is correct
     should_randomize_input = args.randomize_input
@@ -1177,82 +1174,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     )
 
     return msg
-
-
-# WARNING: This code is currently dead
-def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
-    """
-    Run dynamic shapes benchmarks.
-
-    Requires dynamic shape compatible models, which provide a list of example inputs.
-
-    Warms up using the first input example and then iterates the inputs,
-    measuring (and expecting minimal) variance between the runtime for different examples.
-
-    """
-    timings = np.zeros((args.repeat, len(example_inputs), 2), np.float64)
-
-    if args.repeat > 5:
-        print(
-            f"\ndynamic shapes experiments are slow, consider setting --repeat less than {args.repeat}\n"
-        )
-
-    nwarmup = 4
-    for rep in range(args.repeat):
-        # Start each rep fresh, e.g. only warmup on example 0
-        torch._dynamo.reset()
-        optimized_model_iter_fn = optimize_ctx(model_iter_fn)
-        for _ in range(nwarmup):
-            optimized_model_iter_fn(model, example_inputs[0])
-
-        for input_idx, inputs in enumerate(example_inputs):
-            # interleave the runs to handle frequency scaling and load changes
-            timings[rep, input_idx, 0] = timed(
-                model, model_iter_fn, inputs, return_result=False
-            )
-            # different from regular speedup_experiment, we _DO_ want to allow recompilation
-            timings[rep, input_idx, 1] = timed(
-                model, optimized_model_iter_fn, inputs, return_result=False
-            )
-    medians = np.median(timings, axis=0)
-    speedups = list(medians[:, 0] / medians[:, 1])
-    speedups_mean = np.mean(speedups)
-    speedups_median = np.median(speedups)
-    speedups_var = np.var(speedups)
-
-    # TODO this x[0] is not going to work in general but bert only has 1 input
-    shapes = [x[0].shape for x in example_inputs]
-    shape_keys = sorted(set(shapes))
-    shape_speedups = {
-        shape: [
-            it[1] for it in filter(lambda it: it[0] == shape, zip(shapes, speedups))
-        ]
-        for shape in shape_keys
-    }
-    output_str = (
-        f"mean: {speedups_mean:.3f}, median: {speedups_median:.3f}, var: {speedups_var:.3f}"
-        + "\nSpeedups by shape: "
-        + "\n".join(
-            [
-                f"{shape}: "
-                + ", ".join([f"{speedup: .3g}" for speedup in shape_speedups[shape]])
-                for shape in shape_keys
-            ]
-        )
-    )
-    write_outputs(
-        output_filename,
-        ("dev", "name", "batch_size", "speedup mean", "speedup median", "speedup var"),
-        [
-            current_device,
-            current_name,
-            current_batch_size,
-            speedups_mean,
-            speedups_median,
-            speedups_var,
-        ],
-    )
-    return output_str
 
 
 def overhead_experiment(*args, model_iter_fn):
