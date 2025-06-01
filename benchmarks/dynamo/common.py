@@ -726,7 +726,7 @@ def timed(
     # Dont collect outputs to correctly measure timing
     for _ in range(times):
         if batch_size:
-            new_batch_size = torch.randint(1, 1025, ()).item()
+            new_batch_size = torch.randint(1, 33, ()).item()
             example_inputs = tree_map_only(
                 torch.Tensor, lambda x: vary_batch(x, new_batch_size), example_inputs
             )
