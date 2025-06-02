@@ -9,7 +9,11 @@ import torch.fx as fx
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.codegen.common import get_custom_backend_pass_for_device
-from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphModulePass, get_hash_for_files
+from torch._inductor.custom_graph_pass import (
+    CustomGraphModulePass,
+    CustomGraphPass,
+    get_hash_for_files,
+)
 from torch._inductor.lowering import lowerings as L
 from torch._inductor.pattern_matcher import Arg, CallFunction, PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
@@ -275,13 +279,16 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
                 if self.existing_pass:
                     self.existing_pass(gm)
 
-                change_cos_pass(gm.graph)              
+                change_cos_pass(gm.graph)
 
             def uuid(self) -> bytes:
                 return get_hash_for_files((__file__,))
 
-        custom_backend_pass = CustomBackendPass(get_custom_backend_pass_for_device("cpu"))
+        custom_backend_pass = CustomBackendPass(
+            get_custom_backend_pass_for_device("cpu")
+        )
         with patch_inductor_backend("cpu", custom_pass=custom_backend_pass):
+
             def g(x):
                 return x.sin().sin().sin()
 
