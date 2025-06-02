@@ -394,7 +394,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
                 if "weight" in param_name:
                     param = nn.Parameter(BFloat16AllGatherTensor(param))
                     setattr(module, param_name, param)
-        fully_shard(model)
+        fully_shard(model, reshard_after_forward=False)
         optim = torch.optim.AdamW(model.parameters(), lr=1e-2, fused=True)
         torch.manual_seed(42 + self.rank + 1)
         inp = torch.randn((2, 3), device=device_type)
