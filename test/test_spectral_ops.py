@@ -561,6 +561,7 @@ class TestFFT(TestCase):
             lastdim_size = expect.size(lastdim) // 2 + 1
             idx = [slice(None)] * input_ndim
             idx[lastdim] = slice(0, lastdim_size)
+            idx = tuple(idx)
             expect = expect[idx]
 
             actual = torch.fft.ihfftn(input, dim=dim, norm="ortho")
