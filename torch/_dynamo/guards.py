@@ -1665,7 +1665,7 @@ class GuardBuilder(GuardBuilderBase):
             metadata_checker, get_verbose_code_parts(global_name, guard)
         )
 
-    def EQUALS_MATCH(self, guard: Guard):
+    def EQUALS_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         if np:
@@ -1762,9 +1762,14 @@ class GuardBuilder(GuardBuilderBase):
             # is immutable. For a few corner cases like sets and lists, we make a deepcopy to purposefully fail the
             # pointer equality check.
             val = deepcopy(val)
-        self.get_guard_manager(guard).add_equals_match_guard(
-            val, get_verbose_code_parts(code, guard)
-        )
+
+        verbose_code_parts = get_verbose_code_parts(code, guard)
+        if recompile_hint:
+            verbose_code_parts = [
+                f"{part} (HINT: {recompile_hint})" for part in verbose_code_parts
+            ]
+
+        self.get_guard_manager(guard).add_equals_match_guard(val, verbose_code_parts)
         self._set_guard_export_info(guard, code)
         return
 
