@@ -537,9 +537,9 @@ class DistTensorRandomOpTest(DTensorTestBase):
                     slice(offset, offset + size) for offset, size in other_local_shard
                 ]
                 if local_shard_offset == other_local_shard_offset:
-                    self.assertEqual(full_tensor[slice_idx], local_tensor)
+                    self.assertEqual(full_tensor[tuple(slice_idx)], local_tensor)
                 else:
-                    self.assertNotEqual(full_tensor[slice_idx], local_tensor)
+                    self.assertNotEqual(full_tensor[tuple(slice_idx)], local_tensor)
 
 
 class DistTensorRandomOpsTest3D(DTensorTestBase):
