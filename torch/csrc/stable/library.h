@@ -1,3 +1,4 @@
+#pragma once
 // this file can only have stable stuff! Akin to shim.h
 // but unlike shim.h, this file can contain header-only C++
 // code for better UX.
