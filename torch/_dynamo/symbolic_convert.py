@@ -2216,53 +2216,6 @@ class InstructionTranslatorBase(
             null = self.pop()
             assert isinstance(null, NullVariable)
 
-        if isinstance(fn, GetAttrVariable) and isinstance(fn.obj, TensorVariable):
-            # realize is requires for Python 3.8
-            kwargsvars = kwargsvars.realize()
-            if fn.name == "view" and isinstance(
-                argsvars, (ConstantVariable, TensorVariable)
-            ):
-                # Hack to handle special case in some bert models.  Converts
-                # x.view(*shape) into x.view(shape), which is correct for view()
-                # but not generally.  See test_transpose_for_scores().
-                argsvars = TupleVariable([argsvars])
-            elif (
-                fn.name == "random_"
-                and isinstance(argsvars, TupleVariable)
-                and len(argsvars.items) == 0
-                and isinstance(kwargsvars, ConstDictVariable)
-                and ConstantVariable.create("from") in kwargsvars
-            ):
-                # `from`` is python keyword. Adding random_ with `from` in the
-                # Fx graph causes syntax error. Even if we convert the kwargs to
-                # args, aot_autograd/inductor while lowering generates
-                # aten.random.from, again causing syntax errors. Since this
-                # usecase is uncommon, graph break.
-                unimplemented_v2(
-                    gb_type="Tensor.random_ op called with `from` keyword",
-                    context="",
-                    explanation="This is not supported.",
-                    hints=[],
-                )
-            elif (
-                fn.name == "uniform_"
-                and isinstance(argsvars, TupleVariable)
-                and len(argsvars.items) == 0
-                and isinstance(kwargsvars, ConstDictVariable)
-                and ConstantVariable.create("from") in kwargsvars
-            ):
-                # `from`` is python keyword. Adding uniform_ with `from` in the
-                # Fx graph causes syntax error. Even if we convert the kwargs to
-                # args, aot_autograd/inductor while lowering generates
-                # aten.uniform.from, again causing syntax errors. Since this
-                # usecase is uncommon, graph break.
-                unimplemented_v2(
-                    gb_type="Tensor.uniform_ op called with `from` keyword",
-                    context="",
-                    explanation="This is not supported.",
-                    hints=[],
-                )
-
         if not isinstance(
             argsvars, BaseListVariable
         ) and argsvars.has_force_unpack_var_sequence(self):
