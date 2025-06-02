@@ -4942,7 +4942,7 @@
   autogen: repeat.out
   tags: core
 
-- func: repeat_interleave.Tensor(Tensor repeats, *, SymInt? output_size=None) -> Tensor
+- func: repeat_interleave.Tensor(Tensor repeats, *, SymInt? output_size=None, int? dummy_arg_with_default=0) -> Tensor
   variants: function
   dispatch:
     CPU: repeat_interleave_cpu

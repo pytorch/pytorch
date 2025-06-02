@@ -1026,7 +1026,7 @@ AOTITorchError aoti_torch_repeat_interleave_Tensor(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* repeats_tensor = tensor_handle_to_tensor_pointer(repeats);
     *out = new_tensor_handle(at::_ops::repeat_interleave_Tensor::call(
-        *repeats_tensor, pointer_to_optional<c10::SymInt>(output_size)));
+        *repeats_tensor, pointer_to_optional<c10::SymInt>(output_size), std::nullopt));
   });
 }
 

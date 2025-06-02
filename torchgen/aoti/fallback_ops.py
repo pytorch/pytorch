@@ -140,7 +140,7 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten.randn.default": {},
     "aten.randn.generator": {},
     "aten.randperm.default": {},
-    "aten.repeat_interleave.Tensor": {},
+    "aten.repeat_interleave.Tensor": {"v2": ["dummy_arg_with_default"]},
     "aten.replication_pad1d_backward.default": {},
     "aten.replication_pad2d_backward.default": {},
     "aten.reshape.default": {},
