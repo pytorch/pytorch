@@ -122,11 +122,12 @@ fmha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
     ck_tile::index_t stride_dv = dv.stride(1);
     ck_tile::index_t nhead_stride_dv = dv.stride(2);
 
-    // dq_acc: (split, batch_size, seqlen_q, nheads, hdim)
+    // dq_acc: (split, batch_size, nheads, seqlen_q, hdim)
     ck_tile::index_t split_stride_dq_acc = dq_acc.stride(0);
     ck_tile::index_t batch_stride_dq_acc = dq_acc.stride(1);
-    ck_tile::index_t stride_dq_acc = dq_acc.stride(2);
-    ck_tile::index_t nhead_stride_dq_acc = dq_acc.stride(3);
+    ck_tile::index_t stride_dq_acc = dq_acc.stride(3);
+    // TROUBLE SPOT
+    ck_tile::index_t nhead_stride_dq_acc = dq_acc.stride(2);
 
     // bias: (batch_size, nheads, seqlen_q, seqlen_k)
     void *attn_bias_ptr = nullptr;
@@ -287,6 +288,7 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
             "If bias_requires_grad is set, grad_bias must have a value");
 
     const auto sizes = q.sizes();
+    std::cout << "QUERY SIZES: " << sizes << std::endl;
 
     const int batch_size = sizes[0];
     const int seqlen_q = sizes[1];
@@ -372,11 +374,11 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
     at::Tensor dq_accum;
 
     if (!deterministic) {
-        dq_accum = at::zeros({1, batch_size, seqlen_q, num_heads, head_size_8x}, opts.dtype(at::kFloat));
+        dq_accum = at::zeros({1, batch_size, num_heads, seqlen_q, head_size_8x}, opts.dtype(at::kFloat));
     } else {
         const ck_tile::index_t kN0 = head_size_8x <= 128 ? 128 : 64;
         const ck_tile::index_t nsplits = ck_tile::integer_divide_ceil(seqlen_k, kN0);
-        dq_accum = at::zeros({nsplits, batch_size, seqlen_q, num_heads, head_size_8x}, opts.dtype(at::kFloat));
+        dq_accum = at::zeros({nsplits, batch_size, num_heads, seqlen_q, head_size_8x}, opts.dtype(at::kFloat));
     }
 
     at::Tensor dk_expanded, dv_expanded;
