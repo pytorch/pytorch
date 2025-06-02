@@ -3413,9 +3413,9 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         x = x.t_()
         torch._dynamo.decorators.mark_unbacked(x, 0)
         torch._dynamo.decorators.mark_unbacked(x, 1)
-        # with self.assertRaises(torch._dynamo.exc.UserError):
-        # throws a data dependent error.
-        compiled_func(x, torch.tensor([5, 20]))
+        with self.assertRaises(torch._dynamo.exc.UserError):
+            # throws a data dependent error.
+            compiled_func(x, torch.tensor([5, 20]))
 
 
 instantiate_parametrized_tests(TestUnbacked)
