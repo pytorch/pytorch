@@ -1135,12 +1135,13 @@ def tuned_scaled_mm(
                 )
 
         for config in scaled_mm_configs(m, n, k):
-            if k <= 16:
-                continue  # Triton crashes in this case
+            if V.graph.sizevars.guard_or_false(sympy.Le(k, 16)):
+                # Triton crashes however uncommon for real workloads
+                continue
 
             # On NVIDIA B200 GPUs, K dim must be >= 32 for tcgen05.mma.kind::f8f6f4.* PTX instruction to be valid
             # source: https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-matrix-shape
-            if using_b200() and k < 32:
+            if using_b200() and V.graph.sizevars.guard_or_false(sympy.Lt(k, 32)):
                 continue
 
             kwargs = scaled_mm_options(
