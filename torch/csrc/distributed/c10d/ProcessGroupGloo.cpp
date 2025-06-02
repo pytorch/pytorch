@@ -1708,7 +1708,8 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
   }
 
   const std::vector<at::Tensor> getOutputTensors() override {
-    return {newLikeFlat(outputs[0])};
+    return outputs.empty() ? std::vector<at::Tensor>{}
+                           : std::vector<at::Tensor>{newLikeFlat(outputs[0])};
   }
 
   void run() override {
@@ -1907,7 +1908,8 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
   }
 
   const std::vector<at::Tensor> getInputTensors() override {
-    return {newLikeFlat(inputs[0])};
+    return inputs.empty() ? std::vector<at::Tensor>{}
+                          : std::vector<at::Tensor>{newLikeFlat(inputs[0])};
   }
 
   const std::vector<at::Tensor> getOutputTensors() override {
