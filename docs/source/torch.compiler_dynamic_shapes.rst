@@ -54,7 +54,7 @@ The default dynamic behavior in PyTorch 2.1 is:
 
 - Sometimes it can be cumbersome to find the right inputs to mark as dynamic. If
   you're willing to take a performance hit for the first batch, one other affordable
-  option we have are the *eager_then_compile stances which derive dynamism for you.
+  option we have are the eager_then_compile stances which derive dynamism for you.
   See `torch.compiler.set_stance <https://docs.pytorch.org/docs/stable/generated/torch.compiler.set_stance.html>`_ for more details.
 
 The Guard Model
