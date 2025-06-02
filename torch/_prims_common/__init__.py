@@ -270,6 +270,7 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
         guard_or_false,
         guard_or_true,
         guard_size_oblivious,
+        is_nested_int,
     )
 
     maybe_guard_or_false = guard_or_false if false_if_dde else guard_size_oblivious
@@ -288,8 +289,12 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
             return False
 
         # if x is 0 then a is contiguous anyway. So in the check above for non-contiguity condition we can
-        # can assume x is not 0 in expected_stride equation. This is also consistent with make_contiguous_strides_for.
-        expected_stride = expected_stride * sym_max(x, 1)
+        # can assume x is not 0 in expected_stride equation. This make the check consistent with
+        # make_contiguous_strides_for. If we make a tensor and used strides from make_contiguous_strides_for
+        # and then called definitely_contiguous we should get True.
+        expected_stride *= (
+            x if is_nested_int(x) else sym_max(x, 1)
+        )  # type:ignore[assignment]
 
     return True
 

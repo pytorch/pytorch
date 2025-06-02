@@ -1719,7 +1719,13 @@ class CppBuilder:
     def save_compile_cmd_to_cmake(
         self,
         cmake_path: str,
+        device_type: str,
     ) -> None:
+        """
+        Save global cmake settings here, e.g. compiler options.
+        If targeting CUDA, also emit a custom function to embed CUDA kernels.
+        """
+
         definitions = " ".join(self._build_option.get_definitions())
         contents = textwrap.dedent(
             f"""
@@ -1743,6 +1749,69 @@ class CppBuilder:
 
             """
         )
+        if device_type == "cuda" and torch.version.hip is None:
+            from torch._inductor.codecache import _nvcc_arch_as_compile_option
+
+            current_arch = _nvcc_arch_as_compile_option()
+            contents += textwrap.dedent(
+                f"""
+                find_package(CUDA REQUIRED)
+
+                find_program(OBJCOPY_EXECUTABLE objcopy)
+                if(NOT OBJCOPY_EXECUTABLE)
+                    message(FATAL_ERROR "objcopy not found. Cannot embed fatbin as object file")
+                endif()
+
+                set(KERNEL_TARGETS "")
+                set(KERNEL_OBJECT_FILES "")
+                # Function to embed a single kernel
+                function(embed_gpu_kernel KERNEL_NAME PTX_FILE)
+                    set(FATBIN_BASENAME ${{KERNEL_NAME}}.fatbin)
+                    set(FATBIN_FILE ${{CMAKE_CURRENT_BINARY_DIR}}/${{FATBIN_BASENAME}})
+                    set(OBJECT_BASENAME ${{KERNEL_NAME}}.fatbin.o)
+                    set(OBJECT_FILE ${{CMAKE_CURRENT_BINARY_DIR}}/${{OBJECT_BASENAME}})
+
+                    # --- Define UNIQUE C symbol names ---
+                    set(SYMBOL_START __${{KERNEL_NAME}}_start)
+                    set(SYMBOL_END __${{KERNEL_NAME}}_end)
+                    set(SYMBOL_SIZE __${{KERNEL_NAME}}_size)
+                    string(REGEX REPLACE "[^a-zA-Z0-9]" "_" MANGLED_BASENAME ${{FATBIN_FILE}})
+                    set(OBJCOPY_START_SYM _binary_${{MANGLED_BASENAME}}_start)
+                    set(OBJCOPY_END_SYM _binary_${{MANGLED_BASENAME}}_end)
+                    set(OBJCOPY_SIZE_SYM _binary_${{MANGLED_BASENAME}}_size)
+
+                    # --- PTX to FATBIN Command & Target ---
+                    add_custom_command(
+                        OUTPUT ${{FATBIN_FILE}}
+                        COMMAND ${{CUDA_NVCC_EXECUTABLE}} --fatbin ${{PTX_FILE}} -o ${{FATBIN_FILE}} ${{NVCC_GENCODE_FLAGS}}
+                                -gencode arch=compute_80,code=compute_80
+                                -gencode arch=compute_{current_arch},code=sm_{current_arch}
+                        DEPENDS ${{PTX_FILE}}
+                    )
+
+                    # --- FATBIN to Object File (.o) Command ---
+                    add_custom_command(
+                        OUTPUT ${{OBJECT_FILE}}
+                        COMMAND ${{CMAKE_LINKER}} -r -b binary -z noexecstack -o ${{OBJECT_FILE}} ${{FATBIN_FILE}}
+                        COMMAND ${{OBJCOPY_EXECUTABLE}} --rename-section .data=.rodata,alloc,load,readonly,data,contents
+                                ${{OBJECT_FILE}}
+                        COMMAND ${{OBJCOPY_EXECUTABLE}}
+                                --redefine-sym ${{OBJCOPY_START_SYM}}=${{SYMBOL_START}}
+                                --redefine-sym ${{OBJCOPY_END_SYM}}=${{SYMBOL_END}}
+                                --redefine-sym ${{OBJCOPY_SIZE_SYM}}=${{SYMBOL_SIZE}}
+                                ${{OBJECT_FILE}}
+                        DEPENDS ${{FATBIN_FILE}}
+                    )
+                    add_custom_target(build_kernel_object_${{KERNEL_NAME}} DEPENDS ${{OBJECT_FILE}})
+
+                    # --- Add to a list for linking later ---
+                    set(KERNEL_TARGETS ${{KERNEL_TARGETS}} build_kernel_object_${{KERNEL_NAME}} PARENT_SCOPE)
+                    set(KERNEL_OBJECT_FILES ${{KERNEL_OBJECT_FILES}} ${{OBJECT_FILE}} PARENT_SCOPE)
+                endfunction()
+
+                """
+            )
+
         with open(cmake_path, "w") as f:
             f.write(contents)
 
@@ -1751,6 +1820,23 @@ class CppBuilder:
         src_path = "${CMAKE_CURRENT_SOURCE_DIR}/" + Path(src_path).name
         with open(cmake_path, "a") as f:
             f.write(f"target_sources(aoti_model PRIVATE {src_path})\n")
+
+    def save_kernel_asm_to_cmake(self, cmake_path: str, asm_files: list[str]) -> None:
+        # TODO: make this work beyond CUDA
+        with open(cmake_path, "a") as f:
+            for asm_file in asm_files:
+                kernel_name = Path(asm_file).name.split(".")[0]
+                asm_file = f"${{CMAKE_CURRENT_SOURCE_DIR}}/{Path(asm_file).name}"
+                contents = textwrap.dedent(
+                    f"""
+                    embed_gpu_kernel({kernel_name} {asm_file})
+                    """
+                )
+                f.write(contents)
+            f.write("add_dependencies(aoti_model ${KERNEL_TARGETS})\n")
+            f.write(
+                "target_link_libraries(aoti_model PRIVATE ${KERNEL_OBJECT_FILES})\n"
+            )
 
     def save_link_cmd_to_cmake(self, cmake_path: str) -> None:
         lflags = " ".join(self._build_option.get_ldflags())
