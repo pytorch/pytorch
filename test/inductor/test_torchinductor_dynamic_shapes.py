@@ -367,7 +367,9 @@ class TestInductorDynamic(TestCase):
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_item_to_inputs_kernel_nobreak(self, device):
-        @torch.library.custom_op("test_inductor_dynamic_shapes::nobreak_test", mutates_args=())
+        @torch.library.custom_op(
+            "test_inductor_dynamic_shapes::nobreak_test", mutates_args=()
+        )
         def foo(x: torch.Tensor, y: int) -> torch.Tensor:
             return x.clone()
 
@@ -591,7 +593,9 @@ class TestInductorDynamic(TestCase):
     )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_multi_output_unbacked_custom_op(self, device):
-        @torch.library.custom_op("test_inductor_dynamic_shapes::unbacked_test", mutates_args=())
+        @torch.library.custom_op(
+            "test_inductor_dynamic_shapes::unbacked_test", mutates_args=()
+        )
         def foo(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             return torch.empty(2, device=x.device), torch.empty(3, device=x.device)
 
