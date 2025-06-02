@@ -5,7 +5,6 @@ import itertools
 import operator
 from collections.abc import Iterable, Sequence
 from typing import Callable, cast, Optional, TypeVar, Union
-from typing_extensions import ParamSpec
 
 import torch
 from torch._prims_common import DimsSequenceType, DimsType
@@ -27,6 +26,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from typing_extensions import ParamSpec
 
 
 _T = TypeVar("_T")
@@ -56,6 +56,9 @@ def register_prop_rule(
         return impl
 
     return wrapper
+
+
+o
 
 
 def register_op_strategy(
