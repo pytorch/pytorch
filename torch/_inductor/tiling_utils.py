@@ -25,7 +25,7 @@ U = TypeVar("U")
 
 
 Split = tuple[sympy.Expr, ...]
-VarsAndRanges = tuple[list[sympy.Symbol, ...], list[sympy.Expr]]
+VarsAndRanges = tuple[list[sympy.Symbol], list[sympy.Expr]]
 
 
 loop_tiling_log = torch._logging.getArtifactLogger(__name__, "loop_tiling")
@@ -219,7 +219,7 @@ def get_pw_red_splits(
     n: "SchedulerNode",
     pointwise_numel: sympy.Expr,
     red_numel: sympy.Expr,
-    none_if_not_divisible=False,
+    none_if_not_divisible: bool = False,
 ) -> Optional[tuple[VarsAndRanges, VarsAndRanges]]:
     if n.is_reduction() or sympy_product(n._body.sizes[0]) == pointwise_numel:
         return (
@@ -250,7 +250,7 @@ def get_pw_red_splits(
         return (
             (n._body.iter_vars, n._body.sizes[0]),
             (n._body.reduce_vars, n._body.sizes[1]),
-        )
+        )  # type: ignore[return-value]
 
 
 class NodeSplitGetter:

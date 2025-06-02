@@ -774,7 +774,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
             # More complex floor division
             (j + FloorDiv(i, 3), {i: 6, j: 12}, j),
             # Addition inside modular indexing
-            (ModularIndexing(i + 3, 1, 5), {i: 8, j: 12}, i),
+            (ModularIndexing(i + 3, 1, 6), {i: 8, j: 12}, i),
         ]
 
         for expr, var_ranges, expected in test_cases:
