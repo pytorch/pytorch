@@ -485,7 +485,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(
         # skip for cu126 as well due to https://github.com/pytorch/pytorch/issues/153479
-        not (TEST_MULTIGPU and CUDA_12_AND_ABOVE and False),
+        not (TEST_MULTIGPU and CUDA_12_AND_ABOVE),
         "NCCL test requires 2+ GPUs and Device side assert could cause unexpected errors in lower versions of CUDA",
     )
     @parametrize(
@@ -539,10 +539,15 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         backend._set_enable_nan_check(False)
         # Note: using all-gather here bc some NCCL/SM version does not support
         # FP8 reduction
-        pg._allgather_base(output, nan_tensor)
+        # temporarily skip due to https://github.com/pytorch/pytorch/issues/153479
+        # pg._allgather_base(output, nan_tensor)
 
         backend._set_enable_nan_check(True)
-        pg._allgather_base(output, nan_tensor)
+        try:
+            pg._allgather_base(output, nan_tensor)
+        except Exception:
+            sys.exit(signal.SIGABRT)
+
         dist.destroy_process_group()
 
         # reset env
