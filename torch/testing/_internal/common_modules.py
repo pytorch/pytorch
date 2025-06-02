@@ -4112,8 +4112,7 @@ module_db: list[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_RMSNorm,
                skips=(
                    # No channels_last support for LayerNorm currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad', device_type='cuda'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     # TransformerEncoder takes the same inputs as TransformerEncoderLayer
     ModuleInfo(torch.nn.TransformerEncoder,
