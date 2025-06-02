@@ -433,7 +433,7 @@ class TestCutlassBackend(TestCase):
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False, True))
     @parametrize("use_aoti", (False, True))
-    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float8_e4m3fn))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_regular_mm(
         self,
@@ -446,35 +446,93 @@ class TestCutlassBackend(TestCase):
         Main test for mm.
         """
 
-        class MyModel(torch.nn.Module):
-            def forward(self, a, b):
-                return a @ b
-
-        model = MyModel().cuda()
         # M, N, K
         shapes = [
             (128, 128, 16),
             (1024, 1024, 256),
         ]
-        shapes = shapes[0:1] if not dynamic else shapes
-        inputs = [
-            (torch.randn(M, K).cuda().to(dtype), torch.randn(K, N).cuda().to(dtype))
-            for (M, N, K) in shapes
-        ]
-        dynamic_shapes = (
-            {
-                "a": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
-                "b": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
-            }
-            if dynamic
-            else None
-        )
+
+        # M, N, K
+        shapes = shapes if dynamic else shapes[0:1]
+
+        if dtype == torch.float8_e4m3fn:
+            inputs = []
+            for shape in shapes:
+                M, N, K = shape
+                output_dtype = torch.bfloat16
+                device = "cuda"
+
+                x = torch.randn(M, K, dtype=output_dtype, device=device)
+                w = torch.randn(N, K, dtype=output_dtype, device=device)
+
+                # quantize weight (prior to inference)
+                w_fp8, w_inverse_scale = _quantize_rowwise(w, dtype)
+                w_t_fp8 = w_fp8.t()
+                w_inverse_scale = w_inverse_scale.t()  # scale_b should be (1, N)
+
+                # quantize input x
+                x_fp8, x_inverse_scale = _quantize_rowwise(x, dtype)
+
+                inputs.append((x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale))
+
+            class MyModel(torch.nn.Module):
+                def forward(self, x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale):
+                    y = torch._scaled_mm(
+                        x_fp8,
+                        w_t_fp8,
+                        x_inverse_scale,
+                        w_inverse_scale,
+                        None,
+                        out_dtype=torch.bfloat16,
+                        use_fast_accum=False,
+                    )
+                    return y
+
+            dynamic_shapes = (
+                {
+                    "x_fp8": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                    "x_inverse_scale": {0: Dim.DYNAMIC, 1: 1},
+                    "w_t_fp8": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                    "w_inverse_scale": {0: 1, 1: Dim.DYNAMIC},
+                }
+                if dynamic
+                else None
+            )
+            model = MyModel().cuda()
+
+            rtol = 1e-2
+            atol = 0.05
+        else:
+
+            class MyModel(torch.nn.Module):
+                def forward(self, a, b):
+                    return a @ b
+
+            model = MyModel().cuda()
+
+            inputs = [
+                (torch.randn(M, K).cuda().to(dtype), torch.randn(K, N).cuda().to(dtype))
+                for (M, N, K) in shapes
+            ]
+
+            dynamic_shapes = (
+                {
+                    "a": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                    "b": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                }
+                if dynamic
+                else None
+            )
+            rtol = None
+            atol = None
 
         with config.patch(
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
+                "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
+                "cuda.cutlass_tma_only": True,
             }
         ), dynamo_config.patch({"error_on_recompile": dynamic}):
             expected = [model(*input) for input in inputs]
@@ -483,10 +541,10 @@ class TestCutlassBackend(TestCase):
                     model, inputs, dynamic_shapes=dynamic_shapes
                 )
             else:
-                compiled_model = torch.compile(model, dynamic=dynamic)
+                compiled_model = torch.compile(model, dynamic=True)
                 actual = [compiled_model(*input) for input in inputs]
 
-            torch.testing.assert_close(actual, expected)
+            torch.testing.assert_close(actual, expected, rtol=rtol, atol=atol)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False, True))
@@ -1788,72 +1846,6 @@ class TestCutlassBackend(TestCase):
         # the way blocks of results are accumulated (float addition not associative), so
         # setting a small absolute tolerance in these tests
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
-
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+")
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @fp8_config
-    @parametrize("float8_dtype", (torch.float8_e4m3fn,))
-    @parametrize("has_bias", (False,))
-    @parametrize("use_fast_accum", (False,))
-    def test_fp8_dynamic_shapes(
-        self,
-        float8_dtype: torch.dtype,
-        has_bias: bool,
-        use_fast_accum: bool,
-    ):
-        # Only bf16 output type is supported for row-wise scaling, not fp32
-        output_dtype: torch.dtype = torch.bfloat16
-        device = "cuda"
-        shape0 = (512, 128, 64)
-        shape1 = (256, 64, 128)
-
-        # compiling twice induces dynamic shapes
-        for shape in [shape0, shape1]:
-            M, K, N = shape  # Matmul Y = X [M, K] x W [N, K]
-            x = torch.randn(M, K, dtype=output_dtype, device=device)
-            w = torch.randn(N, K, dtype=output_dtype, device=device)
-            bias = None
-            if has_bias:
-                bias = torch.randn(N, device=device, dtype=torch.bfloat16)
-
-            # quantize weight (prior to inference)
-            w_fp8, w_inverse_scale = _quantize_rowwise(w, float8_dtype)
-            w_t_fp8 = w_fp8.t()
-            w_inverse_scale = w_inverse_scale.t()  # scale_b should be (1, N)
-
-            # quantize input x
-            x_fp8, x_inverse_scale = _quantize_rowwise(x, float8_dtype)
-
-            def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
-                y = torch._scaled_mm(
-                    x_fp8,
-                    w_t_fp8,
-                    x_inverse_scale,
-                    w_inverse_scale,
-                    bias,
-                    out_dtype=output_dtype,
-                    use_fast_accum=use_fast_accum,
-                )
-                return y
-
-            y_eager = linear(
-                x_fp8,
-                x_inverse_scale,
-                w_t_fp8,
-                w_inverse_scale,
-                bias,
-            )
-            linear_compiled = torch.compile(linear, backend="inductor")
-            y_compiled = linear_compiled(
-                x_fp8,
-                x_inverse_scale,
-                w_t_fp8,
-                w_inverse_scale,
-                bias,
-            )
-            self.assertEqual(y_eager.dtype, output_dtype)
-            self.assertEqual(y_compiled.dtype, output_dtype)
-            torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
 
 if __name__ == "__main__":
