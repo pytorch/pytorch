@@ -203,19 +203,19 @@ def unzip_artifact_and_replace_files() -> None:
     for path in wheel_path:
         # Should be of the form torch-2.0.0+git1234567-cp37-etc.whl
         # Should usually be the merge base sha but for the ones that didn't do
-        # the replacement, it won't be.  Can probably get rid of this later
+        # the replacement, it won't be.  Can probably change it to just be merge
+        # base later
         old_version = f"+git{path.stem.split('+')[1].split('-')[0][3:]}"
         new_version = f"+git{head_sha[:7]}"
 
-        def move_to_new_version(file: Union[str, Path]) -> None:
+        def rename_to_new_version(file: Union[str, Path]) -> None:
             # Rename file with old_version to new_version
             subprocess.check_output(
                 ["mv", file, str(file).replace(old_version, new_version)]
             )
 
-        def move_content_to_new_version(file: Union[str, Path]) -> None:
+        def change_content_to_new_version(file: Union[str, Path]) -> None:
             # Check if is a file
-            print(file)
             if os.path.isdir(file):
                 return
             # Replace the old version in the file with the new version
@@ -241,20 +241,20 @@ def unzip_artifact_and_replace_files() -> None:
             ["rsync", "-avz", "torch", f"artifacts/dist/{old_stem}"],
         )
 
-        move_content_to_new_version(f"artifacts/dist/{old_stem}/torch/version.py")
+        change_content_to_new_version(f"artifacts/dist/{old_stem}/torch/version.py")
 
         for file in Path(f"artifacts/dist/{old_stem}").glob(
             "*.dist-info/**",
         ):
-            move_content_to_new_version(file)
+            change_content_to_new_version(file)
 
-        move_to_new_version(f"artifacts/dist/{old_stem}")
+        rename_to_new_version(f"artifacts/dist/{old_stem}")
         new_stem = old_stem.replace(old_version, new_version)
 
         for file in Path(f"artifacts/dist/{new_stem}").glob(
             "*.dist-info",
         ):
-            move_to_new_version(file)
+            rename_to_new_version(file)
 
         # Zip the wheel back
         subprocess.check_output(
