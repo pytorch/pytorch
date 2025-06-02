@@ -887,5 +887,8 @@ def dont_skip_tracing(fn=None):
 def set_fullgraph(fullgraph: bool) -> DynamoConfigPatchProxy:
     """
     Context manager/decorator to toggle fullgraph setting.
+
+    More precisely, when encountering a graph break, we will decide to resume (fullgraph=False)
+    or error out (fullgraph=True) based on the fullgraph setting at the location of the graph break.
     """
     return patch_dynamo_config(error_on_graph_break=fullgraph)
