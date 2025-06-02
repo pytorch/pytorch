@@ -8,8 +8,6 @@
 #include <mutex>
 #include <vector>
 
-#include <c10/util/WaitCounter.h>
-
 #include <torch/csrc/distributed/c10d/FlightRecorderDetail.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
