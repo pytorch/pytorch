@@ -204,7 +204,11 @@ def linalg_cross(self, other, *, dim=-1):
 
 # This function is python match of computeStride_impl in TensorUtils.cpp
 def _compute_stride(old_shape, old_stride, new_shape, size_oblivious=False):
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_or_true,
+        sym_eq,
+    )
 
     def maybe_guard_or_false(x):
         if size_oblivious:
@@ -214,7 +218,7 @@ def _compute_stride(old_shape, old_stride, new_shape, size_oblivious=False):
 
     def maybe_guard_or_true(x):
         if size_oblivious:
-            return guard_or_false(x)
+            return guard_or_true(x)
 
         return x
 
