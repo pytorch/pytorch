@@ -52,6 +52,19 @@ class CustomGraphPass(ABC):
         to skip inductor code caching entirely.
         """
 
+class CustomGraphModulePass(CustomGraphPass):
+    """
+    Implement this interface for custom GraphModule passes:
+
+    The __call__() method contains the implementation of the custom pass.
+    """
+
+    @abstractmethod
+    def __call__(self, gm: torch.fx.GraphModule) -> None:
+        """
+        Implementation of the custom pass.
+        """
+
 
 CustomGraphPassType: TypeAlias = Optional[
     Union[CustomGraphPass, Callable[[torch.fx.graph.Graph], None]]

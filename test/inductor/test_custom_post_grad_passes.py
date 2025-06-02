@@ -8,7 +8,14 @@ import torch._inductor.pattern_matcher as pattern_matcher
 import torch.fx as fx
 from torch._dynamo.utils import counters
 from torch._inductor import config
-from torch._inductor.custom_graph_pass import CustomGraphPass, get_hash_for_files
+from torch._inductor.codegen.common import (
+    get_custom_backend_pass_for_device,
+    get_scheduling_for_device,
+    get_wrapper_codegen_for_device,
+    init_backend_registration,
+    register_backend_for_device
+)
+from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphModulePass, get_hash_for_files
 from torch._inductor.lowering import lowerings as L
 from torch._inductor.pattern_matcher import Arg, CallFunction, PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
@@ -106,6 +113,40 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             return fn
 
         _register_fusion_lowering(_mkldnn_conv_relu_pattern(), custom_pass_dict)
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _patch_custom_backend_pass(device: str, custom_pass: CustomGraphModulePass):
+        """
+        Patch the custom backend pass for a specific device.
+        """
+        # Make sure the backend is already registered
+        init_backend_registration()
+
+        # Get the original registration parameters
+        original_scheduling = get_scheduling_for_device(device)
+        original_python_wrapper = get_wrapper_codegen_for_device(device, False)
+        original_cpp_wrapper = get_wrapper_codegen_for_device(device, True)
+        original_custom_pass = get_custom_backend_pass_for_device(device)
+
+        # Append another custom backend pass to the existing one and register it
+        register_backend_for_device(
+            device,
+            original_scheduling,
+            original_python_wrapper,
+            original_cpp_wrapper,
+            custom_pass
+        )
+        yield
+
+        # Restore the original backend
+        register_backend_for_device(
+            device,
+            original_scheduling,
+            original_python_wrapper,
+            original_cpp_wrapper,
+            original_custom_pass
+        )
 
     # custom post grad pass
     class _CustomPass(PatternMatcherPass, CustomGraphPass):
@@ -263,6 +304,32 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             assert len(matmuls) == 1
 
         inner_test()
+    
+    def test_custom_backend_pass(self):
+        class CustomBackendPass(CustomGraphModulePass):
+            def __init__(self, existing_pass: CustomGraphModulePass = None):
+                super().__init__()
+                self.existing_pass = existing_pass
+
+            def __call__(self, gm: fx.GraphModule) -> None:
+                if self.existing_pass:
+                    self.existing_pass(gm)
+
+                change_cos_pass(gm.graph)              
+
+            def uuid(self) -> bytes:
+                return get_hash_for_files((__file__,))
+
+        custom_backend_pass = CustomBackendPass(get_custom_backend_pass_for_device("cpu"))
+        with self._patch_custom_backend_pass("cpu", custom_backend_pass):
+            def g(x):
+                return x.sin().sin().sin()
+
+            def f(x):
+                return x.cos().cos().cos()
+
+            x = torch.randn(8, dtype=torch.float32)
+            torch.testing.assert_close(torch.compile(f)(x), g(x))
 
 
 if __name__ == "__main__":

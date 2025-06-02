@@ -22,6 +22,7 @@ from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir, pattern_matcher
+from ..codegen.common import custom_backend_passes
 from ..comms import remove_fsdp2_unsharded_param_graph_input_usage
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 from ..lowering import lowerings as L
@@ -76,7 +77,6 @@ pass_patterns = [
     PatternMatcherPass(),
     PatternMatcherPass(),
 ]
-
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     """
@@ -181,6 +181,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     )
 
     fake_tensor_updater.incremental_update()
+
+    for device, custom_backend_pass in custom_backend_passes.items():
+        if custom_backend_pass is not None:
+            pass_name = "custom_backend_passes_" + device
+            GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
 
     # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
