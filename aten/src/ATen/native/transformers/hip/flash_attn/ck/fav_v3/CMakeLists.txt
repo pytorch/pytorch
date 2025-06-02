@@ -1,4 +1,4 @@
-include (CMakePrintHelpers)
+include(CMakePrintHelpers)
 
 # Generate AITER/CK Asm code
 execute_process(
