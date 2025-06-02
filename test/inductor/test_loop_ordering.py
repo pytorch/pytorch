@@ -818,6 +818,83 @@ class MemoryCoalescingTest(MockSchedulerTest):
                 torch.rand(256, 256, device=GPU_TYPE, dtype=y_dtype).T,
             )
 
+    def test_solve_for_zero(self):
+        from torch._inductor import tiling_utils
+
+        x, y = sympy.symbols("x y", integer=True)
+        # Test cases: (expression, expected_result)
+        test_cases = [
+            # Simple linear expressions
+            (x + 5, (-5)),
+            (2 * x - 10, (5)),
+            # Constant expressions (should return None)
+            (sympy.Integer(7), None),
+            (sympy.Integer(0), None),
+            # FloorDiv cases (should return None per function)
+            (FloorDiv(x, 2), None),
+            (FloorDiv(x, 2) + 5, None),
+            # ModularIndexing cases
+            (ModularIndexing(x, 1, 5), (5)),
+            (ModularIndexing(x, 1, 3), (3)),
+            # Expressions with no constant solution
+            (x**2 + 1, None),  # No real solution
+        ]
+        for expr, expected in test_cases:
+            result = tiling_utils.solve_for_zero(expr)
+            self.assertEqual(result, expected)
+
+    def test_solve_for_tiling(self):
+        from torch._inductor import tiling_utils
+
+        x = sympy.Symbol("x", integer=True)
+
+        test_cases = [
+            # Simple linear cases that coalesce
+            (3 * x, None),
+            # # # # Expression with no free symbols
+            # (sympy.Integer(5), None),
+            (x / 3, 3),
+            (FloorDiv(x * 2, 6), 3),
+            # # ModularIndexing expressions
+            (ModularIndexing(FloorDiv(x, 4), 1, 64), 4),
+            (x + ModularIndexing(x, 1, 5), None),
+            (x**2, None),  # Non-linear, diff is not constant
+            (4096 * (ModularIndexing(32 * x, 1, 2048)) + FloorDiv(x, 64), 64),
+            (4096 * (ModularIndexing(x, 1, 2048)) + FloorDiv(x, 2048), 2048),
+        ]
+
+        for expr, expected in test_cases:
+            result = tiling_utils.solve_for_tiling(expr)
+            self.assertEqual(result, expected)
+
+    def test_induced_fused_tiling(self):
+        from torch._inductor import tiling_utils
+
+        def fn(nodes):
+            self.assertTrue(len(nodes) == 1)
+
+            coalesce_analysis = tiling_utils.analyze_memory_coalescing(nodes[0])
+            self.assertEqual(coalesce_analysis.suggested_split.tiling_factor, 64)
+            return nodes
+
+        with torch._inductor.config.patch(_post_fusion_custom_pass=fn), torch.no_grad():
+
+            def forward(permute):
+                clone = torch.ops.aten.clone.default(
+                    permute, memory_format=torch.contiguous_format
+                )
+                view_2 = torch.ops.aten.view.default(clone, [-1, 32])
+                amax_1 = torch.ops.aten.amax.default(view_2, [1])
+                return amax_1
+
+            XDIM = 2048
+            YDIM = 4096
+
+            arg0_1 = torch.randn([XDIM, YDIM], device=GPU_TYPE, dtype=torch.bfloat16)
+            permute = torch.ops.aten.permute.default(arg0_1, [1, 0])
+
+            torch.compile(forward)(permute)
+
 
 if __name__ == "__main__":
     if HAS_GPU:
