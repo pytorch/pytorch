@@ -1393,7 +1393,7 @@ class cuda:
     )
 
     # Whether to only use TMA-compatible kernels in CUTLASS
-    cutlass_tma_only = True
+    cutlass_tma_only = False
 
     # Path to CUDA NVCC.
     # NVCC search order:
