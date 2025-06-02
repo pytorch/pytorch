@@ -5293,6 +5293,11 @@ double profile_guard_manager(
     int n_iters) {
   PyObject* locals = f_locals.ptr();
 
+  // Warmup to setup fast paths (like dict_tags) for the actual profiling
+  for (int i = 0; i < 5; i++) {
+    root->check_nopybind(locals);
+  }
+
   std::chrono::duration<double> total_elapsed{0.0};
   for (int i = 0; i < n_iters; i++) {
     // Flush the caches to accurately measure the overhead
