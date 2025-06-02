@@ -1016,11 +1016,9 @@ class TritonTemplateKernel(TritonKernel):
             self.cached_replay_events = []
 
         template_env = {
-            fn.__name__: (
-                self.record_input_dependent_tracked_event()(fn)
-                if record_input_dependent_tracked_event
-                else fn
-            )
+            fn.__name__: self.record_input_dependent_tracked_event()(fn)
+            if record_input_dependent_tracked_event
+            else fn
             for fn in [
                 self.def_kernel,
                 self.size,
@@ -2338,20 +2336,20 @@ class AlgorithmSelectorCache(PersistentCache):
                     node = choice.output_node()
                     log.debug(
                         "Autotuning returned empty timings, falling back to first `ExternKernelCaller`: %s",
-                        str(node),
+                        node,
                     )
                     return node
             node = choices[0].output_node()
             log.debug(
                 "Autotuning returned empty timings, falling back to first choice: %s",
-                str(node),
+                node,
             )
             return node
 
         # if we got any timings at all, pick the best of those
         choice = min(timings, key=timings.__getitem__)
         node = choice.output_node()
-        log.debug("Autotuning selected choice: %s", str(node))
+        log.debug("Autotuning selected choice: %s", node)
         return node
 
     def make_precompile_fn(
