@@ -274,21 +274,24 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 and value in supported_ctx_manager_classes
             )
         )
-
+   
+    @staticmethod
     def _handle_profiler_context(self, tx, args, kwargs):
         warning_once(log, "Profiler function %s will be ignored", self.value)
         return ProfilerContextVariable()
 
+    @staticmethod
     def _handle_autocast_mode(self, tx, args, kwargs):
         return AutocastModeVariable.create(self.value, args, kwargs)
 
+    @staticmethod
     def _handle_disable_torch_function(self, tx, args, kwargs):
         assert not (args or kwargs)
         return TorchFunctionDisableVariable.create(
             tx, only_subclass=self.value is torch._C.DisableTorchFunctionSubclass
         )
-
-    _CTX_MANAGER_DISPATCH = {
+ 
+    SIMPLE_CTX_HANDLERS = {
         torch.profiler.profile: _handle_profiler_context,
         torch.profiler.record_function: _handle_profiler_context,
         torch.autograd.profiler.profile: _handle_profiler_context,
@@ -321,7 +324,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             VmapIncrementNestingCtxManagerVariable,
         )
 
-        handler = self._CTX_MANAGER_DISPATCH.get(self.value)
+        handler = self.SIMPLE_CTX_HANDLERS.get(self.value)
         if handler is not None:
             return handler(self, tx, args, kwargs)
 
@@ -361,26 +364,6 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                     {},
                 ),
             )
-        elif self.value in (
-            torch.amp.autocast_mode.autocast,
-            torch.cuda.amp.autocast,
-            torch.cpu.amp.autocast,
-        ):
-            return AutocastModeVariable.create(self.value, args, kwargs)
-        elif self.value in (
-            # NOTE any class added here must align with the semantic
-            # requirements of `ProfilerContextVariable`.
-            torch.profiler.profile,
-            torch.profiler.record_function,
-            torch.autograd.profiler.profile,
-            torch.autograd.profiler.record_function,
-        ):
-            return self._handle_profiler_context(tx, args, kwargs)
-        elif (
-            self.value is torch._C.DisableTorchFunctionSubclass
-            or self.value is torch._C.DisableTorchFunction
-        ):
-            return self._handle_disable_torch_function(tx, args, kwargs)
         elif self.value is torch._functorch.vmap.vmap_increment_nesting:
             assert len(args) == 2
             return VmapIncrementNestingCtxManagerVariable.create(
