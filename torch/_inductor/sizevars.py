@@ -454,6 +454,12 @@ class SizeVarAllocator:
             last_var = var
         return order
 
+    def guard_or_false(self, left):
+        return self.evaluate_expr(left, fallback_value=False)
+
+    def guard_or_true(self, left):
+        return self.evaluate_expr(left, fallback_value=True)
+
     # The evaluate functions evaluate some symbolic sympy expression
     # (NB: not necessarily an Expr) and return what the concrete result
     # is, guarding on the expression being that result
@@ -466,10 +472,13 @@ class SizeVarAllocator:
         self,
         left: Union[Expr, sympy.logic.boolalg.Boolean],
         size_oblivious: bool = False,
+        fallback_value: Optional[bool] = None,
     ) -> bool:
         assert isinstance(left, (Expr, sympy.logic.boolalg.Boolean)), type(left)
         return self.shape_env.evaluate_expr(
-            sympy.sympify(left), size_oblivious=size_oblivious
+            sympy.sympify(left),
+            size_oblivious=size_oblivious,
+            fallback_value=fallback_value,
         )
 
     def evaluate_min(self, left: Expr, right: Expr) -> Expr:
