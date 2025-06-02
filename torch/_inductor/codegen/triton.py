@@ -1600,7 +1600,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         min_elem_per_thread=0,
         optimize_mask=True,
         fixed_config: Optional[FixedTritonConfig] = None,
-        tiling_scores: Optional[dict[str, sympy.Expr]] = None,
         **kwargs,
     ) -> None:
         self.optimize_mask: bool = optimize_mask
@@ -1617,7 +1616,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.pointer_advancements: dict[SymT, dict[str, list[sympy.Expr]]] = (
             collections.defaultdict(dict)
         )
-        self.tiling_scores = tiling_scores
         self._load_counts: collections.Counter[str] = collections.Counter()
 
         # A set of autotuning hints to pass as part of triton_meta
