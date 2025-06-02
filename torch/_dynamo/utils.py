@@ -62,7 +62,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Literal, TypeIs
+from typing_extensions import Literal, TypeAlias, TypeGuard, TypeIs
 
 import torch
 import torch._functorch.config
@@ -1046,19 +1046,45 @@ def is_numpy_float_type(value):
     )
 
 
-def is_lru_cache_wrapped_function(value):
+@overload
+def is_lru_cache_wrapped_function(
+    value: Callable[..., T],
+) -> TypeGuard[functools._lru_cache_wrapper[T]]: ...
+
+
+@overload
+def is_lru_cache_wrapped_function(
+    value: Any,
+) -> TypeGuard[functools._lru_cache_wrapper[Any]]: ...
+
+
+def is_lru_cache_wrapped_function(
+    value: Any,
+) -> bool:
     return isinstance(value, functools._lru_cache_wrapper) and is_function(
         inspect.getattr_static(value, "__wrapped__")
     )
 
 
-def is_function_or_wrapper(value):
+_FuncTypes: TypeAlias = Union[
+    types.FunctionType,
+    types.BuiltinFunctionType,
+    types.MethodDescriptorType,
+    types.WrapperDescriptorType,
+]
+
+
+def is_function_or_wrapper(
+    value: Any,
+) -> TypeIs[Union[_FuncTypes, torch._ops.OpOverloadPacket, torch._ops.OpOverload]]:
     return is_function(value) or isinstance(
         value, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
     )
 
 
-def is_function(value):
+def is_function(
+    value: Any,
+) -> TypeIs[_FuncTypes]:
     return isinstance(
         value,
         (
@@ -1090,7 +1116,17 @@ cmp_name_to_op_str_mapping = {
 }
 
 
-def is_wrapper_or_member_descriptor(value):
+def is_wrapper_or_member_descriptor(
+    value: Any,
+) -> TypeIs[
+    Union[
+        types.GetSetDescriptorType,
+        types.MethodDescriptorType,
+        types.WrapperDescriptorType,
+        types.MemberDescriptorType,
+        types.MethodWrapperType,
+    ]
+]:
     return isinstance(
         value,
         (
@@ -2127,7 +2163,9 @@ def preserve_rng_state():
                 torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
 
 
-def is_jit_model(model0):
+def is_jit_model(
+    model0,
+):
     return isinstance(
         model0,
         (
@@ -2341,7 +2379,7 @@ def common_constants():
     }
 
 
-def is_torch_sym(value):
+def is_torch_sym(value: Any) -> TypeGuard[Union[torch.SymBool, torch.SymInt]]:
     return isinstance(value, (torch.SymBool, torch.SymInt)) and not isinstance(
         value.node, torch.nested._internal.nested_int.NestedIntNode
     )
@@ -2614,7 +2652,9 @@ def iter_contains(items, search, tx, check_tensor_identity=False):
     return found
 
 
-def key_is_id(k):
+def key_is_id(
+    k: Any,
+) -> TypeIs[Union[torch.Tensor, torch.nn.Module, MethodWrapperType]]:
     """Returns whether it indexes dictionaries using its id"""
     return isinstance(k, (torch.Tensor, torch.nn.Module, MethodWrapperType))
 
@@ -3503,6 +3543,12 @@ def import_submodule(mod: types.ModuleType):
 
 def object_has_getattribute(value: Any):
     return class_has_getattribute(type(value))
+
+
+def object_setattr_ignore_descriptor(obj, name, value):
+    # https://github.com/python/cpython/blob/3.11/Objects/object.c#L1286-L1335
+    d = object.__getattribute__(obj, "__dict__")
+    d[name] = value
 
 
 def class_has_getattribute(cls: type):
