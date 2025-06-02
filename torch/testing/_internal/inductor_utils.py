@@ -304,7 +304,8 @@ def _quantize_rowwise(x: Tensor, float8_dtype: torch.dtype):
 def patch_inductor_backend(
     device: str,
     python_wrapper_codegen: PythonWrapperCodegen = None,
-    custom_pass: CustomGraphModulePass = None):
+    custom_pass: CustomGraphModulePass = None
+):
     """
     Patch the inductor backend for a specific device.
     """

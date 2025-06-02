@@ -264,7 +264,7 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             assert len(matmuls) == 1
 
         inner_test()
-    
+
     def test_custom_backend_pass(self):
         class CustomBackendPass(CustomGraphModulePass):
             def __init__(self, existing_pass: CustomGraphModulePass = None):
