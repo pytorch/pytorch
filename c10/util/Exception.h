@@ -295,6 +295,19 @@ class C10_API SyntaxError : public Error {
   using Error::Error;
 };
 
+// Raised when accelerator API call hits an error.
+// These turn into AcceleratorError when the cross into Python
+class C10_API AcceleratorError : public Error {
+  int32_t error_code;
+
+ public:
+  AcceleratorError(SourceLocation loc, int32_t code, const std::string& msg)
+      : Error(loc, msg), error_code(code) {}
+  int32_t get_error_code() const {
+    return error_code;
+  }
+};
+
 // Base error type for all distributed errors.
 // These turn into DistError when they cross into Python.
 class C10_API DistError : public Error {
