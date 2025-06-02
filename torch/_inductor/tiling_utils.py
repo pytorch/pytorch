@@ -13,6 +13,7 @@ from torch._inductor import config
 from torch._inductor.dependencies import index_vars_no_squeeze
 from torch._inductor.utils import sympy_product, sympy_subs
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .virtualized import V
@@ -25,10 +26,121 @@ U = TypeVar("U")
 Split = tuple[sympy.Expr, ...]
 
 loop_tiling_log = torch._logging.getArtifactLogger(__name__, "loop_tiling")
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
 
 if TYPE_CHECKING:
     from torch._inductor.scheduler import FusedSchedulerNode, SchedulerNode
+
+
+def solve_for_zero(expr: sympy.Expr) -> Optional[sympy.Expr]:
+    """
+    Given an expr with a single free symbol, solve for a constant relation that would make
+    this expression 0.
+    """
+    if expr.is_constant():
+        return None
+    elif isinstance(expr, FloorDiv):
+        return None
+
+    assert len(expr.free_symbols) == 1
+    free_symbol = next(iter(expr.free_symbols))
+    if isinstance(expr, ModularIndexing):
+        out = try_solve(sympy.Eq(expr.args[0], expr.args[2]), free_symbol)
+    else:
+        out = try_solve(sympy.Eq(expr, 0), free_symbol)
+    if not out or not out[1].is_constant():
+        return None
+    return out[1]
+
+
+def solve_for_tiling(expr: sympy.Expr) -> Optional[sympy.Expr]:
+    """
+    Giving an expr with a single free symbol, try to find a tiling that would
+    make the expression coalesced with respect to that symbol.
+
+    Tiling an expression `x` by `y` means that the expression will now be indexed
+    by both the original (x) and by (x * y). So we are looking for a
+    multiplicative factor that will make ((x + 1) * y) - (x * y) == 1.
+
+    To simplify things for sympy, we'll try just x * y == 1, check x(1) and x(0).
+    """
+
+    if len(expr.free_symbols) == 0:
+        return None
+
+    free_symbol = next(iter(expr.free_symbols))
+
+    def _solve_simple_expr(expr: sympy.Expr) -> Optional[sympy.Expr]:
+        assert not expr.has(ModularIndexing) and not expr.has(FloorDiv)
+        if len(expr.free_symbols) != 1:
+            return None
+
+        out = try_solve(sympy.Eq(expr, 1), free_symbol)
+        if not out or not out[1].is_constant():
+            return None
+        return out[1]
+
+    # Sympy solving is very limited with ModularIndexing and FloorDiv,
+    # but good otherwise.
+    if not expr.has(ModularIndexing) and not expr.has(FloorDiv):
+        return _solve_simple_expr(expr)
+
+    required_values = []
+    eq_1_expressions = []
+
+    # very piecemeal solution if ModularIndexing or FloorDiv involved.
+    # Look for terms we'll try to make 0, and then other terms we'll try to make 1.
+    # Expand as needed.
+    for arg in sympy.Add.make_args(expr):
+        # Try to make mul terms 0
+        if isinstance(arg, sympy.Mul):
+            seen = False
+            # TODO - only need one of these to be solvable to zero
+            #
+            for mul_arg in arg.args:
+                out = solve_for_zero(mul_arg)
+                if out is None:
+                    continue
+
+                assert out.is_constant()
+                seen = True
+                required_values.append(out)
+
+            if not seen:
+                return None
+        else:
+            eq_1_expressions.append(arg)
+
+    if not eq_1_expressions:
+        return None
+
+    eq_1_expr = sum(eq_1_expressions)
+
+    def indexing_div_rep(
+        x: sympy.Expr,
+        y: sympy.Expr,
+        z: Optional[sympy.Expr] = None,
+    ) -> sympy.Expr:
+        return x / y
+
+    # For the purposes of tiling/coalesced access, approximate ModularIndexing and FloorDiv
+    # then check later
+    eq_1_expr_simplified = eq_1_expr.replace(ModularIndexing, indexing_div_rep).replace(
+        FloorDiv, indexing_div_rep
+    )
+
+    out = _solve_simple_expr(eq_1_expr_simplified)
+    # since we approximated FloorDiv/ModularIndexing, double check here
+    if not out or not (sympy_subs(eq_1_expr, {free_symbol: out})) == 1:
+        return None
+
+    required_values.append(out)
+
+    if len(OrderedSet(required_values)) == 1:
+        return required_values[0]
+
+    return None
 
 
 def find_coalesced_var(
@@ -425,10 +537,23 @@ def get_hint(v: Union[sympy.Expr, int]) -> int:
 
 
 @dataclasses.dataclass(frozen=True)
+class VarTiling:
+    """
+    Tiling of a var by `tiling_factor` that yields additional coalesced mem accesses by `benefit_score`
+    """
+
+    var: sympy.Symbol
+    tiling_factor: int
+    score: int
+
+
+@dataclasses.dataclass(frozen=True)
 class CoalesceVarAnalysis:
     coalesced_by_var: dict[sympy.Expr, int]
 
     norm_read_writes: FusedNormalizedReadsWrites
+
+    suggested_split: Optional[VarTiling] = None
 
 
 def analyze_memory_coalescing(
@@ -462,9 +587,7 @@ def analyze_memory_coalescing(
         if size == 0:
             continue
 
-        # todo - dtype size
         maybe_coalesced_var = find_coalesced_var(memory_expr, var_ranges)
-
         byte_multipler = 0
         for buf_name in buf_names:
             if buf := V.graph.try_get_buffer(buf_name):
@@ -475,6 +598,75 @@ def analyze_memory_coalescing(
         else:
             uncoalesced_addrs[memory_expr] += size * byte_multipler
 
+    if not uncoalesced_addrs:
+        return CoalesceVarAnalysis(
+            coalesced_by_var=coalesced_by_var, norm_read_writes=norm_read_writes
+        )
+
+    # map from var -> tiling -> total_score
+    tiling_scores: dict[sympy.Expr, dict[int, int]] = defaultdict(Counter)
+
+    for uncoalesced_expr, addr_score in uncoalesced_addrs.items():
+        expr_subs = dict.fromkeys(uncoalesced_expr.free_symbols, 0)
+        for v in uncoalesced_expr.free_symbols:
+            # skip non iter/reduce var variables
+            if v not in var_ranges:
+                continue
+            # skip small addrs
+            if addr_score == 0:
+                continue
+            del expr_subs[v]
+            single_var_expr = sympy_subs(uncoalesced_expr, expr_subs)
+            expr_subs[v] = 0
+            tiling_factor = solve_for_tiling(single_var_expr)
+            if (
+                tiling_factor is None
+                or not tiling_factor.is_constant()
+                or not tiling_factor.is_integer
+            ):
+                continue
+
+            tiling_factor = int(tiling_factor)
+            if not V.graph.sizevars.statically_known_lt(tiling_factor, var_ranges[v]):
+                continue
+
+            # TODO - if a var is in the middle, such as [n0, n1, n2]
+            # n1 can can be split beyond range
+
+            MIN_TILING_BLOCK = 8
+            if not all(
+                V.graph.sizevars.statically_known_lt(MIN_TILING_BLOCK, block)
+                for block in (tiling_factor, var_ranges[v] // tiling_factor)
+            ):
+                continue
+
+            tiling_scores[v][tiling_factor] += addr_score
+
+    if len(tiling_scores) == 0:
+        return CoalesceVarAnalysis(
+            coalesced_by_var=coalesced_by_var, norm_read_writes=norm_read_writes
+        )
+
+    best_tiling: Optional[tuple[sympy.Expr, int]] = None
+    best_tiling_score = 0
+
+    for var, tiling_counter in tiling_scores.items():
+        for tile, tile_score in tiling_counter.items():
+            if tile_score > best_tiling_score:
+                best_tiling = (var, tile)
+                best_tiling_score = tile_score
+
+    if best_tiling is None:
+        return CoalesceVarAnalysis(
+            coalesced_by_var=coalesced_by_var, norm_read_writes=norm_read_writes
+        )
+
+    # TODO - for strictly pointwise fusions,
+    # we can consider just swizzling the var if the var we are going to tile
+    # does not coalesce a significant portion of global reads
+    # TODO - could also prefer index var splits to reduction, better tested
     return CoalesceVarAnalysis(
-        coalesced_by_var=coalesced_by_var, norm_read_writes=norm_read_writes
+        coalesced_by_var=coalesced_by_var,
+        norm_read_writes=norm_read_writes,
+        suggested_split=VarTiling(best_tiling[0], best_tiling[1], best_tiling_score),
     )
