@@ -318,7 +318,7 @@ def patch_inductor_backend(
     original_custom_pass = get_custom_backend_pass_for_device(device)
 
     try:
-        # Append another custom backend pass to the existing one and register it
+        # Register modified backend for the device
         register_backend_for_device(
             device,
             original_scheduling,
