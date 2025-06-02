@@ -901,7 +901,7 @@ class FxGraphHashDetails:
     ) -> Optional[Any]:
         if not custom_pass:
             return None
-        assert isinstance(custom_pass, CustomGraphPass)
+        assert isinstance(custom_pass, CustomGraphPass | CustomGraphModulePass)
         return custom_pass.uuid()
 
 
