@@ -1858,17 +1858,17 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
                     )
                 if isinstance(expr, IndentedBuffer):
                     if assignment:
-                        buffer.writeline(f"{self.prefix}{var} =")
+                        buffer.writeline(f"{self.get_prefix(var)}{var} =")
                     buffer.splice(expr)
                     buffer.writeline(self.suffix)
                 elif isinstance(expr, DeferredLineBase):
                     assert assignment
                     buffer.writeline(
-                        expr._new_line(f"{self.prefix}{var} = {expr.line}{self.suffix}")
+                        expr._new_line(f"{self.get_prefix(var)}{var} = {expr.line}{self.suffix}")
                     )
                 else:
                     if assignment:
-                        line = f"{self.prefix}{var} = {expr}{self.suffix}"
+                        line = f"{self.get_prefix(var)}{var} = {expr}{self.suffix}"
                     else:
                         line = f"{expr}{self.suffix}"
                     buffer.writeline(line)
@@ -1914,6 +1914,8 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         self.varname_map[name] = var
         return var
 
+    def get_prefix(self, var: CSEVariable) -> str:
+        return self.prefix
 
 class CodeGen:
     def __init__(self) -> None:
