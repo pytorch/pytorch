@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from typing import Optional
+
 import torch
 
+from ...utils import triton_version_uses_attrs_dict
 from ..common import DeviceOpOverrides, register_device_op_overrides
 
 
@@ -60,22 +63,6 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                 }                                              \\
             } while (0);
 
-            namespace {
-
-            struct Grid {
-                Grid(uint32_t x, uint32_t y, uint32_t z)
-                  : grid_x(x), grid_y(y), grid_z(z) {}
-                uint32_t grid_x;
-                uint32_t grid_y;
-                uint32_t grid_z;
-
-                bool is_non_zero() {
-                    return grid_x > 0 && grid_y > 0 && grid_z > 0;
-                }
-            };
-
-            }  // anonymous namespace
-
             static inline CUfunction loadKernel(
                     std::string filePath,
                     const std::string &funcName,
@@ -90,6 +77,21 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                 CUmodule mod;
                 CUfunction func;
                 CUDA_DRIVER_CHECK(cuModuleLoad(&mod, filePath.c_str()));
+                CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
+                if (sharedMemBytes > 0) {
+                    CUDA_DRIVER_CHECK(cuFuncSetAttribute(
+                        func,
+                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                        sharedMemBytes
+                    ))
+                }
+                return func;
+            }
+
+            static inline CUfunction loadKernel(const void* start, const std::string &funcName, uint32_t sharedMemBytes) {
+                CUmodule mod;
+                CUfunction func;
+                CUDA_DRIVER_CHECK(cuModuleLoadData(&mod, start));
                 CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
                 if (sharedMemBytes > 0) {
                     CUDA_DRIVER_CHECK(cuFuncSetAttribute(
@@ -237,6 +239,11 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
 
     def cpp_device_ptr(self) -> str:
         return "CUdeviceptr"
+
+    def cpp_global_scratch(self, idx: int) -> Optional[tuple[str, str]]:
+        if triton_version_uses_attrs_dict():
+            return f"CUdeviceptr global_scratch_{idx} = 0;", f"global_scratch_{idx}"
+        return None
 
 
 register_device_op_overrides("cuda", CUDADeviceOpOverrides())

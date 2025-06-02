@@ -39,7 +39,7 @@ class Wishart(ExponentialFamily):
         >>> # xdoctest: +SKIP("FIXME: scale_tril must be at least two-dimensional")
         >>> m = Wishart(torch.Tensor([2]), covariance_matrix=torch.eye(2))
         >>> m.sample()  # Wishart distributed with mean=`df * I` and
-        >>>             # variance(x_ij)=`df` for i != j and variance(x_ij)=`2 * df` for i == j
+        >>> # variance(x_ij)=`df` for i != j and variance(x_ij)=`2 * df` for i == j
 
     Args:
         df (float or Tensor): real-valued parameter larger than the (dimension of Square matrix) - 1
@@ -63,15 +63,19 @@ class Wishart(ExponentialFamily):
     [4] Odell, P. L. & Feiveson, A. H., 1966. `A Numerical Procedure to Generate a SampleCovariance Matrix`. JASA, 61(313):199-203.
     [5] Ku, Y.-C. & Bloomfield, P., 2010. `Generating Random Wishart Matrices with Fractional Degrees of Freedom in OX`.
     """
-    arg_constraints = {
-        "covariance_matrix": constraints.positive_definite,
-        "precision_matrix": constraints.positive_definite,
-        "scale_tril": constraints.lower_cholesky,
-        "df": constraints.greater_than(0),
-    }
+
     support = constraints.positive_definite
     has_rsample = True
     _mean_carrier_measure = 0
+
+    @property
+    def arg_constraints(self):
+        return {
+            "covariance_matrix": constraints.positive_definite,
+            "precision_matrix": constraints.positive_definite,
+            "scale_tril": constraints.lower_cholesky,
+            "df": constraints.greater_than(self.event_shape[-1] - 1),
+        }
 
     def __init__(
         self,
@@ -79,11 +83,13 @@ class Wishart(ExponentialFamily):
         covariance_matrix: Optional[Tensor] = None,
         precision_matrix: Optional[Tensor] = None,
         scale_tril: Optional[Tensor] = None,
-        validate_args=None,
-    ):
+        validate_args: Optional[bool] = None,
+    ) -> None:
         assert (covariance_matrix is not None) + (scale_tril is not None) + (
             precision_matrix is not None
-        ) == 1, "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
+        ) == 1, (
+            "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
+        )
 
         param = next(
             p
@@ -116,7 +122,6 @@ class Wishart(ExponentialFamily):
         elif precision_matrix is not None:
             self.precision_matrix = param.expand(batch_shape + (-1, -1))
 
-        self.arg_constraints["df"] = constraints.greater_than(event_shape[-1] - 1)
         if self.df.lt(event_shape[-1]).any():
             warnings.warn(
                 "Low df values detected. Singular samples are highly likely to occur for ndim - 1 < df < ndim."

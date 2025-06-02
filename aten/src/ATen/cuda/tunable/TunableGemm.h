@@ -145,7 +145,11 @@ inline const char* TypeName(T v) {
 
 template <>
 inline const char* TypeName(float v) {
-  return "float";
+  if (at::globalContext().allowTF32CuBLAS()) {
+    return "tf32";
+  } else {
+    return "float";
+  }
 }
 
 template <>

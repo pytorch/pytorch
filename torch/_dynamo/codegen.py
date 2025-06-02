@@ -18,12 +18,12 @@ import re
 import sys
 import types
 from collections import Counter
-from typing import Optional, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch.nn
 from torch.utils._ordered_set import OrderedSet
 
-from . import utils
+from . import graph_break_hints, utils
 from .bytecode_transformation import (
     add_push_null,
     add_push_null_call_function_ex,
@@ -36,7 +36,7 @@ from .bytecode_transformation import (
     create_rot_n,
     Instruction,
 )
-from .exc import IncorrectUsage, unimplemented
+from .exc import IncorrectUsage, unimplemented_v2
 from .source import AttrSource, ChainedSource, DictGetItemSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
@@ -54,6 +54,10 @@ from .variables.tensor import (
 from .variables.torch_function import TensorWithTFOverrideVariable
 
 
+if TYPE_CHECKING:
+    from .symbolic_convert import InstructionTranslatorBase
+
+
 @dataclasses.dataclass
 class GraphOutputEntry:
     index: int
@@ -67,7 +71,7 @@ class PyCodegen:
 
     def __init__(
         self,
-        tx=None,
+        tx: "InstructionTranslatorBase",
         root: Optional[torch.nn.Module] = None,
         graph_output_var: Optional[str] = None,
         tempvars=None,
@@ -197,7 +201,12 @@ class PyCodegen:
             try:
                 self.call_reconstruct(source)
             except NotImplementedError:
-                unimplemented(f"reconstruct: {source}")
+                unimplemented_v2(
+                    gb_type="Reconstruction failure: source.reconstruct not implemented",
+                    context=str(source),
+                    explanation=f"Dynamo has no bytecode reconstruction implemented for {type(source)} variable {source}.",
+                    hints=[*graph_break_hints.DYNAMO_BUG],
+                )
 
             self._output.append(create_dup_top())
             self.add_cache(source)
@@ -335,7 +344,18 @@ class PyCodegen:
             try:
                 self.call_reconstruct(value)
             except NotImplementedError:
-                unimplemented(f"reconstruct: {value}")
+                unimplemented_v2(
+                    gb_type="Reconstruction failure",
+                    context=str(value),
+                    explanation=f"Dynamo has no bytecode reconstruction implemented for sourceless variable {value}.",
+                    hints=[
+                        "If Dynamo is attempting to trace a return statement and your code is attempting to return a variable "
+                        "that Dynamo cannot reconstruct, then remove it from the return statement.",
+                        *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
+                        "Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have "
+                        "reconstruction rules may be fundamentally unreconstructable.",
+                    ],
+                )
             if allow_cache and value in self.tempvars:
                 self._output.append(create_dup_top())
                 self.add_cache(value)
@@ -486,22 +506,6 @@ class PyCodegen:
                 create_instruction("CALL_FUNCTION_EX", arg=0),
                 create_instruction("UNPACK_SEQUENCE", arg=n),
             ]
-
-    def pop_null(self):
-        # POP_TOP doesn't work for null, so we pop nulls by pushing in a
-        # nop function, calling it (which consumes the null), and popping the result.
-        assert sys.version_info >= (3, 11)
-        return [
-            self.create_load_const_unchecked(lambda: None),
-            # 3.13 swapped NULL and callable
-            *(
-                (create_instruction("SWAP", arg=2),)
-                if sys.version_info >= (3, 13)
-                else ()
-            ),
-            *create_call_function(0, False),
-            create_instruction("POP_TOP"),
-        ]
 
     def pop_top(self):
         self.append_output(create_instruction("POP_TOP"))

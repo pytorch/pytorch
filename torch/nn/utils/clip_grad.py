@@ -1,9 +1,9 @@
-# mypy: allow-untyped-decorators
-# mypy: allow-untyped-defs
 import functools
+import types
 import typing
-from typing import cast, Optional, Union
-from typing_extensions import deprecated
+import warnings
+from typing import Callable, cast, Optional, TypeVar, Union
+from typing_extensions import deprecated, ParamSpec, TypeAlias
 
 import torch
 from torch import Tensor
@@ -21,19 +21,22 @@ __all__ = [
 ]
 
 
-_tensor_or_tensors = Union[
+_TensorOrTensors: TypeAlias = Union[
     torch.Tensor,
     typing.Iterable[torch.Tensor],  # noqa: UP006 - needed until XLA's patch is updated
 ]
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
-def _no_grad(func):
+
+def _no_grad(func: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     This wrapper is needed to avoid a circular import when using @torch.no_grad on the exposed functions
     clip_grad_norm_ and clip_grad_value_ themselves.
     """
 
-    def _no_grad_wrapper(*args, **kwargs):
+    def _no_grad_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         with torch.no_grad():
             return func(*args, **kwargs)
 
@@ -43,7 +46,7 @@ def _no_grad(func):
 
 @_no_grad
 def _get_total_norm(
-    tensors: _tensor_or_tensors,
+    tensors: _TensorOrTensors,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
     foreach: Optional[bool] = None,
@@ -114,7 +117,7 @@ def _get_total_norm(
 
 @_no_grad
 def _clip_grads_with_norm_(
-    parameters: _tensor_or_tensors,
+    parameters: _TensorOrTensors,
     max_norm: float,
     total_norm: torch.Tensor,
     foreach: Optional[bool] = None,
@@ -178,7 +181,7 @@ def _clip_grads_with_norm_(
 
 @_no_grad
 def clip_grad_norm_(
-    parameters: _tensor_or_tensors,
+    parameters: _TensorOrTensors,
     max_norm: float,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
@@ -197,12 +200,12 @@ def clip_grad_norm_(
         parameters (Iterable[Tensor] or Tensor): an iterable of Tensors or a
             single Tensor that will have gradients normalized
         max_norm (float): max norm of the gradients
-        norm_type (float): type of the used p-norm. Can be ``'inf'`` for
-            infinity norm.
-        error_if_nonfinite (bool): if True, an error is thrown if the total
+        norm_type (float, optional): type of the used p-norm. Can be ``'inf'`` for
+            infinity norm. Default: 2.0
+        error_if_nonfinite (bool, optional): if True, an error is thrown if the total
             norm of the gradients from :attr:`parameters` is ``nan``,
-            ``inf``, or ``-inf``. Default: False (will switch to True in the future)
-        foreach (bool): use the faster foreach-based implementation.
+            ``inf``, or ``-inf``. Default: False
+        foreach (bool, optional): use the faster foreach-based implementation.
             If ``None``, use the foreach implementation for CUDA and CPU native tensors and silently
             fall back to the slow implementation for other device types.
             Default: ``None``
@@ -213,8 +216,14 @@ def clip_grad_norm_(
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
     else:
+        is_generator = isinstance(parameters, types.GeneratorType)
         # prevent generators from being exhausted
         parameters = list(parameters)
+        if is_generator and len(parameters) == 0:
+            warnings.warn(
+                "`parameters` is an empty generator, no gradient clipping will occur.",
+                stacklevel=3,
+            )
     grads = [p.grad for p in parameters if p.grad is not None]
     total_norm = _get_total_norm(grads, norm_type, error_if_nonfinite, foreach)
     _clip_grads_with_norm_(parameters, max_norm, total_norm, foreach)
@@ -227,7 +236,7 @@ def clip_grad_norm_(
     category=FutureWarning,
 )
 def clip_grad_norm(
-    parameters: _tensor_or_tensors,
+    parameters: _TensorOrTensors,
     max_norm: float,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
@@ -244,7 +253,7 @@ def clip_grad_norm(
 
 @_no_grad
 def clip_grad_value_(
-    parameters: _tensor_or_tensors,
+    parameters: _TensorOrTensors,
     clip_value: float,
     foreach: Optional[bool] = None,
 ) -> None:
@@ -258,7 +267,7 @@ def clip_grad_value_(
         clip_value (float): maximum allowed value of the gradients.
             The gradients are clipped in the range
             :math:`\left[\text{-clip\_value}, \text{clip\_value}\right]`
-        foreach (bool): use the faster foreach-based implementation
+        foreach (bool, optional): use the faster foreach-based implementation
             If ``None``, use the foreach implementation for CUDA and CPU native tensors and
             silently fall back to the slow implementation for other device types.
             Default: ``None``

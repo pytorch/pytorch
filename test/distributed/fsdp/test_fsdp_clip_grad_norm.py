@@ -338,7 +338,9 @@ class TestClipGradNorm(FSDPTest):
         self.assertEqual(total_norm, torch.tensor(0.0, device=self.device_type))
 
 
-devices = ("cuda", "hpu")
-instantiate_device_type_tests(TestClipGradNorm, globals(), only_for=devices)
+devices = ("cuda", "hpu", "xpu")
+instantiate_device_type_tests(
+    TestClipGradNorm, globals(), only_for=devices, allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()

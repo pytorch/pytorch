@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 # This test requires libaoti_custom_ops.so to be built, which happnes when BUILD_TEST = 1
 import logging
+import os
 import sys
 import unittest
 
@@ -19,6 +20,8 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
+    skipIfRocm,
+    skipIfXpu,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.triton_utils import HAS_CUDA
@@ -79,6 +82,34 @@ def fn_with_incorrect_optional_tensor_fake(
         return x + y + z
 
 
+@torch.library.custom_op(
+    "aoti_custom_ops::fn_ret_list_of_single_tensor", mutates_args={}
+)
+def fn_ret_list_of_single_tensor(x: torch.Tensor) -> list[torch.Tensor]:
+    s = x.sum().to(torch.int64)
+    return [torch.randn(s.item())]
+
+
+@fn_ret_list_of_single_tensor.register_fake
+def _(x):
+    ctx = torch._custom_op.impl.get_ctx()
+    i0 = ctx.new_dynamic_size()
+    return [torch.randn(i0)]
+
+
+@torch.library.custom_op("aoti_custom_ops::fn_ret_single_tensor", mutates_args={})
+def fn_ret_single_tensor(x: torch.Tensor) -> torch.Tensor:
+    s = x.sum().to(torch.int64)
+    return torch.randn(s.item())
+
+
+@fn_ret_single_tensor.register_fake
+def _(x):
+    ctx = torch._custom_op.impl.get_ctx()
+    i0 = ctx.new_dynamic_size()
+    return torch.randn(i0)
+
+
 class AOTInductorTestsTemplate:
     def test_custom_op_add(self) -> None:
         class M(torch.nn.Module):
@@ -102,9 +133,21 @@ class AOTInductorTestsTemplate:
             torch.randn(3, 3, device=self.device),
             torch.randn(3, 3, device=self.device),
         )
-        with config.patch("aot_inductor.output_path", "model.so"):
+        with config.patch("aot_inductor.output_path", "model.pt2"):
             with self.assertRaises(Exception):
                 self.check_model(m, args)
+
+    def test_fn_with_optional_tensor_output(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aoti_custom_ops.fn_with_optional_tensor_output(x, y)
+
+        m = M().to(device=self.device)
+        args = (
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, 3, device=self.device),
+        )
+        self.check_model(m, args)
 
     def test_custom_op_all_inputs(self) -> None:
         class MyModel(torch.nn.Module):
@@ -252,6 +295,24 @@ class AOTInductorTestsTemplate:
 
         self.check_model(m, args)
 
+    def test_custom_op_return_list_of_single_tensor(self) -> None:
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aoti_custom_ops.fn_ret_list_of_single_tensor(x)[0] + 1
+
+        m = Model().to(device=self.device)
+        args = (torch.randn(3, 4),)
+        self.check_model(m, args)
+
+    def test_custom_op_return_single_tensor(self) -> None:
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aoti_custom_ops.fn_ret_single_tensor(x) + 1
+
+        m = Model().to(device=self.device)
+        args = (torch.randn(3, 4),)
+        self.check_model(m, args)
+
     @unittest.skipIf(IS_FBCODE, "FbProxyExecutor doesn't have these error msgs")
     def test_incorrect_custom_op_schema(self):
         class M(torch.nn.Module):
@@ -309,6 +370,37 @@ class AOTInductorTestsTemplate:
         self.assertEqual(len(inps), 0)
         self.assertTrue(sentinel_seen)
 
+    @skipIfXpu
+    @skipIfRocm
+    def test_custom_op_square(self) -> None:
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aoti_custom_ops.fn_square(x)
+
+        m = Model().to(device=self.device)
+        args = (torch.randn(2, 3, device=self.device),)
+        with config.patch(
+            "aot_inductor.custom_ops_to_c_shims",
+            {
+                torch.ops.aoti_custom_ops.fn_square.default: [
+                    """
+                AOTITorchError
+                aoti_torch_cpu_fn_square(
+                    AtenTensorHandle input,
+                    AtenTensorHandle* ret)""",
+                    """
+                AOTITorchError
+                aoti_torch_cuda_fn_square(
+                    AtenTensorHandle input,
+                    AtenTensorHandle* ret)""",
+                ],
+            },
+        ), config.patch(
+            "aot_inductor.custom_op_libs",
+            ["aoti_custom_ops"],
+        ):
+            self.check_model(m, args)
+
 
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)
@@ -341,6 +433,8 @@ class AOTICustomOpTestCase(TestCase):
             lib_file_path = find_library_location("libaoti_custom_ops.so")
             if IS_WINDOWS:
                 lib_file_path = find_library_location("aoti_custom_ops.dll")
+            if not os.path.exists(lib_file_path):
+                raise unittest.SkipTest("libaoti_custom_ops not built!")
             torch.ops.load_library(str(lib_file_path))
         super().setUp()
 

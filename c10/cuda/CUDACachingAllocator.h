@@ -115,14 +115,18 @@ struct TraceEntry {
       size_t addr,
       size_t size,
       cudaStream_t stream,
+      MempoolId_t mempool,
       approx_time_t time,
-      std::shared_ptr<GatheredContext> context = nullptr)
+      std::shared_ptr<GatheredContext> context = nullptr,
+      std::string compile_context = "")
       : action_(action),
         device_(device),
         addr_(addr),
         context_(std::move(context)),
         stream_(stream),
-        size_(size) {
+        size_(size),
+        mempool_(std::move(mempool)),
+        compile_context_(std::move(compile_context)) {
     time_.approx_t_ = time;
   }
   Action action_;
@@ -131,7 +135,9 @@ struct TraceEntry {
   std::shared_ptr<GatheredContext> context_;
   cudaStream_t stream_{};
   size_t size_;
+  MempoolId_t mempool_;
   trace_time_ time_{};
+  std::string compile_context_{};
 };
 
 // Calls made by record_function will save annotations
@@ -205,7 +211,7 @@ class CUDAAllocator : public Allocator {
   virtual bool initialized() = 0;
   virtual double getMemoryFraction(c10::DeviceIndex device) = 0;
   virtual void setMemoryFraction(double fraction, c10::DeviceIndex device) = 0;
-  virtual void emptyCache() = 0;
+  virtual void emptyCache(MempoolId_t mempool_id = {0, 0}) = 0;
   virtual void enable(bool value) = 0;
   virtual bool isEnabled() const = 0;
   virtual void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) = 0;
@@ -215,7 +221,7 @@ class CUDAAllocator : public Allocator {
       c10::DeviceIndex device) = 0;
   virtual void resetAccumulatedStats(c10::DeviceIndex device) = 0;
   virtual void resetPeakStats(c10::DeviceIndex device) = 0;
-  virtual SnapshotInfo snapshot() = 0;
+  virtual SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0}) = 0;
   virtual void beginAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
@@ -224,27 +230,38 @@ class CUDAAllocator : public Allocator {
       c10::DeviceIndex device,
       MempoolId_t mempool_id) = 0;
   virtual void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) = 0;
-  virtual int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
+  virtual int getPoolUseCount(
+      c10::DeviceIndex /*device*/,
+      MempoolId_t /*mempool_id*/) {
     TORCH_CHECK(
         false,
         name(),
         " does not yet support getPoolUseCount. "
         "If you need it, please file an issue describing your use case.");
   }
-  virtual void ensureExistsAndIncrefPool(
-      c10::DeviceIndex device,
-      MempoolId_t mempool_id) {
+  virtual void createOrIncrefPool(
+      c10::DeviceIndex /*device*/,
+      MempoolId_t /*mempool_id*/,
+      CUDAAllocator* allocator = nullptr) {
     TORCH_CHECK(
         false,
         name(),
-        " does not yet support ensureExistsAndIncrefPool. "
+        " does not yet support createOrIncrefPool. "
         "If you need it, please file an issue describing your use case.");
   }
+  virtual void setUseOnOOM(c10::DeviceIndex device, MempoolId_t mempool_id) {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not yet support setUseOnOOM. "
+        "If you need it, please file an issue describing your use case.");
+  }
+
   // returns true if the allocated blocks are equal to expected live allocations
   virtual bool checkPoolLiveAllocations(
-      c10::DeviceIndex device,
-      MempoolId_t mempool_id,
-      const std::unordered_set<void*>& expected_live_allocations) {
+      c10::DeviceIndex /*device*/,
+      MempoolId_t /*mempool_id*/,
+      const std::unordered_set<void*>& /*expected_live_allocations*/) {
     TORCH_CHECK(
         false,
         name(),
@@ -264,9 +281,12 @@ class CUDAAllocator : public Allocator {
       bool enabled,
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
-      RecordContext when) = 0;
+      RecordContext when,
+      bool clearHistory) = 0;
   virtual void recordAnnotation(
-      const std::vector<std::pair<std::string, std::string>>& md) {}
+      const std::vector<std::pair<std::string, std::string>>& /*md*/) {}
+  virtual void pushCompileContext(std::string& md) {}
+  virtual void popCompileContext() {}
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
 
   // Attached AllocatorTraceTracker callbacks will be called while the
@@ -345,7 +365,7 @@ inline void setMemoryFraction(double fraction, c10::DeviceIndex device) {
   return get()->setMemoryFraction(fraction, device);
 }
 
-inline void emptyCache() {
+inline void emptyCache(MempoolId_t mempool_id = {0, 0}) {
   return get()->emptyCache();
 }
 
@@ -382,8 +402,8 @@ inline void resetPeakStats(c10::DeviceIndex device) {
   return get()->resetPeakStats(device);
 }
 
-inline SnapshotInfo snapshot() {
-  return get()->snapshot();
+inline SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0}) {
+  return get()->snapshot(mempool_id);
 }
 
 inline std::shared_ptr<AllocatorState> getCheckpointState(
@@ -414,14 +434,23 @@ inline void recordHistory(
     bool enabled,
     CreateContextFn context_recorder,
     size_t alloc_trace_max_entries,
-    RecordContext when) {
+    RecordContext when,
+    bool clearHistory) {
   return get()->recordHistory(
-      enabled, context_recorder, alloc_trace_max_entries, when);
+      enabled, context_recorder, alloc_trace_max_entries, when, clearHistory);
 }
 
 inline void recordAnnotation(
     const std::vector<std::pair<std::string, std::string>>& md) {
   return get()->recordAnnotation(md);
+}
+
+inline void pushCompileContext(std::string& md) {
+  return get()->pushCompileContext(md);
+}
+
+inline void popCompileContext() {
+  return get()->popCompileContext();
 }
 
 inline bool isHistoryEnabled() {
@@ -447,10 +476,14 @@ inline void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) {
 inline void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return get()->releasePool(device, mempool_id);
 }
-inline void ensureExistsAndIncrefPool(
+inline void createOrIncrefPool(
     c10::DeviceIndex device,
-    MempoolId_t mempool_id) {
-  get()->ensureExistsAndIncrefPool(device, mempool_id);
+    MempoolId_t mempool_id,
+    CUDAAllocator* allocator_ptr = nullptr) {
+  get()->createOrIncrefPool(device, mempool_id, allocator_ptr);
+}
+inline void setUseOnOOM(c10::DeviceIndex device, MempoolId_t mempool_id) {
+  get()->setUseOnOOM(device, mempool_id);
 }
 
 inline int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
@@ -501,7 +534,8 @@ namespace c10::cuda {
 struct C10_CUDA_API MemPool {
   MemPool(
       CUDACachingAllocator::CUDAAllocator* allocator = nullptr,
-      bool is_user_created = true);
+      bool is_user_created = true,
+      bool use_on_oom = false);
   MemPool(const MemPool&) = delete;
   MemPool(MemPool&&) = default;
   MemPool& operator=(const MemPool&) = delete;
@@ -521,28 +555,6 @@ struct C10_CUDA_API MemPool {
   bool is_user_created_;
   MempoolId_t id_;
   c10::DeviceIndex device_;
-};
-
-// MemPoolContext holds the currently active pool and stashes the previous
-// pool. On deletion it makes the previous pool active.
-struct C10_CUDA_API MemPoolContext {
-  MemPoolContext(MemPool* mempool);
-
-  ~MemPoolContext();
-
-  // getActiveMemPool() can be used to get the currently active pool.
-  // For instance: in CUDACachingAllocator, we can route allocations
-  // to a user provided allocator, by doing:
-  //
-  //  auto active_pool = MemPoolContext::getActiveMemPool();
-  //  if (active_pool && active_pool->allocator()) {
-  //    ptr = active_pool->allocator()->raw_alloc(size);
-  //  }
-  //
-  static MemPool* getActiveMemPool();
-
- private:
-  MemPool* prev_mempool_;
 };
 
 } // namespace c10::cuda

@@ -16,10 +16,9 @@
 #include <torch/csrc/jit/runtime/interpreter/preprocess_graph.h>
 
 TORCH_DECLARE_bool(torch_jit_enable_expanded_stacks);
+TORCH_DECLARE_bool(torch_jit_expanded_stacks_mangled);
 
-namespace torch::jit {
-
-namespace interpreter {
+namespace torch::jit::interpreter {
 
 template <class Ttarget, class Tsource>
 Ttarget safe_narrow_cast(Tsource v) {
@@ -63,7 +62,7 @@ struct NodeSourceInfo {
   const char* func_name_{nullptr};
   const char* file_name_{nullptr};
   size_t line_{0};
-  NodeSourceInfo() {}
+  NodeSourceInfo() = default;
 };
 
 struct CodeImpl {
@@ -227,7 +226,7 @@ struct CodeImpl {
   NodeSourceInfo getSourceInfoFromSourceRange(const SourceRange& range) {
     NodeSourceInfo nodeSource;
     SourceRange r = range;
-    if (range.source()) {
+    if (!FLAGS_torch_jit_expanded_stacks_mangled && range.source()) {
       if (auto orig = range.source()->findSourceRangeThatGenerated(r)) {
         r = *orig;
       }
@@ -1059,5 +1058,4 @@ struct MobileCodeImpl : CodeImpl {
   bool emit_promoted_ops_;
 };
 
-} // namespace interpreter
-} // namespace torch::jit
+} // namespace torch::jit::interpreter

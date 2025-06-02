@@ -42,8 +42,9 @@ dnnl::memory::desc get_onednn_md(const at::Tensor& tensor);
 bool onednn_strides_check(const at::Tensor& src);
 bool is_broadcast(const at::Tensor& t);
 void undo_broadcast_on_batch(at::Tensor& m1, at::Tensor& m2);
+void undo_broadcast(at::Tensor& tensor);
 
-bool is_onednn_matmul_strides(const at::Tensor& tensor, bool is_dst = false);
+bool is_onednn_matmul_strides(const at::Tensor& tensor);
 
 bool is_broadcast_from_other_to_self(
     const at::Tensor& self,

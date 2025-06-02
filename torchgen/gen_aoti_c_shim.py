@@ -50,7 +50,7 @@ base_type_to_aten_type = {
     BaseTy.SymInt: "c10::SymInt",
     BaseTy.Scalar: "c10::Scalar",
     BaseTy.float: "double",
-    BaseTy.str: "c10::string_view",
+    BaseTy.str: "::std::string_view",
     BaseTy.DeviceIndex: "c10::DeviceIndex",
     BaseTy.Layout: "c10::Layout",
     BaseTy.MemoryFormat: "c10::MemoryFormat",
@@ -244,6 +244,7 @@ def gen_returns(schema: FunctionSchema) -> tuple[list[str], list[str]]:
         "_scaled_dot_product_flash_attention",
         "_scaled_dot_product_efficient_attention",
         "_scaled_dot_product_cudnn_attention",
+        "_scaled_dot_product_fused_attention_overrideable",
         "convolution_backward",
     ]:
         if name in unambiguous_name:

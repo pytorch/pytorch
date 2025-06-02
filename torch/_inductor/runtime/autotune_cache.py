@@ -10,7 +10,12 @@ from typing import Any, Optional, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
-from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
+from torch._inductor.runtime.runtime_utils import cache_dir
+from torch.compiler._cache import (
+    CacheArtifact,
+    CacheArtifactFactory,
+    CacheArtifactManager,
+)
 from torch.utils._triton import has_triton
 
 from ..remote_cache import (
@@ -20,7 +25,7 @@ from ..remote_cache import (
     RemoteCacheBackend,
     RemoteCacheJsonSerde,
 )
-from .triton_compat import Config
+from .triton_compat import Config, HAS_WARP_SPEC
 
 
 if TYPE_CHECKING:
@@ -57,6 +62,29 @@ def inductor_meta_from_config() -> _InductorMetaTy:
         "is_fbcode": config.is_fbcode(),
         "is_hip": is_hip,
     }
+
+
+@CacheArtifactFactory.register
+class AutotuneCacheArtifact(CacheArtifact):
+    @override
+    def populate_cache(self) -> None:
+        autotune_cache = _LocalAutotuneCacheBackend()
+        key = os.path.join(cache_dir(), self.key)
+        autotune_cache._put(key, self.content)
+
+    @override
+    @staticmethod
+    def type() -> str:
+        return "autotune"
+
+    @override
+    @staticmethod
+    def encode(content: JsonDataTy) -> bytes:
+        assert not isinstance(content, bytes)
+        serde = RemoteCacheJsonSerde()
+        content_bytes = serde.encode(content)
+        assert isinstance(content_bytes, bytes)
+        return content_bytes
 
 
 @dataclasses.dataclass
@@ -121,7 +149,21 @@ class AutotuneCache:
         if not inductor_meta.get("autotune_local_cache", True):
             return
 
-        cache_filename = f"{dirname}/{cache_key}.best_config"
+        from ..codecache import torch_key
+
+        """
+        [Note: torch_key in autotune cache key]
+        Include torch_key() in the cache key so that different versions
+        of torch result in cache invalidation. This is important in case
+        of changes to the best_config format or other code changes that
+        are not backward compatible w.r.t. the cache.
+        """
+        hasher = hashlib.sha256()
+        hasher.update(cache_key.encode("utf-8"))
+        hasher.update(torch_key())
+        updated_cache_key = hasher.hexdigest()
+
+        cache_filename = f"{dirname}/{updated_cache_key}.best_config"
         local_cache = LocalAutotuneCache()
         self.local_cache = (local_cache, cache_filename)
 
@@ -139,10 +181,13 @@ class AutotuneCache:
             return
         assert isinstance(backend_hash, str)
 
+        from ..codecache import torch_key
+
         is_fbcode = bool(inductor_meta.get("is_fbcode", False))
 
         salt = "autotune-best-config-v2"
-        key = backend_hash + self.configs_hash + salt
+        # re: torch_key - see [Note: torch_key in autotune cache key]
+        key = torch_key().hex() + backend_hash + self.configs_hash + salt
         key = hashlib.sha256(key.encode("utf-8")).hexdigest()
 
         remote_cache = create_cache(
@@ -197,7 +242,11 @@ class AutotuneCache:
 
     # Save the config in the caches
     def save(
-        self, config: Config, time_taken_ns: int, found_by_coordesc: bool = False
+        self,
+        config: Config,
+        time_taken_ns: int,
+        found_by_coordesc: bool = False,
+        triton_cache_hash: Optional[str] = None,
     ) -> None:
         data = {
             **config.kwargs,
@@ -206,14 +255,25 @@ class AutotuneCache:
             "configs_hash": self.configs_hash,
             "found_by_coordesc": found_by_coordesc,
             "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
+            "triton_cache_hash": triton_cache_hash,
         }
+        if HAS_WARP_SPEC:
+            data.update(
+                {
+                    "num_consumer_groups": getattr(config, "num_consumer_groups", 0),
+                    "num_buffers_warp_spec": getattr(
+                        config, "num_buffers_warp_spec", 0
+                    ),
+                }
+            )
 
         if local_cache := self.local_cache:
             cache, key = local_cache
             cache.put(key, data)
             AutotuneCacheBundler.put(key, data)
+            autotune_artifact_key = os.path.join(*key.split(os.sep)[-2:])
             CacheArtifactManager.record_artifact(
-                CacheArtifactType.AUTOTUNE, os.path.basename(key), data
+                AutotuneCacheArtifact.type(), autotune_artifact_key, data
             )
 
             if log.isEnabledFor(logging.DEBUG):
@@ -459,12 +519,32 @@ def _load_cached_autotuning(
     # Remove time taken for comparison
     best_config.pop("time_taken_ms", None)
 
+    best_config.pop("triton_cache_hash", None)
+
     if inductor_meta.get("coordinate_descent_tuning") and best_config.pop(
         "found_by_coordesc", False
     ):
         num_warps = best_config.pop("num_warps")
         num_stages = best_config.pop("num_stages")
-        triton_config = Config(best_config, num_warps=num_warps, num_stages=num_stages)
+
+        # Extract common arguments
+        config_args = {
+            "num_warps": num_warps,
+            "num_stages": num_stages,
+        }
+
+        if HAS_WARP_SPEC:
+            config_args.update(
+                {
+                    "num_consumer_groups": best_config.pop("num_consumer_groups", 0),
+                    "num_buffers_warp_spec": best_config.pop(
+                        "num_buffers_warp_spec", 0
+                    ),
+                }
+            )
+
+        # Create the triton_config with the appropriate arguments
+        triton_config = Config(best_config, **config_args)
         triton_config.found_by_coordesc = True
         return triton_config
 
@@ -493,8 +573,9 @@ class _LocalAutotuneCacheBackend(RemoteCacheBackend[bytes]):
     @override
     def _put(self, key: str, data: bytes) -> None:
         os.makedirs(os.path.dirname(key), exist_ok=True)
-        with open(key, "wb") as fd:
-            fd.write(data)
+        from torch._inductor import codecache
+
+        codecache.write_atomic(key, data)
 
 
 class LocalAutotuneCache(RemoteCache[JsonDataTy]):
@@ -515,8 +596,9 @@ class LocalAutotuneCache(RemoteCache[JsonDataTy]):
             # model would only bundle *newly* compiled kernels, not existing
             # kernels that were already compiled and cached.
             AutotuneCacheBundler.put(key, result)
+            autotune_artifact_key = os.path.join(*key.split(os.sep)[-2:])
             CacheArtifactManager.record_artifact(
-                CacheArtifactType.AUTOTUNE, os.path.basename(key), result
+                AutotuneCacheArtifact.type(), autotune_artifact_key, result
             )
         return result
 

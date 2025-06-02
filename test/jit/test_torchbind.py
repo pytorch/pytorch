@@ -5,7 +5,6 @@ import copy
 import io
 import os
 import sys
-import unittest
 from typing import Optional
 
 import torch
@@ -16,14 +15,8 @@ from torch.testing._internal.common_utils import skipIfTorchDynamo
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import (
-    find_library_location,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
-    IS_WINDOWS,
-)
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 
 
 if __name__ == "__main__":
@@ -37,12 +30,7 @@ if __name__ == "__main__":
 @skipIfTorchDynamo("skipping as a precaution")
 class TestTorchbind(JitTestCase):
     def setUp(self):
-        if IS_SANDCASTLE or IS_MACOS or IS_FBCODE:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        lib_file_path = find_library_location("libtorchbind_test.so")
-        if IS_WINDOWS:
-            lib_file_path = find_library_location("torchbind_test.dll")
-        torch.ops.load_library(str(lib_file_path))
+        load_torchbind_test_lib()
 
     def test_torchbind(self):
         def test_equality(f, cmp_key):

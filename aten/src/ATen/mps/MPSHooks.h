@@ -54,7 +54,12 @@ struct MPSHooks : public at::MPSHooksInterface {
   double elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event_id)
       const override;
 
-  // Compatibility with Accelerator API
+  bool isBuilt() const override {
+    return true;
+  }
+  bool isAvailable() const override {
+    return hasMPS();
+  }
   bool hasPrimaryContext(DeviceIndex device_index) const override {
     // When MPS is available, it is always in use for the one device.
     return true;

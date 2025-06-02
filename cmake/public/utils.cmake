@@ -183,7 +183,7 @@ macro(caffe2_interface_library SRC DST)
     # use the populated INTERFACE_LINK_LIBRARIES property, because if one of the
     # dependent library is not a target, cmake creates a $<LINK_ONLY:src> wrapper
     # and then one is not able to find target "src". For more discussions, check
-    #   https://gitlab.kitware.com/cmake/cmake/issues/15415
+    #   https://cmake.org/Bug/print_bug_page.php?bug_id=15415
     #   https://cmake.org/pipermail/cmake-developers/2013-May/019019.html
     # Specifically the following quote
     #
@@ -324,14 +324,6 @@ endmacro()
 #
 macro(torch_cuda_get_nvcc_gencode_flag store_var)
   # setting nvcc arch flags
-  if((NOT DEFINED TORCH_CUDA_ARCH_LIST) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
-    message(WARNING
-        "In the future we will require one to explicitly pass "
-        "TORCH_CUDA_ARCH_LIST to cmake instead of implicitly setting it as an "
-        "env variable. This will become a FATAL_ERROR in future version of "
-        "pytorch.")
-    set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
-  endif()
   if(DEFINED CUDA_ARCH_NAME)
     message(WARNING
         "CUDA_ARCH_NAME is no longer used. Use TORCH_CUDA_ARCH_LIST instead. "
@@ -361,6 +353,28 @@ function(torch_compile_options libname)
       set(MSVC_DEBINFO_OPTION "/Zi")
     endif()
 
+    if(${MSVC_TOOLSET_VERSION} GREATER_EQUAL 142)
+      # Add /permissive- flag for conformance mode to the compiler.
+      # This will force more strict check to the code standard.
+      # 1. From MS official doc: https://learn.microsoft.com/en-us/cpp/build/reference/permissive-standards-conformance?view=msvc-170#remarks
+      #    By default, the /permissive- option is set in new projects created by Visual Studio 2017 version 15.5 and later versions.
+      #    We set the /permissive- flag from VS 2019 (MSVC_TOOLSET_VERSION 142) to avoid compiling issues for old toolkit.
+      # 2. For MSVC VERSION: https://cmake.org/cmake/help/latest/variable/MSVC_TOOLSET_VERSION.html
+      target_compile_options(${libname} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/permissive->)
+    endif()
+    # This option enables a token-based preprocessor that conforms to C99 and C++11 and later standards.
+    # This option is available since VS 2017.
+    # For MS official doc: https://learn.microsoft.com/en-us/cpp/build/reference/zc-preprocessor
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:preprocessor" PARENT_SCOPE)
+
+    if(${MSVC_TOOLSET_VERSION} GREATER_EQUAL 143)
+      # Add /d2implyavx512upperregs- to disable compiler over-aggressive optimization, which caused involeved AVX512 register on AVX2 machine.
+      # Reference: https://github.com/pytorch/pytorch/issues/145702#issuecomment-2874029459
+      target_compile_options(${libname} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/d2implyavx512upperregs->)
+    endif()
+
+
+
     target_compile_options(${libname} PUBLIC
       $<$<COMPILE_LANGUAGE:CXX>:
         ${MSVC_RUNTIME_LIBRARY_OPTION}
@@ -373,6 +387,7 @@ function(torch_compile_options libname)
       -Wall
       -Wextra
       -Wdeprecated
+      -Wunused
       -Wno-unused-parameter
       -Wno-missing-field-initializers
       -Wno-array-bounds
@@ -380,13 +395,11 @@ function(torch_compile_options libname)
       -Wno-strict-overflow
       -Wno-strict-aliasing
       )
-    list(APPEND private_compile_options -Wunused-function)
-    list(APPEND private_compile_options -Wunused-variable)
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      list(APPEND private_compile_options -Wunused-but-set-variable)
+      list(APPEND private_compile_options -Wredundant-move)
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-      list(APPEND private_compile_options -Wunused-private-field -Wextra-semi -Wno-error=extra-semi)
+      list(APPEND private_compile_options -Wextra-semi -Wno-error=extra-semi -Wmove)
     else()
       list(APPEND private_compile_options
         # Considered to be flaky.  See the discussion at
@@ -399,9 +412,9 @@ function(torch_compile_options libname)
         -Werror
         -Werror=inconsistent-missing-override
         -Werror=inconsistent-missing-destructor-override
-        -Werror=unused-function
-        -Werror=unused-variable
         -Werror=pedantic
+        -Werror=unused
+        -Wno-error=unused-parameter
       )
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         list(APPEND private_compile_options -Werror=unused-but-set-variable)
@@ -414,8 +427,13 @@ function(torch_compile_options libname)
       $<$<COMPILE_LANGUAGE:CXX>:${private_compile_options}>)
   if(USE_CUDA)
     foreach(option IN LISTS private_compile_options)
-      if("${option}" STREQUAL "-Wextra-semi")
-        continue()
+      if(CMAKE_CUDA_HOST_COMPILER_ID STREQUAL "GNU")
+        if("${option}" STREQUAL "-Wextra-semi")
+          continue()
+        endif()
+        if("${option}" STREQUAL "-Wunused-private-field")
+          continue()
+        endif()
       endif()
       target_compile_options(${libname} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler ${option}>)
     endforeach()

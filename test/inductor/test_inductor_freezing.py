@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import copy
 import functools
 import importlib
 import itertools
@@ -28,7 +29,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     check_model_gpu,
     copy_tests,
 )
-from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
 
 importlib.import_module("functorch")
@@ -374,6 +375,35 @@ class OptimizeForInferenceTemplate(TestCase):
             RuntimeError, "Trying to run Pytorch Eager Module after Dynamo Freezing"
         ):
             mod(x)
+
+    def test_static_indices_cudagraph(self):
+        if self.device != "cuda":
+            return
+
+        mod1 = torch.nn.Sequential(
+            torch.nn.Linear(2, 2).to(self.device), torch.nn.Linear(2, 2).to(self.device)
+        )
+        mod2 = copy.deepcopy(mod1)
+
+        def fn(x, y, mod):
+            x.add_(1)
+            getattr(mod, "0").bias.add_(2)
+            getattr(mod, "1").weight.add_(3)
+            return mod(x) + y
+
+        x1 = torch.randn(2, 2, device=self.device)
+        y1 = torch.randn(2, 2, device=self.device)
+        x2 = x1.clone()
+        y2 = y1.clone()
+
+        opt_fn = torch.compile(fn, mode="reduce-overhead")
+
+        with torch.no_grad():
+            ref = fn(x1, y1, mod1)
+            res = opt_fn(x2, y2, mod2)
+        self.assertEqual(ref, res)
+        self.assertEqual(x1, x2)
+        self.assertEqual(y1, y2)
 
     def test_rng_op(self):
         @torch.compile()
@@ -968,7 +998,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
 
     copy_tests(OptimizeForInferenceTemplate, FreezingCpuTests, "cpu")
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if HAS_GPU:
 
     class FreezingGpuTests(TestCase):
         common = check_model_gpu

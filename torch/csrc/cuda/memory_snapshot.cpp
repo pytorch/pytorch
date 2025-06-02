@@ -15,6 +15,38 @@ using torch::jit::Pickler;
 using c10::cuda::CUDACachingAllocator::SegmentInfo;
 
 namespace {
+
+class CallbackManager {
+ public:
+  // Constructor
+  CallbackManager() = default;
+  // Destructor
+  ~CallbackManager() = default;
+  // Methods to get and set the callback handles
+  at::CallbackHandle getAnnotationHandle() const {
+    return annotationHandle_;
+  }
+  void setAnnotationHandle(at::CallbackHandle handle) {
+    annotationHandle_ = handle;
+  }
+  at::CallbackHandle getCompileContextHandle() const {
+    return compileContextHandle_;
+  }
+  void setCompileContextHandle(at::CallbackHandle handle) {
+    compileContextHandle_ = handle;
+  }
+  std::unique_lock<std::mutex> lockCallbackMutex() const {
+    return std::unique_lock<std::mutex>(callbackMutex_);
+  }
+
+ private:
+  mutable std::mutex callbackMutex_;
+  at::CallbackHandle annotationHandle_{0};
+  at::CallbackHandle compileContextHandle_{0};
+};
+
+CallbackManager callbackManager;
+
 std::string write_pickle(const IValue& v) {
   std::vector<char> result;
   {
@@ -97,24 +129,66 @@ CapturedTraceback* getFromContext(
       "attempting to gather stack context from the wrong StackContext type.");
 }
 
-void _initRecordAnnotations() {
-  static auto init_placeholder [[maybe_unused]] = [&] {
-    // Save user annotations to CCA memory snapshot tool
-    at::addThreadLocalCallback(
-        at::RecordFunctionCallback(
-            [](const at::RecordFunction& fn)
-                -> std::unique_ptr<at::ObserverContext> {
-              c10::cuda::CUDACachingAllocator::recordAnnotation(
-                  {{"name", fn.name()}, {"stage", "START"}});
-              return nullptr;
-            },
-            [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
-              c10::cuda::CUDACachingAllocator::recordAnnotation(
-                  {{"name", fn.name()}, {"stage", "END"}});
-            })
-            .scopes({at::RecordScope::USER_SCOPE}));
-    return true;
-  }();
+at::CallbackHandle _initRecordAnnotations() {
+  return at::addGlobalCallback(
+      at::RecordFunctionCallback(
+          [](const at::RecordFunction& fn)
+              -> std::unique_ptr<at::ObserverContext> {
+            c10::cuda::CUDACachingAllocator::recordAnnotation(
+                {{"name", fn.name()}, {"stage", "START"}});
+            return nullptr;
+          },
+          [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
+            c10::cuda::CUDACachingAllocator::recordAnnotation(
+                {{"name", fn.name()}, {"stage", "END"}});
+          })
+          .scopes({at::RecordScope::USER_SCOPE}));
+}
+
+at::CallbackHandle _initCompileContexts() {
+  return at::addGlobalCallback(
+      at::RecordFunctionCallback(
+          [](const at::RecordFunction& fn)
+              -> std::unique_ptr<at::ObserverContext> {
+            std::string functionName = fn.name();
+            const std::string functionNamePrefix = "Torch-Compiled Region";
+            if (functionName.compare(
+                    0, functionNamePrefix.size(), functionNamePrefix) == 0) {
+              c10::cuda::CUDACachingAllocator::pushCompileContext(functionName);
+            }
+            return nullptr;
+          },
+          [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
+            std::string functionName = fn.name();
+            const std::string functionNamePrefix = "Torch-Compiled Region";
+            if (functionName.compare(
+                    0, functionNamePrefix.size(), functionNamePrefix) == 0) {
+              c10::cuda::CUDACachingAllocator::popCompileContext();
+            }
+          })
+          .scopes({at::RecordScope::FUNCTION}));
+}
+
+void setRecordFunctionCallbacks(bool enabled, bool compileContext) {
+  // Handle Callbacks under mutex
+  auto lock = callbackManager.lockCallbackMutex();
+  if (enabled) {
+    if (callbackManager.getAnnotationHandle() == 0) {
+      callbackManager.setAnnotationHandle(_initRecordAnnotations());
+    }
+    if (compileContext && callbackManager.getCompileContextHandle() == 0) {
+      callbackManager.setCompileContextHandle(_initCompileContexts());
+    }
+  } else {
+    if (callbackManager.getAnnotationHandle() != 0) {
+      at::removeCallback(callbackManager.getAnnotationHandle());
+      callbackManager.setAnnotationHandle(0);
+    }
+    if (callbackManager.getCompileContextHandle() != 0) {
+      at::removeCallback(callbackManager.getCompileContextHandle());
+      callbackManager.setCompileContextHandle(0);
+    }
+  }
 }
 
 } // namespace
@@ -124,7 +198,9 @@ void _record_memory_history(
     bool record_context,
     int64_t trace_alloc_max_entries,
     bool trace_alloc_record_context,
-    bool record_cpp_context) {
+    bool record_cpp_context,
+    bool clearHistory,
+    bool compileContext) {
   c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
   if (enabled && record_cpp_context &&
       (trace_alloc_record_context || record_context)) {
@@ -139,9 +215,10 @@ void _record_memory_history(
     when = c10::cuda::CUDACachingAllocator::RecordContext::STATE;
   }
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
-  _initRecordAnnotations();
+
+  setRecordFunctionCallbacks(enabled, compileContext);
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled, recorder, trace_alloc_max_entries, when);
+      enabled, recorder, trace_alloc_max_entries, when, clearHistory);
 }
 
 static void checkOptionIn(
@@ -156,7 +233,9 @@ void _record_memory_history(
     std::optional<std::string> enabled,
     std::optional<std::string> context,
     const std::string& stacks,
-    size_t max_entries) {
+    size_t max_entries,
+    bool clearHistory,
+    bool compileContext) {
   if (enabled) {
     checkOptionIn(
         *enabled,
@@ -190,9 +269,9 @@ void _record_memory_history(
     }
   }
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
-  _initRecordAnnotations();
+  setRecordFunctionCallbacks(enabled.has_value(), compileContext);
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled.has_value(), recorder, max_entries, when);
+      enabled.has_value(), recorder, max_entries, when, clearHistory);
 }
 
 std::string _memory_snapshot_pickled() {
@@ -220,6 +299,7 @@ std::string _memory_snapshot_pickled() {
   IValue blocks_s = "blocks";
   IValue is_expandable_s = "is_expandable";
   IValue time_us_s = "time_us";
+  IValue compile_contexts_s = "compile_context";
 
   auto empty_frames = new_list();
 
@@ -336,6 +416,7 @@ std::string _memory_snapshot_pickled() {
           static_cast<int64_t>(te.addr_));
       trace_entry.insert(size_s, (int64_t)te.size_);
       trace_entry.insert(stream_s, int64_t(te.stream_));
+      trace_entry.insert(compile_contexts_s, te.compile_context_);
       if (te.context_) {
         auto sc = getFromContext(te.context_);
         frame_tracebacks.push_back(sc);

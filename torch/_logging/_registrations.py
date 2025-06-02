@@ -50,6 +50,7 @@ register_log(
         "torch._export.converter",
         "torch._export.non_strict_utils",
         "torch._export.serde.serialize",
+        "torch.fx.experimental.proxy_tensor",
     ],
 )
 
@@ -69,6 +70,10 @@ register_artifact(
     "Prints the dynamo traced graph (prior to AOTDispatch) in a table. If you prefer python code use `graph_code` instead. ",
 )
 register_artifact("graph_code", "Like `graph`, but gives you the Python code instead.")
+register_artifact(
+    "graph_code_verbose",
+    "Verbose FX pass logs, e.g. from tensorify_python_scalars and runtime_assert.",
+)
 register_artifact(
     "graph_sizes", "Prints the sizes of all FX nodes in the dynamo graph."
 )
@@ -209,11 +214,17 @@ register_artifact(
 register_artifact(
     "autotuning",
     "Autotuning choice logs, such as kernel source, perf, and tuning parameters.",
+    off_by_default=True,
 )
-
 register_artifact(
     "graph_region_expansion",
     "Logs detailed steps of the duplicate graph region tracker expansion algorithm",
+    off_by_default=True,
+)
+
+register_artifact(
+    "inductor_metrics",
+    "Logs Inductor metrics, such as num_bytes, nodes_num_elem, node_runtimes",
     off_by_default=True,
 )
 
