@@ -142,7 +142,11 @@ struct asin_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // asin(z) = (-i)ln(sqrt(1 - z^2) + (i)(z))
+    // asin(z) = atan(z/sqrt(1-z^2)) if z != ±1
+    if (x.x == 1 && x.y == 0)
+      return T(M_PI_F / 2, 0);
+    else if (x.x == -1 && x.y == 0)
+      return T(M_PI_F / -2, 0);
     auto sqrt_val = T(1, 0) - c10::metal::mul(x, x);
     // calculate sqrt
     // modulus
@@ -153,13 +157,20 @@ struct asin_functor {
     auto imag_part = copysign(
         static_cast<decltype(x.y)>(precise::sqrt((m - sqrt_val.x) * .5)),
         sqrt_val.y);
-    auto log_val = T(real_part, imag_part) + c10::metal::mul(T(0, 1), x);
-    // calculate log (see log_functor)
+    auto atan_val = div(x, T(real_part, imag_part));
+    // calculate atan (see atan_functor)
+    auto coef = div(T(1, 0), T(0, 2));
+    auto log_arg =
+        div(T(-1 * atan_val.x, 1 - atan_val.y), T(atan_val.x, 1 + atan_val.y));
+    // Calculate log using method from log_functor
     auto magnitude =
-        ::precise::sqrt(log_val.x * log_val.x + log_val.y * log_val.y);
+        ::precise::sqrt(log_arg.x * log_arg.x + log_arg.y * log_arg.y);
     auto real = ::precise::log(magnitude);
-    auto imag = ::precise::atan2(log_val.y, log_val.x);
-    return c10::metal::mul(T(0, -1), T(real, imag));
+    auto imag = (log_arg.x == 0 && log_arg.y == 0)
+        ? 0
+        : ::precise::atan2(log_arg.y, log_arg.x);
+    // return coefficient * log value
+    return c10::metal::mul(coef, T(real, imag));
   }
 };
 
@@ -174,7 +185,12 @@ struct acos_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // asin(z) = (-i)ln(sqrt(1 - z^2) + (i)(z))
+    // acos(z) = pi/2 - asin(z) if z != ±1
+    // calculate asin
+    if (x.x == 1 && x.y == 0)
+      return T(M_PI_F, 0);
+    else if (x.x == -1 && x.y == 0)
+      return T(-M_PI_F, 0);
     auto sqrt_val = T(1, 0) - c10::metal::mul(x, x);
     // calculate sqrt
     // modulus
@@ -185,15 +201,20 @@ struct acos_functor {
     auto imag_part = copysign(
         static_cast<decltype(x.y)>(precise::sqrt((m - sqrt_val.x) * .5)),
         sqrt_val.y);
-    auto log_val = T(real_part, imag_part) + c10::metal::mul(T(1, 0), x);
-    // calculate log (see log_functor)
+    auto atan_val = div(x, T(real_part, imag_part));
+    // calculate atan (see atan_functor)
+    auto coef = div(T(1, 0), T(0, 2));
+    auto log_arg =
+        div(T(-1 * atan_val.x, 1 - atan_val.y), T(atan_val.x, 1 + atan_val.y));
+    // Calculate log using method from log_functor
     auto magnitude =
-        ::precise::sqrt(log_val.x * log_val.x + log_val.y * log_val.y);
+        ::precise::sqrt(log_arg.x * log_arg.x + log_arg.y * log_arg.y);
     auto real = ::precise::log(magnitude);
-    auto imag = (log_val.x == 0 && log_val.y == 0)
+    auto imag = (log_arg.x == 0 && log_arg.y == 0)
         ? 0
-        : ::precise::atan2(log_val.y, log_val.x);
-    return c10::metal::mul(T(0, -1), T(real, imag));
+        : ::precise::atan2(log_arg.y, log_arg.x);
+    // return coefficient * log value
+    return T(M_PI_F / 2, 0) - c10::metal::mul(coef, T(real, imag));
   }
 };
 
