@@ -605,11 +605,25 @@ class CUDATemplateCaller(ChoiceCaller):
     def call_name(self) -> str:
         return f"cuda_template_kernels.{self.name}"
 
-    def hash_key(self) -> str:
+    def kernel_hash_key(self) -> str:
+        """
+        Return kernel hash key that does not depend on swizzle.
+        """
         return "-".join(
             [
                 self.category,
                 self.bmreq.hash_key,
+            ]
+        )
+
+    def hash_key(self) -> str:
+        """
+        Return kernel hash key that does not depend on swizzle.
+        """
+        return "-".join(
+            [
+                self.kernel_hash_key(),
+                str(self.info_dict().get("swizzle")),
             ]
         )
 
