@@ -29,11 +29,6 @@ inline void arange_check_bounds(
 
 template <typename scalar_t>
 int64_t compute_arange_size(const Scalar& start, const Scalar& end, const Scalar& step) {
-  using accscalar_t = at::acc_type<scalar_t, false>;
-  auto xstart = start.to<accscalar_t>();
-  auto xend = end.to<accscalar_t>();
-  auto xstep = step.to<accscalar_t>();
-
   arange_check_bounds(start, end, step);
 
   // we use double precision for (start - end) / step
@@ -45,6 +40,10 @@ int64_t compute_arange_size(const Scalar& start, const Scalar& end, const Scalar
   // the corner-case we do want to take into account is int64_t, which has higher precision than double
   double size_d;
   if constexpr (std::is_same_v<scalar_t, int64_t>) {
+    using accscalar_t = at::acc_type<scalar_t, false>;
+    auto xstart = start.to<accscalar_t>();
+    auto xend = end.to<accscalar_t>();
+    auto xstep = step.to<accscalar_t>();
     int64_t sgn = (xstep > 0) - (xstep < 0);
     size_d = std::ceil((xend - xstart + xstep - sgn) / xstep);
   } else {
