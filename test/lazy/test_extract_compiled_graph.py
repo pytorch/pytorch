@@ -16,7 +16,6 @@ import torch
 from torch import fx, nn
 from torch._lazy import config
 from torch._lazy.extract_compiled_graph import extract_compiled_graph
-from torch.testing._internal.common_utils import run_tests
 
 
 class ModuleConstScale(nn.Module):
@@ -210,4 +209,7 @@ class OptimizeTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

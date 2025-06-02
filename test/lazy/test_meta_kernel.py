@@ -4,7 +4,7 @@ import torch
 import torch._lazy
 import torch._lazy.ts_backend
 from torch import float16, float32
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import TestCase
 
 
 torch._lazy.ts_backend.init()
@@ -40,4 +40,7 @@ class TestMetaKernel(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

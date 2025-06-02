@@ -163,4 +163,7 @@ class TestONNXScriptExport(common_utils.TestCase):
 
 
 if __name__ == "__main__":
-    common_utils.run_tests()
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )
