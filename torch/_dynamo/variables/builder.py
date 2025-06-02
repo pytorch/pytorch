@@ -49,6 +49,7 @@ from torch._dynamo.utils import (
     get_metrics_context,
     is_int_specialization_case,
     is_torch_sym,
+    set_feature_use,
 )
 from torch._guards import TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
@@ -66,6 +67,8 @@ from torch.fx.experimental.symbolic_shapes import (
     StatefulSymbolicContext,
     SubclassSymbolicContext,
     SymbolicContext,
+    SymIntSymbolicContext,
+    TrackedFake,
 )
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.nn.utils._expanded_weights import ExpandedWeight
@@ -78,7 +81,7 @@ from torch.utils.weak import TensorWeakRef
 
 from .. import config, graph_break_hints, mutation_guard, replay_record, trace_rules
 from ..device_interface import get_registered_device_interfaces
-from ..exc import InternalTorchDynamoError, unimplemented_v2
+from ..exc import InternalTorchDynamoError, raise_observed_exception, unimplemented_v2
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..pgo import (
     auto_dynamic,
@@ -260,6 +263,7 @@ from .torch_function import (
 )
 from .user_defined import (
     FrozenDataClassVariable,
+    IntWrapperVariable,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
     SourcelessGraphModuleVariable,
@@ -1376,7 +1380,7 @@ class VariableBuilder:
 
             result = UserDefinedDictVariable(value, dict_vt=dict_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
-        elif isinstance(value, tuple) and type(value).__new__ is tuple.__new__:
+        elif isinstance(value, tuple):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
@@ -1393,7 +1397,7 @@ class VariableBuilder:
             tuple_vt = TupleVariable(
                 output, source=self.source, mutation_type=ValueMutationExisting()
             )
-            result = UserDefinedTupleVariable.create(
+            result = UserDefinedTupleVariable(
                 value, tuple_vt=tuple_vt, source=self.source
             )
             return self.tx.output.side_effects.track_object_existing(value, result)
@@ -1444,6 +1448,33 @@ class VariableBuilder:
                         "Ensure your dict_keys keys are constants (e.g. int, float, strings)",
                     ],
                 )
+        elif IntWrapperVariable.is_matching_object(value):
+            from torch.export.dynamic_shapes import _DimHintType
+
+            if value.dynamism is None or value.dynamism.type == _DimHintType.STATIC:
+                return self.wrap_symint(value.val)
+            elif value.dynamism.type == _DimHintType.DYNAMIC:
+                log.debug(
+                    "%s marked %s via IntWrapper",
+                    self.source.name(),
+                    DimDynamic.DYNAMIC,
+                )
+                return self.wrap_symint(
+                    value.val,
+                    dynamism=DimDynamic.DYNAMIC,
+                    context=SymIntSymbolicContext(
+                        constraint=RelaxedUnspecConstraint(warn_only=False)
+                    ),
+                )
+            elif value.dynamism.type == _DimHintType.AUTO:
+                log.debug(
+                    "%s marked %s via IntWrapper",
+                    self.source.name(),
+                    DimDynamic.DYNAMIC,
+                )
+                return self.wrap_symint(value.val, dynamism=DimDynamic.DYNAMIC)
+            else:
+                raise RuntimeError(f"Undefined dynamism {value.dynamism}")
         else:
             return self.wrap_user_defined(value)
 
@@ -1686,6 +1717,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             if torch._dynamo.config.inline_inbuilt_nn_modules:
                 freezing = is_parameter_freezing()
+
                 # Guard against the case where user may overwrite named parameters
                 # / named buffers
                 # NOTE: This is not likely to happen but worth guarding to avoid
@@ -1695,15 +1727,21 @@ class VariableBuilder:
                     and value.named_parameters.__func__
                     is og_module_named_parameters_fn_ptr
                 ):
-                    for _, p in value.named_parameters():
-                        self.mark_static_input(p, guard=freezing)
+                    try:  # catch TypeErrors in named_parameters() from unserializable nn modules
+                        for _, p in value.named_parameters():
+                            self.mark_static_input(p, guard=freezing)
+                    except TypeError as e:
+                        raise_observed_exception(type(e), self.tx, args=list(e.args))
 
                 if (
                     callable(value.named_buffers)
                     and value.named_buffers.__func__ is og_module_named_buffers_fn_ptr
                 ):
-                    for _, b in value.named_buffers():
-                        self.mark_static_input(b, guard=freezing)
+                    try:  # catch TypeErrors in named_parameters() from unserializable nn modules
+                        for _, b in value.named_buffers():
+                            self.mark_static_input(b, guard=freezing)
+                    except TypeError as e:
+                        raise_observed_exception(type(e), self.tx, args=list(e.args))
 
                 if freezing:
                     # we need to add the module to tracing context
@@ -1739,7 +1777,12 @@ class VariableBuilder:
         if type(value) is int:
             # allowlist has higher precedence over specialization control.
             if is_dynamic_source(self.source.name()):
-                return self.wrap_symint(value, True)
+                log.debug("%s marked dynamic via source whitelist", self.source.name())
+                return self.wrap_symint(value, dynamism=DimDynamic.DYNAMIC)
+
+            if is_unbacked_source(self.source.name()):
+                log.debug("%s marked unbacked via source whitelist", self.source.name())
+                return self.wrap_symint(value, dynamism=DimDynamic.SIZE_LIKE_UNBACKED)
 
             if not config.specialize_int:
                 # unspecializing int by default, but still
@@ -2086,7 +2129,12 @@ class VariableBuilder:
 
         return numpy_ndarray_variable
 
-    def wrap_symint(self, value, is_forced_allow_list_dynamic=False):
+    def wrap_symint(
+        self,
+        value,
+        dynamism: Optional[DimDynamic] = None,
+        context: Optional[SymIntSymbolicContext] = None,
+    ):
         assert type(value) is int
 
         if self.name in self.tx.output.unspec_variable_map:
@@ -2105,10 +2153,11 @@ class VariableBuilder:
         # but the general idea is that we generate kernels that can
         # take unspecialized floats and use them in sizevar computation
         elif not is_constant_source(self.get_source()):
-            if torch._dynamo.config.specialize_int:
+            if dynamism is None and torch._dynamo.config.specialize_int:
                 # If specialize_int is False, also return
                 # a constant (but this should have been handled
-                # in the caller, TBH)
+                # in the caller, TBH). But if `dynamism` is set, then actually
+                # turn it into a symint
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value, source=self.source)
 
@@ -2130,13 +2179,13 @@ class VariableBuilder:
             if isinstance(base_source, ChainedSource):
                 base_source = base_source.get_base()
 
-            if is_forced_allow_list_dynamic:
-                log.debug("%s marked dynamic via source whitelist", self.source.name())
-                dynamic_dim = DimDynamic.DYNAMIC
+            if dynamism is not None:
+                dynamic_dim = dynamism
             elif (
                 config.automatic_dynamic_shapes
                 and frame_state_entry.scalar is auto_dynamic
             ):
+                set_feature_use("dynamo.automatic_dynamic_shapes", True)
                 dynamic_dim = get_automatic_dynamic_shapes_mark_as()
             elif (
                 isinstance(base_source, LocalSource)
@@ -2149,6 +2198,8 @@ class VariableBuilder:
             else:  # assume_static_by_default
                 # TODO: dynamic_dim = DimDynamic.STATIC should work but
                 # for some reason it doesn't
+                if frame_state_entry.scalar is auto_dynamic:
+                    set_feature_use("dynamo.automatic_dynamic_shapes", False)
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value)
 
@@ -2159,7 +2210,7 @@ class VariableBuilder:
             )
 
             self.tx.output.tracked_fakes.append(
-                TrackedFake(wrapped_value, self.source, None)
+                TrackedFake(wrapped_value, self.source, context)
             )
         else:
             assert is_constant_source(self.get_source())
@@ -2186,11 +2237,6 @@ class VariableBuilder:
         self.tx.output.unspec_variable_map[self.name] = unspec_var
 
         if not is_constant_source(self.get_source()):
-            if self.tx.export and not isinstance(self.get_source(), LocalSource):
-                raise AssertionError(
-                    f"Dynamo attempts to add additional input during export: value={wrapped_value}, source={self.get_source()}"
-                )
-
             proxy.node.meta["grapharg"] = GraphArg(
                 self.get_source(),
                 wrapped_value,
@@ -2902,21 +2948,66 @@ def is_dynamic_source(source_name: str) -> bool:
     return False
 
 
-# Tracks the sources of all fake tensors we wrap in Dynamo.
-# Used by shape guard computation.
-@dataclasses.dataclass
-class TrackedFake:
-    fake: Union[FakeTensor, SymInt]
-    source: Source
-    symbolic_context: Optional[SymbolicContext]
+def record_automatic_dynamic(
+    tx: "InstructionTranslator", name: str, e: torch.Tensor
+) -> FrameStateSizeEntry:
+    # This mimics stride inference algorithm in _create_symbolic_sizes_strides_storage_offset
+    ex_size = e.size()
+    if not is_sparse_any(e):
+        ex_stride = e.stride()
+        dim = e.dim()
 
-    def __hash__(self) -> int:
-        return hash((self.fake, self.source.name()))
+        stride = [None] * dim
+        pending = [(ex_stride[i], -i) for i in range(dim)]
+        pending.sort(key=_nested_int_aware_sort)
+        candidates = {}
+        for i_stride, neg_i in pending:
+            i = -neg_i
+            stride[i] = candidates.get(i_stride, i_stride)
+            candidates.setdefault(i_stride * ex_size[i], InferStride(i))
+    else:
+        stride = []
 
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, TrackedFake):
-            return self.fake is other.fake and self.source.name() == other.source.name()
-        return False
+    return process_automatic_dynamic(
+        tx, name, FrameStateSizeEntry.make_tensor(tuple(ex_size), tuple(stride))
+    )
+
+
+_UNBACKED_SOURCES: Optional[set[str]] = None
+_UNBACKED_SOURCES_CONFIG_HASH: Optional[int] = None
+
+
+def get_unbacked_sources() -> set[str]:
+    global _UNBACKED_SOURCES, _UNBACKED_SOURCES_CONFIG_HASH
+
+    current_hash = hash(torch.compiler.config.unbacked_sources)
+
+    # If we have already calculated the sources and the config hasn't changed, return cached result
+    if _UNBACKED_SOURCES is not None and _UNBACKED_SOURCES_CONFIG_HASH == current_hash:
+        return _UNBACKED_SOURCES
+
+    # Config has changed or first time, (re)calculate the sources
+    _UNBACKED_SOURCES = {
+        s
+        for s in torch.compiler.config.unbacked_sources.replace(" ", "").split(",")
+        if s
+    }
+    _UNBACKED_SOURCES_CONFIG_HASH = current_hash
+
+    return _UNBACKED_SOURCES
+
+
+def is_unbacked_source(source_name: str) -> bool:
+    unbacked_sources = get_unbacked_sources()
+    for pattern in unbacked_sources:
+        if pattern == source_name or re.match(pattern, source_name):
+            log.debug(
+                "%s was marked unbacked due to unbacked source allowlist pattern: %s",
+                source_name,
+                pattern,
+            )
+            return True
+    return False
 
 
 # Performs automatic dynamic dim determination.
@@ -2975,6 +3066,7 @@ def _automatic_dynamic(
         )
 
     if static_shapes and not is_dynamic_source(name):
+        record_automatic_dynamic(tx, name, e)
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
@@ -3004,27 +3096,7 @@ def _automatic_dynamic(
         )
 
     # Prep for automatic dynamic
-
-    # This mimics stride inference algorithm in _create_symbolic_sizes_strides_storage_offset
-    ex_size = e.size()
-    if not is_sparse_any(e):
-        ex_stride = e.stride()
-        dim = e.dim()
-
-        stride = [None] * dim
-        pending = [(ex_stride[i], -i) for i in range(dim)]
-        pending.sort(key=_nested_int_aware_sort)
-        candidates = {}
-        for i_stride, neg_i in pending:
-            i = -neg_i
-            stride[i] = candidates.get(i_stride, i_stride)
-            candidates.setdefault(i_stride * ex_size[i], InferStride(i))
-    else:
-        stride = []
-
-    frame_state_entry = process_automatic_dynamic(
-        tx, name, FrameStateSizeEntry.make_tensor(tuple(ex_size), tuple(stride))
-    )
+    frame_state_entry = record_automatic_dynamic(tx, name, e)
 
     # TODO: index export_constraints ahead of time so we don't have to
     # do a linear scan every time here
@@ -3062,6 +3134,7 @@ def _automatic_dynamic(
     dynamic_strides = []
     constraint_sizes = []
     constraint_strides = []
+    specialize_on = []
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
         marked_strict_unbacked = i in getattr(
@@ -3071,6 +3144,8 @@ def _automatic_dynamic(
         marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
         marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
         marked_static = i in getattr(e, "_dynamo_static_indices", set())
+
+        specialize_on.append(getattr(e, "_specialize_on", {}).get(i, []))
 
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
@@ -3110,6 +3185,11 @@ def _automatic_dynamic(
             automatic_dynamic_size = True
             automatic_dynamic_stride = True
 
+        if is_unbacked_source(name):
+            log.debug("%s marked unbacked via source whitelist", name)
+            automatic_dynamic_size = True
+            automatic_dynamic_stride = True
+
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
 
         # We will process constraints first, as they will imply that we
@@ -3142,11 +3222,14 @@ def _automatic_dynamic(
             elif marked_strict_unbacked:
                 constraint_size = RelaxedUnspecConstraint(warn_only=False)
             elif not marked_static and automatic_dynamic:
+                set_feature_use("dynamo.automatic_dynamic_shapes", True)
                 if automatic_dynamic_size:
                     constraint_size = RelaxedUnspecConstraint(warn_only=True)
                 if automatic_dynamic_stride:
                     constraint_stride = RelaxedUnspecConstraint(warn_only=True)
             else:
+                if not marked_static and not config.automatic_dynamic_shapes:
+                    set_feature_use("dynamo.automatic_dynamic_shapes", False)
                 constraint_size = None
                 constraint_stride = None
         else:
@@ -3157,7 +3240,7 @@ def _automatic_dynamic(
         constraint_sizes.append(constraint_size)
         constraint_strides.append(constraint_stride)
 
-        if marked_unbacked:
+        if marked_unbacked or is_unbacked_source(name):
             dynamic_size = DimDynamic.SIZE_LIKE_UNBACKED
         elif (
             constraint_size is not None
@@ -3191,6 +3274,7 @@ def _automatic_dynamic(
         dynamic_strides=dynamic_strides,
         constraint_sizes=constraint_sizes,
         constraint_strides=constraint_strides,
+        specialize_on=specialize_on,
         view_base_context=view_base_context,
         tensor_source=source,
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
@@ -3384,6 +3468,12 @@ class SourcelessBuilder:
                 for name in namedtuple_fields(type(value))
             ]
             return NamedTupleVariable(output, tuple_cls=type(value))
+        elif (
+            isinstance(value, torch.SymInt)
+            and value.node.expr in tx.output.bound_symbols
+        ):
+            proxy = tx.output.bound_symbols[value.node.expr]
+            return SymNodeVariable.create(tx, proxy)
         unimplemented_v2(
             gb_type="Unexpected type in sourceless builder",
             context=f"{value_type.__module__}.{value_type.__qualname__}",

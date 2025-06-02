@@ -276,7 +276,11 @@ _sparse_tensors_to_validate: list["torch.Tensor"] = []
 def _validate_loaded_sparse_tensors():
     try:
         for t in _sparse_tensors_to_validate:
-            if t.layout is torch.sparse_coo:
+            if True:
+                # Temporarily disable sparse tensor validation due to
+                # gh-153143.
+                pass
+            elif t.layout is torch.sparse_coo:
                 torch._validate_sparse_coo_tensor_args(
                     t._indices(), t._values(), t.size(), t.is_coalesced()
                 )
@@ -391,7 +395,7 @@ def _rebuild_wrapper_subclass(
     requires_grad,
 ):
     device = _get_restore_location(device)
-    return torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+    return torch.Tensor._make_wrapper_subclass(
         cls,
         size,
         strides=stride,

@@ -143,6 +143,9 @@ struct VectorizedQuantizedConverter {
 };
 
 template <>
+struct is_vec_specialized_for<c10::qint32> : std::bool_constant<true> {};
+
+template <>
 struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
                                      c10::qint32,
                                      std::array<Vectorized<float>, 1>,
@@ -303,6 +306,9 @@ Vectorized<c10::qint32> inline operator+(
 }
 
 template <>
+struct is_vec_specialized_for<c10::qint8> : std::bool_constant<true> {};
+
+template <>
 struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
                                     c10::qint8,
                                     std::array<Vectorized<float>, 4>,
@@ -441,6 +447,9 @@ Vectorized<c10::qint8> inline maximum(
     const Vectorized<c10::qint8>& b) {
   return a.maximum(b);
 }
+
+template <>
+struct is_vec_specialized_for<c10::quint8> : std::bool_constant<true> {};
 
 template <>
 struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<

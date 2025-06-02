@@ -328,6 +328,7 @@ class CheckpointFunction(torch.autograd.Function):
 def noop_context_fn():
     return contextlib.nullcontext(), contextlib.nullcontext()
 
+# Note: [torch.compile and checkpoint]
 # TorchDynamo does not step inside utils.checkpoint function.  The flow
 # looks likes this
 #  1) TorchDynamo tries to wrap utils.checkpoint in a HigherOrderOp by
@@ -1094,6 +1095,16 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
         super().__init__(pack_hook, unpack_hook)
 
 
+# torch._disable_dynamo creates a reference cycle with decorated function
+# This function is used to ensure that the decorated function does not have
+# a closure, so that other objects aren't also kept alive.
+# https://github.com/pytorch/pytorch/issues/154642
+# Note: does not work when fn is compiled
+@torch._disable_dynamo
+def _run_fn_with_dynamo_disabled(fn, *args, **kwargs):
+    return fn(*args, **kwargs)
+
+
 class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
     def __init__(self, frame):
         def pack_hook(x):
@@ -1120,7 +1131,8 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                     with _recomputation_hook(
                         weakref.ref(frame), gid
                     ), torch.autograd.enable_grad():
-                        frame.recompute_fn(*args)
+                        # See Note: [compiled autograd and checkpoint unpack hook]
+                        _run_fn_with_dynamo_disabled(frame.recompute_fn, *args)
                 except _StopRecomputationError:
                     pass
                 frame.is_recomputed[gid] = True
@@ -1541,3 +1553,17 @@ def _checkpoint_without_reentrant_generator(
         )
 
     return
+
+# Note: [compiled autograd and checkpoint unpack hook]
+# When tracing via compiled autograd, this hook will be visible to the
+# compiler if the forward of this checkpointed region ran in eager.
+# If the forward had ran under compile, it would have been wrapped in a
+# higher order op. See Note: [torch.compile and checkpoint].
+#
+# Since we run the recomputation hook under a enable_grad context,
+# AOTDispatch will trace a joint graph for this hook, and may
+# save different activations than in eager. This conflicts with the
+# strict activation count checks in `frame.check_recomputed_tensors_match`.
+# So, we disable this hook to force it to recompute eager checkpointed regions
+# in eager. This could be removed if we can disable the partitioner for this
+# graph segment.
