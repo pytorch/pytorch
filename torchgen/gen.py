@@ -2449,7 +2449,7 @@ existing C shim header files.
 change in the AOTInductor land. You need to annotate the new default argument in
 torchgen/aoti/fallback_ops.py, and then run `python torchgen/gen.py --update-aoti-c-shim` to
 update the C shim header files by creating different versions of the fallback op. See
-TO_BE_CREATED_PR for an example.
+https://github.com/pytorch/pytorch/pull/154848 as an example.
 
                         """
                 except FileNotFoundError:
