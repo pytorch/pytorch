@@ -2283,16 +2283,16 @@ class SIMDScheduling(BaseScheduling):
 
         # # TODO: enable by default
         if (
-            torch._inductor.config.test_configs.global_tiling_analysis
+            torch._inductor.config.triton.global_tiling_analysis
             and coalesce_analysis
         ):
             return cls.compute_tiling_strategy(
                 node_schedule, numel, reduction_numel, coalesce_analysis
             )
 
-        if (
-            not is_pointwise and not config.triton.tile_reductions
-        ) or get_max_tiles(default=2) <= 1:
+        if (not is_pointwise and not config.triton.tile_reductions) or get_max_tiles(
+            default=2
+        ) <= 1:
             # Emit a perf hint in case we miss an opportunity to tile a reduction.
             if perf_hint_log.level <= logging.WARNING:
                 for node in EnableReduction.filter(node_schedule):
