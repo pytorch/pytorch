@@ -385,6 +385,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         pid_cache: Optional[dict[str, str]] = None,
         override_persistent_reduction: Optional[bool] = None,
         override_cooperative_reduction: Optional[bool] = None,
+        tiling_scores: Optional[dict[str, sympy.Expr]] = None,
     ) -> None:
         if pid_cache is None:
             pid_cache = {}
@@ -405,6 +406,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             if override_cooperative_reduction is not None
             else self.should_use_cooperative_reduction()
         )
+        self.tiling_scores: Optional[dict[str, sympy.Expr]] = tiling_scores
         self.persistent_reduction: bool = (
             override_persistent_reduction
             if override_persistent_reduction is not None
@@ -1357,7 +1359,10 @@ class SIMDScheduling(BaseScheduling):
 
         nodes: list[scheduler.SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
 
-        coalesce_analysis = analyze_memory_coalescing(node)
+        if torch._inductor.config.test_configs.global_tiling_analysis:
+            coalesce_analysis = analyze_memory_coalescing(node)
+        else:
+            coalesce_analysis = None
         _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
 
         node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
