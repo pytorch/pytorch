@@ -3793,6 +3793,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             Stringified pickle work traces.
             Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
       )");
+#endif
   module.def(
       "_dump_fr_trace_json",
       [](std::optional<bool> includeCollectives,
@@ -3832,7 +3833,6 @@ such as `dist.all_reduce(tensor, async_op=True)`.
                 Stringified pickle work traces.
                 Default settings return everything.
         )");
-#endif
 
   intrusive_ptr_class_<::c10d::control_plane::WorkerServer>(
       module, "_WorkerServer", R"(
