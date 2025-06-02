@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
-r"""
+"""
 This package enables an interface for accessing the Vulkan backend in Python.
 """
 from typing import Union
 
 import torch
 from torch import Tensor
+
 
 def _device_count() -> int:
     r"""Returns the number of available Vulkan devices."""
@@ -75,11 +76,4 @@ def _compile_shader(name: str, source: str):
 
 
 def _is_available() -> bool:
-    return device_count() > 0
-
-
-__all__ = [
-    "_compile_shader",
-    "_device_count",
-    "_is_available",
-]
+    return _device_count() > 0

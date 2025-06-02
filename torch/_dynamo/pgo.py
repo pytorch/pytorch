@@ -611,6 +611,10 @@ def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
             "To potentially avoid thisTo reduce shape recompilations by compiling dynamically to start, "
             f'set environment variable TORCH_COMPILE_DYNAMIC_SOURCES="{",".join(dynamic_sources)}"'
         )
+        with dynamo_timed(name := "pgo.dynamic_whitelist", log_pt2_compile_event=True):
+            CompileEventLogger.pt2_compile(
+                name, recompile_dynamic_whitelist=",".join(dynamic_sources)
+            )
     return code_state_str
 
 
