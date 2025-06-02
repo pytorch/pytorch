@@ -1929,7 +1929,8 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
   //
   // Or we get stuck in destructors, we will sleep for some time before calling
   // std::abort() to kill the whole process.
-  if (shouldDump_.load() && !terminateHeartbeatMonitorThread_.load()) {
+  if ((pg_->terminateProcessGroup_ || shouldDump_.load()) &&
+      !terminateHeartbeatMonitorThread_.load()) {
     std::this_thread::sleep_for(std::chrono::seconds(heartbeatTimeoutInSec_));
     LOG(INFO)
         << pg_->logPrefix() << "slept for " << heartbeatTimeoutInSec_
