@@ -112,7 +112,6 @@ class CooperativeReductionTests(TestCase):
             elif isinstance(result, torch.Tensor):
                 result = result.to(torch.float64)
 
-
         self.assertEqual(result, expected)
         if "@triton_heuristics.fixed_config" in source_code:
             self.assertIn("cooperative_reduction_grid", source_code)
