@@ -2129,7 +2129,7 @@ class SIMDScheduling(BaseScheduling):
             for i in range(len(splits)):
                 s = V.graph.sizevars.size_hint(splits[i], fallback=32)
                 s = min(s, 8)
-                split_scores[i] *= s / 8
+                split_scores[i] = int(split_scores[i] * s / 8)
 
             scored_sub_split[key] = (splits, split_scores)
             return (splits, split_scores)
