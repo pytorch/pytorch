@@ -394,6 +394,7 @@ class PruningContainer(BasePruningMethod):
                 raise ValueError(f"Unrecognized PRUNING_TYPE {method.PRUNING_TYPE}")
 
             # compute the new mask on the unpruned slice of the tensor t
+            slc = tuple(slc)
             partial_mask = method.compute_mask(t[slc], default_mask=mask[slc])
             new_mask[slc] = partial_mask.to(dtype=new_mask.dtype)
 
