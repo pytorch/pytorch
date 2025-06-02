@@ -1260,6 +1260,18 @@ class PythonWrapperCodegen(CodeGen):
 
     def generate_return(self, output_refs: list[str]) -> None:
         if output_refs:
+            if config.nan_asserts:
+                self.wrapper_call.writeline(
+                    "return_vars = (" + ", ".join(output_refs) + ", )"
+                )
+                self.wrapper_call.writeline("for var in return_vars:")
+                self.wrapper_call.do_indent()
+                self.wrapper_call.writeline("if isinstance(var, torch.Tensor):")
+                self.wrapper_call.do_indent()
+                self.wrapper_call.writeline("assert not var.isnan().any().item()")
+                self.wrapper_call.writeline("assert not var.isinf().any().item()")
+                self.wrapper_call.do_unindent(2)
+
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
         else:
             self.wrapper_call.writeline("return ()")
