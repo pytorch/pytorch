@@ -57,11 +57,64 @@ class CooperativeReductionTests(TestCase):
         torch._inductor.metrics.generated_kernel_count = 0
         torch._dynamo.reset()
 
-    def run_and_check(self, fn, args, *, expect_kernel_count=1):
-        args_cpu = [tensor.cpu().to(torch.float32) for tensor in args]
-        expected = fn(*args_cpu).to(torch.float16)
-        fn = torch.compile(fn, fullgraph=True)
-        result, (source_code,) = run_and_get_code(fn, *args)
+    def run_and_check(self, fn, args, dtype=None, *, expect_kernel_count=1): # Make dtype optional, as some tests don't pass it
+
+        # Determine the CPU reference dtype
+        # We only cast to float16 for the reference if explicitly requested.
+        # Otherwise, we keep it as float64 for higher precision.
+        ref_dtype = dtype
+        if dtype == torch.float16:
+            ref_dtype = torch.float64
+
+        # Move args to CPU and cast to the determined CPU reference dtype
+        args_ref = [tensor.to(ref_dtype) for tensor in args]
+
+        # Calculate expected output
+        raw_expected = fn(*args_ref)
+
+        if isinstance(raw_expected, (tuple, list)):
+            # If it's a tuple or list, apply .to(dtype) to each tensor within it
+            # Also, handle cases where dtype might not be provided (e.g., for bool reductions)
+            if dtype is not None:
+                expected = type(raw_expected)([t.to(dtype) if isinstance(t, torch.Tensor) else t for t in raw_expected])
+            else:
+                expected = type(raw_expected)([t.to(torch.float64) if isinstance(t, torch.Tensor) else t for t in raw_expected]) # Default to float64 for CPU comparison if no dtype specified
+        else:
+            # If it's a single tensor
+            if dtype is not None:
+                expected = raw_expected.to(dtype)
+            else:
+                expected = raw_expected.to(torch.float64) # Default to float64 for CPU comparison if no dtype specified
+
+        # Now, ensure args are on CUDA with the correct dtype for compilation
+        # (Assuming args are already on CUDA in the test calls, and we just need to ensure correct dtype)
+        # However, the run_and_get_code expects *args directly, which are already on CUDA from the test definition
+        # So, no change needed for args here, but it's good to be aware of the data flow.
+
+        fn_compiled = torch.compile(fn, fullgraph=True)
+        result, (source_code,) = run_and_get_code(fn_compiled, *args) # Use the original args which are on CUDA
+
+        # For comparison, ensure result is also a tuple/list if expected is
+        if isinstance(expected, (tuple, list)):
+            # Convert result to the same type as expected (tuple or list)
+            # This is important for self.assertEqual to work correctly
+            if isinstance(result, torch.Tensor): # If compile somehow unwrapped it
+                result = (result,)
+            elif not isinstance(result, type(expected)): # If type is different (e.g., list vs tuple)
+                 result = type(expected)(result)
+
+            # Ensure all tensors in result are also converted to the same dtype for comparison
+            if dtype is not None:
+                result = type(result)([t.to(dtype) if isinstance(t, torch.Tensor) else t for t in result])
+            else:
+                result = type(result)([t.to(torch.float64) if isinstance(t, torch.Tensor) else t for t in result])
+        else:
+            if dtype is not None and isinstance(result, torch.Tensor):
+                result = result.to(dtype)
+            elif isinstance(result, torch.Tensor):
+                result = result.to(torch.float64)
+
+
         self.assertEqual(result, expected)
         if "@triton_heuristics.fixed_config" in source_code:
             self.assertIn("cooperative_reduction_grid", source_code)
@@ -98,7 +151,7 @@ class CooperativeReductionTests(TestCase):
 
         reduction_fn = getattr(torch, name)
         args = [torch.randn(1, 1024**2, device="cuda", dtype=dtype) for _ in range(2)]
-        self.run_and_check(fn, args)
+        self.run_and_check(fn, args, dtype)
 
     def test_bool_reduction_fns(self):
         def fn(x, y):
