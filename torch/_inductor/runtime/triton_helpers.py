@@ -719,7 +719,7 @@ def if_mask(mask: Any, val, *, _builder: object = None) -> tl.constexpr:
     return val
 
 
-HAS_NEW_TMA_API = hasattr(triton.language, "make_tensor_descriptor")
+HAS_NEW_TMA_API = hasattr(tl, "make_tensor_descriptor")
 
 
 """
