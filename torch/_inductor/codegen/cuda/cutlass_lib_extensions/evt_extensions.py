@@ -63,7 +63,7 @@ if try_import_cutlass():
     def create_example_tensors(
         var_name_to_buffer_name: dict[str, str],
         name_to_buffer: dict[str, Buffer],
-        size_hint_fn: Callable[[Expr | int], int],
+        size_hint_fn: Callable[[Union[Expr, int]], int],
     ) -> dict[str, CutlassTensor]:
         def cutlass_tensor_from_buffer(buffer: Buffer) -> CutlassTensor:
             shape = buffer.get_layout().size
@@ -101,7 +101,7 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
         tile_description: TileDescription,
         epilogue_schedule: EpilogueScheduleType,
         name_to_buffer: dict[str, Buffer],
-        size_hint_fn: Callable[[Expr | int], int],
+        size_hint_fn: Callable[[Union[Expr, int]], int],
         **kwargs: dict[str, Any],
     ) -> tuple[str, str, str]:
         cuda_arch = int(cuda_env.get_cuda_arch())  # type: ignore[arg-type]
@@ -145,7 +145,7 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
     def _render_argument_type(
         epilogue_functor: EpilogueFunctor,
         name_to_buffer: dict[str, Buffer],
-        size_hint_fn: Callable[[Expr | int], int],
+        size_hint_fn: Callable[[Union[Expr, int]], int],
     ) -> str:
         epilogue_thread_type = epilogue_functor.epilogue_thread_type
 
@@ -200,7 +200,7 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
         return buffer.getvalue()
 
     def _get_arg_from_node(
-        arg_ty: type, node: Buffer, size_hint_fn: Callable[[Expr | int], int]
+        arg_ty: type, node: Buffer, size_hint_fn: Callable[[Union[Expr, int]], int]
     ) -> str:
         from ..cuda_template import CUTLASSTemplate
 
