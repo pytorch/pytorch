@@ -103,7 +103,7 @@ bundle_triton_into_fx_graph_cache: Optional[bool] = (
 )
 
 non_blocking_remote_cache_write: bool = Config(
-    justknob="pytorch/remote_cache:enable_non_blocking_remote_cache_write",
+    justknob="pytorch/remote_cache:enable_non_blocking_remote_cache_write_v2",
     env_name_force="TORCHINDUCTOR_NON_BLOCKING_REMOTE_CACHE_WRITE",
     default=True,
 )
@@ -395,6 +395,9 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
+
+# disable decomposek autotune choice for gemm
+disable_decompose_k = os.environ.get("TORCHINDUCTOR_DISABLE_DECOMPOSE_K") == "1"
 
 # Modifies the number of autotuning choices displayed, set to None for all
 autotune_num_choices_displayed: Optional[int] = 10
