@@ -402,9 +402,111 @@ Probability distributions - torch.distributions
 `Constraints`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-.. automodule:: torch.distributions.constraints
+.. currentmodule:: torch.distributions.constraints
+
+Classes
+"""""""
+
+.. autoclass:: Constraint
     :members:
-    :member-order: bysource
+    :show-inheritance:
+
+Value Constraints
+'''''''''''''''''
+
+.. autoclass:: Boolean
+.. autoclass:: Real
+
+Interval Constraints
+''''''''''''''''''''
+
+.. autoclass:: Interval
+.. autoclass:: UnitInterval
+.. autoclass:: HalfOpenInterval
+.. autoclass:: GreaterThan
+.. autoclass:: GreaterThanEq
+.. autoclass:: LessThan
+.. autoclass:: Positive
+.. autoclass:: NonNegative
+.. autoclass:: Negative
+
+.. autoclass:: IntegerInterval
+.. autoclass:: IntegerGreaterThan
+.. autoclass:: IntegerLessThan
+.. autoclass:: PositiveInteger
+.. autoclass:: NonNegativeInteger
+
+Generic Constraints
+'''''''''''''''''''
+
+.. autoclass:: Independent
+.. autoclass:: MixtureSameFamilyConstraint
+.. autoclass:: Cat
+.. autoclass:: Stack
+
+Vector Constraints
+''''''''''''''''''
+
+.. autoclass:: RealVector
+.. autoclass:: Simplex
+.. autoclass:: OneHot
+.. autoclass:: Multinomial
+
+Matrix Constraints
+''''''''''''''''''
+
+.. autoclass:: Square
+.. autoclass:: Symmetric
+.. autoclass:: PositiveDefinite
+.. autoclass:: PositiveSemidefinite
+.. autoclass:: CorrCholesky
+.. autoclass:: LowerCholesky
+.. autoclass:: LowerTriangular
+
+Canonical Instances
+"""""""""""""""""""
+
+For parameter-free constraints, the following canonical instances are available:
+
+.. autodata:: boolean
+.. autodata:: corr_cholesky
+.. autodata:: lower_cholesky
+.. autodata:: lower_triangular
+.. autodata:: nonnegative
+.. autodata:: nonnegative_integer
+.. autodata:: one_hot
+.. autodata:: positive
+.. autodata:: positive_definite
+.. autodata:: positive_integer
+.. autodata:: positive_semidefinite
+.. autodata:: real
+.. autodata:: real_vector
+.. autodata:: simplex
+.. autodata:: square
+.. autodata:: symmetric
+.. autodata:: unit_interval
+
+Aliases
+"""""""
+
+.. autoattribute:: torch.distributions.constraints.cat
+.. autoattribute:: torch.distributions.constraints.independent
+.. autoattribute:: torch.distributions.constraints.integer_interval
+.. autoattribute:: torch.distributions.constraints.mixture_same_family
+.. autoattribute:: torch.distributions.constraints.stack
+.. autoattribute:: torch.distributions.constraints.interval
+.. autoattribute:: torch.distributions.constraints.half_open_interval
+.. autoattribute:: torch.distributions.constraints.greater_than
+.. autoattribute:: torch.distributions.constraints.greater_than_eq
+.. autoattribute:: torch.distributions.constraints.less_than
+.. autoattribute:: torch.distributions.constraints.multinomial
+
+Dependent Constraints
+"""""""""""""""""""""
+
+.. autodata:: dependent
+.. autofunction:: is_dependent
+.. autodata:: dependent_property
 
 `Constraint Registry`
 ~~~~~~~~~~~~~~~~~~~~~~~
