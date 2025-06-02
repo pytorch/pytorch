@@ -1563,7 +1563,7 @@ class TritonTemplate(KernelTemplate):
             num_buffers_warp_spec,
             layout,
             kwargs,
-            generate_with_caching,
+            generate_with_caching and self._cache_codegen_enabled_for_template,
         )
 
         # May happen as result of dev by 0.
