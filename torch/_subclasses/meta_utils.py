@@ -1210,7 +1210,8 @@ class MetaConverter(Generic[_TensorT]):
                         symbolic_context is not None
                         and isinstance(symbolic_context, StatelessSymbolicContext)
                         and all(
-                            x is DimDynamic.STATIC for x in symbolic_context.dynamic_sizes
+                            x is DimDynamic.STATIC
+                            for x in symbolic_context.dynamic_sizes
                         )
                     )
                     # Can't just rely on shape env being None - dynamo always initializes it
@@ -1227,7 +1228,9 @@ class MetaConverter(Generic[_TensorT]):
                     sym_source = EphemeralSource("symint_visitor_fn")
 
                     symbol = shape_env.create_symbol(s, sym_source, positive=None)
-                    return shape_env.create_symintnode(symbol, hint=s, source=sym_source)
+                    return shape_env.create_symintnode(
+                        symbol, hint=s, source=sym_source
+                    )
 
                 real_to_fake_mapping = {}
                 if t.is_traceable_wrapper_subclass:
@@ -1300,8 +1303,8 @@ class MetaConverter(Generic[_TensorT]):
                 # NB: we do NOT suppress guards here, we need to remove ephemeral
                 # sources
                 fake_t = t.view_func.apply(
-                        t, base, symint_visitor_fn, tensor_visitor_fn
-                    )
+                    t, base, symint_visitor_fn, tensor_visitor_fn
+                )
 
                 # Ensure the output has symbolic shapes according to the outer symbolic context.
                 # These checks should simplify out any symbols created for closed-over view func

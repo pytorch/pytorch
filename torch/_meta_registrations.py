@@ -206,13 +206,15 @@ def linalg_cross(self, other, *, dim=-1):
 def _compute_stride(old_shape, old_stride, new_shape, size_oblivious=True):
     from torch.fx.experimental.symbolic_shapes import sym_eq
 
+    if not size_oblivious:
+        breakpoint()
     guard_or_false = (
-        id
+        lambda x: x
         if not size_oblivious
         else torch.fx.experimental.symbolic_shapes.guard_or_false
     )
     guard_or_true = (
-        id
+        lambda x: x
         if not size_oblivious
         else torch.fx.experimental.symbolic_shapes.guard_or_true
     )
@@ -273,7 +275,11 @@ def _compute_stride(old_shape, old_stride, new_shape, size_oblivious=True):
 
 @register_meta(aten.view.default)
 def _view_meta(a, *shape, size_oblivious_enabled=True):
-    from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+    from torch.fx.experimental.symbolic_shapes import (
+        has_hint,
+        statically_known_true,
+        sym_eq,
+    )
 
     # Creates a valid shape
     shape = utils.extract_shape_from_varargs(shape, validate=False)
@@ -304,13 +310,6 @@ def _view_meta(a, *shape, size_oblivious_enabled=True):
         else:
             return _a
 
-    # Creates a valid shape
-    shape = utils.extract_shape_from_varargs(shape, validate=False)
-
-    # Reshape may be given a shape with a -1 length
-    # This indicates that the dimension's length should be inferred
-    shape = utils.infer_size(shape, a.numel())
-
     shape_numel = reduce(operator.mul, shape, 1)
 
     torch._check(
@@ -328,13 +327,21 @@ def _view_meta(a, *shape, size_oblivious_enabled=True):
     new_strides = _compute_stride(
         a.size(), a.stride(), shape, size_oblivious=size_oblivious_enabled
     )
-    
+
     if new_strides is not None:
         return a.as_strided(shape, new_strides)
 
-    # If we fail to do size oblivious view, and backed_size_oblivious was on.
-    # then we do redo everything by looking at hints and guarding instead of failing.
-    if torch.fx.experimental._config.backed_size_oblivious:
+    # If we fail to do size oblivious view, and backed_size_oblivious was on,
+    # then we redo everything by looking at hints and guarding instead of failing.
+    # Also if the expression has unbacked symbols, then we run again with size_oblivious_enabled=False
+    # to throw a data dependent error.
+    has_unbacked = any(not has_hint(s) for s in a.shape) or any(
+        not has_hint(s) for s in shape
+    )
+
+    if size_oblivious_enabled and (
+        torch.fx.experimental._config.backed_size_oblivious or has_unbacked
+    ):
         return _view_meta(a, shape, size_oblivious_enabled=False)
 
     msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
