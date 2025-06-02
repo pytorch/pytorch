@@ -108,6 +108,9 @@ Tensor getTensorView(const Tensor& t, MPSShape* shape);
 MPSShape* getMPSShape(const TensorBase& t, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
 MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
 
+// WARNING: This materializes the input if it is COW, invalidating any existing
+// pointers to the tensor's data. Make sure not to depend on the tensor's data
+// pointer staying constant if you call this function.
 static inline id<MTLBuffer> getMTLBufferStorage(const TensorBase& tensor) {
   return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().mutable_data());
 }
@@ -603,6 +606,10 @@ static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
   [encoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
 }
 
+// WARNING: If any tensors in the iterator are COW and they are materialized
+// after this function call, the output of this function becomes invalid.
+// Always either materialize beforehand by calling `mutable_data_ptr` or avoid
+// materializing with `const_data_ptr`.
 id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEncoder,
                                         const TensorIteratorBase& iter,
                                         bool use_64bit_index = false);
