@@ -5276,9 +5276,9 @@ void install_storage_overlapping_guard(
       /* overlapping= */ false);
 }
 
-char flushCacheByEviction() {
-  constexpr size_t kEvictSize = 32 * 1024 * 1024;
-  std::vector<char> buffer(kEvictSize, 1);
+char flush_cache_by_eviction() {
+  constexpr size_t evict_size = 32 * 1024 * 1024;
+  std::vector<char> buffer(evict_size, 1);
 
   volatile char sink = 0;
   for (size_t i = 0; i < buffer.size(); i += 64) {
@@ -5302,7 +5302,7 @@ double profile_guard_manager(
   for (int i = 0; i < n_iters; i++) {
     // Flush the caches to accurately measure the overhead
     // store into a volatile to prevent optimization
-    volatile char dummy = flushCacheByEviction();
+    volatile char dummy = flush_cache_by_eviction();
     (void)dummy;
 
     auto start = std::chrono::high_resolution_clock::now();
