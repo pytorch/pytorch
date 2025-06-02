@@ -450,6 +450,7 @@ def fn(accum, bias):
             MockTileDescription(),
             EpilogueScheduleType.ScheduleAuto,
             _create_mock_buffer_name_map(EXAMPLE_TENSORS),
+            lambda x: x,  # static shapes
         )
         self.assertExpectedInline(
             code,
