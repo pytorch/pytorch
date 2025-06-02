@@ -739,6 +739,7 @@ class LnStructured(BasePruningMethod):
             # replace a None at position=dim with indices
             # e.g.: slc = [None, None, [0, 2, 3]] if dim=2 & indices=[0,2,3]
             slc[dim] = indices
+            slc = tuple(slc)
             # use slc to slice mask and replace all its entries with 1s
             # e.g.: mask[:, :, [0, 2, 3]] = 1
             mask[slc] = 1
