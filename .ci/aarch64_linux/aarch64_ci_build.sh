@@ -27,6 +27,7 @@ if [ "$DESIRED_CUDA" = "cpu" ]; then
     USE_PRIORITIZED_TEXT_FOR_LD=1 python /pytorch/.ci/aarch64_linux/aarch64_wheel_ci_build.py --enable-mkldnn
 else
     echo "BASE_CUDA_VERSION is set to: $DESIRED_CUDA"
+    export USE_SYSTEM_NCCL=1
     #USE_PRIORITIZED_TEXT_FOR_LD for enable linker script optimization https://github.com/pytorch/pytorch/pull/121975/files
     USE_PRIORITIZED_TEXT_FOR_LD=1 python /pytorch/.ci/aarch64_linux/aarch64_wheel_ci_build.py --enable-mkldnn --enable-cuda
 fi
