@@ -136,15 +136,11 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self._assert_dtensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
             model(inp)
-            non_root_params = list(model[0].in_proj.parameters()) + list(
-                model[0].out_proj.parameters()
-            )
-            root_params = list(set(model.parameters()) - set(non_root_params))
+            params = list(model.parameters())
             if reshard_after_forward is False:
-                self._assert_tensor_params(non_root_params)
+                self._assert_tensor_params(params)
             else:
-                self._assert_dtensor_params(non_root_params)
-            self._assert_tensor_params(root_params)
+                self._assert_dtensor_params(params)
             self._assert_same_params(model.parameters(), ref_model.parameters())
             for module in model.modules():
                 if isinstance(module, FSDPModule):
@@ -529,39 +525,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         self.assertEqual(ref_root_loss, root_loss)
         self.assertEqual(ref_nonroot_loss, nonroot_loss)
         self.assertEqual(ref_model(inp).sum(), model(inp).sum())
-
-    @skip_if_lt_x_gpu(4)
-    def test_root_reshard_after_forward(self):
-        self.run_subtests(
-            {
-                "reshard_after_forward": [True, False, 2],
-            },
-            self._test_root_reshard_after_forward,
-        )
-
-    def _test_root_reshard_after_forward(self, reshard_after_forward: Union[bool, int]):
-        torch.manual_seed(42)
-        lin_dim = 32
-        model = MLP(lin_dim, torch.device("cpu"))
-        fully_shard(model.in_proj, reshard_after_forward=reshard_after_forward)
-        fully_shard(model, reshard_after_forward=reshard_after_forward)
-        for param in model.parameters():
-            self.assertTrue(isinstance(param, DTensor))
-        inp = torch.randn((8, lin_dim), device=torch.device("cuda"))
-        loss = model(inp).sum()
-        for param in model.parameters():
-            if reshard_after_forward is True:
-                self.assertTrue(isinstance(param, DTensor))
-            elif reshard_after_forward is False:
-                self.assertFalse(isinstance(param, DTensor))
-            else:
-                self.assertTrue(isinstance(param, DTensor))
-                self.assertEqual(param.device_mesh.ndim, 2)
-                placements = param.placements
-                self.assertEqual(len(placements), 2)
-                self.assertEqual(placements[0], Replicate())
-                self.assertEqual(placements[1], Shard(0))
-        loss.backward()
 
     @skip_if_lt_x_gpu(2)
     def test_multi_forward_module(self):
@@ -1107,9 +1070,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
             # the first microbatch's forward
             expected_all_gather_count = num_mlps + 1
             if reshard_after_forward is not False:  # `True` or `2`
-                # Add the number of MLPs without the +1 for the backward
-                # all-gathers since the root does not reshard after forward
-                expected_all_gather_count += num_mlps
+                expected_all_gather_count += num_mlps + 1
                 # Multiply by the number of microbatches since these
                 # all-gathers run every microbatch
                 expected_all_gather_count *= num_microbatches
