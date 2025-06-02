@@ -520,6 +520,7 @@ class TestFFT(TestCase):
             lastdim_size = input.size(lastdim) // 2 + 1
             idx = [slice(None)] * input_ndim
             idx[lastdim] = slice(0, lastdim_size)
+            idx = tuple(idx)
             input = input[idx]
 
             s = [shape[dim] for dim in actual_dims]
