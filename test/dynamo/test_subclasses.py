@@ -1113,9 +1113,11 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                 elif isinstance(result, (tuple, list)):
                     # Preserve the original type (tuple or list)
                     wrapped = [
-                        cls(x, quant_type=quant_type)
-                        if isinstance(x, torch.Tensor)
-                        else x
+                        (
+                            cls(x, quant_type=quant_type)
+                            if isinstance(x, torch.Tensor)
+                            else x
+                        )
                         for x in result
                     ]
                     return type(result)(wrapped)
@@ -2535,9 +2537,9 @@ class GraphModule(torch.nn.Module):
         clone_1: "f32[3, s16]" = torch.ops.aten.clone.default(primals_3);  primals_3 = None
 
         view: "f32[3*s16]" = torch.ops.aten.view.default(clone, [-1])
-        sym_numel_default: "Sym(3*s16)" = torch.ops.aten.sym_numel.default(clone)
+        sym_size_int_2: "Sym(3*s16)" = torch.ops.aten.sym_size.int(view, 0)
         view_1: "f32[3*s16]" = torch.ops.aten.view.default(clone_1, [-1])
-        return (clone, view, view_1, sym_numel_default, clone_1, primals_5)
+        return (clone, view, view_1, sym_size_int_2, clone_1, primals_5)
 """,  # noqa: B950
         )
 
@@ -2591,9 +2593,9 @@ class GraphModule(torch.nn.Module):
         clone_1: "f32[3, s16]" = torch.ops.aten.clone.default(primals_3);  primals_3 = None
 
         view: "f32[3*s16]" = torch.ops.aten.view.default(clone, [-1])
-        sym_numel_default: "Sym(3*s16)" = torch.ops.aten.sym_numel.default(clone)
+        sym_size_int_2: "Sym(3*s16)" = torch.ops.aten.sym_size.int(view, 0)
         view_1: "f32[3*s16]" = torch.ops.aten.view.default(clone_1, [-1])
-        return (clone, view, view_1, sym_numel_default, clone_1, primals_5)
+        return (clone, view, view_1, sym_size_int_2, clone_1, primals_5)
 """,  # noqa: B950
         )
 
@@ -3225,6 +3227,25 @@ class GraphModule(torch.nn.Module):
         values = torch.randn(9, 5, requires_grad=True)
         lengths = torch.tensor([2, 4, 3])
         self._validate_compile(fn, arg_fn=lambda: (values, lengths))
+
+    def test_in_graph_construction_from_input_6(self):
+        # Construct with symbolic int.
+        def fn(values, offsets, max_seqlen):
+            t = torch.nested.nested_tensor_from_jagged(
+                values, offsets, max_seqlen=max_seqlen
+            )
+            return torch.nested.nested_tensor_from_jagged(
+                values, t.offsets(), max_seqlen=t._maybe_max_seqlen
+            )
+
+        opt_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        values = torch.randn(10, 5)
+        offsets = torch.tensor([0, 2, 4, 7, 10])
+        max_seqlen = 5
+
+        ref = fn(values, offsets, max_seqlen)
+        res = opt_fn(values, offsets, max_seqlen)
+        self.assertEqualIgnoringNestedInts(ref, res)
 
     #
     # Case 2: in-graph construction where offsets are graph intermediates

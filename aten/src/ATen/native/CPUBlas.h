@@ -29,6 +29,18 @@ using gemm_fn = void(*)(
 
 DECLARE_DISPATCH(gemm_fn, gemm_stub)
 
+using gemm_no_downcast_fn = void(*)(
+    at::ScalarType type,
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
+    const Scalar& alpha,
+    const void *a, int64_t lda,
+    const void *b, int64_t ldb,
+    const Scalar& beta,
+    void *c, int64_t ldc);
+
+DECLARE_DISPATCH(gemm_no_downcast_fn, gemm_no_downcast_stub)
+
 template <typename scalar_t>
 void gemm(
     TransposeType transa, TransposeType transb,

@@ -472,7 +472,7 @@ class MetalKernel(SIMDKernel):
     sexpr = MetalExprPrinter().doprint
     kexpr = sexpr
     headers: OrderedSet[str] = OrderedSet(["utils"])
-    multistage_reduction_entry: Optional[IterationRangesEntry] = None
+    multistage_reduction_entry: list[IterationRangesEntry] = []
 
     def __init__(
         self,
@@ -719,13 +719,13 @@ class MetalKernel(SIMDKernel):
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
         index_expr = self.rename_indexing(entry.expr)
         index_str = self.sexpr(index_expr)  # type: ignore[misc]
-        if entry.is_reduction and entry.root.numel > self.max_threadgroup_size:
-            self.multistage_reduction_entry = entry
-        if not entry.is_reduction or self.multistage_reduction_entry is None:
+
+        if not entry.is_reduction or entry.root.numel < self.max_threadgroup_size:
             self.indexing_code.writeline(
                 f"{self.index_dtype} {entry.name} = {index_str};"
             )
             return
+        self.multistage_reduction_entry.append(entry)
         # When reducing the thensor whose size exceeds max threadgroup size
         # loop over extra indices per reduction thread and perform part of the operation
         # using values in the shared memory
@@ -757,12 +757,12 @@ class MetalKernel(SIMDKernel):
             with self.body.indent():
                 self.body.splice(self.loads)
                 self.body.splice(self.compute)
-            self.body.writeline("}")
+            self.body.writeline("}" * len(self.multistage_reduction_entry))
             # Invalidate variables instantiated inside loop
             self.cse.invalidate(OrderedSet(self.cse.reduction_cache.values()))
             # And loop codegen
-            self.multistage_reduction_entry.cache_clear()
-            self.multistage_reduction_entry = None
+            while self.multistage_reduction_entry:
+                self.multistage_reduction_entry.pop().cache_clear()
         else:
             self.body.splice(self.loads)
             self.body.splice(self.compute)

@@ -14,7 +14,8 @@
 PyObject *THPException_FatalError, *THPException_LinAlgError,
     *THPException_OutOfMemoryError, *THPException_DistError,
     *THPException_DistBackendError, *THPException_DistNetworkError,
-    *THPException_DistStoreError, *THPException_DistQueueEmptyError;
+    *THPException_DistStoreError, *THPException_DistQueueEmptyError,
+    *THPException_AcceleratorError;
 
 #define ASSERT_TRUE(cond) \
   if (!(cond))            \
@@ -124,6 +125,18 @@ could not be completed because the input matrix is singular.",
       PyModule_AddObject(
           module, "_DistQueueEmptyError", THPException_DistQueueEmptyError) ==
       0);
+
+  // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
+  ASSERT_TRUE(
+      THPException_AcceleratorError = PyErr_NewExceptionWithDoc(
+          "torch.AcceleratorError",
+          "Exception raised while executing on device",
+          PyExc_RuntimeError,
+          nullptr));
+  type = (PyTypeObject*)THPException_AcceleratorError;
+  ASSERT_TRUE(
+      PyModule_AddObject(
+          module, "AcceleratorError", THPException_AcceleratorError) == 0);
 
   return true;
 }
@@ -341,4 +354,18 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
   }
 }
 
+namespace detail {
+PyObject* _new_accelerator_error_object(const c10::AcceleratorError& e) {
+  auto msg = torch::get_cpp_stacktraces_enabled() ? e.what()
+                                                  : e.what_without_backtrace();
+
+  auto py_msg = PyUnicode_FromString(msg);
+  auto rc = PyObject_CallOneArg(THPException_AcceleratorError, py_msg);
+  auto error_code = PyInt_FromLong(e.get_error_code());
+  PyObject_SetAttrString(rc, "error_code", error_code);
+  Py_XDECREF(py_msg);
+  Py_XDECREF(error_code);
+  return rc;
+}
+} // namespace detail
 } // namespace torch

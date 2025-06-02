@@ -232,6 +232,13 @@ class AOTInductorModelContainer {
     return models_[0]->constant_from_folded(static_cast<int64_t>(idx));
   }
 
+  size_t constant_data_size(size_t idx) const {
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
+    return models_[0]->constant_data_size(static_cast<int64_t>(idx));
+  }
+
   // retrieve type of constants_info_[idx]
   int32_t constant_type(size_t idx) const {
     if (this->num_models() == 0) {

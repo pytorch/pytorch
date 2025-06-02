@@ -120,6 +120,23 @@ def ok_changed_file(file: str) -> bool:
 def check_changed_files(sha: str) -> bool:
     # Return true if all the changed files are in the list of allowed files to
     # be changed to reuse the old whl
+
+    # Removing any files is not allowed since rysnc will not remove files
+    removed_files = (
+        subprocess.check_output(
+            ["git", "diff", "--name-only", sha, "HEAD", "--diff-filter=D"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        .strip()
+        .split()
+    )
+    if removed_files:
+        print(
+            f"Removed files between {sha} and HEAD: {removed_files}, cannot reuse old whl"
+        )
+        return False
+
     changed_files = (
         subprocess.check_output(
             ["git", "diff", "--name-only", sha, "HEAD"],
@@ -190,6 +207,10 @@ def unzip_artifact_and_replace_files() -> None:
         subprocess.check_output(
             ["unzip", "-o", new_path, "-d", f"artifacts/dist/{new_path.stem}"],
         )
+
+        # Remove the old wheel (which is now a zip file)
+        os.remove(new_path)
+
         # Copy python files into the artifact
         subprocess.check_output(
             ["rsync", "-avz", "torch", f"artifacts/dist/{new_path.stem}"],

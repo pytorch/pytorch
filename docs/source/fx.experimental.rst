@@ -31,6 +31,7 @@ torch.fx.experimental.symbolic_shapes
     PropagateUnbackedSymInts
     DivideByKey
     InnerTensorKey
+    Specialization
 
     hint_int
     is_concrete_int

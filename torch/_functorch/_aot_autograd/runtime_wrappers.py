@@ -883,42 +883,26 @@ class AOTDedupeWrapper(CompilerWrapper):
             """
             )
 
-        # Strategy 2: Duplicate specialize.
+        # Strategy 2: Duplicate specialization
         #
-        # In Haskell types, suppose you have:
+        # When we have duplicate arguments in a function call, we need to handle them specially.
+        # For example, if we have a function call f(a, b, a, c), we need to:
         #
-        #   add_dupe_args :: DedupedArgs -> Args
-        #   remove_dupe_args :: Args -> DedupedArgs
+        # 1. Remove duplicates to get a deduplicated list [a, b, c]
+        # 2. Compile our function to work with this deduplicated list
+        # 3. At runtime, convert incoming arguments with duplicates to the deduplicated form
+        # 4. Pass the deduplicated arguments to our compiled function
         #
-        #   compiler_fn
-        #       :: (DedupedArgs -> R) -> DedupedArgs -> AOTConfig -> (DedupedArgs -> R)
-        #   deped_compiler_fn
-        #       :: (Args -> R) -> Args -> AOTConfig -> (Args -> R)
+        # To do this, we need two helper functions:
         #
-        # Then the code below can be written in point-free style as:
+        # - remove_dupe_args: Converts [a, b, a, c] -> [a, b, c]
+        # - add_dupe_args: Converts [a, b, c] -> [a, b, a, c]
         #
-        #   deduped_compiler_fn f a c =
-        #       compiler_fn (f . add_dupe_args) (remove_dupe_args a) c . remove_dupe_args
+        # For our example [a, b, a, c], we track:
         #
-        # Suppose you have:
-        #
-        #   [a, b, a, c]
-        #
-        # We want:
-        #
-        #   remove_dupe_args([a, b, a, c]) == [a, b, c]
-        #   add_dupe_args([a, b, c]) == [a, b, a, c]
-        #
-        # This is done via (respectively):
-        #
-        #   seen_args = {a: 0, b: 1, c: 2}
-        #   enumerate(add_dupe_map) = [  # how to get args from the deduped list
-        #       (0, 0),
-        #       (1, 1),
-        #       (2, 0),
-        #       (3, 2),
-        #   ]
-        #   keep_arg_mask = [True, True, False, True]
+        # - seen_args = {a: 0, b: 1, c: 2} (maps each unique arg to its first position)
+        # - add_dupe_map = [0, 1, 0, 2] (tells us how to reconstruct the original list)
+        # - keep_arg_mask = [True, True, False, True] (tells us which args to keep when deduplicating)
 
         seen_args: dict[Tensor, int] = {}
         # Implicitly map duped arg position (list index) to de-duped arg position

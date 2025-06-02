@@ -80,7 +80,6 @@ def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) ->
 
 @dataclass(frozen=True, kw_only=True)
 class ExperimentConfig:
-    autotune_fallback_to_aten: bool = False
     max_autotune: bool = True
     coordinate_descent_tuning: bool = True
     max_autotune_gemm_backends: str = "ATEN"
@@ -91,7 +90,6 @@ class ExperimentConfig:
 
     def to_options(self) -> dict[str, Any]:
         return {
-            "autotune_fallback_to_aten": self.autotune_fallback_to_aten,
             "max_autotune": self.max_autotune,
             "coordinate_descent_tuning": self.coordinate_descent_tuning,
             "max_autotune_gemm_backends": self.max_autotune_gemm_backends,

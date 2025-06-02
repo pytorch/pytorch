@@ -9,6 +9,8 @@ from abc import ABC, abstractmethod
 from typing import Any, Optional, Union
 
 import torch
+import torch.utils._pytree as pytree
+from torch._inductor.codegen.cuda.cutlass_cache import maybe_fetch_ops
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.select_algorithm import create_inputs_key
 from torch._inductor.utils import clear_on_fresh_inductor_cache
@@ -924,26 +926,31 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         """
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.gemm_operation as cutlass_gemm_op
-        import cutlass_library.library as cutlass_lib
 
         if self.cache_key in self.filtered_ops_cache:
             log.debug("Using cached ops for %s", self.cache_key)
             return self.filtered_ops_cache[self.cache_key]
 
-        # if changed, need to also change CUTLASS_OPERATION_KIND
-        ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
+        maybe_ops = maybe_fetch_ops()
+        if maybe_ops is None:
+            log.debug("Cannot fetch ops from cache, generating ops from scratch")
+            full_ops = cutlass_utils.gen_ops()
+            ops = pytree.tree_flatten(full_ops)[0]
+        else:
+            log.debug("Using cached ops from cache")
+            ops = maybe_ops
+
         res: dict[str, cutlass_gemm_op.GemmOperation] = {}
         start_time = time.time()
-        for op_dict in ops.values():
-            for op_list in op_dict.values():
-                for op in op_list:
-                    assert isinstance(op, cutlass_gemm_op.GemmOperation)
-                    filter_res = self.filter_op(op)
-                    if (
-                        filter_res is not None
-                        and res.get(filter_res.configuration_name(), None) is None
-                    ):
-                        res[filter_res.configuration_name()] = filter_res
+        for op in ops:
+            # if changed, need to also change CUTLASS_OPERATION_KIND
+            assert isinstance(op, cutlass_gemm_op.GemmOperation)
+            filter_res = self.filter_op(op)
+            if (
+                filter_res is not None
+                and res.get(filter_res.configuration_name(), None) is None
+            ):
+                res[filter_res.configuration_name()] = filter_res
         log.info(
             "Got cutlass configs: total number of ops: %d. Filtering took %.2f seconds",
             len(res),

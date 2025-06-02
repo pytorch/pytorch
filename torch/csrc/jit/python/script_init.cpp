@@ -272,7 +272,7 @@ static void checkMutableFunctionDefault(
         << "Mutable default parameters are not supported because Python binds them to the function"
         << " and they persist across function calls.\n As a workaround, make the default None and instantiate"
         << " the default parameter within the body of the function. Found "
-        << def_arg.get_type() << " on parameter " << arg.name());
+        << py::type::handle_of(def_arg) << " on parameter " << arg.name());
   }
 }
 

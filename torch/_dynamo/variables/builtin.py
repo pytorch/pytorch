@@ -1205,20 +1205,17 @@ class BuiltinVariable(VariableTracker):
                 and args[1].has_unpack_var_sequence(tx)
                 and not kwargs
             ):
-                init_args = args[1].unpack_var_sequence(tx)
-                tuple_vt = variables.TupleVariable(
-                    init_args, mutation_type=ValueMutationNew()
-                )
                 if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
-                    return tuple_vt
+                    init_args = args[1].unpack_var_sequence(tx)
+                    return variables.TupleVariable(
+                        init_args, mutation_type=ValueMutationNew()
+                    )
 
-                result = tx.output.side_effects.track_new_user_defined_object(
+                return tx.output.side_effects.track_new_user_defined_object(
                     self,
                     args[0],
                     args[1:],
                 )
-                result.set_underlying_tuple_vt(tuple_vt)
-                return result
 
             if self.fn is list:
                 list_vt = ListVariable([], mutation_type=ValueMutationNew())
@@ -1542,7 +1539,12 @@ class BuiltinVariable(VariableTracker):
                     ):
                         tx.output.guard_on_key_order.add(obj.source)
 
-                    install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+                    if not isinstance(obj, variables.UnspecializedNNModuleVariable):
+                        # Prevent calling __len__ method for guards, the tracing
+                        # of __iter__ will insert the right guards later.
+                        install_guard(
+                            obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH)
+                        )
 
             return cls(
                 list(obj.unpack_var_sequence(tx)),

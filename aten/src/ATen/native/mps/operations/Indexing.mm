@@ -34,6 +34,7 @@
 #include <ATen/ops/flip_native.h>
 #include <ATen/ops/index.h>
 #include <ATen/ops/index_add_native.h>
+#include <ATen/ops/index_copy_native.h>
 #include <ATen/ops/index_fill_native.h>
 #include <ATen/ops/index_put.h>
 #include <ATen/ops/index_select_native.h>
@@ -251,6 +252,78 @@ static void index_put_kernel_mps(TensorIterator& iter,
   }
 }
 } // namespace mps
+
+TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
+                                    int64_t dim,
+                                    const Tensor& index,
+                                    const Tensor& source,
+                                    const Tensor& result) {
+  using namespace mps;
+
+  // special-case for 0-dim tensors
+  if (self.dim() == 0) {
+    TORCH_CHECK(index.numel() == 1,
+                "index_copy_(): attempting to index a 0-dim tensor with an index tensor of size ",
+                index.numel());
+    int64_t idx = index.item<int64_t>();
+    TORCH_CHECK(idx == 0, "index_copy_(): the only valid index for a 0-dim tensor is 0, but got ", idx);
+    result.copy_(source);
+    return;
+  }
+
+  dim = maybe_wrap_dim(dim, self.dim());
+
+  // early return for empty index
+  if (index.numel() == 0) {
+    result.copy_(self);
+    return;
+  }
+
+  for (int64_t i = 0; i < self.dim(); i++) {
+    if (i != dim) {
+      TORCH_CHECK(self.size(i) == source.size(i),
+                  "index_copy_(): self and source must have same size at dimension ",
+                  i,
+                  "; self has size ",
+                  self.size(i),
+                  ", source has size ",
+                  source.size(i));
+    }
+  }
+
+  TORCH_CHECK(source.size(dim) == index.numel(),
+              "index_copy_(): Number of indices (",
+              index.numel(),
+              ") should be equal to source.size(dim) (",
+              source.size(dim),
+              ")");
+
+  auto stream = getCurrentMPSStream();
+  auto device = MPSDevice::getInstance()->device();
+
+  const bool is_dense =
+      self.is_contiguous() && source.is_contiguous() && result.is_contiguous() && index.is_contiguous();
+
+  auto dense_or_strided = is_dense ? "dense" : "strided";
+  auto long_or_int = (index.scalar_type() == ScalarType::Long) ? "long" : "int";
+  auto indexCopyPSO = lib.getPipelineStateForFunc(
+      fmt::format("index_copy_{}_{}_{}", dense_or_strided, scalarToMetalTypeString(result), long_or_int));
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      uint32_t dim_arg = static_cast<uint32_t>(dim);
+      uint32_t ndim = self.dim();
+      uint32_t indices_numel = index.numel();
+      [computeEncoder setComputePipelineState:indexCopyPSO];
+      mtl_setArgs(computeEncoder, result, self, source, index, dim_arg, self.sizes(), ndim, indices_numel);
+      if (!is_dense) {
+        mtl_setArgs<8>(computeEncoder, self.strides(), result.strides(), source.strides());
+      }
+      mtl_dispatch1DJob(computeEncoder, indexCopyPSO, result.numel());
+    }
+  });
+}
 
 static Tensor nonzero_fallback(const Tensor& self) {
   return at::nonzero(self.to("cpu")).to("mps");

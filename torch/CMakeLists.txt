@@ -84,6 +84,7 @@ set(TORCH_PYTHON_LINK_LIBRARIES
     opentelemetry::api
     httplib
     nlohmann
+    moodycamel
     shm
     fmt::fmt-header-only
     ATEN_CPU_FILES_GEN_LIB)

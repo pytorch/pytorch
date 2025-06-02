@@ -861,7 +861,7 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "Encountered input mutation during higher order op tracing for HOP - invoke_subgraph",
+            "Encountered input mutation during higher order op tracing",
         ):
             opt_fn(x, y)
 

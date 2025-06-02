@@ -60,7 +60,7 @@ class AdaroundFakeQuantizer(FakeQuantize):
         self.use_soft_rounding = True
 
     @torch.jit.export
-    def calculate_qparams(self) -> tuple[torch.Tensor, torch.Tensor]:
+    def calculate_qparams(self) -> tuple[torch.Tensor, torch.Tensor]:  # type: ignore[override]
         return self.scale, self.zero_point
 
     @torch.jit.export

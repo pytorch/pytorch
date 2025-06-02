@@ -1286,7 +1286,7 @@ void CudaCodeGen::CompileToNVRTC(
   args.push_back("-hip-pch");
 #else
   const std::string compute = std::string("--gpu-architecture=") +
-#if defined(CUDA_VERSION)
+#if !defined(USE_ROCM)
       // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
       // which gives better backwards compatibility to work on older driver,
       // (since older driver doesn't necessarily recognize PTX emitted by new
