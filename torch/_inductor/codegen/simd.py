@@ -1359,7 +1359,7 @@ class SIMDScheduling(BaseScheduling):
 
         nodes: list[scheduler.SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
 
-        if torch._inductor.config.triton.global_tiling_analysis:
+        if torch._inductor.config.triton.coalesce_tiling_analysis:
             coalesce_analysis = analyze_memory_coalescing(node)
         else:
             coalesce_analysis = None
@@ -2293,10 +2293,7 @@ class SIMDScheduling(BaseScheduling):
         default_tiling = cls.create_tiling([numel], [reduction_numel])
 
         # # TODO: enable by default
-        if (
-            torch._inductor.config.triton.global_tiling_analysis
-            and coalesce_analysis
-        ):
+        if torch._inductor.config.triton.coalesce_tiling_analysis and coalesce_analysis:
             return cls.compute_tiling_strategy(
                 node_schedule, numel, reduction_numel, coalesce_analysis
             )
