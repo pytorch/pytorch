@@ -468,23 +468,23 @@ Canonical Instances
 
 For parameter-free constraints, the following canonical instances are available:
 
-.. autodata:: boolean
-.. autodata:: corr_cholesky
-.. autodata:: lower_cholesky
-.. autodata:: lower_triangular
-.. autodata:: nonnegative
-.. autodata:: nonnegative_integer
-.. autodata:: one_hot
-.. autodata:: positive
-.. autodata:: positive_definite
-.. autodata:: positive_integer
-.. autodata:: positive_semidefinite
-.. autodata:: real
-.. autodata:: real_vector
-.. autodata:: simplex
-.. autodata:: square
-.. autodata:: symmetric
-.. autodata:: unit_interval
+.. autoattribute:: torch.distributions.constraints.boolean
+.. autoattribute:: torch.distributions.constraints.corr_cholesky
+.. autoattribute:: torch.distributions.constraints.lower_cholesky
+.. autoattribute:: torch.distributions.constraints.lower_triangular
+.. autoattribute:: torch.distributions.constraints.nonnegative
+.. autoattribute:: torch.distributions.constraints.nonnegative_integer
+.. autoattribute:: torch.distributions.constraints.one_hot
+.. autoattribute:: torch.distributions.constraints.positive
+.. autoattribute:: torch.distributions.constraints.positive_definite
+.. autoattribute:: torch.distributions.constraints.positive_integer
+.. autoattribute:: torch.distributions.constraints.positive_semidefinite
+.. autoattribute:: torch.distributions.constraints.real
+.. autoattribute:: torch.distributions.constraints.real_vector
+.. autoattribute:: torch.distributions.constraints.simplex
+.. autoattribute:: torch.distributions.constraints.square
+.. autoattribute:: torch.distributions.constraints.symmetric
+.. autoattribute:: torch.distributions.constraints.unit_interval
 
 Aliases
 """""""
