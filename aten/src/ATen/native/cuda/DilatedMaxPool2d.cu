@@ -28,9 +28,15 @@ __device__ inline int min(int a, int b) {
   return a <= b ? a : b;
 }
 
+#ifdef USE_ROCM
+#define CUDA_MAX_THREADS 256
+#define BLOCK_STRIDE_FWD 2 // increasing block_stride to lower # of blocks launched
+#define BLOCK_STRIDE_BWD 4 // increasing block_stride to lower # of blocks launched
+#else
 #define CUDA_MAX_THREADS 1024 // this is safe, in reality 256 is our limit
-
-#define BLOCK_STRIDE 2 // increasing block_stride to lower # of blocks launched
+#define BLOCK_STRIDE_FWD 2 // increasing block_stride to lower # of blocks launched
+#define BLOCK_STRIDE_BWD 2 // increasing block_stride to lower # of blocks launched
+#endif
 
 static __device__ inline int p_start(int size, int pad, int kernel, int dilation, int stride) {
   return (size + pad < ((kernel - 1) * dilation + 1)) ? 0 : (size + pad - ((kernel - 1) * dilation + 1)) / stride + 1;
@@ -146,7 +152,7 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
       if (kernel_h<=MAXh &&
           kernel_w<=MAXw &&
           channels<=MAXc*(blockDim.x*kernel_stride_C)) {
-        scalar_t val [MAXh][MAXw][MAXc] = {{0}};
+        scalar_t val [MAXh][MAXw][MAXc] = {};
         for (int ih = 0; ih < MAXh; ih++) {
           int ih_ = ih*dilation_h+hstart;
           for (int iw = 0; iw < MAXw; iw++) {
@@ -297,6 +303,51 @@ __global__ void max_pool_backward_nhwc(const scalar_t* top_diff,
       int pwend = p_end(iw, pad_w, pooled_width, stride_w);
       int index_shift = ih * width + iw;
       if ((phstart + 1 != phend) || (pwstart + 1 != pwend)) {
+
+#if defined (USE_ROCM)
+#define _MAXh 2
+#define _MAXw 2
+        if (phend-phstart<=_MAXh && pwend-pwstart<=_MAXw) {
+          int msk[_MAXh][_MAXw];
+          scalar_t tpd[_MAXh][_MAXw];
+          int cached_index = threadIdx.x;
+#pragma unroll
+          for (int c = channel_offset; c < channels; c += blockDim.x*kernel_stride_C) {
+#pragma unroll
+            for(int oh = 0; oh < _MAXh; ++oh) {
+#pragma unroll
+              for(int ow = 0; ow < _MAXw; ++ow) {
+                int oh_ = oh+phstart;
+                int ow_ = ow+pwstart;
+                const int64_t* ptr_top_mask = top_mask + oh_ * out_stride_h + ow_ * out_stride_w;
+                if (oh_ >= phend || ow_ >= pwend) {
+                  msk[oh][ow] = ~index_shift;
+                } else {
+                  msk[oh][ow] = ptr_top_mask[c*out_stride_c];
+                  tpd[oh][ow] = top_diff[oh_ * out_stride_h + ow_ * out_stride_w + c*out_stride_c];
+                }
+              }
+            }
+
+            accscalar_t acm = 0;
+#pragma unroll
+            for(int oh = 0; oh < _MAXh; ++oh) {
+#pragma unroll
+              for(int ow = 0; ow < _MAXw; ++ow) {
+                if (msk[oh][ow] == index_shift) {
+                  acm += static_cast<accscalar_t>(tpd[oh][ow]);
+                }
+              }
+            }
+            out_cached[cached_index] += acm;
+            cached_index += blockDim.x;
+          }
+        }
+        else
+#undef _MAXh
+#undef _MAXw
+#endif
+
         for(int oh = phstart; oh < phend; ++oh) {
           for(int ow = pwstart; ow < pwend; ++ow) {
             int cached_index = threadIdx.x;
@@ -419,10 +470,10 @@ const Tensor& indices) {
           int grid_x = nbatch*kernel_stride_C;
           int grid_y = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[1],
-              ceil_div(safe_downcast<int, int64_t>(outputWidth), block_y*BLOCK_STRIDE));
+              ceil_div(safe_downcast<int, int64_t>(outputWidth), block_y*BLOCK_STRIDE_FWD));
           int grid_z = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[2],
-              ceil_div(safe_downcast<int, int64_t>(outputHeight), block_z*BLOCK_STRIDE));
+              ceil_div(safe_downcast<int, int64_t>(outputHeight), block_z*BLOCK_STRIDE_FWD));
           const dim3 grid(grid_x, grid_y, grid_z);
 
           size_t shmem_size = (kernel_size_C * block_x*block_y*block_z) * (sizeof(int) + sizeof(scalar_t));
@@ -554,10 +605,10 @@ const Tensor& gradInput) {
           int grid_x = nbatch*kernel_stride_C;
           int grid_y = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[1],
-              ceil_div(safe_downcast<int, int64_t>(inputWidth), block_y*BLOCK_STRIDE));
+              ceil_div(safe_downcast<int, int64_t>(inputWidth), block_y*BLOCK_STRIDE_BWD));
           int grid_z = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[2],
-              ceil_div(safe_downcast<int, int64_t>(inputHeight), block_z*BLOCK_STRIDE));
+              ceil_div(safe_downcast<int, int64_t>(inputHeight), block_z*BLOCK_STRIDE_BWD));
           const dim3 grid(grid_x, grid_y, grid_z);
 
           size_t shmem_size = (kernel_size_C * block_x*block_y*block_z) * sizeof(accscalar_t);

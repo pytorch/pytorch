@@ -569,7 +569,7 @@ def dispatch_torch_function(tx: "InstructionTranslator", fn, args, kwargs):
             return res
 
     unimplemented_v2(
-        gb_type="TypeError from user code",
+        gb_type="All __torch_function__ overrides returned NotImplemented due to TypeError from user code",
         context=f"{fn=}, {args=}, {kwargs=}",
         explanation=f"All __torch_function__ overrides for for function {fn} returned NotImplemented",
         hints=[
@@ -642,7 +642,11 @@ class TensorWithTFOverrideVariable(TensorVariable):
 
         # Handle non-overriden attributes inherited from `torch.Tensor`.
         attr_is_overriden = _is_attr_overidden(tx, self, name)
-        if hasattr(torch.Tensor, name) and not attr_is_overriden:
+        if (
+            hasattr(torch.Tensor, name)
+            and not attr_is_overriden
+            and not inspect.ismethoddescriptor(getattr(torch.Tensor, name))
+        ):
             args, kwargs = [self], {}
             if can_dispatch_torch_function(tx, args, kwargs):
                 if self.source:

@@ -286,6 +286,12 @@ def graph_break(msg=""):
     """Force a graph break"""
 
 
+# NOTE: primarily used for internal debugging purposes!
+@_disallow_in_graph_helper(throw_if_not_allowed=False)
+def skip_frame(msg=""):
+    """Force a skipped frame"""
+
+
 def forbid_in_graph(fn):
     """
     Customize which functions TorchDynamo will assert are not present while tracing.
@@ -518,7 +524,7 @@ class _DimRange:
 
 
 @forbid_in_graph
-def mark_unbacked(t, index, strict=False):
+def mark_unbacked(t, index, strict=False, specialize_on=None):
     """
     Mark a tensor as having an unbacked dim.  This changes the semantics of operations,
     we will always report the size does not equal zero/one, we will turn asserts
@@ -541,8 +547,13 @@ def mark_unbacked(t, index, strict=False):
             t._dynamo_strict_unbacked_indices.add(index)
             return
 
+        if not hasattr(t, "_specialized_on"):
+            t._specialize_on = {}
+
         if not hasattr(t, "_dynamo_unbacked_indices"):
             t._dynamo_unbacked_indices = set()
+
+        t._specialize_on[index] = specialize_on if specialize_on is not None else []
         t._dynamo_unbacked_indices.add(index)
         return
 
@@ -552,7 +563,7 @@ def mark_unbacked(t, index, strict=False):
 
 
 @forbid_in_graph
-def mark_dynamic(t, index, *, min=None, max=None):
+def mark_dynamic(t, index, *, min=None, max=None, specialize_on=None):
     """
     Mark a tensor as having a dynamic dim and set corresponding min and max range for the dim.
 
@@ -575,6 +586,20 @@ def mark_dynamic(t, index, *, min=None, max=None):
     4) Attempts to trace this function will explicitly raise. As such, all calls to mark_dynamic must be made
     before torch.compile.
 
+    5) If specialize_on is passed in, we will perform a single generic Dynamo trace followed by
+    multiple specialized compilations in addition to a single generic compilation. NB: For now we only support
+    per dimension specialization, or in other words we do not generate a cross product of specializations.
+    At runtime, we will dispatch to a specialized compiled region if the input matches the specialization criteria.
+
+    For example:
+        mark_dynamic(..., specialize_on=[
+            lambda x: x == 8,
+            lambda x: x == 16
+        ])
+
+    This approach results in one Dynamo trace and two backend compilations. When the input dimension equals 8 or 16
+    at runtime, execution will be directed to the specialized compiled region. Performance measurements indicate
+    2-8x speedups depending on the specific specialization and model architecture.
     """
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror mark_dynamic() on all inner tensors with same dim as t
@@ -587,14 +612,20 @@ def mark_dynamic(t, index, *, min=None, max=None):
         if not hasattr(t, "_dynamo_dynamic_indices"):
             t._dynamo_dynamic_indices = set()
             t._dynamo_dynamic_range = set()
+
+        if not hasattr(t, "_specialize_on"):
+            t._specialize_on = {}
+
         # TODO(voz): Should we bounds check?
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))
+        t._specialize_on[index] = specialize_on if specialize_on is not None else []
         return
 
     assert isinstance(index, (list, tuple))
     for i in index:
         mark_dynamic(t, i, min=min, max=max)
+        mark_dynamic(t, i, min=min, max=max, specialize_on=specialize_on)
 
 
 @forbid_in_graph
@@ -708,10 +739,10 @@ def _allow_in_graph_einops():
     if mod is None:
         return
     else:
-        # version > 0.7.0 does allow_in_graph out of tree
+        # version > 0.8.1 does allow_in_graph out of tree
         # for BC we need to keep this in fbcode
         # internal xref https://fb.workplace.com/groups/1026248852325474/permalink/1107135774236781/
-        if Version(mod.__version__) < Version("0.7.0") or is_fbcode():
+        if Version(mod.__version__) <= Version("0.8.1") or is_fbcode():
             import einops
 
             try:
@@ -779,8 +810,12 @@ _allowed_config_patches = (
     "dont_skip_tracing",
 )
 
+from . import config
+
+
 for name in _allowed_config_patches:
-    assert hasattr(torch._dynamo.config, name), "nonexistent config"
+    assert hasattr(config, name), "nonexistent config"
+del config
 
 
 def _patch_dynamo_config_check(changes: dict[str, Any]):

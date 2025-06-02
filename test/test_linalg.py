@@ -9470,6 +9470,24 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         an = torch.from_numpy(np.tensordot(np.zeros((), dtype=np.float32), np.zeros((), dtype=np.float32), 0))
         self.assertEqual(a, an)
 
+        # Testing the fast path introduced in #145936,
+        # i.e. reduction to a scalar has to be of right dim.
+        a = torch.rand(2, 2, device=device)
+        a_dims = [-1, -2]
+        b = torch.rand(2, 2, device=device)
+        b_dims = [-2, -1]
+        for res_ndim in range(5):
+            res_torch = torch.tensordot(a, b, [a_dims, b_dims])
+            self.assertEqual(res_torch.ndim, res_ndim)
+
+            res_numpy = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy(), [a_dims, b_dims]))
+            self.assertEqual(res_torch, res_numpy)
+
+            if res_ndim % 2:
+                b.unsqueeze_(0)
+            else:
+                a.unsqueeze_(0)
+
     @skipCUDAIfNoCusolver
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack

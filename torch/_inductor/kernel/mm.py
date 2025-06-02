@@ -21,9 +21,10 @@ from torch.torch_version import TorchVersion
 
 from .. import config as inductor_config, ir
 from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
+from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphTemplate
-from ..ir import FlexibleLayout, ir_node_to_tensor, is_triton
+from ..ir import FlexibleLayout, is_triton
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
@@ -59,7 +60,6 @@ from .mm_common import (
     persistent_mm_options,
     scale_mm_epilogue,
     scaled_mm_options,
-    should_fallback_to_aten,
 )
 
 
@@ -228,6 +228,8 @@ mm_template = TritonTemplate(
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
 """
     ),
+    cache_codegen_enabled_for_template=True,
+    prologue_loads_all_inputs=True,
 )
 
 persistent_tma_mm_template = TritonTemplate(
@@ -674,8 +676,21 @@ def tuned_mm(mat1, mat2, *, layout=None):
                     **mm_options(config, m, n, k, layout),
                     **persistent_mm_options(mat1, mat2),
                 )
+
+        from torch._inductor.ir import get_free_symbols
+
         # Only do split-k optimization if K is much larger than m, n and m, n are small
-        if use_decompose_k_choice(m, n, k):
+        # and if there aren't any unbacked symbols
+        unbacked_symbols = any(
+            len(get_free_symbols(itr, unbacked_only=True)) > 0
+            for itr in (
+                mat1.get_size(),
+                mat1.get_stride(),
+                mat2.get_size(),
+                mat2.get_stride(),
+            )
+        )
+        if use_decompose_k_choice(m, n, k) and not unbacked_symbols:
             from torch._dispatch.python import enable_python_dispatcher
 
             from ..decomposition import select_decomp_table
@@ -698,15 +713,10 @@ def tuned_mm(mat1, mat2, *, layout=None):
                         ),
                     )
 
-                with V.fake_mode:
-                    mat1_tensor = ir_node_to_tensor(mat1)
-                    mat2_tensor = ir_node_to_tensor(mat2)
-
                 decompose_k_subgraph_template.maybe_append_choice(
                     choices,
                     input_nodes=(mat1, mat2),
                     layout=layout,
-                    example_inputs=[mat1_tensor, mat2_tensor],
                 )
 
     if is_nonzero and use_cutlass_template(layout, m, n, k):
@@ -714,6 +724,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
+        CKTileGemmTemplate.add_choices(choices, layout, [mat1, mat2])
 
     if use_cpp_gemm_template(layout, mat1, mat2):
         CppGemmTemplate.add_choices(
@@ -771,8 +782,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     for k in inductor_config.external_matmul:
         choices.append(lazy_register_extern_choice(k).bind((mat1, mat2), layout))
-    if should_fallback_to_aten(choices):
-        return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
     return autotune_select_algorithm(name, choices, [mat1, mat2], layout)
 
@@ -822,15 +831,11 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
                 **mm_options(config, m, n, k, layout),
             )
 
-    if should_fallback_to_aten(choices):
-        return aten__int_mm.bind((mat1, mat2), layout).output_node()
-
     return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
 
 
 @register_lowering(aten.addmm, type_promotion_kind=None)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
-    ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
     device_type = ir.get_device_type(mat1)
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     static_shape, is_nonzero = _is_static_problem(layout)
@@ -960,30 +965,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             beta=beta,
             has_bias=True,
         )
-
-    if should_fallback_to_aten(choices):
-        choices.append(
-            aten_addmm.bind(
-                (inp_expanded, mat1, mat2),
-                layout,
-                ordered_kwargs_for_cpp_kernel,
-                alpha=alpha,
-                beta=beta,
-            )
-        )
-
-        if (
-            inp_expanded.get_stride()[0] == 0
-            and inp_expanded.get_device().type == "cuda"
-            and inductor_config.triton.autotune_cublasLt
-        ):
-            # unexpand inp to make sure fused addmm from cublasLt is used
-            choices.insert(
-                0,
-                aten_bias_addmm.bind(
-                    (inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta
-                ),
-            )
 
     return autotune_select_algorithm(
         "addmm", choices, [inp_expanded, mat1, mat2], layout
@@ -1154,12 +1135,13 @@ def tuned_scaled_mm(
                 )
 
         for config in scaled_mm_configs(m, n, k):
-            if k == 16 and config.kwargs["BLOCK_M"] >= 64:
-                continue  # Triton crashes in this case
+            if V.graph.sizevars.guard_or_false(sympy.Le(k, 16)):
+                # Triton crashes however uncommon for real workloads
+                continue
 
             # On NVIDIA B200 GPUs, K dim must be >= 32 for tcgen05.mma.kind::f8f6f4.* PTX instruction to be valid
             # source: https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-matrix-shape
-            if using_b200() and k < 32:
+            if using_b200() and V.graph.sizevars.guard_or_false(sympy.Lt(k, 32)):
                 continue
 
             kwargs = scaled_mm_options(
@@ -1175,11 +1157,16 @@ def tuned_scaled_mm(
                 epilogue_fn=scale_mm_epilogue(),
             )
 
+    if is_nonzero and use_cutlass_template(layout, m, n, k):
+        if use_fast_accum:
+            log.warning(
+                "use_fast_accum=True is not supported by cutlass template, skipping cutlass choices"
+            )
+        else:
+            CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, input_nodes)  # type: ignore[arg-type]
+
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, input_nodes)
-
-    if should_fallback_to_aten(choices):
-        return aten_choice.output_node()
 
     return autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
 
