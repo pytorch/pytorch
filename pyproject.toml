@@ -272,10 +272,6 @@ select = [
     "F401",
     "F403",
 ]
-"torchgen/executorch/api/types/__init__.py" = [
-    "F401",
-    "F403",
-]
 "torch/utils/collect_env.py" = [
     "UP", # collect_env.py needs to work with older versions of Python
 ]
