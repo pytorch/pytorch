@@ -59,14 +59,12 @@ class CooperativeReductionTests(TestCase):
 
     def run_and_check(self, fn, args, dtype=None, *, expect_kernel_count=1): # Make dtype optional, as some tests don't pass it
 
-        # Determine the CPU reference dtype
-        # We only cast to float16 for the reference if explicitly requested.
-        # Otherwise, we keep it as float64 for higher precision.
+        # calculate reference value in higher precision when input dtype is float16
         ref_dtype = dtype
         if dtype == torch.float16:
             ref_dtype = torch.float64
 
-        # Move args to CPU and cast to the determined CPU reference dtype
+        # Cast to the determined reference dtype
         args_ref = [tensor.to(ref_dtype) for tensor in args]
 
         # Calculate expected output
@@ -78,13 +76,13 @@ class CooperativeReductionTests(TestCase):
             if dtype is not None:
                 expected = type(raw_expected)([t.to(dtype) if isinstance(t, torch.Tensor) else t for t in raw_expected])
             else:
-                expected = type(raw_expected)([t.to(torch.float64) if isinstance(t, torch.Tensor) else t for t in raw_expected]) # Default to float64 for CPU comparison if no dtype specified
+                expected = type(raw_expected)([t.to(torch.float64) if isinstance(t, torch.Tensor) else t for t in raw_expected])
         else:
             # If it's a single tensor
             if dtype is not None:
                 expected = raw_expected.to(dtype)
             else:
-                expected = raw_expected.to(torch.float64) # Default to float64 for CPU comparison if no dtype specified
+                expected = raw_expected.to(torch.float64)
 
         # Now, ensure args are on CUDA with the correct dtype for compilation
         # (Assuming args are already on CUDA in the test calls, and we just need to ensure correct dtype)
