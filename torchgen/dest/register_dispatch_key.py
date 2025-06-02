@@ -31,6 +31,7 @@ from torchgen.model import (
     DeviceCheckType,
     DispatchKey,
     gets_generated_out_inplace_wrapper,
+    is_cpu_fallback_dispatch_key,
     is_cuda_dispatch_key,
     NativeFunction,
     NativeFunctionsGroup,
@@ -566,7 +567,10 @@ namespace {{
                     return None
                 else:
                     payload = f"TORCH_FN({name})"
-                    return f'm.impl("{f.func.name}",\n{payload});\n'
+                    if is_cpu_fallback_dispatch_key(self.backend_index.dispatch_key):
+                        return f'torch::ATenFallbackControlImpl(m, "{f.func.name}",\n{payload});\n'
+                    else:
+                        return f'm.impl("{f.func.name}",\n{payload});\n'
             else:
                 assert_never(self.target)
 
@@ -1009,7 +1013,11 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
 """
 
         elif self.target is Target.REGISTRATION:
-            return f'm.impl("{f.func.name}", TORCH_FN({sig.name()}));'
+            if is_cpu_fallback_dispatch_key(self.backend_index.dispatch_key):
+                return f'torch::ATenFallbackControlImpl(m, "{f.func.name}", TORCH_FN({sig.name()}));\n'
+            else:
+                return f'm.impl("{f.func.name}", TORCH_FN({sig.name()}));'
+
         else:
             assert_never(self.target)
             # Silence mypy's "Missing return statement" error

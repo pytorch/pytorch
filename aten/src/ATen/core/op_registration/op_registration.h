@@ -19,6 +19,10 @@
 
 namespace c10 {
 
+
+// Checks PYTORCH_CPU_FALLBACK_OPS if a given op should fallback to CPU.
+bool registerOp(const std::string& opName);
+
 namespace detail {
 // The first argument of the schema might be of type DispatchKeySet, in which case we remove it.
 // We do this because every argument in a function schema is expected to be convertable

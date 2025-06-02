@@ -952,6 +952,18 @@ class TorchLibraryInit final {
 
 } // namespace detail
 
+// ATenFallbackControlImpl enables backends to explictly control CPU fallback for any op
+// via the PYTORCH_CPU_FALLBACK_OPS environment variable.
+template <typename TorchFuncType>
+void ATenFallbackControlImpl(
+    torch::Library& m,
+    const char* opName,
+    TorchFuncType funcPtr) {
+  if (at::registerOp(opName)) {
+    m.impl(opName, funcPtr);
+  }
+}
+
 } // namespace torch
 
 // NB: The EXACT NAMING of the initializer functions (e.g.,
