@@ -18,11 +18,16 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
+from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
-from torch.testing._internal.common_utils import skipIfRocm
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    skipIfRocm,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._pytree import tree_map
-from torch.utils._sympy.functions import ModularIndexing
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
 
 # set so that metrics appear
@@ -41,9 +46,11 @@ class MockScheduler:
     def get_backend(cls, *args):
         return TritonScheduling(cls)
 
+    def can_buffer_be_removed_through_fusion(self, *args, **kwargs):
+        return False
 
-@inductor_config.patch(loop_ordering_after_fusion=True)
-class ImplDetailTest(TestCase):
+
+class MockSchedulerTest(TestCase):
     _exit_stack = None
 
     @classmethod
@@ -61,6 +68,9 @@ class ImplDetailTest(TestCase):
         super().tearDownClass()
         cls._exit_stack.close()
 
+
+@inductor_config.patch(loop_ordering_after_fusion=True)
+class ImplDetailTest(MockSchedulerTest):
     @staticmethod
     def _get_snode_body_sym_prefix(snode):
         body = snode._body
@@ -507,6 +517,231 @@ class LoopOrderingTest(TestCase):
 
             ms = do_bench(lambda: opt_f(x))
             print(f"{ms=:.3f}")
+
+
+@inductor_config.patch(
+    {
+        "benchmark_kernel": True,
+        "loop_ordering_after_fusion": True,
+        "triton.unique_kernel_names": True,
+    }
+)
+@instantiate_parametrized_tests
+class MemoryCoalescingTest(MockSchedulerTest):
+    """Tests for memory coalescing analysis with specific tensor sizes."""
+
+    device = GPU_TYPE
+    _exit_stack = None
+
+    def setUp(self):
+        super().setUp()
+        metrics.reset()
+
+    def _create_buffer(self, name, sizes):
+        """Create a buffer with specified sizes"""
+
+        strides = ir.FlexibleLayout.contiguous_strides(sizes)
+
+        box = ir.TensorBox.create(
+            ir.Buffer(
+                name=name,
+                layout=ir.FixedLayout(
+                    torch.device(self.device),
+                    dtype=torch.float32,
+                    size=sizes,
+                    stride=strides,
+                ),
+            )
+        )
+        box_loader = box.make_loader()
+
+        def inner_fn(index):
+            return box_loader(index) * 2
+
+        buf = ir.Pointwise.create(
+            device=box.get_device(),
+            dtype=box.get_dtype(),
+            inner_fn=inner_fn,
+            ranges=box.get_size(),
+        )
+        buf.realize()
+        computed_buf = buf.data.data
+        computed_buf.decide_layout()
+
+        return computed_buf
+
+    def _create_scheduler_node(self, buf):
+        s = SchedulerNode(V.graph.scheduler, buf)
+        s.min_order = 0
+        s.max_order = 100
+        return s
+
+    @parametrize(
+        "inps",
+        (
+            ((128, 384, 196), (768, 64, 196), (128, 6, 64, 196)),
+            ((64,), (16, 4), (16, 4)),
+            ((5, 6), (3, 10), (30,)),
+            ((5, 6, 20), (3, 10, 20), (30, 20)),
+        ),
+    )
+    def test_inferred_splits(self, inps):
+        """
+        Test memory coalescing analysis with the specified tensor sizes.
+        Using direct SchedulerNode creation with sizes (128, 384, 196) and (768, 64, 196).
+        """
+
+        s1, s2, expected_size = inps
+
+        # Create buffers with the specified sizes
+        buf1 = self._create_buffer("buffer1", s1)
+        buf2 = self._create_buffer("buffer2", s2)
+
+        # Create scheduler nodes
+        snode1 = self._create_scheduler_node(buf1)
+        snode2 = self._create_scheduler_node(buf2)
+
+        # Create a fused node
+        fused_node = torch._inductor.scheduler.FusedSchedulerNode.fuse(snode1, snode2)
+
+        from torch._inductor import tiling_utils
+
+        fused_norm_read_writes = tiling_utils.extract_normalized_read_writes(fused_node)
+
+        var_ranges = fused_norm_read_writes.var_ranges
+        self.assertEqual(list(var_ranges.values()), list(expected_size))
+
+    def test_remapped_reads(self):
+        from torch._inductor import tiling_utils
+
+        def fn(nodes):
+            assert len(nodes) == 1
+            fused_norm_read_writes = tiling_utils.extract_normalized_read_writes(
+                nodes[0]
+            )
+
+            self.assertTrue(len(fused_norm_read_writes.var_ranges) == 2)
+
+            # both reads remapped correctly
+            FileCheck().check("4*n0 + n1").run(
+                repr(fused_norm_read_writes.reads.keys())
+            )
+            FileCheck().check("n0 + 4*n1").run(
+                repr(fused_norm_read_writes.reads.keys())
+            )
+
+            return nodes
+
+        with torch._inductor.config.patch(_post_fusion_custom_pass=fn):
+
+            @torch.compile()
+            def foo(x, y):
+                return x + y
+
+            foo(torch.rand([4, 4], device="cuda"), torch.rand([4, 4], device="cuda").T)
+
+    def test_remapped_reads_split(self):
+        from torch._inductor import tiling_utils
+
+        def fn(nodes):
+            self.assertTrue(len(nodes) == 1)
+            fused_norm_read_writes = tiling_utils.extract_normalized_read_writes(
+                nodes[0]
+            )
+
+            inp_node_reads = nodes[0].get_nodes()[1]._body.get_read_exprs()
+            node_ranges = nodes[0].get_nodes()[1]._body.var_ranges
+            self.assertTrue(len(node_ranges) == 1)
+            self.assertTrue(next(iter(node_ranges.values())) == 36)
+            var = next(iter(node_ranges.keys()))
+
+            r = FloorDiv(var, 6) + 6 * ModularIndexing(var, 1, 6)
+            self.assertTrue(r in inp_node_reads)
+
+            # mapped reads
+            self.assertTrue(list(fused_norm_read_writes.var_ranges.values()) == [6, 6])
+            n0, n1 = list(fused_norm_read_writes.var_ranges.keys())
+
+            # translation of above is n0 + 6 * n1
+            self.assertTrue((n0 + 6 * n1) in fused_norm_read_writes.reads.keys())
+
+            return nodes
+
+        with torch._inductor.config.patch(_post_fusion_custom_pass=fn):
+
+            @torch.compile()
+            def foo(x, y):
+                return (
+                    x + y
+                ).contiguous().flatten() + torch.ops._inductor_test.realize(
+                    (y.T + 1).flatten()
+                )
+
+            foo(torch.rand([6, 6], device="cuda"), torch.rand([6, 6], device="cuda").T)
+
+    def test_reduction_pointwise(self):
+        # test one pw var, one red var
+        from torch._inductor import tiling_utils
+
+        def fn(nodes):
+            self.assertTrue(len(nodes) == 1)
+            fused_rw = tiling_utils.extract_normalized_read_writes(nodes[0])
+
+            i_vars, r_vars = fused_rw.index_vars, fused_rw.reduce_vars
+            self.assertTrue(len(i_vars) == 1)
+            self.assertTrue(len(r_vars) == 1)
+
+            # single write to index var
+            self.assertTrue(
+                fused_rw.index_vars[0] == next(iter(fused_rw.writes.keys()))
+            )
+
+            # the write to the fused intermediary node should be removed
+            self.assertTrue(len(fused_rw.writes) == 1)
+
+            # single read
+            self.assertTrue(len(fused_rw.reads) == 1)
+            # that is applied to two bufs
+            self.assertTrue(len(next(iter(fused_rw.reads.values()))) == 2)
+
+            # and the read should be in terms of the index + reduce var,
+            # even though node is pointwise
+            self.assertTrue(256 * i_vars[0] + r_vars[0] in fused_rw.reads)
+
+            return nodes
+
+        with torch._inductor.config.patch(_post_fusion_custom_pass=fn), torch.no_grad():
+
+            @torch.compile()
+            def foo(x, y):
+                out = torch.ops._inductor_test.realize(x + y)
+                return out.sum(dim=1)
+
+            foo(
+                torch.rand(256, 256, device="cuda"), torch.rand(256, 256, device="cuda")
+            )
+
+    def test_reduction_no_pointwise(self):
+        # test one pw var, one red var
+        from torch._inductor import tiling_utils
+
+        def fn(nodes):
+            self.assertTrue(len(nodes) == 1)
+            fused_rw = tiling_utils.extract_normalized_read_writes(nodes[0])
+
+            i_vars, r_vars = fused_rw.index_vars, fused_rw.reduce_vars
+            self.assertTrue(len(i_vars) == 0)
+            self.assertTrue(len(r_vars) == 1)
+
+            return nodes
+
+        with torch._inductor.config.patch(_post_fusion_custom_pass=fn), torch.no_grad():
+
+            @torch.compile()
+            def foo(x):
+                return x.sum()
+
+            foo(torch.rand(1024, device="cuda"))
 
 
 if __name__ == "__main__":
