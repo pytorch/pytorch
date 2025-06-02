@@ -10506,6 +10506,50 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(x_ref, x_test)
 
     @requires_gpu()
+    @skip_if_not_triton
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
+    def test_inductor_multiple_specializations(self):
+        from triton.testing import do_bench
+
+        @torch.compile(
+            options={
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
+            dynamic=False,
+        )
+        def inductor_matmul(a, b):
+            torch._check(a.shape[0] == b.shape[1])
+            return (m, torch.mm(a, b))
+
+        m = 16
+        k = 1280
+        dynamic_a = torch.randn(m, k, device=GPU_TYPE, dtype=torch.bfloat16)
+        dynamic_specialized_a = torch.randn(m, k, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16)
+        torch._dynamo.decorators.mark_dynamic(
+            dynamic_a,
+            0,
+        )
+        torch._dynamo.decorators.mark_dynamic(
+            dynamic_specialized_a,
+            0,
+            specialize_on=[lambda x0: x0 == 16],
+        )
+        torch._dynamo.decorators.mark_dynamic(
+            b,
+            1,
+        )
+        dynamic = do_bench(lambda: inductor_matmul(dynamic_a, b))
+        torch._dynamo.reset()
+        dynamic_specialized = do_bench(
+            lambda: inductor_matmul(dynamic_specialized_a, b)
+        )
+        self.assertGreaterEqual(dynamic, dynamic_specialized)
+
+    @requires_gpu()
     def test_stride_preservation_with_stride_modifying_fx_pass(self):
         def f(x):
             return x + 1
@@ -14995,6 +15039,9 @@ if RUN_GPU:
                 self.assertIn("aoti_torch_check_inf_and_nan", code)
             else:
                 self.assertIn("# make sure graph inputs are not nan/inf", code)
+                self.assertRegex(code, r"return_vars = (.*)")
+                self.assertIn("for var in return_vars:", code)
+                self.assertIn("if isinstance(var, torch.Tensor):", code)
                 self.assertRegex(code, r"assert not .*\.isnan\(\)\.any\(\).item\(\)")
                 self.assertRegex(code, r"assert not .*\.isinf\(\)\.any\(\).item\(\)")
 

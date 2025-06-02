@@ -51,10 +51,11 @@ void initModule(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   py::class_<api::DynamicShaderInfo, std::shared_ptr<api::DynamicShaderInfo>>(
       m, "_vulkan_ShaderInfo")
-      // NOTE: see the _compile_shader docstring in torch/vulkan/__init__.py for the shader calling convention.
-      // IMPORTANT: DynamicShaderInfo.cpp depends on this calling
-      // convention and must be changed if you change it! I strongly recommend using
-      // the Vulkan validation layers when working on this.
+      // NOTE: see the _compile_shader docstring in torch/vulkan/__init__.py for
+      // the shader calling convention. IMPORTANT: DynamicShaderInfo.cpp depends
+      // on this calling convention and must be changed if you change it! I
+      // strongly recommend using the Vulkan validation layers when working on
+      // this.
 
       .def(
           "__call__",
@@ -63,7 +64,7 @@ void initModule(PyObject* module) {
              const py::object& py_threads,
              const py::object& py_group_size) {
             TORCH_CHECK(
-                args.size() > 0,
+                !args.empty(),
                 "must provide at least one argument to compiled Vulkan shader!");
             TORCH_CHECK(
                 THPVariable_Check(args[0].ptr()),
@@ -75,19 +76,17 @@ void initModule(PyObject* module) {
             // convention for now.
             struct Block {
               api::utils::uvec3 size;
-            } block;
-            // TODO: grab output (arg0) and use to set operation extents.
-            block.size = v_output_tensor.extents();
+            } block = {v_output_tensor.extents()};
             auto threads =
                 optional_vec_from_pyobject<std::uint32_t>(py_threads);
             TORCH_CHECK(
-                !threads.has_value() || threads->size() == 3,
-                "threads dimension must be 3");
+                !threads.has_value() || threads->size() < 4,
+                "threads dimension must be less than 4");
             auto group_size =
                 optional_vec_from_pyobject<std::uint32_t>(py_group_size);
             TORCH_CHECK(
-                !group_size.has_value() || group_size->size() == 3,
-                "group size dimension must be 3");
+                !group_size.has_value() || group_size->size() < 4,
+                "group size dimension must be less than 4");
 
             auto* const context = api::context();
             api::UniformParamsBuffer params(context, block);
