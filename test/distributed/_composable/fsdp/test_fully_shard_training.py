@@ -25,7 +25,7 @@ from torch.distributed.fsdp import (
     OffloadPolicy,
     register_fsdp_forward_method,
 )
-from torch.distributed.tensor import DTensor, init_device_mesh, Replicate, Shard
+from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
