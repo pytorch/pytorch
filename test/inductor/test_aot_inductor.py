@@ -163,7 +163,8 @@ class AOTInductorTestsTemplate:
     @skipIfRocm
     @skipIfXpu
     @common_utils.parametrize("embed_kernel_binary", [True, False])
-    def test_simple_multi_arch(self, embed_kernel_binary):
+    @common_utils.parametrize("emit_current_arch_binary", [True, False])
+    def test_simple_multi_arch(self, embed_kernel_binary, emit_current_arch_binary):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU_TYPE")
 
@@ -183,7 +184,8 @@ class AOTInductorTestsTemplate:
         with config.patch(
             {
                 "aot_inductor.embed_kernel_binary": embed_kernel_binary,
-                "aot_inductor.multi_arch_kernel_binary": True,
+                "aot_inductor.emit_multi_arch_kernel": True,
+                "aot_inductor.emit_current_arch_binary": emit_current_arch_binary,
             }
         ):
             self.check_model(model, example_inputs)
@@ -4720,6 +4722,72 @@ class AOTInductorTestsTemplate:
                 FileCheck().check_count(
                     f"{scalar}",
                     2,
+                ).run(code)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
+    @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
+    @skipIfXpu
+    def test_aoti_debug_printer_fp8_dtype(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self, dtype):
+                super().__init__()
+                self.out_dtype = dtype
+
+            def forward(self, x, weight, bias, scale_a, scale_b):
+                weight = weight.to(torch.float8_e4m3fn)
+                output = torch._scaled_mm(
+                    x,
+                    weight,
+                    bias=input_bias,
+                    out_dtype=self.out_dtype,
+                    scale_a=scale_a,
+                    scale_b=scale_b,
+                )
+                return output
+
+        dtype = torch.float16
+
+        a_scale = torch.Tensor([1.0]).to(device=GPU_TYPE)
+        b_scale = torch.Tensor([1.0]).to(device=GPU_TYPE)
+        input_bias = torch.rand(32, device=GPU_TYPE, dtype=dtype)
+        weight_shape = (32, 16)
+        weight = torch.rand(*weight_shape, device=GPU_TYPE, dtype=dtype).T
+        a_inverse_scale = 1 / a_scale
+        b_inverse_scale = 1 / b_scale
+
+        x_shape = (16, 16)
+        x = torch.rand(*x_shape, device=GPU_TYPE, dtype=dtype).to(torch.float8_e4m3fn)
+
+        kernel_calls = [
+            (f"aoti_torch_{GPU_TYPE}__scaled_mm_out", 5),
+        ]
+
+        # test default debug printing all tensor values codegen
+        with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
+            result, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile,
+                Model(dtype),
+                (x, weight, input_bias, a_inverse_scale, b_inverse_scale),
+            )
+
+            # check the c shim print_tensor_handle call is triggered by the config and injected the cpp output code as expected
+            self.assertEqual("aoti_torch_print_tensor_handle" in code, True)
+
+            # check the codegen for debug printing around the actual kernel call is expected and float8 dtype is printed as expected
+            for kernel_call, count in kernel_calls:
+                FileCheck().check_count(
+                    f"before_launch - {kernel_call}",
+                    count,
+                ).run(code)
+                FileCheck().check_count(
+                    f"after_launch - {kernel_call}",
+                    count,
                 ).run(code)
 
     def test_aoti_debug_printing_model_inputs_codegen(self):

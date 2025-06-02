@@ -68,7 +68,8 @@ bool operator==(const Type& left, const Type& right) {
   if (left.kind() != right.kind()) {
     return false;
   }
-  if (std::holds_alternative<Type::CustomObjData>(left.kind_)) {
+  if (std::holds_alternative<Type::CustomObjData>(left.kind_) &&
+      std::holds_alternative<Type::CustomObjData>(right.kind_)) {
     return std::get<Type::CustomObjData>(left.kind_).classFqn ==
         std::get<Type::CustomObjData>(right.kind_).classFqn;
   }
