@@ -159,13 +159,13 @@ void initModule(PyObject* module) {
             auto threads =
                 optional_vec_from_pyobject<std::uint32_t>(py_threads);
             TORCH_CHECK(
-                !threads.has_value() || threads->size() == 3,
-                "threads dimension must be 3");
+                !threads.has_value() || threads->size() < 4,
+                "threads dimension must be less than 4");
             auto group_size =
                 optional_vec_from_pyobject<std::uint32_t>(py_group_size);
             TORCH_CHECK(
-                !group_size.has_value() || group_size->size() == 3,
-                "group size dimension must be 3");
+                !group_size.has_value() || group_size->size() < 4,
+                "group size dimension must be less than 4");
 
             auto* const context = api::context();
 
@@ -185,7 +185,7 @@ void initModule(PyObject* module) {
                 TORCH_CHECK(
                     (v_input.storage_type() == api::StorageType::BUFFER) ==
                         (output_storage_type == api::StorageType::BUFFER),
-                    "all Tensor arguments to compiled Vulkan shader must have the same storage type for now");
+                    "all Tensor arguments to compiled Vulkan shader must have the same storage type for now. output is ", output_storage_type, " but input ", ii, " is ", v_input.storage_type());
                 input_args.push_back(v_input);
               } else {
                 saw_non_tensor_arg = true;
@@ -275,9 +275,7 @@ void initModule(PyObject* module) {
               // convention for now.
               struct Block {
                 api::utils::uvec3 size;
-              } block;
-              // TODO: grab output (arg0) and use to set operation extents.
-              block.size = v_output_tensor.extents();
+              } block = {v_output_tensor.extents()};
               api::UniformParamsBuffer params(context, block);
               const auto threads_arg = threads.has_value()
                   ? uvec3_from_vector(*threads, /* default_element = */ 1)

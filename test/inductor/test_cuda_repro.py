@@ -1569,6 +1569,19 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(o1, o2)
 
+    def test_sorted_masks(self):
+        @torch.compile()
+        def foo(x, y):
+            return (x + y).sum(dim=1)
+
+        x = torch.rand([255, 255], device="cuda")
+        y = torch.rand([255, 255], device="cuda")
+
+        _, code = run_and_get_code(foo, x, y)
+        FileCheck().check("tl.load").check_same("r0_mask").check_same("xmask").run(
+            code[0]
+        )
+
     def test_cat_int8_one_kernel(self):
         @torch.compile()
         def cat(inps):
