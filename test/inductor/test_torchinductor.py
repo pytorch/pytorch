@@ -128,6 +128,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     HAS_MPS,
     HAS_MULTIGPU,
+    HAS_VULKAN,
     IS_BIG_GPU,
     requires_gpu,
     RUN_CPU,
@@ -430,6 +431,7 @@ def check_model(
     check_gradient=False,
     check_has_compiled=True,
     output_process_fn_grad=lambda x: x,
+    reference_on_cpu=False,
 ):
     kwargs = kwargs or {}
     torch._dynamo.reset()
@@ -477,6 +479,8 @@ def check_model(
 
     torch.manual_seed(0)
 
+    if reference_on_cpu:
+        ref_inputs = [x.cpu() for x in ref_inputs]
     correct = ref_model(*ref_inputs, **ref_kwargs)
 
     torch._inductor.metrics.reset()
@@ -643,6 +647,7 @@ def check_model_gpu(
     check_gradient=False,
     check_has_compiled=True,
     output_process_fn_grad=lambda x: x,
+    reference_on_cpu=False,
 ):
     kwargs = kwargs or {}
     if hasattr(model, "to"):
@@ -669,6 +674,7 @@ def check_model_gpu(
         check_gradient=check_gradient,
         check_has_compiled=check_has_compiled,
         output_process_fn_grad=output_process_fn_grad,
+        reference_on_cpu=reference_on_cpu,
     )
 
     if check_lowp:
@@ -13508,7 +13514,7 @@ if RUN_CPU:
 
     copy_tests(CommonTemplate, CpuTests, "cpu")
 
-if RUN_GPU or HAS_MPS:
+if RUN_GPU or HAS_MPS or HAS_VULKAN:
 
     class SweepInputsGPUTest(SweepInputs2, TestCase):
         gen = InputGen(10, GPU_TYPE)

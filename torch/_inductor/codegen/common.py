@@ -452,6 +452,7 @@ def init_backend_registration() -> None:
     from .halide import HalideScheduling
     from .mps import MetalScheduling
     from .triton import TritonScheduling
+    from .vulkan import VulkanScheduling
     from .wrapper import PythonWrapperCodegen
 
     if get_scheduling_for_device("cpu") is None:
@@ -498,6 +499,14 @@ def init_backend_registration() -> None:
             CppWrapperMps,
         )
 
+    if get_scheduling_for_device("vulkan") is None:
+        register_backend_for_device(
+            "vulkan",
+            VulkanScheduling,
+            PythonWrapperCodegen,
+            CppWrapperGpu,
+        )
+
     private_backend = torch._C._get_privateuse1_backend_name()
     if (
         private_backend != "privateuseone"
@@ -541,7 +550,11 @@ def get_device_op_overrides(device: str) -> DeviceOpOverrides:
     assert isinstance(device, str), type(device)
 
     if not device_op_overrides_dict:
-        from . import cpu_device_op_overrides, mps_device_op_overrides  # noqa: F401
+        from . import (
+            cpu_device_op_overrides,
+            mps_device_op_overrides,  # noqa: F401
+            vulkan_device_op_overrides,
+        )
         from .cuda import device_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 

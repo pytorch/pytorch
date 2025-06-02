@@ -61,6 +61,8 @@ HAS_XPU = torch.xpu.is_available() and HAS_TRITON
 
 HAS_MPS = torch.mps.is_available()
 
+HAS_VULKAN = torch.is_vulkan_available()
+
 HAS_GPU = HAS_CUDA or HAS_XPU
 
 GPU_TYPE = get_gpu_type()
@@ -130,8 +132,8 @@ def skip_windows_ci(name: str, file: str) -> None:
             sys.exit(0)
         raise unittest.SkipTest("requires sympy/functorch/filelock")
 
-# TODO: Remove HAS_MPS condition  when `HAS_GPU` includes HAS_MPS
-requires_gpu = functools.partial(unittest.skipIf, not (HAS_GPU or HAS_MPS), "requires gpu")
+# TODO: Remove HAS_MPS condition  when `HAS_GPU` includes HAS_MPS, ditto HAS_VULKAN
+requires_gpu = functools.partial(unittest.skipIf, not (HAS_GPU or HAS_MPS or HAS_VULKAN), "requires gpu")
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
 def requires_cuda_with_enough_memory(min_mem_required):
@@ -219,6 +221,14 @@ def get_kernel_launch() -> str:
 def clone_preserve_strides_offset(x, device=None):
     if not isinstance(x, torch.Tensor):
         return x
+    if x.is_vulkan:
+        # HACK to support SSBO hack
+
+        # XXX: if we change the device here to Vulkan, inductor stops indexing
+        # into the input tensors with a sizevar and starts indexing with
+        # literal 0. Apparently something about the torch.compile integration
+        # requires tracing with SSBO-backed Tensors?
+        return x.cpu().to(device='privateuseone:0')
     buffer = torch.as_strided(
         x, (x.untyped_storage().size() // x.element_size(),), (1,), 0
     )

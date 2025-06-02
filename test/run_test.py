@@ -1287,6 +1287,12 @@ def parse_args():
         help=("If this flag is present, we will only run test_mps and test_metal"),
     )
     parser.add_argument(
+        "--vulkan",
+        "--vulkan",
+        action="store_true",
+        help=("If this flag is present, we will only run Vulkan tests"),
+    )
+    parser.add_argument(
         "--xpu",
         "--xpu",
         action="store_true",
@@ -1556,6 +1562,11 @@ def get_selected_tests(options) -> list[str]:
     else:
         # Exclude all mps tests otherwise
         options.exclude.extend(["test_mps", "test_metal"])
+
+    if options.vulkan:
+        selected_tests = [
+            "inductor/test_vulkan_basic",
+        ]
 
     if options.xpu:
         selected_tests = exclude_tests(XPU_BLOCKLIST, selected_tests, "on XPU")

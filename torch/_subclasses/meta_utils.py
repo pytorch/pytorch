@@ -286,6 +286,7 @@ class MetaTensorDescriber:
         is_traceable_wrapper_subclass_v = is_traceable_wrapper_subclass(t)
         is_functorch_wrapped = is_functorch_wrapped_tensor(t)
         is_mkldnn = t.is_mkldnn
+        is_vulkan = t.is_vulkan
         is_batchedtensor_v = is_batchedtensor(t)
         is_legacy_batchedtensor_v = is_legacy_batchedtensor(t)
         is_gradtrackingtensor_v = is_gradtrackingtensor(t)
@@ -301,6 +302,7 @@ class MetaTensorDescriber:
             or is_sparse_compressed_layout(layout)
             or (is_nested and not is_traceable_wrapper_subclass_v)
             or is_mkldnn
+            or is_vulkan
             # TODO: TBH, functorch wrapped tensors probably should have
             # storage associated with them
             or is_functorch_wrapped
@@ -394,6 +396,7 @@ class MetaTensorDescriber:
             dtype=t.dtype,
             is_sparse=is_sparse,
             is_mkldnn=is_mkldnn,
+            is_vulkan=is_vulkan,
             is_functorch_wrapped=is_functorch_wrapped,
             is_batchedtensor=is_batchedtensor_v,
             is_legacy_batchedtensor=is_legacy_batchedtensor_v,
@@ -623,6 +626,7 @@ class MetaTensorDesc(Generic[_TensorT]):
     requires_grad: bool = False
     is_sparse: bool = False
     is_mkldnn: bool = False
+    is_vulkan: bool = False
     is_functorch_wrapped: bool = False
     is_batchedtensor: bool = False
     is_legacy_batchedtensor: bool = False
@@ -1400,7 +1404,7 @@ class MetaConverter(Generic[_TensorT]):
                     unimplemented(
                         "strided nested tensors are not supported by meta conversion"
                     )
-                elif t.is_mkldnn:
+                elif t.is_mkldnn or t.is_vulkan:
                     is_leaf = t.is_leaf
                     (
                         sizes,
@@ -1414,7 +1418,7 @@ class MetaConverter(Generic[_TensorT]):
                             sizes, strides, dtype=t.dtype, device="meta"
                         )
                     )
-                    if self.copy_data:
+                    if self.copy_data and not t.is_vulkan:
                         with torch.no_grad(), no_dispatch():
                             assert t.size is not None
                             assert t.stride is not None

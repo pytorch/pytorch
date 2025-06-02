@@ -94,7 +94,13 @@ T = TypeVar("T")
 @functools.lru_cache(None)
 def get_gpu_type() -> str:
     avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
-    assert len(avail_gpus) <= 1
+    # NOCOMMIT: this breaks MPS when vulkan is available
+    VULKAN_GPU_TYPE = "vulkan"
+    if torch.is_vulkan_available():
+        avail_gpus.append(VULKAN_GPU_TYPE)
+    assert len(avail_gpus) <= 1 or avail_gpus == ["mps", VULKAN_GPU_TYPE], avail_gpus
+    if len(avail_gpus) == 2:
+        return VULKAN_GPU_TYPE
     gpu_type = "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
     return gpu_type
 
