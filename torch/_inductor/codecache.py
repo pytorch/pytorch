@@ -73,7 +73,7 @@ from torch._inductor.cpp_builder import (
     normalize_path_separator,
 )
 from torch._inductor.cpu_vec_isa import pick_vec_isa
-from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
+from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphModulePass, CustomGraphPassType
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.runtime.compile_tasks import _reload_python_module
 from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
@@ -897,7 +897,7 @@ class FxGraphHashDetails:
 
 
     def _get_custom_pass_detail(
-        self, custom_pass: CustomGraphPassType
+        self, custom_pass: CustomGraphPassType | CustomGraphModulePass
     ) -> Optional[Any]:
         if not custom_pass:
             return None
