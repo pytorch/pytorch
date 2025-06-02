@@ -52,7 +52,6 @@ from .hints import (
 )
 from .runtime_utils import (
     ceildiv,
-    compilation_callback,
     conditional_product,
     create_bandwidth_info_str,
     dynamo_timed,
@@ -746,7 +745,8 @@ class CachingAutotuner(KernelInterface):
             # so we can sort them by index.
             constexpr_args: list[tuple[int, Any]] = []
             for arg_name, arg_val in launcher.config.kwargs.items():
-                constexpr_args.append((self.fn.arg_names.index(arg_name), arg_val))
+                if arg_name in self.fn.arg_names:
+                    constexpr_args.append((self.fn.arg_names.index(arg_name), arg_val))
 
             constexpr_args.sort()
             new_args = [*args]
@@ -914,21 +914,15 @@ class CachingAutotuner(KernelInterface):
         return self.maybe_clone_args(OrderedSet(), *args, **kwargs)
 
     def benchmark_all_configs(self, *args, **kwargs):
-        with (
-            dynamo_timed(
-                "CachingAutotuner.benchmark_all_configs",
-                log_pt2_compile_event=True,
-                metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
-                dynamo_compile_column_us="runtime_triton_autotune_time_us",
-                compile_id=self.compile_id,
-                is_backward=self.is_backward,
-                log_waitcounter=True,
-                waitcounter_name_override="triton_autotuner",
-            ),
-            compilation_callback.callback_handler.install_callbacks(
-                compilation_callback.CallbackTrigger.TRITON_AUTOTUNING,
-                str(self.compile_id),
-            ),
+        with dynamo_timed(
+            "CachingAutotuner.benchmark_all_configs",
+            log_pt2_compile_event=True,
+            metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
+            dynamo_compile_column_us="runtime_triton_autotune_time_us",
+            compile_id=self.compile_id,
+            is_backward=self.is_backward,
+            log_waitcounter=True,
+            waitcounter_name_override="triton_autotuner",
         ):
             timings = {
                 launcher: self.bench(launcher, *args, **kwargs)
@@ -976,7 +970,11 @@ class CachingAutotuner(KernelInterface):
         )
 
         if self.save_cache_hook:
-            self.save_cache_hook(launcher.config, self.autotune_time_taken_ns)
+            self.save_cache_hook(
+                launcher.config,
+                self.autotune_time_taken_ns,
+                triton_cache_hash=launcher.cache_hash,
+            )
 
     def save_gpu_kernel(self, stream, launcher):
         key = self.inductor_meta.get("kernel_name", None)  # unique kernel name
@@ -1439,6 +1437,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         launcher.n_regs = self.kernel.n_regs  # type: ignore[attr-defined]
         launcher.n_spills = self.kernel.n_spills  # type: ignore[attr-defined]
         launcher.shared = self.kernel.shared  # type: ignore[attr-defined]
+        launcher.cache_hash = triton_hash_to_path_key(self.kernel.hash)  # type: ignore[attr-defined]
         launcher.store_cubin = False  # type: ignore[attr-defined]
         launcher._is_static = True  # type: ignore[attr-defined]
         return launcher
@@ -1627,6 +1626,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
         launcher.n_regs = getattr(binary, "n_regs", None)
         launcher.n_spills = getattr(binary, "n_spills", None)
         launcher.shared = binary_shared
+        launcher.cache_hash = triton_hash_to_path_key(binary.hash)
         launcher.store_cubin = self.inductor_meta.get("store_cubin", False)
         # store this global variable to avoid the high overhead of reading it when calling run
         if launcher.store_cubin:
