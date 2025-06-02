@@ -12,6 +12,23 @@ def get_source_segment(source, node):
         return ast.get_source_segment(source, node)
 
 
+def load_registry(path):
+    if path.exists():
+        with path.open() as f:
+            return json.load(f)
+    return {}
+
+
+def save_registry(reg, path):
+    with path.open("w") as f:
+        json.dump(reg, f, indent=2)
+
+
+def next_gb_id(reg):
+    ids = [int(x[2:]) for x in reg if x.startswith("GB") and x[2:].isdigit()]
+    return f"GB{(max(ids,default=0)+1):04d}"
+
+
 """
 Normalizes string literals by removing formatting artifacts and escape sequences.
 Handles f-strings, quotes, newlines, and other syntax elements for cleaner output.
@@ -84,11 +101,16 @@ def extract_info_from_keyword(source, kw):
         return clean_string(param_source)
 
 
-def find_unimplemented_v2_calls(dynamo_dir):
+def find_unimplemented_v2_calls(path):
     results = []
-    dynamo_dir = Path(dynamo_dir)
+    path = Path(path)
 
-    for file_path in dynamo_dir.glob("**/*.py"):
+    if path.is_dir():
+        file_paths = path.glob("**/*.py")
+    else:
+        file_paths = [path]
+
+    for file_path in file_paths:
         with open(file_path) as f:
             source = f.read()
             try:
@@ -137,6 +159,35 @@ def find_unimplemented_v2_calls(dynamo_dir):
     return results
 
 
+def cmd_add_new_gb_type(gb_type, file_path, registry_path):
+    registry_path = Path(registry_path)
+    reg = load_registry(registry_path)
+
+    existing_gb_types = {entry["Gb_type"] for entry in reg.values()}
+    if gb_type in existing_gb_types:
+        print(f"Error: gb_type '{gb_type}' already exists in registry. Please rename the gb_type so it can be unique.")
+        return False
+
+    calls = find_unimplemented_v2_calls(Path(file_path))
+    matching_call = next((call for call in calls if call["gb_type"] == gb_type), None)
+
+    if not matching_call:
+        print(f"Error: Could not find unimplemented_v2 call with gb_type '{gb_type}' in {file_path}")
+        return False
+
+    gb_id = next_gb_id(reg)
+    reg[gb_id] = {
+        "Gb_type": gb_type,
+        "Context": matching_call["context"],
+        "Explanation": matching_call["explanation"],
+        "Hints": matching_call["hints"] or [],
+    }
+
+    save_registry(reg, registry_path)
+    print(f"Added {gb_type} to registry with ID {gb_id}")
+    return True
+
+
 def create_registry(dynamo_dir, registry_path):
     calls = find_unimplemented_v2_calls(dynamo_dir)
     registry = {}
@@ -162,22 +213,44 @@ def create_registry(dynamo_dir, registry_path):
 
 
 def main():
+    script_dir = Path(__file__).resolve().parent
+
+    repo_root = script_dir.parent.parent
+    dynamo_dir = repo_root / "torch" / "_dynamo"
+    registry_path = script_dir / "graph_break_registry.json"
+
     parser = argparse.ArgumentParser(description="Manage graph break registry.")
-    parser.add_argument(
+    subparsers = parser.add_subparsers(dest="command", help="Command to execute")
+
+    create_parser = subparsers.add_parser("create", help="Create registry from scratch")
+    create_parser.add_argument(
         "--dynamo_dir",
         type=str,
-        default=str(Path(__file__).parent.parent.parent / "torch" / "_dynamo"),
+        default=str(dynamo_dir),
         help="Directory to search for unimplemented_v2 calls.",
     )
+
+    add_parser = subparsers.add_parser("add", help="Add a gb_type to registry")
+    add_parser.add_argument("gb_type", help="The gb_type to add")
+    add_parser.add_argument(
+        "file_path", help="Path to the file containing the unimplemented_v2 call"
+    )
+
     parser.add_argument(
         "--registry-path",
         type=str,
-        default=str(Path(__file__).parent / "graph_break_registry.json"),
+        default=str(registry_path),
         help="Path to save the registry JSON file.",
     )
+
     args = parser.parse_args()
 
-    create_registry(args.dynamo_dir, args.registry_path)
+    if args.command == "create":
+        create_registry(args.dynamo_dir, args.registry_path)
+    elif args.command == "add":
+        cmd_add_new_gb_type(args.gb_type, args.file_path, args.registry_path)
+    else:
+        parser.print_help()
 
 
 if __name__ == "__main__":
