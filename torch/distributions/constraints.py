@@ -52,69 +52,74 @@ from torch import Tensor
 
 
 __all__ = [
-    # Classes
+    # Base Classes
     "Constraint",
-    "MixtureSameFamilyConstraint",
-    # Type Aliases
-    "_Dependent",
-    "Independent",
+    # Classes
     "Boolean",
-    "OneHot",
-    "NonNegativeInteger",
-    "PositiveInteger",
-    "IntegerInterval",
-    "Real",
-    "RealVector",
-    "Positive",
-    "NonNegative",
+    "Cat",
+    "CorrCholesky",
     "GreaterThan",
     "GreaterThanEq",
-    "LessThan",
-    "Multinomial",
-    "UnitInterval",
-    "Interval",
     "HalfOpenInterval",
-    "Simplex",
-    "LowerTriangular",
+    "Independent",
+    "IntegerGreaterThan",
+    "IntegerInterval",
+    "IntegerLessThan",
+    "Interval",
+    "LessThan",
     "LowerCholesky",
-    "CorrCholesky",
-    "Square",
-    "Symmetric",
-    "PositiveSemidefinite",
+    "LowerTriangular",
+    "MixtureSameFamilyConstraint",
+    "Multinomial",
+    "Negative",
+    "NonNegative",
+    "NonNegativeInteger",
+    "OneHot",
+    "Positive",
     "PositiveDefinite",
-    "Cat",
+    "PositiveInteger",
+    "PositiveSemidefinite",
+    "Real",
+    "RealVector",
+    "Simplex",
+    "Square",
     "Stack",
+    "Symmetric",
+    "UnitInterval",
     # Constraint Classes / Instances
     "boolean",
-    "cat",
     "corr_cholesky",
     "dependent",
-    "dependent_property",
-    "greater_than",
-    "greater_than_eq",
-    "independent",
-    "integer_interval",
-    "interval",
-    "half_open_interval",
-    "is_dependent",
-    "less_than",
     "lower_cholesky",
     "lower_triangular",
-    "multinomial",
     "nonnegative",
     "nonnegative_integer",
     "one_hot",
     "positive",
-    "positive_semidefinite",
     "positive_definite",
     "positive_integer",
+    "positive_semidefinite",
     "real",
     "real_vector",
     "simplex",
     "square",
-    "stack",
     "symmetric",
     "unit_interval",
+    # aliases
+    "cat",
+    "dependent_property",
+    "independent",
+    "integer_interval",
+    "mixture_same_family",
+    "stack",
+    "interval",
+    "half_open_interval",
+    "greater_than",
+    "greater_than_eq",
+    "less_than",
+    "multinomial",
+    # functions
+    "is_dependent",
 ]
 
 
@@ -841,41 +846,45 @@ class PositiveDefinite(Symmetric):
         return torch.linalg.cholesky_ex(value).info.eq(0)
 
 
+# canonical instances
 # dependent constraints
 dependent: Final[_Dependent] = _Dependent()
-dependent_property = _DependentProperty
-# generic constraints
-independent = Independent
-mixture_same_family = MixtureSameFamilyConstraint
-cat = Cat
-stack = Stack
 # value constraints
-real: Final[Real] = Real()
 boolean: Final[Boolean] = Boolean()
+real: Final[Real] = Real()
 # interval constraints
-nonnegative_integer: Final[NonNegativeInteger] = NonNegativeInteger()
-positive_integer: Final[PositiveInteger] = PositiveInteger()
 nonnegative: Final[NonNegative] = NonNegative()
+nonnegative_integer: Final[NonNegativeInteger] = NonNegativeInteger()
 positive: Final[Positive] = Positive()
+positive_integer: Final[PositiveInteger] = PositiveInteger()
 unit_interval: Final[UnitInterval] = UnitInterval()
 # vector constraints
 one_hot: Final[OneHot] = OneHot()
-simplex: Final[Simplex] = Simplex()
 real_vector: Final[RealVector] = RealVector()
+simplex: Final[Simplex] = Simplex()
 # matrix constraints
-lower_triangular: Final[LowerTriangular] = LowerTriangular()
-lower_cholesky: Final[LowerCholesky] = LowerCholesky()
 corr_cholesky: Final[CorrCholesky] = CorrCholesky()
+lower_cholesky: Final[LowerCholesky] = LowerCholesky()
+lower_triangular: Final[LowerTriangular] = LowerTriangular()
+positive_definite: Final[PositiveDefinite] = PositiveDefinite()
+positive_semidefinite: Final[PositiveSemidefinite] = PositiveSemidefinite()
 square: Final[Square] = Square()
 symmetric: Final[Symmetric] = Symmetric()
-positive_semidefinite: Final[PositiveSemidefinite] = PositiveSemidefinite()
-positive_definite: Final[PositiveDefinite] = PositiveDefinite()
 
-# legacy aliases
+
+# aliases
+dependent_property = _DependentProperty
+# generic constraints
+cat = Cat
+independent = Independent
+mixture_same_family = MixtureSameFamilyConstraint
+stack = Stack
+# interval constraints
 interval = Interval
+integer_interval = IntegerInterval
 half_open_interval = HalfOpenInterval
 greater_than = GreaterThan
 greater_than_eq = GreaterThanEq
 less_than = LessThan
+# vector constraints
 multinomial = Multinomial
-integer_interval = IntegerInterval
