@@ -440,6 +440,14 @@ class BuiltinVariable(VariableTracker):
                 size_add_handler,
             ),
             (
+                (SizeVariable, TupleVariable),
+                size_add_handler,
+            ),
+            (
+                (TupleVariable, SizeVariable),
+                size_add_handler,
+            ),
+            (
                 (TupleVariable, TupleVariable),
                 tuple_add_handler,
             ),
@@ -1539,7 +1547,12 @@ class BuiltinVariable(VariableTracker):
                     ):
                         tx.output.guard_on_key_order.add(obj.source)
 
-                    install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+                    if not isinstance(obj, variables.UnspecializedNNModuleVariable):
+                        # Prevent calling __len__ method for guards, the tracing
+                        # of __iter__ will insert the right guards later.
+                        install_guard(
+                            obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH)
+                        )
 
             return cls(
                 list(obj.unpack_var_sequence(tx)),
