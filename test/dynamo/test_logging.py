@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     find_free_port,
     munge_exc,
     skipIfTorchDynamo,
+    xfailIfS390X,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import (
@@ -61,8 +62,9 @@ def munge_shape_guards(s: str) -> str:
 
     if torch._dynamo.config.enable_cpp_symbolic_shape_guards:
         # Since we can have multiple guard accessors for one guard, the shape guard
-        # printing will have duplicates. We remove duplicates whie preserving order.
-        lines = list(dict.fromkeys(lines))
+        # printing will have just SYMBOLIC_SHAPE_GUARD in one line for the second
+        # guard accessor and onwards. We remove those lines
+        lines = [line for line in lines if "__SHAPE_GUARD__:" in line]
 
     return "\n".join(lines)
 
@@ -181,8 +183,7 @@ class LoggingTests(LoggingTestCase):
 WON'T CONVERT dynamo_error_fn test_logging.py line N
 due to:
 Traceback (most recent call last):
-torch._dynamo.exc.TorchRuntimeError: Failed running call_method add(*(FakeTensor(..., size=(1000, 1000), grad_fn=<MulBackward0>), FakeTensor(..., size=(10, 10))), **{}):
-Attempting to broadcast a dimension of length 10 at -1! Mismatching argument at index 1 had torch.Size([10, 10]); but expected shape should be broadcastable to [1000, 1000]
+torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors: call_method add(*(FakeTensor(..., size=(1000, 1000), grad_fn=<MulBackward0>), FakeTensor(..., size=(10, 10))), **{}): got RuntimeError('Attempting to broadcast a dimension of length 10 at -1! Mismatching argument at index 1 had torch.Size([10, 10]); but expected shape should be broadcastable to [1000, 1000]')
 
 from user code:
    File "test_logging.py", line N, in dynamo_error_fn
@@ -190,8 +191,8 @@ from user code:
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
-    test_inductor_debug = within_range_record_test(3, 25, inductor=logging.DEBUG)
-    test_inductor_info = within_range_record_test(2, 9, inductor=logging.INFO)
+    test_inductor_debug = within_range_record_test(3, 28, inductor=logging.DEBUG)
+    test_inductor_info = within_range_record_test(2, 10, inductor=logging.INFO)
 
     @make_logging_test()
     def test_inductor_error(self, records):
@@ -507,6 +508,28 @@ LoweringException: AssertionError:
         with self.assertRaises(ValueError):
             torch._logging.set_logs(aot_graphs=5)
 
+    def test_invalid_artifact_flag_error_msg(self):
+        env = dict(os.environ)
+        env["TORCH_LOGS"] = "not_an_existing_log_artifact_should_error"
+        _, stderr = self.run_process_no_exception(
+            "import torch",
+            env=env,
+        )
+        lines = stderr.decode().split("\n")
+        # This is a sanity assert that our error is not spammy.
+        # As of this test creation this was 18.
+        # See this issue for the purpose o this test:
+        # https://github.com/pytorch/pytorch/issues/151055
+        self.assertTrue(len(lines) < 50)
+        # The other sanity assert - check that the last few lines
+        # map to the actual error message we want to raise
+        # (I could use an expecttest here, although it would break
+        #  whenever someone adds a new logging artifact)
+        self.assertEqual(
+            lines[-5], 'For more info on various settings, try TORCH_LOGS="help"'
+        )
+        self.assertEqual(lines[-4], "Valid settings:")
+
     @requires_distributed()
     def test_distributed_rank_logging(self):
         env = dict(os.environ)
@@ -589,7 +612,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         fn_opt = torch.compile(f, backend="eager")
         fn_opt(torch.randn(3, 3))
 
-        self.assertEqual(len(records), 4)
+        self.assertEqual(len(records), 3)
         messages = [
             "\n".join(record.getMessage().split("\n")[-2:]) for record in records
         ]
@@ -613,12 +636,6 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         #     return g(g(x))
         #            ~^^^^^^""",
         # )
-        self.assertExpectedInline(
-            messages[3],
-            """\
-            return x * 2
-                   ~~^~~""",
-        )
 
     @skipIfNotPy311
     @make_logging_test(trace_call=True)
@@ -693,6 +710,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertExpectedInline(
             munge_shape_guards(record.getMessage()),
             """\
+| +- __SHAPE_GUARD__: torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == None  # #:# in #
 +- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['z'].size()[0]  # return x + torch.cat([y, z])  # #:# in # #:# in #
 +- __SHAPE_GUARD__: L['y'].size()[0] == L['z'].size()[0]  # duck sizing added this equality because these variables had the same size 3 (to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)
 +- __SHAPE_GUARD__: ((2*L['z'].size()[0]) % 3) == 0  # if x.size(0) % 3 == 0:  # #:# in # #:# in #
@@ -711,6 +729,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertExpectedInline(
             munge_shape_guards(record.getMessage()),
             """\
+| +- __SHAPE_GUARD__: torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == None  # #:# in #
 +- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # #:# in #
 +- __SHAPE_GUARD__: 2 <= L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.mark_unbacked(tensor, dim))""",  # noqa: B950
         )
@@ -730,6 +749,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertExpectedInline(
             munge_shape_guards(record.getMessage()),
             """\
+| +- __SHAPE_GUARD__: torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == None  # #:# in #
 +- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # torch._check(x.size(0) == y.size(0) * 2)  # #:# in # #:# in #
 +- __SHAPE_GUARD__: 3 <= L['y'].size()[0] <= 14  # torch._check(x.size(0) > 5)  # #:# in # #:# in # and torch._check(x.size(0) < 30)  # #:# in # #:# in #""",  # noqa: B950
         )
@@ -818,6 +838,8 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             len([r for r in records if "return a + 1" in r.getMessage()]), 0
         )
 
+    # there are some additional deprecation warnings in stderr, probably due to newer dependencies used on s390x
+    @xfailIfS390X
     def test_logs_out(self):
         import tempfile
 
@@ -906,6 +928,7 @@ exclusions = {
     "aot_graphs_effects",
     "pre_grad_graphs",
     "post_grad_graphs",
+    "inductor_metrics",
     "ir_pre_fusion",
     "ir_post_fusion",
     "compiled_autograd",
@@ -915,6 +938,7 @@ exclusions = {
     "graph_breaks",
     "graph",
     "graph_code",
+    "graph_code_verbose",
     "graph_sizes",
     "ddp_graphs",
     "perf_hints",

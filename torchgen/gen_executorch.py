@@ -444,9 +444,9 @@ def get_ns_grouped_kernels(
                 native_function_namespaces.add(namespace)
             else:
                 namespace = DEFAULT_KERNEL_NAMESPACE
-            assert (
-                len(native_function_namespaces) <= 1
-            ), f"Codegen only supports one namespace per operator, got {native_function_namespaces}"
+            assert len(native_function_namespaces) <= 1, (
+                f"Codegen only supports one namespace per operator, got {native_function_namespaces}"
+            )
             ns_grouped_kernels[namespace].extend(
                 native_function_decl_gen(f, kernel_index)
             )

@@ -434,7 +434,7 @@ query ($owner: String!, $name: String!) {
 RE_GHSTACK_HEAD_REF = re.compile(r"^(gh/[^/]+/[0-9]+/)head$")
 RE_GHSTACK_DESC = re.compile(r"Stack.*:\r?\n(\* [^\r\n]+\r?\n)+", re.MULTILINE)
 RE_PULL_REQUEST_RESOLVED = re.compile(
-    r"Pull Request resolved: "
+    r"(Pull Request resolved|Pull-Request-resolved|Pull-Request): "
     r"https://github.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>[0-9]+)",
     re.MULTILINE,
 )
@@ -819,10 +819,9 @@ class GitHubPR:
                     cursor=info["reviews"]["pageInfo"]["startCursor"],
                 )
                 info = rc["data"]["repository"]["pullRequest"]
-        reviews = {}
-        for author, state in self._reviews:
-            if state != "COMMENTED":
-                reviews[author] = state
+        reviews = {
+            author: state for author, state in self._reviews if state != "COMMENTED"
+        }
         return list(reviews.items())
 
     def get_approved_by(self) -> list[str]:
@@ -939,6 +938,12 @@ class GitHubPR:
                     title=None,
                     summary=None,
                 )
+
+        # Making an exception for Apply lint auggestions/autoformat because the
+        # bot adds a merged label -> triggers workflow -> sometimes needs
+        # approval -> is read as failure, which results in a blocked merge, but
+        # this workflow doesn't provide mergability info
+        self.conclusions.pop("Apply lint suggestions", None)
 
         return self.conclusions
 
@@ -1224,9 +1229,17 @@ class GitHubPR:
         if not self.is_ghstack_pr():
             msg = self.gen_commit_message()
             pr_branch_name = f"__pull-request-{self.pr_num}__init__"
-            repo.fetch(f"pull/{self.pr_num}/head", pr_branch_name)
+            repo.fetch(self.last_commit()["oid"], pr_branch_name)
             repo._run_git("merge", "--squash", pr_branch_name)
             repo._run_git("commit", f'--author="{self.get_author()}"', "-m", msg)
+
+            # Did the PR change since we started the merge?
+            pulled_sha = repo.show_ref(pr_branch_name)
+            latest_pr_status = GitHubPR(self.org, self.project, self.pr_num)
+            if pulled_sha != latest_pr_status.last_commit()["oid"]:
+                raise RuntimeError(
+                    "PR has been updated since CI checks last passed. Please rerun the merge command."
+                )
             return []
         else:
             return self.merge_ghstack_into(
@@ -1931,6 +1944,7 @@ def get_ghstack_dependent_prs(
 
 def do_revert_prs(
     repo: GitRepo,
+    original_pr: GitHubPR,
     shas_and_prs: list[tuple[str, GitHubPR]],
     *,
     author_login: str,
@@ -1952,9 +1966,16 @@ def do_revert_prs(
 
     # Comment/reopen PRs
     for commit_sha, pr in shas_and_prs:
-        revert_message = (
-            f"@{pr.get_pr_creator_login()} your PR has been successfully reverted."
-        )
+        revert_message = ""
+        if pr.pr_num == original_pr.pr_num:
+            revert_message += (
+                f"@{pr.get_pr_creator_login()} your PR has been successfully reverted."
+            )
+        else:
+            revert_message += (
+                f"@{pr.get_pr_creator_login()} your PR has been reverted as part of the stack under "
+                f"#{original_pr.pr_num}.\n"
+            )
         if (
             pr.has_internal_changes()
             and not pr.has_no_connected_diff()
@@ -2006,6 +2027,7 @@ def try_revert(
 
     do_revert_prs(
         repo,
+        pr,
         shas_and_prs,
         author_login=author_login,
         extra_msg=extra_msg,
@@ -2024,7 +2046,7 @@ def check_for_sev(org: str, project: str, skip_mandatory_checks: bool) -> None:
     response = cast(
         dict[str, Any],
         gh_fetch_json_list(
-            "https://api.github.com/search/issues",
+            "https://api.github.com/search/issues",  # @lint-ignore
             # Having two label: queries is an AND operation
             params={
                 "q": f'repo:{org}/{project} is:open is:issue label:"ci: sev" label:"merge blocking"'
@@ -2274,7 +2296,8 @@ def merge(
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
             print(
-                f"Merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} failed due to: {ex}. Retrying in 5 min"
+                f"Merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} failed due to: {ex}. Retrying in 5 min",
+                flush=True,
             )
             time.sleep(5 * 60)
     # Finally report timeout back

@@ -110,7 +110,7 @@ PyObject* THCPModule_nccl_init_rank(PyObject* self, PyObject* args) {
   }
   TORCH_CHECK(
       id_len == NCCL_UNIQUE_ID_BYTES,
-      "invalid unqiue_id (expected ",
+      "invalid unique_id (expected ",
       NCCL_UNIQUE_ID_BYTES,
       " bytes, got ",
       id_len,

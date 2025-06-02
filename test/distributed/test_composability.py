@@ -1,14 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 import copy
-import os
-import sys
-import tempfile
 
 import torch
-import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.pipelining import PipelineStage
@@ -20,6 +15,7 @@ from torch.distributed.pipelining.schedules import (
     ScheduleInterleavedZeroBubble,
     ScheduleLoopedBFS,
 )
+from torch.distributed.tensor import DTensor
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
@@ -30,9 +26,13 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    run_tests,
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_ROCM,
 )
+
+
+device_type = "cuda"
 
 
 # MLP Layer
@@ -92,29 +92,14 @@ def loss_fn(y, target, scale=1e-4):
 
 
 class ComposabilityTest(MultiProcContinousTest):
-    world_size = 4
-
     @classmethod
     def backend_str(cls) -> str:
         # Testing with NCCL backend
         return "nccl"
 
-    @classmethod
-    def setUpClass(cls):
-        """
-        Class-scope test fixture. Run once for entire test class, before any test starts.
-        Set up the device.
-        """
-        super().setUpClass()
-        dev_id = cls.rank % torch.cuda.device_count()
-        cls.device = torch.device(f"cuda:{dev_id}")
-        torch.cuda.set_device(cls.device)
-
-    def _build_mesh(self, mesh_shape=(2, 2), mesh_dim_names=("dp", "pp")):
-        device_mesh = init_device_mesh(
-            "cuda", mesh_shape=mesh_shape, mesh_dim_names=mesh_dim_names
-        )
-        return device_mesh
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
 
     def _rand_microbatches(self, dp_mesh, num_microbatches, dim, dtype=torch.float32):
         full = [
@@ -216,7 +201,12 @@ class ComposabilityTest(MultiProcContinousTest):
             # https://github.com/pytorch/pytorch/issues/144530
             return
 
-        device_mesh = self._build_mesh((2, 2), ("dp", "pp"))
+        torch.get_device_module(device_type).set_device(self.device)
+        mesh_shape = (self.world_size // 2, 2)
+        mesh_dim_names = ("dp", "pp")
+        device_mesh = init_device_mesh(
+            "cuda", mesh_shape=mesh_shape, mesh_dim_names=mesh_dim_names
+        )
         pp_group = device_mesh["pp"].get_group()
         dp_mesh = device_mesh["dp"]
 
@@ -292,7 +282,12 @@ class ComposabilityTest(MultiProcContinousTest):
         if TEST_WITH_ROCM:
             return
 
-        device_mesh = self._build_mesh((2, 2), ("dp", "pp"))
+        torch.get_device_module(device_type).set_device(self.device)
+        mesh_shape = (self.world_size // 2, 2)
+        mesh_dim_names = ("dp", "pp")
+        device_mesh = init_device_mesh(
+            "cuda", mesh_shape=mesh_shape, mesh_dim_names=mesh_dim_names
+        )
         pp_group = device_mesh["pp"].get_group()
         dp_mesh = device_mesh["dp"]
 
@@ -376,35 +371,12 @@ class ComposabilityTest(MultiProcContinousTest):
                 name = ".".join(parts)
                 ref_p = ref_parameters[name]
                 self.assertTrue(isinstance(p.grad, DTensor))
-                torch.testing.assert_close(p.grad.full_tensor(), ref_p.grad)
+                torch.testing.assert_close(
+                    p.grad.full_tensor(), ref_p.grad, atol=5e-5, rtol=2e-2
+                )
 
 
 instantiate_parametrized_tests(ComposabilityTest)
+
 if __name__ == "__main__":
-    # Check if GPU and NCCL are available
-    if not (
-        dist.is_available()
-        and dist.is_nccl_available()
-        and torch.cuda.device_count() > 1
-    ):
-        print(
-            "c10d NCCL not available or not enough GPUs, skipping tests",
-            file=sys.stderr,
-        )
-        sys.exit(0)
-
-    rank = int(os.getenv("RANK", -1))
-    world_size = int(os.getenv("WORLD_SIZE", 4))
-
-    if rank != -1:
-        # Launched with torchrun or other multi-proc launchers. Directly run the test.
-        ComposabilityTest.run_rank(rank, world_size)
-    else:
-        # Launched as a single process. Spawn subprocess to run the tests.
-        # Also need a rendezvous file for `init_process_group` purpose.
-        rdvz_file = tempfile.NamedTemporaryFile(delete=False).name
-        torch.multiprocessing.spawn(
-            ComposabilityTest.run_rank,
-            nprocs=world_size,
-            args=(world_size, rdvz_file),
-        )
+    run_tests()

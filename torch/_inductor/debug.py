@@ -12,7 +12,6 @@ import os.path
 import pickle
 import pstats
 import shutil
-import subprocess
 import traceback
 from collections.abc import Iterator
 from typing import Any, Callable, IO, Optional, Union
@@ -53,11 +52,7 @@ GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=50
 
 @functools.lru_cache(None)
 def has_dot() -> bool:
-    try:
-        subprocess.check_output(["which", "dot"], stderr=subprocess.PIPE)
-        return True
-    except subprocess.SubprocessError:
-        return False
+    return shutil.which("dot") is not None
 
 
 def draw_buffers(
@@ -240,7 +235,7 @@ def update_orig_fx_node_name_to_buf_name(
 
 
 def get_node_name_to_buf_meta(
-    node_name_to_buf_name: dict[str, str]
+    node_name_to_buf_name: dict[str, str],
 ) -> dict[str, BufMeta]:
     buf_name_to_n_node = {}
     for node_name, buf_name in node_name_to_buf_name.items():
@@ -526,14 +521,15 @@ class DebugFormatter:
             fd.write(gm.print_readable(print_output=False))
 
     def ir_pre_fusion(self, nodes: SchedulerNodeList) -> None:
-        if ir_pre_fusion_log.isEnabledFor(logging.INFO):
-            ir_pre_fusion_log.info("BEFORE FUSION\n%s", self._write_ir(nodes))
+        with self.fopen("ir_pre_fusion.txt") as fd:
+            fd.write(self._write_ir(nodes))
 
     def ir_post_fusion(self, nodes: SchedulerNodeList) -> None:
-        if ir_post_fusion_log.isEnabledFor(logging.INFO):
-            ir_post_fusion_log.info("AFTER FUSION\n%s", self._write_ir(nodes))
+        with self.fopen("ir_post_fusion.txt") as fd:
+            fd.write(self._write_ir(nodes))
 
-    def _write_ir(self, nodes: SchedulerNodeList) -> str:
+    @staticmethod
+    def _write_ir(nodes: SchedulerNodeList) -> str:
         buf = io.StringIO()
         for node in nodes:
             buf.write(node.debug_str())
@@ -558,11 +554,11 @@ class DebugFormatter:
             dot_graph_shape=config.trace.dot_graph_shape,
         )
 
-    def output_code(self, filename: str) -> None:
-        shutil.copy(filename, self.filename("output_code.py"))
+    def output_code(self, filename: str, extension: str = "py") -> None:
+        shutil.copy(filename, self.filename(f"output_code.{extension}"))
 
     def log_inductor_triton_kernel_to_post_grad_node_info(
-        self, filename: str = "inductor_triton_kernel_to_post_grad_nodes.json"
+        self, filename: str = "inductor_generated_kernel_to_post_grad_nodes.json"
     ) -> tuple[dict[str, list[str]], dict[str, Any]]:
         debug_info = {}
         with self.fopen(filename, "w") as fd:
@@ -667,6 +663,20 @@ class DebugFormatter:
                 info_dict["benchmark_result"] = time
                 json.dump(info_dict, fd)
                 fd.write("\n")
+
+
+def log_ir_pre_fusion(nodes: SchedulerNodeList) -> None:
+    if ir_pre_fusion_log.isEnabledFor(logging.INFO):
+        ir_pre_fusion_log.info("BEFORE FUSION\n%s", DebugFormatter._write_ir(nodes))
+
+    V.debug.ir_pre_fusion(nodes)
+
+
+def log_ir_post_fusion(nodes: SchedulerNodeList) -> None:
+    if ir_post_fusion_log.isEnabledFor(logging.INFO):
+        ir_post_fusion_log.info("AFTER FUSION\n%s", DebugFormatter._write_ir(nodes))
+
+    V.debug.ir_post_fusion(nodes)
 
 
 @dataclasses.dataclass

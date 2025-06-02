@@ -21,7 +21,7 @@ on:
       python-version:
         required: false
         type: string
-        default: "3.9"
+        default: "3.12"
         description: |
           The python version to be used. Will be 3.9 by default
       timeout-minutes:
@@ -38,6 +38,23 @@ on:
         required: false
         type: boolean
         default: true
+      monitor-log-interval:
+        description: |
+          Set the interval for the monitor script to log utilization.
+        required: false
+        type: number
+        default: 5
+      monitor-data-collect-interval:
+        description: |
+          Set the interval for the monitor script to collect data.
+        required: false
+        type: number
+        default: 1
+    secrets:
+      HUGGING_FACE_HUB_TOKEN:
+        required: false
+        description: |
+          HF Auth token to avoid rate limits when downloading models or datasets from hub
 
 jobs:
   test:
@@ -88,12 +105,27 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Start monitoring script
         id: monitor-script
         if: ${{ !inputs.disable-monitor }}
         continue-on-error: true
+        env:
+          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+          WORKFLOW_RUN_ID: ${{github.run_id}}
+          MONITOR_LOG_INTERVAL: ${{ inputs.monitor-log-interval }}
+          MONITOR_DATA_COLLECT_INTERVAL: ${{ inputs.monitor-data-collect-interval }}
         run: |
-          ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          ${CONDA_RUN} python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7
+          ${CONDA_RUN} python3 -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download build artifacts
@@ -112,19 +144,13 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: ${{ inputs.python-version }}
-          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
-          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
+          environment-file: .github/requirements/conda-env-macOS-ARM64
+          pip-requirements-file: .github/requirements/pip-requirements-macOS.txt
+          default-packages: ""
 
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
-
-      - name: Get workflow job id
-        id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check for keep-going label and re-enabled test issues
         # This uses the filter-test-configs action because it conviniently
@@ -166,6 +192,7 @@ jobs:
           JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
           REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
+          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
         run: |
           # shellcheck disable=SC1090
           set -ex
@@ -208,6 +235,17 @@ jobs:
         run: |
           cat test/**/*_toprint.log || true
 
+      - name: Run OP benchmark
+        shell: bash
+        if: ${{ contains(steps.get-job-id.outputs.job-name, 'mps') }}
+        run: |
+          if [[ -n "$CONDA_ENV" ]]; then
+            # Use binaries under conda environment
+            export PATH="$CONDA_ENV/bin":$PATH
+          fi
+          ${CONDA_RUN} python3 test/bench_mps_ops.py
+
+
       - name: Stop monitoring script
         if: ${{ always() && steps.monitor-script.outputs.monitor-script-pid }}
         continue-on-error: true
@@ -230,6 +268,18 @@ jobs:
           dry-run: false
           schema-version: v3
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload utilization stats
+        if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && !inputs.disable-monitor }}
+        continue-on-error: true
+        uses: ./.github/actions/upload-utilization-stats
+        with:
+          job_id: ${{ steps.get-job-id.outputs.job-id }}
+          job_name: ${{ steps.get-job-id.outputs.job-name }}
+          workflow_name: ${{ github.workflow }}
+          workflow_run_id: ${{github.run_id}}
+          workflow_attempt: ${{github.run_attempt}}
+          local_path: usage_log.txt
 
       - name: Clean up disk space
         if: always()

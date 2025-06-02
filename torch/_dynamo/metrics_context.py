@@ -13,9 +13,36 @@ The metrics system enables comprehensive monitoring and analysis of both compila
 execution performance.
 """
 
+import heapq
+import logging
 import time
+from collections.abc import Iterator
 from typing import Any, Callable, Optional
 from typing_extensions import TypeAlias
+
+
+log = logging.getLogger(__name__)
+
+
+class TopN:
+    """
+    Helper to record a list of metrics, keeping only the top N "most expensive" elements.
+    """
+
+    def __init__(self, at_most: int = 25):
+        self.at_most = at_most
+        self.heap: list[tuple[int, Any]] = []
+
+    def add(self, key: Any, val: int) -> None:
+        # Push if we haven't reached the max size, else push and pop the smallest
+        fn = heapq.heappush if len(self.heap) < self.at_most else heapq.heappushpop
+        fn(self.heap, (val, key))
+
+    def __len__(self) -> int:
+        return len(self.heap)
+
+    def __iter__(self) -> Iterator[tuple[Any, int]]:
+        return ((key, val) for val, key in sorted(self.heap, reverse=True))
 
 
 OnExitType: TypeAlias = Callable[
@@ -61,10 +88,13 @@ class MetricsContext:
         self._level -= 1
         assert self._level >= 0
         if self._level == 0:
-            end_time_ns = time.time_ns()
-            self._on_exit(
-                self._start_time_ns, end_time_ns, self._metrics, exc_type, exc_value
-            )
+            try:
+                end_time_ns = time.time_ns()
+                self._on_exit(
+                    self._start_time_ns, end_time_ns, self._metrics, exc_type, exc_value
+                )
+            except Exception:
+                log.exception("Unexpected exception logging compilation metrics")
 
     def in_progress(self) -> bool:
         """
@@ -109,15 +139,16 @@ class MetricsContext:
             self._metrics[metric] = {}
         self._metrics[metric][key] = value
 
-    def update(self, values: dict[str, Any]) -> None:
+    def update(self, values: dict[str, Any], overwrite: bool = False) -> None:
         """
         Set multiple metrics directly. This method does NOT increment. Raises if any
-        metric has been assigned previously in the current context.
+        metric has been assigned previously in the current context and overwrite is
+        not set to True.
         """
         if self._level == 0:
             raise RuntimeError("Cannot update metrics outside of a MetricsContext")
         existing = self._metrics.keys() & values.keys()
-        if existing:
+        if existing and not overwrite:
             raise RuntimeError(
                 f"Metric(s) {existing} have already been set in the current context"
             )
@@ -142,6 +173,16 @@ class MetricsContext:
             self._metrics[metric] = set()
         self._metrics[metric].add(value)
 
+    def add_top_n(self, metric: str, key: Any, val: int) -> None:
+        """
+        Records a metric as a TopN set of values.
+        """
+        if self._level == 0:
+            return
+        if metric not in self._metrics:
+            self._metrics[metric] = TopN()
+        self._metrics[metric].add(key, val)
+
 
 class RuntimeMetricsContext:
     def __init__(self, on_exit: OnExitType):
@@ -155,7 +196,7 @@ class RuntimeMetricsContext:
         self._start_time_ns: int = 0
 
     def increment(
-        self, metric: str, value: int, extra: Optional[dict[str, Any]]
+        self, metric: str, value: int, extra: Optional[dict[str, Any]] = None
     ) -> None:
         """
         Increment a metric by a given amount.
@@ -177,6 +218,12 @@ class RuntimeMetricsContext:
         Call the on_exit function with the metrics gathered so far and reset.
         """
         if self._metrics:
-            end_time_ns = time.time_ns()
-            self._on_exit(self._start_time_ns, end_time_ns, self._metrics, None, None)
-            self._metrics = {}
+            try:
+                end_time_ns = time.time_ns()
+                self._on_exit(
+                    self._start_time_ns, end_time_ns, self._metrics, None, None
+                )
+            except Exception:
+                log.exception("Unexpected exception logging runtime metrics")
+            finally:
+                self._metrics = {}

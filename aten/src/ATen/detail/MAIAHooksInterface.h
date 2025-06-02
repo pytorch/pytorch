@@ -17,7 +17,7 @@ struct TORCH_API MAIAHooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK(false, "Cannot initialize MAIA without ATen_maia library.");
   }
 
-  bool hasPrimaryContext(DeviceIndex device_index) const override {
+  bool hasPrimaryContext(DeviceIndex /*device_index*/) const override {
     TORCH_CHECK(false, "Cannot initialize MAIA without ATen_maia library.");
     return false;
   }

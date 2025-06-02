@@ -108,6 +108,7 @@ includes = [
     "aten/src/THC/CMakeLists.txt",
     "torch/*",
     "tools/autograd/templates/python_variable_methods.cpp",
+    "torch/csrc/stable/*",
 ]
 
 includes = [os.path.join(proj_dir, include) for include in includes]
@@ -206,6 +207,7 @@ hipify_python.hipify(
     includes=includes,
     ignores=ignores,
     extra_files=[
+        "torch/_inductor/codegen/cuda/device_op_overrides.py",
         "torch/_inductor/codegen/cpp_wrapper_cpu.py",
         "torch/_inductor/codegen/cpp_wrapper_gpu.py",
         "torch/_inductor/codegen/wrapper.py",

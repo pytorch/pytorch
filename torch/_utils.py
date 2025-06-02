@@ -81,9 +81,9 @@ def _to(self, device, non_blocking=False):
         return untyped_storage
 
     device_module = getattr(torch, device.type, None)
-    assert (
-        device_module is not None
-    ), f"{device.type.upper()} device module is not loaded"
+    assert device_module is not None, (
+        f"{device.type.upper()} device module is not loaded"
+    )
     with device_module.device(device):
         if self.is_sparse and hasattr(device_module, "sparse"):
             new_type = getattr(device_module.sparse, self.__class__.__name__)
@@ -95,9 +95,9 @@ def _to(self, device, non_blocking=False):
             )
             return new_type(indices, values, self.size())
         else:
-            assert (
-                not self.is_sparse
-            ), f"sparse storage is not supported for {device.type.upper()} tensors"
+            assert not self.is_sparse, (
+                f"sparse storage is not supported for {device.type.upper()} tensors"
+            )
             untyped_storage = torch.UntypedStorage(self.size(), device=device)
             untyped_storage.copy_(self, non_blocking)
             return untyped_storage
@@ -203,6 +203,16 @@ def set_tensor_metadata(tensor, metadata):
     torch._C._set_tensor_metadata(tensor, metadata)  # type: ignore[attr-defined]
 
 
+def _restore_device_fake_mode(tensor):
+    if torch._guards.detect_fake_mode(None) is not None:
+        if tensor.untyped_storage()._fake_device is not None:
+            device = _get_restore_location(tensor.untyped_storage()._fake_device)
+            if not isinstance(device, torch.device):
+                device = torch.device(device)
+            tensor.fake_device = torch.device(device)
+    return tensor
+
+
 def _rebuild_tensor_v2(
     storage,
     storage_offset,
@@ -221,6 +231,8 @@ def _rebuild_tensor_v2(
     # general expectation is that backward_hooks is an empty
     # OrderedDict.  See Note [Don't serialize hooks]
     tensor._backward_hooks = backward_hooks
+
+    tensor = _restore_device_fake_mode(tensor)
     return tensor
 
 
@@ -244,6 +256,7 @@ def _rebuild_tensor_v3(
     if metadata:
         set_tensor_metadata(t, metadata)
     t._backward_hooks = backward_hooks
+    t = _restore_device_fake_mode(t)
     return t
 
 
@@ -263,7 +276,11 @@ _sparse_tensors_to_validate: list["torch.Tensor"] = []
 def _validate_loaded_sparse_tensors():
     try:
         for t in _sparse_tensors_to_validate:
-            if t.layout is torch.sparse_coo:
+            if True:
+                # Temporarily disable sparse tensor validation due to
+                # gh-153143.
+                pass
+            elif t.layout is torch.sparse_coo:
                 torch._validate_sparse_coo_tensor_args(
                     t._indices(), t._values(), t.size(), t.is_coalesced()
                 )
@@ -378,7 +395,7 @@ def _rebuild_wrapper_subclass(
     requires_grad,
 ):
     device = _get_restore_location(device)
-    return torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+    return torch.Tensor._make_wrapper_subclass(
         cls,
         size,
         strides=stride,

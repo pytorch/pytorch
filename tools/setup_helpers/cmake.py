@@ -189,7 +189,6 @@ class CMake:
             # Key: environment variable name. Value: Corresponding variable name to be passed to CMake. If you are
             # adding a new build option to this block: Consider making these two names identical and adding this option
             # in the block below.
-            "_GLIBCXX_USE_CXX11_ABI": "GLIBCXX_USE_CXX11_ABI",
             "CUDNN_LIB_DIR": "CUDNN_LIBRARY",
             "USE_CUDA_STATIC_LINK": "CAFFE2_STATIC_LINK_CUDA",
         }
@@ -288,6 +287,12 @@ class CMake:
                 "USE_NUMPY": not check_negative_env_flag("USE_NUMPY"),
             }
         )
+
+        # Detect build dependencies from python lib path (in order to set *_HOME variables)
+        # NVSHMEM
+        nvshmem_home = py_lib_path + "/nvidia/nvshmem"
+        if os.path.exists(nvshmem_home):
+            build_options["NVSHMEM_HOME"] = nvshmem_home
 
         # Options starting with CMAKE_
         cmake__options = {

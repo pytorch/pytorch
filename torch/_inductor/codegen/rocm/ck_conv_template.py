@@ -474,9 +474,9 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         chosen_instances = (
             random.sample(
                 filtered_instances,
-                min(len(filtered_instances), config.rocm.n_max_profiling_configs),
+                min(len(filtered_instances), config.rocm.ck_max_profiling_configs),
             )
-            if config.rocm.n_max_profiling_configs
+            if config.rocm.ck_max_profiling_configs
             else filtered_instances
         )
         log.debug(
@@ -516,7 +516,12 @@ class CKGroupedConvFwdTemplate(CKTemplate):
             template_params=(",\n" + 12 * " ").join(template_params),
         ), self._template_from_string(template_type).render(operation_name=op.name())
 
-    def render(self, kernel: ROCmTemplateKernel, op: "CKGroupedConvFwdOp", **kwargs) -> str:  # type: ignore[override, name-defined]
+    def render(  # type: ignore[override]
+        self,
+        kernel: ROCmTemplateKernel,
+        op: "CKGroupedConvFwdOp",  # type: ignore[name-defined]
+        **kwargs,
+    ) -> str:
         template_buffer_node = kwargs.get("template_buffer_node", None)
         if template_buffer_node is not None:
             self.output_node = template_buffer_node

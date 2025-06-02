@@ -52,6 +52,7 @@ FLOAT_TYPES = (
     torch.float64,
 )
 
+
 TEST_OPSET_VERSION = 18
 IS_MACOS = sys.platform.startswith("darwin")
 IS_WINDOWS = os.name == "nt"
@@ -170,9 +171,9 @@ def add_decorate_info(
             # If the OpInfo doesn't exist and it is not enabled, we skip the OpInfo
             # because it could be an OpInfo that is in torch-nightly but not older versions.
             continue
-        assert (
-            opinfo is not None
-        ), f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
+        assert opinfo is not None, (
+            f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
+        )
         decorators = list(opinfo.decorators)
         new_decorator = opinfo_core.DecorateInfo(
             decorate_meta.decorator,
@@ -487,6 +488,7 @@ def dtype_op_schema_compatible(dtype: torch.dtype, schema: onnx.defs.OpSchema) -
 def graph_executor(
     test_name: str,
     outputs: Sequence[Any],
+    opset_version: int = TEST_OPSET_VERSION,
 ) -> Callable[[Callable[..., Any], tuple[Any], dict[str, Any]], None]:
     """Eagerly executes a function."""
 
@@ -500,10 +502,10 @@ def graph_executor(
             (),
             (),
             nodes=(),
-            opset_imports={"": 18, "pkg.torch.onnx": 1},
+            opset_imports={"": opset_version, "pkg.torch.onnx": 1},
             name="main_graph",
         )
-        opset = onnxscript.opset18
+        opset = onnxscript.values.Opset("", opset_version)
         tracer = _building.OpRecorder(opset, {})
         ort_inputs = {}
         onnxscript_args: list[Any] = []
@@ -590,7 +592,7 @@ def graph_executor(
                 proto = onnxscript_function.to_function_proto()
                 ir_function = ir.serde.deserialize_function(proto)
             onnx_model.functions[identifier] = ir_function
-        _ir_passes.add_torchlib_common_imports(onnx_model)
+        _ir_passes.add_torchlib_common_imports(onnx_model, opset_version=opset_version)
         _ir_passes.add_opset_imports(onnx_model)
         # Make sure the model is valid
         model_proto = ir.to_proto(onnx_model)

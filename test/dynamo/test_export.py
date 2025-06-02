@@ -1873,7 +1873,7 @@ def forward(self, x, y):
                     return x + x
 
                 def false_fn(x):
-                    return x[:2]
+                    return x[:2].clone()
 
                 return cond(x.shape[0] <= 2, true_fn, false_fn, [x])
 
@@ -1883,7 +1883,7 @@ def forward(self, x, y):
                     return x + x
 
                 def false_fn(x):
-                    return x[:2]
+                    return x[:2].clone()
 
                 return cond(x.shape[0] <= 2, true_fn, false_fn, (x,))
 
@@ -1897,14 +1897,18 @@ def forward(self, x, y):
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     l_x_ = arg0
-    size = l_x_.size()
-    getitem = size[0];  size = None
-    le = getitem <= 2;  getitem = None
+    sym_size_int = torch.ops.aten.sym_size.int(l_x_, 0)
+    le = sym_size_int <= 2;  sym_size_int = None
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(le, cond_true_0, cond_false_0, [l_x_]);  le = cond_true_0 = cond_false_0 = l_x_ = None
+    cond = torch.ops.higher_order.cond(le, cond_true_0, cond_false_0, (l_x_,));  le = cond_true_0 = cond_false_0 = l_x_ = None
+    getitem_3 = cond[0]
+    sym_size_int_1 = torch.ops.aten.sym_size.int(getitem_3, 0);  getitem_3 = None
+    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_1);  sym_constrain_range_for_size_default = None
+    ge = sym_size_int_1 >= 2;  sym_size_int_1 = None
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 2 on node 'ge'");  ge = _assert_scalar_default = None
     getitem_2 = cond[0];  cond = None
-    return pytree.tree_unflatten([getitem_2], self._out_spec)""",
+    return pytree.tree_unflatten([getitem_2], self._out_spec)""",  # noqa: B950
             )
             self.assertExpectedInline(
                 out_graph.cond_true_0.code.strip(),
@@ -1920,14 +1924,11 @@ def forward(self, l_x_):
 def forward(self, l_x_):
     l_x__1 = l_x_
     getitem = l_x__1[slice(None, 2, None)];  l_x__1 = None
-    return (getitem,)""",
+    clone = getitem.clone();  getitem = None
+    return (clone,)""",
             )
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Expected true_fn_output and false_fn_output to have same metadata but found",
-            ):
-                # True branch and false branch return tensors of different shape
-                torch._dynamo.export(mod)(torch.randn(3, 2))
+            # We could successfully export branches that return different sizes
+            torch._dynamo.export(mod)(torch.randn(3, 2))
 
             # We specialize into one of the branches since predicate is a python boolean.
             test_x = torch.randn(3, 2)
@@ -1977,7 +1978,7 @@ def forward(self, l_x_):
         xs = torch.randn(0, 2)
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "zero-sized tensor",
+            "Observed exception",
         ):
             torch._dynamo.export(mod)(xs)
 
@@ -2064,7 +2065,7 @@ def forward(self, l_x_):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "Dynamic slicing on data-dependent value is not supported",
+            "Dynamic slicing with Tensor arguments",
         ):
             torch._dynamo.export(
                 g,
@@ -2516,7 +2517,7 @@ def forward(self, x):
         dynamic_shapes = {"x": (dim0,)}
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Not all values.*valid.*inferred to be a constant",
+            "You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
         ):
             torch.export.export(bar, (t,), dynamic_shapes=dynamic_shapes, strict=True)
 
@@ -2703,7 +2704,7 @@ def forward(self, x):
                 for node in ebar.graph_module.graph.nodes
                 if node.op == "placeholder"
             ],
-            ["torch.Size([s0, s1, s1])", "torch.Size([s0, s1, s1])"],
+            ["torch.Size([s17, s27, s27])", "torch.Size([s17, s27, s27])"],
         )
 
     @torch._dynamo.config.patch(
@@ -3015,8 +3016,8 @@ def forward(self, x):
             return x.sin()
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
-            "Dynamic control flow is not supported at the moment",
+            torch._dynamo.exc.Unsupported,
+            "Data-dependent branching",
         ):
             torch._dynamo.export(f, aten_graph=True)(torch.randn(5, 6))
 
@@ -3302,7 +3303,12 @@ def forward(self, x):
 
     def test_cond_raise_user_error_on_branch_return_multiple_tensors(self):
         def f_branch_return_multiple_tensors(pred, x, y):
-            return cond(pred, lambda x: (x, x), lambda x: (x, x), [y])
+            return cond(
+                pred,
+                lambda x: (x.clone(), x.clone()),
+                lambda x: (x.clone(), x.clone()),
+                [y],
+            )
 
         example_inputs = (torch.tensor(True), torch.randn(4), torch.randn(2))
         gm, _ = torch._dynamo.export(
@@ -3324,18 +3330,18 @@ def forward(self, x):
 
     def test_cond_raise_user_error_on_mismatch_return_length(self):
         def true_fn(x):
-            return x
+            return x.clone()
 
         def false_fn(x):
-            return (x, x)
+            return (x.clone(), x.clone())
 
         def f_mismatch_return_length(x):
             return cond(torch.tensor(100), true_fn, false_fn, [x])
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected true_fn_output and false_fn_output to have same number of outputs but got",
+            torch._dynamo.exc.TorchRuntimeError,
+            "Unmatched output spec from torch.cond branches",
         ):
             torch._dynamo.export(
                 f_mismatch_return_length,
@@ -3354,8 +3360,8 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected true_fn_output and false_fn_output to have same metadata but found",
+            torch._dynamo.exc.TorchRuntimeError,
+            "When merging two branches' output in torch.cond",
         ):
             torch._dynamo.export(f_return_tensor_mismatch, aten_graph=True)(
                 *example_inputs,
@@ -3458,7 +3464,7 @@ def forward(self, x):
                     gm, guards = torch._dynamo.export(f)(pred, x)
                     actual = normalize_gm(gm.print_readable(print_output=False))
                     # TODO: This is naughty, EXPECTTEST_ACCEPT=1 doesn't work
-                    self.assertExpectedInline(actual, exp_graph[i])
+                    self.assertExpectedInline(actual, exp_graph[i].format(size=size))
                     dynamo_shape_env_guards = [
                         guard
                         for guard in guards
@@ -3480,23 +3486,23 @@ def forward(self, x):
         true_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg1: "f32[s1, s2]";
+        arg0: "Sym(Eq(s26, {size}))"; arg1: "f32[s77, s27]";
 
-        arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {{}}), self._in_spec)
         l_x_ = arg1
 
-        sin: "f32[s1, s2]" = l_x_.sin();  l_x_ = None
+        sin: "f32[s77, s27]" = l_x_.sin();  l_x_ = None
         return pytree.tree_unflatten([sin], self._out_spec)
 """
         false_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg1: "f32[s1, s2]";
+        arg0: "Sym(Eq(s26, {size}))"; arg1: "f32[s77, s27]";
 
-        arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {{}}), self._in_spec)
         l_x_ = arg1
 
-        cos: "f32[s1, s2]" = l_x_.cos();  l_x_ = None
+        cos: "f32[s77, s27]" = l_x_.cos();  l_x_ = None
         return pytree.tree_unflatten([cos], self._out_spec)
 """
         true_guard_code = [
@@ -3848,7 +3854,7 @@ def forward(self, pred, x):
     d = torch.ones(6, 4)
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [a, b, l_x_, d, c]);  l_pred_ = cond_true_0 = cond_false_0 = a = b = l_x_ = d = c = None
+    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, (a, b, l_x_, d, c));  l_pred_ = cond_true_0 = cond_false_0 = a = b = l_x_ = d = c = None
     getitem = cond[0];  cond = None
     return pytree.tree_unflatten([getitem], self._out_spec)""",  # noqa: B950,E122
         )

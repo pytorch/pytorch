@@ -3,6 +3,7 @@
 The following example demonstrates how to represent torchrec's embedding
 sharding with the DTensor API.
 """
+
 import argparse
 import os
 from functools import cached_property
@@ -68,7 +69,7 @@ class LocalShardsWrapper(torch.Tensor):
             ChunkStorageMetadata(o, s.shape) for s, o in zip(local_shards, offsets)
         ]
 
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        r = torch.Tensor._make_wrapper_subclass(
             cls,
             wrapper_shape,
         )

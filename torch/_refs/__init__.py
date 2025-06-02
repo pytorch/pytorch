@@ -19,6 +19,7 @@ import torch.utils._pytree as pytree
 from torch import sym_float, sym_int
 from torch._prims_common import (
     BoolLike,
+    definitely_contiguous,
     DeviceLikeType,
     Dim,
     DimsSequenceType,
@@ -2989,7 +2990,7 @@ def dstack(tensors: TensorSequenceType) -> TensorLikeType:
 
 @register_decomposition(aten.expand)
 def expand(a: Tensor, *shape) -> Tensor:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_or
 
     # NOTE: cannot use utils.extract_shape_from_varargs here
     # because that also validates the shape, but the shape
@@ -3007,14 +3008,27 @@ def expand(a: Tensor, *shape) -> Tensor:
     for idx, x in enumerate(a.shape):
         offset_idx = idx + offset
         requested_length = shape[offset_idx]
-        torch._check(
-            guard_size_oblivious(requested_length == x)
-            or guard_size_oblivious(x == 1)
-            or requested_length == -1,
-            lambda: f"expand: attempting to expand a dimension of length {x}!",
-        )
 
-        shape_[offset_idx] = requested_length if requested_length != -1 else x
+        # expand(in -> out) has 3 different semantics:
+        # 1) out == -1 -> size = in, stride unchanged
+        # 2) in == 1 -> size = out, stride = 0
+        # 3) in == out -> size = in, stride unchanged
+        #
+        # the code below is written for unbacked semantics s.t. we assume unbacked symbols don't
+        # represent -1 unless explicitly specified, and the user is opting for case 2) or 3).
+        # the sym_or allows either case, but in the decomposition's current state, broadcast_in_dim()
+        # will either assume case 3) (via validate_shape() marking the expanded shape size-like), or will
+        # raise a data-dependent error trying to figure out if the stride is 0, requiring the user to manually
+        # select between the semantics of cases 2) and 3).
+        if guard_or_false(requested_length == -1):
+            shape_[offset_idx] = x
+        else:
+            torch._check(
+                sym_or(x == 1, requested_length == x),
+                lambda: f"expand: attempting to expand a dimension of length {x} -> {requested_length}!",
+            )
+            torch._check(requested_length >= 0)
+            shape_[offset_idx] = requested_length
 
     # At this point shape must be valid
     utils.validate_shape(shape_)
@@ -3187,27 +3201,46 @@ def native_group_norm(
         + f"but got input of shape {input.shape} and num_groups = {num_groups}",
     )
 
+    computation_dtype = utils.get_computation_dtype(input.dtype)
+    input_acc = _maybe_convert_to_dtype(input, computation_dtype)
     # num_channels / num_groups and flattened inner dimension are the reduction axes
     reduction_dims = [2, 3]
     input_reshaped = torch.reshape(
-        input,
+        input_acc,
         [batch_size, num_groups, num_channels // num_groups, flattened_inner_size],
     )
-    out, mean, rstd = _normalize(input_reshaped, reduction_dims, eps)
-    out = out.view(input.shape)
-
-    broadcast_dims = [0] + list(range(2, input.ndim))
-    unsqueeze_bias = None
-    if bias is not None:
-        unsqueeze_bias = _unsqueeze_multiple(bias, broadcast_dims)
-    unsqueeze_weight = None
-    if weight is not None:
-        unsqueeze_weight = _unsqueeze_multiple(weight, broadcast_dims)
-
-    if unsqueeze_weight is not None:
-        out = out * unsqueeze_weight
-    if unsqueeze_bias is not None:
-        out = out + unsqueeze_bias
+    reduction_dims = utils.canonicalize_dims(input_reshaped.ndim, reduction_dims)
+    biased_var, mean = torch.var_mean(
+        input_reshaped, dim=reduction_dims, unbiased=False, keepdim=True
+    )
+    rstd = torch.rsqrt(biased_var + eps)
+    if input.device.type == "cpu" and weight is not None:
+        weight_reshaped = torch.reshape(
+            weight, [1, num_groups, num_channels // num_groups, 1]
+        )
+        w = rstd * weight_reshaped
+        b = -mean * w
+        if bias is not None:
+            bias_reshaped = torch.reshape(
+                bias, [1, num_groups, num_channels // num_groups, 1]
+            )
+            b = b + bias_reshaped
+        w = w.contiguous().as_strided([batch_size, num_channels], [num_channels, 1])
+        b = b.contiguous().as_strided([batch_size, num_channels], [num_channels, 1])
+        broadcast_dims = list(range(2, input.ndim))
+        unsqueeze_w = _unsqueeze_multiple(w, broadcast_dims)
+        unsqueeze_b = _unsqueeze_multiple(b, broadcast_dims)
+        out = input_acc * unsqueeze_w + unsqueeze_b
+    else:
+        out = (input_reshaped - mean) * rstd
+        out = out.view(input.shape)
+        broadcast_dims = [0] + list(range(2, input.ndim))
+        if weight is not None:
+            unsqueeze_weight = _unsqueeze_multiple(weight, broadcast_dims)
+            out = out * unsqueeze_weight
+        if bias is not None:
+            unsqueeze_bias = _unsqueeze_multiple(bias, broadcast_dims)
+            out = out + unsqueeze_bias
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
     mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
@@ -3432,10 +3465,12 @@ def stft(
         left = (n_fft - win_length_) // 2
         window = aten.constant_pad_nd(window, [left, n_fft - win_length_ - left])
 
-    input = input.unfold(dimension=-1, size=n_fft, step=hop_length_)
     if not center and align_to_window:
         input_pad_amount = (n_fft - win_length_) // 2
         input = aten.pad(input, [input_pad_amount, input_pad_amount], pad_mode)
+
+    input = input.unfold(dimension=-1, size=n_fft, step=hop_length_)
+
     if window is not None:
         input = input * window
 
@@ -3695,8 +3730,222 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
     return permuted_result.reshape(target_shape)
 
 
+# this function is python match of computeStride_impl in TensorUtils.cpp
+def _compute_stride(old_shape, old_stride, new_shape):
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_or_true,
+        sym_eq,
+    )
+
+    if len(old_shape) == 0:
+        return [1] * len(new_shape)
+
+    numel = reduce(operator.mul, old_shape, 1)
+    zero_numel = guard_or_false(numel == 0)
+    if zero_numel and guard_or_false(sym_eq(old_shape, new_shape)):
+        return old_stride
+
+    new_stride = [0] * len(new_shape)
+
+    if zero_numel:
+        for view_d in range(len(new_shape) - 1, -1, -1):
+            if view_d == len(new_shape) - 1:
+                new_stride[view_d] = 1
+            else:
+                new_stride[view_d] = (
+                    max(new_shape[view_d + 1], 1) * new_stride[view_d + 1]
+                )
+        return new_stride
+
+    view_d = len(new_shape) - 1
+    chunk_base_stride = old_stride[-1]
+    tensor_numel = 1
+    view_numel = 1
+
+    for tensor_d in range(len(old_shape) - 1, -1, -1):
+        tensor_numel *= old_shape[tensor_d]
+
+        if tensor_d == 0 or (
+            guard_or_true(old_shape[tensor_d - 1] != 1)
+            and guard_or_true(
+                old_stride[tensor_d - 1] != tensor_numel * chunk_base_stride
+            )
+        ):
+            while view_d >= 0 and (
+                guard_or_true(view_numel < tensor_numel)
+                or guard_or_false(new_shape[view_d] == 1)
+            ):
+                new_stride[view_d] = view_numel * chunk_base_stride
+                view_numel *= new_shape[view_d]
+                view_d -= 1
+
+            if guard_or_true(view_numel != tensor_numel):
+                return None
+
+            if tensor_d > 0:
+                chunk_base_stride = old_stride[tensor_d - 1]
+                tensor_numel = 1
+                view_numel = 1
+    if view_d != -1:
+        return None
+    return new_stride
+
+
+# This function is called to trace through view operation during fake tensor tracing.
+# It will be called when the exisiting path throws a data dependent error. It's much
+# simpler that reshape_view_helper, if it fails it will throw the original data_dependent_error
+# that was passed to it.
+# The function does the following:
+# (1) if _compute_stride succeeds, the requested shape is valid, the output strides are those
+# returned by _compute_stride.
+# (2) if a contiguous, we know the requested shape is valid, the output strides can be computed using
+# make_contiguous_strides_for.
+def _view_simple(a: TensorLikeType, shape, data_dependent_error) -> TensorLikeType:
+    from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+
+    # Creates a valid shape
+    shape = utils.extract_shape_from_varargs(shape, validate=False)
+
+    # Reshape may be given a shape with a -1 length
+    # This indicates that the dimension's length should be inferred
+    shape = utils.infer_size(shape, a.numel())
+
+    # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
+    shape_numel = reduce(operator.mul, shape, 1)
+    torch._check(
+        a.numel() == shape_numel,
+        f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
+    )
+
+    if len(shape) == len(a.shape) and statically_known_true(sym_eq(shape, a.shape)):
+        return prims.view_of(a)
+
+    new_strides = _compute_stride(a.size(), a.stride(), shape)
+    if new_strides is not None:
+        return a.as_strided(shape, new_strides)
+
+    if definitely_contiguous(a):
+        return a.as_strided(shape, utils.make_contiguous_strides_for(shape))
+
+    raise data_dependent_error
+
+
+def _reshape_view_helper_core_alg(
+    a: TensorLikeType, shape, allow_copy: bool
+) -> TensorLikeType:
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_or_true,
+        GuardOnDataDependentSymNode,
+    )
+
+    deferred: list[Callable[[], bool]] = []
+
+    # NOTE [Reshape Algorithm]
+    # This algorithm works by attempting to greedily construct the desired dimensions in
+    # the output shape, left to right. It does this by, conceptually, accumulating
+    # dimensions of the original tensor, also left to right, until the dimension
+    # can be constructed using prims.split_dim.
+    # The algorithm also has special handling for tail squeezes/unsqueezes, like
+    # if a reshape from (5, 5) to (5, 5, 1) or vice versa.
+    #
+    # This algorithm does not flatten the original tensor and then split dims as appropriate
+    # because that would create copies more often than this algorithm. flatten is the only
+    # operation below which can create a view or a copy, and while it prefers creating
+    # views it may sometimes create a copy if the tensor's strides do not permit a view.
+    # As a result, this algorithm tries to minimize flattening.
+    #
+    # Note that a better version of this algorithm may exist. Regions which could be
+    # flattened without creating a copy can be identified in advance, and that might
+    # allow fewer flatten calls or faster short-circuiting to make a copy.
+    idx = 0
+    a_ = a
+    for length in shape:
+        # Handles tail unsqueezes
+        if idx >= a_.ndim:
+            assert length == 1
+            last_dim = a_.ndim - 1
+            # NOTE: using split_dim instead of unsqueeze may seem silly here,
+            # but it's necessary to get the strides correct
+            a_ = prims.split_dim(a_, last_dim, a_.shape[last_dim])
+            idx = idx + 1
+            continue
+
+        # Skips dimensions that are already the correct length
+        if guard_or_false(length == a_.shape[idx]):
+            idx = idx + 1
+            continue
+
+        # Gathers enough original dimensions such that this new dimension can be created
+        # Note that this accumulation will terminate because we've verified a and the shape
+        # specify the same number of elements above
+        def maybe_throw_dde():
+            # NOTE: if you've hit a data-dependent error here, it's because in trying to accumulate input
+            # tensor dimensions to match the target shape (length), we've hit data-dependent errors testing
+            # divisibility (accum % length != 0), and have deferred raising them, in the hope that we'd
+            # figure out a valid reshape later in the loop.
+            # But we failed, either by running out of dimensions, or we couldn't figure out the strides,
+            # and we've decided to re-raise to either graph break out, or provide the exact guard so the user
+            # can torch._check() to avoid this.
+            for f in deferred:
+                f()
+
+        accum = a_.shape[idx]
+        end = idx
+        while True:
+            try:
+                if accum % length == 0:
+                    break
+            except GuardOnDataDependentSymNode:
+                deferred.append(lambda: bool(accum % length == 0))
+            if end == a_.ndim - 1:
+                maybe_throw_dde()
+            end += 1
+            accum *= a_.shape[end]
+        if end != idx:
+            # NOTE: in this case multiple dimensions must be flatten to create the desired dimension
+            # This flattening is why reshape sometimes creates a copy -- because flattening
+            # may return a view of a copy
+
+            # Checks if collapse can be a view and short-circuits to copying reshape if it can't
+            new_shape, _new_strides = prims._collapse_view_helper(a_, idx, end)
+            if new_shape is None:
+                if allow_copy:
+                    return prims.reshape(a, shape)
+
+                maybe_throw_dde()
+                msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
+                raise ValueError(msg)
+
+            a_ = flatten(a_, idx, end)
+
+        # Splits the (possibly flattened) dimension to create the desired dim length.
+        # guard_or_true is safe due to the tail unsqueeze routine.
+        if guard_or_true(accum != length):
+            a_ = prims.split_dim(a_, idx, length)
+
+        idx = idx + 1
+
+    # Squeezes tail
+    while idx < a_.ndim:
+        torch._check(
+            a_.shape[idx] == 1,
+            lambda: f"a.size({idx}) expected to be 1 but got {a_.shape[idx]}",
+        )
+        a_ = squeeze(a_, idx)
+
+    if a_ is a:
+        return prims.view_of(a)
+    else:
+        return a_
+
+
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        GuardOnDataDependentSymNode,
+    )
 
     # Creates a valid shape
     shape = utils.extract_shape_from_varargs(shape, validate=False)
@@ -3705,7 +3954,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
     shape = utils.infer_size(shape, a.numel())
 
     # Special-cases tensors with no elements
-    if guard_size_oblivious(a.numel() == 0):
+    if guard_or_false(a.numel() == 0):
         return as_strided(a, shape, utils.make_contiguous_strides_for(shape))
 
     # Special-cases reshaping zero dim tensors
@@ -3740,85 +3989,19 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             dim1 = shape[1]
             return torch.as_strided(a, [dim0, dim1], [dim1, 1])
 
-    # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
-
-    # NOTE [Reshape Algorithm]
-    # This algorithm works by attempting to greedily construct the desired dimensions in
-    # the output shape, left to right. It does this by, conceptually, accumulating
-    # dimensions of the original tensor, also left to right, until the dimension
-    # can be constructed using prims.split_dim.
-    # The algorithm also has special handling for tail squeezes/unsqueezes, like
-    # if a reshape from (5, 5) to (5, 5, 1) or vice versa.
-    #
-    # This algorithm does not flatten the original tensor and then split dims as appropriate
-    # because that would create copies more often than this algorithm. flatten is the only
-    # operation below which can create a view or a copy, and while it prefers creating
-    # views it may sometimes create a copy if the tensor's strides do not permit a view.
-    # As a result, this algorithm tries to minimize flattening.
-    #
-    # Note that a better version of this algorithm may exist. Regions which could be
-    # flattened without creating a copy can be identified in advance, and that might
-    # allow fewer flatten calls or faster short-circuiting to make a copy.
-    idx = 0
-    a_ = a
-    for length in shape:
-        # Handles tail unsqueezes
-        if idx >= a_.ndim:
-            assert length == 1
-            last_dim = a_.ndim - 1
-            # NOTE: using split_dim instead of unsqueeze may seem silly here,
-            # but it's necessary to get the strides correct
-            a_ = prims.split_dim(a_, last_dim, a_.shape[last_dim])
-            idx = idx + 1
-            continue
-
-        # Skips dimensions that are already the correct length
-        if guard_size_oblivious(length == a_.shape[idx]):
-            idx = idx + 1
-            continue
-
-        # Gathers enough original dimensions such that this new dimension can be created
-        # Note that this accumulation will terminate because we've verified a and the shape
-        # specify the same number of elements above
-        accum = a_.shape[idx]
-        end = idx
-        while guard_size_oblivious(accum % length != 0):
-            end = end + 1
-            accum = accum * a_.shape[end]
-        if end != idx:
-            # NOTE: in this case multiple dimensions must be flatten to create the desired dimension
-            # This flattening is why reshape sometimes creates a copy -- because flattening
-            # may return a view of a copy
-
-            # Checks if collapse can be a view and short-circuits to copying reshape if it can't
-            new_shape, _new_strides = prims._collapse_view_helper(a_, idx, end)
-            if new_shape is None:
-                if allow_copy:
-                    return prims.reshape(a, shape)
-
-                msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
-                raise ValueError(msg)
-
-            a_ = flatten(a_, idx, end)
-
-        # Splits the (possibly flattened) dimension to create the desired dim length
-        if guard_size_oblivious(accum != length):
-            a_ = prims.split_dim(a_, idx, length)
-
-        idx = idx + 1
-
-    # Squeezes tail
-    while idx < a_.ndim:
-        torch._check(
-            a_.shape[idx] == 1,
-            lambda: f"a.size({idx}) expected to be 1 but got {a_.shape[idx]}",
-        )
-        a_ = squeeze(a_, idx)
-
-    if a_ is a:
-        return prims.view_of(a)
-    else:
-        return a_
+    shape_numel = reduce(operator.mul, shape, 1)
+    torch._check(
+        a.numel() == shape_numel,
+        f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
+    )
+    try:
+        # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
+        return _reshape_view_helper_core_alg(a, shape, allow_copy)
+    except GuardOnDataDependentSymNode as e:
+        # For compile this function is only called on view operations since reshape_symint will do a clone and
+        # compose to view before calling this. GuardOnDataDependentSymNode does not show up for eager.
+        assert not allow_copy
+        return _view_simple(a, shape, e)
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -4964,6 +5147,15 @@ def new_full(
     )
 
 
+@aten.empty.out.py_impl(DispatchKey.CompositeImplicitAutograd)
+def empty_out(
+    size: TensorLikeType,
+    out: TensorLikeType,
+    memory_format: Optional[torch.memory_format] = None,
+) -> TensorLikeType:
+    return out
+
+
 @register_decomposition(aten.empty_like)
 @out_wrapper()
 def empty_like(
@@ -5199,7 +5391,8 @@ def linspace(
         return torch.full((0,), 0, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
     if steps == 1:
         if isinstance(start, TensorLikeType):
-            return torch.empty((steps,), dtype=dtype, **factory_kwargs).copy_(start)  # type: ignore[arg-type]
+            empty_tensor = torch.empty((steps,), dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
+            return torch.ops.aten.copy.default(empty_tensor, start)
         else:
             return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
 
@@ -5685,7 +5878,7 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
         # `masked_fill` allows cpu scalar to be moved to cuda, xpu and hpu but not otherwise.
         is_cpu_scalar = (
             a.device.type
-            in ["cuda", "xpu", torch._C._get_privateuse1_backend_name(), "hpu"]
+            in ["cuda", "xpu", "mps", torch._C._get_privateuse1_backend_name(), "hpu"]
             and value.device.type == "cpu"
         )
         torch._check(
@@ -6270,7 +6463,7 @@ def _dot_check_wrapper(fn):
 
 
 @register_decomposition(aten.dot)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 @_dot_check_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "other"),
@@ -6290,7 +6483,7 @@ def dot(self, other):
 
 
 @register_decomposition(aten.vdot)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 @_dot_check_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "other"),
