@@ -203,28 +203,27 @@ def linalg_cross(self, other, *, dim=-1):
 
 
 # This function is python match of computeStride_impl in TensorUtils.cpp
-def _compute_stride(old_shape, old_stride, new_shape, size_oblivious=True):
-    from torch.fx.experimental.symbolic_shapes import sym_eq
+def _compute_stride(old_shape, old_stride, new_shape, size_oblivious=False):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 
-    if not size_oblivious:
-        breakpoint()
-    guard_or_false = (
-        lambda x: x
-        if not size_oblivious
-        else torch.fx.experimental.symbolic_shapes.guard_or_false
-    )
-    guard_or_true = (
-        lambda x: x
-        if not size_oblivious
-        else torch.fx.experimental.symbolic_shapes.guard_or_true
-    )
+    def maybe_guard_or_false(x):
+        if size_oblivious:
+            return guard_or_false(x)
+
+        return x
+
+    def maybe_guard_or_true(x):
+        if size_oblivious:
+            return guard_or_false(x)
+
+        return x
 
     if len(old_shape) == 0:
         return [1] * len(new_shape)
 
     numel = reduce(operator.mul, old_shape, 1)
-    zero_numel = guard_or_false(numel == 0)
-    if zero_numel and guard_or_false(sym_eq(old_shape, new_shape)):
+    zero_numel = maybe_guard_or_false(numel == 0)
+    if zero_numel and maybe_guard_or_false(sym_eq(old_shape, new_shape)):
         return old_stride
 
     new_stride = [0] * len(new_shape)
@@ -248,20 +247,20 @@ def _compute_stride(old_shape, old_stride, new_shape, size_oblivious=True):
         tensor_numel *= old_shape[tensor_d]
 
         if tensor_d == 0 or (
-            guard_or_true(old_shape[tensor_d - 1] != 1)
-            and guard_or_true(
+            maybe_guard_or_true(old_shape[tensor_d - 1] != 1)
+            and maybe_guard_or_true(
                 old_stride[tensor_d - 1] != tensor_numel * chunk_base_stride
             )
         ):
             while view_d >= 0 and (
-                guard_or_true(view_numel < tensor_numel)
-                or guard_or_false(new_shape[view_d] == 1)
+                maybe_guard_or_true(view_numel < tensor_numel)
+                or maybe_guard_or_false(new_shape[view_d] == 1)
             ):
                 new_stride[view_d] = view_numel * chunk_base_stride
                 view_numel *= new_shape[view_d]
                 view_d -= 1
 
-            if guard_or_true(view_numel != tensor_numel):
+            if maybe_guard_or_true(view_numel != tensor_numel):
                 return None
 
             if tensor_d > 0:
@@ -314,7 +313,7 @@ def _view_meta(a, *shape, size_oblivious_enabled=True):
 
     torch._check(
         a.numel() == shape_numel,
-        f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
+        lambda: f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
     )
 
     if len(shape) == len(a.shape) and statically_known_true(sym_eq(shape, a.shape)):
