@@ -909,7 +909,7 @@ layouts = ("cont", "NHWC", "T")
         "triton.unique_kernel_names": True,
         "loop_ordering_after_fusion": True,
         "test_configs.global_tiling_analysis": True,
-        "triton.max_tiles" : 3,
+        "triton.max_tiles": 3,
     }
 )
 @instantiate_parametrized_tests

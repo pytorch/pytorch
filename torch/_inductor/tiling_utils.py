@@ -174,7 +174,11 @@ def find_coalesced_var(
             loop_tiling_log.info("zero division error %s %s", index, variables)
             continue
         if new_val - zero_index == 1:
-            return v
+            variables[v] = 2
+            # in some more complex expressions, 0->1 will be coalesced,
+            # but not 1->2
+            if (sympy_subs(index, variables) - new_val) == 1:
+                return v
         variables[v] = 0
 
     return None
@@ -459,17 +463,16 @@ def extract_normalized_read_writes(
 
     all_output_names = node.get_buffer_names()
     op_names = node.get_operation_names()
-    outputs = OrderedSet(
-        buf
-        for buf in all_output_names
-        if not V.graph.scheduler.can_buffer_be_removed_through_fusion(buf, op_names)
-    )
+    outputs: OrderedSet[str] = OrderedSet()
+    removed_buffers: OrderedSet[str] = OrderedSet()
+    for buf_name in all_output_names:
+        if V.graph.scheduler.can_buffer_be_removed_through_fusion(buf_name, op_names):
+            removed_buffers.add(buf_name)
+        else:
+            outputs.add(buf_name)
+
     inputs = OrderedSet(
-        dep.name
-        for dep in node.read_writes.reads
-        if not V.graph.scheduler.can_buffer_be_removed_through_fusion(
-            dep.name, op_names
-        )
+        dep.name for dep in node.read_writes.reads if dep.name not in removed_buffers
     )
 
     pointwise_numel: sympy.Expr = node.group[1][0]

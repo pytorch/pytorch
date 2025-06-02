@@ -2123,8 +2123,8 @@ class SIMDScheduling(BaseScheduling):
             # coalesced write is 2x more important
             for i in range(len(splits)):
                 s = V.graph.sizevars.size_hint(splits[i], fallback=32)
-                s = min(s, 32)
-                split_scores[i] *= s / 32
+                s = min(s, 8)
+                split_scores[i] *= s / 8
 
             scored_sub_split[key] = (splits, split_scores)
             return (splits, split_scores)
@@ -2180,11 +2180,17 @@ class SIMDScheduling(BaseScheduling):
 
         default_tiling = cls.create_tiling([pointwise_numel], [reduction_numel])
 
-        # add a slight penalty for longer tilings that dont increase score much
+        # add a slight penalty for longer tilings that dont increase score much,
+        # and are poor sizes
         additional_tiling_penalty = 1.025
 
         def score_mod(t):
-            return -t[0].score / (additional_tiling_penalty ** (len(t[0].tiling) - 1))
+            score_factor = 1.0
+            for tile_size in t[0].tiling.values():
+                if not CandidateTiling.is_good_size(tile_size):
+                    score_factor = score_factor / additional_tiling_penalty
+
+            return -t[0].score * score_factor
 
         # apply penalty for longer tilings that dont increase score much
         for cand, tiling_score in sorted(tilings, key=score_mod):
