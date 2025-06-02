@@ -28,7 +28,7 @@ body:
       If the code is too long (hopefully, it isn't), feel free to put it in a public gist and link it in the issue: https://gist.github.com.
 
       Please also paste or describe the results you observe instead of the expected results. If you observe an error, please paste the error message including the **full** traceback of the exception. It may be relevant to wrap error messages in ```` ```triple quotes blocks``` ````.
-      If your issue is related to numerical accuracy or reproducibility, please read the [numerical accuracy](https://docs.pytorch.org/docs/stable/notes/numerical_accuracy.html) and [reproducibility](https://docs.pytorch.org/docs/stable/notes/randomness.html) notes.
+      If your issue is related to numerical accuracy or reproducibility, please read the [numerical accuracy](https://docs.pytorch.org/docs/stable/notes/numerical_accuracy.html) and [reproducibility](https://docs.pytorch.org/docs/stable/notes/randomness.html) notes. If the difference is not expected as described in these documents, please provide appropriate justification on why one result is wrong and the other is correct.
     placeholder: |
       A clear and concise description of what the bug is.
 
