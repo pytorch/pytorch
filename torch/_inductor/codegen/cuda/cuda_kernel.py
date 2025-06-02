@@ -242,7 +242,6 @@ class CUDATemplateKernel(CUDAKernel):
         self,
         inputs: list[IRNode],
         outputs: list[IRNode],
-        epilogue_inputs: list[IRNode],
         names_str: str = "",
         input_reorder: Optional[list[int]] = None,
     ) -> str:
@@ -260,7 +259,7 @@ class CUDATemplateKernel(CUDAKernel):
                            In this case, the `input_reorder` would be [2, 0, 1].
         """
         names = [x.strip() for x in names_str.strip().split(",")]
-        if len(inputs) + len(epilogue_inputs) + len(outputs) != len(names):
+        if len(inputs) + len(outputs) != len(names):
             raise RuntimeError(
                 f"{len(inputs) + len(outputs)=} != {len(names)=}, {inputs=}, {outputs=}, {names=}"
             )
@@ -276,13 +275,6 @@ class CUDATemplateKernel(CUDAKernel):
             if node is not None:
                 self.named_nodes[name] = node
                 self.args.input_buffers[node.get_name()] = name
-
-        for epilogue_input in epilogue_inputs:
-            if epilogue_input is not None:
-                self.named_nodes[epilogue_input.get_name()] = epilogue_input
-                self.args.input_buffers[epilogue_input.get_name()] = (
-                    epilogue_input.get_name()
-                )
 
         for name, node in zip(names[len(inputs) : len(inputs) + len(outputs)], outputs):
             if node is not None:

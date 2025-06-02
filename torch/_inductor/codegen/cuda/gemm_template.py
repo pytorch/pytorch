@@ -26,7 +26,7 @@ from ...ir import (
     Layout,
     ReinterpretView,
 )
-from ...utils import is_dynamic, OrderedSet, Placeholder
+from ...utils import is_dynamic, Placeholder
 from ...virtualized import V
 from ..common import IndentedBuffer
 from . import cutlass_utils
@@ -1075,33 +1075,29 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         if epilogue_nodes or is_scaled_mm:
             if epilogue_nodes:
                 (
-                    evt_read_names,
-                    evt_write_names,
+                    input_names,
+                    output_names,
                     var_name_to_buffer_name,
                     evt_py_code,
                 ) = CutlassEVTCodegen.ir_to_evt_python_code(
                     Y.get_name(), epilogue_nodes, V.kernel.removed_buffers
                 )
+
                 D_output_name = var_name_to_buffer_name["D"]
                 name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
                 D_output_buffer = name_to_buffer[D_output_name]
-                D_dtype = D_output_buffer.get_dtype()
                 Y = D_output_buffer  # type: ignore[assignment]
                 # Interestingly, I don't think the rest of the layout matters here since we
                 # use the properties of the Y buffer to fill in D's properties in the epilogue
                 # args. This is needed though because it defines types expected in the epilogue args.
                 op.D.element = cutlass_utils.torch_dtype_to_cutlass_type(
-                    D_output_buffer.get_layout().dtype
+                    D_output_buffer.get_dtype()
                 )
 
-                read_names = OrderedSet(evt_read_names) - OrderedSet(evt_write_names)
-                write_names = OrderedSet(evt_write_names)
-                assert write_names, "There should be at least one write"
+                assert output_names, "There should be at least one write"
 
-                input_names = list(read_names)
-                output_names = list(write_names)
                 epilogue_inputs = [name_to_buffer[name] for name in input_names]
-                epilogue_outputs = [name_to_buffer[name] for name in output_names]
+                outputs = [name_to_buffer[name] for name in output_names]
             else:  # Scaled MM, we read the two scale matrices and write a single output
                 (
                     evt_read_names,
@@ -1115,9 +1111,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
                 input_names = list(evt_read_names)
                 output_names = []  # We only need Y
-                D_dtype = Y.get_layout().dtype
                 epilogue_inputs = [self.input_nodes[2], self.input_nodes[3]]
-                epilogue_outputs = []
+                outputs = []
 
             acc_dtype = cutlass_utils.get_accumulator_dtype(
                 [X.get_dtype(), W.get_dtype()]
@@ -1128,7 +1123,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 op,
                 evt_py_code,
                 var_name_to_buffer_name,
-                D_dtype,
+                Y.get_dtype(),
                 acc_dtype,
             )
 
@@ -1145,15 +1140,13 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             )
         else:
             evt_name = None
-            epilogue_inputs = []
-            epilogue_outputs = [Y]
+            outputs = [Y]
             evt_args = f"{{ElementComputeEpilogue({self.alpha}), ElementComputeEpilogue({self.beta})}}"
             evt_code = ""
 
         kernel_call_signature = kernel.def_kernel(
             inputs=inputs,  # type: ignore[arg-type]
-            outputs=epilogue_outputs,  # type: ignore[arg-type]
-            epilogue_inputs=[],
+            outputs=outputs,  # type: ignore[arg-type]
             names_str=names_str,
             input_reorder=input_reorder,
         )
