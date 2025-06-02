@@ -502,6 +502,10 @@ class TestCutlassBackend(TestCase):
 
             rtol = 1e-2
             atol = 0.05
+            additional_patches = {
+                "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
+                "cuda.cutlass_tma_only": True,
+            }
         else:
 
             class MyModel(torch.nn.Module):
@@ -525,14 +529,14 @@ class TestCutlassBackend(TestCase):
             )
             rtol = None
             atol = None
+            additional_patches = {}
 
         with config.patch(
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
-                "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
-                "cuda.cutlass_tma_only": True,
+                **additional_patches,
             }
         ), dynamo_config.patch({"error_on_recompile": dynamic}):
             expected = [model(*input) for input in inputs]
