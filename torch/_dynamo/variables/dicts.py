@@ -536,7 +536,7 @@ class ConstDictVariable(VariableTracker):
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             if not self.items:
-                msg = ConstantVariable.create(f"popitem(): dictionary is empty")
+                msg = ConstantVariable.create("popitem(): dictionary is empty")
                 raise_observed_exception(KeyError, tx, args=[msg])
             k, v = self.items.popitem()
             return variables.TupleVariable([k.vt, v])
