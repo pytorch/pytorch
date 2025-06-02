@@ -1088,6 +1088,27 @@ class CUDAGraphNode:
     def run(self, new_inputs: list[InputType]) -> OutputType:
         self.check_static_inputs_are_stable(new_inputs)
 
+        # Skip releasing any managed-input whose storage ptr will also be
+        # produced as an output of this graph. Releasing it would invalidate
+        # the weak-ref that `reconstruct_outputs()` needs.
+        current_output_ptrs = {
+            md["data_ptr"] for md in self.outputs_metadata
+            if isinstance(md, dict)
+        }
+
+        for idx in self.cudagraph_managed_idxs:
+            if self.preserved_aliased_inputs[idx]:
+                continue
+
+            t = self.reconstructed_inputs[idx]
+            if (
+                isinstance(t, torch.Tensor) and
+                t.untyped_storage().data_ptr() not in current_output_ptrs
+            ):
+                self.reconstructed_inputs[idx] = None
+
+        # now copy the user's fresh values over the (possibly reconstructed)
+        # tensors we'll feed into the graph
         self._copy_inputs_and_remove_from_src(self.reconstructed_inputs, new_inputs)
 
         self.run_graph()
