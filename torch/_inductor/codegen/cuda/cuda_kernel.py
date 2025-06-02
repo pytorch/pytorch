@@ -81,7 +81,7 @@ class CUDAKernel(Kernel):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.layout_args: dict[str, list[LayoutArg]] = defaultdict(list)
-        self.size_args: list[Expr | int] = []
+        self.size_args: list[Union[Expr, int]] = []
         # Mapping from arg name to IRNode.
         self.named_nodes: dict[str, IRNode] = {}
 
