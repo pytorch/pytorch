@@ -1713,6 +1713,9 @@ class GraphModuleDeserializer(metaclass=Final):
         elif serialized_target.startswith("torch"):
             module = torch  # type: ignore[misc]
             serialized_target_names = serialized_target.split(".")[1:]
+        elif serialized_target.startswith("math"):
+            module = math  # type: ignore[misc]
+            serialized_target_names = serialized_target.split(".")[1:]
         elif serialized_target.startswith("#"):
             return self.deserialize_extension_operator(serialized_target)
         else:  # TODO(zhxchen17) Don't catch all here.
