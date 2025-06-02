@@ -693,7 +693,7 @@ class Negative(LessThan):
 
 class RealVector(Independent[Real]):
     """
-    Constrain to a real vector of a given size.
+    Constrain to a real vector.
     """
 
     def __init__(self) -> None:
