@@ -40,8 +40,8 @@ if torch.version.hip:
     if "gfx94" in arch:
         # for gfx942, use fnuz data type.
         f8_type_pair = (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
-    elif "gfx1200" in arch:
-        # for gfx1200, e4m3 is not supported on triton.
+    elif "gfx120" in arch:
+        # for gfx1200 and gfx1201, e4m3 is not supported on triton.
         f8_type_pair = (torch.float8_e5m2,)
 
 def _to_fp8_saturated(x: Tensor, float8_dtype: torch.dtype) -> Tensor:
@@ -165,7 +165,7 @@ class TestFP8Types(TestCase):
         x = torch.rand(*x_shape, device="cuda", dtype=dtype).to(e4m3_type)
         y_fp8 = compiled_fp8_matmul(x)
 
-    @skipIfRocmArch(("gfx1200",))
+    @skipIfRocmArch(("gfx1200", "gfx1201"))
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float))
     @parametrize("shape", ("15,3,13", "4,2048,4096"))
