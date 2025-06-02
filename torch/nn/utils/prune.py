@@ -394,7 +394,8 @@ class PruningContainer(BasePruningMethod):
                 raise ValueError(f"Unrecognized PRUNING_TYPE {method.PRUNING_TYPE}")
 
             # compute the new mask on the unpruned slice of the tensor t
-            slc = tuple(slc)
+            if isinstance(slc, list):
+                slc = tuple(slc)
             partial_mask = method.compute_mask(t[slc], default_mask=mask[slc])
             new_mask[slc] = partial_mask.to(dtype=new_mask.dtype)
 
@@ -626,6 +627,7 @@ class RandomStructured(BasePruningMethod):
             mask = torch.zeros_like(t)
             slc = [slice(None)] * len(t.shape)
             slc[dim] = channel_mask
+            slc = tuple(slc)
             mask[slc] = 1
             return mask
 
