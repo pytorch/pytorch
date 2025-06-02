@@ -1184,7 +1184,7 @@ void raw_cudnn_convolution_forward_out(
     return;
   }
   for (auto it = dilation.begin(); it != dilation.end(); it++) {
-    TORCH_CHECK(*it > 0, "Expected positive dilation in convolution.");
+    TORCH_CHECK_VALUE(*it > 0, "Expected positive dilation in convolution.");
   }
   if (at::native::cudnnv8_enabled_check_debug()) {
     run_single_conv(
