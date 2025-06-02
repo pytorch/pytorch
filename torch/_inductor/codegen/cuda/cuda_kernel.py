@@ -278,7 +278,7 @@ class CUDATemplateKernel(CUDAKernel):
                 self.named_nodes[name] = node
                 self.args.input_buffers[node.get_name()] = name
 
-        free_symbols = OrderedSet([])
+        free_symbols = OrderedSet[str]()
         for name, node in zip(names[len(inputs) : len(inputs) + len(outputs)], outputs):
             if node is not None:
                 self.named_nodes[name] = node
