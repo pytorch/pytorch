@@ -388,9 +388,9 @@ def foreach_reduce(
     for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
         if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
             continue
-        assert unsharded_grad.size(shard_dim) % world_size == 0, (
-            f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
-        )
+        assert (
+            unsharded_grad.size(shard_dim) % world_size == 0
+        ), f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
         chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
         unsharded_grads[i] = torch.cat(chunks, dim=0)
     padded_unsharded_sizes = tuple(
@@ -569,6 +569,7 @@ def _get_gradient_divide_factors(
 ) -> Union[tuple[None, None], tuple[float, float]]:
     # For fp32/bf16, we do not need to worry about overflow/underflow, so we
     # use NCCL's built-in division to avoid separate div kernels
+    # Warning: NCCL ReduceOp.AVG may produce incorrect results with world size 1.
     if reduce_dtype in (torch.float32, torch.bfloat16) and device_type != "mtia":
         return None, None
     data_parallel_size = reduce_scatter_group.size()
