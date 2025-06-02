@@ -5,6 +5,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import operator
 import textwrap
 import traceback
 import typing
@@ -8080,7 +8081,7 @@ class TorchBindObject(NonTensorObj):
             for x in flat_elems
             if isinstance(x, torch.Tensor)
         ]
-        return functools.reduce(lambda x, y: x + y, flat_sizes, 0)
+        return functools.reduce(operator.add, flat_sizes, 0)
 
 
 @ir_dataclass
