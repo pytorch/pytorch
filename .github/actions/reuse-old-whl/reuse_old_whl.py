@@ -325,9 +325,9 @@ def can_reuse_whl(args: argparse.Namespace) -> bool:
         print("Issue #153759 is open, rebuild whl")
         return False
 
-    # if not check_changed_files(get_merge_base()):
-    #     print("Cannot use old whl due to the changed files, rebuild whl")
-    #     return False
+    if not check_changed_files(get_merge_base()):
+        print("Cannot use old whl due to the changed files, rebuild whl")
+        return False
 
     workflow_id = get_workflow_id(args.run_id)
     if workflow_id is None:
