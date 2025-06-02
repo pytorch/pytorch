@@ -60,20 +60,22 @@ def _hermitian_conj(x, dim):
     """
     out = torch.empty_like(x)
     mid = (x.size(dim) - 1) // 2
-    idx = [slice(None)] * out.dim()
-    idx_center = list(idx)
-    idx_center[dim] = 0
+    idx = tuple([slice(None)] * out.dim())
     out[idx] = x[idx]
 
     idx_neg = list(idx)
     idx_neg[dim] = slice(-mid, None)
-    idx_pos = idx
+    idx_neg = tuple(idx_neg)
+    idx_pos = list(idx)
     idx_pos[dim] = slice(1, mid + 1)
+    idx_pos = tuple(idx_pos)
 
     out[idx_pos] = x[idx_neg].flip(dim)
     out[idx_neg] = x[idx_pos].flip(dim)
     if (2 * mid + 1 < x.size(dim)):
+        idx = list(idx)
         idx[dim] = mid + 1
+        idx = tuple(idx)
         out[idx] = x[idx]
     return out.conj()
 
