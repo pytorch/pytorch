@@ -1115,8 +1115,13 @@ class triton:
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
 
-    # TODO - temporary config before enabled by default
-    global_tiling_analysis: bool = True
+    # TODO - enable by default
+    coalesce_tiling_analysis: bool = (
+        os.environ.get(
+            "TORCHINDUCTOR_COALESCE_TILING_ANALYSIS", "1" if not is_fbcode() else "0"
+        )
+        == "1"
+    )
 
     # limit tiling dimensions
     #   - max_tiles=1 disables tiling
@@ -1124,8 +1129,8 @@ class triton:
     #   - max_tiles=3 is experimental and may have bugs
     # higher values are unsupported
 
-    #  We use a max of 3 if global_tiling_analysis is True, and 2 otherwise.
-    #  Note - global_tiling_analysis does not yet apply to dynamic shapes.
+    #  We use a max of 3 if coalesce_tiling_analysis is True, and 2 otherwise.
+    #  Note - coalesce_tiling_analysis does not yet apply to dynamic shapes.
     max_tiles: Optional[int] = None
 
     # Prefer higher dimensional tilings. This simplifies indexing expressions, making
