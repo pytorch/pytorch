@@ -1,8 +1,7 @@
 ARG CENTOS_VERSION
 
-FROM centos:${CENTOS_VERSION}
+FROM quay.io/centos/centos:stream${CENTOS_VERSION}
 
-ARG CENTOS_VERSION
 
 # Set AMD gpu targets to build for
 ARG PYTORCH_ROCM_ARCH
@@ -14,18 +13,20 @@ ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 COPY ./common/install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
 
+#Install langpack
+RUN yum install -y glibc-langpack-en
+
 # Update CentOS git version
 RUN yum -y remove git
 RUN yum -y remove git-*
-RUN yum -y install https://packages.endpointdev.com/rhel/7/os/x86_64/endpoint-repo-1.9-1.x86_64.rpm && \
-    sed -i 's/packages.endpoint/packages.endpointdev/' /etc/yum.repos.d/endpoint.repo
 RUN yum install -y git
 
 # Install devtoolset
-ARG DEVTOOLSET_VERSION
-COPY ./common/install_devtoolset.sh install_devtoolset.sh
-RUN bash ./install_devtoolset.sh && rm install_devtoolset.sh
+RUN dnf install -y rpmdevtools
 ENV BASH_ENV "/etc/profile"
+
+# Install ninja
+RUN dnf --enablerepo=crb install -y ninja-build
 
 # (optional) Install non-default glibc version
 ARG GLIBC_VERSION
@@ -36,6 +37,11 @@ RUN rm install_glibc.sh
 # Install user
 COPY ./common/install_user.sh install_user.sh
 RUN bash ./install_user.sh && rm install_user.sh
+
+# Install katex
+ARG KATEX
+COPY ./common/install_docs_reqs.sh install_docs_reqs.sh
+RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 
 # Install conda and other packages (e.g., numpy, pytest)
 ARG ANACONDA_PYTHON_VERSION

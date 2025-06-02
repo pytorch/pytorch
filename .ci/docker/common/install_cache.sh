@@ -25,6 +25,27 @@ install_ubuntu() {
   chmod 755 /opt/cache/bin/sccache-0.2.14a
 }
 
+install_centos() {
+  echo "Preparing to build sccache from source"
+  # Use dnf for CentOS
+  dnf install -y cargo git gcc openssl-devel
+  echo "Checking out sccache repo"
+  git clone https://github.com/mozilla/sccache -b v0.10.0
+  cd sccache
+  echo "Building sccache"
+  cargo build --release
+  cp target/release/sccache /opt/cache/bin
+  echo "Cleaning up"
+  cd ..
+  rm -rf sccache
+  dnf remove -y cargo rustc
+  dnf clean all
+
+  echo "Downloading old sccache binary from S3 repo for PCH builds"
+  curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache-0.2.14a
+  chmod 755 /opt/cache/bin/sccache-0.2.14a
+}
+
 install_binary() {
   echo "Downloading sccache binary from S3 repo"
   curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache
@@ -36,7 +57,19 @@ sed -e 's|PATH="\(.*\)"|PATH="/opt/cache/bin:\1"|g' -i /etc/environment
 export PATH="/opt/cache/bin:$PATH"
 
 # Setup compiler cache
-install_ubuntu
+ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
+case "$ID" in
+  ubuntu)
+    install_ubuntu
+    ;;
+  centos)
+    install_centos
+    ;;
+  *)
+    echo "Unable to determine OS..."
+    exit 1
+    ;;
+esac
 chmod a+x /opt/cache/bin/sccache
 
 function write_sccache_stub() {
