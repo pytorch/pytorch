@@ -8,6 +8,7 @@ import functools
 import itertools
 import logging
 import math
+import operator
 import os
 import textwrap
 from collections.abc import Iterable, Sequence
