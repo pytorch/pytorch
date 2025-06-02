@@ -26,7 +26,7 @@ def save_registry(reg, path):
 
 def next_gb_id(reg):
     ids = [int(x[2:]) for x in reg if x.startswith("GB") and x[2:].isdigit()]
-    return f"GB{(max(ids,default=0)+1):04d}"
+    return f"GB{(max(ids, default=0) + 1):04d}"
 
 
 """
@@ -165,14 +165,18 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path):
 
     existing_gb_types = {entry["Gb_type"] for entry in reg.values()}
     if gb_type in existing_gb_types:
-        print(f"Error: gb_type '{gb_type}' already exists in registry. Please rename the gb_type so it can be unique.")
+        print(
+            f"Error: gb_type '{gb_type}' already exists in registry. Please rename the gb_type so it can be unique."
+        )
         return False
 
     calls = find_unimplemented_v2_calls(Path(file_path))
     matching_call = next((call for call in calls if call["gb_type"] == gb_type), None)
 
     if not matching_call:
-        print(f"Error: Could not find unimplemented_v2 call with gb_type '{gb_type}' in {file_path}")
+        print(
+            f"Error: Could not find unimplemented_v2 call with gb_type '{gb_type}' in {file_path}"
+        )
         return False
 
     gb_id = next_gb_id(reg)
