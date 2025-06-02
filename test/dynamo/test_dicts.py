@@ -960,9 +960,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         from torch._dynamo.exc import Unsupported
 
         for arg in args:
-            with self.assertRaisesRegex(
-                Unsupported, "Observed exception"
-            ):
+            with self.assertRaisesRegex(Unsupported, "Observed exception"):
                 _ = fn(arg)
 
     def test_builtin_or_with_diff_keys(self):
