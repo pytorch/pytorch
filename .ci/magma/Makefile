@@ -18,7 +18,6 @@ DOCKER_RUN = set -eou pipefail; ${DOCKER_CMD} run --rm -i \
 .PHONY: all
 all: magma-cuda128
 all: magma-cuda126
-all: magma-cuda118
 
 .PHONY:
 clean:
@@ -34,10 +33,4 @@ magma-cuda128:
 .PHONY: magma-cuda126
 magma-cuda126: DESIRED_CUDA := 12.6
 magma-cuda126:
-	$(DOCKER_RUN)
-
-.PHONY: magma-cuda118
-magma-cuda118: DESIRED_CUDA := 11.8
-magma-cuda118: CUDA_ARCH_LIST += -gencode arch=compute_37,code=sm_37
-magma-cuda118:
 	$(DOCKER_RUN)
