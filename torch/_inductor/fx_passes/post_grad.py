@@ -24,7 +24,6 @@ from torch.utils._ordered_set import OrderedSet
 from .. import config, ir, pattern_matcher
 from ..codegen.common import custom_backend_passes
 from ..comms import remove_fsdp2_unsharded_param_graph_input_usage
-from ..compile_fx import get_all_devices
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
@@ -50,6 +49,7 @@ from ..pattern_matcher import (
 )
 from ..utils import (
     decode_device,
+    get_all_devices,
     get_gpu_type,
     is_gpu,
     is_pointwise_use,
