@@ -289,10 +289,23 @@ class C10_API OutOfMemoryError : public Error {
   using Error::Error;
 };
 
-// Used for handling syntacitc erros in input arguments.
-// They shuld turn into SytnaxError when the cross into Python
+// Used for handling syntactic errors in input arguments.
+// These turn into SyntaxError when the cross into Python.
 class C10_API SyntaxError : public Error {
   using Error::Error;
+};
+
+// Raised when accelerator API call hits an error.
+// These turn into AcceleratorError when the cross into Python
+class C10_API AcceleratorError : public Error {
+  int32_t error_code;
+
+ public:
+  AcceleratorError(SourceLocation loc, int32_t code, const std::string& msg)
+      : Error(loc, msg), error_code(code) {}
+  int32_t get_error_code() const {
+    return error_code;
+  }
 };
 
 // Base error type for all distributed errors.
