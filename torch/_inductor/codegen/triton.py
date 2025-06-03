@@ -3642,6 +3642,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "num_reduction": self.num_reduction,
             **self.inductor_meta_common(),
         }
+        if self.tiling_scores:
+            inductor_meta["tiling_scores"] = self.tiling_scores
+
         if self.cooperative_reduction:
             inductor_meta["persistent_reduction"] = self.persistent_reduction
 
