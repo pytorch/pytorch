@@ -379,7 +379,7 @@ class TensorVariable(VariableTracker):
             gb_type="Tensor.retain_grad() with AOTDispatcher",
             context=f"var_getattr {self} retain_grad",
             explanation="`Tensor.retain_grad()` does not work with AOTDispatcher.",
-            hints=[*graph_break_hints.SUPPORTABLE],
+            hints=[],
         )
 
     def method_attr_data(self, tx):
@@ -393,7 +393,7 @@ class TensorVariable(VariableTracker):
                 gb_type="Tensor with grad_fn()",
                 context=f"var_getattr {self} grad_fn",
                 explanation="Dynamo does not support tracing tensors with a grad_fn directly.",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                hints=[],
             )
         else:
             return variables.ConstantVariable(None)
@@ -443,7 +443,6 @@ class TensorVariable(VariableTracker):
                     hints=[
                         f"Remove `{name}` from the list of banned ops by "
                         "setting `torch._dynamo.config._autograd_backward_strict_mode_banned_ops`.",
-                        *graph_break_hints.SUPPORTABLE,
                     ],
                 )
             elif name in self._strict_mode_conditional_banned_ops():
@@ -630,7 +629,7 @@ class TensorVariable(VariableTracker):
                 context=f"call_method {self} {name} {args} {kwargs}",
                 explanation="Dynamo currently does not support this method "
                 f"({name}) invocation in strict mode.",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                hints=[],
             )
 
         # Only override builtin tensor methods
@@ -704,7 +703,7 @@ class TensorVariable(VariableTracker):
                     context=f"call_method {self} {name} {args} {kwargs}",
                     explanation="Dynamo encountered an error while calling "
                     f"the method `{name}`.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
+                    hints=[],
                     from_exc=e,
                 )
 
@@ -1104,7 +1103,7 @@ class TensorVariable(VariableTracker):
             gb_type="Unsupported Tensor.resize_() call",
             context=f"call_method {self} resize_ {args} {kwargs}",
             explanation="Dynamo currently does not support tracing `Tensor.resize_()`.",
-            hints=[*graph_break_hints.SUPPORTABLE],
+            hints=[],
         )
 
     def method_resize_as_(self, *args, **kwargs):
@@ -1112,7 +1111,7 @@ class TensorVariable(VariableTracker):
             gb_type="Unsupported Tensor.resize_as_() call",
             context=f"call_method {self} resize_as_ {args} {kwargs}",
             explanation="Dynamo currently does not support tracing `Tensor.resize_as_()`.",
-            hints=[*graph_break_hints.SUPPORTABLE],
+            hints=[],
         )
 
     def method_sparse_resize_(self, *args, **kwargs):
@@ -1120,7 +1119,7 @@ class TensorVariable(VariableTracker):
             gb_type="Unsupported Tensor.sparse_resize_() call",
             context=f"call_method {self} sparse_resize_ {args} {kwargs}",
             explanation="Dynamo currently does not support tracing `Tensor.sparse_resize_()`.",
-            hints=[*graph_break_hints.SUPPORTABLE],
+            hints=[],
         )
 
     def method_sparse_resize_and_clear_(self, *args, **kwargs):
@@ -1128,7 +1127,7 @@ class TensorVariable(VariableTracker):
             gb_type="Unsupported Tensor.sparse_resize_and_clear_() call",
             context=f"call_method {self} sparse_resize_and_clear_ {args} {kwargs}",
             explanation="Dynamo currently does not support tracing `Tensor.sparse_resize_and_clear_()`.",
-            hints=[*graph_break_hints.SUPPORTABLE],
+            hints=[],
         )
 
     def method_set_(self, *args, **kwargs):
@@ -1275,7 +1274,7 @@ class TensorVariable(VariableTracker):
                     gb_type="Compilation of intermediate hooks requires compiled autograd",
                     context=f"var_getattr {self} {name}",
                     explanation="Dynamo must be in compiled_autograd to register hooks.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
+                    hints=[],
                 )
 
             hook_name, bw_state_proxy = tx.output.add_backward_state_hook(hook)
@@ -1517,14 +1516,14 @@ class NumpyNdarrayVariable(TensorVariable):
                 gb_type="Unsupported ndarray attribute access",
                 context=f"var_getattr {self} {name}",
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                hints=[],
             )
         elif name in ["__version__"]:
             unimplemented_v2(
                 gb_type="Unsupported ndarray.__version__ access",
                 context=f"var_getattr {self} {name}",
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                hints=[],
             )
         if result is None:
             raise NotImplementedError
@@ -1556,7 +1555,7 @@ class NumpyNdarrayVariable(TensorVariable):
                 gb_type="Unsupported ndarray method call",
                 context=f"call_method {self} {name} {args} {kwargs}",
                 explanation=f"`ndarray.{name}()` is not modelled in `torch._numpy`.",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                hints=[],
             )
         proxy = tx.output.create_proxy(
             "call_function",
