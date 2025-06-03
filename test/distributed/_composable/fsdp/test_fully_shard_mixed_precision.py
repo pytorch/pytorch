@@ -605,7 +605,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
                 super().__init__(*args, **kwargs)
                 self._layer = nn.Linear(10, 10)
 
-            def forward(self, input: torch.Tensor):
+            def forward(self, input: Input):
                 return self._layer(input.x)
 
         mp_policy = MixedPrecisionPolicy(

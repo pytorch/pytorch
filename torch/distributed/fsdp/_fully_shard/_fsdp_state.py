@@ -231,8 +231,9 @@ class FSDPState(_State):
                 cast_fn = functools.partial(
                     _cast_fp_tensor, self._mp_policy.param_dtype
                 )
-                args, kwargs = _apply_to_tensors(cast_fn, args), _apply_to_tensors(
-                    cast_fn, kwargs
+                args, kwargs = (
+                    _apply_to_tensors(cast_fn, args),
+                    _apply_to_tensors(cast_fn, kwargs),
                 )
         if self._fsdp_param_group:
             args, kwargs = self._fsdp_param_group.pre_forward(module, args, kwargs)
