@@ -81,9 +81,6 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
-# precompilation timeout
-precompilation_timeout_seconds: int = 60 * 60
-
 # use fx aot graph codegen cache
 fx_graph_cache: bool = Config(
     justknob="pytorch/remote_cache:enable_local_fx_graph_cache",
@@ -676,13 +673,6 @@ def decide_worker_start_method() -> str:
 
 
 worker_start_method: str = decide_worker_start_method()
-
-# Whether to log from subprocess workers that are launched.
-worker_suppress_logging: bool = Config(
-    justknob="pytorch/compiler:worker_suppress_logging",
-    env_name_force="TORCHINDUCTOR_WORKER_SUPPRESS_LOGGING",
-    default=True,
-)
 
 # Flags to turn on all_reduce fusion. These 2 flags should be automaticaly turned
 # on by DDP and should not be set by the users.
@@ -1382,9 +1372,7 @@ class cuda:
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4, 8]
 
     # Whether to use CUTLASS EVT for epilogue fusion
-    cutlass_epilogue_fusion_enabled = (
-        os.environ.get("CUTLASS_EPILOGUE_FUSION", "0") == "1"
-    )
+    cutlass_epilogue_fusion_enabled = False
 
     # Whether to only use TMA-compatible kernels in CUTLASS
     cutlass_tma_only = False
@@ -1494,16 +1482,8 @@ class rocm:
         os.environ.get("INDUCTOR_CK_BACKEND_GENERATE_TEST_RUNNER_CODE", "0") == "1"
     )
 
-    # Deprecated, use CK and/or CK-tile specific settings
+    # Number of op instance choices to trade off between runtime perf and compilation time
     n_max_profiling_configs: Optional[int] = None
-
-    # Number of op instance choices to trade off between runtime perf and compilation time
-    # For CK Kernels
-    ck_max_profiling_configs: Optional[int] = None
-
-    # Number of op instance choices to trade off between runtime perf and compilation time
-    # For CK-Tile Kernels
-    ck_tile_max_profiling_configs: Optional[int] = None
 
     # Flag to use a short list of CK instances which perform well across a variety of shapes.
     # Currently RCR and F16 only

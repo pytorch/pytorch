@@ -481,8 +481,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(
-        # skip for cu126 as well due to https://github.com/pytorch/pytorch/issues/153479
-        not (TEST_MULTIGPU and CUDA_12_AND_ABOVE and False),
+        not (TEST_MULTIGPU and CUDA_12_AND_ABOVE),
         "NCCL test requires 2+ GPUs and Device side assert could cause unexpected errors in lower versions of CUDA",
     )
     @parametrize(
@@ -658,11 +657,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             # fail because one context takes about 1 GB -- much more than the
             # tensor size created in this test.
             self.assertTrue(
-                # Bump the heuristic from 1.5 to 1.7 due to
-                # https://github.com/pytorch/pytorch/issues/153122
-                used_after < used_before * 1.7,
+                used_after < used_before * 1.5,
                 f"{device} used {used_after} bytes after collective, "
-                f"70% more than the status before ({used_before} bytes). "
+                f"50% more than the status before ({used_before} bytes). "
                 f"Extra CUDA context may have been created.",
             )
 
@@ -683,56 +680,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             self._helper_test_extra_cuda_context_by_nvml()
         except ModuleNotFoundError:
             self._helper_test_extra_cuda_context_by_memory()
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_extra_cuda_context_sync_ops(self):
-        # Loop a bunch of sync ops and see if any of them creates extra context.
-        # Requires nvml to check number of processes resident on a device.
-        try:
-            import pynvml
-
-            pynvml.nvmlInit()
-        except Exception:
-            self.skipTest("pynvml not available")
-
-        # Check if non-0 ranks would create extra CUDA context on device 0
-        store = c10d.FileStore(self.file_name, self.world_size)
-        device = torch.device(f"cuda:{self.rank:d}")
-        c10d.init_process_group(
-            backend="nccl",
-            store=store,
-            rank=self.rank,
-            world_size=self.world_size,
-            device_id=device,
-        )
-
-        x = torch.empty((1,), device=device)
-        y = torch.empty((self.world_size,), device=device)
-
-        c10d.all_reduce(x)
-        c10d.reduce(x, dst=0)
-        c10d.broadcast(x, src=0)
-        c10d.all_gather_into_tensor(y, x)
-        c10d.reduce_scatter_tensor(x, y)
-        c10d.barrier()
-
-        # Wait a bit for remote processes to touch my device
-        if self.rank == 0:
-            time.sleep(5)
-
-        handle = pynvml.nvmlDeviceGetHandleByIndex(self.rank)
-        processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
-        nprocs = len(processes)
-
-        # Don't exit till rank 0 is done with the nvml detection
-        c10d.barrier()
-        c10d.destroy_process_group()
-        self.assertLessEqual(
-            nprocs,
-            1,
-            f"Found {nprocs} processes creating contexts on {device}, expecting 1 at most",
-        )
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -1102,7 +1049,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     def test_non_blocking_with_eager_init(self):
         # Test creating a pg eagerly with nonblocking mode when
         # we've passed a specific device_id to init_process_group.
-        raise SkipTest("Skip due to https://github.com/pytorch/pytorch/issues/153517")
         os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "1"
         os.environ["TORCH_NCCL_NONBLOCKING_TIMEOUT"] = "100"
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -3730,9 +3676,6 @@ class NcclProcessGroupWithDispatchedCollectivesTests(
     @skip_if_lt_x_gpu(1)
     @parametrize("float8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
     def test_allgather_float8(self, float8_dtype):
-        device = torch.device(f"cuda:{self.rank:d}")
-        if not sm_is_or_higher_than(device, 9, 0):
-            self.skipTest("FP8 reduction support begins with sm90 capable devices")
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             "nccl",

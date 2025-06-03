@@ -65,7 +65,6 @@ extensions = [
     "myst_parser",
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
-    "sphinx_sitemap",
 ]
 
 myst_enable_extensions = [
@@ -73,14 +72,6 @@ myst_enable_extensions = [
     "deflist",
     "html_image",
 ]
-
-html_baseurl = "https://docs.pytorch.org/docs/stable/"  # needed for sphinx-sitemap
-sitemap_locales = [None]
-sitemap_excludes = [
-    "search.html",
-    "genindex.html",
-]
-sitemap_url_scheme = "{link}"
 
 # build the templated autosummary files
 autosummary_generate = True

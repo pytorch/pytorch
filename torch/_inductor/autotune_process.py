@@ -669,9 +669,6 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     A class to handle CUDA (CUTLASS) benchmark requests. This class is for
     managing the lifecycle of a CUDA kernel benchmark, including compiling
     the source code, managing workspace memory, and executing the kernel.
-
-    Important: Instances of this class have to be serializable across
-    process boundaries. Do not put CUDA Tensors in here!
     """
 
     def __init__(
@@ -706,8 +703,14 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     ) -> Callable[[], None]:
         """
         Create a function to run the CUDA kernel with the given input and output tensors.
-        """
 
+        Args:
+            input_tensors (torch.Tensor): The input tensors for the kernel.
+            out (torch.Tensor): The output tensor for the kernel.
+
+        Returns:
+            Callable[[], None]: A function that runs the kernel.
+        """
         self.ensure_dll_loaded()
         self.update_workspace_size()
         args = [c_void_p(tensor.data_ptr()) for tensor in list(input_tensors) + [out]]
@@ -756,6 +759,9 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         return ret
 
     def update_workspace_size(self) -> None:
+        """
+        Update the workspace size required by the kernel.
+        """
         if self._workspace_size_updated:
             return
         self.ensure_dll_loaded()
@@ -792,18 +798,27 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         self._workspace_size_updated = True
 
     def ensure_dll_loaded(self):
+        """
+        Ensure that the DLL for the kernel is loaded.
+        """
         if self.DLL is None:
             self.DLL, self.hash_key, self.source_file = CUDACodeCache.load(
                 self.source_code, "so"
             )
 
     def cleanup_run_fn(self) -> None:
+        """
+        Clean up resources used by the run function.
+        """
         if self.DLL is not None:
             self.DLL.close()
             self.DLL = None
         self.workspace = None
 
     def __str__(self) -> str:
+        """
+        Return a string representation of the CUDABenchmarkRequest.
+        """
         return f"{self.kernel_name=}, {self.source_file=}, {self.hash_key=}"
 
 

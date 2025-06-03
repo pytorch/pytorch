@@ -311,7 +311,6 @@ class TritonTemplateKernel(TritonKernel):
         epilogue_fn=identity,
         subgraphs: Optional[list[ir.ComputedBuffer]] = None,
         workspace_arg: Optional[WorkspaceArg] = None,
-        prologue_loads_all_inputs=False,
     ) -> None:
         numel = sympy_product(output_node.get_size())
         super().__init__(
@@ -388,10 +387,6 @@ class TritonTemplateKernel(TritonKernel):
         # Update each time an input is marked frozen, used to replay the freezing of inputs on a cache hit.
         self.frozen_layouts_cnt = 0
 
-        # When prologue_loads_all_inputs is true, prologue_supported_inputs is populated during def_kernel
-        # by adding all inputs.
-        self.prologue_loads_all_inputs = prologue_loads_all_inputs
-
     def input_dependent_preserved_state(self) -> str:
         # Not adding self.args.output_buffers on purpose. But we do not need to reproduce it on a cache hit.
         # (never accessed).
@@ -433,7 +428,6 @@ class TritonTemplateKernel(TritonKernel):
             key.name: getattr(self, key.name)
             for key in dataclasses.fields(SubgraphInfo)
         }
-
         assert body_name in self.subgraph_bodies, body_name
 
         subgraph = self.subgraph_bodies[body_name]
@@ -591,13 +585,10 @@ class TritonTemplateKernel(TritonKernel):
         # The args may be duplicated, so renaming must be after args are de-duplicated.
         for name in argnames:
             input_node = self.named_input_nodes[name]
-            if self.prologue_loads_all_inputs:
-                self.prologue_supported_inputs.add(input_node.get_name())
             if input_node.get_name() in V.graph.removed_buffers:
                 continue
             if input_node.get_name() in self.prologue_fused_inputs:
                 continue
-
             arg_name = self.args.input_buffers[input_node.get_name()]
             if input_node.get_layout().offset == 0:
                 renames.writeline(f"{name} = {arg_name}")
@@ -765,9 +756,7 @@ class TritonTemplateKernel(TritonKernel):
         """
 
         input_node = self.named_input_nodes[input_name]
-        if not self.prologue_loads_all_inputs:
-            self.prologue_supported_inputs.add(input_node.get_name())
-
+        self.prologue_supported_inputs.add(input_node.get_name())
         tilings = (sympy_product(input_node.get_size()), sympy.Integer(1))
         groups = {
             "x": tilings[0],
@@ -1272,7 +1261,6 @@ class TritonTemplate(KernelTemplate):
         source: str,
         debug=False,
         cache_codegen_enabled_for_template=False,
-        prologue_loads_all_inputs=False,
     ) -> None:
         super().__init__(name)
         self.grid = grid
@@ -1283,9 +1271,6 @@ class TritonTemplate(KernelTemplate):
         self._cache_codegen_enabled_for_template = cache_codegen_enabled_for_template
         self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
         clear_on_fresh_inductor_cache(self._generated_code_cache)
-        # When prologue_loads_all_inputs is true, prologue_supported_inputs is populated during def_kernel
-        # by adding all inputs.
-        self.prologue_loads_all_inputs = prologue_loads_all_inputs
 
     # When this flag is on, we ensure that the cached results and the generated result if cache
     # was not used are the same.
@@ -1385,7 +1370,6 @@ class TritonTemplate(KernelTemplate):
             "suffix_args": suffix_args,
             "epilogue_fn": epilogue_fn,
             "subgraphs": subgraphs,
-            "prologue_loads_all_inputs": self.prologue_loads_all_inputs,
         }
 
         if HAS_WARP_SPEC:
@@ -1542,7 +1526,7 @@ class TritonTemplate(KernelTemplate):
         # capability doesn't support them.  This is a bug in Triton, but for now we'll
         # patch around it here.  See https://github.com/triton-lang/triton/issues/3011
         # for one example issue with this problem.
-        if torch.cuda.is_available() and not torch.cuda.is_tf32_supported():
+        if not torch.cuda.is_tf32_supported():
             kwargs["ALLOW_TF32"] = "False"
 
         if call_sizes is None:
@@ -2710,18 +2694,19 @@ class AlgorithmSelectorCache(PersistentCache):
             return []
 
         log.debug("Before pruning using prescreening timings, %d choices", len(choices))
-        sorted_candidates = sorted(
+        sorted_choices = sorted(
             candidate_timings.keys(), key=lambda choice: candidate_timings[choice]
         )
         num_to_keep = max(int(math.sqrt(len(choices)) / 4), 8)
 
         # prune choices based on prescreening timings
         candidates_to_prune = OrderedSet(
-            candidate.hash_key() for candidate in sorted_candidates[num_to_keep:]
+            candidate.bmreq.hash_key  # type: ignore[attr-defined]
+            for candidate in sorted_choices[num_to_keep:]
         )
-        for candidate in sorted_candidates[:num_to_keep]:
+        for candidate in sorted_choices[:num_to_keep]:
             if candidate_timings[candidate] == float("inf"):
-                candidates_to_prune.add(candidate.hash_key())
+                candidates_to_prune.add(candidate.bmreq.hash_key)  # type: ignore[attr-defined]
             else:
                 if isinstance(candidate, CUDATemplateCaller):
                     candidate.bmreq.ensure_dll_loaded()
@@ -2729,7 +2714,7 @@ class AlgorithmSelectorCache(PersistentCache):
         choices = [
             choice
             for choice in choices
-            if choice.hash_key() not in candidates_to_prune  # type: ignore[attr-defined]
+            if choice.bmreq.hash_key not in candidates_to_prune  # type: ignore[attr-defined]
         ]
 
         log.debug("After pruning using prescreening timings, %d choices", len(choices))
@@ -2938,9 +2923,6 @@ def autotune_select_algorithm(*args, **kwargs):
         kwargs["return_multi_template"] = (
             torch._inductor.config.benchmark_epilogue_fusion
         )
-
-    if "precompilation_timeout_seconds" not in kwargs:
-        kwargs["precompilation_timeout_seconds"] = config.precompilation_timeout_seconds
 
     return _ALGORITHM_SELECTOR_CACHE(*args, **kwargs)
 

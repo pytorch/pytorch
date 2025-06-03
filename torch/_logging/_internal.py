@@ -247,7 +247,6 @@ def set_logs(
     benchmarking: bool = False,
     autotuning: bool = False,
     graph_region_expansion: bool = False,
-    inductor_metrics: bool = False,
 ):
     """
     Sets the log level for individual components and toggles individual log
@@ -442,8 +441,6 @@ def set_logs(
         graph_region_expansion (:class:`bool`):
             Whether to emit the detailed steps of the duplicate graph region tracker expansion algorithm. Default: ``False``
 
-        inductor_metrics (:class:`bool`):
-            Whether to estimate the runtimes of the nodes in a graph and log them to the metrics table. Default: ``False``
 
     Example::
 
@@ -556,7 +553,6 @@ def set_logs(
         benchmarking=benchmarking,
         autotuning=autotuning,
         graph_region_expansion=graph_region_expansion,
-        inductor_metrics=inductor_metrics,
     )
 
 

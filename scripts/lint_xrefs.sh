@@ -29,17 +29,12 @@ done < <(
     ':(exclude,glob)**/third-party/**'
     ':(exclude,glob)**/third_party/**'
   )
-  if [ $# -eq 2 ]; then
-    for filename in $(git diff --name-only --unified=0 "$1...$2"); do
-      git diff --unified=0 "$1...$2" -- "$filename" "${excludes[@]}" \
-        | grep -E '^\+' \
-        | grep -Ev '^\+\+\+' \
-        | perl -nle 'print for m#'"$pattern"'#g' \
-        | sed 's|^|'"$filename"':|'
-    done
+  if [ $# -gt 0 ]; then
+    paths=("$@")
   else
-    git --no-pager grep --no-color -I -P -o "$pattern" -- . "${excludes[@]}"
-  fi \
+    paths=('*')
+  fi
+  git --no-pager grep --no-color -I -P -o "$pattern" -- "${paths[@]}" "${excludes[@]}" \
   | grep -Ev 'https?://' \
   | sed -E \
       -e 's#([^:]+):\[[^]]+\]\(([^)]+)\)#\1:\2#' \

@@ -608,6 +608,7 @@ class CUDATemplateCaller(ChoiceCaller):
             [
                 self.category,
                 self.bmreq.hash_key,
+                self.info_dict()["swizzle"],  # type: ignore[list-item]
             ]
         )
 
