@@ -5760,20 +5760,19 @@ def full_like(
                 memory_format = m
                 break
 
+    result = torch.full(
+        a.shape,
+        fill_value,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        requires_grad=requires_grad,
+    )
+
     if memory_format != torch.preserve_format:
-        return torch.full(
-            a.shape,
-            fill_value,
-            dtype=dtype,
-            layout=layout,
-            device=device,
-            requires_grad=requires_grad,
-        ).to(memory_format=memory_format)
+        return result.to(memory_format=memory_format)
 
     shape, stride = _get_shape_stride_like(a, layout)
-    result = full(
-        a.shape, fill_value, dtype=dtype, device=device, requires_grad=requires_grad
-    )
     if stride:
         return result.as_strided(shape, stride).clone()
     else:
