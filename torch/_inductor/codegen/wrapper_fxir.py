@@ -21,7 +21,7 @@ from torch._library.triton import wrap_triton
 from torch.fx import GraphModule
 from torch.utils._sympy.functions import FloorDiv
 
-from .. import ir
+from .. import config, ir
 from ..utils import convert_shape_to_symint, convert_to_symint, LineContext
 from .common import (
     CodegenSymbol,
@@ -483,10 +483,31 @@ class FxConverter:
         call_args = self._lookup_args(line.call_args)
         kernel = self.kernels[line.kernel_name]
         tuner = kernel.tuner
-        config = tuner.compile_results[0].config
-        call_args, grid = tuner._interpret_args_grid(call_args, config)
+
+        # Optionally autotune the kernels.
+        # The FX backend currently only supports compile-time tuning.
+        if config.triton.autotune_at_compile_time:
+            from triton.runtime import driver
+
+            device = driver.active.get_current_device()
+            stream = driver.active.get_current_stream(device)
+
+            def node_to_tensor(arg):
+                if not isinstance(arg, torch.fx.Node):
+                    return arg
+
+                fake = arg.meta["val"]
+                return torch.empty_strided(
+                    fake.shape, fake.stride(), device=device
+                ).zero_()
+
+            arg_values = [node_to_tensor(arg) for arg in call_args]
+            tuner.run(*arg_values, stream=stream)
+
+        kernel_config = tuner.compile_results[0].config
+        call_args, grid = tuner._interpret_args_grid(call_args, kernel_config)
         call_kwargs = dict(zip(tuner.triton_meta["signature"], call_args))
-        call_kwargs.update(config.kwargs)
+        call_kwargs.update(kernel_config.kwargs)
 
         def replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
             """

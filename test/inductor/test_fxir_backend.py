@@ -409,6 +409,26 @@ class FxirTestCase(InductorTestCase):
         ), self.assertRaisesRegex(BackendCompilerFailed, "Triton"):
             self._compile_and_check(foo, args)
 
+    @torch._inductor.config.patch("triton.autotune_at_compile_time", True)
+    def test_autotune(self):
+        orig_run = torch._inductor.runtime.triton_heuristics.CachingAutotuner.run
+        called = False
+
+        def run(*args, **kwargs):
+            nonlocal called
+            called = True
+            return orig_run(*args, **kwargs)
+
+        args = [torch.randn(8, device=self.device) for _ in range(2)]
+
+        # Compile and check that the tuner was called.
+        with unittest.mock.patch.object(
+            torch._inductor.runtime.triton_heuristics.CachingAutotuner, "run", run
+        ) as run_mock:
+            self.assertFalse(called)
+            self._compile_and_check(torch.mul, args)
+            self.assertTrue(called)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
