@@ -1,5 +1,5 @@
 import typing
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 import torch
 
@@ -7,7 +7,7 @@ import torch
 _T = typing.TypeVar("_T", bound=Callable)
 
 # ONNX to ATen decomp table
-ONNX_ATEN_DECOMP_TABLE: dict[Any, torch._ops.OpOverload] = {}
+ONNX_ATEN_DECOMP_TABLE: dict[torch._ops.OpOverload, Callable] = {}
 
 
 def _onnx_op(op_type: str, opset_version: int) -> Callable[[_T], _T]:
@@ -19,7 +19,7 @@ def _onnx_op(op_type: str, opset_version: int) -> Callable[[_T], _T]:
             f"onnx::{op_type}.{overload}", mutates_args=()
         )(func)
         ONNX_ATEN_DECOMP_TABLE[getattr(getattr(torch.ops.onnx, op_type), overload)] = (
-            func
+            func  # type: ignore[assignment]
         )
         # Use the same implementation for the fake implementation
         # This is possible because we use pure aten ops to implement ONNX ops

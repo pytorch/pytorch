@@ -4,6 +4,7 @@ This module provides a set of functions to create ONNX operators in the FX graph
 which are exportable to ONNX.
 """
 
+# flake8: noqa: B950
 from __future__ import annotations
 
 
@@ -15,7 +16,7 @@ __all__ = [
 ]
 
 
-from typing import TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
 import torch
 from torch.onnx.ops import _impl, _symbolic_impl
@@ -53,7 +54,7 @@ _TORCH_DTYPE_TO_ONNX_DTYPE = {
 }
 
 
-def aten_decompositions() -> dict[str, torch._ops.OpOverload]:
+def aten_decompositions() -> dict[torch._ops.OpOverload, Callable]:
     """Return the ONNX to ATen decomp table."""
     return _impl.ONNX_ATEN_DECOMP_TABLE
 
