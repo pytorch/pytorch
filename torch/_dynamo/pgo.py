@@ -535,9 +535,6 @@ def get_cache_key() -> Optional[str]:
             )
         return f"{r}:{rank}:{tag}"
 
-    if r := torch.compiler.config.sticky_pgo_key:
-        return f"sticky:{r}:{rank}:{tag}"
-
     if (name_version := torch._utils_internal.get_mast_job_name_version()) is not None:
         mast_job_name, mast_job_version = name_version
         return f"mast:{mast_job_name}:{mast_job_version}:{rank}:{tag}"
@@ -611,6 +608,10 @@ def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
             "To potentially avoid thisTo reduce shape recompilations by compiling dynamically to start, "
             f'set environment variable TORCH_COMPILE_DYNAMIC_SOURCES="{",".join(dynamic_sources)}"'
         )
+        with dynamo_timed(name := "pgo.dynamic_whitelist", log_pt2_compile_event=True):
+            CompileEventLogger.pt2_compile(
+                name, recompile_dynamic_whitelist=",".join(dynamic_sources)
+            )
     return code_state_str
 
 
