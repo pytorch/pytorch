@@ -3794,6 +3794,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
       )");
 #endif
+
   module.def(
       "_dump_fr_trace_json",
       [](std::optional<bool> includeCollectives,
