@@ -101,6 +101,17 @@ def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequenc
     return op(len(left), len(right))
 
 
+def dict___eq__(d, other):
+    if (len(d) != len(other)) or (d.keys() != other.keys()):
+        return False
+
+    for k, v in d.items():
+        if v != other[k]:
+            return False
+
+    return True
+
+
 def set_symmetric_difference(set1, set2):
     symmetric_difference_set = set()
     for x in set1:
