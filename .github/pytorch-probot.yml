@@ -28,6 +28,7 @@ ciflow_push_tags:
 - ciflow/op-benchmark
 - ciflow/pull
 - ciflow/h100
+- ciflow/h100-distributed
 retryable_workflows:
 - pull
 - trunk
