@@ -126,7 +126,6 @@ fmha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
     ck_tile::index_t split_stride_dq_acc = dq_acc.stride(0);
     ck_tile::index_t batch_stride_dq_acc = dq_acc.stride(1);
     ck_tile::index_t stride_dq_acc = dq_acc.stride(3);
-    // TROUBLE SPOT
     ck_tile::index_t nhead_stride_dq_acc = dq_acc.stride(2);
 
     // bias: (batch_size, nheads, seqlen_q, seqlen_k)
@@ -288,7 +287,6 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
             "If bias_requires_grad is set, grad_bias must have a value");
 
     const auto sizes = q.sizes();
-    std::cout << "QUERY SIZES: " << sizes << std::endl;
 
     const int batch_size = sizes[0];
     const int seqlen_q = sizes[1];
