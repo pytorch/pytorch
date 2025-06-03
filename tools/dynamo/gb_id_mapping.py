@@ -160,6 +160,14 @@ def find_unimplemented_v2_calls(path):
 
 
 def cmd_add_new_gb_type(gb_type, file_path, registry_path):
+    """
+    Add a new graph break type to the registry.
+
+    Args:
+        gb_type: The graph break type to add
+        file_path: Path to the file containing the unimplemented_v2 call
+        registry_path: Path to the registry JSON file
+    """
     registry_path = Path(registry_path)
     reg = load_registry(registry_path)
 
@@ -189,7 +197,6 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path):
 
     save_registry(reg, registry_path)
     print(f"Added {gb_type} to registry with ID {gb_id}")
-    return True
 
 
 def create_registry(dynamo_dir, registry_path):
