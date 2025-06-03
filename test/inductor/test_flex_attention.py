@@ -31,6 +31,7 @@ from torch.nn.attention.flex_attention import (
     BlockMask,
     create_block_mask,
     flex_attention,
+    flex_attention_hop,
     noop_mask,
     or_masks,
 )
@@ -3844,7 +3845,20 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(attn_output.device, torch.device("cuda:1"))
 
     @supported_platform
-    def test_selective_ac(self):
+    @skip_on_cpu
+    @common_utils.parametrize(
+        "ops_to_save",
+        [
+            [
+                torch.ops.aten.mm.default,
+            ],
+            [
+                flex_attention_hop,
+            ],
+            [torch.ops.aten.mm.default, flex_attention_hop],
+        ],
+    )
+    def test_selective_ac(self, device, ops_to_save):
         class FlexAttentionModule(nn.Module):
             def __init__(self, hidden_size, num_heads):
                 super().__init__()
@@ -3904,8 +3918,6 @@ class GraphModule(torch.nn.Module):
             create_selective_checkpoint_contexts,
         )
 
-        # ops_to_save = [torch.ops.aten.mm.default, flex_attention_hop]
-        ops_to_save = [torch.ops.aten.mm.default]
         context_fn = functools.partial(
             create_selective_checkpoint_contexts, ops_to_save
         )
@@ -3960,7 +3972,7 @@ class GraphModule(torch.nn.Module):
 
     @supported_platform
     @skip_on_cpu
-    def test_validate_small_embedding_size_error_message(self):
+    def test_validate_small_embedding_size_error_message(self, device):
         # eager support for small embedding size
         q, k, v = [torch.randn(2, 2, 128, 8, device=device) for _ in range(3)]
         flex_attention(q, k, v)
