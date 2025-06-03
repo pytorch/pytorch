@@ -9,6 +9,7 @@ from typing_extensions import Self
 
 import sympy
 
+import torch
 from torch import dtype as torch_dtype
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 from torch._inductor.runtime.runtime_utils import dynamo_timed
@@ -58,6 +59,9 @@ class DeferredTritonCallWrapper:
     arg_types: list[Any]
 
     def generate(self, wrapper: CppWrapperGpu):
+        """
+        Generate the GPU kernel definition, as well as load and launch code.
+        """
         prefix = wrapper.prefix
         if self.kernel_name.startswith("multi_kernel_"):
             # MultiKernel will select one kernel after running the autotune block
@@ -132,10 +136,12 @@ class DeferredTritonCallWrapper:
             self.generate_load_kernel(prefix, kernel_var_name, params)
             self.generate_launch_kernel(prefix, wrapper, kernel_var_name, params)
         prefix.writeline("}")
-        # Ensure the cubin file is included in the package
-        V.graph.wrapper_code.additional_files.append(
-            params[get_cpp_wrapper_cubin_path_name()]
-        )
+
+        if not config.aot_inductor.embed_kernel_binary:
+            # Ensure the cubin file is included in the package
+            V.graph.wrapper_code.additional_files.append(
+                params[get_cpp_wrapper_cubin_path_name()]
+            )
 
     def generate_grid(
         self,
@@ -160,12 +166,27 @@ class DeferredTritonCallWrapper:
     def generate_load_kernel(self, prefix, kernel_var_name, params):
         prefix.writeline(f"if ({kernel_var_name} == nullptr) {{")
         with prefix.indent():
-            load_kernel_args = [
-                cpp_string_literal(params[get_cpp_wrapper_cubin_path_name()]),
-                cpp_string_literal(params["mangled_name"]),
-                str(params["shared_mem"]),
-                "cubin_dir_",
-            ]
+            embed_kernel_args = [f"__{params['inductor_meta']['kernel_name']}_start"]
+            if torch.xpu.is_available():
+                # XPU needs the end address of the kernel to calculate the size of the kernel binary.
+                embed_kernel_args.append(
+                    f"__{params['inductor_meta']['kernel_name']}_end"
+                )
+
+            load_kernel_args = (
+                [
+                    *embed_kernel_args,
+                    cpp_string_literal(params["mangled_name"]),
+                    str(params["shared_mem"]),
+                ]
+                if V.graph.aot_mode and config.aot_inductor.embed_kernel_binary
+                else [
+                    cpp_string_literal(params[get_cpp_wrapper_cubin_path_name()]),
+                    cpp_string_literal(params["mangled_name"]),
+                    str(params["shared_mem"]),
+                    "cubin_dir_",
+                ]
+            )
             prefix.writeline(
                 f"{kernel_var_name} = loadKernel({', '.join(load_kernel_args)}); "
             )
@@ -240,7 +261,7 @@ class CppWrapperGpu(CppWrapperCpu):
     def write_tma_descriptor_helpers_once(self):
         self.header.splice(self.device_codegen.tma_descriptor_helpers())
 
-    def write_get_raw_stream(self, device_idx: int, graph=None) -> str:
+    def write_get_raw_stream(self, device_idx: int, graph_name: str) -> str:
         name = f"stream{device_idx}"
         self.writeline(
             maybe_hipify_code_wrapper(
@@ -294,7 +315,7 @@ class CppWrapperGpu(CppWrapperCpu):
 
         super().codegen_inputs()
 
-    def define_kernel(
+    def _define_kernel_helper(
         self,
         kernel_name: str,
         kernel_body: str,
@@ -306,11 +327,11 @@ class CppWrapperGpu(CppWrapperCpu):
             self._kernel_name_to_body[kernel_name] = kernel_body
             if config.triton.autotune_at_compile_time:
                 # Call PythonWrapperCodegen to create the autotune code block
-                PythonWrapperCodegen.define_kernel(
+                PythonWrapperCodegen._define_kernel_helper(
                     self, kernel_name, kernel_body, metadata, gpu, cpp_definition
                 )
         else:
-            return CppWrapperCpu.define_kernel(
+            return CppWrapperCpu._define_kernel_helper(
                 self, kernel_name, kernel_body, metadata, gpu, cpp_definition
             )
 
@@ -440,12 +461,12 @@ class CppWrapperGpu(CppWrapperCpu):
             is not None
         ):
             global_scratch_def, global_scratch_var = global_scratch
-            code.writeline(global_scratch_def)
+            code.writeline(maybe_hipify_code_wrapper(global_scratch_def))
             new_args.append(f"&{global_scratch_var}")
 
         return ", ".join(new_args)
 
-    def generate_kernel_call(
+    def _generate_kernel_call_helper(
         self,
         kernel_name: str,
         call_args,
@@ -456,6 +477,7 @@ class CppWrapperGpu(CppWrapperCpu):
         raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        graph_name="",
         original_fxnode_name=None,
     ):
         """
@@ -466,7 +488,7 @@ class CppWrapperGpu(CppWrapperCpu):
         device = device or V.graph.get_current_device_or_throw()
         if device.type == "cpu":
             # Even in CppWrapperGpu, we may see cpp kernels
-            return CppWrapperCpu.generate_kernel_call(
+            return CppWrapperCpu._generate_kernel_call_helper(
                 self,
                 kernel_name,
                 call_args,
@@ -484,7 +506,7 @@ class CppWrapperGpu(CppWrapperCpu):
             and kernel_name not in self.kernel_autotune_names
         ):
             # Call PythonWrapperCodegen to create the autotune code block
-            PythonWrapperCodegen.generate_kernel_call(
+            PythonWrapperCodegen._generate_kernel_call_helper(
                 self,
                 kernel_name,
                 call_args,
@@ -500,7 +522,7 @@ class CppWrapperGpu(CppWrapperCpu):
         stream = (
             "stream"
             if V.graph.aot_mode
-            else self.write_get_raw_stream(device.index, V.graph)
+            else self.write_get_raw_stream(device.index, graph_name)
         )
 
         if triton:

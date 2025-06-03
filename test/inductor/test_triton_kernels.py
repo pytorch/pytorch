@@ -799,7 +799,12 @@ def forward(self, x_1, output_1):
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("grid_type", [1, 2, 3])
-    def test_triton_kernel_2d_autotune(self, grad, dynamic, backend, grid_type):
+    @common_utils.parametrize("tdlp", ["0", "1"])
+    def test_triton_kernel_2d_autotune(self, grad, dynamic, backend, grid_type, tdlp):
+        import os
+
+        os.environ["TORCHINDUCTOR_DUMP_LAUNCH_PARAMS"] = tdlp
+
         def call_triton(x: torch.Tensor, y: torch.Tensor, output: torch.Tensor):
             x_elements = output.size()[0]
             y_elements = output.size()[1]
@@ -3451,7 +3456,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
             lib.define(
                 "add_op(Tensor x, Tensor y) -> Tensor",
-                tags=[torch._C.Tag.needs_exact_strides],
             )
 
             def impl(x, y):
@@ -3465,7 +3469,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
             lib.define(
                 "add_out_op(Tensor x, Tensor y, Tensor(a!) out) -> ()",
-                tags=[torch._C.Tag.needs_exact_strides],
             )
 
             def impl_out(x, y, out):

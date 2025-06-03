@@ -306,6 +306,22 @@ at::Tensor mm_mat2_backward(
     at::SymIntArrayRef strides,
     c10::Layout layout,
     const at::Scalar& alpha);
+at::Tensor _grouped_mm_mat1_backward(
+    const Tensor& grad,
+    const Tensor& mat2,
+    at::SymIntArrayRef mat1_sizes,
+    at::SymIntArrayRef mat1_strides,
+    c10::Layout mat1_layout,
+    std::optional<Tensor> offs,
+    const Scalar& alpha);
+at::Tensor _grouped_mm_mat2_backward(
+    const at::Tensor& grad,
+    const at::Tensor& mat1,
+    at::SymIntArrayRef sizes,
+    at::SymIntArrayRef strides,
+    c10::Layout layout,
+    std::optional<Tensor> offs,
+    const at::Scalar& alpha);
 at::Tensor mm_mat1_sparse_backward(
     const at::Tensor& grad,
     const at::Tensor& mat1,

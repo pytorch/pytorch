@@ -18,6 +18,8 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
+    # CPython tests
+    'test/dynamo/cpython/**',
     # Tests from the NumPy test suite
     'test/torch_np/numpy_test/**/*.py',
     'third_party/**',
@@ -55,13 +57,14 @@ init_command = [
 code = 'CLANGFORMAT'
 include_patterns = [
     'aten/src/ATen/*.h',
-    'aten/src/ATen/cpu/vec/*.h',
+    'aten/src/ATen/cpu/vec/**/*.h',
     'aten/src/ATen/mps/**/*.mm',
     'aten/src/ATen/mps/**/*.h',
     'aten/src/ATen/xpu/**/*.h',
     'aten/src/ATen/xpu/**/*.cpp',
     'aten/src/ATen/core/boxing/**/*.h',
     'aten/src/ATen/core/dispatch/**/*.h',
+    'aten/src/ATen/core/Formatting.cpp',
     'aten/src/ATen/native/mps/**/*.metal',
     'aten/src/ATen/native/mps/**/*.mm',
     'aten/src/ATen/native/mps/**/*.h',
@@ -82,6 +85,9 @@ include_patterns = [
     'torch/csrc/**/*.h',
     'torch/csrc/**/*.hpp',
     'torch/csrc/**/*.cpp',
+    'torch/nativert/**/*.h',
+    'torch/nativert/**/*.cpp',
+    'torch/standalone/**/*.h',
     'test/cpp/**/*.h',
     'test/cpp/**/*.cpp',
 ]
@@ -148,12 +154,12 @@ init_command = [
     'numpy==1.26.4 ; python_version >= "3.9" and python_version <= "3.11"',
     'numpy==2.1.0 ; python_version >= "3.12"',
     'expecttest==0.3.0',
-    'mypy==1.14.0',
+    'mypy==1.15.0',
     'sympy==1.13.3',
     'types-requests==2.27.25',
     'types-PyYAML==6.0.7',
     'types-tabulate==0.8.8',
-    'types-protobuf==3.19.18',
+    'types-protobuf==5.29.1.20250403',
     'types-pkg-resources==0.1.3',
     'types-Jinja2==2.11.9',
     'types-colorama==0.4.6',
@@ -224,12 +230,18 @@ include_patterns = [
     'c10/**/*.cpp',
     'c10/**/*.h',
     'torch/*.h',
+    'torch/_inductor/codegen/aoti_runtime/interface.cpp',
     'torch/csrc/*.h',
     'torch/csrc/*.cpp',
     'torch/csrc/**/*.h',
     'torch/csrc/**/*.cpp',
     'torch/csrc/jit/serialization/*.h',
     'torch/csrc/jit/serialization/*.cpp',
+    'torch/nativert/*.h',
+    'torch/nativert/*.cpp',
+    'torch/nativert/**/*.h',
+    'torch/nativert/**/*.cpp',
+    'torch/standalone/**/*.h',
 ]
 exclude_patterns = [
     # The negative filters below are to exclude files that include onnx_pb.h or
@@ -368,7 +380,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruamel.yaml==0.17.4',
+    'ruamel.yaml==0.18.10',
 ]
 is_formatter = true
 
@@ -380,6 +392,12 @@ command = [
     'tools/linter/adapters/gha_linter.py',
     '--',
     '@{{PATHSFILE}}'
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'ruamel.yaml==0.18.10',
 ]
 
 [[linter]]
@@ -398,6 +416,7 @@ exclude_patterns=[
     'tools/clang_format_hash/**',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
+    'test/dynamo/cpython/**',
     '**/*.png',
     '**/*.gz',
     '**/*.patch',
@@ -524,6 +543,7 @@ include_patterns = [
     'c10/**',
     'aten/**',
     'torch/csrc/**',
+    'torch/nativert/**',
 ]
 exclude_patterns = [
     'aten/src/ATen/native/quantized/cpu/qnnpack/**',
@@ -751,6 +771,7 @@ include_patterns = [
     'aten/**',
     'c10/**',
     'torch/csrc/**',
+    'torch/nativert/**',
 ]
 exclude_patterns = [
     'aten/src/ATen/cuda/CUDAContext.cpp',
@@ -936,6 +957,7 @@ include_patterns = [
 exclude_patterns = [
     'test/run_test.py',
     '**/fb/**',
+    'test/dynamo/cpython/3.13/**',
     'test/quantization/**',  # should be run through test/test_quantization.py
     'test/jit/**',  # should be run through test/test_jit.py
     'test/ao/sparsity/**',  # should be run through test/test_ao_sparsity.py
@@ -1004,6 +1026,7 @@ include_patterns = [
     'c10/**',
     'aten/**',
     'torch/csrc/**',
+    'torch/nativert/**',
 ]
 exclude_patterns = [
     'c10/util/CallOnce.h',
@@ -1048,6 +1071,7 @@ include_patterns = [
     'c10/**',
     'aten/**',
     'torch/csrc/**',
+    'torch/nativert/**',
 ]
 exclude_patterns = [
     '**/fb/**',
@@ -1131,6 +1155,7 @@ exclude_patterns = [
     'caffe2/**/*.pyi',
     'fb/**',
     '**/fb/**',
+    'test/dynamo/cpython/**',
     'third_party/**/*.py',
     'third_party/**/*.pyi',
     'torch/_vendor/**',
@@ -1138,12 +1163,6 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
-    'test/_nvfuser/__init__.py',
-    'test/_nvfuser/test_dynamo.py',
-    'test/_nvfuser/test_python_frontend.py',
-    'test/_nvfuser/test_torchscript.py',
-    'test/delete.py',
-    'test/expect/__init__.py',
     'test/quantization/__init__.py',
     'test/quantization/core/__init__.py',
     'test/quantization/core/experimental/apot_fx_graph_mode_ptq.py',
@@ -1165,22 +1184,12 @@ exclude_patterns = [
     'test/quantization/core/test_utils.py',
     'test/quantization/core/test_workflow_module.py',
     'test/quantization/core/test_workflow_ops.py',
-    'test/quantization/eager/__init__.py',
-    'test/quantization/eager/test_bias_correction_eager.py',
-    'test/quantization/eager/test_equalize_eager.py',
-    'test/quantization/eager/test_fuse_eager.py',
-    'test/quantization/eager/test_model_numerics.py',
-    'test/quantization/eager/test_numeric_suite_eager.py',
-    'test/quantization/eager/test_quantize_eager_ptq.py',
-    'test/quantization/eager/test_quantize_eager_qat.py',
     'test/quantization/fx/__init__.py',
     'test/quantization/fx/test_equalize_fx.py',
     'test/quantization/fx/test_model_report_fx.py',
     'test/quantization/fx/test_numeric_suite_fx.py',
     'test/quantization/fx/test_quantize_fx.py',
     'test/quantization/fx/test_subgraph_rewriter.py',
-    'test/test_fake_tensor.py',
-    'test/test_flop_counter.py',
     'test/test_function_schema.py',
     'test/test_functional_autograd_benchmark.py',
     'test/test_functional_optim.py',
@@ -1310,13 +1319,6 @@ exclude_patterns = [
     'torch/_export/passes/const_prop_pass.py',
     'torch/_export/passes/functionalize_side_effectful_ops_pass.py',
     'torch/_export/passes/replace_sym_size_ops_pass.py',
-    'torch/_export/passes/replace_view_ops_with_view_copy_ops_pass.py',
-    'torch/_export/serde/__init__.py',
-    'torch/_export/serde/schema.py',
-    'torch/_export/serde/serialize.py',
-    'torch/_export/serde/upgrade.py',
-    'torch/_export/trace.py',
-    'torch/_export/verifier.py',
     'torch/testing/_internal/__init__.py',
     'torch/testing/_internal/autocast_test_lists.py',
     'torch/testing/_internal/autograd_function_db.py',
@@ -1324,7 +1326,6 @@ exclude_patterns = [
     'torch/testing/_internal/codegen/__init__.py',
     'torch/testing/_internal/codegen/random_topo_test.py',
     'torch/testing/_internal/common_cuda.py',
-    'torch/testing/_internal/common_distributed.py',
     'torch/testing/_internal/common_jit.py',
     'torch/testing/_internal/common_methods_invocations.py',
     'torch/testing/_internal/common_modules.py',
@@ -1341,38 +1342,6 @@ exclude_patterns = [
     'torch/testing/_internal/data/network1.py',
     'torch/testing/_internal/data/network2.py',
     'torch/testing/_internal/dist_utils.py',
-    'torch/testing/_internal/distributed/__init__.py',
-    'torch/testing/_internal/distributed/_shard/__init__.py',
-    'torch/testing/_internal/distributed/_shard/sharded_tensor/__init__.py',
-    'torch/testing/_internal/distributed/_shard/sharded_tensor/_test_ops_common.py',
-    'torch/testing/_internal/distributed/_shard/sharded_tensor/_test_st_common.py',
-    'torch/testing/_internal/distributed/_shard/test_common.py',
-    'torch/testing/_internal/distributed/_tensor/__init__.py',
-    'torch/testing/_internal/distributed/_tensor/common_dtensor.py',
-    'torch/testing/_internal/distributed/ddp_under_dist_autograd_test.py',
-    'torch/testing/_internal/distributed/distributed_test.py',
-    'torch/testing/_internal/distributed/distributed_utils.py',
-    'torch/testing/_internal/distributed/fake_pg.py',
-    'torch/testing/_internal/distributed/multi_threaded_pg.py',
-    'torch/testing/_internal/distributed/nn/__init__.py',
-    'torch/testing/_internal/distributed/nn/api/__init__.py',
-    'torch/testing/_internal/distributed/nn/api/remote_module_test.py',
-    'torch/testing/_internal/distributed/rpc/__init__.py',
-    'torch/testing/_internal/distributed/rpc/dist_autograd_test.py',
-    'torch/testing/_internal/distributed/rpc/dist_optimizer_test.py',
-    'torch/testing/_internal/distributed/rpc/examples/__init__.py',
-    'torch/testing/_internal/distributed/rpc/examples/parameter_server_test.py',
-    'torch/testing/_internal/distributed/rpc/examples/reinforcement_learning_rpc_test.py',
-    'torch/testing/_internal/distributed/rpc/faulty_agent_rpc_test.py',
-    'torch/testing/_internal/distributed/rpc/faulty_rpc_agent_test_fixture.py',
-    'torch/testing/_internal/distributed/rpc/jit/__init__.py',
-    'torch/testing/_internal/distributed/rpc/jit/dist_autograd_test.py',
-    'torch/testing/_internal/distributed/rpc/jit/rpc_test.py',
-    'torch/testing/_internal/distributed/rpc/jit/rpc_test_faulty.py',
-    'torch/testing/_internal/distributed/rpc/rpc_agent_test_fixture.py',
-    'torch/testing/_internal/distributed/rpc/rpc_test.py',
-    'torch/testing/_internal/distributed/rpc/tensorpipe_rpc_agent_test_fixture.py',
-    'torch/testing/_internal/distributed/rpc_utils.py',
     'torch/testing/_internal/generated/__init__.py',
     'torch/testing/_internal/hypothesis_utils.py',
     'torch/testing/_internal/inductor_utils.py',
@@ -1404,10 +1373,7 @@ exclude_patterns = [
     'torch/utils/backend_registration.py',
     'torch/utils/benchmark/__init__.py',
     'torch/utils/benchmark/examples/__init__.py',
-    'torch/utils/benchmark/examples/blas_compare.py',
-    'torch/utils/benchmark/examples/blas_compare_setup.py',
     'torch/utils/benchmark/examples/compare.py',
-    'torch/utils/benchmark/examples/end_to_end.py',
     'torch/utils/benchmark/examples/fuzzer.py',
     'torch/utils/benchmark/examples/op_benchmark.py',
     'torch/utils/benchmark/examples/simple_timeit.py',
@@ -1469,7 +1435,6 @@ exclude_patterns = [
     'torch/utils/throughput_benchmark.py',
     'torch/utils/viz/__init__.py',
     'torch/utils/viz/_cycles.py',
-    'torch/utils/weak.py',
 ]
 init_command = [
     'python3',
@@ -1479,7 +1444,7 @@ init_command = [
     'black==23.12.1',
     'usort==1.0.8.post1',
     'isort==5.13.2',
-    'ruff==0.9.8',  # sync with RUFF
+    'ruff==0.11.10',  # sync with RUFF
 ]
 is_formatter = true
 
@@ -1540,13 +1505,19 @@ command = [
 
 [[linter]]
 code = 'RUFF'
-include_patterns = ['**/*.py', '**/*.pyi']
+include_patterns = [
+    '**/*.py',
+    '**/*.pyi',
+    '**/*.ipynb',
+    'pyproject.toml',
+]
 exclude_patterns = [
     'caffe2/**',
     'functorch/docs/**',
     'functorch/notebooks/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
+    'test/dynamo/cpython/**',
     'scripts/**',
     'third_party/**',
     'fb/**',
@@ -1564,11 +1535,11 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.9.8',  # sync with PYFMT
+    'ruff==0.11.10',  # sync with PYFMT
 ]
 is_formatter = true
 
-# This linter prevents merge conlicts in csv files in pytorch by enforcing
+# This linter prevents merge conflicts in csv files in pytorch by enforcing
 # three lines of whitespace between entries such that unless people are modifying
 # the same line, merge conflicts should not arise in git or hg
 [[linter]]
@@ -1723,7 +1694,7 @@ command = [
     '@{{PATHSFILE}}'
 ]
 include_patterns = [
-   'torch/**/not-exist.py'
+   'torch/_inductor/**/*.py'
 ]
 is_formatter = false
 
@@ -1738,5 +1709,29 @@ command = [
 ]
 include_patterns = [
    'torch/_dynamo/**',
+]
+is_formatter = false
+
+[[linter]]
+code = 'TEST_DEVICE_BIAS'
+command = [
+    'python3',
+    'tools/linter/adapters/test_device_bias_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
+include_patterns = [
+    'test/**/test_*.py',
+]
+
+# 'header_only_linter' reports on properly testing header-only APIs.
+[[linter]]
+code = 'HEADER_ONLY_LINTER'
+command = [
+    'python3',
+    'tools/linter/adapters/header_only_linter.py',
+]
+include_patterns = [
+    'torch/header_only_apis.txt',
 ]
 is_formatter = false

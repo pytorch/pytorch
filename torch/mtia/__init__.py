@@ -197,6 +197,13 @@ def snapshot() -> dict[str, Any]:
     return torch._C._mtia_memorySnapshot()
 
 
+def attach_out_of_memory_observer(
+    observer: Callable[[int, int, int, int], None]
+) -> None:
+    r"""Attach an out-of-memory observer to MTIA memory allocator"""
+    torch._C._mtia_attachOutOfMemoryObserver(observer)
+
+
 def get_device_capability(device: Optional[_device_t] = None) -> tuple[int, int]:
     r"""Return capability of a given device as a tuple of (major version, minor version).
 
@@ -237,6 +244,17 @@ def set_device(device: _device_t) -> None:
     device = _get_device_index(device)
     if device >= 0:
         torch._C._accelerator_hooks_set_current_device(device)
+
+
+def get_device_properties(device: Optional[_device_t] = None) -> dict[str, Any]:
+    r"""Return a dictionary of MTIA device properties
+
+    Args:
+        device (torch.device or int, optional) selected device. Returns
+            statistics for the current device, given by current_device(),
+            if device is None (default).
+    """
+    return torch._C._mtia_getDeviceProperties(_get_device_index(device, optional=True))
 
 
 class device:
@@ -376,8 +394,10 @@ __all__ = [
     "max_memory_allocated",
     "reset_peak_memory_stats",
     "get_device_capability",
+    "get_device_properties",
     "record_memory_history",
     "snapshot",
+    "attach_out_of_memory_observer",
     "empty_cache",
     "set_device",
     "set_stream",

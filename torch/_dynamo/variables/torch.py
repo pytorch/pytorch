@@ -34,7 +34,7 @@ import logging
 import math
 import re
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch._C
 import torch._refs
@@ -169,19 +169,23 @@ constant_fold_functions_need_guards = dict.fromkeys(constant_fold_functions_need
 constant_fold_functions = dict.fromkeys(constant_fold_functions)
 
 
-tracing_state_functions = {
-    torch.jit.is_scripting: False,
-    torch.jit.is_tracing: False,
-    torch._C._get_tracing_state: None,
-    torch.fx._symbolic_trace.is_fx_tracing: False,
-    torch.onnx.is_in_onnx_export: False,
-    torch._dynamo.external_utils.is_compiling: True,
-    torch._utils.is_compiling: True,
-    torch.compiler.is_compiling: True,
-    torch.compiler.is_dynamo_compiling: True,
-    torch.compiler.is_exporting: True,
-    torch.nn.modules.activation._is_make_fx_tracing: False,
-}
+@functools.lru_cache(None)
+def tracing_state_functions() -> dict[Callable[[], Any], Optional[bool]]:
+    # Defined as a function to avoid circular import like torch.onnx
+    return {
+        torch.jit.is_scripting: False,
+        torch.jit.is_tracing: False,
+        torch._C._get_tracing_state: None,
+        torch.fx._symbolic_trace.is_fx_tracing: False,
+        torch.onnx.is_in_onnx_export: False,
+        torch._dynamo.external_utils.is_compiling: True,
+        torch._utils.is_compiling: True,
+        torch.compiler.is_compiling: True,
+        torch.compiler.is_dynamo_compiling: True,
+        torch.compiler.is_exporting: True,
+        torch.nn.modules.activation._is_make_fx_tracing: False,
+    }
+
 
 bin_ops = dict.fromkeys(["add", "sub", "mul", "div", "sqrt"])
 
@@ -199,7 +203,7 @@ def get_overridable_functions():
     from torch.overrides import get_overridable_functions as get_overridable_functions_
 
     funcs = set(chain.from_iterable(get_overridable_functions_().values()))
-    more = {
+    more: set[Callable[..., Any]] = {
         torch.ones,
         torch.ones_like,
         torch.zeros,
@@ -456,7 +460,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         )
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
-        @register(*tracing_state_functions)
+        @register(*tracing_state_functions())
         def handle_tracing_state_functions(
             self, tx: "InstructionTranslator", *args, **kwargs
         ):
@@ -470,7 +474,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 torch.compiler.is_exporting,
             ):
                 tx.mark_inconsistent_side_effects()
-            return ConstantVariable.create(tracing_state_functions[self.value])
+            return ConstantVariable.create(tracing_state_functions()[self.value])
 
         @register(*dispatch_key_set_functions)
         def handle_dispatch_key_set_functions(
@@ -918,6 +922,41 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             elif isinstance(expr, ConstantVariable):
                 return expr
+
+        @register(torch.fx.experimental.symbolic_shapes.statically_known_false)
+        def handle_statically_known_false(self, tx: "InstructionTranslator", expr):
+            if isinstance(expr, SymNodeVariable):
+                return variables.ConstantVariable.create(
+                    torch.fx.experimental.symbolic_shapes.statically_known_false(
+                        expr.sym_num
+                    )
+                )
+            elif isinstance(expr, ConstantVariable):
+                return expr
+
+        @register(torch.fx.experimental.symbolic_shapes.statically_known_true)
+        def handle_statically_known_true(self, tx: "InstructionTranslator", expr):
+            if isinstance(expr, SymNodeVariable):
+                return variables.ConstantVariable.create(
+                    torch.fx.experimental.symbolic_shapes.statically_known_true(
+                        expr.sym_num
+                    )
+                )
+            elif isinstance(expr, ConstantVariable):
+                return expr
+
+        @register(torch.fx.experimental.symbolic_shapes.has_static_value)
+        def handle_has_static_value(self, tx: "InstructionTranslator", expr):
+            if isinstance(expr, SymNodeVariable):
+                val = expr.sym_num
+            elif isinstance(expr, ConstantVariable):
+                val = expr.value
+            else:
+                return
+
+            return variables.ConstantVariable.create(
+                torch.fx.experimental.symbolic_shapes.has_static_value(val)
+            )
 
         @register(torch._C._autograd._unsafe_set_version_counter)
         def handle_unsafe_set_version_counter(
@@ -1469,6 +1508,8 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             tx.output.example_value_from_input_node(data.as_proxy().node)
         )
         result = VariableTracker.build(tx, example_value, source)
+        # Realize the VT because we will delete the guards on it in the next line.
+        result = result.realize()
         # No need to guard on this since we already guarded on `data`.
         # These guards would fail since varname doesn't exist until after the function starts
         TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(

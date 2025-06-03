@@ -131,7 +131,13 @@ class FSDPState(_State):
                 current_stream = self._device_handle.current_stream()
                 self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
                 self._comm_ctx.all_gather_stream.wait_stream(current_stream)
-            if self._device.type in ["cuda", "hpu", "xpu", "mtia"]:
+            if self._device.type in [
+                "cuda",
+                "hpu",
+                "xpu",
+                "mtia",
+                torch._C._get_privateuse1_backend_name(),
+            ]:
                 with torch.profiler.record_function("FSDP::inputs_to_device"):
                     args_tuple, kwargs_tuple = _to_kwargs(
                         args, kwargs, self._device, False
@@ -169,10 +175,6 @@ class FSDPState(_State):
                 state._is_root = False
             self._state_ctx.all_states.append(state)
             visited_states.add(state)
-        if self._fsdp_param_group:
-            # For the root, do not reshard after forward since for training,
-            # the parameters would be freed and all-gathered immediately
-            self._fsdp_param_group.post_forward_mesh_info = None
         self._init_fqns()
         self._init_shared_state()
         # Run parameter group lazy inits after initializing FQNs for improved
