@@ -1,13 +1,14 @@
 import torch
 import torch._dynamo
 from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_cuda import SM70OrLater
+from torch.testing._internal.inductor_utils import skipCUDAIf
+from torch._inductor.test_case import TestCase
 
 
 class TestCUDAGraphInputOutputAlias(TestCase):
+    @skipCUDAIf(not SM70OrLater, "Requires sm70")
     def test_reused_input_as_output(self):
-        if not torch.cuda.is_available():
-            self.skipTest("CUDA not available")
-
         x = torch.randn(10, 10, device='cuda')
 
         def fn(x):
@@ -19,10 +20,8 @@ class TestCUDAGraphInputOutputAlias(TestCase):
             out = compiled_fn(x)
             self.assertTrue(torch.allclose(out, x))
 
+    @skipCUDAIf(not SM70OrLater, "Requires sm70")
     def test_memory_does_not_leak(self):
-        if not torch.cuda.is_available():
-            self.skipTest("CUDA not available")
-
         torch.cuda.empty_cache()
         x = torch.randn(1024, 1024, device='cuda')
 
