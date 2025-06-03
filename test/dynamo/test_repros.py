@@ -5589,25 +5589,27 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
     # https://github.com/pytorch/pytorch/issues/121621
     def test_tensor_random(self):
-        def random_op(tensor, params):
-            res = tensor.random_(**params)
+        def random_op(tensor, args, kwargs):
+            res = tensor.random_(*args, **kwargs)
             return res
 
         random_op = torch.compile(random_op)
-        params = {"from": -10, "to": 10}
         tensor = torch.randn([2, 3])
-        random_op(tensor, params)
+        random_op(tensor, [], {"from": -10, "to": 10})
+        random_op(tensor, [-10], {"to": 10})
+        random_op(tensor, [-10, 10], {})
 
     # https://github.com/pytorch/pytorch/issues/131019
     def test_tensor_uniform(self):
-        def uniform_op(tensor, params):
-            res = tensor.uniform_(**params)
+        def uniform_op(tensor, args, kwargs):
+            res = tensor.uniform_(*args, **kwargs)
             return res
 
         uniform_op = torch.compile(uniform_op)
-        params = {"from": -10, "to": 10}
         tensor = torch.randn([2, 3])
-        uniform_op(tensor, params)
+        uniform_op(tensor, [], {"from": -10, "to": 10})
+        uniform_op(tensor, [-10], {"to": 10})
+        uniform_op(tensor, [-10, 10], {})
 
     def test_data_attr_mutation_after_saved_for_bw(self):
         def f(x):
