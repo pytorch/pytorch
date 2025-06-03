@@ -2,6 +2,7 @@
 #include <ATen/Context.h>
 #include <libkineto.h>
 #include <torch/csrc/autograd/profiler_kineto.h>
+#include <torch/csrc/mtia/profiler/MTIAMemoryProfiler.h>
 #include <torch/csrc/profiler/kineto_client_interface.h>
 #include <chrono>
 #include <thread>
@@ -23,7 +24,9 @@ using namespace torch::autograd::profiler;
 
 class LibKinetoClient : public libkineto::ClientInterface {
  public:
-  void init() override {}
+  void init() override {
+    ::torch::mtia::initMemoryProfiler();
+  }
 
   void prepare(
       bool report_input_shapes = false,
@@ -56,6 +59,20 @@ class LibKinetoClient : public libkineto::ClientInterface {
 
   void stop() override {
     (void)disableProfiler();
+  }
+
+  void start_memory_profile() override {
+    LOG(INFO) << "Starting on-demand memory profile";
+    startMemoryProfile();
+  }
+
+  void stop_memory_profile() override {
+    LOG(INFO) << "Stopping on-demand memory profile";
+    stopMemoryProfile();
+  }
+
+  void export_memory_profile(const std::string& path) override {
+    exportMemoryProfile(path);
   }
 
  private:

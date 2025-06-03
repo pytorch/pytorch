@@ -87,7 +87,7 @@ bool file_exists(std::string& path) {
 #ifdef _WIN32
   return fs::exists(path);
 #else
-  struct stat rc {};
+  struct stat rc{};
   return lstat(path.c_str(), &rc) == 0;
 #endif
 }
@@ -129,6 +129,7 @@ AOTI_TORCH_DEVICE_TYPE_IMPL(cpu, CPU)
 AOTI_TORCH_DEVICE_TYPE_IMPL(cuda, CUDA)
 AOTI_TORCH_DEVICE_TYPE_IMPL(meta, Meta)
 AOTI_TORCH_DEVICE_TYPE_IMPL(xpu, XPU)
+AOTI_TORCH_DEVICE_TYPE_IMPL(mps, MPS)
 AOTI_TORCH_DEVICE_TYPE_IMPL(privateuse1, PrivateUse1)
 #undef AOTI_TORCH_DEVICE_TYPE_IMPL
 
@@ -1205,10 +1206,21 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
     if (!is_complex_type) {
       // "min_all_cuda" function is not implemented for 'ComplexFloat' type.
       // (similar for max) Skip printing min/max value for complex type tensors
-      // here If encountered complex dtypes (rare occasions), suggest to print
+      // here if encountered complex (rare occasions), suggest to print
       // out the whole value of the tensor.
-      std::cout << "Min value: " << t->min().item<float>() << '\n';
-      std::cout << "Max value: " << t->max().item<float>() << '\n';
+      std::cout << "Min value: " << t->to(float_dtype).min().item() << '\n';
+      std::cout << "Max value: " << t->to(float_dtype).max().item() << '\n';
+    } else {
+      // Set the numel threshold to print as 256 to avoid printing out too much
+      // More info for aten native cuda kernel for "min_all_cuda" implementation
+      // source:
+      // https://github.com/pytorch/pytorch/blob/4b3983241263b03abd25ae381ae4743ac49b648e/aten/src/ATen/native/cuda/ReduceMinValuesKernel.cu#L51
+      if (numel <= 256) {
+        std::cout
+            << "[INFO] Aten built-in function `min_all_cuda/max_all_cuda` not implemented for current dtype: "
+            << t->dtype() << ". Printing out the whole value:\n"
+            << *t << "\n";
+      }
     }
   }
   std::cout << "Device: " << t->device() << '\n';
@@ -1364,9 +1376,8 @@ static c10::IValue to_ivalue(
     case c10::TypeKind::TensorType: {
       auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
           to<AtenTensorHandle>(stable_ivalue));
-      at::Tensor arg = *torch::aot_inductor::tensor_handle_to_tensor_pointer(
-          ret_raiiath.get());
-      return (c10::IValue(arg));
+      return (c10::IValue(*torch::aot_inductor::tensor_handle_to_tensor_pointer(
+          ret_raiiath.get())));
     }
     case c10::TypeKind::IntType: {
       return c10::IValue(to<int64_t>(stable_ivalue));
@@ -1433,7 +1444,8 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
     const auto num_returns = schema.returns().size();
     const auto num_arguments = schema.arguments().size();
 
-    std::vector<StableIValue> ministack(std::max(num_arguments, num_returns));
+    auto ministack =
+        std::make_unique<StableIValue[]>(std::max(num_arguments, num_returns));
 
     for (const auto idx : c10::irange(num_arguments)) {
       const auto ministack_idx = num_arguments - idx - 1;
@@ -1443,7 +1455,7 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
 
     // boxed function is going to take a stack of StableIValues, cast them to
     // our schema values, and run the function and modify the StableIValue stack
-    fn_(ministack.data(), num_arguments, num_returns);
+    fn_(ministack.get(), num_arguments, num_returns);
 
     // read the output from the end of the stack and wrap that back into
     // IValue from StableIValue

@@ -38,6 +38,7 @@ from torch.onnx._internal.exporter import (
     _registration,
     _reporting,
     _tensors,
+    _type_casting,
     _verification,
 )
 
@@ -61,6 +62,7 @@ _TORCH_DTYPE_TO_ONNX: dict[torch.dtype, ir.DataType] = {
     torch.float8_e4m3fnuz: ir.DataType.FLOAT8E4M3FNUZ,
     torch.float8_e5m2: ir.DataType.FLOAT8E5M2,
     torch.float8_e5m2fnuz: ir.DataType.FLOAT8E5M2FNUZ,
+    torch.float4_e2m1fn_x2: ir.DataType.FLOAT4E2M1,
     torch.int16: ir.DataType.INT16,
     torch.int32: ir.DataType.INT32,
     torch.int64: ir.DataType.INT64,
@@ -102,29 +104,50 @@ logger = logging.getLogger(__name__)
 current_tracer: _building.OpRecorder | None = None
 
 
-def _torch_dtype_to_onnx_dtype(dtype: torch.dtype) -> ir.DataType:
+def torch_dtype_to_onnx_dtype(dtype: torch.dtype) -> ir.DataType:
     return _TORCH_DTYPE_TO_ONNX[dtype]
 
 
 class TorchTensor(ir.Tensor):
     def __init__(self, tensor: torch.Tensor, name: str | None = None):
         # Pass the tensor as the raw data to ir.Tensor's constructor
+        if tensor.dtype == torch.float4_e2m1fn_x2:
+            # Change the shape to the unpacked shape
+            shape = ir.Shape(_type_casting.get_float4_shape(tensor), frozen=True)
+        else:
+            # The base class will set the shape to the tensor's shape
+            shape = None
         super().__init__(
-            tensor, dtype=_torch_dtype_to_onnx_dtype(tensor.dtype), name=name
+            tensor,
+            dtype=torch_dtype_to_onnx_dtype(tensor.dtype),
+            shape=shape,
+            name=name,
         )
 
     def numpy(self) -> npt.NDArray:
         self.raw: torch.Tensor
+
+        # Handle dtypes that are not natively supported by NumPy:
+        # We pick an uint dtype that has the same size as the original dtype,
+        # view the tensor as that dtype so that it is convertible to NumPy,
+        # and then view it back to the proper dtype (using ml_dtypes obtained by
+        # calling dtype.numpy()).
         if self.dtype == ir.DataType.BFLOAT16:
-            return self.raw.view(torch.uint16).numpy(force=True)
+            return (
+                self.raw.view(torch.uint16).numpy(force=True).view(self.dtype.numpy())
+            )
         if self.dtype in {
             ir.DataType.FLOAT8E4M3FN,
             ir.DataType.FLOAT8E4M3FNUZ,
             ir.DataType.FLOAT8E5M2,
             ir.DataType.FLOAT8E5M2FNUZ,
         }:
-            # TODO: Use ml_dtypes
-            return self.raw.view(torch.uint8).numpy(force=True)
+            return self.raw.view(torch.uint8).numpy(force=True).view(self.dtype.numpy())
+        if self.dtype == ir.DataType.FLOAT4E2M1:
+            return _type_casting.unpack_float4x2_as_uint8(self.raw).view(
+                self.dtype.numpy()
+            )
+
         return self.raw.numpy(force=True)
 
     def __array__(self, dtype: Any = None, copy: bool | None = None) -> npt.NDArray:
@@ -205,7 +228,13 @@ def _set_shape_type(
         logger.warning("Setting shape and type of tensors is not supported yet")
     if isinstance(meta_val, torch.Tensor):
         dims = []
-        for dim in meta_val.shape:
+        shape: tuple[int, ...]
+        if meta_val.dtype == torch.float4_e2m1fn_x2:
+            # Change the shape to the unpacked shape
+            shape = _type_casting.get_float4_shape(meta_val)
+        else:
+            shape = meta_val.shape
+        for dim in shape:
             if isinstance(dim, int):
                 dims.append(dim)
             else:
@@ -218,7 +247,7 @@ def _set_shape_type(
         # be the intention even though non of the ONNX ops deals with complex values.
         # In this case, we don't change the dtype or the shape of the tensor.
         if value.dtype is None:
-            value.dtype = _torch_dtype_to_onnx_dtype(meta_val.dtype)
+            value.dtype = torch_dtype_to_onnx_dtype(meta_val.dtype)
             if complex_to_float:
                 if meta_val.dtype == torch.complex64:
                     value.dtype = ir.DataType.FLOAT
@@ -439,7 +468,7 @@ def _convert_fx_arg_to_onnx_arg(
     if isinstance(arg, (torch.device, torch.memory_format, torch.layout)):
         return str(arg)
     if isinstance(arg, torch.dtype):
-        return _torch_dtype_to_onnx_dtype(arg)
+        return torch_dtype_to_onnx_dtype(arg)
     # Maybe a Python value
     return arg
 
@@ -782,7 +811,7 @@ def _get_inputs_and_attributes(
             elif isinstance(arg, torch.device):
                 attributes[schema_arg.name] = str(arg)
             elif isinstance(arg, torch.dtype):
-                attributes[schema_arg.name] = _torch_dtype_to_onnx_dtype(arg)
+                attributes[schema_arg.name] = torch_dtype_to_onnx_dtype(arg)
             else:
                 attributes[schema_arg.name] = arg
         for schema_arg in node_schema.arguments:
@@ -798,7 +827,7 @@ def _get_inputs_and_attributes(
             } or isinstance(kwarg, torch.device):
                 attr = str(kwarg)
             elif isinstance(kwarg, torch.dtype):
-                attr = _torch_dtype_to_onnx_dtype(kwarg)  # type: ignore[assignment]
+                attr = torch_dtype_to_onnx_dtype(kwarg)  # type: ignore[assignment]
             else:
                 attr = kwarg  # type: ignore[assignment]
 
@@ -1237,7 +1266,8 @@ def export(
         # We know the model is already exported program, so the args, kwargs, and dynamic_shapes
         # are not used.
         program = model
-        export_status.torch_export = True
+        # torch.export.export has strict default to False
+        export_status.torch_export_non_strict = True
     else:
         # Convert an nn.Module to an ExportedProgram
         # Try everything 🐰 (all paths for getting an ExportedProgram)
@@ -1255,12 +1285,10 @@ def export(
             # Record the status
             if strategy_class is _capture_strategies.TorchExportNonStrictStrategy:
                 export_status.torch_export_non_strict = result.success
-            elif strategy_class is _capture_strategies.TorchExportStrategy:
-                export_status.torch_export = result.success
+            elif strategy_class is _capture_strategies.TorchExportStrictStrategy:
+                export_status.torch_export_strict = result.success
             elif strategy_class is _capture_strategies.TorchExportDraftExportStrategy:
                 export_status.torch_export_draft_export = result.success
-            elif strategy_class is _capture_strategies.JitTraceConvertStrategy:
-                export_status.torch_jit = result.success
 
             if result.exception is not None:
                 failed_results.append(result)

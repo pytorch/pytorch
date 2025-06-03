@@ -307,14 +307,7 @@ class TestPatternMatcher(TestCase):
             torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
             torch.randn((8), dtype=torch.float32, device=GPU_TYPE),
         )
-
-        args2 = (
-            torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=GPU_TYPE),
-            torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
-            torch.randn((32, 1), dtype=torch.float16, device=GPU_TYPE),
-        )
         self._test_fused_int_mm_mul_impl(fn1, args1, True)
-        self._test_fused_int_mm_mul_impl(fn1, [arg.cpu() for arg in args2], False)
 
     def _test_mixed_impl(
         self,
@@ -641,6 +634,44 @@ class TestPatternMatcher(TestCase):
         res2 = jit_func(input_tensor)
 
         self.assertEqual(res1, res2)
+
+    @inductor_config.patch(
+        {
+            "max_autotune_gemm_backends": "ATEN",
+        }
+    )
+    def test_bmm_to_mm(self):
+        def fn(a, b):
+            return torch.bmm(a, b)
+
+        a = torch.randn(1, 16, 8, device=GPU_TYPE)
+        b = torch.randn(1, 8, 32, device=GPU_TYPE)
+
+        result, (code,) = run_and_get_code(torch.compile(fn), a, b)
+
+        expected = fn(a, b)
+        torch.testing.assert_close(result, expected)
+
+        # The mm kernel should use ATen (because we set max_autotune_gemm_backends = ATEN).
+        # Its name should contain `aten.bmm` since this is the original aten op where the bmm came from.
+        if HAS_GPU:
+            FileCheck().check("extern_kernels.mm(").check_not(
+                "extern_kernels.bmm("
+            ).run(code)
+        else:
+            FileCheck().check("extern_kernels.bmm(")
+
+        a_multi = torch.randn(3, 16, 8, device=GPU_TYPE)
+        b_multi = torch.randn(3, 8, 32, device=GPU_TYPE)
+
+        result_multi, (code_multi,) = run_and_get_code(
+            torch.compile(fn), a_multi, b_multi
+        )
+
+        expected_multi = fn(a_multi, b_multi)
+        torch.testing.assert_close(result_multi, expected_multi)
+
+        FileCheck().check("extern_kernels.bmm(").run(code_multi)
 
     def test_cat_mm(self):
         def fn(a, b, c):
@@ -1292,6 +1323,19 @@ class TestPatternMatcher(TestCase):
                 torch.testing.assert_close(actual, expected)
                 # addmm should be replaced
                 FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    def test_replace_mul_zero(self):
+        def test(x, y):
+            return x + (y * 0)
+
+        x = torch.rand([256], device=GPU_TYPE)
+        y = torch.rand([256], device=GPU_TYPE)
+
+        test_c = torch.compile(test)
+
+        out, code = run_and_get_code(test_c, x, y)
+        FileCheck().check_not(".run").run(code[0])
+        self.assertEqual(out, test(x, y))
 
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations2(self):

@@ -14,7 +14,7 @@ constexpr auto kInternalModule = "torch.distributed.rpc.internal";
 #define PROFILE_GIL_SCOPED_ACQUIRE                                       \
   std::chrono::time_point<std::chrono::high_resolution_clock> startTime; \
   auto shouldProfileGIL =                                                \
-      RpcAgent::getCurrentRpcAgent() -> isGILProfilingEnabled();         \
+      RpcAgent::getCurrentRpcAgent()->isGILProfilingEnabled();           \
   if (shouldProfileGIL) {                                                \
     startTime = std::chrono::high_resolution_clock::now();               \
   }                                                                      \
@@ -174,7 +174,7 @@ void PythonRpcHandler::handleExceptionGILHeld(const py::object& obj) {
 
 bool PythonRpcHandler::isRemoteException(const py::object& obj) {
   PROFILE_GIL_SCOPED_ACQUIRE;
-  auto type = obj.get_type();
+  auto type = py::type::handle_of(obj);
   auto moduleName = type.attr("__module__").cast<std::string>();
   auto qualName = type.attr("__qualname__").cast<std::string>();
   return moduleName == kInternalModule && qualName == "RemoteException";
