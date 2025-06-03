@@ -81,6 +81,9 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# precompilation timeout
+precompilation_timeout_seconds: int = 60 * 60
+
 # use fx aot graph codegen cache
 fx_graph_cache: bool = Config(
     justknob="pytorch/remote_cache:enable_local_fx_graph_cache",
@@ -100,7 +103,7 @@ bundle_triton_into_fx_graph_cache: Optional[bool] = (
 )
 
 non_blocking_remote_cache_write: bool = Config(
-    justknob="pytorch/remote_cache:enable_non_blocking_remote_cache_write",
+    justknob="pytorch/remote_cache:enable_non_blocking_remote_cache_write_v2",
     env_name_force="TORCHINDUCTOR_NON_BLOCKING_REMOTE_CACHE_WRITE",
     default=True,
 )
@@ -145,8 +148,19 @@ force_disable_caches: bool = Config(
 # Unsafe way to skip dynamic shape guards to get faster cache load
 unsafe_skip_cache_dynamic_shape_guards: bool = False
 
-# Unsafe way to mark function as cacheable
-unsafe_marked_cacheable_functions: list[str] = []
+# Unsafe way to mark non torch functions as safe to cache
+# dictionary is from function name -> cache key
+# Any function name in the dictionary will be allowed to be cacheable
+# by AOTAutogradCache and FxGraphCache.
+# changing the cache key value will change the resulting
+# FXGraphCache key.
+# Example usage:
+# torch._inductor.config.unsafe_marked_cacheable_functions = {
+# 'torch.ops.my_function' : torch.__version__
+# }
+# The above example causes the custom op torch.ops.my_function to be cacheable,
+# and for cache keys to be keyed by the current torch version
+unsafe_marked_cacheable_functions: dict[str, str] = {}
 
 # sleep in inductor for testing
 sleep_sec_TESTING_ONLY: Optional[int] = None
@@ -251,6 +265,16 @@ pre_grad_custom_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 # WARNING: Inductor scheduler IR is at prototype stage and subject to change,
 # hence custom IR passes built on top of it might break in the future.
 _pre_fusion_custom_pass: Optional[
+    Callable[
+        [list["torch._inductor.scheduler.BaseSchedulerNode"]],
+        list["torch._inductor.scheduler.BaseSchedulerNode"],
+    ]
+] = None
+
+# Registers a custom pass to be run right after fusion in Inductor scheduler.
+# WARNING: Inductor scheduler IR is at prototype stage and subject to change,
+# hence custom IR passes built on top of it might break in the future.
+_post_fusion_custom_pass: Optional[
     Callable[
         [list["torch._inductor.scheduler.BaseSchedulerNode"]],
         list["torch._inductor.scheduler.BaseSchedulerNode"],
@@ -382,6 +406,9 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
+# disable decomposek autotune choice for gemm
+disable_decompose_k = os.environ.get("TORCHINDUCTOR_DISABLE_DECOMPOSE_K") == "1"
+
 # Modifies the number of autotuning choices displayed, set to None for all
 autotune_num_choices_displayed: Optional[int] = 10
 
@@ -422,11 +449,8 @@ max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE", "DEFAULT"
 ).upper()  # type: ignore[assignment]
 
-# NOTE: This feature is deprecated and will be defauled to False in the future.
-# Whether we fall back to ATen or hard error when no matches are found during autotuning
-autotune_fallback_to_aten = (
-    os.environ.get("TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN", "0") == "1"
-)
+# DEPRECATED. This setting is ignored.
+autotune_fallback_to_aten = False
 
 # the value used as a fallback for the unbacked SymInts
 # that can appear in the input shapes (e.g., in autotuning)
@@ -663,6 +687,13 @@ def decide_worker_start_method() -> str:
 
 worker_start_method: str = decide_worker_start_method()
 
+# Whether to log from subprocess workers that are launched.
+worker_suppress_logging: bool = Config(
+    justknob="pytorch/compiler:worker_suppress_logging",
+    env_name_force="TORCHINDUCTOR_WORKER_SUPPRESS_LOGGING",
+    default=True,
+)
+
 # Flags to turn on all_reduce fusion. These 2 flags should be automaticaly turned
 # on by DDP and should not be set by the users.
 _fuse_ddp_communication = False
@@ -750,6 +781,14 @@ compile_threads: Optional[int] = None if is_fbcode() else decide_compile_threads
 # Whether or not to enable statically launching CUDA kernels
 # compiled by triton (instead of using triton's own launcher)
 use_static_cuda_launcher: bool = static_cuda_launcher_default()
+
+# Attempt to statically launch user defined triton kernels
+# Requires use_static_cuda_launcher
+static_launch_user_defined_triton_kernels: bool = Config(
+    justknob="pytorch/inductor:static_launch_user_defined_triton_kernels",
+    env_name_force="TORCHINDUCTOR_STATIC_LAUNCH_USER_DEFINED_TRITON_KERNELS",
+    default=False,
+)
 
 # Raise error if we bypass the launcher
 strict_static_cuda_launcher: bool = (
@@ -902,6 +941,9 @@ enable_linear_binary_folding = (
 
 # Adds NVTX annotations aroung training phases
 annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0") == "1"
+
+# Enable caching codegen of triton templates.
+enable_caching_generated_triton_templates: bool = False
 
 
 # config specific to codegen/cpp.py
@@ -1295,6 +1337,20 @@ class aot_inductor:
     # Experimental.  Controls automatic precompiling of common AOTI include files.
     precompile_headers: bool = not is_fbcode()
 
+    # Embed generated kernel binary files into model.so
+    embed_kernel_binary: bool = False
+
+    # Generate kernel files that support multiple archs
+    # Default it will emit multi arch kernels as asm files, e.g. PTX for CUDA.
+    emit_multi_arch_kernel: bool = False
+    # In addition to emit asm files, also emit binary files for current arch
+    emit_current_arch_binary: bool = False
+
+    # Custom ops that have implemented C shim wrappers, defined as an op to C shim declaration dict
+    custom_ops_to_c_shims: dict[torch._ops.OpOverload, list[str]] = {}
+    # custom op libs that have implemented C shim wrappers
+    custom_op_libs: Optional[list[str]] = None
+
 
 class cuda:
     """Settings for cuda backend, today this consists of cutlass"""
@@ -1339,10 +1395,12 @@ class cuda:
     cutlass_max_profiling_configs: Optional[int] = None
 
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
-    cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4]
+    cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4, 8]
 
     # Whether to use CUTLASS EVT for epilogue fusion
-    cutlass_epilogue_fusion_enabled = False
+    cutlass_epilogue_fusion_enabled = (
+        os.environ.get("CUTLASS_EPILOGUE_FUSION", "0") == "1"
+    )
 
     # Whether to only use TMA-compatible kernels in CUTLASS
     cutlass_tma_only = False
@@ -1403,6 +1461,11 @@ class cuda:
         os.environ.get("TORCHINDUCTOR_CUTLASS_HASH_WITH_COMPILE_CMD", "0") == "1"
     )
 
+    # Experimental. Prescreen top x configs before tuning on swizzle.
+    cutlass_prescreening: bool = (
+        os.environ.get("TORCHINDUCTOR_CUTLASS_PRESCREENING", "1") == "1"
+    )
+
 
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx90a", "gfx942"].
@@ -1447,8 +1510,16 @@ class rocm:
         os.environ.get("INDUCTOR_CK_BACKEND_GENERATE_TEST_RUNNER_CODE", "0") == "1"
     )
 
-    # Number of op instance choices to trade off between runtime perf and compilation time
+    # Deprecated, use CK and/or CK-tile specific settings
     n_max_profiling_configs: Optional[int] = None
+
+    # Number of op instance choices to trade off between runtime perf and compilation time
+    # For CK Kernels
+    ck_max_profiling_configs: Optional[int] = None
+
+    # Number of op instance choices to trade off between runtime perf and compilation time
+    # For CK-Tile Kernels
+    ck_tile_max_profiling_configs: Optional[int] = None
 
     # Flag to use a short list of CK instances which perform well across a variety of shapes.
     # Currently RCR and F16 only

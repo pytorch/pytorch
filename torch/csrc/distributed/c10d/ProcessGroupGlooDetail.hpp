@@ -271,24 +271,23 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
       uint32_t tag,
       uint64_t seq)
       : ProcessGroupGloo::AsyncWork(
+            std::move(context),
             {inputs},
             OpType::ALLREDUCE,
             seq,
             "gloo:all_reduce",
             inputs),
-        context(std::move(context)),
         inputs(inputs),
         reduceOp(std::move(reduceOp)),
         tag(tag) {}
 
-  std::shared_ptr<gloo::Context> context;
   std::vector<at::Tensor> inputs{};
   const ReduceOp reduceOp;
   const uint32_t tag;
 
   void allreduce(std::vector<at::Tensor>& tensors) {
     const auto& scalarType = tensors[0].scalar_type();
-    gloo::AllreduceOptions opts(context);
+    gloo::AllreduceOptions opts(context_);
     opts.setReduceFunction(getFunction(scalarType, reduceOp));
     opts.setTag(tag);
     GENERATE_ALL_TYPES(scalarType, setOutputs, opts, tensors);
@@ -296,8 +295,16 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     // Gloo doesn't support AVG so we use SUM + division.
     if (reduceOp == ReduceOp::AVG) {
-      tensors[0] /= context->size;
+      tensors[0] /= context_->size;
     }
+  }
+
+  const std::vector<at::Tensor> getInputTensors() override {
+    return inputs;
+  }
+
+  const std::vector<at::Tensor> getOutputTensors() override {
+    return inputs;
   }
 
   void run() override {
@@ -359,16 +366,15 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
       uint32_t tag,
       uint64_t seq)
       : ProcessGroupGloo::AsyncWork(
+            std::move(context),
             {inputs},
             OpType::_ALLREDUCE_SPARSE,
             seq,
             "gloo:sparse_all_reduce",
             inputs),
-        context(std::move(context)),
         inputs(inputs),
         tag(tag) {}
 
-  std::shared_ptr<gloo::Context> context;
   std::vector<at::Tensor> inputs{};
   const uint32_t tag;
 
@@ -472,9 +478,9 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     // Sanity check dimensionality across ranks.
     {
-      const auto expected = metadata[context->rank].sizes();
-      for (const auto i : c10::irange(context->size)) {
-        if (i == context->rank) {
+      const auto expected = metadata[context_->rank].sizes();
+      for (const auto i : c10::irange(context_->size)) {
+        if (i == context_->rank) {
           continue;
         }
         const auto actual = metadata[i].sizes();
@@ -487,11 +493,11 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     auto values = allgather_values(input, metadata);
 
     // Perform global reduction.
-    AT_ASSERT(static_cast<int>(indices.size()) == context->size);
-    AT_ASSERT(static_cast<int>(values.size()) == context->size);
+    AT_ASSERT(static_cast<int>(indices.size()) == context_->size);
+    AT_ASSERT(static_cast<int>(values.size()) == context_->size);
     auto output = at::sparse_coo_tensor(
         indices[0], values[0], input.sizes(), input.options());
-    for (const auto i : c10::irange(1, context->size)) {
+    for (const auto i : c10::irange(1, context_->size)) {
       output += at::sparse_coo_tensor(
           indices[i], values[i], input.sizes(), input.options());
     }
@@ -510,24 +516,32 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     }
   }
 
+  const std::vector<at::Tensor> getInputTensors() override {
+    return inputs;
+  }
+
+  const std::vector<at::Tensor> getOutputTensors() override {
+    return inputs;
+  }
+
  private:
   std::vector<SparseTensorMetadata> allgather_metadata(
       const at::Tensor& tensor) {
     auto buffer =
-        at::zeros({context->size, SparseTensorMetadata::dim}, at::kLong);
+        at::zeros({context_->size, SparseTensorMetadata::dim}, at::kLong);
 
     // Prepare metadata vector (1 entry per rank)
     std::vector<SparseTensorMetadata> metadata;
-    metadata.reserve(context->size);
-    for (const auto i : c10::irange(context->size)) {
+    metadata.reserve(context_->size);
+    for (const auto i : c10::irange(context_->size)) {
       metadata.emplace_back(buffer.select(0, i));
     }
 
     // Populate data for this rank
-    metadata[context->rank].populate_from_sparse_tensor(tensor);
+    metadata[context_->rank].populate_from_sparse_tensor(tensor);
 
     // Allgather metadata
-    gloo::AllgatherOptions opts(context);
+    gloo::AllgatherOptions opts(context_);
     opts.setOutput(buffer.mutable_data_ptr<int64_t>(), buffer.numel());
     opts.setTag(tag);
     gloo::allgather(opts);
@@ -540,7 +554,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
       const std::vector<SparseTensorMetadata>& metadata) {
     const auto sparseDim = tensor.sparse_dim();
 
-    std::vector<size_t> counts(context->size);
+    std::vector<size_t> counts(context_->size);
     size_t totalSize = 0;
     for (const auto i : c10::irange(metadata.size())) {
       counts[i] = metadata[i].nnz() * sparseDim;
@@ -554,7 +568,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     auto input = tensor.indices().contiguous();
 
     // Allgatherv indices.
-    gloo::AllgathervOptions opts(context);
+    gloo::AllgathervOptions opts(context_);
     opts.setInput(
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
         const_cast<int64_t*>(input.const_data_ptr<int64_t>()),
@@ -588,7 +602,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
       denseNumel *= dim;
     }
 
-    std::vector<size_t> counts(context->size);
+    std::vector<size_t> counts(context_->size);
     int64_t totalSize = 0;
     for (const auto i : c10::irange(metadata.size())) {
       counts[i] = metadata[i].nnz() * denseNumel;
@@ -598,7 +612,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     auto output = at::empty({totalSize}, tensor.scalar_type());
 
     // Allgatherv indices.
-    gloo::AllgathervOptions opts(context);
+    gloo::AllgathervOptions opts(context_);
     // tensors copied from cuda may not be contiguous, get a contiguous
     // tensor before use its data_ptr
     at::Tensor valueTensor = tensor.values().contiguous();

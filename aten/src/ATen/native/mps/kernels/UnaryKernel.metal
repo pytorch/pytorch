@@ -4,12 +4,6 @@
 using namespace metal;
 using namespace c10::metal;
 
-template <typename T>
-T complex_div(T a, T b) {
-  auto denom = dot(b, b);
-  return T(dot(a, b), a.y * b.x - a.x * b.y) / denom;
-}
-
 struct exp_functor {
   template <typename T>
   inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
@@ -81,7 +75,7 @@ struct tan_functor {
     // tan(x+yi)=(tan(x) + itanh(y)) / (1 - i(tan(x) * tanh(y)))
     auto tan_x = precise::tan(x.x);
     auto tanh_y = precise::tanh(x.y);
-    return complex_div(T(tan_x, tanh_y), T(1, -1 * tan_x * tanh_y));
+    return div(T(tan_x, tanh_y), T(1, -1 * tan_x * tanh_y));
   }
 };
 
@@ -99,7 +93,7 @@ struct tanh_functor {
     // tanh(x+iy)=(tanh(x)+itan(y))/(1+itahnh(x)*tan(y));
     auto tanh_x = precise::tanh(x.x);
     auto tan_y = precise::tan(x.y);
-    return complex_div(T(tanh_x, tan_y), T(1.0, tanh_x * tan_y));
+    return div(T(tanh_x, tan_y), T(1.0, tanh_x * tan_y));
   }
 };
 
@@ -144,10 +138,32 @@ struct log10_functor {
     auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
     auto real = ::precise::log(magnitude);
     auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
-    return complex_div(T(real, imag), T(::precise::log(10), 0));
+    return div(T(real, imag), T(::precise::log(10), 0));
   }
   inline float operator()(const bool x) {
     return x ? 0 : -INFINITY;
+  }
+};
+
+struct log1p_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(::c10::metal::log1p(float(x)));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return ::precise::log(1.0f + static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // TODO: Implement proper log1p algoirthm
+    auto magnitude = ::precise::sqrt((1.0f + x.x) * (1.0f + x.x) + x.y * x.y);
+    auto real = ::precise::log(magnitude);
+    auto imag = (x.x == -1 && x.y == 0) ? 0 : ::precise::atan2(x.y, 1.0 + x.x);
+    return T(real, imag);
+  }
+  inline float operator()(const bool x) {
+    return x ? ::precise::log(2.0) : 0;
   }
 };
 
@@ -166,7 +182,7 @@ struct log2_functor {
     auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
     auto real = ::precise::log(magnitude);
     auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
-    return complex_div(T(real, imag), T(::precise::log(2), 0));
+    return div(T(real, imag), T(::precise::log(2), 0));
   }
   inline float operator()(const bool x) {
     return x ? 0 : -INFINITY;
@@ -282,6 +298,7 @@ REGISTER_UNARY_OP(bitwise_not, bool, bool);
   REGISTER_UNARY_OP(exp2, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(log, DTYPE1, DTYPE0);          \
   REGISTER_UNARY_OP(log10, DTYPE1, DTYPE0);        \
+  REGISTER_UNARY_OP(log1p, DTYPE1, DTYPE0);        \
   REGISTER_UNARY_OP(log2, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sinc, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sqrt, DTYPE1, DTYPE0);         \
@@ -310,6 +327,7 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
   REGISTER_UNARY_OP(exp2, DTYPE##2, DTYPE##2);  \
   REGISTER_UNARY_OP(log, DTYPE##2, DTYPE##2);   \
   REGISTER_UNARY_OP(log10, DTYPE##2, DTYPE##2); \
+  REGISTER_UNARY_OP(log1p, DTYPE##2, DTYPE##2); \
   REGISTER_UNARY_OP(log2, DTYPE##2, DTYPE##2);  \
   REGISTER_UNARY_OP(tanh, DTYPE##2, DTYPE##2);  \
   REGISTER_UNARY_OP(sqrt, DTYPE##2, DTYPE##2);  \
