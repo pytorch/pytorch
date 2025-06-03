@@ -898,7 +898,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             for _, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
             model = fully_shard(
-                model, mesh=mesh, reshard_after_forward=True, **fsdp_config
+                model, mesh=mesh, reshard_after_forward=False, **fsdp_config
             )
             optim = torch.optim.SGD(model.parameters(), lr=1e-4)
             return model, optim
