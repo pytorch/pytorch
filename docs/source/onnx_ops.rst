@@ -112,3 +112,5 @@ to decompose ONNX operators defined above to ATen operators.
     )
     # The program can be decomposed into aten ops
     ep_decomposed = ep.run_decompositions(torch.onnx.ops.aten_decompositions())
+
+.. autofunction:: torch.onnx.ops.aten_decompositions
