@@ -153,12 +153,12 @@ kernel void searchsorted(
       constant INPUT_T * data_in [[buffer(0)]],                              \
       constant INPUT_T * data_bd [[buffer(1)]],                              \
       device OUTPUT_T * data_out [[buffer(2)]],                              \
-      constant int64_t & idim_in [[buffer(3)]],                              \
-      constant int64_t & idim_bd [[buffer(4)]],                              \
-      constant int64_t & numel_in [[buffer(5)]],                             \
-      constant int64_t & right [[buffer(6)]],                                \
-      constant int64_t & is_1d_boundaries [[buffer(7)]],                     \
-      constant int64_t * data_sort [[buffer(8)]],                            \
+      constant int64_t& idim_in [[buffer(3)]],                               \
+      constant int64_t& idim_bd [[buffer(4)]],                               \
+      constant int64_t& numel_in [[buffer(5)]],                              \
+      constant int64_t& right [[buffer(6)]],                                 \
+      constant int64_t& is_1d_boundaries [[buffer(7)]],                      \
+      constant int64_t* data_sort [[buffer(8)]],                             \
       uint2 tgid [[threadgroup_position_in_grid]],                           \
       uint2 tid2 [[thread_position_in_threadgroup]],                         \
       uint2 tptg [[threads_per_threadgroup]]);                               \
@@ -167,11 +167,11 @@ kernel void searchsorted(
       constant INPUT_T * data_in [[buffer(0)]],                              \
       constant INPUT_T * data_bd [[buffer(1)]],                              \
       device OUTPUT_T * data_out [[buffer(2)]],                              \
-      constant int64_t & idim_in [[buffer(3)]],                              \
-      constant int64_t & idim_bd [[buffer(4)]],                              \
-      constant int64_t & numel_in [[buffer(5)]],                             \
-      constant int64_t & right [[buffer(6)]],                                \
-      constant int64_t & is_1d_boundaries [[buffer(7)]],                     \
+      constant int64_t& idim_in [[buffer(3)]],                               \
+      constant int64_t& idim_bd [[buffer(4)]],                               \
+      constant int64_t& numel_in [[buffer(5)]],                              \
+      constant int64_t& right [[buffer(6)]],                                 \
+      constant int64_t& is_1d_boundaries [[buffer(7)]],                      \
       uint2 tgid [[threadgroup_position_in_grid]],                           \
       uint2 tid2 [[thread_position_in_threadgroup]],                         \
       uint2 tptg [[threads_per_threadgroup]]);
