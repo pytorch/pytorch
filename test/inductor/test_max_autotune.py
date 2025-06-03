@@ -1,7 +1,9 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import functools
 import inspect
 import json
+import logging
 import math
 import os
 import random
@@ -40,6 +42,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TEST_WITH_ROCM,
 )
+from torch.testing._internal.logging_utils import multiple_logs_to_string
 from torch.utils._triton import has_triton_tma_device
 
 
@@ -136,7 +139,6 @@ class TestMaxAutotune(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_fallback_to_aten": False,
                 "triton.enable_persistent_tma_matmul": "1",
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
             }
@@ -161,7 +163,6 @@ class TestMaxAutotune(TestCase):
         with self.assertRaises(BackendCompilerFailed) as context, config.patch(
             {
                 "max_autotune": True,
-                "autotune_fallback_to_aten": False,
                 "triton.enable_persistent_tma_matmul": "1",
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
             }
@@ -195,7 +196,6 @@ class TestMaxAutotune(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_fallback_to_aten": False,
                 "triton.enable_persistent_tma_matmul": "1",
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
             }
@@ -256,7 +256,6 @@ class TestMaxAutotune(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_fallback_to_aten": False,
                 "triton.enable_persistent_tma_matmul": "1",
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
             }
@@ -282,7 +281,6 @@ class TestMaxAutotune(TestCase):
         with self.assertRaises(BackendCompilerFailed) as context, config.patch(
             {
                 "max_autotune": True,
-                "autotune_fallback_to_aten": False,
                 "triton.enable_persistent_tma_matmul": "1",
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
             }
@@ -318,7 +316,6 @@ class TestMaxAutotune(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_fallback_to_aten": False,
                 "triton.enable_persistent_tma_matmul": "1",
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
             }
@@ -377,7 +374,6 @@ class TestMaxAutotune(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_fallback_to_aten": False,
                 "triton.enable_persistent_tma_matmul": True,
                 "max_autotune_gemm_backends": "TRITON",
                 "test_configs.autotune_choice_name_regex": "tma",
@@ -691,6 +687,51 @@ class TestMaxAutotune(TestCase):
         f_c = torch.compile(mode="max-autotune-no-cudagraphs")(f)
         self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
 
+    @config.patch("trace.enabled", True)
+    @config.patch({"test_configs.force_extern_kernel_in_multi_template": True})
+    def test_mutation_rename(self):
+        torch._logging.set_logs(ir_post_fusion=True)
+
+        def f(x, y, z, other):
+            mul = x * y
+            diag = torch.diagonal(mul)
+            diag.copy_(other)
+            x = torch.mm(mul, z)
+            y = torch.diagonal(x).add_(torch.tensor(1, device=GPU_TYPE))
+            return y
+
+        t = functools.partial(torch.randn, device=GPU_TYPE)
+        inps = (t(3, 3), t(3, 3), t(3, 3), t(3))
+        fn = torch.compile(f, mode="max-autotune-no-cudagraphs")
+        (
+            pre_fusion_tream,
+            post_fusion_stream,
+        ), ctx = multiple_logs_to_string(
+            "torch._inductor.debug", "ir_pre_fusion", "ir_post_fusion"
+        )
+
+        with config.patch({"trace.debug_dir": tempfile.mkdtemp()}):
+            with self.assertLogs(
+                logging.getLogger("torch._inductor.debug"), level=logging.INFO
+            ) as cm, ctx():
+                out = fn(*inps)
+
+        self.assertEqual(f(*inps), out)
+
+        pre_fusion_stream = cm.output[0]
+        post_fusion_stream = cm.output[1]
+
+        # before and after finalizing multi template buffer, deps should have the same normalization
+        # wrt writes
+        FileCheck().check("MultiTemplateBuffer").check("unmet").check_same("buf1").run(
+            pre_fusion_stream
+        )
+        FileCheck().check("ExternKernelSchedulerNode").check("unmet").check_same(
+            "buf1"
+        ).run(post_fusion_stream)
+
+        torch._logging.set_logs()
+
     @config.patch({"test_configs.force_extern_kernel_in_multi_template": True})
     def test_cat_max_autotune_extern(self):
         self._test_cat_max_autotune_impl(using_triton_mm=False)
@@ -820,7 +861,6 @@ class TestMaxAutotune(TestCase):
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="",
-        autotune_fallback_to_aten=False,
     )
     def test_no_valid_choices(self):
         a = torch.zeros([2, 2], device=GPU_TYPE)
@@ -833,7 +873,6 @@ class TestMaxAutotune(TestCase):
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
-        autotune_fallback_to_aten=False,
     )
     def test_inf_timing(self, multi_template):
         from unittest.mock import patch
@@ -907,7 +946,6 @@ class TestMaxAutotune(TestCase):
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
-        autotune_fallback_to_aten=False,
     )
     def test_max_autotune_decompose_k(self, sizes, dtype, dynamic):
         fp16_red_setting = (
@@ -1010,7 +1048,6 @@ class TestMaxAutotune(TestCase):
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
-        autotune_fallback_to_aten=False,
     )
     def test_max_autotune_decompose_k_dynamic_input(self):
         def f(a, b):
@@ -1058,7 +1095,6 @@ class TestMaxAutotune(TestCase):
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
-        autotune_fallback_to_aten=False,
     )
     def test_max_autotune_decompose_k_output_stride(self):
         def f(a, b):
@@ -1188,29 +1224,23 @@ class TestMaxAutotune(TestCase):
             cache_key, events = get_cache_key_and_events()
 
             if not TEST_WITH_ROCM:
-                self.assertEqual(
+                self.assertExpectedInline(
                     remove_white_space(cache_key),
                     remove_white_space(
-                        """
-                    {'input_nodes': ["[[10, 22], [22, 1], torch.float32, device(type='cuda', index=0), 0]",
-                                    "[[22, 30], [30, 1], torch.float32, device(type='cuda', index=0), 0]"],
+                        f"""
+                    {{'input_nodes': ["[[10, 22], [22, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]",
+                                    "[[22, 30], [30, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]"],
                     'num_stages': 1, 'num_warps': 2, 'prefix_args': 0, 'suffix_args': 0,
-                    'call_sizes': [10, 30], 'layout': "[[10, 30], [30, 1], torch.float32, device(type='cuda', index=0), 0]",
+                    'call_sizes': [10, 30], 'layout': "[[10, 30], [30, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]",
                     'num_consumer_groups': 0, 'num_buffers_warp_spec': 0,
-                    'kwargs': {'EVEN_K': False, 'ALLOW_TF32': True, 'USE_FAST_ACCUM': False, 'ACC_TYPE': 'tl.float32',
-                    'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 16, 'GROUP_M': 8}}"""
+                    'kwargs': {{'EVEN_K': False, 'ALLOW_TF32': True, 'USE_FAST_ACCUM': False, 'ACC_TYPE': 'tl.float32',
+                    'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 16, 'GROUP_M': 8}}}}"""
                     ),
                 )
 
                 self.assertEqual(
                     remove_white_space(events),
-                    remove_white_space(
-                        """[
-                        ('def_kernel', ['A', 'B'], {}),
-                        ('load_input', ['A', 'a', ('idx_m', 'idx_n')], {'mask': 'a_mask', 'indent_width': 8}),
-                        ('load_input', ['B', 'b', ('idx_m', 'idx_n')], {'mask': 'b_mask', 'indent_width': 8})]
-                    """
-                    ),
+                    remove_white_space("""[('def_kernel', ['A', 'B'], {})]"""),
                 )
 
         # Test symbolic shapes with different symbols. Will cache miss due to different symbols in inputs.
@@ -1232,29 +1262,34 @@ class TestMaxAutotune(TestCase):
             cache_key, events = get_cache_key_and_events()
 
             if not TEST_WITH_ROCM:
-                self.assertEqual(
+                self.assertExpectedInline(
                     remove_white_space(cache_key),
                     remove_white_space(
-                        """{'input_nodes': ["[[s77, s17], [s17, 1], torch.float32, device(type='cuda', index=0), 0]",
-                                            "[[s17, s94], [s94, 1], torch.float32, device(type='cuda', index=0), 0]"],
+                        f"""{{'input_nodes': ["[[s77, s17], [s17, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]",
+                                            "[[s17, s94], [s94, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]"],
                             'num_stages': 1, 'num_warps': 2, 'prefix_args': 0, 'suffix_args': 0, 'call_sizes': [s77, s94],
-                            'layout': "[[s77, s94], [s94, 1], torch.float32, device(type='cuda', index=0), 0]",
-                            'num_consumer_groups': 0, 'num_buffers_warp_spec': 0, 'kwargs': {'EVEN_K': False,
+                            'layout': "[[s77, s94], [s94, 1], torch.float32, device(type='{GPU_TYPE}', index=0), 0]",
+                            'num_consumer_groups': 0, 'num_buffers_warp_spec': 0, 'kwargs': {{'EVEN_K': False,
                             'ALLOW_TF32': True, 'USE_FAST_ACCUM': False,
-                            'ACC_TYPE': 'tl.float32', 'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 16, 'GROUP_M': 8}}"""
+                            'ACC_TYPE': 'tl.float32', 'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 16, 'GROUP_M': 8}}}}"""
                     ),
                 )
 
-                self.assertEqual(
+                self.assertExpectedInline(
+                    remove_white_space(events),
+                    remove_white_space(
+                        """[('def_kernel',['A','B'],{}),('size',['A',0],{}),('size',['B',1],{}),('size',['A',1],{})]"""
+                    ),
+                )
+                self.assertExpectedInline(
                     remove_white_space(events),
                     remove_white_space(
                         """[
-                        ('def_kernel', ['A', 'B'], {}),
-                        ('size', ['A', 0], {}), ('size', ['B', 1], {}),
-                        ('size', ['A', 1], {}),
-                        ('load_input', ['A', 'a', ('idx_m', 'idx_n')], {'mask': 'a_mask', 'indent_width': 8}),
-                        ('load_input', ['B', 'b', ('idx_m', 'idx_n')], {'mask': 'b_mask', 'indent_width': 8})]
-                    """
+                            ('def_kernel', ['A', 'B'], {}),
+                            ('size', ['A', 0], {}),
+                            ('size', ['B', 1], {}),
+                            ('size', ['A', 1], {})]
+                        """
                     ),
                 )
 
@@ -1318,6 +1353,29 @@ class TestMaxAutotune(TestCase):
 
             self.assertEqual(hits(), 0)
             self.assertEqual(misses(), 7)
+
+    @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        autotune_fallback_to_aten=False,
+        disable_decompose_k=True,
+    )
+    def test_max_autotune_disable_decompose_K(self):
+        M, N, K = (32, 32, 32768)
+
+        a = torch.randn(M, K, dtype=torch.float16, device="cuda", requires_grad=True)
+        b = torch.randn(K, N, dtype=torch.float16, device="cuda", requires_grad=True)
+
+        compiled_func = torch.compile(lambda a, b: a @ b)
+        out, code = run_and_get_code(compiled_func, a, b)
+
+        for codegen in code:
+            FileCheck().check_not("decompose_k").run(codegen)
 
 
 class TestMaxAutotunePrecompile(TestCase):

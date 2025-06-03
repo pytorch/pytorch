@@ -247,7 +247,7 @@ class NNModuleVariable(VariableTracker):
 
         if object_has_getattribute(base):
             unimplemented_v2(
-                gb_type="torch.nn.Module with a custom __getattribute__ defined",
+                gb_type="Custom __getattribute__ in nn.Module dict key check",
                 context=f"has_key_in_generic_dict {self} {key}",
                 explanation="Dynamo does not support checking key existence "
                 "on `nn.Module` instances that have a custom "
@@ -269,7 +269,7 @@ class NNModuleVariable(VariableTracker):
         """Check for a __getattr__ and handle it specially if it is implemented"""
         if object_has_getattribute(base):
             unimplemented_v2(
-                gb_type="torch.nn.Module with a custom __getattribute__ defined",
+                gb_type="Custom __getattribute__ in nn.Module attribute access",
                 context=f"var_getattr {self} {name}",
                 explanation="Dynamo does not support checking key existence "
                 "on `nn.Module` instances that have a custom "
