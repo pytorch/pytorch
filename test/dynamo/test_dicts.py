@@ -1085,6 +1085,48 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(TypeError, lambda: d1 | 1)
 
     @make_dynamo_test
+    def test_binop_ior(self):
+        d1 = self.thetype({"a": 1, "b": 2})
+        d2 = self.thetype({"b": 3, "c": 4})
+
+        # Test the |= operator
+        d3, d4 = d1.copy(), d2.copy()
+        d3 |= d2
+        d4 |= d1
+        self.assertEqual(d3, {"a": 1, "b": 3, "c": 4})
+        self.assertEqual(d4, {"a": 1, "b": 2, "c": 4})
+
+        # Test with an iterable
+        d3, d4 = d1.copy(), d2.copy()
+
+        def fn(d):
+            for k, v in d.items():
+                yield (k, v)
+
+        self.assertEqual(d3.__ior__(d2.items()), {"a": 1, "b": 3, "c": 4})
+        self.assertEqual(d4.__ior__(fn(d1)), {"a": 1, "b": 2, "c": 4})
+
+        # Test the __ior__ method
+        d3, d4 = d1.copy(), d2.copy()
+        d3.__ior__(d2)
+        d4.__ior__(d1)
+        self.assertEqual(d3, {"a": 1, "b": 3, "c": 4})
+        self.assertEqual(d4, {"a": 1, "b": 2, "c": 4})
+
+        # Test Dict.__or__
+        d3, d4 = d1.copy(), d2.copy()
+        self.assertEqual(dict.__ior__(d3, d2), {"a": 1, "b": 3, "c": 4})
+        self.assertEqual(self.thetype.__ior__(d4, d1), {"a": 1, "b": 2, "c": 4})
+
+        # Test return value
+        d3, d4 = d1.copy(), d2.copy()
+        self.assertEqual(d3.__ior__(d2), {"a": 1, "b": 3, "c": 4})
+        self.assertEqual(dict.__ior__(d4, d1), {"a": 1, "b": 2, "c": 4})
+
+        # Test with non-dict types
+        self.assertRaises(TypeError, lambda: dict.__ior__(d1, 1))
+
+    @make_dynamo_test
     def test_clear(self):
         d = self.thetype({"a": 1, "b": 2})
         d.clear()
@@ -1284,6 +1326,12 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         # Test invalid usage
         self.assertRaises(TypeError, d.values, 1)
 
+    @make_dynamo_test
+    def test_type(self):
+        d = self.thetype({"a": 1, "b": 2})
+        self.assertIsInstance(d, self.thetype)
+        self.assertIs(type(d), self.thetype)
+
 
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
@@ -1305,6 +1353,32 @@ class OrderedDictMethodsTests(DictMethodsTests):
         # Test OrderedDict.move_to_end
         self.thetype.move_to_end(d, "a")
         self.assertEqual("".join(d), "cdeba")
+
+    @make_dynamo_test
+    def test_binop_or_return_type(self):
+        d1 = self.thetype({"a": 1, "b": 2})
+        d2 = self.thetype({"b": 3, "c": 4})
+
+        # Test return type
+        self.assertIs(type(d1 | d2), OrderedDict)
+        self.assertIs(type(dict(d1) | d2), OrderedDict)
+        self.assertIs(type(d1 | dict(d2)), OrderedDict)
+
+    @make_dynamo_test
+    def test_binop_ior_return_type(self):
+        d1 = self.thetype({"a": 1, "b": 2})
+        d2 = self.thetype({"b": 3, "c": 4})
+
+        # Test return type
+        d3, d4 = d1.copy(), d2.copy()
+        self.assertIs(type(d3.__ior__(d2)), OrderedDict)
+        self.assertIs(type(dict.__ior__(d4, d2)), OrderedDict)
+        self.assertIs(type(self.thetype.__ior__(d4, d2)), OrderedDict)
+
+        d3, d4 = d1.copy(), d2.copy()
+        self.assertIs(type(dict.__ior__(d3, dict(d2))), OrderedDict)
+        self.assertIs(type(dict.__ior__(dict(d3), d2)), dict)
+        self.assertIs(type(dict(d4).__ior__(d2)), dict)
 
 
 if __name__ == "__main__":
