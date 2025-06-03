@@ -81,6 +81,7 @@ class CUDAKernel(Kernel):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.layout_args: dict[str, list[LayoutArg]] = defaultdict(list)
+        self.size_args: list[Union[Expr, int]] = []
         # Mapping from arg name to IRNode.
         self.named_nodes: dict[str, IRNode] = {}
 
@@ -172,6 +173,9 @@ class CUDAKernel(Kernel):
         LDD = get_ld(Y)
         return (M, N, K, B, LDA, LDB, LDC, LDD)
 
+    def get_dynamic_shape_args(self) -> list[Union[Expr, int]]:
+        return [*self.get_layout_args(), *self.size_args]
+
     @staticmethod
     def find_ld_idx(node: IRNode) -> int:
         strides = node.get_stride()
@@ -206,7 +210,6 @@ class CUDATemplateKernel(CUDAKernel):
         self.kernel_name = kernel_name
         self.runtime_arg_info = runtime_arg_info
         self.runtime_arg_values = runtime_arg_values
-        self.size_arg_values = list[str]()
 
     def check_not_null(self, node: IRNode) -> str:
         """
@@ -278,7 +281,7 @@ class CUDATemplateKernel(CUDAKernel):
                 self.named_nodes[name] = node
                 self.args.input_buffers[node.get_name()] = name
 
-        free_symbols = OrderedSet[str]()
+        free_symbols = OrderedSet[Expr]()
         for name, node in zip(names[len(inputs) : len(inputs) + len(outputs)], outputs):
             if node is not None:
                 self.named_nodes[name] = node
@@ -287,14 +290,14 @@ class CUDATemplateKernel(CUDAKernel):
                 for expr in [*node.get_size(), *node.get_stride()]:
                     if isinstance(expr, Expr):
                         for s in expr.free_symbols:
-                            free_symbols.add(str(s))
+                            free_symbols.add(s)  # type: ignore[arg-type]
 
         arg_defs, *_ = self.args.cpp_argdefs(DTYPE_TO_CUTLASS_TYPE)
 
         self.init_layout_args()
         size_vars = ["M", "N", "K", "B", "lda", "ldb", "ldc", "ldd"]
         size_vars.extend(free_symbols)
-        self.size_arg_values.extend(free_symbols)
+        self.size_args.extend(free_symbols)
         size_args = [f"const int {s}" for s in size_vars]
 
         runtime_arg_decls = ",".join(
@@ -335,12 +338,11 @@ class CUDATemplateKernel(CUDAKernel):
         else:
             _, call_args, _, arg_types = self.args.python_argdefs()
 
-        layout_args = self.get_layout_args()
-        call_args.extend(layout_args)  # type: ignore[arg-type]
-        call_args.extend(self.size_arg_values)  # type: ignore[arg-type]
+        dynamic_shape_args = self.get_dynamic_shape_args()
+        call_args.extend(dynamic_shape_args)  # type: ignore[arg-type]
         for arg in self.runtime_arg_values:
             call_args.append(arg)
-        arg_types.extend("int" for a in layout_args)
+        arg_types.extend("int" for _ in dynamic_shape_args)
         for arg in self.runtime_arg_info:
             arg_types.append(arg.ty)
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar

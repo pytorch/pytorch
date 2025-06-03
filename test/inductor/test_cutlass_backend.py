@@ -1660,7 +1660,10 @@ class TestCutlassBackend(TestCase):
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
-    def test_evt_multi_output(self, op):
+    @parametrize(
+        "dynamic", (False, True)
+    )  # To not drastically increase test time we only test dynamic on this test
+    def test_evt_multi_output(self, op, dynamic):
         class TestModel(torch.nn.Module):
             def forward(self, a, b, extra_args):
                 acc = a @ b
@@ -1671,18 +1674,24 @@ class TestCutlassBackend(TestCase):
 
         M = 1024
         N = 512
-        a = torch.ones(M, N).cuda().half()
-        b = torch.ones(N, N).cuda().half()
-        extra_args = gen_args(op, (M, N))
-        model = TestModel().cuda()
+        shapes = [(512, 512)] if not dynamic else [(1024, 64), (128, 256)]
+        for i, shape in enumerate(shapes):
+            M, N = shape
+            a = torch.ones(M, N).cuda().half()
+            b = torch.ones(N, N).cuda().half()
+            extra_args = gen_args(op, (M, N))
+            model = TestModel().cuda()
 
-        result = torch.compile(model)(a, b, extra_args)
-        ref_result = model(a, b, extra_args)
+            result = torch.compile(model)(a, b, extra_args)
+            ref_result = model(a, b, extra_args)
 
-        self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 2
-        )
-        torch.testing.assert_close(result, ref_result)
+            self.assertEqual(
+                torch._dynamo.utils.counters["inductor"][
+                    "cuda_epilogue_fusion_counter"
+                ],
+                2 * (i + 1),
+            )
+            torch.testing.assert_close(result, ref_result)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
