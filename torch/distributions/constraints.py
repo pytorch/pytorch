@@ -493,7 +493,7 @@ class Real(Constraint):
     """
 
     def check(self, value: Tensor) -> Tensor:
-        return value == value.real  # False for NANs.
+        return value == value  # False for NANs.
 
 
 # interval constraints -------------------------------------------------------------------
