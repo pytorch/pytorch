@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import unittest
 
 import transformers
 from onnxscript import ir
@@ -651,6 +652,76 @@ class DynamoExporterTest(common_utils.TestCase):
         onnx_program = torch.onnx.export(
             ScanModel(), inputs, dynamo=True, fallback=False
         )
+        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+
+    def test_scan_cdist_dynamic_shapes(self):
+        def dist(y: torch.Tensor, scanned_x: torch.Tensor):
+            sub = y - scanned_x.reshape((1, -1))
+            sq = sub * sub
+            rd = torch.sqrt(sq.sum(axis=1))
+            return [y.clone(), rd]
+
+        class ScanModel(torch.nn.Module):
+            def forward(self, x, y):
+                carry, out = torch.ops.higher_order.scan(dist, [y], [x], additional_inputs=[])
+                return out
+
+        x_rows = torch.export.Dim("x_rows")
+        y_rows = torch.export.Dim("y_rows")
+        dim = torch.export.Dim("dim")
+        dyns = ({0: x_rows, 1: dim}, {0: y_rows, 1: dim})
+        inputs = (torch.randn(3, 4), torch.randn(5, 4))
+        onnx_program = torch.onnx.export(
+            ScanModel(), inputs, dynamo=True, fallback=False, dynamic_shapes=dyns
+        )
+        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+
+    def test_scan_loop_inplace(self):
+        def dummy_loop(padded: torch.Tensor, pos: torch.Tensor):
+            copy = torch.zeros(padded.shape)
+            for i in range(pos.shape[0]):
+                p = pos[i]
+                copy[i, :p] = padded[i, :p]
+            return copy
+
+        def dummy_loop_with_scan(padded: torch.Tensor, pos: torch.Tensor):
+            def pad_row(padded, p):
+                row = torch.zeros((padded.shape[0],))
+                torch._check(p.item() > 0)
+                torch._check(p.item() < padded.shape[0])
+                # this check is not always true, we add it anyway to make this dimension >= 2
+                # and avoid raising an exception about dynamic dimension in {0, 1}
+                if torch.compiler.is_exporting():
+                    torch._check(p.item() > 1)
+                row[: p.item()] = padded[: p.item()]
+                return (row,)
+
+            return torch.ops.higher_order.scan(pad_row, [], [padded, pos], [])
+
+        def select_when_exporting(f, f_scan):
+            return f_scan if torch.compiler.is_exporting() else f
+
+        class ScanModel(torch.nn.Module):
+            def forward(self, images, position):
+                return select_when_exporting(dummy_loop, dummy_loop_with_scan)(
+                    images, position
+                )
+
+        DYN = torch.export.Dim.DYNAMIC
+        x = torch.randn((5, 6))
+        y = torch.arange(5, dtype=torch.int64) + 1
+        ep = torch.export.export(
+            ScanModel(),
+            (x, y),
+            dynamic_shapes={"images": {0: DYN, 1: DYN}, "position": {0: DYN}},
+            strict=False,
+        )
+        try:
+            onnx_program = torch.onnx.export(ep, dynamo=True, fallback=False)
+        except torch.onnx._internal.exporter._errors.ConversionError:
+            raise unittest.SkipTest(
+                "Issue https://github.com/pytorch/pytorch/issues/153705 not fixed."
+            )
         onnx_testing.assert_onnx_program(onnx_program, args=inputs)
 
 

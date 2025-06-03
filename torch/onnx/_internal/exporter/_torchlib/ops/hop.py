@@ -67,6 +67,7 @@ def higher_order_cond(
     false_func: ir.Function,
     inputs: Sequence[ir.Value],
 ) -> Sequence[ir.Value]:
+    """See :func:`orch.ops.higher_order.scan`."""
     then_node = ir.Node(
         true_func.domain, true_func.name, inputs, num_outputs=len(true_func.outputs)
     )
