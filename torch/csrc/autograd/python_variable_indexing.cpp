@@ -294,9 +294,10 @@ static bool treatSequenceAsTuple(PyObject* index) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (n >= 32) {
     TORCH_WARN(
-        "FutureWarning: Using a non-tuple sequence for "
-        "multidimensional indexing is deprecated; use x[tuple(seq)] instead of "
-        "x[seq]. In the future this will be interpreted as tensor index, "
+        "Using a non-tuple sequence for "
+        "multidimensional indexing is deprecated and will be changed in "
+        "pytorch 2.9; use x[tuple(seq)] instead of "
+        "x[seq]. In pytorch 2.9 this will be interpreted as tensor index, "
         "x[torch.tensor(seq)], which will result either in an error or a "
         "different result");
     return false;
