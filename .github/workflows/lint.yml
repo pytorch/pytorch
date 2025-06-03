@@ -33,7 +33,7 @@ jobs:
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      docker-image: ci-image:pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter
+      docker-image: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.9-linter
       # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
       # to run git rev-parse HEAD~:.ci/docker when a new image is needed
       fetch-depth: 0
@@ -50,7 +50,7 @@ jobs:
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      docker-image: ci-image:pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter
+      docker-image: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.9-linter
       # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
       # to run git rev-parse HEAD~:.ci/docker when a new image is needed
       fetch-depth: 0
@@ -282,6 +282,15 @@ jobs:
         run: |
           # All we need to see is that it passes
           python3 torch/utils/collect_env.py
+
+  link-check:
+    name: Link checks
+    needs: get-label-type
+    uses: ./.github/workflows/_link_check.yml
+    with:
+      runner: ${{ needs.get-label-type.outputs.label-type }}
+      ref:    ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    secrets: inherit
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

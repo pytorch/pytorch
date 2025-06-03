@@ -64,6 +64,7 @@ include_patterns = [
     'aten/src/ATen/xpu/**/*.cpp',
     'aten/src/ATen/core/boxing/**/*.h',
     'aten/src/ATen/core/dispatch/**/*.h',
+    'aten/src/ATen/core/Formatting.cpp',
     'aten/src/ATen/native/mps/**/*.metal',
     'aten/src/ATen/native/mps/**/*.mm',
     'aten/src/ATen/native/mps/**/*.h',
@@ -86,6 +87,7 @@ include_patterns = [
     'torch/csrc/**/*.cpp',
     'torch/nativert/**/*.h',
     'torch/nativert/**/*.cpp',
+    'torch/standalone/**/*.h',
     'test/cpp/**/*.h',
     'test/cpp/**/*.cpp',
 ]
@@ -152,12 +154,12 @@ init_command = [
     'numpy==1.26.4 ; python_version >= "3.9" and python_version <= "3.11"',
     'numpy==2.1.0 ; python_version >= "3.12"',
     'expecttest==0.3.0',
-    'mypy==1.14.0',
+    'mypy==1.15.0',
     'sympy==1.13.3',
     'types-requests==2.27.25',
     'types-PyYAML==6.0.7',
     'types-tabulate==0.8.8',
-    'types-protobuf==3.19.18',
+    'types-protobuf==5.29.1.20250403',
     'types-pkg-resources==0.1.3',
     'types-Jinja2==2.11.9',
     'types-colorama==0.4.6',
@@ -239,6 +241,7 @@ include_patterns = [
     'torch/nativert/*.cpp',
     'torch/nativert/**/*.h',
     'torch/nativert/**/*.cpp',
+    'torch/standalone/**/*.h',
 ]
 exclude_patterns = [
     # The negative filters below are to exclude files that include onnx_pb.h or
@@ -1160,12 +1163,6 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
-    'test/_nvfuser/__init__.py',
-    'test/_nvfuser/test_dynamo.py',
-    'test/_nvfuser/test_python_frontend.py',
-    'test/_nvfuser/test_torchscript.py',
-    'test/delete.py',
-    'test/expect/__init__.py',
     'test/quantization/__init__.py',
     'test/quantization/core/__init__.py',
     'test/quantization/core/experimental/apot_fx_graph_mode_ptq.py',
@@ -1193,8 +1190,6 @@ exclude_patterns = [
     'test/quantization/fx/test_numeric_suite_fx.py',
     'test/quantization/fx/test_quantize_fx.py',
     'test/quantization/fx/test_subgraph_rewriter.py',
-    'test/test_fake_tensor.py',
-    'test/test_flop_counter.py',
     'test/test_function_schema.py',
     'test/test_functional_autograd_benchmark.py',
     'test/test_functional_optim.py',
@@ -1324,13 +1319,6 @@ exclude_patterns = [
     'torch/_export/passes/const_prop_pass.py',
     'torch/_export/passes/functionalize_side_effectful_ops_pass.py',
     'torch/_export/passes/replace_sym_size_ops_pass.py',
-    'torch/_export/passes/replace_view_ops_with_view_copy_ops_pass.py',
-    'torch/_export/serde/__init__.py',
-    'torch/_export/serde/schema.py',
-    'torch/_export/serde/serialize.py',
-    'torch/_export/serde/upgrade.py',
-    'torch/_export/trace.py',
-    'torch/_export/verifier.py',
     'torch/testing/_internal/__init__.py',
     'torch/testing/_internal/autocast_test_lists.py',
     'torch/testing/_internal/autograd_function_db.py',
@@ -1447,7 +1435,6 @@ exclude_patterns = [
     'torch/utils/throughput_benchmark.py',
     'torch/utils/viz/__init__.py',
     'torch/utils/viz/_cycles.py',
-    'torch/utils/weak.py',
 ]
 init_command = [
     'python3',
