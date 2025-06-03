@@ -67,7 +67,7 @@ if __name__ == "__main__":
     # If we are in a global install, use `--user` to install so that you do not
     # need root access in order to initialize linters.
     #
-    # However, `pip install` interacts poorly with virtualenvs (see:
+    # However, `pip install --user` interacts poorly with virtualenvs (see:
     # https://bit.ly/3vD4kvl) and conda (see: https://bit.ly/3KG7ZfU). So in
     # these cases perform a regular installation.
     in_conda = os.environ.get("CONDA_PREFIX") is not None
