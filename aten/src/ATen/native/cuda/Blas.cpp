@@ -1281,7 +1281,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   }
 #ifdef USE_ROCM
   if (mat1.scalar_type() == ScalarType::Float4_e2m1fn_x2 || mat2.scalar_type() == ScalarType::Float4_e2m1fn_x2) {
-    TORCH_CHECK(ROCM_VERSION >= 60500, "Float4_e2m1fn_x2 is only supported for ROCm 6.5 and above");
+    TORCH_CHECK(ROCM_VERSION >= 60500, "Float4_e2m1fn_x2 is only supported for ROCm 7.0 and above");
   }
   if (mat1.scalar_type() == ScalarType::Float8_e5m2 || mat2.scalar_type() == ScalarType::Float8_e5m2) {
     TORCH_CHECK(ROCM_VERSION >= 60000, "Float8_e5m2 is only supported for ROCm 6.5 and above");
@@ -1354,6 +1354,22 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     // Until more than bf16 is supported.
     TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16,
          "hipblaslt rowwise _scaled_mm only supports BFloat16 output but got ", out.scalar_type());
+  }
+  else if (scaling_choice == ScalingType::BlockWise) {
+    #if ROCM_VERSION >= 70000
+    TORCH_CHECK(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
+                "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
+
+    TORCH_CHECK(mat1.size(0) % 32 == 0 && mat1.size(1) % 32 == 0 &&
+                mat2.size(0) % 32 == 0 && mat2.size(1) % 32 == 0,
+                "Matrix dimensions must be multiples of 32 for block-wise scaling");
+
+    TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16 ||
+                out.scalar_type() == ScalarType::Half,
+                "Block-wise scaling only supports BFloat16 or Half output types");
+#else
+    TORCH_CHECK(false, "Block-wise scaling for Float8_e8m0fnu requires ROCm 7.0 or later");
+#endif
   }
 #endif
 
@@ -1432,12 +1448,14 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       params.k = args.k;
       params.a = args.mata->data_ptr();
       params.a_scale_ptr = args.scale_mata_ptr;
+      params.a_scale_type = scale_a.scalar_type();
       params.lda = args.lda;
       params.a_dtype = args.mata->scalar_type();
       params.a_scale_dtype = args.scale_mata_dtype.value();
       params.a_scaling_type = args.scaling_mata_type.value();
       params.b = args.matb->data_ptr();
       params.b_scale_ptr = args.scale_matb_ptr;
+      params.b_scale_type = scale_b.scalar_type();
       params.ldb = args.ldb;
       params.b_dtype = args.matb->scalar_type();
       params.b_scale_dtype = args.scale_matb_dtype.value();
