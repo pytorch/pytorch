@@ -231,10 +231,8 @@ Tensor aminmax_backward(
   auto min_reduced = restore_reduced_dims(min, dims, keepdim);
   auto max_reduced = restore_reduced_dims(max, dims, keepdim);
 
-  auto min_mask =
-      at::isnan(min).all().item<bool>() ? self.isnan() : self == min_reduced;
-  auto max_mask =
-      at::isnan(max).all().item<bool>() ? self.isnan() : self == max_reduced;
+  auto min_mask = self == min_reduced;
+  auto max_mask = self == max_reduced;
 
   Tensor result;
   if (grad_min.defined()) {
