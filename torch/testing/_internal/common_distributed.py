@@ -1508,7 +1508,7 @@ class MultiProcContinousTest(TestCase):
     # Class variables:
     MAIN_PROCESS_RANK = -1
     # number of test processes
-    world_size: int = -2  # unset state
+    world_size: Optional[int] = None
     # rank of the current process
     rank: int = -2  # unset state
     # Rendezvous file
@@ -1649,9 +1649,11 @@ class MultiProcContinousTest(TestCase):
 
         # Use device count as world size
         device_type = cls.device_type()
-        cls.world_size = torch.get_device_module(device_type).device_count()
-        if cls.world_size == 0:
-            raise unittest.SkipTest(f"No {device_type} devices available")
+        # If world_size is not set, use device count
+        if cls.world_size is None:
+            cls.world_size = torch.get_device_module(device_type).device_count()
+            if cls.world_size == 0:
+                raise unittest.SkipTest(f"No {device_type} devices available")
 
         logger.info(
             f"Testing class {cls.__name__} on {cls.world_size} {device_type}"  # noqa: G004

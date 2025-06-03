@@ -99,9 +99,12 @@ def _prepare_tensor(tensor: torch.Tensor) -> tuple[torch.Tensor, _TensorMeta]:
 
 def _prepare_state_dict(
     state_dict: object,
-    step: int,
     device: torch.device,
+    step: Optional[int],
 ) -> tuple[_StateDictMeta, list[torch.Tensor]]:
+    if step is None:
+        step = -1
+
     leaves: list[tuple[KeyPath, object]]
     leaves, treespec = tree_flatten_with_path(state_dict)
 
@@ -187,17 +190,16 @@ class PGTransport:
         self._device = device
         self._state_dict = state_dict
 
-    def metadata(self) -> str:
-        return "<n/a>"
-
     def disallow_checkpoint(self) -> None:
         pass
 
     def send_checkpoint(
-        self, dst_ranks: list[int], step: int, state_dict: T, timeout: timedelta
+        self, dst_ranks: list[int], state_dict: T, step: Optional[int] = None
     ) -> None:
         with _timeit("preparing state_dict"):
-            meta, tensors = _prepare_state_dict(state_dict, step, device=self._device)
+            meta, tensors = _prepare_state_dict(
+                state_dict, device=self._device, step=step
+            )
 
         work = []
 
@@ -220,31 +222,28 @@ class PGTransport:
                 # can free the memory to avoid OOMs
                 if original_device == torch.device("cpu"):
                     for w in work:
-                        w.wait(timeout)
+                        w.wait()
                     work = []
 
             for w in work:
-                w.wait(timeout)
+                w.wait()
 
-    def recv_checkpoint(
-        self, src_rank: int, metadata: str, step: int, timeout: timedelta
-    ) -> T:
+    def recv_checkpoint(self, src_rank: int, step: Optional[int] = None) -> T:
         state_dict = self._state_dict() if self._state_dict else {}
         state_dict_leaves, _ = tree_flatten_with_path(state_dict)
 
         dst_tensors: dict[KeyPath, object] = dict(state_dict_leaves)
 
         len_t = torch.zeros(1, dtype=torch.int64, device=self._device)
-        self._pg.recv([len_t], src_rank, tag=1).wait(timeout)
+        self._pg.recv([len_t], src_rank, tag=1).wait()
         length = cast(int, len_t.item())
 
-        assert length > 0, f"invalid metadata length {length=}"
-
         buf = torch.empty(length, dtype=torch.uint8, device=self._device)
-        self._pg.recv([buf], src_rank, tag=2).wait(timeout)
+        self._pg.recv([buf], src_rank, tag=2).wait()
 
         meta: _StateDictMeta = pickle.loads(buf.cpu().numpy().tobytes())
-        assert meta.step == step
+        if step is not None:
+            assert meta.step == step, "Step mismatch"
 
         i: int = 0
         works: list[Work] = []
@@ -271,7 +270,7 @@ class PGTransport:
 
             if inplace is None:
                 # if not inplace we need to copy it to CPU to avoid OOMing
-                work.wait(timeout)
+                work.wait()
                 t = t.cpu()
             else:
                 works.append(work)
@@ -294,6 +293,6 @@ class PGTransport:
                 values.append(v)
 
         for work in works:
-            work.wait(timeout)
+            work.wait()
 
         return tree_unflatten(values, meta.treespec)
