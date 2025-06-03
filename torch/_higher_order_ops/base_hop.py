@@ -6,9 +6,9 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._higher_order_ops.cond import materialize_as_graph
 from torch._higher_order_ops.utils import (
     check_input_alias_and_mutation_return_ouputs,
+    materialize_as_graph,
     reenter_make_fx,
 )
 from torch._ops import HigherOrderOperator
