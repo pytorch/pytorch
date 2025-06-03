@@ -118,7 +118,6 @@ bmm_template = TritonTemplate(
     {{store_output(("idx_q", "idx_m", "idx_n"), "acc", "mask")}}
 """,
     cache_codegen_enabled_for_template=True,
-    prologue_loads_all_inputs=True,
 )
 
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out")
