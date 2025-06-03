@@ -201,8 +201,8 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> list[MergeRule
             mandatory_checks_name=[
                 "Lint",
                 "EasyCLA",
-                "pull / linux-jammy-py3_8-clang9-xla / build",
-                "pull / linux-jammy-py3_8-clang9-xla / test (xla, 1, 1, linux.12xlarge)",
+                "pull / linux-focal-py3_8-clang9-xla / build",
+                "pull / linux-focal-py3_8-clang9-xla / test (xla, 1, 1, linux.12xlarge)",
             ],
             ignore_flaky_failures=True,
         ),
@@ -543,8 +543,8 @@ class TestTryMerge(TestCase):
                 "expected": "android-emulator-build-test / build-and-test (default)",
             },
             {
-                "name": "linux-jammy-rocm5.4.2-py3.8 / build",
-                "expected": "linux-jammy-rocm5.4.2-py3.8 / build",
+                "name": "linux-focal-rocm5.4.2-py3.8 / build",
+                "expected": "linux-focal-rocm5.4.2-py3.8 / build",
             },
             {
                 "name": "libtorch-cpu-shared-with-deps-release-build",
@@ -599,7 +599,7 @@ class TestBypassFailures(TestCase):
         )
         self.assertTrue(
             checks[
-                "pull / linux-jammy-py3.11-clang10 / test (dynamo, 1, 2, linux.2xlarge)"
+                "pull / linux-focal-py3.11-clang10 / test (dynamo, 1, 2, linux.2xlarge)"
             ].classification
             == "BROKEN_TRUNK"
         )
@@ -617,7 +617,7 @@ class TestBypassFailures(TestCase):
         )
         self.assertTrue(
             checks[
-                "pull / linux-jammy-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, linux.8xlarge.nvidia.gpu)"
+                "pull / linux-focal-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, linux.8xlarge.nvidia.gpu)"
             ].classification
             == "FLAKY"
         )
@@ -811,9 +811,9 @@ class TestBypassFailures(TestCase):
         # current checks takes place after other classifications: flaky, unstable,
         # or broken trunk. Only actual new failures should be kept in the list of
         # ignore current checks to use to record force merge with actual failures
-        flaky = "pull / linux-jammy-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, linux.8xlarge.nvidia.gpu)"
+        flaky = "pull / linux-focal-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, linux.8xlarge.nvidia.gpu)"
         broken_trunk = (
-            "pull / linux-jammy-py3.11-clang10 / test (dynamo, 1, 2, linux.2xlarge)"
+            "pull / linux-focal-py3.11-clang10 / test (dynamo, 1, 2, linux.2xlarge)"
         )
 
         pr = GitHubPR("pytorch", "pytorch", 109584)
