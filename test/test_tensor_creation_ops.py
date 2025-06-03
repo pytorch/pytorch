@@ -3205,7 +3205,7 @@ class TestTensorCreation(TestCase):
             self.assertTrue(t_mapped.untyped_storage().filename == expected_filename)
             self.assertEqual(torch.flatten(t), t_mapped)
 
-            s = torch.UntypedStorage.from_file(f.name, shared, t.numel() * dtype.itemsize)
+            s = torch.UntypedStorage.from_file(f.name, shared, nbytes=t.numel() * dtype.itemsize)
             self.assertTrue(s.filename == expected_filename)
 
     @onlyCPU
