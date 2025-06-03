@@ -1222,7 +1222,14 @@ Tensor randint_like(
     std::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(high.numel() == 1, "high must be a scalar tensor");
   int64_t high_scalar = high.item<int64_t>();
-  return native::randint_like(self, high_scalar, dtype, layout, device, pin_memory, optional_memory_format);
+  return at::native::randint_like(
+      self,
+      high_scalar,
+      dtype,
+      layout,
+      device,
+      pin_memory,
+      optional_memory_format);
 }
 
 Tensor randint_like(
