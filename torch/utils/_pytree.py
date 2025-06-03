@@ -113,14 +113,14 @@ class KeyEntry(Protocol):
 
 
 class EnumEncoder(json.JSONEncoder):
-    def default(self, obj: object) -> object:
+    def default(self, obj: object) -> Union[str, dict[str, Any]]:
         if isinstance(obj, Enum):
             return {
                 "__enum__": True,
                 "fqn": f"{obj.__class__.__module__}:{obj.__class__.__qualname__}",
                 "name": obj.name,
             }
-        return super().default(obj)
+        return cast(str, super().default(obj))
 
 
 Context = Any
@@ -1840,7 +1840,7 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
     return _TreeSpecSchema(serialized_type_name, serialized_context, child_schemas)
 
 
-def enum_object_hook(obj: dict[str, Any]) -> Any:
+def enum_object_hook(obj: dict[str, Any]) -> Union[Enum, dict[str, Any]]:
     if "__enum__" in obj:
         modname, _, classname = obj["fqn"].partition(":")
         mod = importlib.import_module(modname)
