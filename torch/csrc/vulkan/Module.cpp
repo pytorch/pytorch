@@ -185,7 +185,12 @@ void initModule(PyObject* module) {
                 TORCH_CHECK(
                     (v_input.storage_type() == api::StorageType::BUFFER) ==
                         (output_storage_type == api::StorageType::BUFFER),
-                    "all Tensor arguments to compiled Vulkan shader must have the same storage type for now. output is ", output_storage_type, " but input ", ii, " is ", v_input.storage_type());
+                    "all Tensor arguments to compiled Vulkan shader must have the same storage type for now. output is ",
+                    output_storage_type,
+                    " but input ",
+                    ii,
+                    " is ",
+                    v_input.storage_type());
                 input_args.push_back(v_input);
               } else {
                 saw_non_tensor_arg = true;
