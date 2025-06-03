@@ -162,13 +162,25 @@ class TestFxGraphCache(TestCase):
             )
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
-            # "cuda" has .ptx and .cubin file, but xpu only has .spv file
-            save_kernel_count = 6 if device == "xpu" else 7
-            read_and_emit_kernel_count = 6 if device == "xpu" else 7
+
+            # we expect:
+            #  .ttir
+            #  .ttgir
+            #  .llir
+            #  .ptx (cuda) or .spv (xpu)
+            #  .json
+            #  __grp__.*.json
+            # optionally, we can also get
+            #  .cubin (CUDA only)
+            #  .source (new versions of triton only, triton-lang/triton#6992)
+
+            # to avoid depending on the device and triton version, just assert that
+            # we have at least 6 kernels.
+            save_and_read_min_artifact_count = 6
             if bundle_triton and device != "cpu":
-                self.assertEqual(
+                self.assertGreaterEqual(
                     counters["inductor"]["triton_bundler_save_kernel"],
-                    grad_multiplier * save_kernel_count,
+                    grad_multiplier * save_and_read_min_artifact_count,
                 )
                 self.assertEqual(
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"], 0
@@ -213,13 +225,13 @@ class TestFxGraphCache(TestCase):
             )
 
             if bundle_triton and device != "cpu":
-                self.assertEqual(
+                self.assertGreaterEqual(
                     counters["inductor"]["triton_bundler_save_kernel"],
-                    grad_multiplier * save_kernel_count,
+                    grad_multiplier * save_and_read_min_artifact_count,
                 )
-                self.assertEqual(
+                self.assertGreaterEqual(
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"],
-                    grad_multiplier * read_and_emit_kernel_count,
+                    grad_multiplier * save_and_read_min_artifact_count,
                 )
                 if use_static_cuda_launcher:
                     self.assertEqual(
@@ -261,13 +273,13 @@ class TestFxGraphCache(TestCase):
             )
 
             if bundle_triton and device != "cpu":
-                self.assertEqual(
+                self.assertGreaterEqual(
                     counters["inductor"]["triton_bundler_save_kernel"],
-                    grad_multiplier * save_kernel_count * 2,
+                    grad_multiplier * save_and_read_min_artifact_count * 2,
                 )
-                self.assertEqual(
+                self.assertGreaterEqual(
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"],
-                    grad_multiplier * read_and_emit_kernel_count,
+                    grad_multiplier * save_and_read_min_artifact_count,
                 )
                 if use_static_cuda_launcher:
                     self.assertEqual(
