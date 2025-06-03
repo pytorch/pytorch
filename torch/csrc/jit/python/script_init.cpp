@@ -1430,7 +1430,7 @@ void initJitScriptBindings(PyObject* module) {
               return StrongFunctionPtr(std::move(self), fn);
             } else {
               throw AttributeError(
-                  "'CompilationUnit' has no attribute '%s'", name.c_str());
+                  fmt::format("'CompilationUnit' has no attribute '{}'", name));
             }
           })
       .def(

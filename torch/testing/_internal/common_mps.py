@@ -98,6 +98,7 @@ if torch.backends.mps.is_available():
             "nn.functional.conv2d",
             "nn.functional.conv_transpose1d",
             "nn.functional.conv_transpose2d",
+            "nn.functional.conv_transpose3d",
             "nn.functional.feature_alpha_dropoutwithout_train",
             "nn.functional.padcircular",
             "nn.functional.softsign",
@@ -378,7 +379,6 @@ if torch.backends.mps.is_available():
             "linalg.eig": None,
             "linalg.eigvals": None,
             "put": None,
-            "nn.functional.conv_transpose3d": None,
             "cauchy_": None,
             "cauchy": None,
             "cholesky_inverse": None,
@@ -507,6 +507,11 @@ if torch.backends.mps.is_available():
             "nn.functional.conv3d": [torch.int64],
             "nn.functional.conv_transpose1d": [torch.int64],
             "nn.functional.conv_transpose2d": [torch.int64, torch.bfloat16],
+            "nn.functional.conv_transpose3d": [
+                torch.int64,
+                torch.bfloat16,
+                torch.float16,
+            ],
             # Unsupported dtypes
             "dot": [torch.int64] if MACOS_VERSION < 14.0 else [],
             "histc": [torch.float16, torch.bfloat16],
