@@ -136,11 +136,15 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self._assert_dtensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
             model(inp)
-            params = list(model.parameters())
+            non_root_params = list(model[0].in_proj.parameters()) + list(
+                model[0].out_proj.parameters()
+            )
+            root_params = list(set(model.parameters()) - set(non_root_params))
             if reshard_after_forward is False:
-                self._assert_tensor_params(params)
+                self._assert_tensor_params(non_root_params)
             else:
-                self._assert_dtensor_params(params)
+                self._assert_dtensor_params(non_root_params)
+            self._assert_tensor_params(root_params)
             self._assert_same_params(model.parameters(), ref_model.parameters())
             for module in model.modules():
                 if isinstance(module, FSDPModule):
@@ -1070,7 +1074,9 @@ class TestFullyShardGradientAccumulation(FSDPTest):
             # the first microbatch's forward
             expected_all_gather_count = num_mlps + 1
             if reshard_after_forward is not False:  # `True` or `2`
-                expected_all_gather_count += num_mlps + 1
+                # Add the number of MLPs without the +1 for the backward
+                # all-gathers since the root does not reshard after forward
+                expected_all_gather_count += num_mlps
                 # Multiply by the number of microbatches since these
                 # all-gathers run every microbatch
                 expected_all_gather_count *= num_microbatches

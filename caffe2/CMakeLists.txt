@@ -1289,8 +1289,7 @@ endif()
 target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
 
 target_include_directories(torch_cpu PRIVATE
-  ${TORCH_SRC_DIR}/csrc
-  ${TORCH_SRC_DIR}/standalone)
+  ${TORCH_SRC_DIR}/csrc)
 
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/miniz-3.0.2)
@@ -1309,12 +1308,9 @@ target_include_directories(torch_cpu PRIVATE
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/nlohmann/include)
 
-install(DIRECTORY
-  "${TORCH_SRC_DIR}/csrc"
-  "${TORCH_SRC_DIR}/standalone"
+install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
   FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
-
 install(FILES
   "${TORCH_SRC_DIR}/script.h"
   "${TORCH_SRC_DIR}/extension.h"

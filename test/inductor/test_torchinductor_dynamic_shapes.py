@@ -367,20 +367,18 @@ class TestInductorDynamic(TestCase):
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_item_to_inputs_kernel_nobreak(self, device):
-        @torch.library.custom_op(
-            "test_inductor_dynamic_shapes::nobreak_test", mutates_args=()
-        )
-        def nobreak_test(x: torch.Tensor, y: int) -> torch.Tensor:
+        @torch.library.custom_op("test::foo", mutates_args=())
+        def foo(x: torch.Tensor, y: int) -> torch.Tensor:
             return x.clone()
 
-        @nobreak_test.register_fake
+        @foo.register_fake
         def _(x: torch.Tensor, y: int) -> torch.Tensor:
             return x.clone()
 
         @torch.compile(fullgraph=True)
         def f(x, r):
             y = x.item()
-            return torch.ops.test_inductor_dynamic_shapes.nobreak_test(r, y)
+            return torch.ops.test.foo(r, y)
 
         f(torch.tensor([3], device=device), torch.randn(10, device=device))
 
@@ -593,13 +591,11 @@ class TestInductorDynamic(TestCase):
     )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_multi_output_unbacked_custom_op(self, device):
-        @torch.library.custom_op(
-            "test_inductor_dynamic_shapes::unbacked_test", mutates_args=()
-        )
-        def unbacked_test(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        @torch.library.custom_op("test::foo", mutates_args=())
+        def foo(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             return torch.empty(2, device=x.device), torch.empty(3, device=x.device)
 
-        @unbacked_test.register_fake
+        @foo.register_fake
         def _(x: torch.Tensor) -> torch.Tensor:
             ctx = torch.library.get_ctx()
             u0 = ctx.new_dynamic_size()
@@ -607,7 +603,7 @@ class TestInductorDynamic(TestCase):
 
         @torch.compile(fullgraph=True)
         def f(x):
-            a, b = torch.ops.test_inductor_dynamic_shapes.unbacked_test(x)
+            a, b = torch.ops.test.foo(x)
             return a.sum() + b.sum()
 
         f(torch.tensor([3], device=device))

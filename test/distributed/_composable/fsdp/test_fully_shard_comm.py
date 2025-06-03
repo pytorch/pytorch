@@ -348,9 +348,9 @@ class TestFullyShardCommunication(FSDPTest):
         if reshard_after_forward is False:
             self.assertEqual(len(bwd_comm_counts), 1)
         else:
-            # 2 means two types of collectives (all-gather, reduce-scatter)
+            # The root always does not reshard after forward
             self.assertEqual(len(bwd_comm_counts), 2)
-            self.assertEqual(bwd_comm_counts[c10d_ops._allgather_base_], num_blocks + 1)
+            self.assertEqual(bwd_comm_counts[c10d_ops._allgather_base_], num_blocks)
         self.assertEqual(
             bwd_comm_counts[c10d_ops._reduce_scatter_base_], num_blocks + 1
         )
@@ -478,20 +478,13 @@ class TestFullyShardCommunication(FSDPTest):
         with CommDebugMode() as bwd_comm_mode:
             loss.sum().backward()
         bwd_comm_counts = bwd_comm_mode.get_comm_counts()
-        # If recurse is False, set_reshard_after_forward only affects the root module
-        if set_reshard_after_forward:
+        # If recurse is False, set_reshard_after_forward only affects the root module,
+        # resulting in comm_counts identical to those without set_reshard_after_forward.
+        if recurse == set_reshard_after_forward:
             self.assertEqual(len(bwd_comm_counts), 2)
-            self.assertEqual(
-                bwd_comm_counts[c10d_ops._allgather_base_],
-                num_blocks + 1 if recurse else 1,
-            )
+            self.assertEqual(bwd_comm_counts[c10d_ops._allgather_base_], num_blocks)
         else:
-            if recurse:
-                self.assertEqual(len(bwd_comm_counts), 1)
-            else:
-                self.assertEqual(len(bwd_comm_counts), 2)
-                self.assertEqual(bwd_comm_counts[c10d_ops._allgather_base_], num_blocks)
-
+            self.assertEqual(len(bwd_comm_counts), 1)
         self.assertEqual(
             bwd_comm_counts[c10d_ops._reduce_scatter_base_], num_blocks + 1
         )
@@ -551,7 +544,8 @@ class TestFullyShardPrefetch(FSDPTest):
                 events.clear()
                 loss.sum().backward()
                 expected_events = [
-                    ("unshard", "", TrainingState.PRE_BACKWARD),
+                    # Root does not reshard after forward so there is no
+                    # unshard event for it in backward
                     ("unshard", "layers.2", TrainingState.PRE_BACKWARD),
                     # Explicit backward prefetching moves the unshards early
                     # by one module (note how swapping each unshard down one
@@ -596,14 +590,15 @@ class TestFullyShardPrefetch(FSDPTest):
                 ("unshard", "layers.0", TrainingState.FORWARD),
                 ("unshard", "layers.1", TrainingState.FORWARD),
                 ("unshard", "layers.2", TrainingState.FORWARD),
-                ("unshard", "", TrainingState.FORWARD),  # root
+                # Root does not reshard after forward so there is not another
+                # unshard event for it
                 ("unshard", "layers.0", TrainingState.FORWARD),
                 ("unshard", "layers.1", TrainingState.FORWARD),
                 ("unshard", "layers.2", TrainingState.FORWARD),
             ]
             if reshard_after_forward is False:
                 # No reshard after forward means no second set of unshards
-                expected_events = expected_events[:-4]
+                expected_events = expected_events[:-3]
             self.assertEqual(events, expected_events)
             events.clear()
             (loss1 + loss2).sum().backward()
@@ -613,7 +608,6 @@ class TestFullyShardPrefetch(FSDPTest):
                 # final callback (since the input not requiring gradient means
                 # that we do not have a tensor on which to hook for
                 # post-backward)
-                ("unshard", "", TrainingState.PRE_BACKWARD),
                 ("unshard", "layers.2", TrainingState.PRE_BACKWARD),
                 ("unshard", "layers.1", TrainingState.PRE_BACKWARD),
                 ("post_backward", "layers.2", TrainingState.POST_BACKWARD),
@@ -738,7 +732,6 @@ class TestFullyShardPrefetch(FSDPTest):
         )
         expected_backward_events = [
             # Default backward prefetching
-            ("unshard", "", TrainingState.PRE_BACKWARD),
             ("unshard", "layers.3", TrainingState.PRE_BACKWARD),
             ("unshard", "layers.2", TrainingState.PRE_BACKWARD),
             ("reshard", "layers.3", TrainingState.POST_BACKWARD),
@@ -770,7 +763,6 @@ class TestFullyShardPrefetch(FSDPTest):
                 ("unshard", "layers.3", TrainingState.FORWARD),
                 ("reshard", "layers.2", TrainingState.FORWARD),
                 ("reshard", "layers.3", TrainingState.FORWARD),
-                ("reshard", "", TrainingState.FORWARD),
             ]
             self.assertEqual(events, expected_forward_events)
             events.clear()
@@ -791,7 +783,6 @@ class TestFullyShardPrefetch(FSDPTest):
                 ("reshard", "layers.1", TrainingState.FORWARD),
                 ("reshard", "layers.2", TrainingState.FORWARD),
                 ("reshard", "layers.3", TrainingState.FORWARD),
-                ("reshard", "", TrainingState.FORWARD),
             ]
             self.assertEqual(events, expected_forward_events)
             events.clear()
@@ -840,7 +831,6 @@ class TestFullyShardPrefetch(FSDPTest):
             ("reshard", "layers.2", TrainingState.FORWARD),
             ("unshard", "layers.3", TrainingState.FORWARD),
             ("reshard", "layers.3", TrainingState.FORWARD),
-            ("reshard", "", TrainingState.FORWARD),
         ]
         with patch_unshard(unshard_with_record), patch_reshard(
             reshard_with_record
@@ -851,7 +841,6 @@ class TestFullyShardPrefetch(FSDPTest):
             events.clear()
             loss.sum().backward()
             expected_backward_events = [
-                ("unshard", "", TrainingState.PRE_BACKWARD),
                 # Root prefetches `layers.3` per default
                 ("unshard", "layers.3", TrainingState.PRE_BACKWARD),
                 # `layers.i` prefetches for `layers.i-1` (same as default)
@@ -878,7 +867,6 @@ class TestFullyShardPrefetch(FSDPTest):
             events.clear()
             loss.sum().backward()
             expected_backward_events = [
-                ("unshard", "", TrainingState.PRE_BACKWARD),
                 # Root prefetches `layers.3` per default
                 ("unshard", "layers.3", TrainingState.PRE_BACKWARD),
                 # `layers.i` prefetches for `layers.i-1` and `layers.i-2`
