@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSProfiler.h>
+// #include <ATen/native/Activation.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
@@ -81,6 +82,10 @@ static void log1p_kernel_mps(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "log1p");
 }
 
+static void sigmoid_kernel_mps(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "sigmoid");
+}
+
 REGISTER_DISPATCH(exp_stub, exp_kernel);
 REGISTER_DISPATCH(erfinv_stub, erfinv_kernel);
 REGISTER_DISPATCH(sinc_stub, sinc_kernel);
@@ -98,4 +103,5 @@ REGISTER_DISPATCH(log10_stub, log10_kernel_mps);
 REGISTER_DISPATCH(log2_stub, log2_kernel_mps);
 REGISTER_DISPATCH(log_stub, log_kernel_mps);
 REGISTER_DISPATCH(log1p_stub, log1p_kernel_mps);
+REGISTER_DISPATCH(sigmoid_stub, sigmoid_kernel_mps);
 } // namespace at::native
