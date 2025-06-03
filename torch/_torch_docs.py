@@ -6648,7 +6648,7 @@ dimension(s) :attr:`dim`.
     The difference between ``max``/``min`` and ``amax``/``amin`` is:
         - ``amax``/``amin`` supports reducing on multiple dimensions,
         - ``amax``/``amin`` does not return indices,
-        - ``amax``, ``amin``, ``max(dim)``,``min(dim)` evenly distributes gradient between equal values 
+        - ``amax``, ``amin``, ``max(dim)``, ``min(dim)` evenly distributes gradient between equal values 
         when there are multiple input elements with the same minimum or maximum value.
 
 {keepdim_details}
@@ -7255,7 +7255,7 @@ dimension(s) :attr:`dim`.
     The difference between ``max``/``min`` and ``amax``/``amin`` is:
         - ``amax``/``amin`` supports reducing on multiple dimensions,
         - ``amax``/``amin`` does not return indices,
-        - ``amax``, ``amin``, ``max(dim)``,``min(dim)` evenly distributes gradient between equal values 
+        - ``amax``, ``amin``, ``max(dim)``, ``min(dim)` evenly distributes gradient between equal values 
         when there are multiple input elements with the same minimum or maximum value.
 
 {keepdim_details}
