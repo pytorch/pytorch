@@ -22,6 +22,7 @@ if torch.backends.mps.is_available():
         SUPPORTED_COMPLEX_OPS = {
             "__radd__",
             "__rmul__",
+            "__rsub__",
             "__getitem__",
             "_unsafe_masked_index",
             "abs",
@@ -66,6 +67,7 @@ if torch.backends.mps.is_available():
             "H",
             "hsplit",
             "imag",
+            "index_copy",
             "index_select",
             "isfinite",
             "isinf",
@@ -75,6 +77,7 @@ if torch.backends.mps.is_available():
             "linalg.diagonal",
             "linalg.svd",
             "log10",
+            "log1p",
             "log2",
             "log",
             "mH",
@@ -96,6 +99,7 @@ if torch.backends.mps.is_available():
             "nn.functional.conv2d",
             "nn.functional.conv_transpose1d",
             "nn.functional.conv_transpose2d",
+            "nn.functional.conv_transpose3d",
             "nn.functional.feature_alpha_dropoutwithout_train",
             "nn.functional.padcircular",
             "nn.functional.softsign",
@@ -116,6 +120,7 @@ if torch.backends.mps.is_available():
             "resolve_conj",
             "resolve_neg",
             "rsqrt",
+            "rsub",
             "scalar_tensor",
             "select",
             "sgn",
@@ -233,7 +238,6 @@ if torch.backends.mps.is_available():
             "linalg.pinv",
             "linspace",
             "linspacetensor_overload",
-            "log1p",
             "logical_and",
             "logical_not",
             "logical_or",
@@ -375,8 +379,6 @@ if torch.backends.mps.is_available():
             "linalg.eig": None,
             "linalg.eigvals": None,
             "put": None,
-            "nn.functional.conv_transpose3d": None,
-            "__rsub__": None,
             "cauchy_": None,
             "cauchy": None,
             "cholesky_inverse": None,
@@ -391,7 +393,6 @@ if torch.backends.mps.is_available():
             "heaviside": None,
             "igamma": None,
             "igammac": None,
-            "index_copy": None,
             "index_reduceprod": None,
             "index_reducemean": None,
             "index_reduceamax": None,
@@ -448,7 +449,6 @@ if torch.backends.mps.is_available():
             "ormqr": None,
             "pca_lowrank": None,
             "qr": None,
-            "rsub": None,
             "scatter_reduceamax": [torch.int32, torch.int64]
             if MACOS_VERSION < 15.0
             else [torch.int64],
@@ -507,59 +507,15 @@ if torch.backends.mps.is_available():
             "nn.functional.conv3d": [torch.int64],
             "nn.functional.conv_transpose1d": [torch.int64],
             "nn.functional.conv_transpose2d": [torch.int64, torch.bfloat16],
+            "nn.functional.conv_transpose3d": [
+                torch.int64,
+                torch.bfloat16,
+                torch.float16,
+            ],
             # Unsupported dtypes
             "dot": [torch.int64] if MACOS_VERSION < 14.0 else [],
             "histc": [torch.float16, torch.bfloat16],
             "index_add": [torch.int64],
-            # Operations not supported for integral types
-            "special.xlog1py": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
-            "special.zeta": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
-            "special.chebyshev_polynomial_t": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
-            "special.chebyshev_polynomial_u": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
-            "special.hermite_polynomial_h": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
-            "special.hermite_polynomial_he": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
             # GEMM on MPS is not supported for integral types
             "nn.functional.linear": [
                 torch.int16,
@@ -581,7 +537,6 @@ if torch.backends.mps.is_available():
             "mat": [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
             "matmul": [torch.int64] if MACOS_VERSION < 14.0 else [],
             "__rmatmul__": [torch.int64] if MACOS_VERSION < 14.0 else [],
-            "unravel_index": [torch.int32, torch.int64],
             # returned output on CPU is float64
             "bincount": [
                 torch.int16,
@@ -590,8 +545,6 @@ if torch.backends.mps.is_available():
                 torch.uint8,
                 torch.int8,
             ],
-            # trunc_tensor not working properly for float16 and bfloat16
-            "fmod": [torch.float16],
             # round not working properly for float16 and bfloat16
             "round": [torch.float16, torch.bfloat16],
             "rounddecimals_0": [torch.bfloat16],
@@ -928,8 +881,6 @@ if torch.backends.mps.is_available():
             "signal.windows.kaiser": [torch.float32],
             "signal.windows.nuttall": [torch.float32],
             "eye": [torch.float16, torch.float32],
-            # trunc_tensor not working properly for float16
-            "fmod": [torch.float16],
             # round not working properly for float16
             "round": [torch.float16],
             # topk fails with duplicate indices
@@ -942,7 +893,6 @@ if torch.backends.mps.is_available():
             "masked.softmax": [torch.float32, torch.float16],
             "masked.log_softmax": [torch.float32, torch.float16],
             "atanh": [torch.float16],
-            "__rmod__": [torch.float16],
             "triangular_solve": [torch.float32],
             # Unsupported Border padding mode, forward pass success as fallback to cpu
             "grid_sampler_2d": [torch.float32, torch.float16, torch.bfloat16],
