@@ -1,4 +1,5 @@
 import os
+import sys
 
 
 os.environ["TORCH_LOGS"] = "inductor"
@@ -13,10 +14,10 @@ from typing import Any, Callable, Optional
 
 from tabulate import tabulate
 from tqdm import tqdm
-from triton.testing import do_bench
 
 import torch
 from torch._inductor import config as inductor_config
+from torch._inductor.utils import do_bench_using_profiling
 
 
 log: logging.Logger = logging.getLogger(__name__)
@@ -32,8 +33,8 @@ inductor_config.autotune_local_cache = False
 UNITS = {
     "name": "",
     "forward_time": " (us)",
-    "compilation_time": " (s)",
     "teraflops": " (TFLOPS)",
+    "compilation_time": " (s)",
 }
 PERF_OVER_ATEN_STR: str = "perf_over_aten (%)"
 
@@ -76,7 +77,10 @@ CUTLASS_INSTANTIATION_LEVELS = [
 
 
 def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:
-    return do_bench(lambda: func(*args, **kwargs), warmup=100, rep=10000) * 1e3
+    return (
+        do_bench_using_profiling(lambda: func(*args, **kwargs), warmup=100, rep=10000)
+        * 1e3
+    )
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -163,6 +167,7 @@ class ExperimentGroupConfig:
 class ExperimentResults:
     name: str
     forward_time: float
+    teraflops: float
     compilation_time: float
 
     def asdict(self):
@@ -213,7 +218,8 @@ def run_single_experiment_group(
         torch._dynamo.reset()
         torch._inductor.utils.clear_inductor_caches()
         compiled_op = torch.compile(
-            op, fullgraph=True, options=config.to_options(), dynamic=False
+            op,
+            options=config.to_options(),
         )
 
         start_time = time.perf_counter()
@@ -230,6 +236,7 @@ def run_single_experiment_group(
                 ExperimentResults(
                     name=config.name(),
                     forward_time=float("inf"),
+                    teraflops=0.0,
                     compilation_time=float("inf"),
                 )
             )
@@ -241,10 +248,18 @@ def run_single_experiment_group(
             *inputs,
         )
 
+        flops = calculate_flops(
+            group_config.op_name,
+            group_config.shape,
+            group_config.batch_size,
+        )
+        teraflops = flops / (forward_time * 1e-6) / 1e12
+
         results.append(
             ExperimentResults(
                 name=config.name(),
                 forward_time=forward_time,
+                teraflops=teraflops,
                 compilation_time=compilation_time,
             )
         )
@@ -315,7 +330,7 @@ def generate_experiment_configs(
     return configs
 
 
-def calculate_table_data(results: list[ExperimentResults], flops: int) -> dict:
+def calculate_table_data(results: list[ExperimentResults]) -> dict:
     table_data = defaultdict(list)
     aten_perf: Optional[float] = None
 
@@ -323,15 +338,6 @@ def calculate_table_data(results: list[ExperimentResults], flops: int) -> dict:
         for key, value in experiment_result.asdict().items():
             assert key in UNITS, f"Unknown key {key}"
             table_data[key + UNITS[key]].append(value)
-
-        # Calculate teraflops: flops / latency
-        # forward_time is in microseconds, so convert to seconds for TFLOPS calculation
-        if experiment_result.forward_time != float("inf"):
-            # flops operations / (latency in seconds)
-            teraflops = flops / (experiment_result.forward_time * 1e-6) / 1e12
-            table_data["teraflops" + UNITS["teraflops"]].append(teraflops)
-        else:
-            table_data["teraflops" + UNITS["teraflops"]].append(float("inf"))
 
         if experiment_result.name == "aten":
             aten_perf = experiment_result.forward_time
@@ -370,14 +376,7 @@ def get_printable_results(experiment_groups: list[ExperimentGroup]) -> list[str]
         group_config_name = experiment_group.config.name()
         output.append(f"\nExperiment group: {group_config_name}")
 
-        # Calculate flops using the helper function
-        flops = calculate_flops(
-            experiment_group.config.op_name,
-            experiment_group.config.shape,
-            experiment_group.config.batch_size,
-        )
-
-        table_data = calculate_table_data(experiment_group.results, flops)
+        table_data = calculate_table_data(experiment_group.results)
         for name, edge in zip(table_data["name"], table_data[PERF_OVER_ATEN_STR]):
             edge_over_aten[name].append(edge)
         output.append(
@@ -423,8 +422,10 @@ def main():
         results.append(
             ExperimentGroup(config=group_config, results=group_results),
         )
-        log.info(f"\nINTERMEDIATE results: {i}/{len(configs)}")  # noqa: G004
-        log.info(get_printable_results(results))
+        sys.stderr.write(
+            f"\nINTERMEDIATE results: {i + 1}/{len(configs)} \n"
+            + get_printable_results(results)
+        )
     print("\nFINAL results...")
     print(get_printable_results(results))
 
