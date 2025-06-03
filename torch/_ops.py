@@ -7,7 +7,6 @@ import inspect
 import sys
 import types
 from typing import Any, Callable, final, Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import Concatenate, ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
@@ -15,6 +14,7 @@ from torch import _utils_internal
 from torch._C import _dispatch_is_included_in_alias as is_included_in_alias, DispatchKey
 from torch._functorch.pyfunctorch import dispatch_functorch, TransformType
 from torch.utils._python_dispatch import TorchDispatchMode
+from typing_extensions import Concatenate, ParamSpec
 
 
 if TYPE_CHECKING:
@@ -133,9 +133,9 @@ class OperatorBase:
                 return fn
 
             assert isinstance(k, DispatchKey)
-            assert k != DispatchKey.Python, (
-                "Please register a mode for the DispatchKey.Python key instead."
-            )
+            assert (
+                k != DispatchKey.Python
+            ), "Please register a mode for the DispatchKey.Python key instead."
 
             if k in self.py_kernels:
                 raise RuntimeError(
@@ -351,7 +351,9 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     def dispatch(self, /, dispatch_key, *args, **kwargs):
         from torch.utils._python_dispatch import _get_current_dispatch_mode
 
+        print(f"Check cache for {self} at {dispatch_key}")
         if dispatch_key in self._dispatch_cache:
+            print(f"Cache hit for {self} at {dispatch_key}")
             kernel = self._dispatch_cache[dispatch_key]
             assert not isinstance(kernel, DispatchKey)
             return kernel(*args, **kwargs)
@@ -385,11 +387,13 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
 
             curr_mode = _get_current_dispatch_mode()
             if curr_mode is not None:
+                print(f"curr_mode = {curr_mode}")
                 if type(curr_mode) in self.python_key_table:
                     handler = self.python_key_table[type(curr_mode)]
                     with _pop_mode_temporarily() as mode:
                         # "natural" calling convention: (mode, *args, **kwargs)
                         # TODO(rzou): we should support torch_dispatch calling convention too.
+                        print(f"handler mode = {mode}")
                         result = handler(mode, *args, **kwargs)
                 else:
                     raise NotImplementedError(
@@ -452,12 +456,12 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                 DispatchKey.Python
             ):
                 curr_mode = _get_current_dispatch_mode_pre_dispatch()
-                assert curr_mode is not None, (
-                    "Illegal invocation of dispatch on DispatchKey.PreDispatch without a mode."
-                )
-                assert type(curr_mode) in self.python_key_table, (
-                    f"Current active mode {curr_mode} not registered"
-                )
+                assert (
+                    curr_mode is not None
+                ), "Illegal invocation of dispatch on DispatchKey.PreDispatch without a mode."
+                assert (
+                    type(curr_mode) in self.python_key_table
+                ), f"Current active mode {curr_mode} not registered"
                 handler = self.python_key_table[type(curr_mode)]
                 with _pop_mode_temporarily(functionality_key) as mode:
                     return handler(mode, *args, **kwargs)
@@ -488,12 +492,27 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     def __call__(self, /, *args, **kwargs):
         def wrapper():
             flat_args = _to_flat_tuple(args, kwargs)
-            if torch.overrides.has_torch_function(flat_args):
+            print(self)
+            if (
+                torch.overrides.has_torch_function(flat_args)
+                or torch.overrides._is_torch_function_mode_enabled()
+            ):
+                from torch.utils._python_dispatch import _get_current_dispatch_mode
+
+                print(
+                    f"handle_torch_function at pre_dispatch mode {_get_current_dispatch_mode_pre_dispatch()} and mode {_get_current_dispatch_mode()}"
+                )
+                """
+                raise RuntimeError(
+                    "HigherOrderOperator does not support torch_function yet."
+                )
+                """
                 return torch.overrides.handle_torch_function(
                     self, flat_args, *args, **kwargs
                 )
 
             dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
+            print(f"dispatch_key_set = {dispatch_key_set}")
             return self.dispatch(
                 dispatch_key_set.highestPriorityTypeId(), *args, **kwargs
             )
@@ -878,9 +897,9 @@ class OpOverload(OperatorBase):
                 # TODO: We also need to handle tensor subclasses here
                 # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
                 curr_mode = type(_get_current_dispatch_mode())
-                assert curr_mode is not None, (
-                    "Illegal invocation of dispatch on DispatchKey.Python without a mode."
-                )
+                assert (
+                    curr_mode is not None
+                ), "Illegal invocation of dispatch on DispatchKey.Python without a mode."
 
                 if curr_mode not in self.python_key_table:
                     if isinstance(self, TorchBindOpOverload):

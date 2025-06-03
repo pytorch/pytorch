@@ -1474,7 +1474,12 @@ def _context_parallel(
             kwargs = kwargs or {}
 
             if func != self._fn:
+                if func.__name__ == "flex_attention":
+                    raise RuntimeError("hop is hit")
+
                 return func(*args, **kwargs)
+
+            raise RuntimeError("hop is hit")
 
             if self._input_fn is not None:
                 args, kwargs = self._input_fn(self._device_mesh, *args, **kwargs)

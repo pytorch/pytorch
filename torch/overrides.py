@@ -30,7 +30,6 @@ import warnings
 from collections.abc import Iterable
 from functools import wraps
 from typing import Any, Callable, Optional, TypeVar
-from typing_extensions import ParamSpec
 
 import torch
 from torch._C import (
@@ -44,6 +43,7 @@ from torch._C import (
     _pop_torch_function_stack,
     _push_on_torch_function_stack,
 )
+from typing_extensions import ParamSpec
 
 
 __all__ = [
@@ -1721,7 +1721,13 @@ def handle_torch_function(
     if _is_torch_function_mode_enabled():
         # if we're here, the mode must be set to a TorchFunctionStackMode
         # this unsets it and calls directly into TorchFunctionStackMode's torch function
+        print(
+            f"_get_current_function_mode_stack = {_get_current_function_mode_stack()}"
+        )
         with _pop_mode_temporarily() as mode:
+            print(
+                f"calling {mode} torch function for {public_api.__name__} {public_api}"
+            )
             result = mode.__torch_function__(public_api, types, args, kwargs)
         if result is not NotImplemented:
             return result
@@ -1809,9 +1815,9 @@ has_torch_function_variadic = _add_docstr(
 
 
 @functools.lru_cache(None)
-def _get_overridable_functions() -> tuple[
-    dict[Any, list[Callable]], dict[Callable, str]
-]:
+def _get_overridable_functions() -> (
+    tuple[dict[Any, list[Callable]], dict[Callable, str]]
+):
     overridable_funcs = collections.defaultdict(list)
     index = {}
     tested_namespaces = [

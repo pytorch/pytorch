@@ -555,6 +555,46 @@ class RingFlexAttentionTest(DTensorTestBase):
 
         torch.cuda.memory._record_memory_history(max_entries=100000)
 
+        from typing import Any, Callable, Optional, Protocol, Union
+
+        from torch.overrides import TorchFunctionMode
+
+        class DistributeFunction(TorchFunctionMode):
+            def __init__(
+                self,
+                device_mesh: DeviceMesh,
+            ):
+                self._device_mesh = device_mesh
+
+            def __torch_function__(
+                self,
+                func: Callable,
+                types: Any,
+                args: tuple[Any, ...] = (),
+                kwargs: Optional[dict[str, Any]] = None,
+            ) -> Any:
+                kwargs = kwargs or {}
+
+                if (
+                    hasattr(func, "namespace")
+                    and getattr(func, "namespace") == "higher_order"
+                ):
+                    return None
+
+                return func(*args, **kwargs)
+
+        with DistributeFunction(device_mesh):
+            cp_out, cp_lse = flex_attention(
+                q,
+                k,
+                v,
+                block_mask=block_mask_post_sharding,
+                return_lse=True,
+            )
+            # cp_out.sum().backward()
+
+        """
+        _set_dispatch_mode("torch_function")
         with context_parallel(
             device_mesh,
             buffers=[cp_q, cp_k, cp_v],
@@ -564,6 +604,7 @@ class RingFlexAttentionTest(DTensorTestBase):
             cp_q.requires_grad = True
             cp_k.requires_grad = True
             cp_v.requires_grad = True
+            print("calling flex_attention from context_parallel")
             cp_out, cp_lse = flex_attention(
                 cp_q,
                 cp_k,
@@ -576,7 +617,7 @@ class RingFlexAttentionTest(DTensorTestBase):
             cp_q.requires_grad = False
             cp_k.requires_grad = False
             cp_v.requires_grad = False
-
+        """
         try:
             if self.rank == 0:
                 import pickle

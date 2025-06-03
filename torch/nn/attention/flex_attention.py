@@ -1380,6 +1380,7 @@ def flex_attention(
             torch._dynamo.mark_static(x, -3)
             torch._dynamo.mark_static(x, -1)
 
+        # Xilun: goes here
         out, lse = flex_attention_hop(
             query, key, value, score_mod, block_mask.as_tuple(), scale, kernel_options  # type: ignore[union-attr]
         )
@@ -1410,6 +1411,7 @@ def flex_attention(
                         )
                     else:
                         backend = "eager"
+                    raise RuntimeError()
                     out, lse = torch.compile(
                         _flex_attention_hop_wrapper, backend=backend, fullgraph=True
                     )(
