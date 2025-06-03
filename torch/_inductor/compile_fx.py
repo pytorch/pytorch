@@ -102,11 +102,7 @@ from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .exc import InductorError
 from .fx_passes.joint_graph import joint_graph_passes
-from .fx_passes.post_grad import (
-    move_cpu_scalar_tensor_to_cuda,
-    post_grad_passes,
-    view_to_reshape,
-)
+from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .ir import get_device_type, IRNode
@@ -1135,16 +1131,6 @@ class _InProcessFxCompile(FxCompile):
             # trace_structured("inductor_input_graph", payload_fn=lambda: gm.print_readable(print_output=False))
 
             shape_env = shape_env_from_inputs(example_inputs)
-
-            # cudagraph does not support cpu tensors. In this pass, we update the graph
-            # by explicitly moving cpu tensors to gpu when profitable, relying on
-            # graph partition to split off this data copy, and cudagraphifying
-            # the remaining gpu ops.
-            if (
-                torch._inductor.config.triton.cudagraphs
-                and torch._inductor.config.graph_partition
-            ):
-                move_cpu_scalar_tensor_to_cuda(gm)
 
             # Convert view to reshape in the graph. This is necessary primarily for
             # layout optimization. Do it unconditionally for uniformity.
