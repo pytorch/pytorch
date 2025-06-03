@@ -41,14 +41,23 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.sparse import SparseSemiStructuredTensor, to_sparse_semi_structured
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FP8,
+    SM80OrLater,
+    SM90OrLater,
+)
 from torch.testing._internal.common_utils import (
     IN_RE_WORKER,
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import (
+    _quantize_rowwise,
+    _quantize_tensorwise,
+    HAS_CPU,
+    HAS_CUDA,
+)
 
 
 torch.set_float32_matmul_precision("high")
@@ -120,10 +129,19 @@ use_evt_config = config.patch(
         "max_autotune": True,
         "max_autotune_gemm_backends": "CUTLASS",
         "cuda.cutlass_max_profiling_configs": 1,
-        "autotune_fallback_to_aten": False,
         "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
         "cuda.cutlass_tma_only": True,
         "cuda.cutlass_epilogue_fusion_enabled": True,
+    }
+)
+
+fp8_config = config.patch(
+    {
+        "max_autotune": True,
+        "max_autotune_gemm_backends": "CUTLASS",
+        "cuda.cutlass_max_profiling_configs": 1,
+        "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
+        "cuda.cutlass_tma_only": True,
     }
 )
 
@@ -249,7 +267,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
                 "cuda.cutlass_max_profiling_configs": 4,
-                "autotune_fallback_to_aten": False,
             }
         ):
             Y_compiled = torch.compile(torch.mm)(a, b)
@@ -288,7 +305,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
                 "cuda.cutlass_max_profiling_configs": 4,
-                "autotune_fallback_to_aten": False,
             }
         ):
             for x_shape in x_shapes:
@@ -316,7 +332,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
                 "cuda.cutlass_max_profiling_configs": 4,
-                "autotune_fallback_to_aten": False,
             }
         ):
             Y_compiled = torch.compile(torch.bmm)(a, b)
@@ -349,7 +364,6 @@ class TestCutlassBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 1,
-                "autotune_fallback_to_aten": False,
             }
         ):
             from torch._inductor.utils import run_and_get_code
@@ -392,7 +406,6 @@ class TestCutlassBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 1,
-                "autotune_fallback_to_aten": False,
                 "cuda.cutlass_max_profiling_swizzle_options": [
                     1,
                     2,
@@ -462,7 +475,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
             }
         ), dynamo_config.patch({"error_on_recompile": dynamic}):
             expected = [model(*input) for input in inputs]
@@ -540,7 +552,6 @@ class TestCutlassBackend(TestCase):
                     "max_autotune": True,
                     "max_autotune_gemm_backends": max_autotune_gemm_backends,
                     "cuda.cutlass_max_profiling_configs": 2,
-                    "autotune_fallback_to_aten": False,
                 }
             ), dynamo_config.patch({"error_on_recompile": dynamic}):
                 expected = [model(*input) for input in inputs]
@@ -602,7 +613,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
             }
         ):
             expected = [model(*input) for input in inputs]
@@ -637,7 +647,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
                 "cuda.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
-                "autotune_fallback_to_aten": False,
             }
         ):
             for M, K, N in (
@@ -693,7 +702,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 4,
                 "cuda.version": "12.2",  # required to enable the Kernels we need
-                "autotune_fallback_to_aten": False,
             }
         ):
             counters["inductor"]["cuda_epilogue_fusion_counter"] = 0
@@ -792,7 +800,6 @@ class TestCutlassBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
             }
         ):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
@@ -811,7 +818,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "autotune_fallback_to_aten": False,
                 "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
@@ -850,7 +856,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "autotune_fallback_to_aten": False,
                 "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
@@ -884,7 +889,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "autotune_fallback_to_aten": False,
                 "cuda.cutlass_op_allowlist_regex": "128x256x64.*stream_k_warpspecialized_cooperative_epi_nosmem",
                 "cuda.cutlass_max_profiling_configs": 1,
             }
@@ -931,7 +935,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": "CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 2,
                 "autotune_local_cache": True,
-                "autotune_fallback_to_aten": False,
             }
         ):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a_sparse, b)
@@ -1087,7 +1090,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
             }
         ), mock.patch(
             "torch._inductor.kernel.mm.autotune_select_algorithm",
@@ -1146,7 +1148,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
                 "cuda.cutlass_presets": presets,
             }
         ), mock.patch(
@@ -1252,7 +1253,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
                 "cuda.generate_test_runner": True,  # put standalone runner in the generated code
             }
         ):
@@ -1369,7 +1369,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
             }
         ):
             compiled = torch.compile(torch.mm)
@@ -1393,7 +1392,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 1,
-                "autotune_fallback_to_aten": False,
             }
         ):
             _ = torch.compile(model)(B)
@@ -1416,7 +1414,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 1,
-                "autotune_fallback_to_aten": False,
             }
         ):
             _ = torch.compile(model)(B)
@@ -1642,6 +1639,155 @@ class TestCutlassBackend(TestCase):
                         self.assertTrue(_check_if_instances_equal(op, deserialized))
 
         self.assertGreater(count, 1000, "Too few ops generated")
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @fp8_config
+    @parametrize("float8_dtype", (torch.float8_e4m3fn,))
+    @parametrize(
+        "shape",
+        (
+            (
+                16,
+                16,
+                32,
+            ),
+        ),
+    )
+    @parametrize("has_bias", (False,))
+    @parametrize("use_fast_accum", (False,))
+    def test_fp8_rowwise_scaling(
+        self,
+        float8_dtype: torch.dtype,
+        shape: tuple[int, int, int],
+        has_bias: bool,
+        use_fast_accum: bool,
+    ):
+        # Only bf16 output type is supported for row-wise scaling, not fp32
+        output_dtype: torch.dtype = torch.bfloat16
+        device = "cuda"
+        M, K, N = shape  # Matmul Y = X [M, K] x W [N, K]
+        x = torch.randn(M, K, dtype=output_dtype, device=device)
+        w = torch.randn(N, K, dtype=output_dtype, device=device)
+        bias = None
+        if has_bias:
+            bias = torch.randn(N, device=device, dtype=torch.bfloat16)
+
+        # quantize weight (prior to inference)
+        w_fp8, w_inverse_scale = _quantize_rowwise(w, float8_dtype)
+        w_t_fp8 = w_fp8.t()
+        w_inverse_scale = w_inverse_scale.t()  # scale_b should be (1, N)
+
+        # quantize input x
+        x_fp8, x_inverse_scale = _quantize_rowwise(x, float8_dtype)
+
+        def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
+            y = torch._scaled_mm(
+                x_fp8,
+                w_t_fp8,
+                x_inverse_scale,
+                w_inverse_scale,
+                bias,
+                out_dtype=output_dtype,
+                use_fast_accum=use_fast_accum,
+            )
+            return y
+
+        y_eager = linear(
+            x_fp8,
+            x_inverse_scale,
+            w_t_fp8,
+            w_inverse_scale,
+            bias,
+        )
+        linear_compiled = torch.compile(linear, backend="inductor")
+        y_compiled = linear_compiled(
+            x_fp8,
+            x_inverse_scale,
+            w_t_fp8,
+            w_inverse_scale,
+            bias,
+        )
+        self.assertEqual(y_eager.dtype, output_dtype)
+        self.assertEqual(y_compiled.dtype, output_dtype)
+        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @fp8_config
+    @parametrize("float8_dtype", (torch.float8_e4m3fn,))
+    @parametrize(
+        "shape",
+        (
+            (
+                16,
+                16,
+                32,
+            ),
+        ),
+    )
+    @parametrize("has_bias", (False,))
+    @parametrize("use_fast_accum", (False,))
+    def test_fp8_tensorwise_scaling(
+        self,
+        float8_dtype: torch.dtype,
+        shape: tuple[int, int, int],
+        has_bias: bool,
+        use_fast_accum: bool,
+    ):
+        device = "cuda"
+        M, K, N = shape  # Matmul Y = X [M, K] x W [N, K]
+        input_dtype = torch.bfloat16
+        output_dtype = torch.bfloat16
+        # input and output dtypes of _scaled_mm do not need to be the same, but
+        # typically in a model they are
+        x = torch.randn(M, K, dtype=input_dtype, device=device)
+        w = torch.randn(N, K, dtype=input_dtype, device=device)
+        bias = None
+        if has_bias:
+            bias = torch.randn(N, device=device, dtype=torch.bfloat16)
+
+        # quantize weight (prior to inference)
+        w_fp8, w_inverse_scale = _quantize_tensorwise(w, float8_dtype)
+        w_t_fp8 = w_fp8.t()
+
+        # quantize input x
+        x_fp8, x_inverse_scale = _quantize_tensorwise(x, float8_dtype)
+
+        def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
+            y = torch._scaled_mm(
+                x_fp8,
+                w_t_fp8,
+                x_inverse_scale,
+                w_inverse_scale,
+                bias,
+                out_dtype=output_dtype,
+                use_fast_accum=use_fast_accum,
+            )
+            return y
+
+        y_eager = linear(
+            x_fp8,
+            x_inverse_scale,
+            w_t_fp8,
+            w_inverse_scale,
+            bias,
+        )
+        linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
+        y_compiled = linear_compiled(
+            x_fp8,
+            x_inverse_scale,
+            w_t_fp8,
+            w_inverse_scale,
+            bias,
+        )
+        self.assertEqual(y_eager.dtype, output_dtype)
+        self.assertEqual(y_compiled.dtype, output_dtype)
+        # depending on the kernel config (BLOCK_M size, etc) selected during Inductor
+        # autotuning for the compiled case, the results can be different because of
+        # the way blocks of results are accumulated (float addition not associative), so
+        # setting a small absolute tolerance in these tests
+        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
 
 if __name__ == "__main__":

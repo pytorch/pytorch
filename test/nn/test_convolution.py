@@ -1797,7 +1797,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(expect, actual)
 
     @dtypes(torch.float, torch.cfloat)
-    @dtypesIfMPS(torch.float)
+    @dtypesIfMPS(
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
+    )  # Complex not supported on MacOS13
     def test_conv1d_same_padding_backward(self, device, dtype):
         # Test F.conv1d gradients work with padding='same'
         x = torch.rand(1, 1, 12, dtype=dtype, device=device, requires_grad=True)
@@ -2132,9 +2134,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         arg_str="N",
         arg_values=[
             subtest(arg_values=(2), name="ConvTranspose2d"),
-            subtest(
-                arg_values=(3), name="ConvTranspose3d", decorators=[expectedFailureMPS]
-            ),
+            subtest(arg_values=(3), name="ConvTranspose3d"),
         ],
     )
     def test_conv_transpose_with_output_size_and_no_batch_dim(self, device, N):
@@ -3091,7 +3091,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
         input_large = torch.randn(1, 1, 2048, 1024, dtype=dtype, device=device)
         conv2(input_large)
 
-    @expectedFailureMPS  # ConvTranspose 3D is not supported on MPS
     def test_conv_noncontig_weights(self, device):
         for dim in (1, 2, 3):
             for grouped in (False, True):
