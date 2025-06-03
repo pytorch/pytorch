@@ -3614,6 +3614,27 @@ class TestOutOfOrderDataLoader(TestCase):
         self.assertNotEqual(data, [0, 5, 1, 6, 2, 7, 3, 8, 4, 9])
         self.assertEqual(expected_data, data)
 
+class SimpleListDataset(Dataset):
+    def __len__(self):
+        return 4
+
+    def __getitems__(self, idxs):
+        assert isinstance(idxs, list), f"Expected a list, got {type(idxs)}"
+        return [torch.tensor([i]) for i in idxs]
+
+    def __getitem__(self, idx):
+        return torch.tensor([idx])
+
+class TestDataLoaderBatchSamplerList(TestCase):
+    def test_passes_list_to_getitems(self):
+        ds = SimpleListDataset()
+        sampler = torch.utils.data.SequentialSampler(ds)
+        batch_sampler = torch.utils.data.BatchSampler(sampler, batch_size=2, drop_last=False)
+        dl = DataLoader(ds, batch_sampler=batch_sampler)
+        for batch in dl:
+            self.assertTrue(all(isinstance(t, torch.Tensor) for t in batch))
+            # Optionally, check batch length and values
+            self.assertEqual(len(batch), 2)
 
 instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
 
