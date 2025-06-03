@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
 import dataclasses
+import io
 import json
 import os
 import queue
+import struct
 from typing import Optional
 
 import fsspec  # type: ignore[import-untyped]
@@ -66,11 +68,17 @@ class _HuggingFaceStorageWriter(FsspecWriter):
         if HfFileSystem.protocol not in fsspec.available_protocols():
             fsspec.register_implementation(HfFileSystem.protocol, HfFileSystem)
 
-        super().__init__(
-            path=path,
-            token=token,
-            serialization_format=SerializationFormat.SAFETENSORS,
-        )
+        if token is not None:
+            super().__init__(
+                path=path,
+                token=token,
+                serialization_format=SerializationFormat.SAFETENSORS,
+            )
+        else:
+            super().__init__(
+                path=path,
+                serialization_format=SerializationFormat.SAFETENSORS,
+            )
         self._fqn_to_index_mapping: dict[str, int] = fqn_to_index_mapping
 
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
@@ -169,7 +177,12 @@ class _HuggingFaceStorageReader(FsspecReader):
 
         if HfFileSystem.protocol not in fsspec.available_protocols():
             fsspec.register_implementation(HfFileSystem.protocol, HfFileSystem)
-        super().__init__(path=path, token=token)
+
+        if token is not None:
+            super().__init__(path=path, token=token)
+        else:
+            super().__init__(path=path)
+
         self.storage_data: dict[str, str] = {}
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
@@ -214,22 +227,22 @@ class _HuggingFaceStorageReader(FsspecReader):
 
         if not self.fs.exists(metadata_path):
             # if metadata file doesn't exist, create it from the safetensors file
-            from safetensors.torch import safe_open  # type: ignore[import-not-found]
-
             safetensors_files = []
             for file in self.fs.ls(self.path):
                 if file.endswith(SUFFIX):
-                    safetensors_files.append(os.path.basename(file))
+                    safetensors_files.append(file)
 
             if len(safetensors_files) != 1:
                 raise ValueError(
                     f"Need exactly one safetensors file to load without metadata, found {len(safetensors_files)} files"
                 )
             storage_data = {}
-            with safe_open(safetensors_files[0], framework="pt") as f:
-                for k in f.keys():
-                    state_dict_metadata[k] = BytesStorageMetadata()
-                    storage_data[k] = safetensors_files[0]
+            with self.fs.create_stream(safetensors_files[0], "rb") as f:
+                keys = _get_safetensors_file_keys(f)
+
+            for key in keys:
+                state_dict_metadata[key] = BytesStorageMetadata()
+                storage_data[key] = os.path.basename(safetensors_files[0])
         else:
             with self.fs.create_stream(metadata_path, "r") as metadata_file:
                 metadata = json.load(metadata_file)
@@ -248,3 +261,16 @@ class _HuggingFaceStorageReader(FsspecReader):
         metadata.storage_meta.load_id = self.load_id
 
         return metadata
+
+
+def _get_safetensors_file_keys(file_bytes: io.IOBase) -> list[str]:
+    # this uses the same logic that's done in HF code base
+    # https://github.com/2404589803/huggingface_hub/blob/main/src/huggingface_hub/hf_api.py#L5308
+    # and follows their documentation on how their files are serialized
+    # https://huggingface.co/docs/safetensors/index#format
+
+    header_len_bytes = file_bytes.read(8)
+    header_len = struct.unpack("<Q", header_len_bytes)[0]
+    header_json = file_bytes.read(header_len)
+    metadata = json.loads(header_json)
+    return list(metadata.keys())

@@ -52,6 +52,7 @@ __all__ = [
     "FlatArgsAdapter",
     "UnflattenedModule",
     "AdditionalInputs",
+    "draft_export",
 ]
 
 # To make sure export specific custom ops are loaded
@@ -131,6 +132,10 @@ def export_for_training(
          to be different and the model will be serialized in the same way regardless of what value
          is passed here.
          WARNING: This option is experimental and use this at your own risk.
+
+        preserve_module_call_signature: A list of submodule paths for which the original
+         calling conventions are preserved as metadata. The metadata will be used when calling
+         torch.export.unflatten to preserve the original calling conventions of modules.
 
     Returns:
         An :class:`ExportedProgram` containing the traced callable.
@@ -247,6 +252,10 @@ def export(
          different and the model will be serialized in the same way regardless of what value
          is passed here.
 
+        preserve_module_call_signature: A list of submodule paths for which the original
+         calling conventions are preserved as metadata. The metadata will be used when calling
+         torch.export.unflatten to preserve the original calling conventions of modules.
+
     Returns:
         An :class:`ExportedProgram` containing the traced callable.
 
@@ -272,15 +281,42 @@ def export(
             "Maybe try converting your ScriptModule to an ExportedProgram "
             "using `TS2EPConverter(mod, args, kwargs).convert()` instead."
         )
-    return _export(
-        mod,
-        args,
-        kwargs,
-        dynamic_shapes,
-        strict=strict,
-        preserve_module_call_signature=preserve_module_call_signature,
-        pre_dispatch=True,
-    )
+
+    try:
+        return _export(
+            mod,
+            args,
+            kwargs,
+            dynamic_shapes,
+            strict=strict,
+            preserve_module_call_signature=preserve_module_call_signature,
+            pre_dispatch=True,
+        )
+    except Exception as e:
+        draft_export_msg = (
+            "The error above occurred when calling torch.export.export. If you would "
+            "like to view some more information about this error, and get a list "
+            "of all other errors that may occur in your export call, you can "
+            "replace your `export()` call with `draft_export()`."
+        )
+
+        # For errors that we know can be caught by draft-export, add the message
+        # to ask users to try out draft-export
+        if isinstance(
+            e,
+            (
+                torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode,
+                torch._subclasses.fake_tensor.UnsupportedOperatorException,
+                torch._dynamo.exc.UserError,
+                torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
+            ),
+        ):
+            new_msg = str(e) + "\n\n" + draft_export_msg
+            e.args = (new_msg,)
+        elif isinstance(e, RuntimeError) and "no fake impl registered" in str(e):
+            new_msg = str(e) + "\n\n" + draft_export_msg
+            e.args = (new_msg,)
+        raise e
 
 
 DEFAULT_PICKLE_PROTOCOL = 2
@@ -481,6 +517,32 @@ def load(
         ep = deserialize(artifact, expected_opset_version)
 
         return ep
+
+
+def draft_export(
+    mod: torch.nn.Module,
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]] = None,
+    *,
+    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    preserve_module_call_signature: tuple[str, ...] = (),
+    strict: bool = False,
+) -> ExportedProgram:
+    """
+    A version of torch.export.export which is designed to consistently produce
+    an ExportedProgram, even if there are potential soundness issues, and to
+    generate a report listing the issues found.
+    """
+    from ._draft_export import draft_export
+
+    return draft_export(
+        mod=mod,
+        args=args,
+        kwargs=kwargs,
+        dynamic_shapes=dynamic_shapes,
+        preserve_module_call_signature=preserve_module_call_signature,
+        strict=strict,
+    )
 
 
 def register_dataclass(

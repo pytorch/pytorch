@@ -1,8 +1,4 @@
 #pragma once
-
-// TODO: Make Fligth Recorder device agnostic
-#ifdef USE_C10D_NCCL
-
 #include <cstdio>
 #include <cstdlib>
 
@@ -10,7 +6,6 @@
 #include <mutex>
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAEvent.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <optional>
@@ -24,7 +19,7 @@ namespace c10d {
 // (minor when adding fields, major when changing existing fields)
 // Also update both JSON and Pickle dumps to make use of the newly defined
 // field(s).
-DEFINE_CONSTANT(version_val, "2.6")
+DEFINE_CONSTANT(version_val, "2.7")
 DEFINE_CONSTANT(entries_key, "entries")
 DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state")
 DEFINE_CONSTANT(nccl_version_key, "nccl_version")
@@ -88,24 +83,22 @@ class TORCH_API DebugInfoWriter {
   static std::atomic<bool> hasWriterRegistered_;
 };
 
-/* Helper used by work::getDuration() and nccl flight recorder */
-float getDurationFromEvent(
-    at::cuda::CUDAEvent& ncclStartEvent,
-    at::cuda::CUDAEvent& ncclEndEvent);
-
+template <typename EventType>
 struct FlightRecorder {
-  static FlightRecorder* get() {
+  static FlightRecorder<EventType>* get() {
     // intentionally leak on exit
     // because this will hold python state that may get destructed
-    static FlightRecorder* instance = new FlightRecorder();
+    static FlightRecorder<EventType>* instance =
+        new FlightRecorder<EventType>();
     return instance;
   }
   FlightRecorder() {
-    max_entries_ = getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
-    capture_cpp_stack_ = getCvarBool({"TORCH_NCCL_TRACE_CPP_STACK"}, false);
+    max_entries_ =
+        getCvarInt({"TORCH_FR_BUFFER_SIZE", "TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
+    capture_cpp_stack_ = getCvarBool(
+        {"TORCH_FR_CPP_STACK", "TORCH_NCCL_TRACE_CPP_STACK"}, false);
     enabled_ = max_entries_ > 0;
   }
-  using Event = at::cuda::CUDAEvent;
   struct Entry {
     size_t id_; // incremented id in the trace buffer
                 // used to figure out where in the circular entries
@@ -129,7 +122,7 @@ struct FlightRecorder {
     // we borrow pointers to start_ and end_ so we can query the state
     // on reporting. However, once the event is completed, the call
     // to `complete` will clear these.
-    Event *start_, *end_;
+    EventType *start_, *end_;
 
     // timestamp when the entry was created, likely close to the time the work
     // was 'enqueued'- not necessarily started
@@ -164,6 +157,10 @@ struct FlightRecorder {
                            // a retired but not completed event has timed out
 
     // Returns the traceback of current entry, in string form.
+    // Note: `getTraceback` invokes `torch::symbolize`, which may need to
+    // acquire the GIL. If you don't want to block the current thread or take
+    // the risk of a GIL deadlock, you can use an asynchronous calling mechanism
+    // like std::async.
     std::string getTraceback();
   };
 
@@ -188,8 +185,8 @@ struct FlightRecorder {
       std::string profiling_name,
       const std::vector<at::Tensor>& inputs,
       const std::vector<at::Tensor>& outputs,
-      Event* start,
-      Event* end,
+      EventType* start,
+      EventType* end,
       std::chrono::milliseconds timeout_ms,
       std::shared_ptr<ProcessGroupStatus> pg_status,
       bool isP2P);
@@ -239,20 +236,16 @@ struct FlightRecorder {
   std::string dump_json(
       const std::optional<std::unordered_map<
           std::string,
-          std::unordered_map<std::string, std::string>>>& ncclDumpMap,
+          std::unordered_map<std::string, std::string>>>& extraDumpMap,
       bool includeCollectives,
       bool onlyActive);
 
-  // dump all collectives + ncclDumpMap
   std::string dump(
       const std::optional<std::unordered_map<
           std::string,
-          std::unordered_map<std::string, std::string>>>& ncclDumpMap,
+          std::unordered_map<std::string, std::string>>>& extraDumpMap,
       bool includeCollectives,
       bool includeStackTraces,
       bool onlyActive);
 };
-
 } // namespace c10d
-
-#endif // USE_C10D_NCCL

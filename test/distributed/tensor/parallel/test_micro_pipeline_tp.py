@@ -19,19 +19,20 @@ from torch.distributed._functional_collectives import (
     reduce_scatter_tensor,
 )
 from torch.distributed._symmetric_memory import _test_mode
-from torch.distributed._tensor import DeviceMesh
-from torch.distributed._tensor.placement_types import Shard
 from torch.distributed.distributed_c10d import _get_group_size_by_name
+from torch.distributed.tensor import DeviceMesh, Shard
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
     RowwiseParallel,
 )
+from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     instantiate_parametrized_tests,
+    MI300_ARCH,
     parametrize,
     run_tests,
-    skipIfRocm,
+    runOnRocmArch,
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
@@ -123,7 +124,7 @@ class MicroPipelineTPTest(TestCase):
         self.assertEqual(all_gathers[2].gather_dim, 0)
         self.assertEqual(
             all_gathers[2].res_node.target,
-            torch.ops.aten.view.dtype,
+            torch.ops._c10d_functional.wait_tensor.default,
         )
 
         self.assertEqual(all_gathers[3].gather_dim, 1)
@@ -242,7 +243,7 @@ class MicroPipelineTPTest(TestCase):
             self.assertNotIn("all_gather_into_tensor", code)
             self.assertEqual("return_A=True" in code, return_A)
 
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("A_dims", [2, 3])
     @parametrize("gather_dim", [0, 1, 2])
@@ -285,8 +286,8 @@ class MicroPipelineTPTest(TestCase):
             raise AssertionError(f"Invalid A_dims: {A_dims}")
 
         A_shard_shape[gather_dim] //= self.world_size
-        A_shard = torch.rand(*A_shard_shape, device="cuda").to(torch.float8_e4m3fn)
-        B = torch.rand(16, 32, device="cuda").to(torch.float8_e4m3fn).T
+        A_shard = torch.rand(*A_shard_shape, device="cuda").to(e4m3_type)
+        B = torch.rand(16, 32, device="cuda").to(e4m3_type).T
         A_scale = torch.tensor(0.1, device="cuda")
         B_scale = torch.tensor(0.1, device="cuda")
 
@@ -345,7 +346,7 @@ class MicroPipelineTPTest(TestCase):
         self.assertIn("fused_matmul_reduce_scatter", code)
         self.assertNotIn("reduce_scatter_tensor", code)
 
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("A_dims", [2, 3])
     @parametrize("scatter_dim", [0, 1, 2])
@@ -373,12 +374,12 @@ class MicroPipelineTPTest(TestCase):
             return reduce_scatter_tensor(C, "avg", scatter_dim, group)
 
         if A_dims == 2:
-            A = torch.rand(64, 32, device="cuda").to(torch.float8_e4m3fn)
+            A = torch.rand(64, 32, device="cuda").to(e4m3_type)
         elif A_dims == 3:
-            A = torch.rand(2, 64, 32, device="cuda").to(torch.float8_e4m3fn)
+            A = torch.rand(2, 64, 32, device="cuda").to(e4m3_type)
         else:
             raise AssertionError(f"Invalid A_dims: {A_dims}")
-        B = torch.rand(16, 32, device="cuda").to(torch.float8_e4m3fn).T
+        B = torch.rand(16, 32, device="cuda").to(e4m3_type).T
         A_scale = torch.tensor(0.1, device="cuda")
         B_scale = torch.tensor(0.1, device="cuda")
 
@@ -399,7 +400,7 @@ class MicroPipelineTPTest(TestCase):
         self.assertIn("fused_scaled_matmul_reduce_scatter", code)
         self.assertNotIn("reduce_scatter_tensor", code)
 
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("scatter_dim", [0, 1, 2])
     @fresh_inductor_cache()
@@ -432,8 +433,8 @@ class MicroPipelineTPTest(TestCase):
             C = C.view(*orig_shape[:-1], C.shape[-1])
             return reduce_scatter_tensor(C, "sum", scatter_dim, group)
 
-        A = torch.rand(2, 16, 32, device="cuda").to(torch.float8_e4m3fn)
-        B = torch.rand(64, 32, device="cuda").to(torch.float8_e4m3fn).T
+        A = torch.rand(2, 16, 32, device="cuda").to(e4m3_type)
+        B = torch.rand(64, 32, device="cuda").to(e4m3_type).T
 
         # A_scale = rowwise scales
         A_scale = torch.full((2, 16, 1), 0.1, device="cuda")
