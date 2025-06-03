@@ -8,7 +8,7 @@ import torch
 from torch import nn, Tensor
 from torch._dynamo.convert_frame import maybe_cprofile
 from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._inductor.test_case import run_tests, TestCase
 from torch._dynamo.testing import rand_strided, reduce_to_scalar_loss
 from torch._inductor import config, ir, metrics
 from torch._inductor.fx_passes import pad_mm as pad_mm_pass
