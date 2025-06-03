@@ -148,16 +148,7 @@ struct log10_functor {
 struct log1p_functor {
   template <typename T>
   inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
-    const auto xp1 = 1.0f + float(x);
-    if (xp1 == 1.0f) {
-      return x;
-    }
-    auto rc = ::precise::log(xp1);
-    // See https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html#1202
-    if (x > -.5 && x < .5) {
-        rc *= float(x) / (xp1 - 1.0f);
-    }
-    return T(rc);
+    return T(::c10::metal::log1p(float(x)));
   }
   template <typename T>
   inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
@@ -165,8 +156,8 @@ struct log1p_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // log(x+yi) = ln(sqrt(x^2 + y^2)) + iarctan(y/x)
-    auto magnitude = ::precise::sqrt((1.0 + x.x) * (1.0 + x.x) + x.y * x.y);
+    // TODO: Implement proper log1p algoirthm
+    auto magnitude = ::precise::sqrt((1.0f + x.x) * (1.0f + x.x) + x.y * x.y);
     auto real = ::precise::log(magnitude);
     auto imag = (x.x == -1 && x.y == 0) ? 0 : ::precise::atan2(x.y, 1.0 + x.x);
     return T(real, imag);
