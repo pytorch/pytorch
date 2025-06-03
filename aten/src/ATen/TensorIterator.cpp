@@ -1535,7 +1535,6 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
   // Nothing beyond this point is important for meta functions, so it's fine to exit early here.
   // Extend the condition to MAIA tesnors as MAIA tensors also don't have storage.
   if (privateuse1_without_storage  ||
-      common_device_.type() == DeviceType::MTIA ||
       common_device_.type() == DeviceType::XLA  ||
       common_device_.type() == DeviceType::IPU  ||
       common_device_.type() == DeviceType::Lazy ||
