@@ -1707,8 +1707,9 @@ class ConstructorMoverPass:
                 if self.allow_cpu_device(user) and self.is_on_target_device(user):
                     del cpu_indeg[user]
                 elif self.all_inputs_are_cpu_scalar_or_on_target_device(user):
-                    # this node takes only cpu scalar tensor or gpu tensor as input
-                    # and output a gpu tensor. we can convert its cpu scakar input to gpu safely
+                    # this node takes only cpu scalar tensors or gpu tensors as inputs
+                    # and outputs a gpu tensor. we can convert its cpu scalar inputs to gpu
+                    # without making further changes
                     del cpu_indeg[user]
                 else:
                     # otherwise, we should continue look at its downstream uses
