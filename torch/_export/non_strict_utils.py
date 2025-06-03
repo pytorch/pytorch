@@ -143,9 +143,11 @@ def fakify(
             constraint_sizes[i] = RelaxedUnspecConstraint(warn_only=False)  # type: ignore[call-overload]
         else:
             dynamic_sizes.append(DimDynamic.STATIC)
-    symbolic_context = StatelessSymbolicContext(
-        dynamic_sizes=dynamic_sizes,
-        constraint_sizes=constraint_sizes,  # type: ignore[arg-type]
+    symbolic_context: StatelessSymbolicContext = (  # make mypy happy
+        StatelessSymbolicContext(
+            dynamic_sizes=dynamic_sizes,
+            constraint_sizes=constraint_sizes,  # type: ignore[arg-type]
+        )
     )
     t_id = id(t)
     assert mode.shape_env is not None
@@ -914,7 +916,8 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
             # because it has some known incompletenesses, e.g., it doesn't support
             # empty data. See https://github.com/pytorch/pytorch/issues/143216
             if any(
-                isinstance(a, torch.SymInt) for a in pytree.tree_flatten(args[0])[0]
+                isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool))
+                for a in pytree.tree_flatten(args[0])[0]
             ):
                 return torch._refs.tensor, args, kwargs
         if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):
