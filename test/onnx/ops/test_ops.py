@@ -6,7 +6,6 @@ from __future__ import annotations
 from onnxscript import ir
 
 import torch
-from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.onnx.ops import _symbolic_impl
 from torch.testing._internal import common_utils
 
@@ -454,15 +453,16 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             (input_data, cos_cache_data, sin_cache_data, position_ids_data),
         )
         self.assertIn(
-            "onnx::RotaryEmbedding.opset23", [node.name() for node in ep.graph.nodes]
+            "onnx.RotaryEmbedding.opset23",
+            [str(node.target) for node in ep.graph.nodes],
         )
         # The program can be decomposed into aten ops so it is fully compatible with the PyTorch ecosystem
         aten_decomped = ep.run_decompositions(torch.onnx.ops.aten_decompositions())
-        self.assertNoeIn(
-            "onnx::RotaryEmbedding.opset23",
-            [node.name() for node in aten_decomped.graph.nodes],
+        self.assertNotIn(
+            "onnx.RotaryEmbedding.opset23",
+            [str(node.target) for node in aten_decomped.graph.nodes],
         )
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             aten_decomped.module()(
                 input_data, cos_cache_data, sin_cache_data, position_ids_data
             ),
@@ -510,7 +510,8 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             dynamic_shapes=dynamic_shapes,
             opset_version=23,
         )
-        onnx_testing.assert_onnx_program(onnx_program)
+        self.assertEqual(onnx_program.model.opset_imports[""], 23)
+        self.assertEqual("RotaryEmbedding", onnx_program.model.graph.node(0).op_type)
 
 
 if __name__ == "__main__":

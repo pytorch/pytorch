@@ -55,7 +55,7 @@ _TORCH_DTYPE_TO_ONNX_DTYPE = {
 
 def aten_decompositions() -> dict[str, torch._ops.OpOverload]:
     """Return the ONNX to ATen decomp table."""
-    return _symbolic_impl.ONNX_ATEN_DECOMP_TABLE
+    return _impl.ONNX_ATEN_DECOMP_TABLE
 
 
 def _parse_domain_op_type(domain_op: str) -> tuple[str, str]:
