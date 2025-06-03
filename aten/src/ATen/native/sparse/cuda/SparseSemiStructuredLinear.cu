@@ -3,7 +3,7 @@
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/Dispatch.h>
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
 #else
 #include <cuda_runtime.h>
 #include <cutlass/cutlass.h>
@@ -16,7 +16,7 @@
 #include <type_traits>
 #include <tuple>
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
 #else
 #define CUTLASS_STATUS_CHECK(status)                                      \
   {                                                                       \
@@ -31,7 +31,7 @@ namespace {
 
 namespace at::native {
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
 #else
 // Wrapper function for CUTLASS sparse GEMM implementation, used
 // solely to simplify dispatching from
@@ -245,7 +245,7 @@ Tensor two_four_sgemm(
                         ElementC(0),
                         {cute::_1{}, cute::_0{}, problem_size.m()}};
             } else {
-                return {ElementC(0)};
+                return {{ElementC(0)}};
             }
         }()
     };
@@ -613,7 +613,7 @@ Tensor _sparse_semi_structured_linear(
                     "removed in a future PyTorch release.  Please use "
                     "_sparse_semi_structured_mm/_sparse_semi_structured_addmm "
                     "instead.");
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
     TORCH_CHECK(false, "_sparse_semi_structured_linear: CUTLASS not supported");
     return Tensor{};
 #else

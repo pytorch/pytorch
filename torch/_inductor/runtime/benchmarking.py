@@ -35,7 +35,7 @@ def time_and_count(
     def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
         fn_qual_name = f"{self.__class__.__name__}.{fn.__name__}"
         counters["inductor"][f"benchmarking.{fn_qual_name}"] += 1
-        with dynamo_timed(fn_qual_name, log_pt2_compile_event=True):
+        with dynamo_timed(fn_qual_name, log_pt2_compile_event=False):
             return fn(self, *args, **kwargs)
 
     return wrapper

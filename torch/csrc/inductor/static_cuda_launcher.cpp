@@ -112,7 +112,8 @@ CUfunction loadKernel(
   // we set maximum dynamic shared memory to the difference between
   // the static shared memory and total max shared memory allowed on the device.
   // This prevents us from setting shared memory above the maximum
-  TORCH_CHECK(
+  TORCH_CHECK_WITH(
+      OutOfMemoryError,
       sharedMemBytes < static_cast<uint32_t>(shared_optin),
       "out of resource: ",
       funcName,
@@ -384,6 +385,15 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
     // No need to do any work if we're outside of grid bounds
     Py_RETURN_NONE;
   }
+  CUcontext pctx = nullptr;
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
+  if (!pctx) {
+    // Ensure device context exists
+    CUdevice device = 0;
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuDeviceGet(&device, 0));
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuDevicePrimaryCtxRetain(&pctx, device));
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxSetCurrent(pctx));
+  }
   CUfunction func = reinterpret_cast<CUfunction>(func_ptr); // NOLINT
   cudaStream_t cudaStream = reinterpret_cast<cudaStream_t>(stream); // NOLINT
   auto num_args = std::strlen(argTypes);
@@ -441,7 +451,7 @@ std::array<PyMethodDef, 2> StaticCudaLauncherMethods = {
 // We don't implement __new__ or __init__ because we're using it only as a
 // container for static methods.
 PyTypeObject StaticCudaLauncherType = {
-      PyVarObject_HEAD_INIT(nullptr, 0)
+    PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C._StaticCudaLauncher", // tp_name
     sizeof(PyObject), // tp_basicsize
     0, // tp_itemsize

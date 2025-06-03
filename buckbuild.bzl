@@ -178,11 +178,12 @@ THIRD_PARTY_LIBS = {
     "psimd": ["//xplat/third-party/psimd:psimd", "//third_party:psimd"],
     "pthreadpool": ["//xplat/third-party/pthreadpool:pthreadpool", "//third_party:pthreadpool"],
     "pthreadpool_header": ["//xplat/third-party/pthreadpool:pthreadpool_header", "//third_party:pthreadpool_header"],
-    "pyyaml": ["//third-party/pyyaml:pyyaml", "//third_party:pyyaml"],
+    "moodycamel": ["//third-party/moodycamel:moodycamel", "//third_party:moodycamel"],
+    "pyyaml": ["//third-party/pypi/pyyaml:pyyaml", "//third_party:pyyaml"],
     "rt": ["//xplat/third-party/linker_lib:rt", "//third_party:rt"],
     "ruy": ["//third-party/ruy:ruy_xplat_lib", "//third_party:ruy_lib"],
-    "sleef_arm": ["//third-party/sleef:sleef_arm", "//third_party:sleef_arm"],
-    "typing-extensions": ["//third-party/typing-extensions:typing-extensions", "//third_party:typing-extensions"],
+    "nlohmann-json": ["fbsource//third-party/nlohmann-json:nlohmann-json", "//third_party:nlohmann-json"],
+    "sleef_arm": ["//third-party/sleef:sleef", "//third_party:sleef_arm"],
 }
 
 def third_party(name):
@@ -297,7 +298,7 @@ def get_pt_preprocessor_flags():
         PT_PREPROCESSOR_FLAGS.append("-DENABLE_PYTORCH_NON_PRODUCTION_BUILDS")
     return PT_PREPROCESSOR_FLAGS
 
-# This needs to be kept in sync with https://github.com/pytorch/pytorch/blob/release/1.9/torchgen/gen.py#L892
+# This needs to be kept in sync with https://github.com/pytorch/pytorch/blob/release/1.9/torchgen/gen.py#L892  @lint-ignore
 PT_BACKEND_HEADERS = [
     "CPU",
     "CUDA",
@@ -1725,7 +1726,6 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
-            "-DTMP_IMPL_MEMORY_PROFILING_ON_DEMAND",
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
@@ -1737,6 +1737,7 @@ def define_buck_targets(
         deps = [
             third_party("glog"),
             third_party("kineto"),
+            third_party("nlohmann-json"),
         ],
         exported_deps = [
             ":aten_cpu",
@@ -1751,7 +1752,6 @@ def define_buck_targets(
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
             "-DEDGE_PROFILER_USE_KINETO",
-            "-DTMP_IMPL_MEMORY_PROFILING_ON_DEMAND",
         ],
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
@@ -1838,7 +1838,6 @@ def define_buck_targets(
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
-            "-DTMP_IMPL_MEMORY_PROFILING_ON_DEMAND",
         ] + (["-DFB_XPLAT_BUILD"] if not IS_OSS else []),
         extra_flags = {
             "fbandroid_compiler_flags": ["-frtti"],

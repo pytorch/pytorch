@@ -32,13 +32,19 @@ import torch._C
 import torch._numpy as tnp
 import torch.utils._pytree as pytree
 
-from .. import config, trace_rules, variables
+from .. import config, graph_break_hints, trace_rules, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import raise_observed_exception, unimplemented, unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
-from ..source import AttrSource, GetItemSource, TypeSource, WeakRefCallSource
+from ..source import (
+    AttrSource,
+    GenericAttrSource,
+    GetItemSource,
+    TypeSource,
+    WeakRefCallSource,
+)
 from ..utils import (
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
@@ -47,7 +53,6 @@ from ..utils import (
     istype,
     list_methods,
     proxy_args_kwargs,
-    set_example_value,
     tuple_methods,
 )
 from .base import VariableTracker
@@ -72,7 +77,7 @@ class SuperVariable(VariableTracker):
 
     def __init__(self, typevar, objvar=None, **kwargs) -> None:
         super().__init__(**kwargs)
-        # typevar is the fist argument to super(). In the case where no argument
+        # typevar is the first argument to super(). In the case where no argument
         # is provided to super(), it is the __class__ object where
         # the super() function is being called
         self.typevar = typevar
@@ -136,7 +141,17 @@ class SuperVariable(VariableTracker):
                         )
                     return resolved_getattr, source
 
-        unimplemented("Unable to resolve super getattr")
+        unimplemented_v2(
+            gb_type="Unable to resolve super getattr",
+            context="",
+            explanation=f"Dynamo failed to trace attribute `{name}` accessed "
+            f"via `super()` (for type `{self.typevar}` and object `{self.objvar}`) "
+            "because the resolved attribute type is not supported.",
+            hints=[
+                "Ensure the attribute exists in the parent class.",
+                "Check the arguments passed to `super()`.",
+            ],
+        )
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         # Check if getattr is a constant. If not, delay the actual work by
@@ -156,7 +171,7 @@ class SuperVariable(VariableTracker):
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
@@ -186,7 +201,14 @@ class SuperVariable(VariableTracker):
                         unpatched_nn_module_init, source=source
                     ).call_function(tx, [self.objvar] + args, kwargs)
             else:
-                unimplemented("super() nn.Module.__init__")
+                unimplemented_v2(
+                    gb_type="Unsupported super().__init__() call",
+                    context=f"call_method {self} {name} {args} {kwargs}",
+                    explanation="Dynamo encountered a super().__init__() call "
+                    f"on {objvar} that resolved to a `torch.nn.Module.__init__()` "
+                    "call that we cannot trace.",
+                    hints=[*graph_break_hints.DIFFICULT],
+                )
         elif (
             self.objvar.source
             and hasattr(inner_fn, "__name__")
@@ -211,8 +233,27 @@ class SuperVariable(VariableTracker):
         elif isinstance(inner_fn, classmethod) and isinstance(
             inner_fn.__func__, types.FunctionType
         ):
+            if isinstance(self.objvar, variables.UserDefinedClassVariable):
+                # super().classmethod is called from a classmethod itself. So,
+                # super was converted to super(__class__, cls) in bytecode and
+                # therefore we have to propagate the cls.
+                cls_variable = self.objvar
+            else:
+                # current function is an instance method, therefore super was
+                # converted to super(__class__, self). We have to find
+                # type(self) to bind the cls to the parent classmethod.
+                # Note that it can't be the self.typevar because __class__ is
+                # the class where the method is defined, which could be
+                # different from type(self) with polymorphism.
+                cls_source = None
+                if self.objvar.source:
+                    cls_source = AttrSource(self.objvar.source, "__class__")
+                cls_variable = VariableTracker.build(
+                    tx, self.objvar.value_type, cls_source
+                )
+
             return variables.UserMethodVariable(
-                inner_fn.__func__, self.objvar, source=source
+                inner_fn.__func__, cls_variable, source=source
             ).call_function(tx, args, kwargs)
         elif isinstance(inner_fn, types.FunctionType):
             return variables.UserFunctionVariable(
@@ -230,10 +271,30 @@ class SuperVariable(VariableTracker):
             attr = args[0]
             try:
                 attr = attr.as_python_constant()
-            except NotImplementedError:
-                unimplemented(f"non-const delattr attr: {attr}")
+            except NotImplementedError as exc:
+                unimplemented_v2(
+                    gb_type="Non-constant attribute given to `super().__delattr__()`",
+                    context=f"call_method {self} {name}",
+                    explanation="Dynamo requires the attribute name passed to "
+                    "`super().__delattr__(...)` to be a constant (string).",
+                    hints=[
+                        "Ensure the attribute name is a string literal or a constant variable."
+                    ],
+                    from_exc=exc,
+                )
             if not tx.output.side_effects.is_attribute_mutation(self.objvar):
-                unimplemented(f"delattr({self.objvar}, {attr}, ...)")
+                unimplemented_v2(
+                    gb_type="Attempted super().__delattr__() on an object without mutation tracking",
+                    context=f"call_method {self} {name}",
+                    explanation="Dynamo needs to track mutations on an object "
+                    "before `super().__delattr__` can be used on it. But the "
+                    f"object ({self.objvar}) doesn't have attribute mutation "
+                    "tracking enabled.",
+                    hints=[
+                        "Ensure the object is tracked by Dynamo's side effect system.",
+                        *graph_break_hints.DYNAMO_BUG,
+                    ],
+                )
 
             tx.output.side_effects.store_attr(
                 self.objvar, attr, variables.DeletedVariable()
@@ -269,12 +330,16 @@ class SuperVariable(VariableTracker):
                 return result
 
             try:
-                attr_value = self.objvar.value.__getattribute__(attr_name)
+                # NB - use object.__getattribute__ to prevent running any user code
+                attr_value = object.__getattribute__(self.objvar.value, attr_name)
             except AttributeError:
                 raise_observed_exception(AttributeError, tx)
 
-            source = self.source and AttrSource(self.source, attr_name)
-            return VariableTracker.build(tx, attr_value, source)
+            attr_source = None
+            if self.objvar.source is not None:
+                # setup a object.__getattribute__(self.objvar, name) source
+                attr_source = GenericAttrSource(self.objvar.source, attr_name)
+            return VariableTracker.build(tx, attr_value, attr_source)
         elif inner_fn is torch._C._disabled_torch_function_impl:
             # See `THPModule_disable_torch_function` for the C impl.
             # The signature of _disabled_torch_function_impl is similar to
@@ -287,14 +352,11 @@ class SuperVariable(VariableTracker):
                 key_str = hash_key_vt.vt.as_python_constant()
                 tf_kwargs[key_str] = value_vt
 
-            output_old = tx.output.torch_function_enabled
             tx_old = tx.symbolic_torch_function_state.torch_function_subclass_enabled
-            tx.output.torch_function_enabled = False
             tx.symbolic_torch_function_state.torch_function_subclass_enabled = False
             try:
                 return func.call_function(tx, tf_args, tf_kwargs)
             finally:
-                tx.output.torch_function_enabled = output_old
                 tx.symbolic_torch_function_state.torch_function_subclass_enabled = (
                     tx_old
                 )
@@ -307,7 +369,17 @@ class SuperVariable(VariableTracker):
             fn_var = VariableTracker.build(tx, inner_fn, source)
             return fn_var.call_function(tx, [self.objvar] + args, kwargs)
 
-        unimplemented(f"non-function or method super: {inner_fn}")
+        unimplemented_v2(
+            gb_type="Attempted to call a super() attribute that is "
+            "not a function or method",
+            context=f"call_method {self} {name}",
+            explanation="Dynamo does not know how to trace the call "
+            f"`super().{name}()` because `super().{name}` is not a "
+            "function or method attribute.",
+            hints=[
+                "Ensure the attribute accessed via `super()` is a standard method or function.",
+            ],
+        )
 
 
 class ExceptionVariable(VariableTracker):
@@ -391,9 +463,26 @@ class ExceptionVariable(VariableTracker):
             if isinstance(val, ConstantVariable) and val.value is None:
                 self.__traceback__ = val
             else:
-                unimplemented(f"setattr(ExceptionVariable, {name_var}, {val})")
+                unimplemented_v2(
+                    gb_type="Set Exception object `__traceback__` attribute to not-`None`",
+                    context=f"call_setattr {self} {name}",
+                    explanation="Dynamo does not support setting the attribute "
+                    "'__traceback__' on tracked exception objects to anything "
+                    "other than None.",
+                    hints=[
+                        "Avoid setting '__traceback__' on exception objects "
+                        "within traced code, or set it to None."
+                    ],
+                )
         else:
-            unimplemented(f"setattr(ExceptionVariable, {name_var}, {val})")
+            unimplemented_v2(
+                gb_type="Unsupported attribute assignment on Exception object",
+                context=f"call_setattr {self} {name}",
+                explanation="Dynamo does not support setting the attribute "
+                f"'{name}' on tracked exception objects. Only `__context__`, "
+                "`__cause__`, `__suppress_context__`, and `__traceback__` are supported.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         return variables.ConstantVariable(None)
 
     def call_method(self, tx, name, args, kwargs):
@@ -598,11 +687,32 @@ class AutogradFunctionVariable(VariableTracker):
 
             vjp_fn = self.fn_cls.vjp  # type: ignore[attr-defined]
             if vjp_fn is not torch.autograd.Function.vjp:
-                unimplemented("NYI - User defind vjp")
+                unimplemented_v2(
+                    gb_type="Unsupported custom vjp",
+                    context=f"call_apply {self} {args} {kwargs}",
+                    explanation="Dynamo does not support tracing "
+                    "`torch.autograd.Function` subclasses that define "
+                    "a custom `vjp` method.",
+                    hints=[
+                        "Remove the custom `vjp` method if possible.",
+                        "Use standard `backward` instead if applicable.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
 
             jvp_fn = self.fn_cls.jvp  # type: ignore[attr-defined]
             if jvp_fn is not torch.autograd.Function.jvp:
-                unimplemented("NYI - User defind jvp")
+                unimplemented_v2(
+                    gb_type="Unsupported custom jvp",
+                    context=f"call_apply {self} {args} {kwargs}",
+                    explanation="Dynamo does not support tracing "
+                    "`torch.autograd.Function` subclasses that define "
+                    "a custom `jvp` method.",
+                    hints=[
+                        "Remove the custom `jvp` method if possible.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
 
             from .higher_order_ops import AutogradFunctionApplyVariable
 
@@ -654,8 +764,16 @@ class AutogradFunctionVariable(VariableTracker):
                 source=source,
             ).call_function(tx, args, kwargs)
         else:
-            unimplemented(
-                f"non-function or method in subclass of torch.autograd.Function: {fn}"
+            unimplemented_v2(
+                gb_type="Non-function or method in subclass of torch.autograd.Function",
+                context=f"call_apply {self} {args} {kwargs}",
+                explanation="Dynamo requires the `forward` attribute of a "
+                "`torch.autograd.Function` subclass to be a standard Python "
+                f"function or method. Found type `{type(fn).__name__}` instead.",
+                hints=[
+                    "Ensure the `forward` method is defined as a regular "
+                    "function or instance method."
+                ],
             )
 
     def call_backward(self, tx: "InstructionTranslator", args, kwargs):
@@ -673,7 +791,7 @@ class AutogradFunctionVariable(VariableTracker):
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
@@ -722,7 +840,18 @@ class AutogradFunctionVariable(VariableTracker):
                     obj.__func__, self, source=source
                 ).call_function(tx, args, kwargs)
             else:
-                unimplemented(f"Unsupported method: {name}")
+                unimplemented_v2(
+                    gb_type="Unsupported autograd.Function method",
+                    context=f"call_method {self} {name}",
+                    explanation="Dynamo does not support calling the method "
+                    f"`{name}` directly on the `torch.autograd.Function` "
+                    "instance. Supported methods include `apply`, `backward`, "
+                    "static methods, and class methods.",
+                    hints=[
+                        "Ensure the method is decorated with `@staticmethod` "
+                        "or `@classmethod` if it's meant to be called on the class.",
+                    ],
+                )
 
 
 @dataclasses.dataclass
@@ -747,7 +876,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         value,
         value_type=None,
         inference=False,
-        proxy=None,
         saved_tensors=None,
         needs_input_grad=None,
         non_differentiable=None,
@@ -755,7 +883,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     ) -> None:
         super().__init__(value=value, value_type=value_type, **kwargs)
         self.inference = inference
-        self.proxy = proxy
         self.saved_tensors = saved_tensors
         self.needs_input_grad = needs_input_grad
         self.non_differentiable = non_differentiable
@@ -768,33 +895,33 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 isinstance(x, variables.TensorVariable) and x.requires_grad
                 for x in args
             )
-        proxy = tx.output.create_proxy(
-            "call_function", torch.autograd.function.FunctionCtx, (), {}
-        )
         out = tx.output.side_effects.track_object_new(
             None,
             torch.autograd.function.FunctionCtx,
             functools.partial(
                 AutogradFunctionContextVariable,
                 inference=True,
-                proxy=proxy,
                 saved_tensors=SavedTensorBox(),
                 needs_input_grad=needs_input_grad,
             ),
             {},
         )
-        set_example_value(proxy.node, out.value)
-
         return out
 
     def as_proxy(self):
         if self.proxy is None:
-            unimplemented("proxy not set")
+            unimplemented_v2(
+                gb_type="proxy not set",
+                context=f"as_proxy {self}",
+                explanation="Dynamo requires the autograd.Function context "
+                "to be initialized with a proxy.",
+                hints=[*graph_break_hints.DYNAMO_BUG],
+            )
         return self.proxy
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
@@ -807,10 +934,26 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             return variables.ConstantVariable.create(None)
 
         if name != "save_for_backward":
-            unimplemented(f"autograd.Function context method: {name}")
+            unimplemented_v2(
+                gb_type="Unsupported autograd.Function context method",
+                context=f"call_method {self} {name}",
+                explanation="Dynamo does not support calling the method "
+                f"`{name}` on `autograd.Function` context objects. Supported "
+                "methods are `__setattr__`, `save_for_backward` and "
+                "`mark_non_differentiable`.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         if self.saved_tensors is None:
-            unimplemented(
-                "save_for_backward only supported on a newly constructed FunctionCtx"
+            unimplemented_v2(
+                gb_type="Unsupported autograd.Function context `save_for_backward`",
+                context=f"call_method {self} {name}",
+                explanation="Dynamo requires the `saved_tensors` attribute "
+                "to be initialized on the `autograd.Function` context object.",
+                hints=[
+                    "Ensure that the `saved_tensors` attribute is properly "
+                    "initialized before calling `save_for_backward`. "
+                    "`save_for_backward` only supported on a newly constructed `torch.autograd.function.FunctionCtx`.",
+                ],
             )
 
         if not self.inference:
@@ -856,7 +999,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
@@ -875,11 +1018,21 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
                     kwargs,
                 )
             else:
-                unimplemented(
-                    "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
+                unimplemented_v2(
+                    gb_type="Unsupported torch._C._ImperativeEngine.queue_callback()",
+                    context=f"call_method {self} {name}",
+                    explanation="queue_callback() is only supported when "
+                    "Compiled Autograd is enabled with fullgraph=True.",
+                    hints=[],
                 )
         else:
-            unimplemented(f"torch._C._ImperativeEngine method: {name}")
+            unimplemented_v2(
+                gb_type="Unsupported torch._C._ImperativeEngine method",
+                context=f"call_method {self} {name}",
+                explanation="Dynamo only supports the `queue_callback` method "
+                f"on a torch._C._ImperativeEngine instance, but found: `{name}`.",
+                hints=[],
+            )
 
 
 class LambdaVariable(VariableTracker):
@@ -959,7 +1112,7 @@ class GetAttrVariable(VariableTracker):
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -1016,7 +1169,9 @@ class GetAttrVariable(VariableTracker):
         elif name == "__setitem__" and self.name == "__dict__" and not kwargs:
             if isinstance(self.obj, variables.UserDefinedObjectVariable):
                 # Bypass any custom setattr as we are updating the `__dict__` itself
-                return self.obj.method_setattr_standard(tx, args[0], args[1])
+                return self.obj.method_setattr_standard(
+                    tx, args[0], args[1], directly_update_dict=True
+                )
             if isinstance(self.obj, variables.NNModuleVariable):
                 # This matches how `setattr` is handled for NNModuleVariable
                 self.obj.convert_to_unspecialized(tx)
@@ -1059,7 +1214,7 @@ class MethodWrapperVariable(VariableTracker):
                     tx, wrapper_name, [self_obj, *args], kwargs
                 )
 
-        super().call_function(tx, args, kwargs)
+        return super().call_function(tx, args, kwargs)
 
     def is_python_constant(self):
         return True
@@ -1117,7 +1272,10 @@ class PythonModuleVariable(VariableTracker):
             return tx.output.side_effects.load_attr(self, name)
 
         if self.is_torch or name not in self.value.__dict__:
-            attr_value = getattr(self.value, name)
+            try:
+                attr_value = getattr(self.value, name)
+            except AttributeError:
+                raise_observed_exception(AttributeError, tx)
         else:
             attr_value = self.value.__dict__[name]
 
@@ -1132,7 +1290,7 @@ class TypingVariable(VariableTracker):
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
@@ -1309,7 +1467,7 @@ class NumpyVariable(VariableTracker):
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
@@ -1462,7 +1620,7 @@ class LoggingLoggerVariable(VariableTracker):
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
@@ -1504,7 +1662,7 @@ class ConstantLikeVariable(VariableTracker):
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -1685,7 +1843,7 @@ class RandomVariable(VariableTracker):
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
