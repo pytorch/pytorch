@@ -615,6 +615,9 @@ run_gc_after_compile = Config(  # type: ignore[var-annotated]
 # wrapper. This ensures that nn.module hooks are also compiled in the same frame.
 wrap_top_frame = False
 
+# record pre-graph bytecode in profile traces
+record_pre_graph_bytecode_in_traces = True
+
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
 
