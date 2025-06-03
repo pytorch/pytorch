@@ -12,7 +12,6 @@ import unittest
 import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
-from enum import auto, Enum
 from re import escape
 from typing import Dict, List, Union
 from unittest.mock import MagicMock, patch
@@ -201,11 +200,6 @@ class Inp2:
 class Inp3:
     f: torch.Tensor
     p: torch.Tensor
-
-
-class TestEnumColor(Enum):
-    RED = auto()
-    GREEN = auto()
 
 
 NON_STRICT_SUFFIX = "_nonstrict"
@@ -14473,37 +14467,6 @@ def forward(self, args_0):
     abs_1 = torch.ops.aten.abs.default(args_0);  args_0 = None
     return (abs_1,)""",
         )
-
-    def test_enum_serialization_round_trip(self):
-        import json
-        import os
-
-        import torch
-
-        # Define a model that accepts a dict with Enum as key
-        class M(torch.nn.Module):
-            def forward(self, x):
-                return x[TestEnumColor.RED] + 1
-
-        # Export the model with the Enum input
-        model = M()
-        ep = torch.export.export(model, ({TestEnumColor.RED: torch.tensor(5)},))
-
-        # Save and load
-        file_name = "tmp_enum.pt"
-        torch.export.save(ep, file_name)
-        ep2 = torch.export.load(file_name)
-
-        # Ensure that the Enum type is preserved in in_spec
-        self.assertEqual(
-            ep.module()._in_spec,
-            ep2.module()._in_spec,
-            "Enum type not preserved after save/load round-trip",
-        )
-
-        # Cleanup the temporary file
-        if os.path.exists(file_name):
-            os.remove(file_name)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")

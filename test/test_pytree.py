@@ -1096,6 +1096,14 @@ if "optree" in sys.modules:
         serialized_spec = py_pytree.treespec_dumps(spec)
         self.assertIsInstance(serialized_spec, str)
 
+    def test_enum_treespec_roundtrip(self):
+        data = {TestEnum.A: 5}
+        spec = py_pytree.tree_structure(data)
+
+        serialized = py_pytree.treespec_dumps(spec)
+        deserialized_spec = py_pytree.treespec_loads(serialized)
+        self.assertEqual(spec, deserialized_spec)
+
     def test_pytree_serialize_namedtuple(self):
         Point1 = namedtuple("Point1", ["x", "y"])
         py_pytree._register_namedtuple(
