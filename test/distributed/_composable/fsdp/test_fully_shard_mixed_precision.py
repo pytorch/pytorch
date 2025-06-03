@@ -611,7 +611,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
         mp_policy = MixedPrecisionPolicy(
             torch.bfloat16, torch.bfloat16, torch.bfloat16, True
         )
-        model = Model().cuda()
+        model = Model()
         inp = Input(torch.randn(2, 10).cuda())
 
         fully_shard(model, mp_policy=mp_policy)
