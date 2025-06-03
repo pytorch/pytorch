@@ -1559,7 +1559,16 @@ class TestStandaloneCompile(TestCase):
 
         return inner
 
-    def _test_basic(self, device: str, format: str, dynamic: bool) -> None:
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("device", (GPU_TYPE, "cpu"))
+    @parametrize("format", ("binary", "unpacked"))
+    @parametrize("dynamic", (False, True))
+    @parametrize("graph_partition", (False, True))
+    def test_basic(
+        self, device: str, format: str, dynamic: bool, graph_partition: bool
+    ) -> None:
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
@@ -1574,7 +1583,9 @@ class TestStandaloneCompile(TestCase):
 
         eager_out = f(x)
 
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory() as temp_dir, config.patch(
+            graph_partition=graph_partition
+        ):
             path = (
                 temp_dir
                 if format == "unpacked"
@@ -1601,27 +1612,6 @@ class TestStandaloneCompile(TestCase):
                 self.assertEqual(eager_out, compiled_out)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
-
-    @config.patch({"fx_graph_cache": True})
-    @config.patch({"fx_graph_remote_cache": False})
-    @functorch_config.patch({"enable_autograd_cache": True})
-    @parametrize("device", (GPU_TYPE, "cpu"))
-    @parametrize("format", ("binary", "unpacked"))
-    @parametrize("dynamic", (False, True))
-    def test_basic(self, device: str, format: str, dynamic: bool) -> None:
-        self._test_basic(device, format, dynamic)
-
-    @config.patch({"fx_graph_cache": True})
-    @config.patch({"fx_graph_remote_cache": False})
-    @functorch_config.patch({"enable_autograd_cache": True})
-    @parametrize("device", (GPU_TYPE, "cpu"))
-    @parametrize("format", ("binary", "unpacked"))
-    @parametrize("dynamic", (False, True))
-    @config.patch("graph_partition", True)
-    def test_basic_with_graph_partition(
-        self, device: str, format: str, dynamic: bool
-    ) -> None:
-        self._test_basic(device, format, dynamic)
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
