@@ -228,7 +228,7 @@ def assume_constant_result(fn):
     return torch._dynamo.assume_constant_result(fn)
 
 
-def disable(fn=None, recursive=True):
+def disable(fn=None, recursive=True, *, reason=None):
     """
     This function provides a decorator to disable compilation on a function.
     It also provides the option of recursively disabling called functions.
@@ -236,10 +236,11 @@ def disable(fn=None, recursive=True):
     Args:
         fn (optional): The function to disable
         recursive (optional): A boolean value indicating whether the disabling should be recursive.
+        reason (optional): A string value indicating the reason for disabling the function.
     """
     import torch._dynamo
 
-    return torch._dynamo.disable(fn, recursive)
+    return torch._dynamo.disable(fn, recursive, reason=reason)
 
 
 def set_stance(
@@ -283,6 +284,15 @@ def set_stance(
             - "eager_on_recompile": Run code eagerly when a recompile is necessary.
               If there is cached compiled code valid for the input, it will still be used.
             - "fail_on_recompile": Raise an error when recompiling a function.
+            - "eager_then_compile": Run the first invocation in eager mode, then compile on
+              subsequent calls. This is beneficial for dynamic shapes as it allows inferring
+              dynamism from the first two invocations instead of wasting a static compile on
+              the first invocation.
+            - "aot_eager_then_compile": Run the first invocation with AOT eager to get memory
+              benefits from activation checkpointing, then compile on subsequent calls. Like
+              eager_then_compile, this improves handling of dynamic shapes by avoiding an
+              initial static compile.
+
 
         skip_guard_eval_unsafe: A flag to run only differentiating guards.
             CAUTION - This flag is unsafe and should only be used if your setup
