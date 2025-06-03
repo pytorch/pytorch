@@ -455,88 +455,31 @@ class TestCutlassBackend(TestCase):
         # M, N, K
         shapes = shapes if dynamic else shapes[0:1]
 
-        if dtype == torch.float8_e4m3fn:
-            inputs = []
-            for shape in shapes:
-                M, N, K = shape
-                output_dtype = torch.bfloat16
-                device = "cuda"
+        class MyModel(torch.nn.Module):
+            def forward(self, a, b):
+                return a @ b
 
-                x = torch.randn(M, K, dtype=output_dtype, device=device)
-                w = torch.randn(N, K, dtype=output_dtype, device=device)
+        model = MyModel().cuda()
 
-                # quantize weight (prior to inference)
-                w_fp8, w_inverse_scale = _quantize_rowwise(w, dtype)
-                w_t_fp8 = w_fp8.t()
-                w_inverse_scale = w_inverse_scale.t()  # scale_b should be (1, N)
+        inputs = [
+            (torch.randn(M, K).cuda().to(dtype), torch.randn(K, N).cuda().to(dtype))
+            for (M, N, K) in shapes
+        ]
 
-                # quantize input x
-                x_fp8, x_inverse_scale = _quantize_rowwise(x, dtype)
-
-                inputs.append((x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale))
-
-            class MyModel(torch.nn.Module):
-                def forward(self, x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale):
-                    y = torch._scaled_mm(
-                        x_fp8,
-                        w_t_fp8,
-                        x_inverse_scale,
-                        w_inverse_scale,
-                        None,
-                        out_dtype=torch.bfloat16,
-                        use_fast_accum=False,
-                    )
-                    return y
-
-            dynamic_shapes = (
-                {
-                    "x_fp8": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
-                    "x_inverse_scale": {0: Dim.DYNAMIC, 1: 1},
-                    "w_t_fp8": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
-                    "w_inverse_scale": {0: 1, 1: Dim.DYNAMIC},
-                }
-                if dynamic
-                else None
-            )
-            model = MyModel().cuda()
-
-            rtol = 1e-2
-            atol = 0.05
-            additional_patches = {
-                "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
-                "cuda.cutlass_tma_only": True,
+        dynamic_shapes = (
+            {
+                "a": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                "b": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
             }
-        else:
-
-            class MyModel(torch.nn.Module):
-                def forward(self, a, b):
-                    return a @ b
-
-            model = MyModel().cuda()
-
-            inputs = [
-                (torch.randn(M, K).cuda().to(dtype), torch.randn(K, N).cuda().to(dtype))
-                for (M, N, K) in shapes
-            ]
-
-            dynamic_shapes = (
-                {
-                    "a": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
-                    "b": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
-                }
-                if dynamic
-                else None
-            )
-            rtol = None
-            atol = None
-            additional_patches = {}
+            if dynamic
+            else None
+        )
 
         with config.patch(
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
-                **additional_patches,
             }
         ), dynamo_config.patch({"error_on_recompile": dynamic}):
             expected = [model(*input) for input in inputs]
@@ -548,7 +491,96 @@ class TestCutlassBackend(TestCase):
                 compiled_model = torch.compile(model, dynamic=True)
                 actual = [compiled_model(*input) for input in inputs]
 
-            torch.testing.assert_close(actual, expected, rtol=rtol, atol=atol)
+            torch.testing.assert_close(actual, expected)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @parametrize("dynamic", (False, True))
+    @parametrize("use_aoti", (False, True))
+    @parametrize("dtype", (torch.float8_e4m3fn,))
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_autotune_cutlass_backend_fp8_scaled_mm(
+        self,
+        dynamic: bool,
+        max_autotune_gemm_backends: str = "CUTLASS",
+        use_aoti: bool = False,
+        dtype: torch.dtype = torch.float16,
+    ):
+        """
+        Main test for mm.
+        """
+
+        # M, N, K
+        shapes = [
+            (128, 128, 16),
+            (1024, 1024, 256),
+        ]
+
+        # M, N, K
+        shapes = shapes if dynamic else shapes[0:1]
+
+        inputs = []
+        for shape in shapes:
+            M, N, K = shape
+            output_dtype = torch.bfloat16
+            device = "cuda"
+
+            x = torch.randn(M, K, dtype=output_dtype, device=device)
+            w = torch.randn(N, K, dtype=output_dtype, device=device)
+
+            # quantize weight (prior to inference)
+            w_fp8, w_inverse_scale = _quantize_rowwise(w, dtype)
+            w_t_fp8 = w_fp8.t()
+            w_inverse_scale = w_inverse_scale.t()  # scale_b should be (1, N)
+
+            # quantize input x
+            x_fp8, x_inverse_scale = _quantize_rowwise(x, dtype)
+
+            inputs.append((x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale))
+
+        class MyModel(torch.nn.Module):
+            def forward(self, x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale):
+                y = torch._scaled_mm(
+                    x_fp8,
+                    w_t_fp8,
+                    x_inverse_scale,
+                    w_inverse_scale,
+                    None,
+                    out_dtype=torch.bfloat16,
+                    use_fast_accum=False,
+                )
+                return y
+
+        dynamic_shapes = (
+            {
+                "x_fp8": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                "x_inverse_scale": {0: Dim.DYNAMIC, 1: 1},
+                "w_t_fp8": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                "w_inverse_scale": {0: 1, 1: Dim.DYNAMIC},
+            }
+            if dynamic
+            else None
+        )
+        model = MyModel().cuda()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_max_profiling_configs": 2,
+                "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
+                "cuda.cutlass_tma_only": True,
+            }
+        ), dynamo_config.patch({"error_on_recompile": dynamic}):
+            expected = [model(*input) for input in inputs]
+            if use_aoti:
+                actual = AOTIRunnerUtil.run_multiple(
+                    model, inputs, dynamic_shapes=dynamic_shapes
+                )
+            else:
+                compiled_model = torch.compile(model, dynamic=True)
+                actual = [compiled_model(*input) for input in inputs]
+
+            torch.testing.assert_close(actual, expected, rtol=1e-2, atol=0.05)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False, True))
