@@ -272,21 +272,16 @@ def get_nvidia_smi():
 def _detect_linux_pkg_manager():
     if get_platform() != "linux":
         return "N/A"
-    mgr_name = ""
-    for mgr_name in ["dpkg", "dnf", "yum", "zypper", ""]:
-        if mgr_name == "":
-            continue
+    for mgr_name in ["dpkg", "dnf", "yum", "zypper"]:
         rc, _, _ = run(f"which {mgr_name}")
         if rc == 0:
-            break
-    return mgr_name
+            return mgr_name
+    return "N/A"
 
 
 def get_linux_pkg_version(run_lambda, pkg):
-    if get_platform() != "linux":
-        return "N/A"
     pkg_mgr = _detect_linux_pkg_manager()
-    if pkg_mgr in ["", "N/A"]:
+    if pkg_mgr == "N/A":
         return "N/A"
 
     pkgs = {
