@@ -23,6 +23,10 @@ from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.codegen.wrapper_fxir import FxConverter, WrapperFxCodegen
 from torch._inductor.select_algorithm import extern_kernels
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
@@ -39,6 +43,7 @@ from torch.testing._internal.inductor_utils import (
     scalar_asserts=False,
     nan_asserts=False,
 )
+@instantiate_parametrized_tests
 class FxirTestCase(InductorTestCase):
     device = GPU_TYPE
 
@@ -409,8 +414,8 @@ class FxirTestCase(InductorTestCase):
         ), self.assertRaisesRegex(BackendCompilerFailed, "Triton"):
             self._compile_and_check(foo, args)
 
-    @torch._inductor.config.patch("triton.autotune_at_compile_time", True)
-    def test_autotune(self):
+    @parametrize("enable_tuning", (False, True))
+    def test_autotune(self, enable_tuning: bool):
         orig_run = torch._inductor.runtime.triton_heuristics.CachingAutotuner.run
         called = False
 
@@ -422,12 +427,15 @@ class FxirTestCase(InductorTestCase):
         args = [torch.randn(8, device=self.device) for _ in range(2)]
 
         # Compile and check that the tuner was called.
-        with unittest.mock.patch.object(
+
+        with config.patch(
+            "triton.autotune_at_compile_time", enable_tuning
+        ), unittest.mock.patch.object(
             torch._inductor.runtime.triton_heuristics.CachingAutotuner, "run", run
         ):
             self.assertFalse(called)
             self._compile_and_check(torch.mul, args)
-            self.assertTrue(called)
+            self.assertEqual(called, enable_tuning)
 
 
 if __name__ == "__main__":
