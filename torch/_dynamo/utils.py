@@ -47,7 +47,7 @@ import uuid
 import warnings
 import weakref
 from collections import Counter, OrderedDict
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import is_dataclass
 from functools import lru_cache
 from types import MethodWrapperType
@@ -4670,3 +4670,17 @@ def maybe_disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
 
 def is_node_meta_valid(node: Optional[torch.fx.Node]) -> bool:
     return node is None or "example_value" in node.meta or "val" in node.meta
+
+
+def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
+    cm: AbstractContextManager[None] = (
+        torch._C._profiler._RecordFunctionFast("Pregraph bytecode")
+        if torch.autograd.profiler._is_profiler_enabled
+        else contextlib.nullcontext()
+    )
+    cm.__enter__()
+    return cm
+
+
+def record_pregraph_bytecode_exit(cm: AbstractContextManager[None]) -> None:
+    cm.__exit__(None, None, None)
