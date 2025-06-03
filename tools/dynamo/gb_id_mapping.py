@@ -189,6 +189,60 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path):
     print(f"Added {gb_type} to registry with ID {gb_id}")
 
 
+def cmd_update_gb_type(old_gb_type, file_path, registry_path, new_gb_type=None):
+    """
+    Update an existing graph break type in the registry by appending the new version
+    while preserving the original.
+
+    Additionally, if a new unique gb_type is provided, it will be used to update the gb_type as well.
+    """
+    registry_path = Path(registry_path)
+    reg = load_registry(registry_path)
+
+    gb_id_map = {
+        entry.get("Gb_type"): id for id, entry in reg.items() if isinstance(entry, dict)
+    }
+    gb_id = gb_id_map.get(old_gb_type)
+
+    if gb_id is None:
+        print(f"Error: gb_type '{old_gb_type}' not found in registry.")
+        return False
+
+    search_gb_type = new_gb_type if new_gb_type else old_gb_type
+    calls = find_unimplemented_v2_calls(Path(file_path))
+    matching_call = next(
+        (call for call in calls if call["gb_type"] == search_gb_type), None
+    )
+
+    if not matching_call:
+        print(
+            f"Error: Could not find unimplemented_v2 call with gb_type '{search_gb_type}' in {file_path}"
+        )
+        return False
+
+    if (
+        matching_call["gb_type"] != old_gb_type
+        and matching_call["gb_type"] in gb_id_map
+    ):
+        print(
+            f"Error: New gb_type '{matching_call['gb_type']}' already exists in registry. Please use a unique gb_type."
+        )
+        return False
+
+    reg[gb_id] = {
+        "Gb_type": matching_call["gb_type"],
+        "Context": matching_call["context"],
+        "Explanation": matching_call["explanation"],
+        "Hints": matching_call["hints"] or [],
+        "previous_version": reg[gb_id],
+    }
+
+    save_registry(reg, registry_path)
+    print(
+        f"Updated {old_gb_type} to {matching_call['gb_type']} in registry with ID {gb_id}"
+    )
+
+
 def create_registry(dynamo_dir, registry_path):
     calls = find_unimplemented_v2_calls(dynamo_dir)
     registry = {}
@@ -237,6 +291,18 @@ def main():
         "file_path", help="Path to the file containing the unimplemented_v2 call"
     )
 
+    update_parser = subparsers.add_parser(
+        "update", help="Update an existing gb_type in registry"
+    )
+    update_parser.add_argument("gb_type", help="The gb_type to update")
+    update_parser.add_argument(
+        "file_path",
+        help="Path to the file containing the updated unimplemented_v2 call",
+    )
+    update_parser.add_argument(
+        "--new_gb_type", help="New gb_type name if it has changed", default=None
+    )
+
     parser.add_argument(
         "--registry-path",
         type=str,
@@ -257,6 +323,10 @@ def main():
         create_registry(args.dynamo_dir, args.registry_path)
     elif args.command == "add":
         cmd_add_new_gb_type(args.gb_type, args.file_path, args.registry_path)
+    elif args.command == "update":
+        cmd_update_gb_type(
+            args.gb_type, args.file_path, args.registry_path, args.new_gb_type
+        )
     else:
         parser.print_help()
 
