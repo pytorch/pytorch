@@ -933,6 +933,7 @@ if(USE_ROCM)
     target_compile_definitions(torch_hip PRIVATE USE_NCCL)
   endif()
 
+
   if(USE_PRECOMPILED_HEADERS)
     target_precompile_headers(torch_hip PRIVATE
         "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
@@ -1002,7 +1003,12 @@ elseif(USE_CUDA)
     # `torch::magma` should be mentioned before other CUDA
     # to transitively include all symbols present in torch_cuda/torch_cpu
     if(USE_MAGMA)
-      target_link_libraries(torch_cuda_linalg PRIVATE torch::magma)
+      if(USE_CUDA)
+        target_link_libraries(torch_cuda_linalg PRIVATE torch::magma)
+      elseif(USE_ROCM)
+        target_link_libraries(torch_cuda_linalg PRIVATE __rocm_magma)
+
+      endif()
       # CUDAHooks reports version of MAGMA PyTorch was compiled against, i.e. needs to be able to include magma headers
       get_target_property(HOOKS_INCLUDE_DIRECTORIES torch_cuda INCLUDE_DIRECTORIES)
       if(NOT "${MAGMA_INCLUDE_DIR}" IN_LIST HOOKS_INCLUDE_DIRECTORIES)
