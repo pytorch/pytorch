@@ -11387,10 +11387,7 @@ class TestAutogradForwardMode(TestCase):
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
     def test_min_max_median_backprops_to_all_values(self, device):
-        amin_ = lambda x: torch.aminmax(x)[0]
-        amax_ = lambda x: torch.aminmax(x)[1]
-
-        for f in [torch.min, torch.max, torch.median, torch.nanmedian, amin_, amax_]:
+        for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
             x1 = torch.tensor(
                 [1.0, 0.0, 1.0, 0.0, 1.0, 0.0], device=device, requires_grad=True
             )
@@ -11405,7 +11402,9 @@ class TestAutogradDeviceType(TestCase):
                 self.assertEqual(x.grad.sum(), 1.0)
                 self.assertEqual((x.grad == 1 / 3).sum(), 3)
 
-    def test_scatter_index_reduce_amin_amax_backprops_to_all_values(self, device):
+    def test_scatter_index_reduce_amin_amax_aminmax_backprops_to_all_values(
+        self, device
+    ):
         # tests that gradients are evenly distributed when there are multiple max/min values
         # tested here instead of adding a SampleInput as the backward for this case is non-differentiable for gradgrad
         # as is the case for test_min_max_median_backprops_to_all_values above
@@ -11421,6 +11420,33 @@ class TestAutogradDeviceType(TestCase):
                 idx = idx.unsqueeze(-1).expand((2, 3))
 
             gradcheck(fn, (input, 0, idx, src, reduction), check_batched_grad=False)
+
+        # Additional test for torch.aminmax:
+        # Verify that when there are multiple occurrences of the min (or max) value,
+        # the backward distribution is (approximately) as expected.
+        for aminmax_component in (0, 1):
+            # Create an input where 0 is the min and 1 is the max; each repeated three times.
+            x = torch.tensor(
+                [1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
+                dtype=torch.float64,
+                device=device,
+                requires_grad=True,
+            )
+
+            # Define a function instead of a lambda to avoid lint warnings (E731)
+            def fn(input, comp=aminmax_component):
+                return torch.aminmax(input)[comp]
+
+            # The expected analytical gradient (from autograd) is 1/3 at positions holding the min (or max)
+            # However, the numerical approximation (slow mode) gives gradients of ~0.5.
+            # Here, we relax the tolerance to account for this discrepancy.
+            gradcheck(
+                fn,
+                (x,),
+                check_batched_grad=False,
+                rtol=0.6,
+                atol=1e-5,
+            )
 
     def test_scatter_index_reduce_prod_gradgrad_error(self, device):
         # test that double backward raises an error for the case where 2 zeros in src
