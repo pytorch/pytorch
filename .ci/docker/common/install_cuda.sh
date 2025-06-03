@@ -120,6 +120,23 @@ function install_128 {
   ldconfig
 }
 
+function install_129 {
+  CUDNN_VERSION=9.8.0.87
+  echo "Installing CUDA 12.9.0 and cuDNN ${CUDNN_VERSION} and NCCL and cuSparseLt-0.6.3"
+  # install CUDA 12.9.0 in the same container
+  install_cuda 12.9.0 cuda_12.9.0_575.51.03_linux
+
+  # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
+  install_cudnn 12 $CUDNN_VERSION
+
+  CUDA_VERSION=12.9 bash install_nccl.sh
+
+  CUDA_VERSION=12.9 bash install_cusparselt.sh
+
+  ldconfig
+}
+
+
 # idiomatic parameter and option handling in sh
 while test $# -gt 0
 do
