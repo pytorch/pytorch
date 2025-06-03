@@ -371,9 +371,11 @@ void _validate_sparse_coo_tensor_args(
     const Tensor& indices,
     const Tensor& values_,
     ArrayRef<int64_t> size,
-    std::optional<bool> is_coalesced_) {
+    std::optional<bool> is_coalesced_,
+    std::optional<bool> check_pinning_) {
   Tensor values = expand_values_if_needed(values_);
   bool is_coalesced = is_coalesced_.value_or(false);
+  const bool check_pinning = check_pinning_.value_or(true);
 
   // the following checks are redundant because they are also checked in
   // SparseTensorImpl::set_indices_and_values_unsafe but we need to ensure them
@@ -397,13 +399,15 @@ void _validate_sparse_coo_tensor_args(
       "), but got ",
       size.size());
 
-  TORCH_CHECK(
-      indices.is_pinned() == values.is_pinned(),
-      "memory pinning of indices (=",
-      indices.is_pinned(),
-      ") must match memory pinning of values (=",
-      values.is_pinned(),
-      ")");
+  if (check_pinning) {
+    TORCH_CHECK(
+        indices.is_pinned() == values.is_pinned(),
+        "memory pinning of indices (=",
+        indices.is_pinned(),
+        ") must match memory pinning of values (=",
+        values.is_pinned(),
+        ")");
+  }
 
   // Check to make sure all indices are within the boundaries of `size`
   if (indices.numel() > 0) {

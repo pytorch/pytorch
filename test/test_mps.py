@@ -11991,10 +11991,11 @@ class TestConsistency(TestCaseMPS):
     }
 
     FP32_LOW_PRECISION_LIST = {
-        # conv2d and conv_transpose2d results have a very small
+        # conv2d, conv_transpose2d and conv_transpose3d results have a very small
         # difference compared to CPU/CUDA, so we use lower precision on FP32
         'nn.functional.conv2d',
         'nn.functional.conv_transpose2d',
+        'nn.functional.conv_transpose3d',
         'matmul', '__rmatmul__',
         'linalg.multi_dot',
         'addbmm',
