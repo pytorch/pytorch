@@ -303,7 +303,7 @@ struct TypeError : public PyTorchError {
 
 // Translates to Python AttributeError
 struct AttributeError : public PyTorchError {
-  AttributeError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
+  using PyTorchError::PyTorchError;
   PyObject* python_type() override {
     return PyExc_AttributeError;
   }
