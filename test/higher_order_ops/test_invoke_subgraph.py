@@ -404,19 +404,16 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    # TODO: support input mutation in inductor
-    @unittest.expectedFailure
-    def test_buffer_mutation(self):
+    def test_buffer_mutation_works_under_no_grad(self):
         class Mod(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.c = 5
                 self.register_buffer("buf", torch.ones(8, requires_grad=False))
 
             @mark_compile_region
             def forward(self, x, y):
                 self.buf.add_(1)
-                return torch.mul(x, y).sin() + self.c + self.buf
+                return torch.mul(x, y).sin() * self.buf
 
         mod_ref = Mod()
         mod = Mod()
@@ -434,17 +431,61 @@ class GraphModule(torch.nn.Module):
             "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
             True,
         ):
-            res = torch.compile(fn, backend="inductor", fullgraph=True)(
-                mod, x_clone, y_clone
-            )
+            with torch.no_grad():
+                res = torch.compile(fn, fullgraph=True)(mod, x_clone, y_clone)
         self.assertEqual(ref, res)
-        # The error is buffer mutation is not applied to original module.
-        # My guess is that this is due to bad interaction between
-        # decomposing auto_functionalized and top-level graph's input mutation handling
-        # logic, where top-level thinks the there's no input mutation in the graph (because auto_functionalized
-        # is functional) but after decomposing, we re-introduce the mutation
-        # to input, this should propagate back recursively to top-level.
         self.assertEqual(mod_ref.buf, mod.buf)
+
+        mod = Mod()
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
+        with mock.patch(
+            "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
+            True,
+        ):
+            with torch.inference_mode():
+                res = torch.compile(fn, fullgraph=True)(mod, x_clone, y_clone)
+        self.assertEqual(ref, res)
+        self.assertEqual(mod_ref.buf, mod.buf)
+
+        mod = Mod()
+        x_clone = x.detach().clone().requires_grad_(False)
+        y_clone = y.detach().clone().requires_grad_(False)
+        with mock.patch(
+            "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
+            True,
+        ):
+            res = torch.compile(fn, fullgraph=True)(mod, x_clone, y_clone)
+        self.assertEqual(ref, res)
+        self.assertEqual(mod_ref.buf, mod.buf)
+
+    def test_buffer_mutation_errors_under_training(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(8, requires_grad=False))
+
+            @mark_compile_region
+            def forward(self, x, y):
+                self.buf.add_(1)
+                return torch.mul(x, y).sin() * self.buf
+
+        mod = Mod()
+
+        def fn(mod, x, y):
+            return mod(x, y) + mod(x, y)
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "does not currently support training with in-place input or buffer mutations",
+        ):
+            with mock.patch(
+                "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
+                True,
+            ):
+                torch.compile(fn, backend="inductor", fullgraph=True)(mod, x, y)
 
     def test_list(self):
         @mark_compile_region
