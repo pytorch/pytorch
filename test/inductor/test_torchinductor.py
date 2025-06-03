@@ -15068,6 +15068,9 @@ if RUN_GPU:
                 self.assertIn("aoti_torch_check_inf_and_nan", code)
             else:
                 self.assertIn("# make sure graph inputs are not nan/inf", code)
+                self.assertRegex(code, r"return_vars = (.*)")
+                self.assertIn("for var in return_vars:", code)
+                self.assertIn("if isinstance(var, torch.Tensor):", code)
                 self.assertRegex(code, r"assert not .*\.isnan\(\)\.any\(\).item\(\)")
                 self.assertRegex(code, r"assert not .*\.isinf\(\)\.any\(\).item\(\)")
 

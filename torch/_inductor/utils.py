@@ -3103,6 +3103,15 @@ def get_ld_library_path() -> str:
     return path
 
 
+def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
+    from torch._inductor.codegen.wrapper import SubgraphPythonWrapperCodegen
+
+    return (
+        isinstance(wrapper, SubgraphPythonWrapperCodegen)
+        and wrapper.partition_signatures is not None
+    )
+
+
 def dtype_from_size(size: int) -> torch.dtype:
     from .virtualized import V
 

@@ -119,7 +119,15 @@ def signature_to_meta(
         # Even if the ks0 symbol itself is within tl.int32 range, it's
         # risky to use tl.int32 dtype since we may have ks0*ks1 later
         # for kernels like torch.mean when dynamic shape is enabled.
-        if isinstance(arg, SizeArg) and arg.name.startswith("ks"):
+        #
+        # Check config.triton.use_block_ptr, since Triton block pointer
+        # does not support 64bit indexing:
+        # https://gist.github.com/shunting314/6a41c776171720ce4561f202dcde0ad6
+        if (
+            not config.triton.use_block_ptr
+            and isinstance(arg, SizeArg)
+            and arg.name.startswith("ks")
+        ):
             return "tl.int64"
         return size_dtype
 
