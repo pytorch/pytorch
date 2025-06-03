@@ -195,7 +195,8 @@ inline DispatchKey get_autocast_dispatch_key_from_device_type(
     case c10::DeviceType::MPS:
       return DispatchKey::AutocastMPS;
     default:
-      throw std::runtime_error(
+      TORCH_CHECK(
+          false,
           "unknown device type for autocast in get_autocast_dispatch_key_from_device_type");
   }
 }
@@ -216,7 +217,8 @@ inline at::ScalarType get_lower_precision_fp_from_device_type(
   if (is_autocast_available(device_type)) {
     return get_autocast_dtype(device_type);
   } else {
-    throw std::runtime_error(
+    TORCH_CHECK(
+        false,
         "unknown device type for autocast in get_lower_precision_fp_from_device_type");
   }
 }

@@ -437,6 +437,123 @@ def _gather_tunableop_results() -> None:
         shutil.copy(output_file, duplicate_file)
 
 
+def _create_matrices(
+    m: int,
+    n: int,
+    k: int,
+    lda: int,
+    ldb: int,
+    ldc: int,
+    transA: bool,
+    transB: bool,
+    dtypeA: torch.dtype,
+    deviceid: str,
+    dtypeB: Optional[torch.dtype] = None,
+    randn: bool = True,
+    subMatrix: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    r"""Helper function for _process_single_offline_gemm.
+    Creates matrices that are then consumed by one of the Torch GEMM APIs.
+    """
+    # Fill parameters set for use with ScaledGEMM
+    fillA = 0.25
+    fillB = 0.75
+
+    if dtypeB is None:
+        dtypeB = dtypeA
+
+    if subMatrix:
+        # User reference for understanding leading dimension:
+        # https://github.com/Reference-LAPACK/lapack/blob/master/BLAS/SRC/dgemm.f
+        # TO DO: According to lines 108 - 133, there is no lower bound on rowsA,
+        # but there is a restriction on rowsB. Using this formula for now as it
+        # seems to work for all UTs.
+        rowsA = rowsB = max(ldc, k)
+
+        if randn:
+            matA = torch.randn(rowsA, lda, dtype=dtypeA, device=deviceid)
+            matB = torch.randn(rowsB, ldb, dtype=dtypeA, device=deviceid)
+        else:
+            matA = torch.full((rowsA, lda), fillA, dtype=dtypeB, device=deviceid)
+            matB = torch.full((rowsB, ldb), fillB, dtype=dtypeB, device=deviceid)
+
+        subA = matA[:k, :m].t() if transA else matA[:m, :k]
+        subB = matB[:n, :k].t() if transB else matB[:k, :n]
+        return subA, subB
+    else:
+        if randn:
+            matA = (
+                torch.rand(k, m, dtype=dtypeA, device=deviceid).t()
+                if transA
+                else torch.rand(m, k, dtype=dtypeA, device=deviceid)
+            )
+            matB = (
+                torch.rand(n, k, dtype=dtypeB, device=deviceid).t()
+                if transB
+                else torch.rand(k, n, dtype=dtypeB, device=deviceid)
+            )
+        else:
+            matA = (
+                torch.full((k, m), fillA, dtype=dtypeA, device=deviceid).t()
+                if transA
+                else torch.full((m, k), fillA, dtype=dtypeA, device=deviceid)
+            )
+            matB = (
+                torch.full((n, k), fillB, dtype=dtypeB, device=deviceid).t()
+                if transB
+                else torch.full((k, n), fillB, dtype=dtypeB, device=deviceid)
+            )
+        return matA, matB
+
+
+def _create_batch_matrices(
+    m: int,
+    n: int,
+    k: int,
+    b: int,
+    lda: int,
+    ldb: int,
+    ldc: int,
+    transA: bool,
+    transB: bool,
+    dtype: torch.dtype,
+    deviceid: str,
+    subMatrix: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    r"""Helper function for _process_single_offline_gemm.
+    Creates batch matrices that are then consumed by one of the Torch GEMM APIs.
+    Similar to _create_matrices but for 3D batch matrices.
+    """
+    if subMatrix:
+        # User reference for understanding leading dimension:
+        # https://github.com/Reference-LAPACK/lapack/blob/master/BLAS/SRC/dgemm.f
+        # TO DO: According to lines 108 - 133, there is no lower bound on rowsA,
+        # but there is a restriction on rowsB. Using this formula for now as it
+        # seems to work for all UTs.
+        rowsA = rowsB = max(ldc, k)
+
+        matA = torch.randn(b, rowsA, lda, dtype=dtype, device=deviceid)
+        matB = torch.randn(b, rowsB, ldb, dtype=dtype, device=deviceid)
+
+        subA = matA[:b, :k, :m].transpose(1, 2) if transA else matA[:b, :m, :k]
+        subB = matB[:b, :n, :k].transpose(1, 2) if transB else matB[:b, :k, :n]
+        return subA, subB
+    else:
+        matA = (
+            torch.rand(b, k, m, dtype=dtype, device=deviceid)
+            if transA
+            else torch.rand(b, m, k, dtype=dtype, device=deviceid)
+        )
+        matB = (
+            torch.rand(b, n, k, dtype=dtype, device=deviceid)
+            if transB
+            else torch.rand(b, k, n, dtype=dtype, device=deviceid)
+        )
+        matA = matA.transpose(1, 2) if transA else matA
+        matB = matB.transpose(1, 2) if transB else matB
+        return matA, matB
+
+
 def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     r"""Process a single untuned GEMM."""
 
@@ -466,10 +583,11 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     dtypeB = None
     dtypeC = None
 
+    # Extract BLAS parameters
     if underscore_count == 2:
         [op_sig, data_type, layout] = untuned_gemm[0].split("_")
-        transA = layout[0] == "T"
-        transB = layout[1] == "T"
+        transB = layout[0] == "T"
+        transA = layout[1] == "T"
         dtype = dtype_dict.get(data_type)
         if data_type == "tf32":
             # User must still set HIPBLASLT_ALLOW_TF32=1
@@ -490,8 +608,8 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             data_typeC = untuned_gemm_temp[5] + "_" + untuned_gemm_temp[6]
         else:
             data_typeC = untuned_gemm_temp[5]
-        transA = untuned_gemm_temp[count][0] == "T"
-        transB = untuned_gemm_temp[count][1] == "T"
+        transB = untuned_gemm_temp[count][0] == "T"
+        transA = untuned_gemm_temp[count][1] == "T"
         dtypeA = dtype_dict.get(data_typeA)
         dtypeB = dtype_dict.get(data_typeB)
         dtypeC = dtype_dict.get(data_typeC)
@@ -505,22 +623,18 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         assert untuned_gemm_temp[4] == "ld"
         [ldb, lda, ldc] = [int(g) for g in untuned_gemm_temp[5:8]]
 
-    # We cannot handle submatrices in offline tuning
+    # Detect subMatrix case
     if all(item in [n, m, k] for item in [lda, ldb, ldc]):
-        pass
+        subMatrix = False
     else:
-        warnings.warn(
-            "Offline tuning is not supported on submatrices. Use online tuning instead. "
-            + f"Skipped tuning for: {untuned_gemm[1]}"
-        )
-        return
+        subMatrix = True
 
     if op_sig == "GemmTunableOp":
         # Warnings for unsupported cases:
         if m == 1 or n == 1 or k == 1:
             if (not transA) and (not transB):
                 pass  # case is supported
-            elif transB and n == 1:
+            elif transA and n == 1:
                 pass  # case is supported
             else:
                 warnings.warn(
@@ -529,17 +643,15 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
                 )
                 return
 
-        matA = (
-            torch.rand(k, m, dtype=dtype, device=deviceid).t()
-            if transB
-            else torch.rand(m, k, dtype=dtype, device=deviceid)
-        )
-        matB = (
-            torch.rand(n, k, dtype=dtype, device=deviceid).t()
-            if transA
-            else torch.rand(k, n, dtype=dtype, device=deviceid)
+        # Resolve linter issue
+        if dtype is None or not isinstance(dtype, torch.dtype):
+            raise TypeError(f"dtype must be a torch.dtype, but got {dtype}")
+
+        matA, matB = _create_matrices(
+            m, n, k, lda, ldb, ldc, transA, transB, dtype, deviceid, subMatrix=subMatrix
         )
         torch.mm(matA, matB)
+
     elif op_sig == "GemmStridedBatchedTunableOp":
         # Warnings for unsupported cases:
         if m == 1 or n == 1 or k == 1:
@@ -550,35 +662,49 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             return
 
         [b] = [int(g) for g in untuned_gemm_temp[5:6]]
-        matA = (
-            torch.rand(b, k, m, dtype=dtype, device=deviceid)
-            if transB
-            else torch.rand(b, m, k, dtype=dtype, device=deviceid)
+
+        # Resolve linter issue
+        if dtype is None or not isinstance(dtype, torch.dtype):
+            raise TypeError(f"dtype must be a torch.dtype, but got {dtype}")
+
+        matA, matB = _create_batch_matrices(
+            m,
+            n,
+            k,
+            b,
+            lda,
+            ldb,
+            ldc,
+            transA,
+            transB,
+            dtype,
+            deviceid,
+            subMatrix=subMatrix,
         )
-        matB = (
-            torch.rand(b, n, k, dtype=dtype, device=deviceid)
-            if transA
-            else torch.rand(b, k, n, dtype=dtype, device=deviceid)
-        )
-        matA = matA.transpose(1, 2) if transB else matA
-        matB = matB.transpose(1, 2) if transA else matB
         torch.bmm(matA, matB)
     elif op_sig == "ScaledGemmTunableOp":
         # Only combination supported by PyTorch
-        assert transA is True
-        assert transB is False
+        assert transB is True
+        assert transA is False
 
-        fillA = 0.25
-        fillB = 0.75
-        matA = (
-            torch.full((k, m), fillA, dtype=dtypeA, device=deviceid).t()
-            if transB
-            else torch.full((m, k), fillA, dtype=dtypeA, device=deviceid)
-        )
-        matB = (
-            torch.full((n, k), fillB, dtype=dtypeB, device=deviceid).t()
-            if transA
-            else torch.full((k, n), fillB, dtype=dtypeB, device=deviceid)
+        # Resolve linter issue
+        if dtypeA is None or not isinstance(dtypeA, torch.dtype):
+            raise TypeError(f"dtype must be a torch.dtype, but got {dtypeA}")
+
+        matA, matB = _create_matrices(
+            m,
+            n,
+            k,
+            lda,
+            ldb,
+            ldc,
+            transA,
+            transB,
+            dtypeA,
+            deviceid,
+            dtypeB=dtypeB,
+            randn=False,
+            subMatrix=subMatrix,
         )
 
         assert untuned_gemm_temp[8] == "rw"
@@ -589,12 +715,12 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         if rowwise:
             scaleA = (
                 torch.ones((1, m), device=deviceid)
-                if transB
+                if transA
                 else torch.ones((m, 1), device=deviceid)
             )
             scaleB = (
                 torch.ones((1, n), device=deviceid)
-                if transA
+                if transB
                 else torch.ones((n, 1), device=deviceid)
             )
         else:
@@ -611,7 +737,7 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             bias_dtype = dtype_dict.get(untuned_gemm_temp[11])
             bias = (
                 torch.full((n,), fillbias, dtype=bias_dtype, device=deviceid)
-                if transA
+                if transB
                 else torch.full((m,), fillbias, dtype=bias_dtype, device=deviceid)
             )
             torch._scaled_mm(
@@ -622,21 +748,16 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         # y = x*A^T + b
         assert transA != transB
 
-        X = (
-            torch.rand(k, m, dtype=dtype, device=deviceid).t()
-            if transB
-            else torch.rand(m, k, dtype=dtype, device=deviceid)
+        # Resolve linter issue
+        if dtype is None or not isinstance(dtype, torch.dtype):
+            raise TypeError(f"dtype must be a torch.dtype, but got {dtype}")
+
+        bias = torch.rand(n, dtype=dtype, device=deviceid)
+
+        X, matA = _create_matrices(
+            m, n, k, lda, ldb, ldc, transA, transB, dtype, deviceid, subMatrix=subMatrix
         )
-        matA = (
-            torch.rand(n, k, dtype=dtype, device=deviceid)
-            if transA
-            else torch.rand(k, n, dtype=dtype, device=deviceid).t()
-        )
-        bias = (
-            torch.rand(n, dtype=dtype, device=deviceid)
-            if transA
-            else torch.rand(m, dtype=dtype, device=deviceid)
-        )
+        matA = matA.t()
         torch.nn.functional.linear(X, matA, bias)
     else:
         warnings.warn(f"error: unknown op {op_sig}")
