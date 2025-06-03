@@ -311,6 +311,158 @@ at::Tensor nvshmem_all_to_all_vdev(
   return out;
 }
 
+// Start of `nvshmem_all_to_all_vdev_2d`
+// This kernel is used to exchange output splits and source offsets between peers.
+// For meaning of `mype` and `npes`, see the docstring of `nvshmem_all_to_all_vdev_2d`.
+// `in_out_splits` is of size (3, npes * ne) and contains:
+// - input splits (IN)
+// - output splits (OUT) and
+// - source offsets (OUT).
+__global__ void exchangeSplitAndOffset_2d(int64_t* in_out_splits, int mype, int npes, int ne) {
+  int nsplits = npes * ne;
+  auto input_splits = in_out_splits;
+  auto output_splits = in_out_splits + nsplits;
+  auto source_offsets = in_out_splits + nsplits * 2;
+  int tid = threadIdx.x;
+
+  __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
+
+  // Scan input splits to get the source offsets
+  prefixSum(peer_offsets, input_splits, nsplits);
+  __syncthreads();;
+
+  // Use 1 block to do the exchange
+  if (tid < nsplits) {
+    int peer = tid / ne;
+    int e = tid % ne;
+    // This does a transpose from rank-major order to expert-major order
+    int dst_offset = e * npes + mype;
+    nvshmem_int64_p(source_offsets + dst_offset, peer_offsets[tid], peer);
+    nvshmem_int64_p(output_splits + dst_offset, input_splits[tid], peer);
+  }
+  // This barrier ensures that all remote PEs see the updated values
+  nvshmemx_barrier_all_block();
+}
+
+// This kernel is used to do the actual data exchange.
+// `in_out_splits` has the same definition as in `exchangeSplitAndOffset`.
+// `stride` is the stride at dim 0, unit in byte.
+// For meaning of `mype` and `npes`, see the docstring of `nvshmem_all_to_all_vdev_2d`.
+__global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_out_splits, size_t stride, int mype, int npes, int ne) {
+  int nsplits = npes * ne;
+  auto output_splits = in_out_splits + nsplits;
+  auto source_offsets = in_out_splits + nsplits * 2;
+  int bid = blockIdx.x;
+  int tid = threadIdx.x;
+
+  // Calculate the output offsets
+  __shared__ int64_t e_offsets[THREADS_PER_BLOCK];
+  prefixSum(e_offsets, output_splits, nsplits);
+  __syncthreads();
+
+  // Target a different e based on bid
+  for (int eid = bid; eid < nsplits; eid += gridDim.x) {
+    int peer = eid % npes;
+    // Amount from `peer` for `e`
+    auto peer_size = output_splits[eid] * stride;
+    auto source_offset = source_offsets[eid] * stride;
+    auto write_offset = e_offsets[eid] * stride;
+    nvshmemx_getmem_block(
+      (char*)recv_data + write_offset,
+      (char*)send_data + source_offset,
+      peer_size,
+      peer);
+  }
+  // Write out the output offsets (to the scratchpad line)
+  if (bid == 0 && tid < nsplits) {
+    source_offsets[tid] = e_offsets[tid];
+  }
+}
+
+at::Tensor nvshmem_all_to_all_vdev_2d(
+    at::Tensor& input,
+    at::Tensor& out,
+    at::Tensor& in_out_splits,
+    std::string group_name) {
+  /* Perform a 2D AllToAllv shuffle operation using NVSHMEM, with split information provided on device.
+   * Arguments:
+   *  - `input` is the input tensor
+   *  - `out` is the output tensor
+   *  - `in_out_splits` is a 2D tensor of size (3, `world_size` * `ne`). In the
+   *  scenario of Mixture-of-Experts models, `ne` is the number of experts per
+   *  rank. The rows are (in order):
+        input splits (IN)
+        output splits (OUT) and
+        output offsets (OUT).
+   *  - `group_name` is the name of the group to use for the collective operation.
+   *  A 2D AllToAllv shuffle is illustrated below:
+        (world_size = 2, ne = 2)
+        Source: |         Rank 0        |         Rank 1        |
+                | e00 | e01 | e02 | e03 | e10 | e11 | e12 | e13 |
+        Dest:   |         Rank 0        |         Rank 1        |
+                | e00 | e10 | e01 | e11 | e02 | e12 | e03 | e13 |
+        where each eij is a slice of the `input` tensor, with length indicated by input splits (`in_out_splits[0]`) at index `i * ne + j`.
+        That is, the 2D AllToAllv shuffle achives a transpose from rank-major order at input to expert-major order at output.
+  */
+  auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
+  auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
+  auto splits_hdl = c10d::symmetric_memory::rendezvous(in_out_splits, group_name);
+  int rank = input_hdl->get_rank();
+  int world_size = input_hdl->get_world_size();
+
+  void* input_ptr = input_hdl->get_buffer_ptrs()[rank];
+  void* output_ptr = out_hdl->get_buffer_ptrs()[rank];
+  int64_t* splits_ptr = (int64_t*)(splits_hdl->get_buffer_ptrs()[rank]);
+
+  // Number of experts per rank
+  int ne = in_out_splits.stride(0) / world_size;
+  TORCH_CHECK(ne * world_size == in_out_splits.stride(0), "Each row of in_out_splits must be a multiple of world_size")
+
+  auto stream = at::cuda::getCurrentCUDAStream(input.device().index());
+
+  // Exchange output splits and source offsets
+  // Use collective launch because kernel involves nvshmem barrier
+  void* args0[] = {
+      &splits_ptr,
+      &rank,
+      &world_size,
+      &ne};
+  nvshmemx_collective_launch(
+      (const void*)exchangeSplitAndOffset_2d,
+      dim3(1),
+      dim3(THREADS_PER_BLOCK),
+      args0,
+      0,
+      stream);
+
+  // CTA Tuning
+  // Naive for now, use 1 block per expert.
+  // Total number of blocks is limited to 64 (intra-node) or 8 (inter-node).
+  int num_blocks = std::min(world_size * ne, world_size > 8 ? 8 : 64);
+  LOG(INFO) << "num_blocks: " << num_blocks << ", ne: " << ne << ", world_size: " << world_size;
+
+  // Stride at dim 0 (assuming input is contiguous, TODO)
+  size_t stride_bytes = input.stride(0) * input.element_size();
+
+  // All to all data exchange
+  void* args1[] = {
+      &input_ptr,
+      &output_ptr,
+      &splits_ptr,
+      &stride_bytes,
+      &rank,
+      &world_size,
+      &ne};
+  nvshmemx_collective_launch(
+      (const void*)allToAllV_2d,
+      dim3(num_blocks),
+      dim3(THREADS_PER_BLOCK),
+      args1,
+      0,
+      stream);
+  return out;
+}
+
 } // namespace c10d::nvshmem_extension
 
 
@@ -318,4 +470,5 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("nvshmem_broadcast", c10d::nvshmem_extension::nvshmem_broadcast);
   m.impl("nvshmem_all_to_all", c10d::nvshmem_extension::nvshmem_all_to_all);
   m.impl("nvshmem_all_to_all_vdev", c10d::nvshmem_extension::nvshmem_all_to_all_vdev);
+  m.impl("nvshmem_all_to_all_vdev_2d", c10d::nvshmem_extension::nvshmem_all_to_all_vdev_2d);
 }
