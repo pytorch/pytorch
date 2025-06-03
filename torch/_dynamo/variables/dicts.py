@@ -326,7 +326,7 @@ class ConstDictVariable(VariableTracker):
                 )
             )
             self.reconstruct_kvs_into_new_dict(codegen)
-            codegen.extend_output(*create_call_function(1, False))
+            codegen.extend_output(create_call_function(1, False))
         else:
             self.reconstruct_kvs_into_new_dict(codegen)
 
