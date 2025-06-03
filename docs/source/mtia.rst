@@ -23,6 +23,7 @@ The MTIA backend is implemented out of the tree, only interfaces are be defined 
     empty_cache
     record_memory_history
     snapshot
+    attach_out_of_memory_observer
     set_device
     set_stream
     stream
