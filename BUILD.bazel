@@ -290,6 +290,7 @@ header_template_rule(
     substitutions = {
         "@AT_CUDNN_ENABLED@": "1",
         "@AT_CUSPARSELT_ENABLED@": "0",
+        "@AT_HIPSPARSELT_ENABLED@": "0",
         "@AT_ROCM_ENABLED@": "0",
         "@AT_MAGMA_ENABLED@": "0",
         "@NVCC_FLAGS_EXTRA@": "",
@@ -668,6 +669,14 @@ flatbuffer_cc_library(
     ],
     flatc_args = ["--cpp", "--gen-mutable", "--scoped-enums"],
     out_prefix = "torch/csrc/jit/serialization/",
+)
+
+cc_library(
+    name = "torch_standalone_headers",
+    hdrs = glob([
+        "torch/standalone/**/*.h"
+    ]),
+    visibility = ["//visibility:public"],
 )
 
 cc_library(
