@@ -2689,6 +2689,15 @@ class Scheduler:
             return backend.benchmark_codegened_module(module)
 
     def finalize_multi_template_buffers(self) -> None:
+        """
+        Finalize a backing choice for MultiTemplateBuffers which did not already have a
+        choice finalized through fusion. In the case of an extern choice, this will result
+        in replacing the SchedulerNode.
+
+        If a MultiTemplateBuffer did not have any fusion opportunities, finalizing a choie
+        will force completion of compilation and benchmarking.
+        """
+
         def replace_operation_buffer(
             orig_node: ir.MultiTemplateBuffer, new_node: ir.OperationBuffer
         ) -> None:
@@ -2755,6 +2764,24 @@ class Scheduler:
                 self.nodes[i] = new_scheduler_node
                 self.name_to_node[node.get_name()] = new_scheduler_node
                 self.name_to_fused_node[node.get_name()] = new_scheduler_node
+
+                # We need to reflect the mutation renames that were recorded in the original node
+                mutation_renames = {}
+                for dep in itertools.chain(
+                    node.read_writes.reads, node.unmet_dependencies
+                ):
+                    if real_name := self.mutation_real_name.get(dep.name, None):
+                        mutation_renames[real_name] = dep.name
+
+                def rename_deps(deps: OrderedSet[Dep]) -> OrderedSet[Dep]:
+                    return OrderedSet(dep.rename(mutation_renames) for dep in deps)
+
+                new_scheduler_node.unmet_dependencies = rename_deps(
+                    new_scheduler_node.unmet_dependencies
+                )
+                new_scheduler_node.read_writes.reads = rename_deps(
+                    new_scheduler_node.read_writes.reads
+                )
 
                 for new_out, old_out in zip(
                     new_scheduler_node.get_outputs(), node.get_outputs()
@@ -2882,7 +2909,7 @@ class Scheduler:
             future_choices: list[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
             triton_choices = 0
             for choice, unfused_time in sorted(
-                choice_timings.items(), key=lambda x: x[1]
+                choice_timings.items(), key=operator.itemgetter(1)
             ):
                 if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
                     continue
@@ -3478,7 +3505,7 @@ class Scheduler:
             return 0
 
         # Pick the largest buffer to guide the loop reordering
-        _numel, lhs_dep, rhs_dep = max(candidates, key=lambda x: x[0])
+        _numel, lhs_dep, rhs_dep = max(candidates, key=operator.itemgetter(0))
 
         if not isinstance(lhs_dep, MemoryDep) or not isinstance(rhs_dep, MemoryDep):
             return 0

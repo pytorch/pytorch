@@ -2696,6 +2696,12 @@ class CommonTemplate:
 
         self.common(fn, (torch.randint(4, (4,)),))
 
+    def test_clamp_type_promotion_non_tensor(self):
+        def fn(a):
+            return a.clamp(min=1.5), a.clamp(min=2)
+
+        self.common(fn, (torch.randint(4, (4,)),))
+
     @skip_if_gpu_halide
     @xfail_if_triton_cpu
     def test_dist(self):
@@ -4858,18 +4864,16 @@ class CommonTemplate:
 
     @xfail_if_mps_unimplemented
     def test_fractional_max_pool2d2(self):
-        # fallback for larger kernel size
+        # large kernel size without unrolling
 
         def fn(x, samples):
             return aten.fractional_max_pool2d(x, (6, 5), (3, 3), samples)
 
-        torch._inductor.metrics.generated_kernel_count = 0
         self.common(
             fn,
             (torch.randn(2, 4, 36, 36), torch.rand(2, 4, 2)),
             check_lowp=False,
         )
-        assertGeneratedKernelCountEqual(self, 0)
 
     @xfail_if_mps_unimplemented
     def test_fractional_max_pool2d3(self):
@@ -10502,6 +10506,50 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(x_ref, x_test)
 
     @requires_gpu()
+    @skip_if_not_triton
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
+    def test_inductor_multiple_specializations(self):
+        from triton.testing import do_bench
+
+        @torch.compile(
+            options={
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
+            dynamic=False,
+        )
+        def inductor_matmul(a, b):
+            torch._check(a.shape[0] == b.shape[1])
+            return (m, torch.mm(a, b))
+
+        m = 16
+        k = 1280
+        dynamic_a = torch.randn(m, k, device=GPU_TYPE, dtype=torch.bfloat16)
+        dynamic_specialized_a = torch.randn(m, k, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16)
+        torch._dynamo.decorators.mark_dynamic(
+            dynamic_a,
+            0,
+        )
+        torch._dynamo.decorators.mark_dynamic(
+            dynamic_specialized_a,
+            0,
+            specialize_on=[lambda x0: x0 == 16],
+        )
+        torch._dynamo.decorators.mark_dynamic(
+            b,
+            1,
+        )
+        dynamic = do_bench(lambda: inductor_matmul(dynamic_a, b))
+        torch._dynamo.reset()
+        dynamic_specialized = do_bench(
+            lambda: inductor_matmul(dynamic_specialized_a, b)
+        )
+        self.assertGreaterEqual(dynamic, dynamic_specialized)
+
+    @requires_gpu()
     def test_stride_preservation_with_stride_modifying_fx_pass(self):
         def f(x):
             return x + 1
@@ -12757,8 +12805,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(forward, (a, b))
 
-    @xfail_if_mps_unimplemented
     def test_isin_tensor_scalar(self):
+        if self.device == "mps" and MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("isin is not implemented on MacOS-13")
+
         for invert in [True, False]:
             torch._dynamo.reset()
             elements = 1
@@ -14989,6 +15039,9 @@ if RUN_GPU:
                 self.assertIn("aoti_torch_check_inf_and_nan", code)
             else:
                 self.assertIn("# make sure graph inputs are not nan/inf", code)
+                self.assertRegex(code, r"return_vars = (.*)")
+                self.assertIn("for var in return_vars:", code)
+                self.assertIn("if isinstance(var, torch.Tensor):", code)
                 self.assertRegex(code, r"assert not .*\.isnan\(\)\.any\(\).item\(\)")
                 self.assertRegex(code, r"assert not .*\.isinf\(\)\.any\(\).item\(\)")
 
