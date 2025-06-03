@@ -902,7 +902,7 @@ def is_from_source(source: Source, target: Source):
     return source == target
 
 
-@functools.lru_cache(None)
+@functools.lru_cache
 def is_from_unspecialized_nn_module_source(source: Source):
     if isinstance(source, UnspecializedNNModuleSource):
         return True
@@ -911,7 +911,7 @@ def is_from_unspecialized_nn_module_source(source: Source):
     return False
 
 
-@functools.lru_cache(None)
+@functools.lru_cache
 def is_from_unspecialized_builtin_nn_module_source(source: Source):
     if isinstance(source, UnspecializedBuiltinNNModuleSource):
         return True
@@ -920,7 +920,7 @@ def is_from_unspecialized_builtin_nn_module_source(source: Source):
     return False
 
 
-@functools.lru_cache(None)
+@functools.lru_cache
 def is_from_unspecialized_param_buffer_source(source: Source):
     if isinstance(source, UnspecializedParamBufferSource):
         return True
@@ -929,7 +929,7 @@ def is_from_unspecialized_param_buffer_source(source: Source):
     return False
 
 
-@functools.lru_cache(None)
+@functools.lru_cache
 def is_from_flatten_script_object_source(source: Source):
     if isinstance(source, FlattenScriptObjectSource):
         return True
@@ -938,7 +938,7 @@ def is_from_flatten_script_object_source(source: Source):
     return False
 
 
-@functools.lru_cache(None)
+@functools.lru_cache
 def is_from_optimizer_source(source: Source):
     if isinstance(source, OptimizerSource):
         return True
@@ -949,7 +949,7 @@ def is_from_optimizer_source(source: Source):
 
 # TODO: can probably write a generic "test this on everything in the chain"
 # helper
-@functools.lru_cache(None)
+@functools.lru_cache
 def is_from_defaults(source: Source):
     if isinstance(source, DefaultsSource):
         return True
