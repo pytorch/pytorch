@@ -320,7 +320,7 @@ def _view_meta(a, *shape, size_oblivious_enabled=True):
         lambda: f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
     )
 
-    if len(shape) == len(a.shape) and statically_known_true(sym_eq(shape, a.shape)):
+    if len(shape) == len(a.shape) and guard_or_false(sym_eq(shape, a.shape)):
         return view_of(a)
 
     if definitely_contiguous(a) if size_oblivious_enabled else is_contiguous(a):
