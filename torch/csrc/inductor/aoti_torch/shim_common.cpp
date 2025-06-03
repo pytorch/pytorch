@@ -1206,10 +1206,21 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
     if (!is_complex_type) {
       // "min_all_cuda" function is not implemented for 'ComplexFloat' type.
       // (similar for max) Skip printing min/max value for complex type tensors
-      // here If encountered complex dtypes (rare occasions), suggest to print
+      // here if encountered complex (rare occasions), suggest to print
       // out the whole value of the tensor.
-      std::cout << "Min value: " << t->min().item<float>() << '\n';
-      std::cout << "Max value: " << t->max().item<float>() << '\n';
+      std::cout << "Min value: " << t->to(float_dtype).min().item() << '\n';
+      std::cout << "Max value: " << t->to(float_dtype).max().item() << '\n';
+    } else {
+      // Set the numel threshold to print as 256 to avoid printing out too much
+      // More info for aten native cuda kernel for "min_all_cuda" implementation
+      // source:
+      // https://github.com/pytorch/pytorch/blob/4b3983241263b03abd25ae381ae4743ac49b648e/aten/src/ATen/native/cuda/ReduceMinValuesKernel.cu#L51
+      if (numel <= 256) {
+        std::cout
+            << "[INFO] Aten built-in function `min_all_cuda/max_all_cuda` not implemented for current dtype: "
+            << t->dtype() << ". Printing out the whole value:\n"
+            << *t << "\n";
+      }
     }
   }
   std::cout << "Device: " << t->device() << '\n';
