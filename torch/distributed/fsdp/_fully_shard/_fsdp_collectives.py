@@ -88,7 +88,7 @@ def all_gather_copy_in_cuda(
     )
     foreach_copy_dsts = torch.split(all_gather_input, inp_split_sizes)
     with torch.no_grad():
-        torch._foreach_copy_(foreach_copy_dsts, all_gather_inputs)
+        torch._foreach_copy_(foreach_copy_dsts, all_gather_inputs, non_blocking=True)
     return all_gather_input, all_gather_output
 
 
