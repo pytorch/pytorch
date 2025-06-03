@@ -1320,6 +1320,12 @@ class ExportedProgram:
             len(self._graph_signature.input_specs),
         )
 
+    def functionalize(self):
+        """
+        Returns a functional version of the ExportedProgram.
+        """
+        return self.run_decompositions({})
+
     @_disable_prexisiting_fake_mode
     def run_decompositions(
         self,
