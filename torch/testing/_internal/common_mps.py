@@ -67,6 +67,7 @@ if torch.backends.mps.is_available():
             "H",
             "hsplit",
             "imag",
+            "index_copy",
             "index_select",
             "isfinite",
             "isinf",
@@ -97,6 +98,7 @@ if torch.backends.mps.is_available():
             "nn.functional.conv2d",
             "nn.functional.conv_transpose1d",
             "nn.functional.conv_transpose2d",
+            "nn.functional.conv_transpose3d",
             "nn.functional.feature_alpha_dropoutwithout_train",
             "nn.functional.padcircular",
             "nn.functional.softsign",
@@ -377,7 +379,6 @@ if torch.backends.mps.is_available():
             "linalg.eig": None,
             "linalg.eigvals": None,
             "put": None,
-            "nn.functional.conv_transpose3d": None,
             "cauchy_": None,
             "cauchy": None,
             "cholesky_inverse": None,
@@ -392,7 +393,6 @@ if torch.backends.mps.is_available():
             "heaviside": None,
             "igamma": None,
             "igammac": None,
-            "index_copy": None,
             "index_reduceprod": None,
             "index_reducemean": None,
             "index_reduceamax": None,
@@ -507,6 +507,11 @@ if torch.backends.mps.is_available():
             "nn.functional.conv3d": [torch.int64],
             "nn.functional.conv_transpose1d": [torch.int64],
             "nn.functional.conv_transpose2d": [torch.int64, torch.bfloat16],
+            "nn.functional.conv_transpose3d": [
+                torch.int64,
+                torch.bfloat16,
+                torch.float16,
+            ],
             # Unsupported dtypes
             "dot": [torch.int64] if MACOS_VERSION < 14.0 else [],
             "histc": [torch.float16, torch.bfloat16],
@@ -581,7 +586,6 @@ if torch.backends.mps.is_available():
             "mat": [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
             "matmul": [torch.int64] if MACOS_VERSION < 14.0 else [],
             "__rmatmul__": [torch.int64] if MACOS_VERSION < 14.0 else [],
-            "unravel_index": [torch.int32, torch.int64],
             # returned output on CPU is float64
             "bincount": [
                 torch.int16,
@@ -590,8 +594,6 @@ if torch.backends.mps.is_available():
                 torch.uint8,
                 torch.int8,
             ],
-            # trunc_tensor not working properly for float16 and bfloat16
-            "fmod": [torch.float16],
             # round not working properly for float16 and bfloat16
             "round": [torch.float16, torch.bfloat16],
             "rounddecimals_0": [torch.bfloat16],
@@ -928,8 +930,6 @@ if torch.backends.mps.is_available():
             "signal.windows.kaiser": [torch.float32],
             "signal.windows.nuttall": [torch.float32],
             "eye": [torch.float16, torch.float32],
-            # trunc_tensor not working properly for float16
-            "fmod": [torch.float16],
             # round not working properly for float16
             "round": [torch.float16],
             # topk fails with duplicate indices
@@ -942,7 +942,6 @@ if torch.backends.mps.is_available():
             "masked.softmax": [torch.float32, torch.float16],
             "masked.log_softmax": [torch.float32, torch.float16],
             "atanh": [torch.float16],
-            "__rmod__": [torch.float16],
             "triangular_solve": [torch.float32],
             # Unsupported Border padding mode, forward pass success as fallback to cpu
             "grid_sampler_2d": [torch.float32, torch.float16, torch.bfloat16],

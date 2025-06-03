@@ -11,7 +11,7 @@ import subprocess
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 import black
 import isort
@@ -69,10 +69,6 @@ USE_BLACK_FILELIST = re.compile(
         )
     )
 )
-
-
-def eprint(*args: Any, **kwargs: Any) -> None:
-    print(*args, file=sys.stderr, flush=True, **kwargs)
 
 
 class LintSeverity(str, Enum):
