@@ -74,18 +74,6 @@ def expand_hints(hints):
     return expanded_hints
 
 
-"""
-    Extracts and returns the value of a keyword argument from an AST node.
-
-    This function handles different types of AST nodes:
-    - If the node is a constant, it returns the constant value.
-    - If the node is an f-string, it reconstructs the string by
-      evaluating formatted values and concatenating them with string literals.
-    - For other types, it cleans the source segment to remove formatting artifacts.
-
-"""
-
-
 def extract_info_from_keyword(source, kw):
     """
     Extracts and returns the value of a keyword argument from an AST node.
@@ -170,14 +158,6 @@ def find_unimplemented_v2_calls(path):
 
 
 def cmd_add_new_gb_type(gb_type, file_path, registry_path):
-    """
-    Add a new graph break type to the registry.
-
-    Args:
-        gb_type: The graph break type to add
-        file_path: Path to the file containing the unimplemented_v2 call
-        registry_path: Path to the registry JSON file
-    """
     registry_path = Path(registry_path)
     reg = load_registry(registry_path)
 
