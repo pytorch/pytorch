@@ -77,8 +77,12 @@ struct zeta_functor {
 
 struct xlog1py_functor {
   template <typename T>
-  inline T operator()(const T a, const T b) {
+  inline enable_if_t<is_floating_point_v<T>, T> operator()(const T a, const T b) {
     return static_cast<T>(c10::metal::xlog1py(a, b));
+  }
+  template <typename T>
+  inline enable_if_t<!is_floating_point_v<T>, float> operator()(const T a, const T b) {
+    return c10::metal::xlog1py(float(a), float(b));
   }
 };
 
@@ -300,6 +304,7 @@ REGISTER_FLOAT_BINARY_OP(fmin);
 REGISTER_FLOAT_BINARY_OP(nextafter);
 REGISTER_FLOAT_BINARY_OP(zeta);
 REGISTER_FLOAT_BINARY_OP(xlog1py);
+REGISTER_INT2FLOAT_BINARY_OP(xlog1py);
 REGISTER_FLOAT_BINARY_OP(chebyshev_polynomial_t);
 REGISTER_FLOAT_BINARY_OP(chebyshev_polynomial_u);
 REGISTER_FLOAT_BINARY_OP(chebyshev_polynomial_v);

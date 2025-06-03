@@ -512,14 +512,6 @@ if torch.backends.mps.is_available():
             "histc": [torch.float16, torch.bfloat16],
             "index_add": [torch.int64],
             # Operations not supported for integral types
-            "special.xlog1py": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
             "special.zeta": [
                 torch.bool,
                 torch.int16,
