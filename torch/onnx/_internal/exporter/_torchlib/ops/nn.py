@@ -206,10 +206,9 @@ def _aten_scaled_dot_product_attention_no_mask_onnx(
     op: Opset,
 ) -> TFloat:
     # Swap the last two axes of key
-    key_shape = op.Shape(key)
-    key_last_dim = op.Slice(key_shape, [-1], op.Constant(value_ints=[_INT64_MAX]))
-    key_second_last_dim = op.Slice(key_shape, [-2], [-1])
-    key_first_dims = op.Slice(key_shape, op.Constant(value_ints=[_INT64_MIN]), [-2])
+    key_last_dim = op.Shape(key, start=-1)
+    key_second_last_dim = op.Shape(key, start=-2, end=-1)
+    key_first_dims = op.Shape(key, end=-2)
     # Contract the dimensions that are not the last two so we can transpose
     # with a static permutation.
     key_squeezed_shape = op.Concat(
@@ -246,10 +245,9 @@ def _aten_scaled_dot_product_attention_float_mask_onnx(
     op: Opset,
 ) -> TFloat:
     # Swap the last two axes of key
-    key_shape = op.Shape(key)
-    key_last_dim = op.Slice(key_shape, [-1], op.Constant(value_ints=[_INT64_MAX]))
-    key_second_last_dim = op.Slice(key_shape, [-2], [-1])
-    key_first_dims = op.Slice(key_shape, op.Constant(value_ints=[_INT64_MIN]), [-2])
+    key_last_dim = op.Shape(key, start=-1)
+    key_second_last_dim = op.Shape(key, start=-2, end=-1)
+    key_first_dims = op.Shape(key, end=-2)
     # Contract the dimensions that are not the last two so we can transpose
     # with a static permutation.
     key_squeezed_shape = op.Concat(
