@@ -2192,13 +2192,17 @@ class SIMDScheduling(BaseScheduling):
 
         # add a slight penalty for longer tilings that dont increase score much,
         # and are poor sizes
-        additional_tiling_penalty = 1.025
+        bad_size_additional_tiling_penalty = 1.025
+        good_size_tiling_penalty = 1.005
+
 
         def score_mod(t):
             score_factor = 1.0
             for tile_size in t[0].tiling.values():
                 if not CandidateTiling.is_good_size(tile_size):
-                    score_factor = score_factor / additional_tiling_penalty
+                    score_factor = score_factor / bad_size_additional_tiling_penalty
+                else:
+                    score_factor = score_factor / good_size_tiling_penalty
 
             return -t[0].score * score_factor
 
@@ -2291,6 +2295,7 @@ class SIMDScheduling(BaseScheduling):
 
         # Tiled reductions are gated by a config flag.
         default_tiling = cls.create_tiling([numel], [reduction_numel])
+
 
         # # TODO: enable by default
         if torch._inductor.config.triton.coalesce_tiling_analysis and coalesce_analysis:
