@@ -5766,6 +5766,7 @@ def full_like(
         dtype=dtype,
         layout=layout,
         device=device,
+        pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
 
