@@ -475,6 +475,13 @@ coverage_ignore_functions = [
     "get_weight_qspec",
     "propagate_annotation",
     "register_annotator",
+    # torch.ao.quantization.experimental.apot_utils
+    "apot_to_float",
+    "float_to_apot",
+    "quant_dequant_util",
+    # torch.ao.quantization.experimental.quantizer
+    "quant_dequant_APoT",
+    "quantize_APoT",
     # torch.ao.quantization.utils
     "activation_dtype",
     "activation_is_dynamically_quantized",
@@ -2552,10 +2559,6 @@ coverage_ignore_classes = [
     "AdaptiveRoundingLoss",
     # torch.ao.quantization.experimental.adaround_optimization
     "AdaptiveRoundingOptimizer",
-    # torch.ao.quantization.experimental.apot_utils
-    "apot_to_float",
-    "float_to_apot",
-    "quant_dequant_util"
     # torch.ao.quantization.experimental.fake_quantize
     "APoTFakeQuantize",
     # torch.ao.quantization.experimental.fake_quantize_function
@@ -2563,8 +2566,6 @@ coverage_ignore_classes = [
     # torch.ao.quantization.experimental.observer
     "APoTObserver",
     # torch.ao.quantization.experimental.quantizer
-    "quant_dequant_APoT",
-    "quantize_APoT",
     "APoTQuantizer",
     # torch.ao.quantization.stubs
     "DeQuantStub",
