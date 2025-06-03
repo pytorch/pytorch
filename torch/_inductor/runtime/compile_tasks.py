@@ -52,6 +52,11 @@ def _worker_compile_triton(
     extra_env: dict[str, str],
     extra_config: dict[str, Any],
 ) -> tuple[CachingAutotuner, int]:
+    # Install a crash handler to print out the stacktrace for SEGV
+    import torch._C
+
+    torch._C._initCrashHandler()
+
     _set_triton_ptxas_path()
     os.environ.update(extra_env)
     from torch._inductor import config
