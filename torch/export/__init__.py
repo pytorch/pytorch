@@ -446,12 +446,15 @@ def load(
 
     extra_files = extra_files or {}
 
-    from torch.export.pt2_archive._package import load_pt2
+    from torch.export.pt2_archive._package import load_pt2, PT2ArchiveContents
 
-    pt2_contents = load_pt2(
-        f,
-        expected_opset_version=expected_opset_version,
-    )
+    try:
+        pt2_contents = load_pt2(
+            f,
+            expected_opset_version=expected_opset_version,
+        )
+    except RuntimeError:
+        pt2_contents = PT2ArchiveContents({}, {}, {})
 
     if len(pt2_contents.exported_programs) > 0 or len(pt2_contents.extra_files) > 0:
         for k, v in pt2_contents.extra_files.items():

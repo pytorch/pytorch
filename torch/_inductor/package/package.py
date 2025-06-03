@@ -1,8 +1,11 @@
+import io
 import json
 import logging
 import os
-from typing import Union
+import tempfile
+from typing import IO, Union
 
+import torch
 from torch._inductor import config
 from torch._inductor.cpp_builder import BuildOptionsBase, CppBuilder
 from torch.export.pt2_archive._package import AOTICompiledModel, load_pt2, package_pt2
@@ -95,12 +98,33 @@ def load_package(
     num_runners: int = 1,
     device_index: int = -1,
 ) -> AOTICompiledModel:  # type: ignore[type-arg]
-    pt2_contents = load_pt2(
-        path,
-        run_single_threaded=run_single_threaded,
-        num_runners=num_runners,
-        device_index=device_index,
-    )
-    if model_name not in pt2_contents.aoti_runners:
-        raise RuntimeError(f"Model {model_name} not found in package")
-    return pt2_contents.aoti_runners[model_name]
+    try:
+        pt2_contents = load_pt2(
+            path,
+            run_single_threaded=run_single_threaded,
+            num_runners=num_runners,
+            device_index=device_index,
+        )
+        if model_name not in pt2_contents.aoti_runners:
+            raise RuntimeError(f"Model {model_name} not found in package")
+        return pt2_contents.aoti_runners[model_name]
+    except RuntimeError:
+        log.warning("Loading outdated pt2 file. Please regenerate your package.")
+
+    if isinstance(path, (io.IOBase, IO)):
+        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+            # TODO(angelayi): We shouldn't need to do this -- miniz should
+            # handle reading the buffer. This is just a temporary workaround
+            path.seek(0)
+            f.write(path.read())
+            log.debug("Writing buffer to tmp file located at %s.", f.name)
+            loader = torch._C._aoti.AOTIModelPackageLoader(
+                f.name, model_name, run_single_threaded, num_runners, device_index
+            )  # type: ignore[call-arg]
+            return AOTICompiledModel(loader)
+
+    path = os.fspath(path)  # AOTIModelPackageLoader expects (str, str)
+    loader = torch._C._aoti.AOTIModelPackageLoader(
+        path, model_name, run_single_threaded, num_runners, device_index
+    )  # type: ignore[call-arg]
+    return AOTICompiledModel(loader)

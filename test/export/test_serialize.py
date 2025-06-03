@@ -1562,7 +1562,7 @@ class TestSaveLoad(TestCase):
         ep = export_for_training(f, (torch.randn(1, 3),), strict=True)
 
         with self.assertRaisesRegex(
-            RuntimeError, r"Saved archive version -1 does not match our current"
+            ValueError, r"Saved archive version -1 does not match our current"
         ):
             with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
                 save(ep, f.name)

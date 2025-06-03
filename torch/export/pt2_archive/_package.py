@@ -527,7 +527,7 @@ def load_pt2(
     with PT2ArchiveReader(f) as archive_reader:
         version = archive_reader.read_string(ARCHIVE_VERSION_PATH)
         if version != ARCHIVE_VERSION_VALUE:
-            raise RuntimeError(
+            raise ValueError(
                 f"Saved archive version {version} does not match our current "
                 f"archive version {ARCHIVE_VERSION_VALUE}."
             )
