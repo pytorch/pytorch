@@ -98,8 +98,7 @@ class TORCH_API TensorBase {
   explicit TensorBase(
       c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl)
       : impl_(std::move(tensor_impl)) {
-    TORCH_CHECK(
-        impl_.get() != nullptr, "TensorImpl with nullptr is not supported");
+    TORCH_CHECK(impl_, "TensorImpl with nullptr is not supported");
   }
   TensorBase(const TensorBase&) = default;
   TensorBase(TensorBase&&) noexcept = default;
