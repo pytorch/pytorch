@@ -88,7 +88,7 @@ with the corresponding ``ExportedProgram``::
 ONNX to ATen Decomposition Table
 --------------------------------
 
-You can use :func:`torch.onnx.ops.aten_decompositions` to obtain a decomposition Table
+You can use :func:`torch.onnx.ops.aten_decompositions` to obtain a decomposition table
 to decompose ONNX operators defined above to ATen operators.
 
 ::
