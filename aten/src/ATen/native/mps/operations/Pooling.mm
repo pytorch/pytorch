@@ -94,6 +94,10 @@ static void pool2d_template(const Tensor& input,
   const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
   const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
 
+  // Conditions when maxpool2d_with_indices will produce wrong output size for
+  bool shape_fails = has_indices && ceil_mode && (dH > 1 || dW > 1) && (inputHeight % dH == 0 || inputWidth % dW == 0);
+  TORCH_CHECK(!shape_fails, "MPSGraph miscomputes the output index shape when ceil_mode=True, see issue: #154882");
+
   pool2d_shape_check(input,
                      kH,
                      kW,
