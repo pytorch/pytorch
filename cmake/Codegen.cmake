@@ -120,7 +120,11 @@ if(INTERN_BUILD_ATEN_OPS)
       "89;90a;100a")
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/ScaledGroupMM.cu"
-      "89;90a")
+      "90a")
+    _BUILD_FOR_ADDITIONAL_ARCHS(
+      "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/GroupMM.cu"
+      "90a")
+
   endif()
 
   set(GEN_ROCM_FLAG)
@@ -386,17 +390,15 @@ if(INTERN_BUILD_ATEN_OPS)
     LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}  ${CXX_ZVECTOR_FLAGS}")
   endif(CXX_ZVECTOR_FOUND)
 
-  if(CXX_SVE_FOUND)
-    if(CXX_SVE256_FOUND)
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_SVE_CPU_DEFINITION -DHAVE_SVE256_CPU_DEFINITION")
-      list(APPEND CPU_CAPABILITY_NAMES "SVE256")
-      if("${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
-        list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -O2 -march=armv8-a+sve -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
-      else()
-        list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8-a+sve -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
-      endif()
-    endif(CXX_SVE256_FOUND)
-  endif(CXX_SVE_FOUND)
+  if(CXX_SVE_FOUND AND CXX_SVE256_FOUND AND CXX_ARM_BF16_FOUND)
+    list(APPEND CPU_CAPABILITY_NAMES "SVE256")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_SVE_CPU_DEFINITION -DHAVE_SVE256_CPU_DEFINITION -DHAVE_ARM_BF16_CPU_DEFINITION")
+    if("${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
+      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -O2 -march=armv8-a+sve+bf16 -D__ARM_FEATURE_BF16 -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
+    else()
+      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8-a+sve+bf16 -D__ARM_FEATURE_BF16 -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
+    endif()
+  endif()
 
   list(LENGTH CPU_CAPABILITY_NAMES NUM_CPU_CAPABILITY_NAMES)
   math(EXPR NUM_CPU_CAPABILITY_NAMES "${NUM_CPU_CAPABILITY_NAMES}-1")
@@ -417,11 +419,8 @@ if(INTERN_BUILD_ATEN_OPS)
       endif(MSVC)
 
       # Only parallelize the SortingKernel for now to avoid side effects
-      if(${NAME} STREQUAL "native/cpu/SortingKernel.cpp" AND NOT MSVC AND USE_OPENMP)
-        set(EXTRA_FLAGS "${EXTRA_FLAGS} -D_GLIBCXX_PARALLEL")
-        if(USE_PRECOMPILED_HEADERS)
-          set_source_files_properties(${NEW_IMPL} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
-        endif()
+      if(${NAME} STREQUAL "native/cpu/SortingKernel.cpp" AND NOT MSVC AND USE_OMP)
+        string(APPEND EXTRA_FLAGS " -D_GLIBCXX_PARALLEL")
       endif()
 
       # Disable certain warnings for GCC-9.X

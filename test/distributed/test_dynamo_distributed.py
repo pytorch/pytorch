@@ -683,7 +683,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(correct_outputs, outputs))
             self.assertEqual(len(counters["graph_break"]), 1)
             first_graph_break = list(counters["graph_break"].keys())[0]  # noqa: RUF015
-            self.assertTrue("setattr" not in first_graph_break)
+            self.assertIn("setattr() on Tensor.requires_grad", first_graph_break)
 
     @config.patch(inline_inbuilt_nn_modules=False)
     @config.patch(enable_compiler_collectives=True)

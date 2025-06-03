@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from typing import Optional, Union
+
 import torch
 import torch.nn.functional as F
 from torch import Tensor
@@ -38,7 +40,13 @@ class NegativeBinomial(Distribution):
     }
     support = constraints.nonnegative_integer
 
-    def __init__(self, total_count, probs=None, logits=None, validate_args=None):
+    def __init__(
+        self,
+        total_count: Union[Tensor, float],
+        probs: Optional[Tensor] = None,
+        logits: Optional[Tensor] = None,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if (probs is None) == (logits is None):
             raise ValueError(
                 "Either `probs` or `logits` must be specified, but not both."
@@ -50,6 +58,7 @@ class NegativeBinomial(Distribution):
             ) = broadcast_all(total_count, probs)
             self.total_count = self.total_count.type_as(self.probs)
         else:
+            assert logits is not None  # helps mypy
             (
                 self.total_count,
                 self.logits,
