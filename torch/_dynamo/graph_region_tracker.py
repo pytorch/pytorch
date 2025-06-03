@@ -17,6 +17,7 @@ import copyreg
 import io
 import logging
 import math
+import operator
 import pickle
 from collections import defaultdict, deque
 from dataclasses import fields
@@ -113,7 +114,7 @@ def _normalize_args(
     node: Node,
 ) -> tuple[tuple[str, ...], tuple[Optional[Any], ...]]:
     flat_args, _ = tree_flatten(node.args)
-    sorted_kwargs = sorted(node.kwargs.items(), key=lambda x: x[0])
+    sorted_kwargs = sorted(node.kwargs.items(), key=operator.itemgetter(0))
     sorted_keys = tuple(sorted(node.kwargs.keys()))
     flat_kwargs, _ = tree_flatten(sorted_kwargs)
     all_args = flat_args + flat_kwargs
