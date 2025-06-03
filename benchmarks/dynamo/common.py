@@ -14,6 +14,7 @@ import itertools
 import json
 import logging
 import os
+import random
 import shutil
 import signal
 import subprocess
@@ -690,17 +691,52 @@ def timed(
     times=1,
     return_result=False,
     collect_outputs=False,
+    batch_size=None,
 ):
     use_xla = tensor_is_on_xla(example_inputs)
     synchronize()
+
+    if batch_size:
+        patch_torch_manual_seed()
 
     if use_xla:
         xm.mark_step()
         xm.wait_device_ops()
 
+    def vary_batch(t: torch.Tensor, new_batch_size) -> torch.Tensor:
+        for i, s in enumerate(t.size()):
+            if s == batch_size:
+                # If new batch is smaller, we truncate
+                if new_batch_size < batch_size:
+                    indexer = [slice(None)] * t.ndim
+                    indexer[i] = slice(0, new_batch_size)
+                    t = t[tuple(indexer)]
+                # If new batch is greater, we just duplicate the last row
+                # over and over until we hit the desired batch size
+                elif new_batch_size > batch_size:
+                    indexer = [slice(None)] * t.ndim
+                    indexer[i] = -1
+                    last_slice = t[tuple(indexer)].unsqueeze(i)
+                    repeat_shape = list(t.shape)
+                    repeat_shape[i] = new_batch_size - batch_size
+                    padding = last_slice.expand(*repeat_shape)
+                    t = torch.cat([t, padding], dim=i)
+                break
+        return t
+
     time_total = 0
     # Dont collect outputs to correctly measure timing
     for _ in range(times):
+        # If batch_size is 1, it too often collides with other non batch size
+        # dimensions resulting in errors.
+        if batch_size and batch_size > 1:
+            # Calculate new batch size by varying the original batch size by up to 20%
+            # Ensure it's at least greater than 1
+            variation = random.uniform(0.8, 1.2)
+            new_batch_size = max(2, int(batch_size * variation))
+            example_inputs = tree_map_only(
+                torch.Tensor, lambda x: vary_batch(x, new_batch_size), example_inputs
+            )
         # Put this call inside the loop to reset the seed for each iteration.
         # Don't include reset_rng_state() to correctly measure timing
         reset_rng_state(use_xla)
@@ -1018,9 +1054,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     Writes to ./speedups.csv
     """
-    # if args.dynamic_shapes:
-    #     return speedup_experiment_ds(args, model_iter_fn, model, example_inputs)
-
     timings = np.zeros((args.repeat, 2), np.float64)
     # if we randomize the input, we should also check the result is correct
     should_randomize_input = args.randomize_input
@@ -1074,6 +1107,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
                     return_result=True,
                     times=times,
                     collect_outputs=args.collect_outputs,
+                    batch_size=kwargs.get("batch_size"),
                 )
 
             # call mark_step between the 2 calls to make the comparison fair.
@@ -1177,82 +1211,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     )
 
     return msg
-
-
-# WARNING: This code is currently dead
-def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
-    """
-    Run dynamic shapes benchmarks.
-
-    Requires dynamic shape compatible models, which provide a list of example inputs.
-
-    Warms up using the first input example and then iterates the inputs,
-    measuring (and expecting minimal) variance between the runtime for different examples.
-
-    """
-    timings = np.zeros((args.repeat, len(example_inputs), 2), np.float64)
-
-    if args.repeat > 5:
-        print(
-            f"\ndynamic shapes experiments are slow, consider setting --repeat less than {args.repeat}\n"
-        )
-
-    nwarmup = 4
-    for rep in range(args.repeat):
-        # Start each rep fresh, e.g. only warmup on example 0
-        torch._dynamo.reset()
-        optimized_model_iter_fn = optimize_ctx(model_iter_fn)
-        for _ in range(nwarmup):
-            optimized_model_iter_fn(model, example_inputs[0])
-
-        for input_idx, inputs in enumerate(example_inputs):
-            # interleave the runs to handle frequency scaling and load changes
-            timings[rep, input_idx, 0] = timed(
-                model, model_iter_fn, inputs, return_result=False
-            )
-            # different from regular speedup_experiment, we _DO_ want to allow recompilation
-            timings[rep, input_idx, 1] = timed(
-                model, optimized_model_iter_fn, inputs, return_result=False
-            )
-    medians = np.median(timings, axis=0)
-    speedups = list(medians[:, 0] / medians[:, 1])
-    speedups_mean = np.mean(speedups)
-    speedups_median = np.median(speedups)
-    speedups_var = np.var(speedups)
-
-    # TODO this x[0] is not going to work in general but bert only has 1 input
-    shapes = [x[0].shape for x in example_inputs]
-    shape_keys = sorted(set(shapes))
-    shape_speedups = {
-        shape: [
-            it[1] for it in filter(lambda it: it[0] == shape, zip(shapes, speedups))
-        ]
-        for shape in shape_keys
-    }
-    output_str = (
-        f"mean: {speedups_mean:.3f}, median: {speedups_median:.3f}, var: {speedups_var:.3f}"
-        + "\nSpeedups by shape: "
-        + "\n".join(
-            [
-                f"{shape}: "
-                + ", ".join([f"{speedup: .3g}" for speedup in shape_speedups[shape]])
-                for shape in shape_keys
-            ]
-        )
-    )
-    write_outputs(
-        output_filename,
-        ("dev", "name", "batch_size", "speedup mean", "speedup median", "speedup var"),
-        [
-            current_device,
-            current_name,
-            current_batch_size,
-            speedups_mean,
-            speedups_median,
-            speedups_var,
-        ],
-    )
-    return output_str
 
 
 def overhead_experiment(*args, model_iter_fn):
@@ -2557,7 +2515,14 @@ class BenchmarkRunner:
             return " ".join(map(str, results))
 
     def run_performance_test(
-        self, name, model, example_inputs, optimize_ctx, experiment, tag=None
+        self,
+        name,
+        model,
+        example_inputs,
+        optimize_ctx,
+        experiment,
+        tag=None,
+        batch_size=None,
     ):
         if self.args.xla:
             with self.pick_grad(name, self.args.training):
@@ -2615,6 +2580,7 @@ class BenchmarkRunner:
         with self.pick_grad(name, self.args.training), ctx:
             ok, total = Stats.reset_counters()
             experiment_kwargs = {}
+            experiment_kwargs["batch_size"] = batch_size
             if tag is not None:
                 experiment_kwargs["tag"] = tag
             results = []
@@ -2778,6 +2744,7 @@ class BenchmarkRunner:
         experiment,
         explain=False,
         tag=None,
+        batch_size=None,
     ):
         mode = "train" if self.args.training else "eval"
         msg = f"{current_device:4} {mode:5} {current_name:34} "
@@ -2806,7 +2773,13 @@ class BenchmarkRunner:
                 )
             else:
                 status = self.run_performance_test(
-                    name, model, example_inputs, optimize_ctx, experiment, tag
+                    name,
+                    model,
+                    example_inputs,
+                    optimize_ctx,
+                    experiment,
+                    tag,
+                    batch_size=batch_size,
                 )
             print(status)
         empty_gpu_cache(current_device)
@@ -4143,6 +4116,7 @@ def run(runner, args, original_dir=None):
                         experiment,
                         explain=args.explain,
                         tag=args.tag,
+                        batch_size=batch_size if args.dynamic_batch_only else None,
                     )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
