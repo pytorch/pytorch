@@ -31,7 +31,7 @@ def get_config_request_key(
     """
     hash_target = "-".join(
         [
-            cutlass_key().hex(),
+            cutlass_key().decode(),
             arch,
             cuda_version,
             instantiation_level,

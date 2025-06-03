@@ -4709,13 +4709,6 @@ class ChoiceCaller:
     def to_callable(self):  # type: ignore[no-untyped-def]
         raise NotImplementedError
 
-    def kernel_hash_key(self) -> str:
-        """
-        Hash key for the underlying kernel. By default, we assume there are no
-        runtime params, so kernel hash key defaults to choice caller's hash key.
-        """
-        return self.hash_key()
-
     def hash_key(self) -> str:
         raise NotImplementedError
 

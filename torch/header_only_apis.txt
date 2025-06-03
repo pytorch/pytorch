@@ -47,6 +47,3 @@ loadu
 maximum
 minimum
 size
-
-# torch/standalone/macros/Export.h
-C10_API
