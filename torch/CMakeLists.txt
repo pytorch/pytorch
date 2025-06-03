@@ -74,6 +74,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${TORCH_SRC_DIR}/csrc
     ${TORCH_SRC_DIR}/csrc/api/include
     ${TORCH_SRC_DIR}/lib
+    ${TORCH_SRC_DIR}/standalone
     )
 
 list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
@@ -84,6 +85,7 @@ set(TORCH_PYTHON_LINK_LIBRARIES
     opentelemetry::api
     httplib
     nlohmann
+    moodycamel
     shm
     fmt::fmt-header-only
     ATEN_CPU_FILES_GEN_LIB)
