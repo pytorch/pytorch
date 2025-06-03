@@ -33,6 +33,7 @@ UNITS = {
     "name": "",
     "forward_time": " (us)",
     "compilation_time": " (s)",
+    "teraflops": " (TFLOPS)",
 }
 PERF_OVER_ATEN_STR: str = "perf_over_aten (%)"
 
@@ -75,7 +76,7 @@ CUTLASS_INSTANTIATION_LEVELS = [
 
 
 def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:
-    return do_bench(lambda: func(*args, **kwargs)) * 1e3
+    return do_bench(lambda: func(*args, **kwargs), warmup=100, rep=10000) * 1e3
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -211,7 +212,9 @@ def run_single_experiment_group(
     for config in group_config.experiments:
         torch._dynamo.reset()
         torch._inductor.utils.clear_inductor_caches()
-        compiled_op = torch.compile(op, fullgraph=True, options=config.to_options())
+        compiled_op = torch.compile(
+            op, fullgraph=True, options=config.to_options(), dynamic=False
+        )
 
         start_time = time.perf_counter()
         try:
@@ -312,7 +315,7 @@ def generate_experiment_configs(
     return configs
 
 
-def calculate_table_data(results: list[ExperimentResults]) -> dict:
+def calculate_table_data(results: list[ExperimentResults], flops: int) -> dict:
     table_data = defaultdict(list)
     aten_perf: Optional[float] = None
 
@@ -320,6 +323,15 @@ def calculate_table_data(results: list[ExperimentResults]) -> dict:
         for key, value in experiment_result.asdict().items():
             assert key in UNITS, f"Unknown key {key}"
             table_data[key + UNITS[key]].append(value)
+
+        # Calculate teraflops: flops / latency
+        # forward_time is in microseconds, so convert to seconds for TFLOPS calculation
+        if experiment_result.forward_time != float("inf"):
+            # flops operations / (latency in seconds)
+            teraflops = flops / (experiment_result.forward_time * 1e-6) / 1e12
+            table_data["teraflops" + UNITS["teraflops"]].append(teraflops)
+        else:
+            table_data["teraflops" + UNITS["teraflops"]].append(float("inf"))
 
         if experiment_result.name == "aten":
             aten_perf = experiment_result.forward_time
@@ -336,6 +348,20 @@ def calculate_table_data(results: list[ExperimentResults]) -> dict:
     return table_data
 
 
+def calculate_flops(op_name: str, shape: tuple[int, int, int], batch_size: int) -> int:
+    """
+    Calculate the number of floating point operations based on operation type and shape.
+    """
+    M, N, K = shape
+
+    if op_name == "bmm":
+        return 2 * batch_size * M * N * K
+    elif op_name == "addmm":
+        return 2 * M * N * K + M * N
+    else:
+        return 2 * M * N * K
+
+
 def get_printable_results(experiment_groups: list[ExperimentGroup]) -> list[str]:
     edge_over_aten = defaultdict(list)
     output = []
@@ -344,7 +370,14 @@ def get_printable_results(experiment_groups: list[ExperimentGroup]) -> list[str]
         group_config_name = experiment_group.config.name()
         output.append(f"\nExperiment group: {group_config_name}")
 
-        table_data = calculate_table_data(experiment_group.results)
+        # Calculate flops using the helper function
+        flops = calculate_flops(
+            experiment_group.config.op_name,
+            experiment_group.config.shape,
+            experiment_group.config.batch_size,
+        )
+
+        table_data = calculate_table_data(experiment_group.results, flops)
         for name, edge in zip(table_data["name"], table_data[PERF_OVER_ATEN_STR]):
             edge_over_aten[name].append(edge)
         output.append(
