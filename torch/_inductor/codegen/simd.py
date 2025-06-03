@@ -1998,7 +1998,7 @@ class SIMDScheduling(BaseScheduling):
 
             # Flatten leading dimensions, assigning labels to each dim.
             for node_tiling in node_tilings:
-                num_leading_dims = max(0, len(node_tiling) - config.triton.max_tiles)
+                num_leading_dims = max(0, len(node_tiling) - get_max_tiles(2))
                 first_trailing_dim = num_leading_dims + 1
                 collapsed_leading_dim = sympy_product(node_tiling[:first_trailing_dim])
                 collapsed_splits = (collapsed_leading_dim,) + tuple(
@@ -2195,7 +2195,6 @@ class SIMDScheduling(BaseScheduling):
         bad_size_additional_tiling_penalty = 1.025
         good_size_tiling_penalty = 1.005
 
-
         def score_mod(t):
             score_factor = 1.0
             for tile_size in t[0].tiling.values():
@@ -2295,7 +2294,6 @@ class SIMDScheduling(BaseScheduling):
 
         # Tiled reductions are gated by a config flag.
         default_tiling = cls.create_tiling([numel], [reduction_numel])
-
 
         # # TODO: enable by default
         if torch._inductor.config.triton.coalesce_tiling_analysis and coalesce_analysis:

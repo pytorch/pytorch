@@ -547,7 +547,7 @@ def extract_normalized_read_writes(
 
         # We create Identity sympy.Functions to prevent expansion to int64,
         # unwrap for tiling analysis.
-        def remove_identity(expr):
+        def remove_identity(expr: sympy.Expr) -> sympy.Expr:
             return expr.replace(Identity, lambda x: x)
 
         n_reads_new = {
@@ -661,7 +661,7 @@ def analyze_memory_coalescing(
 
     for is_read, (memory_expr, buf_names) in itertools.chain(
         ((True, item) for item in reads.items()),
-        ((False, item) for item in writes.items())
+        ((False, item) for item in writes.items()),
     ):
         # skip memory deps with indirect vars - todo: better handling
         indirect_expr = bool(
@@ -683,7 +683,7 @@ def analyze_memory_coalescing(
                 byte_multipler += buf.dtype.itemsize
 
         # coalesced writes more important
-        byte_multipler *= (1 if is_read else 2)
+        byte_multipler *= 1 if is_read else 2
 
         if maybe_coalesced_var:
             coalesced_by_var[maybe_coalesced_var] += size * byte_multipler
