@@ -25,17 +25,23 @@ inline void infer_size_impl(
   // N.B. this is an index, not a sym dim!
   std::optional<int64_t> infer_dim;
   for (int64_t dim = 0, ndim = shape.size(); dim != ndim; dim++) {
-    // We can avoid failing on unbacked shape[dim] and assert that it is >=0
-    // following python behaviour.
-    if (shape[dim] == -1) {
+    if (TORCH_GUARD_OR_FALSE(sym_eq(shape[dim], -1))) {
       if (infer_dim) {
         throw std::runtime_error("only one dimension can be inferred");
       }
       infer_dim = dim;
-    } else if (shape[dim] >= 0) {
-      newsize *= shape[dim];
     } else {
-      TORCH_CHECK(false, "invalid shape dimension ", shape[dim]);
+      // in case of unbacked shape[dim] we assume it's not -1 and add a runtime
+      // assertion.
+      TORCH_MAYBE_SYM_CHECK(
+          sym_gt(shape[dim], -1),
+          "invalid shape dimension ",
+          shape[dim],
+          " at index ",
+          dim,
+          " of shape ",
+          shape);
+      newsize *= shape[dim];
     }
   }
 

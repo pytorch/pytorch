@@ -153,7 +153,7 @@ class TestCutlassEVT(TestCase):
         self.assertExpectedInline(writes, """['buf0', 'buf3', 'buf4']""")
         self.assertExpectedInline(
             renames,
-            """{'accum': 'buf0', 'tmp_0': 'buf0', 'buf1': 'buf1', 'buf2': 'buf2', 'D': 'buf3', 'tmp_3': 'buf4'}""",
+            """{'accum': 'buf0', 'tmp_0': 'buf0', 'buf1': 'buf1', 'buf2': 'buf2', 'tmp_2': 'buf3', 'D': 'buf4'}""",
         )
         self.assertExpectedInline(
             code,
@@ -162,10 +162,9 @@ def fn(accum, buf1, buf2):
     tmp_0 = accum
     tmp_1 = tmp_0 * buf1
     tmp_2 = tmp_1 + buf2
-    D = tmp_2 # cutlass evt requirement
-    tmp_3 = tmp_0 + D
+    D = tmp_0 + tmp_2
 
-return tmp_0, D, tmp_3""",
+return tmp_0, tmp_2, D""",
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -262,7 +261,7 @@ index strides [200, 60000, 1], and layout stride [60000, 200, 1]""",
         self.assertExpectedInline(writes, """['buf0', 'buf3', 'buf4']""")
         self.assertExpectedInline(
             renames,
-            """{'accum': 'buf0', 'tmp_0': 'buf0', 'buf1': 'buf1', 'buf2': 'buf2', 'D': 'buf3', 'tmp_4': 'buf4'}""",
+            """{'accum': 'buf0', 'tmp_0': 'buf0', 'buf1': 'buf1', 'buf2': 'buf2', 'tmp_2': 'buf3', 'D': 'buf4'}""",
         )
         self.assertExpectedInline(
             code,
@@ -271,11 +270,10 @@ def fn(accum, buf1, buf2):
     tmp_0 = accum
     tmp_1 = tmp_0 * buf1
     tmp_2 = tmp_1 + buf2
-    D = tmp_2 # cutlass evt requirement
-    tmp_3 = D * D
-    tmp_4 = tmp_0 + tmp_3
+    tmp_3 = tmp_2 * tmp_2
+    D = tmp_0 + tmp_3
 
-return tmp_0, D, tmp_4""",
+return tmp_0, tmp_2, D""",
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -321,7 +319,7 @@ return tmp_0, D, tmp_4""",
         self.assertExpectedInline(writes, """['buf3', 'buf4']""")
         self.assertExpectedInline(
             renames,
-            """{'accum': 'buf0', 'buf1': 'buf1', 'buf2': 'buf2', 'D': 'buf3', 'tmp_2': 'buf4'}""",
+            """{'accum': 'buf0', 'buf1': 'buf1', 'buf2': 'buf2', 'tmp_1': 'buf3', 'D': 'buf4'}""",
         )
         self.assertExpectedInline(
             code,
@@ -329,10 +327,9 @@ return tmp_0, D, tmp_4""",
 def fn(accum, buf1, buf2):
     tmp_0 = accum * buf1
     tmp_1 = tmp_0 + buf2
-    D = tmp_1 # cutlass evt requirement
-    tmp_2 = accum + D
+    D = accum + tmp_1
 
-return D, tmp_2""",
+return tmp_1, D""",
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
