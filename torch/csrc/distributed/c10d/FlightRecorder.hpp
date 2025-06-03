@@ -8,6 +8,7 @@
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 #include <optional>
 
 namespace c10d {
@@ -248,4 +249,18 @@ struct FlightRecorder {
       bool includeStackTraces,
       bool onlyActive);
 };
+
+// Dumps the fr traces and additional information about the Process
+// Group.
+TORCH_API std::string dump_fr_trace(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive);
+
+// Dumps the fr traces and additional information about the Process
+// Group in JSON formatted string.
+// We don't include stack traces in JSON format as it is far too much data.
+TORCH_API std::string dump_fr_trace_json(
+    bool includeCollectives,
+    bool onlyActive);
 } // namespace c10d
