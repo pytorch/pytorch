@@ -2971,8 +2971,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         index: sympy.Expr,
         value: Union[CSEVariable, tuple[CSEVariable, ...]],
     ):
-        if V.graph.name is None:
-            import pdb; pdb.set_trace()
         assert self.inside_reduction
         self.inside_reduction = False
         indexing = self.indexing(index, block_ptr=True)

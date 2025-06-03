@@ -48,18 +48,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
         self.gm = make_fx_graph(*self.example_inputs)
 
-    def __str__(self) -> str:
-        return f"SubgraphCaller({self.name})"
-
-    def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
-        # Codegen Subgraph for benchmarking
-        # Need GraphLowering instead of SubgraphLowering to generate
-        # fully callable module
-        import torch._inductor.config as inductor_config
         from torch._inductor.graph import GraphLowering
-
-        gm_original_output_strides(self.gm)
-        bm_graph_lowering = GraphLowering(
+        self.graph_lowering = GraphLowering(
             gm=self.gm,
             example_inputs=self.example_inputs,
             shape_env=V.graph._shape_env,
@@ -71,8 +61,19 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             name=self.name,
         )
 
+    def __str__(self) -> str:
+        return f"SubgraphCaller({self.name})"
+
+    def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
+        # Codegen Subgraph for benchmarking
+        # Need GraphLowering instead of SubgraphLowering to generate
+        # fully callable module
+        import torch._inductor.config as inductor_config
+
+        gm_original_output_strides(self.gm)
+
         sym_inputs = add_symbolic_shapes_for_inputs_to_subgraph(
-            self.input_nodes, bm_graph_lowering
+            self.input_nodes, self.graph_lowering
         )
 
         sym_inputs = [
@@ -101,20 +102,19 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                     assert ar.shape == example_inp.shape
                     assert ar.stride() == example_inp.stride()
 
-        with V.set_graph_handler(bm_graph_lowering):
+        with V.set_graph_handler(self.graph_lowering):
             # Don't bother autotuning on Triton here
             with inductor_config.patch(
                 max_autotune=False,
                 max_autotune_gemm=False,
                 max_autotune_gemm_backends="ATEN",
             ):
-                bm_graph_lowering.run(*self.example_inputs)
-                mod = bm_graph_lowering.compile_to_module()
+                self.graph_lowering.run(*self.example_inputs)
+                mod = self.graph_lowering.compile_to_module()
                 bm_func = mod.call
 
                 bm_func([*sym_inputs, *args])
 
-        self.graph_lowering = bm_graph_lowering
         return benchmarker.benchmark_gpu(lambda: bm_func([*sym_inputs, *args]))
 
     def hash_key(self) -> str:
