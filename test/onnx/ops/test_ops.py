@@ -6,8 +6,8 @@ from __future__ import annotations
 from onnxscript import ir
 
 import torch
-from torch.onnx.ops import _symbolic_impl
 from torch.onnx._internal.exporter import _testing as onnx_testing
+from torch.onnx.ops import _symbolic_impl
 from torch.testing._internal import common_utils
 
 
@@ -508,6 +508,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             model,
             (input_data, cos_cache_data, sin_cache_data, position_ids_data),
             dynamic_shapes=dynamic_shapes,
+            opset_version=23,
         )
         onnx_testing.assert_onnx_program(onnx_program)
 

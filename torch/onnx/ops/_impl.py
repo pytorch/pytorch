@@ -18,7 +18,9 @@ def _onnx_op(op_type: str, opset_version: int) -> Callable[[_T], _T]:
         torch_op = torch.library.custom_op(
             f"onnx::{op_type}.{overload}", mutates_args=()
         )(func)
-        ONNX_ATEN_DECOMP_TABLE[getattr(getattr(torch.ops.onnx, op_type), overload)] = func
+        ONNX_ATEN_DECOMP_TABLE[getattr(getattr(torch.ops.onnx, op_type), overload)] = (
+            func
+        )
         # Use the same implementation for the fake implementation
         # This is possible because we use pure aten ops to implement ONNX ops
         torch_op.register_fake(func)
