@@ -485,13 +485,13 @@ void _assert_async_cpu(const Tensor& self) {
 void _assert_async_msg_cpu(const Tensor& self, std::string_view assert_msg) {
   TORCH_CHECK(
       native::is_nonzero(self),
-      assert_msg != "" ? assert_msg : "Assertion is failed");
+      !assert_msg.empty() ? assert_msg : "Assertion is failed");
 }
 
 void _assert_scalar(const Scalar& scalar, std::string_view assert_msg) {
   TORCH_SYM_CHECK(
       scalar.toSymBool(),
-      assert_msg != "" ? assert_msg : "Assertion is failed");
+      !assert_msg.empty() ? assert_msg : "Assertion is failed");
 }
 
 Tensor _functional_assert_scalar(
@@ -569,7 +569,7 @@ static void isin_sorting(
 }
 
 template <typename... Args>
-Device out_device(Args&... inps) {
+static Device out_device(Args&... inps) {
   for (const auto& i : {inps...}) {
     if (i.device() != at::kCPU) {
       return i.device();
@@ -739,7 +739,7 @@ std::tuple<Tensor&, Tensor&> mode_out(
 }
 
 template <class Stub>
-void minmax_out_impl(
+static void minmax_out_impl(
     const Tensor& self,
     int64_t dim,
     bool keepdim,

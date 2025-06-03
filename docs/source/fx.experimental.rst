@@ -31,6 +31,7 @@ torch.fx.experimental.symbolic_shapes
     PropagateUnbackedSymInts
     DivideByKey
     InnerTensorKey
+    Specialization
 
     hint_int
     is_concrete_int
@@ -38,16 +39,18 @@ torch.fx.experimental.symbolic_shapes
     is_concrete_float
     has_free_symbols
     has_free_unbacked_symbols
-    definitely_true
-    definitely_false
     guard_or_true
     guard_or_false
     guard_size_oblivious
+    sym_and
     sym_eq
+    sym_or
     constrain_range
     constrain_unify
     canonicalize_bool_expr
     statically_known_true
+    statically_known_false
+    has_static_value
     lru_cache
     check_consistent
     compute_unbacked_bindings
