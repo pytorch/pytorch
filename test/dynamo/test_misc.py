@@ -12603,7 +12603,6 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         res = opt_f()
         self.assertEqual(ref, res)
 
-
     def test_randint_no_graphbreak(self):
         @torch.compile(backend="aot_eager", fullgraph=True)
         def f(actions, n_act, epsilon=0.1):

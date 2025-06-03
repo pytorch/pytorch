@@ -1214,6 +1214,19 @@ Tensor randint_like(
 
 Tensor randint_like(
     const Tensor& self,
+    const Tensor& high,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
+    std::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(high.numel() == 1, "high must be a scalar tensor");
+  int64_t high_scalar = high.item<int64_t>();
+  return native::randint_like(self, high_scalar, dtype, layout, device, pin_memory, optional_memory_format);
+}
+
+Tensor randint_like(
+    const Tensor& self,
     int64_t low,
     int64_t high,
     std::optional<ScalarType> dtype,
