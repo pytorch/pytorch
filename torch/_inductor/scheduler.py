@@ -2013,6 +2013,11 @@ _post_grad_graph_counter = itertools.count()
 
 
 class Scheduler:
+    """
+    A Scheduler is a graph of BaseSchedulerNodes. It is responsible for
+    optimizations such as fusion, reorder, and graph partition.
+    """
+
     __dep_size_hint_cache: dict[Dep, int]
 
     def __init__(self, nodes: list[ir.Operation]) -> None:
@@ -2096,6 +2101,8 @@ class Scheduler:
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
         self.nodes = self.fuse_nodes(self.nodes)
+        if config._post_fusion_custom_pass is not None:
+            self.nodes = config._post_fusion_custom_pass(self.nodes)
         self.merge_loops()
         self.finalize_multi_template_buffers()
         if config.combo_kernels:
@@ -2684,6 +2691,15 @@ class Scheduler:
             return backend.benchmark_codegened_module(module)
 
     def finalize_multi_template_buffers(self) -> None:
+        """
+        Finalize a backing choice for MultiTemplateBuffers which did not already have a
+        choice finalized through fusion. In the case of an extern choice, this will result
+        in replacing the SchedulerNode.
+
+        If a MultiTemplateBuffer did not have any fusion opportunities, finalizing a choie
+        will force completion of compilation and benchmarking.
+        """
+
         def replace_operation_buffer(
             orig_node: ir.MultiTemplateBuffer, new_node: ir.OperationBuffer
         ) -> None:
@@ -2750,6 +2766,24 @@ class Scheduler:
                 self.nodes[i] = new_scheduler_node
                 self.name_to_node[node.get_name()] = new_scheduler_node
                 self.name_to_fused_node[node.get_name()] = new_scheduler_node
+
+                # We need to reflect the mutation renames that were recorded in the original node
+                mutation_renames = {}
+                for dep in itertools.chain(
+                    node.read_writes.reads, node.unmet_dependencies
+                ):
+                    if real_name := self.mutation_real_name.get(dep.name, None):
+                        mutation_renames[real_name] = dep.name
+
+                def rename_deps(deps: OrderedSet[Dep]) -> OrderedSet[Dep]:
+                    return OrderedSet(dep.rename(mutation_renames) for dep in deps)
+
+                new_scheduler_node.unmet_dependencies = rename_deps(
+                    new_scheduler_node.unmet_dependencies
+                )
+                new_scheduler_node.read_writes.reads = rename_deps(
+                    new_scheduler_node.read_writes.reads
+                )
 
                 for new_out, old_out in zip(
                     new_scheduler_node.get_outputs(), node.get_outputs()
@@ -2877,7 +2911,7 @@ class Scheduler:
             future_choices: list[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
             triton_choices = 0
             for choice, unfused_time in sorted(
-                choice_timings.items(), key=lambda x: x[1]
+                choice_timings.items(), key=operator.itemgetter(1)
             ):
                 if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
                     continue
@@ -3473,7 +3507,7 @@ class Scheduler:
             return 0
 
         # Pick the largest buffer to guide the loop reordering
-        _numel, lhs_dep, rhs_dep = max(candidates, key=lambda x: x[0])
+        _numel, lhs_dep, rhs_dep = max(candidates, key=operator.itemgetter(0))
 
         if not isinstance(lhs_dep, MemoryDep) or not isinstance(rhs_dep, MemoryDep):
             return 0
@@ -4231,6 +4265,26 @@ class Scheduler:
         unmet_output_names = OrderedSet(V.graph.get_output_names())
         name_to_node = self.get_name_to_nodes()
 
+        def is_none_layout(buf_name: str) -> bool:
+            """
+            Checks if buf_name is NoneLayout. Buffers with NoneLayout is not allocated
+            so graph partition should not take it as inputs or outputs.
+            """
+            buf = self.name_to_buf.get(buf_name, None)
+
+            if buf is None:
+                return False
+
+            if isinstance(buf.node.layout, NoneLayout):
+                if isinstance(buf.node, ir.MutationOutput) and (
+                    real_name := self.mutation_real_name.get(buf_name, None)
+                ):
+                    return is_none_layout(real_name)
+
+                return True
+
+            return False
+
         for partition, skip_cudagraph in zip(
             reversed(partitions), reversed(skip_cudagraphs)
         ):
@@ -4254,10 +4308,15 @@ class Scheduler:
                     [
                         x.name
                         for x in read_writes.reads | read_writes.writes
-                        if not isinstance(x, WeakDep)
+                        if not is_none_layout(x.name)
                     ]
                 )
                 - output_names
+            )
+
+            partition_input_names = OrderedSet(
+                self.mutation_real_name.get(name, name)
+                for name in partition_input_names
             )
 
             buffer_names_to_free: OrderedSet[str] = OrderedSet()
@@ -4287,7 +4346,16 @@ class Scheduler:
 
             returned_output_names.update(extra_output_names)
 
-            output_nodes = [name_to_node[name] for name in returned_output_names]
+            returned_output_names = OrderedSet(
+                self.mutation_real_name.get(name, name)
+                for name in returned_output_names
+            )
+
+            output_nodes = [
+                name_to_node[name]
+                for name in returned_output_names
+                if not is_none_layout(name)
+            ]
 
             constant_names = [
                 name for name in partition_input_names if name in V.graph.constants
@@ -4313,6 +4381,42 @@ class Scheduler:
             )
 
         return signatures[::-1]
+
+    def clean_removed_buffer_from_partition_signatures(
+        self, signature: GraphPartitionSignature
+    ) -> GraphPartitionSignature:
+        """
+        Updates the partition signature by removing buffers specified in
+        V.graph.removed_buffers. See [Note: Removed Graph Partition Arguments]
+        """
+        input_nodes = {
+            name: buffer
+            for name, buffer in signature.input_nodes.items()
+            if name not in V.graph.removed_buffers
+        }
+        input_deallocation = {
+            name: val
+            for name, val in signature.input_deallocation.items()
+            if name not in V.graph.removed_buffers
+        }
+        output_nodes = [
+            node
+            for node in signature.output_nodes
+            if node.maybe_get_name() not in V.graph.removed_buffers
+        ]
+        constant_names = [
+            name
+            for name in signature.constant_names
+            if name not in V.graph.removed_buffers
+        ]
+        return GraphPartitionSignature(
+            signature.symbol_inputs,
+            input_nodes,
+            output_nodes,
+            input_deallocation,
+            signature.skip_cudagraph,
+            constant_names,
+        )
 
     def reorder_for_minimizing_partition(
         self,
@@ -4488,6 +4592,8 @@ class Scheduler:
         signature: GraphPartitionSignature,
     ) -> None:
         """Codegen a partition given its inputs/outputs"""
+        from .codegen.wrapper import SubgraphPythonWrapperCodegen
+
         parent_wrapper_code = V.graph.wrapper_code
         graph_partition_id = next(self._graph_partition_counter)
 
@@ -4499,6 +4605,20 @@ class Scheduler:
                 partition_signatures=signature,
             )
             self._codegen(partition)
+
+            # Note: [Removed Graph Partition Arguments]
+            # Graph partition relies on node.read_writes to analyze the partition
+            # inputs and outputs. However, during codegen, we may decide some buffers
+            # are internal to a kernel (e.g., triton kernel) such that these buffers
+            # are never actually defined. This information is collected during codegen
+            # and recorded in V.graph.removed_buffers. So we cleanup signature and write
+            # prefix (i.e., generating call function and return outputs) after we have
+            # codegen the partition.
+            assert isinstance(V.graph.wrapper_code, SubgraphPythonWrapperCodegen)
+            signature = self.clean_removed_buffer_from_partition_signatures(signature)
+            V.graph.wrapper_code.partition_signatures = signature
+            V.graph.wrapper_code.write_prefix()
+
             partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
 
         V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code.value)

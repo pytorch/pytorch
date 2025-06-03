@@ -1949,9 +1949,13 @@ def _new_process_group_helper(
             # TODO: remove this check after lazy initialization is supported
             # if pg_options is not None:
             #     raise RuntimeError("GLOO options not supported")
+            if not is_gloo_available():
+                raise RuntimeError("Distributed package doesn't have Gloo built in")
             backend_class = ProcessGroupGloo(
                 backend_prefix_store, group_rank, group_size, timeout=timeout
             )
+            backend_class.options.global_ranks_in_group = global_ranks_in_group
+            backend_class.options.group_name = group_name
             backend_type = ProcessGroup.BackendType.GLOO
         elif backend_str == Backend.NCCL:
             if not is_nccl_available():
@@ -5438,28 +5442,22 @@ def new_subgroups(
             f"The arg 'group_size' ({group_size}) must not exceed the world size ({world_size})"
         )
     if world_size % group_size != 0:
-        raise ValueError("The world size must be divisible by 'group_size'")
-
-    subgroups = []
-    cur_subgroup = None
+        raise ValueError(
+            f"The world size ({world_size}) must be divisible by '{group_size=}'"
+        )
 
     # TODO: Use itertools.batched(get_process_group_ranks(group=group), group_size) instead when Python 3.12 is supported.
-    ranks_iterator = iter(get_process_group_ranks(group=group or _get_default_group()))
-    while ranks_in_subgroup := tuple(itertools.islice(ranks_iterator, group_size)):
-        subgroup = new_group(
-            ranks=ranks_in_subgroup,
-            timeout=timeout,
-            backend=backend,
-            pg_options=pg_options,
-            group_desc=group_desc,
-        )
-        subgroups.append(subgroup)
-
-        if rank := get_rank(group=group) in ranks_in_subgroup:
-            cur_subgroup = subgroup
-            logger.info("Rank %s is assigned to subgroup %s", rank, ranks_in_subgroup)
-
-    return cur_subgroup, subgroups
+    ranks = get_process_group_ranks(group=group or _get_default_group())
+    ranks_per_subgroup_list = [
+        ranks[i : i + group_size] for i in range(0, len(ranks), group_size)
+    ]
+    return new_subgroups_by_enumeration(
+        ranks_per_subgroup_list,
+        timeout=timeout,
+        backend=backend,
+        pg_options=pg_options,
+        group_desc=group_desc,
+    )
 
 
 def new_subgroups_by_enumeration(

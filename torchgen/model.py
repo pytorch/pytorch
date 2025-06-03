@@ -271,6 +271,7 @@ STRUCTURED_DISPATCH_KEYS = {
     DispatchKey.CUDA,
     DispatchKey.CPU,
     DispatchKey.XPU,
+    DispatchKey.MTIA,
 }
 UFUNC_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
 
@@ -305,6 +306,7 @@ dispatch_keys = [
     DispatchKey.QuantizedMeta,
     DispatchKey.NestedTensorMeta,
     DispatchKey.ZeroTensor,
+    DispatchKey.MTIA,
 ]
 
 
