@@ -994,6 +994,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     }
   }
 
+  // Initialize the heartbeat monitor instance. This has to be done before
+  // the watchdog thread is launched to avoid the error.
+  heartbeatMonitor_ = std::make_unique<HeartbeatMonitor>(this);
+
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   // in blockingWait mode, we don't need to enable the watchdog thread to check
   // the timeout or nccl error because the main thread would throw an exception
@@ -1032,7 +1036,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << traceBufferSize_
             << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_
             << ", TORCH_NCCL_CUDA_EVENT_CACHE: " << cudaEventCacheEnabled_;
-  heartbeatMonitor_ = std::make_unique<HeartbeatMonitor>(this);
 
   getGlobalRankStartAndStride(
       options_->global_ranks_in_group,
@@ -2214,8 +2217,7 @@ int ProcessGroupNCCL::getSignalSrcRank(
 
 void ProcessGroupNCCL::broadcastDumpSignal() {
   // broadcast dump signal to all other global ranks.
-  auto global_store = globalStore();
-  broadcastSignal(global_store, std::string(kStoreDumpKey), globalRank());
+  broadcastSignal(globalStore_, std::string(kStoreDumpKey), globalRank());
   // signal the local rank to start dumping
   if (!shouldDump_.load()) {
     LOG(ERROR) << logPrefix() << "First PG on this rank to signal dumping.";
