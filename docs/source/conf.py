@@ -2546,6 +2546,26 @@ coverage_ignore_classes = [
     # torch.ao.quantization.quantizer.xnnpack_quantizer_utils
     "OperatorConfig",
     "QuantizationConfig",
+    # torch.ao.quantization.experimental.adaround_fake_quantize
+    "AdaroundFakeQuantizer",
+    # torch.ao.quantization.experimental.adaround_loss
+    "AdaptiveRoundingLoss",
+    # torch.ao.quantization.experimental.adaround_optimization
+    "AdaptiveRoundingOptimizer",
+    # torch.ao.quantization.experimental.apot_utils
+    "apot_to_float",
+    "float_to_apot",
+    "quant_dequant_util"
+    # torch.ao.quantization.experimental.fake_quantize
+    "APoTFakeQuantize",
+    # torch.ao.quantization.experimental.fake_quantize_function
+    "fake_quantize_function",
+    # torch.ao.quantization.experimental.observer
+    "APoTObserver",
+    # torch.ao.quantization.experimental.quantizer
+    "quant_dequant_APoT",
+    "quantize_APoT",
+    "APoTQuantizer",
     # torch.ao.quantization.stubs
     "DeQuantStub",
     "QuantStub",
