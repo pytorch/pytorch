@@ -31,7 +31,6 @@ For example, you can define a module::
                 cos_cache_data,
                 sin_cache_data,
                 position_ids_data,
-                interleaved=True,
             )
 
 and export it to ONNX using::
@@ -101,7 +100,6 @@ to decompose ONNX operators defined above to ATen operators.
                 cos_cache_data,
                 sin_cache_data,
                 position_ids_data,
-                interleaved=True,
             )
 
     model = Model()

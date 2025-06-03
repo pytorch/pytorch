@@ -512,6 +512,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         )
         self.assertEqual(onnx_program.model.opset_imports[""], 23)
         self.assertEqual("RotaryEmbedding", onnx_program.model.graph.node(0).op_type)
+        print(onnx_program)
 
 
 if __name__ == "__main__":
