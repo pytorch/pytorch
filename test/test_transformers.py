@@ -1898,6 +1898,39 @@ class TestSDPAFailureModes(NNTestCase):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, is_causal=True))
 
+    @onlyCUDA
+    def test_mem_eff_attention_fail_with_batch_size_geq_65536(self):
+        batch_size = 2**16
+        query = torch.rand([batch_size, 2, 2, 8], device='cuda', dtype=torch.float16, requires_grad=True)
+        key = torch.rand([batch_size, 2, 2, 8], device='cuda', dtype=torch.float16, requires_grad=True)
+        value = torch.rand([batch_size, 2, 2, 8], device='cuda', dtype=torch.float16, requires_grad=True)
+        q_cpu, k_cpu, v_cpu = (query.detach().cpu().requires_grad_(True),
+                               key.detach().cpu().requires_grad_(True),
+                               value.detach().cpu().requires_grad_(True))
+        with sdpa_kernel(backends=SDPBackend.EFFICIENT_ATTENTION):
+            out = F.scaled_dot_product_attention(query, key, value)
+        out_cpu = F.scaled_dot_product_attention(q_cpu, k_cpu, v_cpu)
+        grad_out = torch.rand_like(out)
+        out.backward(grad_out)
+        out_cpu.backward(grad_out.cpu())
+
+        self.assertEqual(out, out_cpu, atol=2e-3, rtol=1e-4)
+        self.assertEqual(query.grad, q_cpu.grad, atol=2e-3, rtol=1e-4)
+        self.assertEqual(key.grad, k_cpu.grad, atol=2e-3, rtol=1e-4)
+        self.assertEqual(value.grad, v_cpu.grad, atol=2e-3, rtol=1e-4)
+
+    @onlyCUDA
+    def test_mem_eff_attention_fail_with_batch_size_geq_65536_error(self):
+        query = torch.rand([2**16, 2, 2, 8], device='cuda', dtype=torch.float16)
+        key = torch.rand([2**16, 2, 2, 8], device='cuda', dtype=torch.float16)
+        value = torch.rand([2**16, 2, 2, 8], device='cuda', dtype=torch.float16)
+        error_str = (r"Efficient attention cannot produce valid seed and offset outputs when "
+                     r"the batch size exceeds \(65535\)\.")
+        with self.assertRaisesRegex(RuntimeError, error_str):
+            torch._scaled_dot_product_efficient_attention(query, key, value,
+                                                          attn_bias=None, compute_log_sumexp=True,
+                                                          dropout_p=0.01)
+
 def _get_block_size_n(device, head_dim, is_dropout, is_causal):
     # This should match the block sizes in the CUDA kernel
     assert head_dim <= 256

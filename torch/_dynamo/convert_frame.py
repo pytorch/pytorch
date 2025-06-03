@@ -100,6 +100,7 @@ from .exc import (
     FailOnRecompileLimitHit,
     format_error_msg,
     InternalTorchDynamoError,
+    PackageError,
     RecompileLimitExceeded,
     ShortenTraceback,
     SkipCodeRecursiveException,
@@ -1139,6 +1140,7 @@ def _compile(
                     UncapturedHigherOrderOpError,
                     BisectValidationException,
                     ShortenTraceback,
+                    PackageError,
                 ),
             ):
                 raise
