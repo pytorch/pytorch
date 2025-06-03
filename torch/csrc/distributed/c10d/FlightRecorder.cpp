@@ -43,7 +43,7 @@ DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
 
     std::string fileNamePrefix = getCvarString(
         {"TORCH_FR_DUMP_TEMP_FILE", "TORCH_NCCL_DEBUG_INFO_TEMP_FILE"},
-        defaultLocation.c_str());
+        defaultLocation.string().c_str());
     // Using std::unique_ptr here to auto-delete the writer object
     // when the pointer itself is destroyed.
     std::unique_ptr<DebugInfoWriter> writerPtr(
