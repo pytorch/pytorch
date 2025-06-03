@@ -3,10 +3,7 @@ import json
 import logging
 import os
 import tempfile
-import zipfile
-from pathlib import Path
 from typing import Any, IO, Optional, Union
-from typing_extensions import Self
 
 import torch
 import torch._inductor
@@ -14,9 +11,9 @@ import torch.utils._pytree as pytree
 from torch._inductor import config
 from torch._inductor.cpp_builder import BuildOptionsBase, CppBuilder
 from torch.export._tree_utils import reorder_kwargs
+from torch.export.pt2_archive._package import PT2ArchiveWriter
 from torch.export.pt2_archive.constants import (
     AOTINDUCTOR_DIR,
-    ARCHIVE_VERSION_VALUE,
     CONSTANTS_DIR,
     CUSTOM_OBJ_FILENAME_PREFIX,
 )
@@ -24,74 +21,6 @@ from torch.types import FileLike
 
 
 log = logging.getLogger(__name__)
-
-
-class PT2ArchiveWriter:
-    def __init__(self, archive_path: FileLike) -> None:
-        self.archive_path: FileLike = archive_path
-        self.archive_file: Optional[zipfile.ZipFile] = None
-
-    def __enter__(self) -> Self:
-        assert self.archive_file is None
-        self.archive_file = zipfile.ZipFile(
-            self.archive_path, "w", compression=zipfile.ZIP_STORED
-        )
-        self.writestr("version", str(ARCHIVE_VERSION_VALUE))
-        self.writestr("archive_format", "pt2")
-        return self
-
-    def __exit__(self, *args) -> None:  # type: ignore[no-untyped-def]
-        assert self.archive_file is not None
-        self.archive_file.close()
-        self.archive_file = None
-        return None
-
-    def writestr(self, name: str, data: Union[bytes, str]) -> None:
-        assert self.archive_file is not None
-        self.archive_file.writestr(name, data)
-
-    def write_file(self, name: str, file_path: str) -> None:
-        """
-        Copy a file into the archive.
-        name: The destination file inside the archive.
-        file_path: The source file on disk.
-        """
-        assert Path(file_path).is_file(), f"{file_path} is not a valid file path"
-        assert self.archive_file is not None
-        self.archive_file.write(file_path, arcname=name)
-
-
-class PT2ArchiveReader:
-    def __init__(self, archive_path: str) -> None:
-        self.archive_path: str = archive_path
-        self.archive_file: Optional[zipfile.ZipFile] = None
-
-    def __enter__(self) -> Self:
-        self.archive_file = zipfile.ZipFile(
-            self.archive_path, "r", compression=zipfile.ZIP_STORED
-        )
-        return self
-
-    def __exit__(self, *args) -> None:  # type: ignore[no-untyped-def]
-        if self.archive_file is not None:
-            self.archive_file.close()
-        return None
-
-    def read(self, name: str) -> bytes:
-        assert self.archive_file is not None
-        return self.archive_file.read(name)
-
-    def extract_to_path(self, member: str, path: str) -> str:
-        assert self.archive_file is not None
-        return self.archive_file.extract(member, path)
-
-    def extractall(self, path: str) -> None:
-        assert self.archive_file is not None
-        self.archive_file.extractall(path)
-
-    def get_file_names(self) -> list[str]:
-        assert self.archive_file is not None
-        return self.archive_file.namelist()
 
 
 def compile_so(aoti_dir: str, aoti_files: list[str], so_path: str) -> str:
