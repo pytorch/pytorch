@@ -6003,10 +6003,10 @@ class TestMPS(TestCaseMPS):
 
         log_result = torch.log1p(x)
         log_result_cpu = torch.log1p(cpu_x)
-        self.assertEqual(log_result, log_result_cpu, atol=0, rtol=6e-2)
+        self.assertEqual(log_result, log_result_cpu, atol=0, rtol=2e-7)
 
         # Fallback to log
-        cpu_x = torch.arange(-1.0, 2.0, 1e1 * eps, dtype=dtype, requires_grad=False)
+        cpu_x = torch.arange(-1.0, 2.0, 1e-4, dtype=dtype, requires_grad=False)
         x = cpu_x.detach().clone().to('mps')
 
         log_result = torch.log1p(x)

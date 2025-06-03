@@ -148,12 +148,16 @@ struct log10_functor {
 struct log1p_functor {
   template <typename T>
   inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
-    // For values smaller than 1e-6 approximate with 3 elements of Taylor series
-    if (::metal::abs(float(x)) < 1e-6) {
-      constexpr float one_third = 1. / 3.;
-      return T(x * (1.0 - x * (.5 - x * one_third)));
+    const auto xp1 = 1.0f + float(x);
+    if (xp1 == 1.0f) {
+      return x;
     }
-    return T(::precise::log(1.0f + x));
+    auto rc = ::precise::log(xp1);
+    // See https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html#1202
+    if (x > -.5 && x < .5) {
+        rc *= float(x) / (xp1 - 1.0f);
+    }
+    return T(rc);
   }
   template <typename T>
   inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
