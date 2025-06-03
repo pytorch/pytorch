@@ -13837,6 +13837,20 @@ def forward(self, x):
         with self.assertRaises(RuntimeError):
             ep.module()(torch.randn(4, 2))
 
+    def test_unbacked_strides_like_channel_last(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                n = x.item() // 2240
+                y = torch.empty(1, n, 20, 112)
+                return y[:, :, :20, :].reshape(n, -1, 112)
+
+        mod = Foo()
+        x = torch.tensor([4480])
+        ep = export(mod, (x,))
+        self.assertEqual(mod(x).shape, ep.module()(x).shape)
+        x = torch.tensor([2240])
+        self.assertEqual(mod(x).shape, ep.module()(x).shape)
+
     @testing.expectedFailureSerDer  # T195866111
     @testing.expectedFailureSerDerNonStrict
     def test_hints_wrapper(self):

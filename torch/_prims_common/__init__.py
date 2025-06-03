@@ -1925,7 +1925,14 @@ def check(
 def are_strides_like_channels_last(
     shape: Sequence[int], strides: Sequence[int]
 ) -> bool:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, guard_or_false, guard_or_true
+
+    def ge(a, b):
+        if guard_or_false(a == 0):
+            return False
+        if guard_or_false(b == 0):
+            return True
+        return guard_or_false(a >= b) or guard_or_false(a % b == 0)
 
     ndim = len(shape)
 
@@ -1938,19 +1945,19 @@ def are_strides_like_channels_last(
     else:
         return False
 
-    if guard_size_oblivious(strides[1] == 0):
+    if guard_or_false(strides[1] == 0):
         return False
 
     min = 0
     for d in dim_order:
-        if guard_size_oblivious(shape[d] == 0):
+        if guard_or_false(shape[d] == 0):
             return False
-        if guard_size_oblivious(strides[d] < min):
+        if not ge(strides[d], min):
             return False
-        if d == 0 and min == strides[1]:
+        if d == 0 and guard_or_false(min == strides[1]):
             return False
         min = strides[d]
-        if guard_size_oblivious(strides[d] > 1):
+        if guard_or_true(strides[d] > 1):
             min *= shape[d]
     return True
 
