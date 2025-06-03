@@ -89,8 +89,9 @@ class SetGuardsSet(torch._dynamo.test_case.TestCase):
             torch.randn(2),
             torch.amp._exit_autocast,
         }
+        cnts = CompileCounter()
 
-        @torch.compile(backend="eager", fullgraph=True)
+        @torch.compile(backend=cnts, fullgraph=True)
         def fn(x, s):
             if torch.amp._exit_autocast in s:
                 return x.sin()
@@ -99,51 +100,38 @@ class SetGuardsSet(torch._dynamo.test_case.TestCase):
         x = torch.randn(2)
         y = fn(x, s)
         self.assertEqual(y, x.sin())
+        self.assertEqual(cnts.frame_count, 1)
 
         s.clear()
         y = fn(x, s)
         self.assertEqual(y, x.cos())
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_set_with_tensors_2(self):
         s = {
-            torch.tensor(1.0),
-            torch.randn(2),
-            torch.zeros(4),
+            torch.ones(1),
+            torch.tensor([1.0]),
+            torch.zeros(1),
         }
+        cnts = CompileCounter()
 
-        @torch.compile(backend="eager", fullgraph=True)
+        @torch.compile(backend=cnts, fullgraph=True)
         def fn(x, s):
-            if len(s) == 3:
-                return x.sin()
-            return x.cos()
+            z = torch.zeros(1)
+            for i in s:
+                z += i
+            return x + z
 
-        x = torch.tensor(1.0)
+        x = torch.tensor([1.0])
         y = fn(x, s)
-        self.assertEqual(y, x.sin())
+        self.assertEqual(y, x + 2)
+        self.assertEqual(cnts.frame_count, 1)
 
-        s.clear()
+        t = s.pop()
+        s.add(t + 1)
         y = fn(x, s)
-        self.assertEqual(y, x.cos())
-
-    def test_set_with_str_and_tensor(self):
-        s = {
-            "PyTorch",
-            torch.tensor(1.0),
-        }
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x, s):
-            if "PyTorch" in s:
-                return x.sin()
-            return x.cos()
-
-        x = torch.tensor(1.0)
-        y = fn(x, s)
-        self.assertEqual(y, x.sin())
-
-        s.remove("PyTorch")
-        y = fn(x, s)
-        self.assertEqual(y, x.cos())
+        self.assertEqual(y, x + 3)
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_set_multiple_types(self):
         s = {
@@ -153,8 +141,9 @@ class SetGuardsSet(torch._dynamo.test_case.TestCase):
             1j,
             math.nan,
         }
+        cnts = CompileCounter()
 
-        @torch.compile(backend="eager", fullgraph=True)
+        @torch.compile(backend=cnts, fullgraph=True)
         def fn(x, s):
             if "PyTorch" in s:
                 return x.sin()
@@ -163,10 +152,12 @@ class SetGuardsSet(torch._dynamo.test_case.TestCase):
         x = torch.tensor(1.0)
         y = fn(x, s)
         self.assertEqual(y, x.sin())
+        self.assertEqual(cnts.frame_count, 1)
 
         s.remove("PyTorch")
         y = fn(x, s)
         self.assertEqual(y, x.cos())
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_set_recompile_on_key_pop(self):
         s = {
