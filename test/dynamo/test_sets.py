@@ -2,11 +2,11 @@
 
 # TODO: move set tests from test_functions.py/test_misc.py to this file
 
+import math
 import unittest
 
 import torch
 import torch._dynamo.test_case
-from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import make_dynamo_test
 
@@ -89,15 +89,83 @@ class SetGuardsSet(torch._dynamo.test_case.TestCase):
             torch.amp._exit_autocast,
         }
 
+        @torch.compile(backend="eager", fullgraph=True)
         def fn(x, s):
             if torch.amp._exit_autocast in s:
                 return x.sin()
             return x.cos()
 
         x = torch.randn(2)
+        y = fn(x, s)
+        self.assertEqual(y, x.sin())
 
-        with self.assertRaises(Unsupported):
-            torch.compile(fn, backend="eager", fullgraph=True)(x, s)
+        s.clear()
+        y = fn(x, s)
+        self.assertEqual(y, x.cos())
+
+    def test_set_with_tensors_2(self):
+        s = {
+            torch.tensor(1.0),
+            torch.randn(2),
+            torch.zeros(4),
+        }
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, s):
+            if len(s) == 3:
+                return x.sin()
+            return x.cos()
+
+        x = torch.tensor(1.0)
+        y = fn(x, s)
+        self.assertEqual(y, x.sin())
+
+        s.clear()
+        y = fn(x, s)
+        self.assertEqual(y, x.cos())
+
+    def test_set_with_str_and_tensor(self):
+        s = {
+            "PyTorch",
+            torch.tensor(1.0),
+        }
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, s):
+            if "PyTorch" in s:
+                return x.sin()
+            return x.cos()
+
+        x = torch.tensor(1.0)
+        y = fn(x, s)
+        self.assertEqual(y, x.sin())
+
+        s.remove("PyTorch")
+        y = fn(x, s)
+        self.assertEqual(y, x.cos())
+
+    def test_set_multiple_types(self):
+        s = {
+            "PyTorch",
+            torch.tensor(1.0),
+            3.3,
+            1j,
+            math.nan,
+        }
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, s):
+            if "PyTorch" in s:
+                return x.sin()
+            return x.cos()
+
+        x = torch.tensor(1.0)
+        y = fn(x, s)
+        self.assertEqual(y, x.sin())
+
+        s.remove("PyTorch")
+        y = fn(x, s)
+        self.assertEqual(y, x.cos())
 
     def test_set_recompile_on_key_pop(self):
         s = {

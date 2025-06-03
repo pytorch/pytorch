@@ -4165,37 +4165,39 @@ class SetGetItemGuardAccessor : public GuardAccessor {
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
 
-    py::object sorted = py::module_::import("builtins").attr("sorted");
-    py::object hash = py::module_::import("builtins").attr("hash");
-    py::object pybind_obj = py::reinterpret_borrow<py::object>(obj);
+    // PyObject* dict_type = (PyObject*)&PyDict_Type;
+    // PyObject* fromkeys =
+    //     PyObject_CallMethod(dict_type, "fromkeys", "O", obj);
 
-    py::list lst = sorted(pybind_obj, py::arg("key") = hash);
-
-    if (_index >= static_cast<Py_ssize_t>(py::len(lst))) {
+    PyObject* lst = PySequence_List(obj);
+    PyObject* x = PyList_GetItem(lst, _index); // borrowed ref
+    // Py_XDECREF(fromkeys);
+    Py_XDECREF(lst);
+    if (x == nullptr) {
+      PyErr_Clear();
       return false;
     }
-
-    py::object x = lst[_index];
-    bool result = _guard_manager->check_nopybind(x.ptr());
+    bool result = _guard_manager->check_nopybind(x);
     return result;
   }
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
 
-    py::object sorted = py::module_::import("builtins").attr("sorted");
-    py::object hash = py::module_::import("builtins").attr("hash");
-    py::object pybind_obj = py::reinterpret_borrow<py::object>(obj);
+    // PyObject* dict_type = (PyObject*)&PyDict_Type;
+    // PyObject* fromkeys =
+    //     PyObject_CallMethod(dict_type, "fromkeys", "O", obj);
 
-    py::list lst = sorted(pybind_obj, py::arg("key") = hash);
+    PyObject* lst = PySequence_List(obj);
+    PyObject* x = PyList_GetItem(lst, _index); // borrowed ref
+    // Py_XDECREF(fromkeys);
+    Py_XDECREF(lst);
 
-    if (_index >= static_cast<Py_ssize_t>(py::len(lst))) {
-      return GuardDebugInfo(
-          false, fmt::format("IndexError on {}", get_source()), 0);
+    if (x == nullptr) {
+      PyErr_Clear();
+      return GuardDebugInfo(false, 0);
     }
-
-    py::object x = lst[_index];
-    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x.ptr());
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
     return result;
   }
 
@@ -5384,23 +5386,40 @@ void install_storage_overlapping_guard(
       /* overlapping= */ false);
 }
 
+char flush_cache_by_eviction() {
+  constexpr size_t evict_size = 32 * 1024 * 1024;
+  std::vector<char> buffer(evict_size, 1);
+
+  volatile char sink = 0;
+  for (size_t i = 0; i < buffer.size(); i += 64) {
+    sink ^= buffer[i];
+  }
+  return sink;
+}
+
 double profile_guard_manager(
     RootGuardManager* root,
     py::object f_locals,
     int n_iters) {
   PyObject* locals = f_locals.ptr();
 
-  // Warmup
+  // Warmup to setup fast paths (like dict_tags) for the actual profiling
   for (int i = 0; i < 5; i++) {
     root->check_nopybind(locals);
   }
 
-  auto start = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> total_elapsed{0.0};
   for (int i = 0; i < n_iters; i++) {
+    // Flush the caches to accurately measure the overhead
+    // store into a volatile to prevent optimization
+    volatile char dummy = flush_cache_by_eviction();
+    (void)dummy;
+
+    auto start = std::chrono::high_resolution_clock::now();
     root->check_nopybind(locals);
+    auto end = std::chrono::high_resolution_clock::now();
+    total_elapsed += end - start;
   }
-  auto end = std::chrono::high_resolution_clock::now();
-  std::chrono::duration<double> total_elapsed = end - start;
 
   // Calculate the average time per iteration in microseconds
   return (total_elapsed.count() * 1e6) / n_iters;
