@@ -413,7 +413,9 @@ def sample_inputs_aten_index_put(op_info, device, dtype, requires_grad, **kwargs
         for broadcast_value in [False, True]:
             inp = make_arg(self_shape)
 
-            tmp_indices = tuple([slice(None) if idx is None else idx for idx in indices])
+            tmp_indices = tuple(
+                [slice(None) if idx is None else idx for idx in indices]
+            )
             values_shape = inp[tmp_indices].shape
             if broadcast_value:
                 values_shape = values_shape[3:]

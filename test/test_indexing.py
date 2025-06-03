@@ -250,7 +250,10 @@ class TestIndexing(TestCase):
         reference = consec((10,))
         strided = torch.tensor((), dtype=dtype, device=device)
         strided.set_(
-            reference.untyped_storage(), storage_offset=0, size=torch.Size([4]), stride=[2]
+            reference.untyped_storage(),
+            storage_offset=0,
+            size=torch.Size([4]),
+            stride=[2],
         )
 
         self.assertEqual(strided[[0]], torch.tensor([1], dtype=dtype, device=device))
@@ -274,7 +277,10 @@ class TestIndexing(TestCase):
         # stride is [4, 8]
         strided = torch.tensor((), dtype=dtype, device=device)
         strided.set_(
-            reference.untyped_storage(), storage_offset=4, size=torch.Size([2]), stride=[4]
+            reference.untyped_storage(),
+            storage_offset=4,
+            size=torch.Size([2]),
+            stride=[4],
         )
         self.assertEqual(strided[[0]], torch.tensor([5], dtype=dtype, device=device))
         self.assertEqual(
@@ -446,7 +452,9 @@ class TestIndexing(TestCase):
 
         reference = torch.arange(0.0, 24, dtype=dtype, device=device).view(3, 8)
         strided = torch.tensor((), dtype=dtype, device=device)
-        strided.set_(reference.untyped_storage(), 1, size=torch.Size([2, 4]), stride=[8, 2])
+        strided.set_(
+            reference.untyped_storage(), 1, size=torch.Size([2, 4]), stride=[8, 2]
+        )
 
         self.assertEqual(
             strided[ri([0, 1]), ri([0])],
@@ -502,7 +510,9 @@ class TestIndexing(TestCase):
 
         reference = torch.arange(0.0, 24, dtype=dtype, device=device).view(3, 8)
         strided = torch.tensor((), dtype=dtype, device=device)
-        strided.set_(reference.untyped_storage(), 10, size=torch.Size([2, 2]), stride=[7, 1])
+        strided.set_(
+            reference.untyped_storage(), 10, size=torch.Size([2, 2]), stride=[7, 1]
+        )
         self.assertEqual(
             strided[ri([0]), ri([1])], torch.tensor([11], dtype=dtype, device=device)
         )
@@ -513,7 +523,9 @@ class TestIndexing(TestCase):
 
         reference = torch.arange(0.0, 24, dtype=dtype, device=device).view(3, 8)
         strided = torch.tensor((), dtype=dtype, device=device)
-        strided.set_(reference.untyped_storage(), 10, size=torch.Size([2, 2]), stride=[7, 1])
+        strided.set_(
+            reference.untyped_storage(), 10, size=torch.Size([2, 2]), stride=[7, 1]
+        )
         self.assertEqual(
             strided[ri([0, 1]), ri([1, 0])],
             torch.tensor([11, 17], dtype=dtype, device=device),
@@ -528,7 +540,9 @@ class TestIndexing(TestCase):
 
         reference = torch.arange(0.0, 24, dtype=dtype, device=device).view(3, 8)
         strided = torch.tensor((), dtype=dtype, device=device)
-        strided.set_(reference.untyped_storage(), 10, size=torch.Size([2, 2]), stride=[7, 1])
+        strided.set_(
+            reference.untyped_storage(), 10, size=torch.Size([2, 2]), stride=[7, 1]
+        )
 
         rows = ri([[0], [1]])
         columns = ri([[0, 1], [0, 1]])
