@@ -3606,7 +3606,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         stack_len = len(self.stack) - len(null_idxes)
         nargs = stack_len + len(argnames)
 
-        name = unique_id(f"__resume_at_{inst.offset}", with_uuid=True)
+        name = unique_id(f"__resume_at_{inst.offset}")
 
         new_code: types.CodeType = ContinueExecutionCache.lookup(
             self.f_code,

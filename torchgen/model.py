@@ -271,7 +271,6 @@ STRUCTURED_DISPATCH_KEYS = {
     DispatchKey.CUDA,
     DispatchKey.CPU,
     DispatchKey.XPU,
-    DispatchKey.MTIA,
 }
 UFUNC_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
 

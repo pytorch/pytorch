@@ -314,7 +314,6 @@ DTYPE_TO_CUTLASS_TYPE = {
     **DTYPE_TO_CPP,
     torch.float16: "__half",
     torch.bfloat16: "__nv_bfloat16",
-    torch.float8_e4m3fn: "cutlass::float_e4m3_t",
 }
 
 
@@ -360,8 +359,6 @@ def dtype_match(
         return cutlass_dtype == cutlass_library.library.DataType.u8
     elif torch_dtype == torch.int32:
         return cutlass_dtype == cutlass_library.library.DataType.s32
-    elif torch_dtype == torch.float8_e4m3fn:
-        return cutlass_dtype == cutlass_library.library.DataType.e4m3
     else:
         return False
 
@@ -392,7 +389,7 @@ def get_accumulator_dtype(
         ]:
             torch_dtype = dtype0
 
-    if torch_dtype in (torch.float16, torch.bfloat16, torch.float, torch.float8_e4m3fn):
+    if torch_dtype in (torch.float16, torch.bfloat16, torch.float):
         return torch.float
     if torch_dtype == torch.int8:
         return torch.int32
@@ -410,7 +407,7 @@ def get_alignments(torch_dtype: torch.dtype) -> list[int]:
         return [8, 4, 2, 1]
     elif torch_dtype == torch.float:
         return [4, 2, 1]
-    elif torch_dtype in (torch.uint8, torch.int8, torch.float8_e4m3fn):
+    elif torch_dtype in (torch.uint8, torch.int8):
         return [16, 8, 4, 2]
     elif torch_dtype == torch.int32:
         return [4, 2, 1]

@@ -32,7 +32,6 @@ def calculate_runtime(f, *args) -> float:
     Assumes all inputs are fp32
     """
     metrics.reset()
-    torch._logging.set_logs(inductor_metrics=True)
     torch.compile(f, backend=compile_but_use_eager)(*args)
     print(metrics.node_runtimes)
 
@@ -40,7 +39,6 @@ def calculate_runtime(f, *args) -> float:
     for pair in metrics.node_runtimes:
         ret += pair[1]
 
-    torch._logging.set_logs()
     return ret
 
 
@@ -237,7 +235,6 @@ class TestCommAnalysis(TestCase):
         )
         try:
             metrics.reset()
-            torch._logging.set_logs(inductor_metrics=True)
             torch.compile(fn)(*inps)
             found_collective = False
             for snode, runtime in metrics.node_runtimes:
@@ -254,7 +251,6 @@ class TestCommAnalysis(TestCase):
                 self.assertNotZero(runtime)
             # Make sure a collective kernel is found in graph
             self.assertTrue(found_collective)
-            torch._logging.set_logs()
         finally:
             dist.destroy_process_group()
 

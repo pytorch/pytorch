@@ -43,7 +43,6 @@ jobs:
           { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.2" },
           { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.2" },
         ]}
-      allow-reuse-old-whl: true
     secrets: inherit
 
   linux-jammy-rocm-py3_10-inductor-test:
