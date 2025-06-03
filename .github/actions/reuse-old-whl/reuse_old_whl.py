@@ -3,7 +3,7 @@ import os
 import subprocess
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, cast, Optional
+from typing import Any, cast, Optional, Union
 
 import requests
 
@@ -196,42 +196,83 @@ def unzip_artifact_and_replace_files() -> None:
     )
     os.remove("artifacts.zip")
 
+    head_sha = get_head_sha()
+
     # Rename wheel into zip
     wheel_path = Path("artifacts/dist").glob("*.whl")
     for path in wheel_path:
-        new_path = path.with_suffix(".zip")
-        os.rename(path, new_path)
-        print(f"Renamed {path} to {new_path}")
-        print(new_path.stem)
+        # Should be of the form torch-2.0.0+git1234567-cp37-etc.whl
+        # Should usually be the merge base sha but for the ones that didn't do
+        # the replacement, it won't be.  Can probably change it to just be merge
+        # base later
+        old_version = f"+git{path.stem.split('+')[1].split('-')[0][3:]}"
+        new_version = f"+git{head_sha[:7]}"
+
+        def rename_to_new_version(file: Union[str, Path]) -> None:
+            # Rename file with old_version to new_version
+            subprocess.check_output(
+                ["mv", file, str(file).replace(old_version, new_version)]
+            )
+
+        def change_content_to_new_version(file: Union[str, Path]) -> None:
+            # Check if is a file
+            if os.path.isdir(file):
+                return
+            # Replace the old version in the file with the new version
+            with open(file) as f:
+                content = f.read()
+                content = content.replace(old_version, new_version)
+            with open(file, "w") as f:
+                f.write(content)
+
+        zip_path = path.with_suffix(".zip")
+        os.rename(path, zip_path)
+        old_stem = zip_path.stem
         # Unzip the wheel
         subprocess.check_output(
-            ["unzip", "-o", new_path, "-d", f"artifacts/dist/{new_path.stem}"],
+            ["unzip", "-o", zip_path, "-d", f"artifacts/dist/{old_stem}"],
         )
 
         # Remove the old wheel (which is now a zip file)
-        os.remove(new_path)
+        os.remove(zip_path)
 
         # Copy python files into the artifact
         subprocess.check_output(
-            ["rsync", "-avz", "torch", f"artifacts/dist/{new_path.stem}"],
+            ["rsync", "-avz", "torch", f"artifacts/dist/{old_stem}"],
         )
+
+        change_content_to_new_version(f"artifacts/dist/{old_stem}/torch/version.py")
+
+        for file in Path(f"artifacts/dist/{old_stem}").glob(
+            "*.dist-info/**",
+        ):
+            change_content_to_new_version(file)
+
+        rename_to_new_version(f"artifacts/dist/{old_stem}")
+        new_stem = old_stem.replace(old_version, new_version)
+
+        for file in Path(f"artifacts/dist/{new_stem}").glob(
+            "*.dist-info",
+        ):
+            rename_to_new_version(file)
 
         # Zip the wheel back
         subprocess.check_output(
-            ["zip", "-r", f"{new_path.stem}.zip", "."],
-            cwd=f"artifacts/dist/{new_path.stem}",
+            ["zip", "-r", f"{new_stem}.zip", "."],
+            cwd=f"artifacts/dist/{new_stem}",
         )
+
         subprocess.check_output(
             [
                 "mv",
-                f"artifacts/dist/{new_path.stem}/{new_path.stem}.zip",
-                f"artifacts/dist/{new_path.stem}.whl",
+                f"artifacts/dist/{new_stem}/{new_stem}.zip",
+                f"artifacts/dist/{new_stem}.whl",
             ],
         )
 
         # Remove the extracted folder
         subprocess.check_output(
-            ["rm", "-rf", f"artifacts/dist/{new_path.stem}"],
+            ["rm", "-rf", f"artifacts/dist/{new_stem}"],
         )
 
     # Rezip the artifact
