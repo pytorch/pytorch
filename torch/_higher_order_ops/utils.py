@@ -13,10 +13,7 @@ from torch._guards import detect_fake_mode
 from torch._higher_order_ops.schema import HopSchema
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
-from torch._subclasses.functional_tensor import (
-    disable_functional_mode,
-    FunctionalTensor,
-)
+from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
     disable_proxy_modes_tracing,
@@ -427,6 +424,7 @@ def unique_graph_name_with_root(
 
 def _from_fun(t):
     from torch._functorch.aot_autograd import from_fun
+    from torch._subclasses.functional_tensor import FunctionalTensor
 
     if isinstance(t, torch.Tensor):
         if t.dtype != torch.bool:
@@ -786,7 +784,7 @@ def _maybe_unwrap_functional(arg: Any) -> Any:
 
 def check_input_alias_and_mutation_return_outputs(
     gm: torch.fx.GraphModule,
-    fake_args: Union[list[FakeTensor], list[FunctionalTensor], tuple[FakeTensor, ...]],
+    fake_args: Union[list[FakeTensor], tuple[FakeTensor, ...]],
 ) -> tuple[
     dict[int, int],
     dict[int, int],
@@ -1010,9 +1008,13 @@ def call_op(op: Union[OpOverload, HopInstance], args, kwargs):
     for arg in schema.arguments[len(bound_args) :]:
         assert arg.name in kwargs, (arg.name, kwargs)
         bound_args.append(kwargs[arg.name])
+
     assert len(bound_args) == len(schema.arguments)
-    args, kwargs = pytree.tree_unflatten(bound_args, schema.tree_spec)
-    return op(*args, **kwargs)
+    if schema.tree_spec is not None:
+        args, kwargs = pytree.tree_unflatten(bound_args, schema.tree_spec)
+        return op(*args, **kwargs)
+    else:
+        return op(*bound_args)
 
 
 def materialize_as_graph(

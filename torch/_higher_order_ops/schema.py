@@ -142,16 +142,22 @@ class HopSchemaGenerator:
         self.schema_tree_spec = pytree.tree_flatten((args, kwargs))[1]
 
     def gen_schema(self) -> torch._C.FunctionSchema:
-        if self.schema_tree_spec is None:
-            raise RuntimeError(
-                "schema_tree_spec is not set. Please call add_schema_tree_spec first."
-            )
+        for i, arg_info in enumerate(self.arg_infos):
+            arg_spec = pytree.tree_flatten(arg_info.example_value)[1]
+            if not arg_spec.is_leaf() and self.schema_tree_spec is None:
+                raise RuntimeError(
+                    f"example_value of arg_infos[{i}] is {arg_info.example_value}, which is not a leaf node. "
+                    "Please call add_schema_tree_spec to add a schema tree spec first. "
+                    "Or consider changing the hop's signature to only take flattened arguments."
+                )
+
         return CFunctionSchemaGen.from_hop_argument_info(
             str(self.hop),
             self.arg_infos,
             HopArgumentInfoGen.from_example(tuple(self.example_outputs), name="out"),
             self.schema_tree_spec,
         )
+
 
 
 class CFunctionSchemaGen:
@@ -246,7 +252,7 @@ class HopSchema(torch._C.FunctionSchema):
         returns: list[torch._C.Argument],
         is_vararg: bool,
         is_varret: bool,
-        schema_tree_spec: pytree.TreeSpec,
+        schema_tree_spec: Optional[pytree.TreeSpec],
     ):
         self.tree_spec = schema_tree_spec
         self.is_vararg = is_vararg

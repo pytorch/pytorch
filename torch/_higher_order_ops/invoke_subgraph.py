@@ -94,18 +94,18 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("subgraph", gm)
         schema_gen.add_arg("identifier", identifier)
-        (
-            _,
-            _,
-            _,
-            mutated_inputs,
-            outputs,
-        ) = check_input_alias_and_mutation_return_outputs(gm, operands)
+        example_inputs = [
+            n.meta["val"] if "val" in n.meta else n.meta["example_value"]
+            for n in gm.graph.find_nodes(op="placeholder")
+        ]
+        _, _, _, mutated_inputs, outputs = check_input_alias_and_mutation_return_outputs(
+            gm, example_inputs
+        )
         for idx, arg in enumerate(operands):
             schema_gen.add_arg(f"arg{idx}", arg, is_mutated=idx in mutated_inputs)
         for out in outputs:
             schema_gen.add_output(out)
-        schema_gen.add_schema_tree_spec(subgraph, identifier, *operands)
+        # schema_gen.add_schema_tree_spec(subgraph, identifier, *operands)
 
         return schema_gen.gen_schema()
 
