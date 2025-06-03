@@ -383,6 +383,12 @@ static void cumulative_op_impl(const Tensor& self,
               dim,
               ")");
   TORCH_CHECK(!self.is_complex(), "cumulative ops are not yet supported for complex");
+
+  // issue #154881, raising error to prevent crash within MPSGraph until
+  // workaround is implemented.
+  TORCH_CHECK(nDims - wrapped_dim <= 4,
+              "On-going issue on MPSGraph cumulative ops when ndims() - axis > 4, see issue #154881");
+
   auto input = dtype.has_value() ? self.to(dtype.value()) : self;
 
   // issue #103810551: cumsum / cumprod are broken for int8, int16 and as chances for overflow are pretty high, cast to
