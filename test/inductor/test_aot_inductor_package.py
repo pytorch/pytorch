@@ -517,8 +517,8 @@ class TestAOTInductorPackage(TestCase):
             )
 
     @skipif(
-        lambda device, package_cpp_only: device == "cpu" or package_cpp_only,
-        "No support for cpp only and cpu",
+        lambda device, package_cpp_only: package_cpp_only,
+        "No support for cpp only",
     )
     def test_package_without_weight(self):
         class Model(torch.nn.Module):
@@ -551,8 +551,8 @@ class TestAOTInductorPackage(TestCase):
         self.assertEqual(expected, output)
 
     @skipif(
-        lambda device, package_cpp_only: device == "cpu" or package_cpp_only,
-        "No support for cpp only and cpu",
+        lambda device, package_cpp_only: package_cpp_only,
+        "No support for cpp only",
     )
     def test_package_user_managed_weight(self):
         class Model(torch.nn.Module):
@@ -630,8 +630,8 @@ class TestAOTInductorPackage(TestCase):
         self.assertEqual(expected, output_copy)
 
     @skipif(
-        lambda device, package_cpp_only: device == "cpu" or package_cpp_only,
-        "No support for cpp only and cpu",
+        lambda device, package_cpp_only: package_cpp_only,
+        "No support for cpp only",
     )
     def test_update_weights(self):
         class Model(torch.nn.Module):
