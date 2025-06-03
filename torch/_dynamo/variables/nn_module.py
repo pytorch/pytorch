@@ -48,7 +48,6 @@ from ..source import (
     FSDPNNModuleSource,
     GetItemSource,
     NNModuleSource,
-    UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
 )
 from ..utils import (
@@ -891,8 +890,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         self.nn_module_stack_source = self.source
 
     def _wrap_source(self, attr_source):
-        if not isinstance(attr_source, UnspecializedNNModuleSource):
-            return UnspecializedNNModuleSource(attr_source)
+        # the vt is already wrapped with UnspecializedNNModuleSource
         return attr_source
 
     def get_nn_module_stack_source(self):
@@ -1193,8 +1191,7 @@ class UnspecializedBuiltinNNModuleVariable(UnspecializedNNModuleVariable):
     """
 
     def _wrap_source(self, attr_source):
-        if not isinstance(attr_source, UnspecializedBuiltinNNModuleSource):
-            return UnspecializedBuiltinNNModuleSource(attr_source)
+        # vt is already wrapped with the UnspecializedBuiltinNNModuleSource
         return attr_source
 
 
