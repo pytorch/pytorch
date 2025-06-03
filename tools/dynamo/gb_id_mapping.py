@@ -8,42 +8,43 @@ from pathlib import Path
 
 
 def get_source_segment(source, node):
-    if hasattr(ast, "get_source_segment"):
-        return ast.get_source_segment(source, node)
-
-
-"""
-Normalizes string literals by removing formatting artifacts and escape sequences.
-Handles f-strings, quotes, newlines, and other syntax elements for cleaner output.
-"""
+    return ast.get_source_segment(source, node)
 
 
 def clean_string(s):
-    if s is None:
-        return None
+    """
+    Normalizes string literals by removing formatting artifacts and escape sequences.
+    Handles f-strings, quotes, newlines, and other syntax elements for cleaner output.
+    """
     if isinstance(s, str):
+        # Convert f-string prefix to regular string prefix (e.g., f"hello" -> "hello")
         s = re.sub(r'^f["\']', r'"', s)
+        # Replace quoted strings with f-prefix in the middle with a space (e.g., " f"" -> " ")
         s = re.sub(r'["\'] f["\']', " ", s)
+        # Remove surrounding quotes, keeping only the content (e.g., "hello" -> hello)
         s = re.sub(r'^["\'](.*)["\']$', r"\1", s)
+        # Replace any whitespace around newlines with a single space for consistent formatting
         s = re.sub(r"\s*\n\s*", " ", s)
+        # Replace escaped quotes with their unescaped versions (e.g., \" -> ", \' -> ')
         s = s.replace('\\"', '"').replace("\\'", "'")
+        # Remove any remaining backslashes used for escaping
         s = s.replace("\\", "")
-        s = s.replace("\\", "")
+        # Replace adjacent quoted strings with a space (e.g., " "" -> " ")
         s = re.sub(r'" "', " ", s)
+        # Remove any curly brace expressions used in f-strings (e.g., {variable})
         s = re.sub(r"\{[^}]*\}", "", s)
+        # Remove backticks used in docstrings or code examples
         s = re.sub(r"``", "", s)
     return s
 
 
-# Expands hint references to their actual values from graph_break_hints.
 def expand_hints(hints):
-    import inspect
-
+    # Expands hint references to their actual values from graph_break_hints.
     from torch._dynamo import graph_break_hints
 
     hint_constants = {
         name: value
-        for name, value in inspect.getmembers(graph_break_hints)
+        for name, value in graph_break_hints.__dict__.items()
         if isinstance(value, list) and name.isupper()
     }
 
@@ -56,7 +57,8 @@ def expand_hints(hints):
     return expanded_hints
 
 
-"""
+def extract_info_from_keyword(source, kw):
+    """
     Extracts and returns the value of a keyword argument from an AST node.
 
     This function handles different types of AST nodes:
@@ -65,10 +67,7 @@ def expand_hints(hints):
       evaluating formatted values and concatenating them with string literals.
     - For other types, it cleans the source segment to remove formatting artifacts.
 
-"""
-
-
-def extract_info_from_keyword(source, kw):
+    """
     param_source = get_source_segment(source, kw.value)
     if isinstance(kw.value, ast.Constant):
         return kw.value.value
@@ -84,53 +83,57 @@ def extract_info_from_keyword(source, kw):
         return clean_string(param_source)
 
 
-def find_unimplemented_v2_calls(dynamo_dir):
+def find_unimplemented_v2_calls(path):
     results = []
-    dynamo_dir = Path(dynamo_dir)
+    path = Path(path)
 
-    for file_path in dynamo_dir.glob("**/*.py"):
+    if path.is_dir():
+        file_paths = path.glob("**/*.py")
+    else:
+        file_paths = [path]
+
+    for file_path in file_paths:
         with open(file_path) as f:
             source = f.read()
             try:
                 tree = ast.parse(source)
 
                 for node in ast.walk(tree):
-                    if isinstance(node, ast.Call):
-                        is_unimplemented = False
-                        if (
-                            isinstance(node.func, ast.Name)
-                            and node.func.id == "unimplemented_v2"
-                        ):
-                            is_unimplemented = True
+                    if isinstance(node, ast.FunctionDef):
+                        if node.name == "unimplemented_v2":
+                            continue
+                    if (
+                        isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Name)
+                        and node.func.id == "unimplemented_v2"
+                    ):
+                        info = {
+                            "gb_type": None,
+                            "context": None,
+                            "explanation": None,
+                            "hints": [],
+                        }
 
-                        if is_unimplemented:
-                            info = {
-                                "gb_type": None,
-                                "context": None,
-                                "explanation": None,
-                                "hints": [],
-                            }
+                        for kw in node.keywords:
+                            if kw.arg in info:
+                                info[kw.arg] = extract_info_from_keyword(source, kw)
 
-                            for kw in node.keywords:
-                                if kw.arg in info:
-                                    info[kw.arg] = extract_info_from_keyword(source, kw)
+                        if info["gb_type"] is None:
+                            continue
 
-                            if info["gb_type"] is None:
-                                continue
+                        if info["hints"]:
+                            hints = info["hints"]
+                            expanded_hints = []
+                            items = re.findall(r'"([^"]*)"', hints)
+                            if items:
+                                expanded_hints.extend(items)
 
-                            if info["hints"]:
-                                hints = info["hints"]
-                                expanded_hints = []
-                                items = re.findall(r'"([^"]*)"', hints)
-                                if items:
-                                    expanded_hints.extend(items)
+                            if "*graph_break_hints." in hints:
+                                expanded_hints.extend(expand_hints([hints]))
 
-                                if "*graph_break_hints." in hints:
-                                    expanded_hints.extend(expand_hints([hints]))
+                            info["hints"] = expanded_hints
 
-                                info["hints"] = expanded_hints
-
-                            results.append(info)
+                        results.append(info)
             except SyntaxError:
                 print(f"Syntax error in {file_path}")
 
@@ -162,22 +165,43 @@ def create_registry(dynamo_dir, registry_path):
 
 
 def main():
+    script_dir = Path(__file__).resolve().parent
+
+    repo_root = script_dir.parent.parent
+    dynamo_dir = repo_root / "torch" / "_dynamo"
+    registry_path = script_dir / "graph_break_registry.json"
+
     parser = argparse.ArgumentParser(description="Manage graph break registry.")
-    parser.add_argument(
+    subparsers = parser.add_subparsers(dest="command", help="Command to execute")
+
+    create_parser = subparsers.add_parser("create", help="Create registry from scratch")
+    create_parser.add_argument(
         "--dynamo_dir",
         type=str,
-        default=str(Path(__file__).parent.parent.parent / "torch" / "_dynamo"),
+        default=None,
         help="Directory to search for unimplemented_v2 calls.",
     )
+
     parser.add_argument(
         "--registry-path",
         type=str,
-        default=str(Path(__file__).parent / "graph_break_registry.json"),
+        default=str(registry_path),
         help="Path to save the registry JSON file.",
     )
+
     args = parser.parse_args()
 
-    create_registry(args.dynamo_dir, args.registry_path)
+    if args.command == "create":
+        if getattr(args, "dynamo_dir", None) is None:
+            try:
+                import torch._dynamo
+
+                args.dynamo_dir = str(Path(torch._dynamo.__file__).parent)
+            except ImportError:
+                args.dynamo_dir = str(dynamo_dir)
+        create_registry(args.dynamo_dir, args.registry_path)
+    else:
+        parser.print_help()
 
 
 if __name__ == "__main__":
