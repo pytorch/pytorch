@@ -33,7 +33,7 @@ def _onnx_op(op_type: str, opset_version: int) -> Callable[[_T], _T]:
 
 @_onnx_op("RotaryEmbedding", 23)
 def rotary_embedding(
-    input: torch.Tensor,
+    x: torch.Tensor,
     cos_cache: torch.Tensor,
     sin_cache: torch.Tensor,
     position_ids: Optional[torch.Tensor] = None,
@@ -42,24 +42,25 @@ def rotary_embedding(
     num_heads: int = 0,
     rotary_embedding_dim: int = 0,
 ) -> torch.Tensor:
-    # First ensure input has shape [batch_size, num_heads, seq_len, head_size]
-    batch_size = input.shape[0]
-    sequence_length = input.shape[1]
-    if len(input.shape) == 3:
-        hidden_size = input.shape[2]
+    """RotaryEmbedding-23 https://onnx.ai/onnx/operators/onnx__RotaryEmbedding.html#rotaryembedding-23"""
+    # First ensure x has shape [batch_size, num_heads, seq_len, head_size]
+    batch_size = x.shape[0]
+    sequence_length = x.shape[1]
+    if len(x.shape) == 3:
+        hidden_size = x.shape[2]
         assert num_heads != 0
         head_size = hidden_size // num_heads
         new_shape = [batch_size, sequence_length, num_heads, head_size]
-        input = torch.reshape(input, new_shape)
-    assert len(input.shape) == 4
-    head_size = input.shape[3]
+        x = torch.reshape(x, new_shape)
+    assert len(x.shape) == 4
+    head_size = x.shape[3]
 
-    # Fully or partially perform rotation on input based on rotary_embedding_dim attribute
+    # Fully or partially perform rotation on x based on rotary_embedding_dim attribute
     if rotary_embedding_dim == 0:
         # If rotary_embedding_dim not provided, perform full rotation by using head_size
         rotary_embedding_dim = head_size
-    x_rotate = input[:, :, :, :rotary_embedding_dim]
-    x_not_rotate = input[:, :, :, rotary_embedding_dim:]
+    x_rotate = x[:, :, :, :rotary_embedding_dim]
+    x_not_rotate = x[:, :, :, rotary_embedding_dim:]
     rotary_embedding_dim_half = rotary_embedding_dim // 2
 
     # Retrieve sin and cos caches using position ids
@@ -86,7 +87,7 @@ def rotary_embedding(
         sin, 2
     )  # Shape: [batch_size, sequence_length, 1, rotary_embedding_dim/2]
 
-    # Either divide the input in halves or interleave (based on interleaved attribute)
+    # Either divide the x in halves or interleave (based on interleaved attribute)
     if interleaved:
         x1 = x_rotate[:, :, :, 0::2]
         x2 = x_rotate[:, :, :, 1::2]
@@ -97,7 +98,7 @@ def rotary_embedding(
     real = cos * x1 - sin * x2
     imag = sin * x1 + cos * x2
 
-    # Inserted rotated embeddings back to the original input
+    # Inserted rotated embeddings back to the original x
     if interleaved:
         # x_rotate[:, :, :, 0::2] = real
         # x_rotate[:, :, :, 1::2] = imag
@@ -108,6 +109,6 @@ def rotary_embedding(
     else:
         x_rotate = torch.cat((real, imag), dim=-1)
     output = torch.cat((x_rotate, x_not_rotate), dim=-1)
-    if len(input.shape) == 3:
-        output = torch.reshape(output, input.shape)
+    if len(x.shape) == 3:
+        output = torch.reshape(output, x.shape)
     return output
