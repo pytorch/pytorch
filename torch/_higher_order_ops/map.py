@@ -175,14 +175,6 @@ def map(
         def wrapped_fn(*flat_args, f, xs_tree_spec, args_tree_spec, num_xs):
             xs = pytree.tree_unflatten(flat_args[:num_xs], xs_tree_spec)
             args = pytree.tree_unflatten(flat_args[num_xs:], args_tree_spec)
-            # outs = f(xs, *args)
-            # if pytree.tree_any(lambda elem: not isinstance(elem, torch.Tensor) if elem is not None else False, outs):
-            #         raise RuntimeError(
-            #             "Expect outputs of map only contains tensors or None. "
-            #             f"Got types {[type(out) for out in pytree.tree_leaves(outs)]}."
-            #         )
-            # return outs
-
             return f(xs, *args)
 
         inner_f = functools.partial(
@@ -251,17 +243,6 @@ def trace_map(proxy_mode, func_overload, f, xs, pos_args):
 @map_impl.py_impl(DispatchKey.CompositeExplicitAutograd)
 def map_dense(f, xs, pos_args):
     pytrees = [f(*inp, *pos_args) for inp in _unstack_pytree(xs)]
-    outs_flatten = pytree.tree_leaves(pytrees)
-    if any(
-        # pytree.tree_map(lambda elem: not isinstance(elem, torch.Tensor), outs)
-        not isinstance(out, torch.Tensor)
-        for out in outs_flatten
-        if out is not None
-    ):
-        raise RuntimeError(
-            "Expect outputs of map only contains tensors or None. "
-            f"Got types {[type(out) for out in outs_flatten]}."
-        )
     return _stack_pytree(pytrees)
 
 

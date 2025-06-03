@@ -1429,7 +1429,11 @@ def forward(self, pred_1, x_1):
             control_flow.map(f, x, y)
 
         with self.assertRaisesRegex(
-            RuntimeError, "Expect outputs of map only contains tensors"
+            # Should be
+            # torch._dynamo.exc.UncapturedHigherOrderOpError,
+            # "Expected all leaves to be of torch.Tensor type.*",
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "map doesn't work unless it is captured completely with torch.compile.*",
         ):
             control_flow.map(f1, x, y)
 
