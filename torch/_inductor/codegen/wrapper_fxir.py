@@ -260,7 +260,7 @@ class FxConverter:
             # Introduce a new symbol for constant inputs.
             buffer = (
                 SymbolBuffer(sympy.Symbol(name, is_integer=True))
-                if isinstance(ir_node, (int, sympy.Integer))
+                if isinstance(ir_node, (int, float, sympy.Integer, sympy.Float))
                 else self._get_buffer(ir_node)
             )
             node = self.gm.graph.placeholder(buffer.get_name())

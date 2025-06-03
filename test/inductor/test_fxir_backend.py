@@ -23,6 +23,10 @@ from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.codegen.wrapper_fxir import FxConverter, WrapperFxCodegen
 from torch._inductor.select_algorithm import extern_kernels
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
@@ -39,6 +43,7 @@ from torch.testing._internal.inductor_utils import (
     scalar_asserts=False,
     nan_asserts=False,
 )
+@instantiate_parametrized_tests
 class FxirTestCase(InductorTestCase):
     device = GPU_TYPE
 
@@ -402,7 +407,11 @@ class FxirTestCase(InductorTestCase):
             output_code = f.read()
         self.assertIn("triton_kernel_wrapper_mutation", output_code)
 
-    def test_export_const_placeholder(self):
+    @parametrize(
+        "const",
+        (1, 1.5),
+    )
+    def test_export_const_placeholder(self, const):
         """
         Test that we can compile a graph coming from torch.export with a constant input.
         """
@@ -411,7 +420,7 @@ class FxirTestCase(InductorTestCase):
             def forward(self, x, y):
                 return x - y
 
-        args = (torch.randn(8, device=self.device), 1)
+        args = (torch.randn(8, device=self.device), const)
         mod = TestModule()
         export_gm = torch.export.export(mod, args).module()
 
