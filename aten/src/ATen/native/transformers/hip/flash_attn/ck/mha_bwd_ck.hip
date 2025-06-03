@@ -37,7 +37,7 @@ aiter::mha_bwd_traits get_mha_bwd_traits(fmha_bwd_traits t, mask_info mask)
                           t.hdim_v,
                           t.data_type,
                           t.is_group_mode,
-                          mask,
+                          mask.type,
                           t.bias_type,
                           t.has_dbias,
                           t.has_dropout,
@@ -431,7 +431,7 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
                                  stream_config,
                                  q_dtype_str,
                                  false,             // is_group_mode
-                                 mask,
+                                 mask.type,
                                  attn_bias_.has_value() ? bias_enum::elementwise_bias : bias_enum::no_bias,
                                  bias_requires_grad,
                                  false,             // is_store_randval
