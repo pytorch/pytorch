@@ -324,6 +324,12 @@ test_python_smoke() {
   assert_git_not_dirty
 }
 
+test_h100_distributed() {
+  # Distributed tests at H100
+  time python test/run_test.py --include distributed/_composable/test_composability/test_pp_composability.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  assert_git_not_dirty
+}
+
 test_lazy_tensor_meta_reference_disabled() {
   export TORCH_DISABLE_FUNCTIONALIZATION_META_REFERENCE=1
   echo "Testing lazy tensor operations without meta reference"
@@ -595,7 +601,6 @@ test_perf_for_dashboard() {
     elif [[ "${TEST_CONFIG}" == *cpu_aarch64* ]]; then
       device=cpu_aarch64
     fi
-    test_inductor_set_cpu_affinity
   elif [[ "${TEST_CONFIG}" == *cuda_a10g* ]]; then
     device=cuda_a10g
   elif [[ "${TEST_CONFIG}" == *h100* ]]; then
@@ -603,6 +608,9 @@ test_perf_for_dashboard() {
   elif [[ "${TEST_CONFIG}" == *rocm* ]]; then
     device=rocm
   fi
+
+  # Always set CPU affinity because metrics like compilation time requires CPU
+  test_inductor_set_cpu_affinity
 
   for mode in "${modes[@]}"; do
     if [[ "$mode" == "inference" ]]; then
@@ -1639,7 +1647,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     install_torchaudio cuda
   fi
   install_torchvision
-  TORCH_CUDA_ARCH_LIST="8.0;8.6" pip_install git+https://github.com/pytorch/ao.git
+  TORCH_CUDA_ARCH_LIST="8.0;8.6" install_torchao
   id=$((SHARD_NUMBER-1))
   # https://github.com/opencv/opencv-python/issues/885
   pip_install opencv-python==4.8.0.74
@@ -1724,6 +1732,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
   test_xpu_bin
 elif [[ "${TEST_CONFIG}" == smoke ]]; then
   test_python_smoke
+elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
+  test_h100_distributed
 else
   install_torchvision
   install_monkeytype
