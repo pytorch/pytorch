@@ -8,6 +8,7 @@ import functools
 import itertools
 import logging
 import math
+import operator
 import os
 import textwrap
 from collections.abc import Iterable, Sequence
@@ -1768,8 +1769,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         index_vars = index.free_symbols
         has_rindex = False
 
-        mask_vars = OrderedSet[str]()
-        for var in index_vars:
+        mask_vars: OrderedSet[str] = OrderedSet[str]()
+        for var in sorted(index_vars, key=operator.attrgetter("name")):
             assert isinstance(var, sympy.Symbol)
             has_rindex = has_rindex or symbol_is_type(
                 var, TritonSymbols.reduction_types

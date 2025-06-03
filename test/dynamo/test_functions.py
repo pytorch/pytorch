@@ -519,6 +519,17 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         args = [a, b]
         return sub(*args)
 
+    def test_size_tuple_add(self):
+        def fn():
+            size = torch.Size([])
+            assert isinstance(size + size, torch.Size)
+            assert isinstance(size + (), tuple)
+            assert isinstance(size + (), torch.Size)
+
+        fn()
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        compiled_fn()
+
     @make_test
     def test_is_in_onnx_export(x, y):
         if torch.onnx.is_in_onnx_export():

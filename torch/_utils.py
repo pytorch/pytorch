@@ -274,6 +274,13 @@ _sparse_tensors_to_validate: list["torch.Tensor"] = []
 # to Pickler semantics, we have to use the same (non-validating) function for
 # unpickling sparse tensors, regardless of the caller.
 def _validate_loaded_sparse_tensors():
+    if not torch.sparse.check_sparse_tensor_invariants().is_enabled():
+        # Skip sparse tensor invariants validation for better
+        # performance. See check_sparse_tensor_invariants
+        # documentation for how to control sparse tensor invariants
+        # checking.
+        _sparse_tensors_to_validate.clear()
+        return
     try:
         for t in _sparse_tensors_to_validate:
             if True:
