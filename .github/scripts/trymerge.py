@@ -628,20 +628,35 @@ def _revlist_to_prs(
     rc: list[tuple[GitHubPR, str]] = []
     for idx, rev in enumerate(rev_list):
         msg = repo.commit_message(rev)
-        m = RE_PULL_REQUEST_RESOLVED.search(msg)
-        if m is None:
+        # findall doesn't return named captures, so we need to use finditer
+        all_matches = list(RE_PULL_REQUEST_RESOLVED.finditer(msg))
+        if len(all_matches) == 0:
             raise RuntimeError(
-                f"Could not find PR-resolved string in {msg} of ghstacked PR {pr.pr_num}"
+                f"Could not find PR-resolved string in {msg} on commit {rev} of ghstacked PR {pr.pr_num}"
             )
-        if pr.org != m.group("owner") or pr.project != m.group("repo"):
-            raise RuntimeError(
-                f"PR {m.group('number')} resolved to wrong owner/repo pair"
+
+        candidate = None
+        for m in all_matches:
+            if pr.org != m.group("owner") or pr.project != m.group("repo"):
+                raise RuntimeError(
+                    f"PR {m.group('number')} resolved to wrong owner/repo pair"
+                )
+            if candidate is not None and candidate.pr_num == pr.pr_num:
+                # Prioritize the PR that matches the current PR number
+                continue
+            pr_num = int(m.group("number"))
+            candidate = (
+                GitHubPR(pr.org, pr.project, pr_num) if pr_num != pr.pr_num else pr
             )
-        pr_num = int(m.group("number"))
-        candidate = GitHubPR(pr.org, pr.project, pr_num) if pr_num != pr.pr_num else pr
-        if should_skip is not None and should_skip(idx, candidate):
-            continue
-        rc.append((candidate, rev))
+            if should_skip is not None and should_skip(idx, candidate):
+                # Not sure what the correct behavior is if one PR is skipped but
+                # the other isn't.  This behavior is to choose one that isn't
+                # skipped if possible
+                continue
+
+        if candidate is not None:
+            rc.append((candidate, rev))
+
     return rc
 
 
@@ -666,6 +681,12 @@ def get_ghstack_prs(
 
     assert pr.is_ghstack_pr()
     entire_stack = _revlist_to_prs(repo, pr, reversed(rev_list), skip_func)
+    print(
+        f"Found {len(entire_stack)} PRs in the stack for {pr.pr_num}: {[x[0].pr_num for x in entire_stack]}"
+    )
+    assert entire_stack[-1][0].pr_num == pr.pr_num, (
+        f"Last PR in the stack {entire_stack[-1][0].pr_num} does not match the current PR {pr.pr_num}"
+    )
 
     for stacked_pr, rev in entire_stack:
         if stacked_pr.is_closed():
