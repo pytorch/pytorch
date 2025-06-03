@@ -3334,7 +3334,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 gb_type="Encountered non user function variable during invoke_subgraph HOP tracing",
                 context=str(fn_vt),
                 explanation="invoke_subgraph does not support non user function variable",
-                hints=graph_break_hints.SUPPORTABLE,
+                hints=[*graph_break_hints.SUPPORTABLE],
             )
 
         invoke_subgraph_cache = (

@@ -1575,7 +1575,7 @@ class CudaKernelParamCache:
         # Retrieve the basename again in case it is a generated hashcode
         basename, _ = get_name_and_dir_from_output_file_path(bin_path)
 
-        if config.aot_inductor.multi_arch_kernel_binary:
+        if config.aot_inductor.emit_multi_arch_kernel:
             bin_type_to_ext = {"cubin": ".fatbin", "spv": ".spv"}
             assert bin_type in bin_type_to_ext.keys(), (
                 "multi_arch_kernel_binary only supported in CUDA/XPU"
@@ -1585,7 +1585,7 @@ class CudaKernelParamCache:
 
         asm_path: str = ""
         if (
-            config.aot_inductor.multi_arch_kernel_binary
+            config.aot_inductor.emit_multi_arch_kernel
             or config.aot_inductor.package_cpp_only
         ):
             assert asm, "Missing kernel assembly code"
@@ -2045,8 +2045,8 @@ class AotCodeCompiler:
                 if entry.output_path.endswith(".o")
             ]
             if gpu_kernels_o:
-                assert not config.aot_inductor.multi_arch_kernel_binary, (
-                    "TODO: add multi_arch_kernel_binary support for cutlass kernels"
+                assert not config.aot_inductor.emit_multi_arch_kernel, (
+                    "TODO: add emit_multi_arch_kernel support for cutlass kernels"
                 )
 
             cubins_o = []
@@ -2058,16 +2058,20 @@ class AotCodeCompiler:
 
                 cubin_file = value[get_cpp_wrapper_cubin_path_name()]
                 if (
-                    config.aot_inductor.multi_arch_kernel_binary
+                    config.aot_inductor.emit_multi_arch_kernel
                     and device_type == "cuda"
                 ):
-                    # Compile .ptx into .fatbin
-                    archs = OrderedSet(
-                        [cuda_env.get_cuda_arch(), "80", "86", "89", "90"]
+                    current_arch = _nvcc_arch_as_compile_option()
+                    cmd = (
+                        f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
+                        # Include PTX with the minimum arch as SM80
+                        "-gencode arch=compute_80,code=compute_80 "
                     )
-                    cmd = f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file}"
-                    for arch in archs:
-                        cmd += f" -gencode arch=compute_{arch},code=compute_{arch}"
+                    if config.aot_inductor.emit_current_arch_binary:
+                        # Include SASS for the current specific arch, to avoid
+                        # CUDA JIT compilation overhead. In theory, we could do
+                        # this for all archs that are newer than the current arch.
+                        cmd += f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
                     subprocess.run(
                         cmd.split(), capture_output=True, text=True, check=True
                     )
@@ -2137,7 +2141,7 @@ class AotCodeCompiler:
                     generated_files.append(consts_o)
                     so_builder.save_src_to_cmake(cmake_path, consts_o)
 
-                if config.aot_inductor.multi_arch_kernel_binary:
+                if config.aot_inductor.emit_multi_arch_kernel:
                     so_builder.save_kernel_asm_to_cmake(cmake_path, asm_files)
                     generated_files.extend(asm_files)
                 else:
@@ -2150,6 +2154,8 @@ class AotCodeCompiler:
             else:
                 so_builder.build()
                 for o_file in obj_srcs:
+                    if o_file in gpu_kernels_o:
+                        continue
                     # Remove these as they are not needed anymore
                     os.remove(o_file)
 
@@ -3394,13 +3400,18 @@ def _nvcc_host_compiler_options() -> list[str]:
     ]
 
 
-def _nvcc_compiler_options() -> list[str]:
+def _nvcc_arch_as_compile_option() -> str:
     arch = cuda_env.get_cuda_arch()
     if arch == "90":
         # Required by cutlass compilation.
-        arch = "90a"
+        return "90a"
     if arch == "100":
-        arch = "100a"
+        return "100a"
+    return arch
+
+
+def _nvcc_compiler_options() -> list[str]:
+    arch = _nvcc_arch_as_compile_option()
     code = [f"sm_{arch}", f"compute_{arch}"]
     if config.cuda.enable_cuda_lto:
         code += [f"lto_{arch}"]

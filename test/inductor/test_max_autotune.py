@@ -139,7 +139,6 @@ class TestMaxAutotune(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_fallback_to_aten": False,
                 "triton.enable_persistent_tma_matmul": "1",
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
             }
@@ -164,7 +163,6 @@ class TestMaxAutotune(TestCase):
         with self.assertRaises(BackendCompilerFailed) as context, config.patch(
             {
                 "max_autotune": True,
-                "autotune_fallback_to_aten": False,
                 "triton.enable_persistent_tma_matmul": "1",
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
             }
@@ -198,7 +196,6 @@ class TestMaxAutotune(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_fallback_to_aten": False,
                 "triton.enable_persistent_tma_matmul": "1",
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
             }
@@ -259,7 +256,6 @@ class TestMaxAutotune(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_fallback_to_aten": False,
                 "triton.enable_persistent_tma_matmul": "1",
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
             }
@@ -285,7 +281,6 @@ class TestMaxAutotune(TestCase):
         with self.assertRaises(BackendCompilerFailed) as context, config.patch(
             {
                 "max_autotune": True,
-                "autotune_fallback_to_aten": False,
                 "triton.enable_persistent_tma_matmul": "1",
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
             }
@@ -321,7 +316,6 @@ class TestMaxAutotune(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_fallback_to_aten": False,
                 "triton.enable_persistent_tma_matmul": "1",
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
             }
@@ -380,7 +374,6 @@ class TestMaxAutotune(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_fallback_to_aten": False,
                 "triton.enable_persistent_tma_matmul": True,
                 "max_autotune_gemm_backends": "TRITON",
                 "test_configs.autotune_choice_name_regex": "tma",
@@ -868,7 +861,6 @@ class TestMaxAutotune(TestCase):
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="",
-        autotune_fallback_to_aten=False,
     )
     def test_no_valid_choices(self):
         a = torch.zeros([2, 2], device=GPU_TYPE)
@@ -881,7 +873,6 @@ class TestMaxAutotune(TestCase):
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
-        autotune_fallback_to_aten=False,
     )
     def test_inf_timing(self, multi_template):
         from unittest.mock import patch
@@ -955,7 +946,6 @@ class TestMaxAutotune(TestCase):
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
-        autotune_fallback_to_aten=False,
     )
     def test_max_autotune_decompose_k(self, sizes, dtype, dynamic):
         fp16_red_setting = (
@@ -1058,7 +1048,6 @@ class TestMaxAutotune(TestCase):
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
-        autotune_fallback_to_aten=False,
     )
     def test_max_autotune_decompose_k_dynamic_input(self):
         def f(a, b):
@@ -1106,7 +1095,6 @@ class TestMaxAutotune(TestCase):
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
-        autotune_fallback_to_aten=False,
     )
     def test_max_autotune_decompose_k_output_stride(self):
         def f(a, b):
@@ -1365,6 +1353,29 @@ class TestMaxAutotune(TestCase):
 
             self.assertEqual(hits(), 0)
             self.assertEqual(misses(), 7)
+
+    @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        autotune_fallback_to_aten=False,
+        disable_decompose_k=True,
+    )
+    def test_max_autotune_disable_decompose_K(self):
+        M, N, K = (32, 32, 32768)
+
+        a = torch.randn(M, K, dtype=torch.float16, device="cuda", requires_grad=True)
+        b = torch.randn(K, N, dtype=torch.float16, device="cuda", requires_grad=True)
+
+        compiled_func = torch.compile(lambda a, b: a @ b)
+        out, code = run_and_get_code(compiled_func, a, b)
+
+        for codegen in code:
+            FileCheck().check_not("decompose_k").run(codegen)
 
 
 class TestMaxAutotunePrecompile(TestCase):
