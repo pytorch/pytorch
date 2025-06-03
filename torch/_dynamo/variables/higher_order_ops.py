@@ -1932,12 +1932,17 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             supports_input_mutation=self.supports_input_mutation,
             supports_aliasing=self.supports_aliasing,
         )
-        
-        # Check all outputs of map are tensors. 
+
+        # Check all outputs of map are tensors.
         # For map, outputting None is OK, thus ignore None values in the check
-        body_r_vars = body_r.unpack_var_sequence(tx)        
-        none_mask = [type(x.realize()) is ConstantVariable and x.as_python_constant() is None for x in body_r_vars]
-        _check_all_tensorvariable([br for bm, br in zip(none_mask, body_r_vars) if not bm])
+        body_r_vars = body_r.unpack_var_sequence(tx)
+        none_mask = [
+            type(x.realize()) is ConstantVariable and x.as_python_constant() is None
+            for x in body_r_vars
+        ]
+        _check_all_tensorvariable(
+            [br for bm, br in zip(none_mask, body_r_vars) if not bm]
+        )
 
         body_nn_modules = dict(tx.output.nn_modules)
 
