@@ -1220,7 +1220,9 @@ Tensor randint_like(
     std::optional<Device> device,
     std::optional<bool> pin_memory,
     std::optional<c10::MemoryFormat> optional_memory_format) {
-  TORCH_CHECK(high.numel() == 1, "high must be a scalar tensor");
+  TORCH_CHECK(
+      high.numel() == 1 && high.ndimension() == 0 && high.device().is_cpu(),
+      "high must be a scalar tensor and on CPU");
   int64_t high_scalar = high.item<int64_t>();
   return at::native::randint_like(
       self,
