@@ -6473,64 +6473,93 @@ Tensor rms_norm_jvp(
     const Tensor& input_t,
     const Tensor& weight_p,
     const Tensor& weight_t,
-    const Tensor& saved_invstd,
+    const Tensor& saved_rstd,
     IntArrayRef normalized_shape) {
 
   auto dims = std::vector<int64_t>{};
-  auto input_sizes = input_p.sizes().vec();
-  auto view_size = input_sizes;
-  auto view_size_affine = input_sizes;
+  auto view_size = input_t.sizes().vec();
+  auto view_size_affine = input_t.sizes().vec();
 
+  int64_t numel = 1;
   for (const auto i : c10::irange(view_size.size())) {
     if (i < view_size.size() - normalized_shape.size()) {
       view_size_affine[i] = 1;
     } else {
+      numel *= input_t.size(static_cast<int64_t>(i));
       view_size[i] = 1;
       dims.push_back(static_cast<int64_t>(i));
     }
   }
 
-  auto invstd_p = saved_invstd.view(view_size);
+  auto rstd_p = saved_rstd.view(view_size);
 
-  Tensor invstd_rms_t;
-  if (input_t._is_zerotensor()) {
-    invstd_rms_t = at::zeros_like(invstd_p, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor rstd_t;
+  if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
+      input_t._is_zerotensor()) {
+    rstd_t = -rstd_p.pow(3) * (input_t) * (input_p);
   } else {
-    auto prod_p_t = input_p * input_t;
-    auto mean_prod_p_t = prod_p_t.mean(IntArrayRef(dims), true);
-    invstd_rms_t = -invstd_p.pow(3) * mean_prod_p_t;
+    rstd_t = input_t * input_p;
+    rstd_t *= -rstd_p.pow(3);
   }
+  rstd_t = rstd_t.sum(dims, true);
+  rstd_t /= numel;
 
   Tensor result_t;
-  if (input_t._is_zerotensor()) {
-    result_t = at::zeros_like(input_p, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  } else if (areAnyTensorSubclassLike({input_t, input_p, invstd_p, invstd_rms_t})) {
-    result_t = input_t * invstd_p + input_p * invstd_rms_t;
+  if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
+      input_t._is_zerotensor()) {
+    result_t = (input_t) * rstd_p + (input_p) * rstd_t;
   } else {
-    result_t = input_t * invstd_p;
-    auto term2 = input_p * invstd_rms_t;
-    result_t += term2;
+    result_t = input_t * rstd_p;
+    auto temp = input_p * rstd_t;
+    result_t += temp;
   }
 
   std::optional<Tensor> result_p = std::nullopt;
   if (weight_p.defined()) {
-    result_p = std::optional<Tensor>(input_p * invstd_p);
+    result_p = std::optional<Tensor>(input_p * rstd_p);
   }
-  return _affine_jvp(
+
+  auto res = _affine_jvp(
       result_p,
       result_t,
       weight_p.defined() ? weight_p.view(view_size_affine) : weight_p,
       weight_t.defined() ? weight_t.view(view_size_affine) : weight_t,
       Tensor());
+  return res;
 }
 
 Tensor rms_norm_rstd_jvp(
     const Tensor& input_p,
     const Tensor& input_t,
-    const Tensor& saved_out,
-    IntArrayRef normalized_shape){
-  // AARON TODO:
-  return Tensor();
+    const Tensor& saved_rstd,
+    IntArrayRef normalized_shape) {
+  auto dims = std::vector<int64_t>{};
+  auto view_size = input_t.sizes().vec();
+  auto view_size_affine = input_t.sizes().vec();
+
+  int64_t numel = 1;
+  for (const auto i : c10::irange(view_size.size())) {
+    if (i < view_size.size() - normalized_shape.size()) {
+      view_size_affine[i] = 1;
+    } else {
+      numel *= input_t.size(static_cast<int64_t>(i));
+      view_size[i] = 1;
+      dims.push_back(static_cast<int64_t>(i));
+    }
+  }
+
+  auto rstd_p = saved_rstd.view(view_size);
+  Tensor rstd_t;
+  if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
+      input_t._is_zerotensor()) {
+    rstd_t = -rstd_p.pow(3) * (input_t) * (input_p);
+  } else {
+    rstd_t = input_t * input_p;
+    rstd_t *= -rstd_p.pow(3);
+  }
+  rstd_t = rstd_t.sum(dims, true);
+  rstd_t /= numel;
+  return rstd_t;
 }
 
 Tensor group_norm_jvp(
