@@ -2324,6 +2324,7 @@ def is_collective(
 
     return (
         isinstance(node, ir._CollectiveKernel)
+        and not isinstance(node, ir._WaitKernel)
         and (op is None or node.op_overload is op)
     ) or (
         # TODO: this is a temporary solution to ensure that we can identify torchrec's
