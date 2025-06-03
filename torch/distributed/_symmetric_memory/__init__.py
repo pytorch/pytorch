@@ -37,26 +37,6 @@ def enable_symm_mem_for_group(group_name: str) -> None:
         f"symmetric_memory-{global_ranks_str}",
         c10d._get_process_group_store(group),
     )
-    # Use one store-based broadcast to bootstrap a file store from the process
-    # and simultaneously verify that all ranks are on the same host.
-    hostname = socket.gethostname()
-    if group.rank() == 0:
-        uid = str(uuid.uuid4())
-        msg = f"{hostname}/{uid}"
-        store.set("init", msg)
-    else:
-        msg = store.get("init").decode("utf-8")
-        tokens = msg.split("/")
-        assert len(tokens) == 2, tokens
-        rank_0_hostname, uid = tokens
-        if hostname != rank_0_hostname:
-            raise RuntimeError(
-                "init_symmetric_memory_for_process_group() failed for "
-                f'group "{group_name}". Rank 0 and rank {group.rank()} '
-                f"are on different hosts ({rank_0_hostname} and {hostname})"
-            )
-    store = torch._C._distributed_c10d.FileStore(f"/tmp/{uid}", group.size())
-    # TODO: check device connectiivity
     _group_name_to_store[group_name] = store
     _SymmetricMemory.set_group_info(
         group_name,
@@ -1099,6 +1079,7 @@ def _fused_matmul_reduce_scatter_impl(
         stacked_partials,
         group_name,
     )
+
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
     return reduce_fn(
@@ -1252,10 +1233,10 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     A_with_scatter_dim_0 = A.movedim(scatter_dim_after_maybe_reshape, 0)
 
     # To handle case where A is 3D+, reshape to 2D to prepare for mm which requires 2D inputs.
-    A_with_scatter_dim_0 = A.flatten(0, -2)
+    A_2D_with_scatter_dim_0 = A_with_scatter_dim_0.flatten(0, -2)
 
     # Parition A along the first dim to prepare for sharding across TP process group.
-    A_shards = A_with_scatter_dim_0.chunk(group.size())
+    A_shards = A_2D_with_scatter_dim_0.chunk(group.size())
 
     # Now that 'A' is sharded along the first dim, we need to update its scale(s) accordingly.
     # How we do this depends on if we are using tensorwise scaling, rowwise scaling, or no scaling.
@@ -1293,7 +1274,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     # have the shape (A_with_scatter_dim_0_tensor.shape[0], B.shape[1]) to align with the formula:
     # (a*b,c) @ (c,d) = (a*b,d)
     stacked_partials = A_with_scatter_dim_0.new_empty(
-        A_with_scatter_dim_0.shape[0], B.shape[1], dtype=out_dtype or A.dtype
+        A_2D_with_scatter_dim_0.shape[0], B.shape[1], dtype=out_dtype or A.dtype
     )
 
     # Execute the pipelined mm/scaled_mm.
@@ -1311,24 +1292,34 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     # stacked partial outputs. The next dims will be A's leading dims (sharded along the original scatter dim),
     # as it was the left operand of the mm op. We can use -1 as the final dim of the view to populate the rest.
     stacked_partials_3D_leading_dims = [group.size()] + list(
+        # We use A from after the dim swap 0<=>scatter_dim, but before the flatten,
+        # to get the leading dims of the 3D+ view of stacked partials.
         A_with_scatter_dim_0.shape[:-1]
     )
-    stacked_partials_3D_leading_dims[orig_scatter_dim] //= group.size()
+
+    # The `group_size` leading dim has been prepended to `stacked_partials_3D_leading_dims`,
+    # to capture the partial output from each rank. We need to divide the sharding/scatter dim
+    # by the group size. If the original scatter dim was 0, then it is now dim 1 in this
+    # tensor, since this new `group_size` dim was prepended.
+    stacked_partial_scatter_dim = orig_scatter_dim if orig_scatter_dim > 0 else 1
+    stacked_partials_3D_leading_dims[stacked_partial_scatter_dim] //= group.size()
 
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
     reduced_out = reduce_fn(
         # View 2D stacked partials as 3D+ tensor of shape (`group_size`, ...)
         stacked_partials.view(*stacked_partials_3D_leading_dims, -1)
-        # Swap back the scatter dim (which we moved to 0, and now is `group_size`)
-        .movedim(0, orig_scatter_dim),
-        dim=orig_scatter_dim,  # Reduce along the origal scatter dim (`group_size`)
+        # We originally swapped 0<=>scatter_dim_after_maybe_reshape. Now after
+        # prepending the `group_size` dim, to undo this original swap, we
+        # must swap 1<=>scatter_dim_after_maybe_reshape+1.
+        .movedim(1, scatter_dim_after_maybe_reshape + 1),
+        # Reduce along the `group_size` dim (0).
+        dim=0,
     )
 
-    # Final 3D+ output shape must be scattered along original scatter dim as well.
-    final_out_shape = [*output_shape[:-1], B.shape[-1]]
-    final_out_shape[orig_scatter_dim] //= group.size()
-    out = reduced_out.view(*final_out_shape)
+    # Output shape must be scattered along original scatter dim as well.
+    output_shape[orig_scatter_dim] //= group.size()
+    out = reduced_out.view(*output_shape)
     return out
 
 

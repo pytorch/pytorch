@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend, same
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import skipIfWindows
+from torch.testing._internal.common_utils import requires_cuda, skipIfWindows
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -61,6 +61,50 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             opt_fn(x, np.int64(i))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    @requires_cuda
+    def test_no_recompilations_with_efficient_attention(self):
+        def fn(q, k, v, attn_mask):
+            from torch.nn.attention import sdpa_kernel, SDPBackend
+            from torch.nn.functional import scaled_dot_product_attention
+
+            with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+                return scaled_dot_product_attention(
+                    q, k, v, attn_mask=attn_mask, scale=1.0
+                )
+
+        def make_q_k_v_mask(batch, num_heads, head_dim, seq_len_kv):
+            from collections import namedtuple
+            from functools import partial
+
+            dtype = torch.float16
+            device = "cuda"
+            make_tensor = partial(
+                torch.rand, device=device, dtype=dtype, requires_grad=True
+            )
+            seq_len_q = 64
+            SdpaShape = namedtuple(
+                "Sdpa_Shape", ["batch", "num_heads", "seq_len", "head_dim"]
+            )
+            query = make_tensor(SdpaShape(batch, num_heads, seq_len_q, head_dim))
+            kv_shape = SdpaShape(batch, num_heads, seq_len_kv, head_dim)
+            key, value = make_tensor(kv_shape), make_tensor(kv_shape)
+            mask = torch.randn(
+                (batch, num_heads, seq_len_q, seq_len_kv), device=device, dtype=dtype
+            )
+
+            return query, key, value, mask
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+
+        q, k, v, mask = make_q_k_v_mask(16, 16, 64, 15)
+        opt_fn(q, k, v, mask)
+
+        q, k, v, mask = make_q_k_v_mask(16, 16, 64, 16)
+        opt_fn(q, k, v, mask)
+
+        self.assertEqual(cnts.frame_count, 1)
 
     @unittest.expectedFailure  # array scalars decay to 0D arrays
     def test_builtin_max_min(self):

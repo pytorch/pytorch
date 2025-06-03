@@ -182,7 +182,7 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor, bool from_const_data
               tensor.data_ptr()};
   }
   else {
-    TORCH_CHECK(false, "itensor_view_from_dense expects float/bfloat16/half/int8/fp8 tensor input");
+    TORCH_CHECK(false, "itensor_view_from_dense expects float/bfloat16/half/int8/fp8 tensor input", tensor.scalar_type());
   }
 }
 

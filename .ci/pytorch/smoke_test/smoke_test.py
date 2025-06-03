@@ -271,8 +271,10 @@ def smoke_test_cuda(
         print(f"cuDNN enabled? {torch.backends.cudnn.enabled}")
         torch_cudnn_version = cudnn_to_version_str(torch.backends.cudnn.version())
         print(f"Torch cuDNN version: {torch_cudnn_version}")
-        torch_nccl_version = ".".join(str(v) for v in torch.cuda.nccl.version())
-        print(f"Torch nccl; version: {torch_nccl_version}")
+
+        if sys.platform in ["linux", "linux2"]:
+            torch_nccl_version = ".".join(str(v) for v in torch.cuda.nccl.version())
+            print(f"Torch nccl; version: {torch_nccl_version}")
 
         # Pypi dependencies are installed on linux ony and nccl is availbale only on Linux.
         if pypi_pkg_check == "enabled" and sys.platform in ["linux", "linux2"]:

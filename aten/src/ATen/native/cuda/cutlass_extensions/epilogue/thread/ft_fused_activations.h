@@ -69,30 +69,6 @@ __forceinline__ __device__ float tanh_opt(float x)
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
-template<>
-struct GELU_taylor<float> {
-    static const bool kIsHeavy = true;
-    CUTLASS_DEVICE
-    float operator()(float const& z) const
-    {
-
-        float k0 = float(0.7978845608028654);
-        float k1 = float(0.044715);
-
-        return float(
-            cutlass::constants::half<float>() * z
-            * (cutlass::constants::one<float>() + tanh_opt(k0 * z * (cutlass::constants::one<float>() + k1 * z * z))));
-    }
-
-    using Params = LinearCombinationGenericParams<float>;
-
-    CUTLASS_DEVICE
-    float operator()(float const& scalar, Params const& params_) const
-    {
-        return this->operator()(scalar);
-    }
-};
-
 }  // namespace thread
 }  // namespace epilogue
 }  // namespace cutlass
