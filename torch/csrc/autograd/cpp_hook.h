@@ -12,6 +12,9 @@ struct CppFunctionTensorPreHook : public FunctionPreHook {
   CppFunctionTensorPreHook(std::shared_ptr<hooks_list> hooks, size_t value_idx);
   variable_list operator()(const variable_list& values) override;
 
+  void compiled_args(
+      torch::dynamo::autograd::CompiledNodeArgs& args) const override;
+
   std::shared_ptr<hooks_list> hooks_;
   size_t value_idx_;
 };
