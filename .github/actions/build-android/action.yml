@@ -64,7 +64,7 @@ runs:
           --cap-add=SYS_PTRACE \
           --tty \
           --detach \
-          --user jenkins \
+          jenkins \
           -w /var/lib/jenkins/workspace \
           "${DOCKER_IMAGE}"
         )

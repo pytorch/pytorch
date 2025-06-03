@@ -17,7 +17,7 @@
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace/pytorch,type=bind,consistency=cached",
   "workspaceFolder": "/workspace/pytorch",
   "containerEnv": {
-    "PIP_USER": "0" // <‑‑ disable implicit --user
+    "PIP_USER": "0" // <‑‑ disable implicit
   },
 // Use 'forwardPorts' to make a list of ports inside the container available locally.
   // "forwardPorts": [],
