@@ -7318,6 +7318,23 @@ def forward(self, x):
         ep = torch.export.export_for_training(f, (torch.randn(2, 2), mod), strict=False)
         self.assertEqual(ref_out, ep.module()(ref_x, mod))
 
+    def test_unbacked_noncontig_lin(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(32, 64)
+            def forward(self, x):
+                n = x.item()
+                y = torch.empty(x).view(1, -1, 32)
+                return self.lin(y)
+
+        mod = Foo()
+        x = torch.tensor([128])
+        ep = export(mod, (x,))
+        self.assertEqual(mod(x).shape, ep.module()(x).shape)
+        x = torch.tensor([512])
+        self.assertEqual(mod(x).shape, ep.module()(x).shape)
+
     def test_runtime_assert_for_prim(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
