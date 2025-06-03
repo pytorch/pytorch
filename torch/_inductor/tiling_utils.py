@@ -547,7 +547,7 @@ def extract_normalized_read_writes(
 
         # We create Identity sympy.Functions to prevent expansion to int64,
         # unwrap for tiling analysis.
-        def remove_identity(expr):
+        def remove_identity(expr: sympy.Expr) -> sympy.Expr:
             return expr.replace(Identity, lambda x: x)
 
         n_reads_new = {
