@@ -113,6 +113,50 @@ struct tan_functor {
   }
 };
 
+struct sinh_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(precise::sinh(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return precise::sinh(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // sinh(x) = (e^x - e^(-x)) / 2
+    auto exp_1 =
+        T(precise::exp(x.x) * precise::cos(x.y),
+          precise::exp(x.x) * precise::sin(x.y));
+    auto exp_2 =
+        T(precise::exp(-x.x) * precise::cos(-x.y),
+          precise::exp(-x.x) * precise::sin(-x.y));
+    return div(exp_1 - exp_2, T(2, 0));
+  }
+};
+
+struct cosh_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(precise::cosh(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return precise::cosh(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // cosh(x+iy)=(e^x + e^(-x)) / 2
+    auto exp_1 =
+        T(precise::exp(x.x) * precise::cos(x.y),
+          precise::exp(x.x) * precise::sin(x.y));
+    auto exp_2 =
+        T(precise::exp(-x.x) * precise::cos(-x.y),
+          precise::exp(-x.x) * precise::sin(-x.y));
+    return div(exp_1 + exp_2, T(2, 0));
+  }
+};
+
 struct tanh_functor {
   template <typename T>
   inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
@@ -476,6 +520,8 @@ REGISTER_UNARY_OP(abs, half, half);
   REGISTER_UNARY_OP(sinc, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sqrt, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(rsqrt, DTYPE1, DTYPE0);        \
+  REGISTER_UNARY_OP(sinh, DTYPE1, DTYPE0);         \
+  REGISTER_UNARY_OP(cosh, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(tanh, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sin, DTYPE1, DTYPE0);          \
   REGISTER_UNARY_OP(cos, DTYPE1, DTYPE0);          \
@@ -508,6 +554,8 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
   REGISTER_UNARY_OP(log10, DTYPE##2, DTYPE##2);   \
   REGISTER_UNARY_OP(log1p, DTYPE##2, DTYPE##2);   \
   REGISTER_UNARY_OP(log2, DTYPE##2, DTYPE##2);    \
+  REGISTER_UNARY_OP(sinh, DTYPE##2, DTYPE##2);    \
+  REGISTER_UNARY_OP(cosh, DTYPE##2, DTYPE##2);    \
   REGISTER_UNARY_OP(tanh, DTYPE##2, DTYPE##2);    \
   REGISTER_UNARY_OP(sqrt, DTYPE##2, DTYPE##2);    \
   REGISTER_UNARY_OP(rsqrt, DTYPE##2, DTYPE##2);   \
