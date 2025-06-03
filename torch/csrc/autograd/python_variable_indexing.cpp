@@ -29,6 +29,7 @@
 #include <c10/util/irange.h>
 
 #include <c10/core/Layout.h>
+#include <fmt/format.h>
 
 using namespace at;
 using namespace torch::autograd::utils;
@@ -123,10 +124,10 @@ inline Variable valueToTensor(
   } else if (torch::is_symbool(value)) {
     scalar = Scalar(py::cast<c10::SymBool>(py::handle(value)));
   } else {
-    throw TypeError(
-        "can't assign a %s to a %s",
+    throw TypeError(fmt::format(
+        "can't assign a {} to a {}",
         Py_TYPE(value)->tp_name,
-        torch::utils::options_to_string(options).c_str());
+        torch::utils::options_to_string(options)));
   }
   // lift_fresh is supposed to be used in situations where you are guaranteed to
   // get a plain Tensor which is not true for cpu device but not for non cpu
