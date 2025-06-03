@@ -1,4 +1,5 @@
 import dataclasses
+import logging
 import operator
 import textwrap
 from collections import Counter
@@ -58,6 +59,7 @@ from .wrapper import (
 
 
 aten = torch.ops.aten
+log = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -489,10 +491,11 @@ class FxConverter:
         if config.triton.autotune_at_compile_time:
             from triton.runtime import driver
 
+            log.info("Autotuning Triton kernels at compile time.")
             device = driver.active.get_current_device()
             stream = driver.active.get_current_stream(device)
 
-            def node_to_tensor(arg):
+            def node_to_tensor(arg: Any) -> Any:
                 if not isinstance(arg, torch.fx.Node):
                     return arg
 
@@ -503,6 +506,10 @@ class FxConverter:
 
             arg_values = [node_to_tensor(arg) for arg in call_args]
             tuner.run(*arg_values, stream=stream)
+        else:
+            log.info(
+                "Skipping autotuning. Set config.triton.autotune_at_compile_time = True to enable."
+            )
 
         kernel_config = tuner.compile_results[0].config
         call_args, grid = tuner._interpret_args_grid(call_args, kernel_config)

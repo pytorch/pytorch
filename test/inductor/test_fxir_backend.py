@@ -424,7 +424,7 @@ class FxirTestCase(InductorTestCase):
         # Compile and check that the tuner was called.
         with unittest.mock.patch.object(
             torch._inductor.runtime.triton_heuristics.CachingAutotuner, "run", run
-        ) as run_mock:
+        ):
             self.assertFalse(called)
             self._compile_and_check(torch.mul, args)
             self.assertTrue(called)
