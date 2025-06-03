@@ -25,6 +25,7 @@
 #include <ATen/TracerMode.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
 #include <c10/core/Layout.h>
@@ -276,10 +277,43 @@ static bool treatSequenceAsTuple(PyObject* index) {
   if (!PySequence_Check(index)) {
     return false;
   }
+  // This uses a heuristics from NumPy for determining whether to treat
+  // non-tuple sequences as if they were a tuple. From the NumPy code comments:
+  //
+  // "At this point, we're left with a non-tuple, non-array, sequence:
+  //  typically, a list. We use some somewhat-arbitrary heuristics from here
+  //  onwards to decided whether to treat that list as a single index, or a
+  //  list of indices. Backwards compatibility only takes effect for short
+  //  sequences - otherwise we treat it like any other scalar."
   auto n = PySequence_Size(index);
   if (n < 0) {
     // Negative size indicates a Python error in the PySequence_Size call.
     PyErr_Clear();
+    return false;
+  }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  if (n >= 32) {
+    TORCH_WARN(
+        "FutureWarning: Using a non-tuple sequence for "
+        "multidimensional indexing is deprecated; use x[tuple(seq)] instead of "
+        "x[seq]. In the future this will be interpreted as tensor index, "
+        "x[torch.tensor(seq)], which will result either in an error or a "
+        "different result");
+    return false;
+  }
+  for (Py_ssize_t i = 0; i < n; i++) {
+    auto obj = THPObjectPtr{PySequence_GetItem(index, i)};
+    if (!obj.get()) {
+      PyErr_Clear();
+      return false;
+    }
+    if (THPVariable_Check(obj.get()) || PySequence_Check(obj.get()) ||
+        PySlice_Check(obj.get())) {
+      return true;
+    }
+    if (obj.get() == Py_Ellipsis || obj.get() == Py_None) {
+      return true;
+    }
   }
   return false;
 }
