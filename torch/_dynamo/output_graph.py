@@ -51,6 +51,7 @@ from torch._guards import (
     CompileId,
     GlobalContextCheckpointState,
     Source,
+    tracing,
     TracingContext,
 )
 from torch._subclasses.fake_tensor import FakeTensor
@@ -1753,9 +1754,10 @@ class OutputGraph(OutputGraphGuardsState):
                                 # Modify gm so AOTAutogradCache key changes per specialization
                                 gm.meta["specialization"] = specialization
                                 example_inputs: list[Tensor] = list(args)
-                                specialization_cache[specialization] = (
-                                    self.call_user_compiler(gm, example_inputs)
-                                )
+                                with tracing(self.tracing_context):
+                                    specialization_cache[specialization] = (
+                                        self.call_user_compiler(gm, example_inputs)
+                                    )
 
                             return specialization_cache[specialization](*args, **kwargs)
                     return compiled_fn(*args, **kwargs)
