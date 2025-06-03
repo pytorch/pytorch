@@ -75,7 +75,7 @@ class CustomGraphModulePass(ABC):
         """
         Implementation of the custom pass.
         """
-    
+
     @abstractmethod
     def uuid(self) -> Optional[Any]:
         """
