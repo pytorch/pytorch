@@ -8625,9 +8625,9 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(size[:-1], (1, 2))
         self.assertEqual(size[0:0], ())
         # type check __add__
-        self.assertIsInstance(empty_size + (), tuple)  # issue #154432
-        self.assertIsInstance(size + (), tuple)  # issue #154432
-        self.assertIsInstance(size + (4, 5), tuple)  # issue #154432
+        self.assertIsInstance(empty_size + (), torch.Size)
+        self.assertIsInstance(size + (), torch.Size)
+        self.assertIsInstance(size + (4, 5), torch.Size)
         self.assertIsInstance(size + size, torch.Size)
         # value check __add__
         self.assertEqual(empty_size + (), ())
@@ -8635,8 +8635,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(size + (4, 5), (1, 2, 3, 4, 5))
         self.assertEqual(size + size, (1, 2, 3, 1, 2, 3))
         # type check __radd__
-        self.assertIsInstance(() + empty_size, tuple)  # issue #154432
-        self.assertIsInstance((4, 5) + size, tuple)  # issue #154432
+        self.assertIsInstance(() + empty_size, torch.Size)
+        self.assertIsInstance((4, 5) + size, torch.Size)
         # value check __radd__
         self.assertEqual(() + size, (1, 2, 3))
         self.assertEqual((4, 5) + size, (4, 5, 1, 2, 3))
@@ -8660,18 +8660,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(0 * size, ())
         self.assertEqual(1 * size, (1, 2, 3))
         self.assertEqual(2 * size, (1, 2, 3, 1, 2, 3))
-
-    @xfailIfTorchDynamo
-    def test_Size_add_strict_return_type(self):
-        # FIXME: https://github.com/pytorch/pytorch/issues/154432
-        size = torch.Size([1, 2, 3])
-        # type check __add__
-        self.assertIsInstance(size + (), torch.Size)
-        self.assertIsInstance(size + (4, 5), torch.Size)
-        self.assertIsInstance(size + size, torch.Size)
-        # type check __radd__
-        self.assertIsInstance(() + size, torch.Size)
-        self.assertIsInstance((4, 5) + size, torch.Size)
 
     def test_Size_concat_non_tuple_sequence(self):
         # check that TypeError get's raised on adding non-tuple sequences.
