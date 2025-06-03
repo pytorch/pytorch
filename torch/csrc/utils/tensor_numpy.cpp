@@ -1,3 +1,4 @@
+#include <fmt/format.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 #define WITH_NUMPY_IMPORT_ARRAY
@@ -303,7 +304,8 @@ int aten_to_numpy_dtype(const ScalarType scalar_type) {
     case kBool:
       return NPY_BOOL;
     default:
-      throw TypeError("Got unsupported ScalarType %s", toString(scalar_type));
+      throw TypeError(
+          fmt::format("Got unsupported ScalarType {}", toString(scalar_type)));
   }
 }
 
@@ -355,10 +357,10 @@ ScalarType numpy_dtype_to_aten(int dtype) {
   auto pytype = THPObjectPtr(PyArray_TypeObjectFromType(dtype));
   if (!pytype)
     throw python_error();
-  throw TypeError(
-      "can't convert np.ndarray of type %s. The only supported types are: "
+  throw TypeError(fmt::format(
+      "can't convert np.ndarray of type {}. The only supported types are: "
       "float64, float32, float16, complex64, complex128, int64, int32, int16, int8, uint64, uint32, uint16, uint8, and bool.",
-      ((PyTypeObject*)pytype.get())->tp_name);
+      ((PyTypeObject*)pytype.get())->tp_name));
 }
 
 bool is_numpy_int(PyObject* obj) {
