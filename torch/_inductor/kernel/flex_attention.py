@@ -430,8 +430,8 @@ compute_flex_attention = r"""
         )
 
 
-        tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(desc_q)
-        tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(desc_k)
+        triton_helpers.tensormap_fenceproxy_acquire(desc_q)
+        triton_helpers.tensormap_fenceproxy_acquire(desc_k)
 
 
     # We support two cases for batch dimension. a) (ZKV == ZQ) where off_zkv = off_zq.

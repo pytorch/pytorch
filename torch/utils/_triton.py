@@ -59,10 +59,9 @@ def has_triton_tma_device():
             except ImportError:
                 pass
 
-            # TODO: audit usage of this function to make sure this is the right thing to do
             # new API
             try:
-                from triton.languange import make_tensor_descriptor  # noqa: F401
+                from triton.language import make_tensor_descriptor  # noqa: F401
 
                 return True
             except ImportError:
