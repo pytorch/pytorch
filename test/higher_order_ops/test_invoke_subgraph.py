@@ -247,7 +247,7 @@ class TestInvokeSubgraphCompile(TestCase):
         with mock.patch(
             "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
             True,
-        ):
+        ), torch.no_grad():
             res = torch.compile(fn, backend=backend, fullgraph=True)(
                 mod, x_clone, y_clone
             )
@@ -307,8 +307,7 @@ class GraphModule(torch.nn.Module):
 
             @mark_compile_region
             def forward(self, x, y):
-                self.buf.add_(1)
-                return torch.mul(x, y).sin() + self.c + self.buf
+                return torch.mul(x, y).sin() * self.c * self.buf
 
         mod_ref = Mod()
         mod = Mod()
@@ -339,68 +338,65 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[8]", primals_2: "f32[8]", primals_3: "f32[8]"):
-        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
-        _tree_spec_constant0 = self._tree_spec_constant0
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.invoke_subgraph, subgraph = auto_functionalized_subgraph_0, identifier = 'auto_functionalized_fw_subgraph_0', arg1 = primals_1, arg2 = primals_2, _arg0_base_index = 0, _all_bases = [primals_3], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = _tree_spec_constant0 = None
-        getitem: "f32[8]" = auto_functionalized_v2[0]
-        getitem_1: "f32[8]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
-        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_0
-        _tree_spec_constant1 = self._tree_spec_constant1
-        auto_functionalized_v2_1 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.invoke_subgraph, subgraph = auto_functionalized_subgraph_1, identifier = 'auto_functionalized_fw_subgraph_0', arg1 = primals_1, arg2 = primals_2, _arg0_base_index = 0, _all_bases = [getitem_1], _op_schema = _tree_spec_constant1);  auto_functionalized_subgraph_1 = getitem_1 = _tree_spec_constant1 = None
-        getitem_2: "f32[8]" = auto_functionalized_v2_1[0]
-        getitem_3: "f32[8]" = auto_functionalized_v2_1[1];  auto_functionalized_v2_1 = None
+        partitioned_fw_subgraph_0_0 = self.partitioned_fw_subgraph_0_0
 
-        add: "f32[8]" = torch.ops.aten.add.Tensor(getitem, getitem_2);  getitem = getitem_2 = None
-        return (add, primals_1, primals_2, primals_3, getitem_3)
+        invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_0, 'partitioned_fw_subgraph_0_0', primals_1, primals_2, primals_3);  partitioned_fw_subgraph_0_0 = None
+        getitem_12: "f32[8]" = invoke_subgraph_4[3]
+        getitem_11: "f32[8]" = invoke_subgraph_4[2]
+        getitem_10: "f32[8]" = invoke_subgraph_4[1]
+        getitem: "f32[8]" = invoke_subgraph_4[0];  invoke_subgraph_4 = None
 
-    class auto_functionalized_subgraph_0(torch.nn.Module):
-        def forward(self, arg0_1: "f32[8]", arg1_1: "f32[8]", arg2_1: "f32[8]"):
-            add: "f32[8]" = torch.ops.aten.add.Tensor(arg0_1, 1)
-            mul: "f32[8]" = torch.ops.aten.mul.Tensor(arg1_1, arg2_1);  arg1_1 = arg2_1 = None
+        partitioned_fw_subgraph_0_1 = self.partitioned_fw_subgraph_0_0
+
+        invoke_subgraph_6 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_1, 'partitioned_fw_subgraph_0_0', primals_1, primals_2, primals_3);  partitioned_fw_subgraph_0_1 = primals_1 = primals_2 = primals_3 = None
+        getitem_15: "f32[8]" = invoke_subgraph_6[3]
+        getitem_14: "f32[8]" = invoke_subgraph_6[2]
+        getitem_13: "f32[8]" = invoke_subgraph_6[1]
+        getitem_1: "f32[8]" = invoke_subgraph_6[0];  invoke_subgraph_6 = None
+
+        add: "f32[8]" = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
+        return (add, getitem_12, getitem_11, getitem_10, getitem_15, getitem_14, getitem_13)
+
+    class partitioned_fw_subgraph_0_0(torch.nn.Module):
+        def forward(self, primals_0: "f32[8]", primals_1: "f32[8]", primals_2: "f32[8]"):
+            mul: "f32[8]" = torch.ops.aten.mul.Tensor(primals_0, primals_1)
             sin: "f32[8]" = torch.ops.aten.sin.default(mul);  mul = None
-            add_1: "f32[8]" = torch.ops.aten.add.Tensor(sin, 5);  sin = None
-            add_2: "f32[8]" = torch.ops.aten.add.Tensor(add_1, add);  add_1 = None
-            copy_: "f32[8]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
-            return (add_2,)
+            mul_1: "f32[8]" = torch.ops.aten.mul.Tensor(sin, 5);  sin = None
+            mul_2: "f32[8]" = torch.ops.aten.mul.Tensor(mul_1, primals_2);  mul_1 = None
+            return (mul_2, primals_0, primals_1, primals_2)
 """,
         )
         self.assertExpectedInline(
             normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f32[8]", primals_2: "f32[8]", primals_3: "f32[8]", getitem_3: "f32[8]", tangents_1: "f32[8]"):
-        auto_functionalized_subgraph_2 = self.auto_functionalized_subgraph_2
-        _tree_spec_constant2 = self._tree_spec_constant2
-        auto_functionalized_v2_2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.invoke_subgraph, subgraph = auto_functionalized_subgraph_2, identifier = 'auto_functionalized_bw_subgraph_0_0', arg1 = primals_1, arg2 = primals_2, arg3 = tangents_1, _arg0_base_index = 0, _all_bases = [getitem_3], _op_schema = _tree_spec_constant2);  auto_functionalized_subgraph_2 = getitem_3 = _tree_spec_constant2 = None
-        getitem_5: "f32[8]" = auto_functionalized_v2_2[1]
-        getitem_6: "f32[8]" = auto_functionalized_v2_2[2]
-        getitem_8: "f32[8]" = auto_functionalized_v2_2[4];  auto_functionalized_v2_2 = None
-        auto_functionalized_subgraph_3 = self.auto_functionalized_subgraph_2
-        _tree_spec_constant2_1 = self._tree_spec_constant2
-        auto_functionalized_v2_3 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.invoke_subgraph, subgraph = auto_functionalized_subgraph_3, identifier = 'auto_functionalized_bw_subgraph_0_0', arg1 = primals_1, arg2 = primals_2, arg3 = tangents_1, _arg0_base_index = 0, _all_bases = [getitem_8], _op_schema = _tree_spec_constant2_1);  auto_functionalized_subgraph_3 = primals_1 = primals_2 = tangents_1 = getitem_8 = _tree_spec_constant2_1 = None
-        getitem_10: "f32[8]" = auto_functionalized_v2_3[1]
-        getitem_11: "f32[8]" = auto_functionalized_v2_3[2]
-        getitem_13: "f32[8]" = auto_functionalized_v2_3[4];  auto_functionalized_v2_3 = None
+    def forward(self, getitem_12: "f32[8]", getitem_11: "f32[8]", getitem_10: "f32[8]", getitem_15: "f32[8]", getitem_14: "f32[8]", getitem_13: "f32[8]", tangents_1: "f32[8]"):
+        partitioned_bw_subgraph_0_1 = self.partitioned_bw_subgraph_0_0
 
-        add_1: "f32[8]" = torch.ops.aten.add.Tensor(getitem_5, getitem_10);  getitem_5 = getitem_10 = None
-        add_2: "f32[8]" = torch.ops.aten.add.Tensor(getitem_6, getitem_11);  getitem_6 = getitem_11 = None
+        invoke_subgraph_7 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_1, 'partitioned_bw_subgraph_0_0', getitem_13, getitem_14, getitem_15, tangents_1);  partitioned_bw_subgraph_0_1 = getitem_13 = getitem_14 = getitem_15 = None
+        getitem_2: "f32[8]" = invoke_subgraph_7[0]
+        getitem_3: "f32[8]" = invoke_subgraph_7[1];  invoke_subgraph_7 = None
 
-        copy_: "f32[8]" = torch.ops.aten.copy_.default(primals_3, getitem_13);  primals_3 = getitem_13 = copy_ = None
+        partitioned_bw_subgraph_0_0 = self.partitioned_bw_subgraph_0_0
+
+        invoke_subgraph_5 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_0, 'partitioned_bw_subgraph_0_0', getitem_10, getitem_11, getitem_12, tangents_1);  partitioned_bw_subgraph_0_0 = getitem_10 = getitem_11 = getitem_12 = tangents_1 = None
+        getitem_6: "f32[8]" = invoke_subgraph_5[0]
+        getitem_7: "f32[8]" = invoke_subgraph_5[1];  invoke_subgraph_5 = None
+
+        add_1: "f32[8]" = torch.ops.aten.add.Tensor(getitem_2, getitem_6);  getitem_2 = getitem_6 = None
+        add_2: "f32[8]" = torch.ops.aten.add.Tensor(getitem_3, getitem_7);  getitem_3 = getitem_7 = None
         return (add_1, add_2, None)
 
-    class auto_functionalized_subgraph_2(torch.nn.Module):
-        def forward(self, arg0_1: "f32[8]", arg1_1: "f32[8]", arg2_1: "f32[8]", arg3_1: "f32[8]"):
-            add: "f32[8]" = torch.ops.aten.add.Tensor(arg0_1, 1)
-            mul: "f32[8]" = torch.ops.aten.mul.Tensor(arg1_1, arg2_1)
-            sin: "f32[8]" = torch.ops.aten.sin.default(mul)
-            add_1: "f32[8]" = torch.ops.aten.add.Tensor(sin, 5);  sin = None
-            add_2: "f32[8]" = torch.ops.aten.add.Tensor(add_1, add);  add_1 = None
+    class partitioned_bw_subgraph_0_0(torch.nn.Module):
+        def forward(self, primals_0: "f32[8]", primals_1: "f32[8]", primals_2: "f32[8]", tangents_0: "f32[8]"):
+            mul_3: "f32[8]" = torch.ops.aten.mul.Tensor(tangents_0, primals_2);  tangents_0 = primals_2 = None
+            mul_4: "f32[8]" = torch.ops.aten.mul.Tensor(mul_3, 5);  mul_3 = None
+            mul: "f32[8]" = torch.ops.aten.mul.Tensor(primals_0, primals_1)
             cos: "f32[8]" = torch.ops.aten.cos.default(mul);  mul = None
-            mul_1: "f32[8]" = torch.ops.aten.mul.Tensor(arg3_1, cos);  arg3_1 = cos = None
-            mul_2: "f32[8]" = torch.ops.aten.mul.Tensor(mul_1, arg1_1);  arg1_1 = None
-            mul_3: "f32[8]" = torch.ops.aten.mul.Tensor(mul_1, arg2_1);  mul_1 = arg2_1 = None
-            copy_: "f32[8]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
-            return (None, mul_3, mul_2, add_2)
+            mul_5: "f32[8]" = torch.ops.aten.mul.Tensor(mul_4, cos);  mul_4 = cos = None
+            mul_6: "f32[8]" = torch.ops.aten.mul.Tensor(mul_5, primals_0);  primals_0 = None
+            mul_7: "f32[8]" = torch.ops.aten.mul.Tensor(mul_5, primals_1);  mul_5 = primals_1 = None
+            return (mul_7, mul_6, None)
 """,
         )
 
