@@ -42,6 +42,21 @@ The default dynamic behavior in PyTorch 2.1 is:
   operators; if you try it on a big model it will (1) probably crash PT2 and
   (2) run slow for no good reason.
 
+- You can whitelist specific sources to be marked as dynamic using the
+  ``TORCH_COMPILE_DYNAMIC_SOURCES`` environment variable or by setting
+  ``torch.compiler.config.dynamic_sources``. This is particularly useful for large
+  models with graph breaks, as you can maintain dynamism across graph breaks since
+  source names stay consistent. You can also use this to mark integers as dynamic.
+  The format is a comma-delimited list of source names, e.g., ``"L['x'], L['y']"``.
+  You can also use regexes, e.g., `"L\\['x.*'\\], L\\['y.*'\\]")`.
+  This whitelist takes precedence over other flags like ``dynamic=False``,
+  ``force_nn_module_property_static_shapes``, and ``force_parameter_static_shapes``.
+
+- Sometimes it can be cumbersome to find the right inputs to mark as dynamic. If
+  you're willing to take a performance hit for the first batch, one other affordable
+  option we have are the eager_then_compile stances which derive dynamism for you.
+  See `torch.compiler.set_stance <https://docs.pytorch.org/docs/stable/generated/torch.compiler.set_stance.html>`_ for more details.
+
 The Guard Model
 ---------------
 
@@ -117,6 +132,8 @@ Naively implemented, this is too restrictive: most PyTorch programs will immedia
 - On tensor creation, PyTorch precomputes a lot of data about a tensor; for example, if you use ``empty_strided`` to create a tensor, we will eagerly sort the strides and determine if the tensor is non-overlapping and dense. Sorts produce a lot of guards. However, it is more common to produce a tensor directly with a higher-level API like ``empty``, which is guaranteed to produce a non-overlapping and dense tensor. We modified PyTorch to avoid needlessly recomputing these properties.
 - Even if nontrivial compute is needed, sometimes a property is never actually queried at all. Making these precomputed properties lazy allows us to avoid guarding on an unbacked symbolic integer unless it is actually needed.
 - The data in an integer tensor is generally not known to be non-negative. However, we provide an API ``constrain_range`` whereby a user can specify that a size is bounded above and below by known limits.
+
+Similar to the dynamic APIs, there are corresponding unbacked APIs: namely you can use mark_unbacked instead of ``mark_dynamic`` and ``TORCH_COMPILE_UNBACKED_SOURCES`` instead of ``TORCH_COMPILE_DYNAMIC_SOURCES`` to tell the compiler to mark an input as unbacked.
 
 In future versions of PT2 (beyond PT2.1), we will extend our reasoning system
 to infer that an unbacked symbolic integer is size-like based on usage.  For
