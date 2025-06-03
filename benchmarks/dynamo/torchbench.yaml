@@ -117,9 +117,6 @@ disable_cudagraph:
   # oscillates from .05 to 1.05
   - tts_angular
 
-  # TODO: fix issue with graph partition
-  - speech_transformer
-
 
 dtype:
   force_amp_for_fp16_bf16_models:

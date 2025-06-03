@@ -1481,7 +1481,9 @@ def is_index_put_and_requires_h2d_sync_for_gpu_value(node):
 
 
 class ConstructorMoverPass:
-    def __init__(self, target: str, allow_outputs: bool = False) -> None:
+    def __init__(
+        self, target: str, allow_outputs: bool = False, allow_inputs: bool = False
+    ) -> None:
         """
         Move constructors from cpu to the target_device.
 
@@ -1494,9 +1496,11 @@ class ConstructorMoverPass:
 
         - target: target device type
         - allow_outputs: allow outputs to be moved
+        - allow_inputs: allow inputs to be moved
         """
 
         self.target = target
+        self.allow_inputs = allow_inputs
         self.allow_outputs = allow_outputs
 
         assert isinstance(target, str), (
@@ -1516,6 +1520,38 @@ class ConstructorMoverPass:
             torch.ops.aten.copy.default,
             torch.ops.aten.copy_.default,
             torch.ops.aten.slice_scatter.default,
+        )
+
+    def is_on_target_device(self, node: fx.Node) -> bool:
+        """
+        Returns whether a node is on the target device.
+        """
+        node_device = self.get_node_device(node)
+        return node_device is not None and node_device.type == self.target
+
+    def is_cpu_scalar_tensor(self, node: fx.Node) -> bool:
+        """
+        Returns whether a node is a cpu scalar tensor.
+        """
+        device = self.get_node_device(node)
+        is_cpu = device is not None and device.type == "cpu"
+        ten = node.meta.get("val")
+        is_scalar = isinstance(ten, torch.Tensor) and len(ten.size()) == 0
+        return is_cpu and is_scalar
+
+    def all_inputs_are_cpu_scalar_or_on_target_device(self, node: fx.Node) -> bool:
+        """
+        Returns whether a node's inputs are either cpu scalar tensors or
+        on the target device.
+        """
+        inputs = (
+            inp
+            for inp in itertools.chain(node.args, node.kwargs.values())
+            if isinstance(inp, fx.Node)
+        )
+        return all(
+            self.is_cpu_scalar_tensor(inp) or self.is_on_target_device(inp)
+            for inp in inputs
         )
 
     def cannot_be_moved(self, node: fx.Node) -> bool:
@@ -1569,11 +1605,21 @@ class ConstructorMoverPass:
     def __call__(self, graph: fx.Graph) -> None:
         target_devices = OrderedSet[torch.device]()
         constructors = []
+        cpu_placeholders: OrderedSet[fx.Node] = OrderedSet()
 
         for node in graph.nodes:
             device = self.get_node_device(node)
             if device and device.type == self.target:
                 target_devices.add(device)
+
+            if (
+                self.allow_inputs
+                and node.op == "placeholder"
+                and self.is_cpu_scalar_tensor(node)
+            ):
+                cpu_placeholders.add(node)
+                constructors.append(node)
+                continue
 
             if not (
                 isinstance(node.target, torch._ops.OpOverload)
@@ -1595,10 +1641,18 @@ class ConstructorMoverPass:
 
         movable_constructors = self.find_movable_constructors(graph, constructors)
 
+        target_device = next(iter(target_devices))
         for node in movable_constructors:
-            kwargs = node.kwargs.copy()
-            kwargs["device"] = next(iter(target_devices))
-            node.kwargs = kwargs
+            if node in cpu_placeholders:
+                with graph.inserting_after(node):
+                    gpu_node = graph.call_function(
+                        torch.ops.prims.device_put.default, (node, target_device)
+                    )
+                    node.replace_all_uses_with(gpu_node, lambda x: x != gpu_node)
+            else:
+                kwargs = node.kwargs.copy()
+                kwargs["device"] = target_device
+                node.kwargs = kwargs
 
     def find_movable_constructors(
         self, graph: fx.Graph, constructors: list[fx.Node]
@@ -1649,12 +1703,12 @@ class ConstructorMoverPass:
 
                 # this node was used on a op which takes in multiple devices and output a gpu
                 # tensor. we can convert its cpu input to gpu without making further changes
-                node_device = self.get_node_device(user)
-                if (
-                    self.allow_cpu_device(user)
-                    and node_device
-                    and node_device.type == self.target
-                ):
+                if self.allow_cpu_device(user) and self.is_on_target_device(user):
+                    del cpu_indeg[user]
+                elif self.all_inputs_are_cpu_scalar_or_on_target_device(user):
+                    # this node takes only cpu scalar tensors or gpu tensors as inputs
+                    # and outputs a gpu tensor. we can convert its cpu scalar inputs to gpu
+                    # without making further changes
                     del cpu_indeg[user]
                 else:
                     # otherwise, we should continue look at its downstream uses
@@ -1683,4 +1737,20 @@ def move_constructors_to_gpu(graph: fx.Graph) -> None:
     """
     Moves intermediary tensors which are constructed on the cpu to gpu when safe
     """
-    ConstructorMoverPass(get_gpu_type())(graph)
+
+    # cudagraph does not support cpu tensors. In this pass, we update the graph
+    # by explicitly moving cpu scalar tensors to gpu when profitable, relying on
+    # graph partition to split off this data copy, and cudagraphifying
+    # the remaining gpu ops.
+    allow_inputs = (
+        True
+        if (
+            torch._inductor.config.triton.cudagraphs
+            and torch._inductor.config.graph_partition
+        )
+        else False
+    )
+    ConstructorMoverPass(
+        get_gpu_type(),
+        allow_inputs=allow_inputs,
+    )(graph)
