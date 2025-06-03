@@ -201,7 +201,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
         for out in output:
             schema_gen.add_output(out)
 
-        schema_gen.add_schema_tree_spec(subgraph, *operands, **kwargs)
+        # schema_gen.add_schema_tree_spec(subgraph, *operands, **kwargs)
         return schema_gen.gen_schema()
 
 
