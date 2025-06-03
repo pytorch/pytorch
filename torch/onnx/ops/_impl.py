@@ -6,12 +6,8 @@ import torch
 
 _T = typing.TypeVar("_T", bound=Callable)
 
-_ONNX_DECOMP_TABLE: dict[Any, Callable] = {}
-
-
-def onnx_aten_decomp_table() -> dict[Any, Callable]:
-    """Return the ONNX to ATen decomp table."""
-    return _ONNX_DECOMP_TABLE
+# ONNX to ATen decomp table
+ONNX_ATEN_DECOMP_TABLE: dict[Any, torch._ops.OpOverload] = {}
 
 
 def _onnx_op(op_type: str, opset_version: int) -> Callable[[_T], _T]:
@@ -22,7 +18,7 @@ def _onnx_op(op_type: str, opset_version: int) -> Callable[[_T], _T]:
         torch_op = torch.library.custom_op(
             f"onnx::{op_type}.{overload}", mutates_args=()
         )(func)
-        _ONNX_DECOMP_TABLE[getattr(getattr(torch.ops.onnx, op_type), overload)] = func
+        ONNX_ATEN_DECOMP_TABLE[getattr(getattr(torch.ops.onnx, op_type), overload)] = func
         # Use the same implementation for the fake implementation
         # This is possible because we use pure aten ops to implement ONNX ops
         torch_op.register_fake(func)

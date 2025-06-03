@@ -8,6 +8,7 @@ from __future__ import annotations
 
 
 __all__ = [
+    "aten_decompositions",
     "symbolic",
     "symbolic_multi_out",
     "rotary_embedding",
@@ -52,6 +53,11 @@ _TORCH_DTYPE_TO_ONNX_DTYPE = {
 }
 
 
+def aten_decompositions() -> dict[str, torch._ops.OpOverload]:
+    """Return the ONNX to ATen decomp table."""
+    return _symbolic_impl.ONNX_ATEN_DECOMP_TABLE
+
+
 def _parse_domain_op_type(domain_op: str) -> tuple[str, str]:
     splitted = domain_op.split("::", 1)
     if len(splitted) == 1:
@@ -89,6 +95,9 @@ def symbolic(
 
     This function is used to create a symbolic operator with a single output.
     To create an operator with multiple outputs, use :func:`symbolic_multi_out`.
+
+    You may use ``if torch.onnx.is_in_onnx_export()`` to conditionally enable the
+    symbolic logic only during ``torch.onnx.export()``.
 
     Example::
 
@@ -184,6 +193,9 @@ def symbolic_multi_out(
     metadata_props: dict[str, str] | None = None,
 ) -> Sequence[torch.Tensor]:
     """Create a symbolic FX operator to represent an arbitrary ONNX operator with multiple outputs.
+
+    You may use ``if torch.onnx.is_in_onnx_export()`` to conditionally enable the
+    symbolic logic only during ``torch.onnx.export()``.
 
     Example::
 
