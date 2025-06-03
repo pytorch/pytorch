@@ -24,6 +24,7 @@ from torch.utils._ordered_set import OrderedSet
 from .. import config, ir, pattern_matcher
 from ..codegen.common import custom_backend_passes
 from ..comms import remove_fsdp2_unsharded_param_graph_input_usage
+from ..compile_fx import get_all_devices
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
@@ -77,6 +78,7 @@ pass_patterns = [
     PatternMatcherPass(),
     PatternMatcherPass(),
 ]
+
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     """
@@ -182,8 +184,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     fake_tensor_updater.incremental_update()
 
+    gm_devices = [d.type for d in get_all_devices(gm)]
     for device, custom_backend_pass in custom_backend_passes.items():
-        if custom_backend_pass is not None:
+        if custom_backend_pass is not None and device in gm_devices:
             pass_name = "custom_backend_passes_" + device
             GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
 
