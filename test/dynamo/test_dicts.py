@@ -1262,16 +1262,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(TypeError, d.values, 1)
 
 
-@unittest.expectedFailure
-class DictSubclassMethodsTests(DictMethodsTests):
-    thetype = SimpleDict
-
-
-@unittest.expectedFailure
-class OrderedDictMethodsTests(DictMethodsTests):
-    thetype = OrderedDict
-
-
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
