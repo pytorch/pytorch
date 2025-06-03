@@ -161,7 +161,7 @@ jobs:
       - name: Check if can use old whl build
         id: use-old-whl
         uses: ./.github/actions/reuse-old-whl
-        if: ${{ inputs.allow-reuse-old-whl && github.event_name == 'push' }}
+        if: ${{ inputs.allow-reuse-old-whl }}
         with:
           build-environment: ${{ inputs.build-environment }}
           run-id: ${{ github.run_id }}
