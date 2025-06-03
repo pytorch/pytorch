@@ -37,7 +37,7 @@ jobs:
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
-          docker-image-name: ci-image:pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
+          docker-image-name: ci-image:pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
           working-directory: pytorch
 
       - name: Use following to pull public copy of the image
@@ -100,8 +100,10 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
+          # Disable shellcheck warning for GPU_FLAG
+          # shellcheck disable=SC2086
           container_name=$(docker run \
-            "${GPU_FLAG:-}" \
+            ${GPU_FLAG:-} \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
