@@ -76,12 +76,12 @@ struct zeta_functor {
 };
 
 struct xlog1py_functor {
-  template <typename T>
-  inline enable_if_t<is_floating_point_v<T>, T> operator()(const T a, const T b) {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
     return static_cast<T>(c10::metal::xlog1py(a, b));
   }
-  template <typename T>
-  inline enable_if_t<!is_floating_point_v<T>, float> operator()(const T a, const T b) {
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
     return c10::metal::xlog1py(float(a), float(b));
   }
 };
