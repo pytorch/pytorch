@@ -3028,8 +3028,8 @@ class TestAutograd(TestCase):
         check_index(x, y, ([1, 2, 3], [0]))
         check_index(x, y, ([1, 2], [2, 1]))
         check_index(x, y, ([[1, 2], [3, 0]], [[0, 1], [2, 3]]))
-        check_index(x, y, ([slice(None), [2, 3]]))
-        check_index(x, y, ([[2, 3], slice(None)]))
+        check_index(x, y, ((slice(None), [2, 3])))
+        check_index(x, y, (([2, 3], slice(None))))
 
         # advanced indexing, with less dim, or ellipsis
         check_index(x, y, ([0]))
@@ -3061,8 +3061,8 @@ class TestAutograd(TestCase):
         # advanced indexing, with a tensor wrapped in a variable
         z = torch.LongTensor([0, 1])
         zv = Variable(z, requires_grad=False)
-        seq = [z, Ellipsis]
-        seqv = [zv, Ellipsis]
+        seq = (z, Ellipsis)
+        seqv = (zv, Ellipsis)
 
         if y.grad is not None:
             with torch.no_grad():
@@ -3086,7 +3086,7 @@ class TestAutograd(TestCase):
         x = torch.arange(1.0, 17).view(4, 4)
         y = Variable(x, requires_grad=True)
 
-        idx = [[1, 1, 3, 2, 1, 2], [0]]
+        idx = ([1, 1, 3, 2, 1, 2], [0])
         y[idx].sum().backward()
         expected_grad = torch.zeros(4, 4)
         for i in idx[0]:
@@ -3097,7 +3097,7 @@ class TestAutograd(TestCase):
 
         x = torch.arange(1.0, 17).view(4, 4)
         y = Variable(x, requires_grad=True)
-        idx = [[[1, 2], [0, 0]], [[0, 1], [1, 1]]]
+        idx = ([[1, 2], [0, 0]], [[0, 1], [1, 1]])
         y[idx].sum().backward()
         expected_grad = torch.tensor(
             [
@@ -3112,7 +3112,7 @@ class TestAutograd(TestCase):
         x = torch.arange(1.0, 65).view(4, 4, 4)
         y = Variable(x, requires_grad=True)
 
-        idx = [[1, 1, 1], slice(None), slice(None)]
+        idx = ([1, 1, 1], slice(None), slice(None))
         y[idx].sum().backward()
         expected_grad = torch.empty(4, 4, 4).zero_()
         expected_grad[1].fill_(3)
@@ -3541,32 +3541,32 @@ class TestAutograd(TestCase):
         self._test_setitem((5, 5), 1)
         self._test_setitem((5,), 1)
         self._test_setitem((1,), 0)
-        self._test_setitem((10,), [[0, 4, 2]])
-        self._test_setitem((5, 5), [[0, 4], [2, 2]])
-        self._test_setitem((5, 5, 5), [slice(None), slice(None), [1, 3]])
-        self._test_setitem((5, 5, 5), [slice(None), [1, 3], slice(None)])
-        self._test_setitem((5, 5, 5), [[1, 3], slice(None), slice(None)])
-        self._test_setitem((5, 5, 5), [slice(None), [2, 4], [1, 3]])
-        self._test_setitem((5, 5, 5), [[1, 3], [2, 4], slice(None)])
+        self._test_setitem((10,), ([0, 4, 2]))
+        self._test_setitem((5, 5), ([0, 4], [2, 2]))
+        self._test_setitem((5, 5, 5), (slice(None), slice(None), [1, 3]))
+        self._test_setitem((5, 5, 5), (slice(None), [1, 3], slice(None)))
+        self._test_setitem((5, 5, 5), ([1, 3], slice(None), slice(None)))
+        self._test_setitem((5, 5, 5), (slice(None), [2, 4], [1, 3]))
+        self._test_setitem((5, 5, 5), ([1, 3], [2, 4], slice(None)))
         self._test_setitem_tensor((5, 5), 3)
-        self._test_setitem_tensor((5, 5), [[0, 1], [1, 0]])
+        self._test_setitem_tensor((5, 5), ([0, 1], [1, 0]))
         self._test_setitem_tensor((5,), 3)
         self._test_setitem_tensor(
             (5,), Variable(torch.LongTensor([3]), requires_grad=False).sum()
         )
         self._test_setitem_tensor((5,), [[0, 1, 2, 3]])
-        self._test_setitem_tensor((5, 5, 5), [slice(None), slice(None), [1, 3]])
-        self._test_setitem_tensor((5, 5, 5), [slice(None), [1, 3], slice(None)])
-        self._test_setitem_tensor((5, 5, 5), [[1, 3], slice(None), slice(None)])
-        self._test_setitem_tensor((5, 5, 5), [slice(None), [2, 4], [1, 3]])
-        self._test_setitem_tensor((5, 5, 5), [[1, 3], [2, 4], slice(None)])
+        self._test_setitem_tensor((5, 5, 5), (slice(None), slice(None), [1, 3]))
+        self._test_setitem_tensor((5, 5, 5), (slice(None), [1, 3], slice(None)))
+        self._test_setitem_tensor((5, 5, 5), ([1, 3], slice(None), slice(None)))
+        self._test_setitem_tensor((5, 5, 5), (slice(None), [2, 4], [1, 3]))
+        self._test_setitem_tensor((5, 5, 5), ([1, 3], [2, 4], slice(None)))
         self._test_setitem_tensor(
             (5, 5, 5),
-            [
+            (
                 Variable(torch.LongTensor([1, 3]), requires_grad=False),
                 [2, 4],
                 slice(None),
-            ],
+            ),
         )
 
     def test_setitem_mask(self):
