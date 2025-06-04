@@ -1,5 +1,5 @@
-from typing import Optional, runtime_checkable
-from typing_extensions import Protocol
+from typing import Optional
+from typing_extensions import Protocol, runtime_checkable
 
 from torch.distributed._state_dict_utils import _copy_state_dict, _create_cpu_state_dict
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE

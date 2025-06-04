@@ -1,4 +1,5 @@
-from typing import Any, Callable, Protocol, runtime_checkable
+from typing import Any, Callable, Protocol
+from typing_extensions import runtime_checkable
 
 
 class TimerClass(Protocol):
