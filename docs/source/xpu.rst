@@ -52,6 +52,7 @@ Streams and events
     Event
     Stream
 
+.. automodule:: torch.xpu.memory
 .. currentmodule:: torch.xpu.memory
 
 Memory management

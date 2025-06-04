@@ -96,9 +96,9 @@ Graphs (beta)
     graph
     make_graphed_callables
 
-.. currentmodule:: torch.cuda.memory
-
 .. _cuda-memory-management-api:
+.. automodule:: torch.cuda.memory
+.. currentmodule:: torch.cuda.memory
 
 Memory management
 -----------------
@@ -233,7 +233,6 @@ See the docs for :class:`~torch.cuda.gds.GdsFile` for an example of how to use t
 .. py:module:: torch.cuda.gds
 .. py:module:: torch.cuda.graphs
 .. py:module:: torch.cuda.jiterator
-.. py:module:: torch.cuda.memory
 .. py:module:: torch.cuda.nccl
 .. py:module:: torch.cuda.nvtx
 .. py:module:: torch.cuda.profiler
