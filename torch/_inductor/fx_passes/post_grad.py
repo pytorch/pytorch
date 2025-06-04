@@ -184,11 +184,12 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     fake_tensor_updater.incremental_update()
 
-    gm_devices = [d.type for d in get_all_devices(gm)]
     for device, custom_backend_pass in custom_backend_passes.items():
-        if custom_backend_pass is not None and device in gm_devices:
-            pass_name = "custom_backend_passes_" + device
-            GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
+        if custom_backend_pass is not None:
+            gm_devices = [d.type for d in get_all_devices(gm)]
+            if device in gm_devices:
+                pass_name = "custom_backend_passes_" + device
+                GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
 
     # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
