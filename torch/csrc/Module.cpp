@@ -1799,15 +1799,27 @@ class WeakTensorRef {
 
 namespace {
 
-// Use a "dumb" structure that won't be cleaned up by the exit handlers.
-std::array<void (*)(int), 32> _oldHandlers;
+using SigHandler = void (*)(int);
+
+
+SigHandler* _getOldHandler(int signum) {
+  // Use a "dumb" structure that won't be cleaned up by the exit handlers.
+  static SigHandler _sigsegv = nullptr;
+  static SigHandler _sigint = nullptr;
+
+  switch (signum) {
+  case SIGSEGV: return &_sigsegv;
+  case SIGINT: return &_sigint;
+  default: assert(false); return nullptr;
+  }
+}
 
 extern "C" void _signalHandler(int signum) {
   // Note that technically there's not much you're allowed to do here - but
   // we're probably dying anyway so give it a try...
 
-  auto oldAction = _oldHandlers[signum];
-  _oldHandlers[signum] = nullptr;
+  auto oldAction = *_getOldHandler(signum);
+  *_getOldHandler(signum) = nullptr;
 
   // If we hit another signal don't run this handler again.
   std::signal(signum, oldAction);
@@ -1832,11 +1844,8 @@ extern "C" void _signalHandler(int signum) {
 }
 
 void _initCrashHandler() {
-  static_assert(
-    _oldHandlers.size() > std::max({SIGABRT, SIGILL, SIGSEGV}));
-  _oldHandlers[SIGABRT] = std::signal(SIGABRT, _signalHandler);
-  _oldHandlers[SIGILL] = std::signal(SIGILL, _signalHandler);
-  _oldHandlers[SIGSEGV] = std::signal(SIGSEGV, _signalHandler);
+  *_getOldHandler(SIGILL) = std::signal(SIGILL, _signalHandler);
+  *_getOldHandler(SIGSEGV) = std::signal(SIGSEGV, _signalHandler);
 }
 
 } // anonymous namespace

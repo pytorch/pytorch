@@ -1466,3 +1466,10 @@ class LocalElasticAgentTest(unittest.TestCase):
     )
     def test_rank_restart_after_failure(self):
         self.run_test_with_backend(backend="c10d", test_to_run=self.fail_rank_one_once)
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )
