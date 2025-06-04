@@ -362,20 +362,24 @@ inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Ten
     return false;
   }
 
-  bool can_use_miopen_channels_last_2d = false;
   // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
   // See #64427
   static std::optional<bool> PYTORCH_MIOPEN_SUGGEST_NHWC = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC");
+  static bool suggest_nhwc = PYTORCH_MIOPEN_SUGGEST_NHWC && *PYTORCH_MIOPEN_SUGGEST_NHWC;
 
   auto input_memory_format = input.suggest_memory_format();
   auto weight_memory_format = weight.suggest_memory_format();
+  auto weight_ndim = weight.ndimension();
 
-  can_use_miopen_channels_last_2d = PYTORCH_MIOPEN_SUGGEST_NHWC &&  *PYTORCH_MIOPEN_SUGGEST_NHWC && (
-            ( (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
-            (weight_memory_format == at::MemoryFormat::ChannelsLast) )
-        );
+  bool can_use_miopen_channels_last_2d = suggest_nhwc && (weight_ndim == 4) && (
+    (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
+    (weight_memory_format == at::MemoryFormat::ChannelsLast)
+  );
 
-  bool can_use_miopen_channels_last_3d = false;
+  bool can_use_miopen_channels_last_3d = suggest_nhwc && (weight_ndim == 5) && (
+    (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
+    (weight_memory_format == at::MemoryFormat::ChannelsLast3d)
+  );
 
   return can_use_miopen_channels_last_2d || can_use_miopen_channels_last_3d;
 }
