@@ -2296,7 +2296,11 @@ class SIMDScheduling(BaseScheduling):
         default_tiling = cls.create_tiling([numel], [reduction_numel])
 
         # # TODO: enable by default
-        if torch._inductor.config.triton.coalesce_tiling_analysis and coalesce_analysis:
+        if (
+            torch._inductor.config.triton.coalesce_tiling_analysis
+            and coalesce_analysis
+            and not config.triton.prefer_nd_tiling
+        ):
             return cls.compute_tiling_strategy(
                 node_schedule, numel, reduction_numel, coalesce_analysis
             )
