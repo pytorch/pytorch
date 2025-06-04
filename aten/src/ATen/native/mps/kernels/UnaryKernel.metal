@@ -31,7 +31,7 @@ struct exp_functor {
 struct sigmoid_functor {
   template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
   inline T operator()(const T x) {
-    return T(1.0f / (1.0f + exp_(-x)));
+    return T(1.0f / (1.0f + exp_(-static_cast<float>(x))));
   }
   template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
   inline T operator()(const T x) {
