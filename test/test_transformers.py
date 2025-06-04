@@ -4050,6 +4050,7 @@ class TestSDPAXpuOnly(NNTestCase):
         attn_mask = make_tensor(attn_mask_shape)
         attn_mask = attn_mask.expand(1, 1, seqlen, seqlen)
 
+        # test that we do not dispatch to onednn for an unsupported case
         actual = F.scaled_dot_product_attention(
             query, key, value, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
 
@@ -4069,7 +4070,6 @@ class TestSDPAXpuOnly(NNTestCase):
 
         attn_mask = torch.full((seqlen, seqlen), float('-inf') ,device=device, dtype=torch.bfloat16)
 
-        # test that we do not dispatch to onednn for an unsupported case
         actual = F.scaled_dot_product_attention(
             query, key, value, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
 
