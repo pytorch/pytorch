@@ -2,8 +2,10 @@
 # Owner(s): ["oncall: distributed"]
 import torch
 from torch.distributed.pipelining import pipe_split, pipeline
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+device = torch.accelerator.current_accelerator().type
 
 
 # Building block for model
@@ -41,7 +43,7 @@ class M(torch.nn.Module):
 
 
 class UnflattenTests(TestCase):
-    def test_unflatten(self, device):
+    def test_unflatten(self):
         x = torch.randn(1, 16, 256, 256, device=device)
         constant = torch.ones(1, 16, 256, 256, device=device)
 
@@ -71,9 +73,6 @@ class UnflattenTests(TestCase):
         torch.testing.assert_close(out, ref)
         print(f"Equivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
 
-
-devices = ["cpu", "cuda", "hpu", "xpu"]
-instantiate_device_type_tests(UnflattenTests, globals(), only_for=devices)
 
 if __name__ == "__main__":
     run_tests()

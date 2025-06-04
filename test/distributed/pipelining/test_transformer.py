@@ -2,13 +2,15 @@
 # Owner(s): ["oncall: distributed"]
 import torch
 from torch.distributed.pipelining import pipeline, SplitPoint
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 d_hid = 16
 n_layers = 8
 microbatch_size = 4
+
+
+device = torch.accelerator.current_accelerator().type
 
 
 class MLPModule(torch.nn.Module):
@@ -35,7 +37,7 @@ class TransformerLike(torch.nn.Module):
 
 
 class TransformerTests(TestCase):
-    def test_ir(self, device):
+    def test_ir(self):
         transformer = TransformerLike().to(device)
         x = torch.randn(microbatch_size, d_hid, device=device)
 
@@ -71,9 +73,6 @@ class TransformerTests(TestCase):
         torch.testing.assert_close(out, ref)
         print(f"Equivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
 
-
-devices = ["cpu", "cuda", "hpu", "xpu"]
-instantiate_device_type_tests(TransformerTests, globals(), only_for=devices)
 
 if __name__ == "__main__":
     run_tests()
