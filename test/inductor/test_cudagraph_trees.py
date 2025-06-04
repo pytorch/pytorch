@@ -10,6 +10,7 @@ import unittest
 import warnings
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
+import weakref
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -163,6 +164,15 @@ if HAS_CUDA:
             )
             self.device_idx = torch.rand([0], device="cuda").device.index
             warnings.filterwarnings("ignore")
+            # Reset counters before each test
+            counters.clear()
+
+        def _check_cudagraph_support(self):
+            """Check if CUDA graphs are supported on this device"""
+            if not torch.cuda.is_available():
+                self.skipTest("CUDA not available")
+            if torch.cuda.get_device_capability()[0] < 7:
+                self.skipTest("CUDA graphs require SM70 or later")
 
         def tearDown(self):
             super().tearDown()
@@ -208,6 +218,152 @@ if HAS_CUDA:
 
         def num_checkpoints(self):
             return self.get_manager().debug_checkpointing_counter
+
+        def test_preserve_aliased_input_output(self):
+            """Test that input tensors aliased with outputs are preserved"""
+            self._check_cudagraph_support()
+            x = torch.randn(10, 10, device='cuda')
+            x_ptr = x.untyped_storage().data_ptr()
+
+            def fn(x):
+                return x  # just returns input directly (shared input/output)
+
+            compiled_fn = torch.compile(fn, fullgraph=True, backend='inductor')
+
+            # First run to capture CUDA graph
+            out1 = compiled_fn(x)
+            self.assertEqual(out1.untyped_storage().data_ptr(), x_ptr)
+
+            # Second run should reuse the same storage
+            out2 = compiled_fn(x)
+            self.assertEqual(out2.untyped_storage().data_ptr(), x_ptr)
+
+            # Verify no CUDA graph skips occurred
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+
+        def test_release_non_aliased_inputs(self):
+            """Test that non-aliased inputs are properly released"""
+            self._check_cudagraph_support()
+            x = torch.randn(10, 10, device='cuda')
+            x_ptr = x.untyped_storage().data_ptr()
+
+            def fn(x):
+                # Create new tensor, not aliased with input
+                return x + 1
+
+            compiled_fn = torch.compile(fn, fullgraph=True, backend='inductor')
+
+            # First run to capture CUDA graph
+            out1 = compiled_fn(x)
+            self.assertNotEqual(out1.untyped_storage().data_ptr(), x_ptr)
+
+            # Second run should create new storage
+            out2 = compiled_fn(x)
+            self.assertNotEqual(out2.untyped_storage().data_ptr(), x_ptr)
+            self.assertNotEqual(out1.untyped_storage().data_ptr(), out2.untyped_storage().data_ptr())
+
+            # Verify no CUDA graph skips occurred
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+
+        def test_mixed_aliased_non_aliased(self):
+            """Test handling of mixed aliased and non-aliased inputs/outputs"""
+            self._check_cudagraph_support()
+            x = torch.randn(10, 10, device='cuda')
+            y = torch.randn(10, 10, device='cuda')
+            x_ptr = x.untyped_storage().data_ptr()
+            y_ptr = y.untyped_storage().data_ptr()
+
+            def fn(x, y):
+                # x is aliased, y is not
+                return x, y + 1
+
+            compiled_fn = torch.compile(fn, fullgraph=True, backend='inductor')
+
+            # First run to capture CUDA graph
+            out1_x, out1_y = compiled_fn(x, y)
+            self.assertEqual(out1_x.untyped_storage().data_ptr(), x_ptr)
+            self.assertNotEqual(out1_y.untyped_storage().data_ptr(), y_ptr)
+
+            # Second run should preserve x's storage but create new for y
+            out2_x, out2_y = compiled_fn(x, y)
+            self.assertEqual(out2_x.untyped_storage().data_ptr(), x_ptr)
+            self.assertNotEqual(out2_y.untyped_storage().data_ptr(), y_ptr)
+            self.assertNotEqual(out1_y.untyped_storage().data_ptr(), out2_y.untyped_storage().data_ptr())
+
+            # Verify no CUDA graph skips occurred
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+
+        def test_reconstruct_inputs(self):
+            """Test that inputs are properly reconstructed for next graph execution"""
+            self._check_cudagraph_support()
+            x = torch.randn(10, 10, device='cuda')
+            x_ptr = x.untyped_storage().data_ptr()
+
+            def fn(x):
+                # Modify x in-place
+                x.add_(1)
+                return x
+
+            compiled_fn = torch.compile(fn, fullgraph=True, backend='inductor')
+
+            # First run to capture CUDA graph
+            out1 = compiled_fn(x)
+            self.assertEqual(out1.untyped_storage().data_ptr(), x_ptr)
+
+            # Second run should use reconstructed input
+            out2 = compiled_fn(x)
+            self.assertEqual(out2.untyped_storage().data_ptr(), x_ptr)
+            self.assertTrue(torch.allclose(out2, out1 + 1))
+
+            # Verify no CUDA graph skips occurred
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+
+        def test_weak_ref_reconstruction(self):
+            """Test that weak references are properly maintained during reconstruction"""
+            self._check_cudagraph_support()
+            x = torch.randn(10, 10, device='cuda')
+            x_ptr = x.untyped_storage().data_ptr()
+            
+            # Create a weak reference to the storage
+            storage_ref = weakref.ref(x.untyped_storage())
+            self.assertIsNotNone(storage_ref())
+
+            def fn(x):
+                # Return both the input and a new tensor
+                return x, x + 1
+
+            compiled_fn = torch.compile(fn, fullgraph=True, backend='inductor')
+
+            # First run to capture CUDA graph
+            out1_x, out1_y = compiled_fn(x)
+            self.assertEqual(out1_x.untyped_storage().data_ptr(), x_ptr)
+            
+            # Verify weak reference is still valid
+            self.assertIsNotNone(storage_ref())
+            self.assertEqual(storage_ref().data_ptr(), x_ptr)
+
+            # Second run should preserve x's storage
+            out2_x, out2_y = compiled_fn(x)
+            self.assertEqual(out2_x.untyped_storage().data_ptr(), x_ptr)
+            
+            # Verify weak reference is still valid
+            self.assertIsNotNone(storage_ref())
+            self.assertEqual(storage_ref().data_ptr(), x_ptr)
+
+            # Delete all references to x
+            del x
+            del out1_x
+            del out2_x
+            
+            # Run again to trigger reconstruction
+            out3_x, out3_y = compiled_fn(torch.randn(10, 10, device='cuda'))
+            
+            # Verify weak reference is still valid after reconstruction
+            self.assertIsNotNone(storage_ref())
+            self.assertEqual(storage_ref().data_ptr(), x_ptr)
+
+            # Verify no CUDA graph skips occurred
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
         def test_run_simple(self):
             def foo(x):
