@@ -12341,7 +12341,7 @@ fn
         class Mod(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.c = 2
+                self.c = 2.0
                 self.norm = torch.nn.LayerNorm(8)
 
             def forward(self, x):
@@ -12358,7 +12358,7 @@ fn
         x = torch.rand(4, 8)
         opt_mod(x)
 
-        mod.c = 3
+        mod.c = 3.0
         # Since the guards are skipped on all tensors
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             opt_mod(x)
@@ -12386,7 +12386,7 @@ fn
         x = torch.rand(4, 8)
         opt_mod(x)
 
-        GLOBAL_INT = 1
+        GLOBAL_INT = 2
         # Since the guards are skipped on globals, we should not recompile
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             opt_mod(x)

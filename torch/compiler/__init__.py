@@ -30,6 +30,8 @@ __all__ = [
     "load_cache_artifacts",
     "skip_guard_on_inbuilt_nn_modules_unsafe",
     "skip_guard_on_all_nn_modules_unsafe",
+    "keep_tensor_guards",
+    "skip_guard_on_globals",
 ]
 
 
