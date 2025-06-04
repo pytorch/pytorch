@@ -104,11 +104,6 @@ class Driver:
         super().__init__()
         self.num_devices = num_devices
         self.is_initialized = False
-        self.rlock = threading.RLock()
-
-    def _lazy_init(self):
-        if self.is_initialized:
-            return
 
         # State of our driver
         self.curr_device_idx = 0
@@ -119,6 +114,11 @@ class Driver:
         self.host_allocator = HostAllocator()
         self.event_belong = {}
 
+        self.rlock = threading.RLock()
+
+    def _lazy_init(self):
+        if self.is_initialized:
+            return
         self.devices = []
 
         for i in range(self.num_devices):
@@ -136,7 +136,6 @@ class Driver:
 
     def exec(self, cmd, *args):
         with self.rlock:
-            self._lazy_init()
             log.info("Main process launched: %s(*%s)", cmd, safe_str(args))
 
             if cmd in Driver.registry:
@@ -151,6 +150,7 @@ class Driver:
                 return res
 
     def run_on_executor(self, device_idx, cmd, *args):
+        self._lazy_init()
         req_queue, ans_queue, _ = self.devices[device_idx]
         stream = self.getStream(device_idx)
         validate_send_queue_args(cmd, args)
@@ -161,7 +161,7 @@ class Driver:
 
     @register(registry)
     def hasPrimaryContext(self, device_idx):
-        return device_idx >= 0 and device_idx < len(self.devices)
+        return device_idx >= 0 and device_idx < self.num_devices
 
     @register(registry)
     def deviceCount(self, *args):
