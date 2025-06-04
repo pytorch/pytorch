@@ -569,7 +569,8 @@ def load_pt2(
                     )
                     for model_name in aoti_model_names
                 }
-
+        else:
+            aoti_runners = {}
     else:
         aoti_runners = {
             model_name: AOTICompiledModel(

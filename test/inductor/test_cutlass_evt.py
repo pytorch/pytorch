@@ -347,9 +347,7 @@ return tmp_1, D""",
         )
         buffer_renames = {"buf0": "buf0", "buf1": "buf1", "acc": "buf0"}
         name_to_buffer = {"buf0": row_major_buf0, "buf1": col_major_buf1}
-        result = create_example_tensors(
-            buffer_renames, name_to_buffer, lambda x: int(x)
-        )
+        result = create_example_tensors(buffer_renames, name_to_buffer)
         self.assertEqual(result["acc"].shape, (3, 4, 1))
         self.assertEqual(result["acc"].stride, (4, 1, 0))
         self.assertEqual(
@@ -372,9 +370,7 @@ return tmp_1, D""",
 
         self.assertExpectedInline(
             _render_argument_type(
-                epilogue_functor,
-                _create_mock_buffer_name_map(EXAMPLE_TENSORS),
-                lambda x: int(x),
+                epilogue_functor, _create_mock_buffer_name_map(EXAMPLE_TENSORS)
             ),
             """\
 { /* thread */
@@ -429,9 +425,7 @@ def fn(accum, bias):
 
         self.assertExpectedInline(
             _render_argument_type(
-                epilogue_functor,
-                _create_mock_buffer_name_map(example_tensors),
-                lambda x: int(x),
+                epilogue_functor, _create_mock_buffer_name_map(example_tensors)
             ),
             """\
 { /* thread */
@@ -456,7 +450,6 @@ def fn(accum, bias):
             MockTileDescription(),
             EpilogueScheduleType.ScheduleAuto,
             _create_mock_buffer_name_map(EXAMPLE_TENSORS),
-            lambda x: x,  # static shapes
         )
         self.assertExpectedInline(
             code,

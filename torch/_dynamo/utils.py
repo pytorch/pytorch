@@ -2402,10 +2402,6 @@ def is_int_specialization_case(value, source):
             source.guard_source().is_unspecialized_builtin_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
-        or (
-            source.guard_source().is_unspecialized_nn_module()
-            and not config.allow_unspec_int_on_nn_module
-        )
         or is_from_defaults(source)
         # TODO: Delete this condition when rollout is done.  NB: this
         # condition never evaluates True in open source
