@@ -345,7 +345,7 @@ def pack_value_flag(
     DTYPE_PACK: tl.constexpr,
 ):
     # Workaround for triton bug, tensor.to doesn't unwrap constexpr values
-    DTYPE_VALUE_AS_UINT = tl.core._constexpr_to_value(DTYPE_VALUE_AS_UINT)
+    DTYPE_VALUE_AS_UINT = tl.core._unwrap_if_constexpr(DTYPE_VALUE_AS_UINT)
     bitwidth = DTYPE_VALUE_AS_UINT.primitive_bitwidth
     uv = value.to(DTYPE_VALUE_AS_UINT, bitcast=True).to(DTYPE_PACK)
     return flag.to(DTYPE_PACK) | (uv << bitwidth)
@@ -358,8 +358,8 @@ def unpack_value(
     DTYPE_VALUE_AS_UINT,
 ):
     # Workaround for triton bug, tensor.to doesn't unwrap constexpr values
-    DTYPE_VALUE = tl.core._constexpr_to_value(DTYPE_VALUE)
-    DTYPE_VALUE_AS_UINT = tl.core._constexpr_to_value(DTYPE_VALUE_AS_UINT)
+    DTYPE_VALUE = tl.core._unwrap_if_constexpr(DTYPE_VALUE)
+    DTYPE_VALUE_AS_UINT = tl.core._unwrap_if_constexpr(DTYPE_VALUE_AS_UINT)
     bitwidth = DTYPE_VALUE_AS_UINT.primitive_bitwidth
     value_uint = (pack >> bitwidth).to(DTYPE_VALUE_AS_UINT)
     return value_uint.to(DTYPE_VALUE, bitcast=True)
@@ -717,3 +717,107 @@ def if_mask(mask: Any, val, *, _builder: object = None) -> tl.constexpr:
     if isinstance(mask, tl.constexpr) and mask.value is None:
         return tl.constexpr(None)
     return val
+
+
+HAS_NEW_TMA_API = hasattr(tl, "make_tensor_descriptor")
+
+
+"""
+Helper function that dispatches to either `tl.make_tensor_descriptor` or
+`triton.language.extra.cuda.experimental_device_tensormap_create2d` based on `HAS_NEW_TMA_API`.
+
+Parameters:
+- base_ptr: The base pointer to the tensor data (used as `base` or `global_address`)
+- shape: The shape of the tensor (used as `shape` or `global_size`)
+- strides: The strides of the tensor (only used with `make_tensor_descriptor`)
+- block_shape: The block shape (used as `block_shape` or `load_size`)
+- desc_ptr: The descriptor pointer (only used with `experimental_device_tensormap_create2d`)
+- element_ty: The element type (only used with `experimental_device_tensormap_create2d`)
+
+Returns:
+- The tensor descriptor or None depending on the API used
+"""
+if HAS_NEW_TMA_API:
+
+    @triton.jit
+    def make_tensor_descriptor(
+        base_ptr,
+        global_shape,
+        strides,
+        block_shape,
+        desc_ptr,
+        element_ty,
+    ):
+        return tl.make_tensor_descriptor(
+            base=base_ptr,
+            shape=global_shape,
+            strides=strides,
+            block_shape=block_shape,
+        )
+
+    @triton.jit
+    def load_tensor_descriptor(
+        desc,
+        offsets,
+        shape,
+        dtype,
+    ):
+        return tl.load_tensor_descriptor(desc, offsets)
+
+    @triton.jit
+    def store_tensor_descriptor(
+        desc,
+        value,
+        offsets,
+    ):
+        return tl.store_tensor_descriptor(desc, offsets, value)
+
+    @triton.jit
+    def tensormap_fenceproxy_acquire(
+        desc,
+    ):
+        pass
+
+else:
+
+    @triton.jit
+    def make_tensor_descriptor(
+        base_ptr,
+        global_shape,
+        strides,
+        block_shape,
+        desc_ptr,
+        element_ty,
+    ):
+        tl.extra.cuda.experimental_device_tensormap_create2d(
+            desc_ptr=desc_ptr,
+            global_address=base_ptr,
+            load_size=block_shape,
+            global_size=global_shape,
+            element_ty=element_ty,
+        )
+
+        return desc_ptr
+
+    @triton.jit
+    def load_tensor_descriptor(
+        desc,
+        offsets,
+        shape,
+        dtype,
+    ):
+        return tl._experimental_descriptor_load(desc, offsets, shape, dtype)
+
+    @triton.jit
+    def store_tensor_descriptor(
+        desc,
+        value,
+        offsets,
+    ):
+        return tl._experimental_descriptor_store(desc, value, offsets)
+
+    @triton.jit
+    def tensormap_fenceproxy_acquire(
+        desc,
+    ):
+        tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(desc)
