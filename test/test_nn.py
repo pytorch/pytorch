@@ -2605,6 +2605,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(len(w), 1)
             self.assertIn('Please ensure they have the same size.', str(w[0]))
 
+        i = torch.randn((10, 1), device='cuda')
+        t = torch.randn((10,))
+        with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
+            F.mse_loss(i, t)
+
     def test_weighted_mse_loss(self):
         inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
         targets = torch.tensor([1.5, 2.5, 3.5, 4.5])
