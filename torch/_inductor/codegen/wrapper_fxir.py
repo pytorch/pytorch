@@ -1,4 +1,5 @@
 import dataclasses
+import functools
 import logging
 import operator
 import textwrap
@@ -20,6 +21,7 @@ from torch._inductor.utils import sympy_product
 from torch._inductor.virtualized import V
 from torch._library.triton import wrap_triton
 from torch.fx import GraphModule
+from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import FloorDiv
 
 from .. import config, ir
@@ -496,12 +498,21 @@ class FxConverter:
             stream = driver.active.get_current_stream(device)
 
             def node_to_tensor(arg: Any) -> Any:
+                """
+                Create real tensors for autotuning arguments, substituting size hints
+                for dynamic shapes.
+                """
+                to_size_hint = functools.partial(
+                    pytree.tree_map, V.graph.sizevars.size_hint
+                )
                 if not isinstance(arg, torch.fx.Node):
-                    return arg
+                    return to_size_hint(arg)
 
                 fake = arg.meta["val"]
                 return torch.empty_strided(
-                    fake.shape, fake.stride(), device=device
+                    to_size_hint(fake.shape),
+                    to_size_hint(fake.stride()),
+                    device=device,
                 ).zero_()
 
             arg_values = [node_to_tensor(arg) for arg in call_args]

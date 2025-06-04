@@ -415,7 +415,8 @@ class FxirTestCase(InductorTestCase):
             self._compile_and_check(foo, args)
 
     @parametrize("enable_tuning", (False, True))
-    def test_autotune(self, enable_tuning: bool):
+    @parametrize("use_dynamic_shapes", (False, True))
+    def test_autotune(self, use_dynamic_shapes: bool, enable_tuning: bool):
         orig_run = torch._inductor.runtime.triton_heuristics.CachingAutotuner.run
         called = False
 
@@ -434,8 +435,18 @@ class FxirTestCase(InductorTestCase):
             torch._inductor.runtime.triton_heuristics.CachingAutotuner, "run", run
         ):
             self.assertFalse(called)
-            self._compile_and_check(torch.mul, args)
+            (gm,) = self._compile_and_check(
+                torch.mul, args, compile_kwargs={"dynamic": use_dynamic_shapes}
+            )
             self.assertEqual(called, enable_tuning)
+
+        # Check for a symbolic output shape.
+        (empty_strided,) = gm.graph.find_nodes(
+            op="call_function", target=torch.empty_strided
+        )
+        (shape, stride) = empty_strided.args
+        output_is_symbolic = any(isinstance(dim, torch.SymInt) for dim in shape)
+        self.assertEqual(output_is_symbolic, use_dynamic_shapes)
 
 
 if __name__ == "__main__":
