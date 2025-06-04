@@ -2,8 +2,6 @@
 # Owner(s): ["oncall: distributed"]
 import copy
 import logging
-import os
-import sys
 import tempfile
 
 from model_registry import ModelWithKwargs, MultiMLP, MultiMLPWithDw
@@ -37,6 +35,7 @@ from torch.testing._internal.common_utils import (
     check_leaked_tensors,
     instantiate_parametrized_tests,
     parametrize,
+    run_tests,
     skip_but_pass_in_sandcastle_if,
 )
 
@@ -48,6 +47,8 @@ batch_size = 256
 
 torch.manual_seed(0)
 
+device_type = "cuda"
+
 
 class ScheduleTest(MultiProcContinousTest):
     @classmethod
@@ -55,15 +56,9 @@ class ScheduleTest(MultiProcContinousTest):
         # Testing with NCCL backend
         return "nccl"
 
-    @classmethod
-    def setUpClass(cls):
-        """
-        Class-scope test fixture. Run once for entire test class, before any test starts.
-        Set up the device.
-        """
-        super().setUpClass()
-        dev_id = cls.rank % torch.cuda.device_count()
-        cls.device = torch.device(f"cuda:{dev_id}")
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -77,7 +72,7 @@ class ScheduleTest(MultiProcContinousTest):
         x = torch.randn(batch_size, d_hid, device=self.device)
         x_clone = x.clone()
 
-        num_microbatches = 4
+        num_microbatches = 2 * self.world_size
         x_mb = x.chunk(num_microbatches)[0]
 
         # Create a pipeline
@@ -159,6 +154,12 @@ class ScheduleTest(MultiProcContinousTest):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     def test_kwargs_with_tracer(self, ScheduleClass):
+        # Model has two stages only, thus limiting group size to 2
+        group_size = 2
+        group = dist.new_group(list(range(group_size)))
+        if self.rank >= group_size:
+            return
+
         mod = ModelWithKwargs(d_hid)
         mod.to(self.device)
 
@@ -180,6 +181,7 @@ class ScheduleTest(MultiProcContinousTest):
         stage = pipe.build_stage(
             self.rank,
             self.device,
+            group=group,
         )
 
         # Attach to a schedule
@@ -188,16 +190,16 @@ class ScheduleTest(MultiProcContinousTest):
         # Run
         if self.rank == 0:
             schedule.step(x, y=y)
-        elif self.rank == self.world_size - 1:
+        elif self.rank == group_size - 1:
             losses = []
             out = schedule.step(target=target, losses=losses)
         else:
             schedule.step()
 
-        dist.barrier()
+        # dist.barrier()
 
         # Last rank checks result
-        if self.rank == self.world_size - 1:
+        if self.rank == group_size - 1:
             ref_out = mod(x, y=y)
             ref_loss = loss_fn(ref_out, target)
             pipe_loss = sum(losses)
@@ -207,9 +209,8 @@ class ScheduleTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
-    @parametrize("ModelClass", [MultiMLP])
-    def test_grad_with_tracer(self, ScheduleClass, ModelClass):
-        mod = ModelClass(d_hid)
+    def test_grad_with_tracer(self, ScheduleClass):
+        mod = MultiMLP(d_hid, n_layers=self.world_size)
         mod.to(self.device)
 
         ref_mod = copy.deepcopy(mod)
@@ -229,7 +230,7 @@ class ScheduleTest(MultiProcContinousTest):
             ref_loss.backward()
 
         # Create a pipeline
-        chunks = 4
+        chunks = 2 * self.world_size
         x_mb = x.chunk(chunks)[0]
         split_spec = mod.split_spec if hasattr(mod, "split_spec") else None
         pipe = pipeline(
@@ -307,7 +308,7 @@ class ScheduleTest(MultiProcContinousTest):
         # Get a submodule, e.g. `layers.0` or `layers.1`
         submod_name = f"layers.{self.rank}"
         stage_module = full_mod.get_submodule(submod_name)
-        chunks = 4
+        chunks = 2 * self.world_size
 
         if shape_inference:
             input_args = None
@@ -410,7 +411,7 @@ class ScheduleTest(MultiProcContinousTest):
         num_microbatches = (
             ScheduleClass.num_microbatches
             if hasattr(ScheduleClass, "num_microbatches")
-            else 8
+            else 2 * self.world_size
         )
         stages = [
             PipelineStage(
@@ -518,13 +519,15 @@ class ScheduleTest(MultiProcContinousTest):
                     raise
 
     @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if(
+        not torch.cuda.device_count() == 2, "This test requires exactly 2 GPUs"
+    )
     @parametrize("ScheduleClass", [ScheduleWithW, ScheduleInterleavedZeroBubble])
     def test_schedule_with_native_zero_bubble(self, ScheduleClass):
         print(ScheduleClass)
         if ScheduleClass is ScheduleInterleavedZeroBubble:
             n_stages = 4
-            num_microbatches = 8
+            num_microbatches = 2 * n_stages
             rank_stages = {
                 0: [0, 2],
                 1: [1, 3],
@@ -612,7 +615,9 @@ class ScheduleTest(MultiProcContinousTest):
                     raise
 
     @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if(
+        not torch.cuda.device_count() == 2, "This test requires exactly 2 GPUs"
+    )
     @parametrize(
         "ScheduleClass",
         [
@@ -717,7 +722,9 @@ class ScheduleTest(MultiProcContinousTest):
                     raise
 
     @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if(
+        not torch.cuda.device_count() == 2, "This test requires exactly 2 GPUs"
+    )
     @parametrize(
         "schedule_class", [ScheduleVShaped, ScheduleUnbalanced, ScheduleZBVZeroBubble]
     )
@@ -822,7 +829,9 @@ class ScheduleTest(MultiProcContinousTest):
                     raise
 
     @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if(
+        not torch.cuda.device_count() == 2, "This test requires exactly 2 GPUs"
+    )
     @parametrize("ScheduleClass", [ScheduleInterleavedZeroBubble])
     def test_schedule_with_weight_update_mlp_e2e(self, ScheduleClass):
         stages_per_rank = 2
@@ -942,30 +951,4 @@ instantiate_parametrized_tests(ScheduleTest)
 
 
 if __name__ == "__main__":
-    # Check if GPU and NCCL are available
-    if not (
-        dist.is_available()
-        and dist.is_nccl_available()
-        and torch.cuda.device_count() > 1
-    ):
-        print(
-            "c10d NCCL not available or not enough GPUs, skipping tests",
-            file=sys.stderr,
-        )
-        sys.exit(0)
-
-    rank = int(os.getenv("RANK", -1))
-    world_size = int(os.getenv("WORLD_SIZE", 2))
-
-    if rank != -1:
-        # Launched with torchrun or other multi-proc launchers. Directly run the test.
-        ScheduleTest.run_rank(rank, world_size)
-    else:
-        # Launched as a single process. Spawn subprocess to run the tests.
-        # Also need a rendezvous file for `init_process_group` purpose.
-        rdvz_file = tempfile.NamedTemporaryFile(delete=False).name
-        torch.multiprocessing.spawn(
-            ScheduleTest.run_rank,
-            nprocs=world_size,
-            args=(world_size, rdvz_file),
-        )
+    run_tests()
