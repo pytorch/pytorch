@@ -82,6 +82,11 @@ TORCH_META_FUNC(_softmax_backward_data)
  const Tensor& output,
  int64_t dim,
  ScalarType input_dtype) {
+  if (grad.storage().allocator() == at::globalContext().getPinnedMemoryAllocator(c10::kMPS)) {
+    // See Note [CPU pinned to MPS failures]
+    // `python test/test_nn.py -k test_softmax_results_mps`
+    grad.mutable_data_ptr();
+  }
   TensorArg grad_arg{grad, "grad", 1}, output_arg{output, "output", 2};
   checkSameSize("softmax_backward", grad_arg, output_arg);
 

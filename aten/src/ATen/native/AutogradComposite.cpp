@@ -104,7 +104,7 @@ Tensor _lazy_clone(Tensor const& self, std::optional<c10::Device> device_opt) {
     return zeros_like(self, self.options());
   }
 
-  if (device_opt.has_value()) {
+  if (device_opt.has_value() && device_opt.value() != src_device) {
     c10::Device dst_device = device_opt.value();
     c10::DeviceType dst_device_type = dst_device.type();
     TORCH_CHECK(
@@ -132,7 +132,10 @@ Tensor _lazy_clone(Tensor const& self, std::optional<c10::Device> device_opt) {
 
     c10::Allocator* allocator = nullptr;
 
-    if (src_device_type == c10::kMPS && dst_device_type == c10::kCPU) {
+    if (src_device_type == dst_device_type) {
+      allocator = self_storage->allocator();
+
+    } else if (src_device_type == c10::kMPS && dst_device_type == c10::kCPU) {
       // For MPS-to-CPU, need the output to use the pinned MPS allocator, not
       // the regular CPU allocator.
       allocator = at::globalContext().getPinnedMemoryAllocator(c10::kMPS);

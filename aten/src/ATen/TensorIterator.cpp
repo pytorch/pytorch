@@ -142,6 +142,17 @@ TensorIteratorConfig& TensorIteratorConfig::add_borrowed_input(const TensorBase&
 }
 
 TensorIteratorConfig& TensorIteratorConfig::add_borrowed_const_input(const TensorBase& input) {
+  if (input.storage().allocator() == at::globalContext().getPinnedMemoryAllocator(c10::kMPS)) {
+    // Note [CPU pinned to MPS failures]
+    // For some reason, if the tensor is COW and is CPU pinned to MPS, it
+    // doesn't always behave properly for read ops and can unexpectedly get
+    // mutated without properly materializing. Need to figure out why.  Many of
+    // the tests in `python test/test_mps.py TestConsistencyMPS` are affected by
+    // this. As a workaround, it's possible to just materialize it now, but that
+    // would mean that most read ops unnecessarily materialize pinned CPU
+    // inputs.
+    //input.mutable_data_ptr();
+  }
   const_tensor_indices_.push_back(tensors_.size());
   tensors_.push_back(c10::MaybeOwned<TensorBase>::borrowed(input));
   num_inputs_++;
