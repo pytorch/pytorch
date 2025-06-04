@@ -1,45 +1,44 @@
 .. currentmodule:: torch.cuda._sanitizer
 
-CUDA Stream Sanitizer
-=====================
+# CUDA Stream Sanitizer
 
-.. note::
+```{note}
     This is a prototype feature, which means it is at an early stage
     for feedback and testing, and its components are subject to change.
+```
 
-Overview
---------
+## Overview
 
+```{eval-rst}
 .. automodule:: torch.cuda._sanitizer
+```
 
-
-Usage
-------
+## Usage
 
 Here is an example of a simple synchronization error in PyTorch:
 
-::
-
+```python
     import torch
 
     a = torch.rand(4, 2, device="cuda")
 
     with torch.cuda.stream(torch.cuda.Stream()):
         torch.mul(a, 5, out=a)
+```
 
 The ``a`` tensor is initialized on the default stream and, without any synchronization
 methods, modified on a new stream. The two kernels will run concurrently on the same tensor,
 which might cause the second kernel to read uninitialized data before the first one was able
 to write it, or the first kernel might overwrite part of the result of the second.
 When this script is run on the commandline with:
-::
 
+```bash
     TORCH_CUDA_SANITIZER=1 python example_error.py
+```
 
 the following output is printed by CSAN:
 
-::
-
+```bash
     ============================
     CSAN detected a possible data race on tensor with data pointer 139719969079296
     Access by stream 94646435460352 during kernel:
@@ -68,6 +67,7 @@ the following output is printed by CSAN:
       ...
       File "pytorch/torch/cuda/_sanitizer.py", line 420, in _handle_memory_allocation
         traceback.StackSummary.extract(
+```
 
 This gives extensive insight into the origin of the error:
 
@@ -82,21 +82,23 @@ This gives extensive insight into the origin of the error:
   - In the example, it can be seen that tensor ``a`` corresponds to arguments ``self``, ``out``
     and the ``output`` value of the invoked operator ``torch.mul``.
 
-.. seealso::
+```{seealso}
     The list of supported torch operators and their schemas can be viewed
-    :doc:`here <torch>`.
+    {doc}[here](torch).
+```
 
 The bug can be fixed by forcing the new stream to wait for the default stream:
 
-::
-
+```python
     with torch.cuda.stream(torch.cuda.Stream()):
         torch.cuda.current_stream().wait_stream(torch.cuda.default_stream())
         torch.mul(a, 5, out=a)
+```
 
 When the script is run again, there are no errors reported.
 
-API Reference
--------------
+## API Reference
 
+```{eval-rst}
 .. autofunction:: enable_cuda_sanitizer
+```
