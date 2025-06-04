@@ -8,10 +8,7 @@ import sys
 from typing import Optional
 
 import torch
-from torch.testing._internal.common_utils import (
-    raise_on_run_directly,
-    skipIfTorchDynamo,
-)
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 
 
 # Make the helper files in test/ importable
@@ -20,6 +17,14 @@ sys.path.append(pytorch_test_dir)
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test file is not meant to be run directly, use:\n\n"
+        "\tpython test/test_jit.py TESTNAME\n\n"
+        "instead."
+    )
 
 
 @skipIfTorchDynamo("skipping as a precaution")
@@ -458,7 +463,3 @@ class TestTorchbind(JitTestCase):
             return obj.decrement()
 
         self.checkScript(gn, ())
-
-
-if __name__ == "__main__":
-    raise_on_run_directly("test/test_jit.py")
