@@ -252,6 +252,7 @@ def cmd_update_gb_type(old_gb_type, file_path, registry_path, new_gb_type=None):
     )
     return True
 
+
 def create_registry(dynamo_dir, registry_path):
     calls = find_unimplemented_v2_calls(dynamo_dir)
     registry = {}
@@ -298,7 +299,7 @@ def main():
         "--dynamo_dir",
         type=str,
         default=default_dynamo_dir,
-        help="Directory to search for unimplemented_v2 calls",
+        help="Directory to search for unimplemented_v2 calls.",
     )
 
     add_parser = subparsers.add_parser("add", help="Add a gb_type to registry")
@@ -323,7 +324,7 @@ def main():
         "--registry-path",
         type=str,
         default=str(registry_path),
-        help="Path to save the registry JSON file.",
+        help="Path to save the registry JSON file",
     )
 
     args = parser.parse_args()

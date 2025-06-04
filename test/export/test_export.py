@@ -12913,6 +12913,33 @@ graph():
         ):
             ep.module()(torch.randn(10), torch.tensor(2))
 
+    @testing.expectedFailureCppSerDes  # TODO: When we deserialize we somehow hardcode sympy.lower to 2
+    @testing.expectedFailureSerDerNonStrict
+    @testing.expectedFailureSerDer
+    def test_baddbmm(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(
+                    torch.randn(64, 64, 192, dtype=torch.float16)
+                )
+                self.bias = torch.nn.Parameter(
+                    torch.randn(64, 1, 192, dtype=torch.float16)
+                )
+
+            def forward(self, x):
+                return torch.ops.aten.baddbmm.default(self.bias, x, self.weight)
+
+        x1 = torch.randn(64, 2048, 64, dtype=torch.float16)
+        x2 = torch.randn(64, 1, 64, dtype=torch.float16)
+        m = M()
+
+        torch.fx.experimental._config.backed_size_oblivious = True
+        ep = export(m, (x2,), dynamic_shapes=({1: Dim("batch")},))
+
+        self.assertTrue(torch.allclose(m(x2), ep.module()(x2)))
+        self.assertTrue(torch.allclose(m(x1), ep.module()(x1)))
+
     @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureSerDerNonStrict  # construtor is not serialized today
@@ -13372,6 +13399,25 @@ def forward(self, x):
         inp2 = torch.randn(7, 4)
         self.assertTrue(torch.allclose(comp_mod(inp1), mod(inp1)))
         self.assertTrue(torch.allclose(comp_mod(inp2), mod(inp2)))
+
+    def test_repeat_interleave(self):
+        class M(torch.nn.Module):
+            def forward(self, values, batch_sizes):
+                return torch.repeat_interleave(
+                    torch.arange(
+                        values.shape[0],
+                    ),
+                    batch_sizes,
+                )
+
+        inp = (torch.randint(0, 10, (1, 3)), torch.randint(0, 10, (1,)))
+        torch.fx.experimental._config.backed_size_oblivious = True
+        ep = torch.export.export(
+            M(), inp, dynamic_shapes=({0: Dim("dim")}, {0: Dim("dim")})
+        )
+        self.assertTrue(torch.allclose(M()(*inp), ep.module()(*inp)))
+        inp = (torch.randint(0, 10, (2, 3)), torch.randint(0, 10, (2,)))
+        self.assertTrue(torch.allclose(M()(*inp), ep.module()(*inp)))
 
     def test_automatic_dynamic_shapes_simple_equality(self):
         # The next 3 test cases tests for automatic dynamic shapes specs, verifying that automatic dynamism
