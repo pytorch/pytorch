@@ -155,7 +155,6 @@ class HopSchemaGenerator:
         )
 
 
-
 class CFunctionSchemaGen:
     """
     Note: [HigherOrderOperator schema generation]
@@ -197,7 +196,7 @@ class CFunctionSchemaGen:
         op_name: str,
         inp_argument_info: list[HopArgumentInfo],
         out_argument_info: HopArgumentInfo,
-        schema_tree_spec: pytree.TreeSpec,
+        schema_tree_spec: Optional[pytree.TreeSpec],
     ) -> Any:
         args = []
         for i, arg_info in enumerate(inp_argument_info):
