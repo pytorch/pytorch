@@ -56,7 +56,7 @@ which python
 
 # Add link.exe to PATH
 where link.exe
-export PATH=C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Tools/MSVC/14.43.34808/bin/Hostarm64/arm64;%PATH%
+export PATH="C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Tools/MSVC/14.43.34808/bin/Hostarm64/arm64;$PATH"
 
 # Install Python dependencies
 python -m pip install --upgrade pip
