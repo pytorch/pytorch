@@ -314,7 +314,7 @@ DTYPE_TO_CUTLASS_TYPE = {
     **DTYPE_TO_CPP,
     torch.float16: "__half",
     torch.bfloat16: "__nv_bfloat16",
-    torch.float8_e4m3fn: "cutlass::float_e4m3_t",
+    torch.float8_e4m3fn: "__nv_fp8_e4m3",
 }
 
 
