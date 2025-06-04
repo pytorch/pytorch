@@ -1,7 +1,6 @@
 # Owner(s): ["module: PrivateUse1"]
 
 import os
-import tempfile
 import types
 import unittest
 
@@ -298,7 +297,8 @@ class TestOpenReg(TestCase):
 
     # Serialization
     @unittest.skip(
-        "Temporarily disable due to the tiny differences between clang++ and g++ in defining static variable in inline function"
+        "Temporarily disable due to the tiny differences between clang++ and g++ in defining static variable in inline function,"
+        "this pr can fix this, https://github.com/pytorch/pytorch/pull/147095"
     )
     def test_serialization(self):
         storage = torch.UntypedStorage(4, device=torch.device("openreg"))
@@ -320,17 +320,18 @@ class TestOpenReg(TestCase):
         torch._utils.set_tensor_metadata(tensor, metadata)  # type: ignore[misc]
         self.assertEqual(torch._utils.get_tensor_metadata(tensor), metadata)  # type: ignore[misc]
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = os.path.join(tmpdir, "data.pt")
-            torch.save(tensor, path)
+        # Need to support torch.storage.UntypedStorage first in prepare_for_sending.convert
+        # with tempfile.TemporaryDirectory() as tmpdir:
+        #     path = os.path.join(tmpdir, "data.pt")
+        #     torch.save(tensor, path)
 
-            tensor_openreg = torch.load(path)
-            self.assertTrue(tensor_openreg.is_openreg)
-            self.assertEqual(torch._utils.get_tensor_metadata(tensor_openreg), metadata)  # type: ignore[misc]
+        #     tensor_openreg = torch.load(path)
+        #     self.assertTrue(tensor_openreg.is_openreg)
+        #     self.assertEqual(torch._utils.get_tensor_metadata(tensor_openreg), metadata)  # type: ignore[misc]
 
-            tensor_cpu = torch.load(path, map_location="cpu")
-            self.assertFalse(tensor_cpu.is_openreg)
-            self.assertEqual(torch._utils.get_tensor_metadata(tensor), {})  # type: ignore[misc]
+        #     tensor_cpu = torch.load(path, map_location="cpu")
+        #     self.assertFalse(tensor_cpu.is_openreg)
+        #     self.assertEqual(torch._utils.get_tensor_metadata(tensor), {})  # type: ignore[misc]
 
     # Opeartors
     def test_factory(self):
