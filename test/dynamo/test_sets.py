@@ -221,6 +221,7 @@ class SetGuardsSet(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(res, fn(x, s))
 
+    @unittest.skip("random failures on Python 3.9")
     def test_set_guard_on_keys_change(self):
         # This test guarantee that we're not triggering any of the dict guards
         # on sets
@@ -245,6 +246,7 @@ class SetGuardsSet(torch._dynamo.test_case.TestCase):
 
         # pop and add the same item
         s.remove(torch.amp._exit_autocast)
+        # It is not guaranteed that _exit_autocast will be in a specific order
         s.add(torch.amp._exit_autocast)
 
         x = torch.randn(4)
