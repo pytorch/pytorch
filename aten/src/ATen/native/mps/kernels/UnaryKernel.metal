@@ -4,20 +4,42 @@
 using namespace metal;
 using namespace c10::metal;
 
+// Implement exp wrapper for both real and complex types
+template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
+inline T exp_(const T x) {
+  return T(precise::exp(x));
+}
+
+template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+inline T exp_(const T x) {
+  return T(
+      precise::exp(x.x) * precise::cos(x.y),
+      precise::exp(x.x) * precise::sin(x.y));
+}
+
 struct exp_functor {
-  template <typename T>
-  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
-    return T(precise::exp(x));
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return exp_(x);
   }
-  template <typename T>
-  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
-    return precise::exp(static_cast<float>(x));
+  template <typename T, enable_if_t<is_scalar_integral_v<T>, bool> = true>
+  inline float operator()(const T x) {
+    return exp_(static_cast<float>(x));
   }
-  template <typename T>
-  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    return T(
-        precise::exp(x.x) * precise::cos(x.y),
-        precise::exp(x.x) * precise::sin(x.y));
+};
+
+struct sigmoid_functor {
+  template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return T(1.0f / (1.0f + exp_(-static_cast<float>(x))));
+  }
+  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return c10::metal::div(T(1, 0), (T(1, 0) + exp_(-x)));
+  }
+  template <typename T, enable_if_t<is_scalar_integral_v<T>, bool> = true>
+  inline float operator()(const T x) {
+    return 1.0f / (1.0f + exp_(-static_cast<float>(x)));
   }
 };
 
@@ -295,6 +317,7 @@ REGISTER_UNARY_OP(bitwise_not, bool, bool);
 #define INSTANTIATE_UNARY_KERNELS2(DTYPE0, DTYPE1) \
   REGISTER_UNARY_OP(erfinv, DTYPE1, DTYPE0);       \
   REGISTER_UNARY_OP(exp, DTYPE1, DTYPE0);          \
+  REGISTER_UNARY_OP(sigmoid, DTYPE1, DTYPE0);      \
   REGISTER_UNARY_OP(exp2, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(log, DTYPE1, DTYPE0);          \
   REGISTER_UNARY_OP(log10, DTYPE1, DTYPE0);        \
@@ -321,21 +344,22 @@ INSTANTIATE_UNARY_KERNELS2(float, short);
 INSTANTIATE_UNARY_KERNELS2(float, int);
 INSTANTIATE_UNARY_KERNELS2(float, long);
 
-#define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE)   \
-  REGISTER_UNARY_OP(neg, DTYPE##2, DTYPE##2);   \
-  REGISTER_UNARY_OP(exp, DTYPE##2, DTYPE##2);   \
-  REGISTER_UNARY_OP(exp2, DTYPE##2, DTYPE##2);  \
-  REGISTER_UNARY_OP(log, DTYPE##2, DTYPE##2);   \
-  REGISTER_UNARY_OP(log10, DTYPE##2, DTYPE##2); \
-  REGISTER_UNARY_OP(log1p, DTYPE##2, DTYPE##2); \
-  REGISTER_UNARY_OP(log2, DTYPE##2, DTYPE##2);  \
-  REGISTER_UNARY_OP(tanh, DTYPE##2, DTYPE##2);  \
-  REGISTER_UNARY_OP(sqrt, DTYPE##2, DTYPE##2);  \
-  REGISTER_UNARY_OP(rsqrt, DTYPE##2, DTYPE##2); \
-                                                \
-  REGISTER_UNARY_OP(sinc, DTYPE##2, DTYPE##2);  \
-  REGISTER_UNARY_OP(sin, DTYPE##2, DTYPE##2);   \
-  REGISTER_UNARY_OP(cos, DTYPE##2, DTYPE##2);   \
+#define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE)     \
+  REGISTER_UNARY_OP(neg, DTYPE##2, DTYPE##2);     \
+  REGISTER_UNARY_OP(exp, DTYPE##2, DTYPE##2);     \
+  REGISTER_UNARY_OP(sigmoid, DTYPE##2, DTYPE##2); \
+  REGISTER_UNARY_OP(exp2, DTYPE##2, DTYPE##2);    \
+  REGISTER_UNARY_OP(log, DTYPE##2, DTYPE##2);     \
+  REGISTER_UNARY_OP(log10, DTYPE##2, DTYPE##2);   \
+  REGISTER_UNARY_OP(log1p, DTYPE##2, DTYPE##2);   \
+  REGISTER_UNARY_OP(log2, DTYPE##2, DTYPE##2);    \
+  REGISTER_UNARY_OP(tanh, DTYPE##2, DTYPE##2);    \
+  REGISTER_UNARY_OP(sqrt, DTYPE##2, DTYPE##2);    \
+  REGISTER_UNARY_OP(rsqrt, DTYPE##2, DTYPE##2);   \
+                                                  \
+  REGISTER_UNARY_OP(sinc, DTYPE##2, DTYPE##2);    \
+  REGISTER_UNARY_OP(sin, DTYPE##2, DTYPE##2);     \
+  REGISTER_UNARY_OP(cos, DTYPE##2, DTYPE##2);     \
   REGISTER_UNARY_OP(tan, DTYPE##2, DTYPE##2)
 
 INSTANTIATE_UNARY_KERNELS_VEC2(half);
