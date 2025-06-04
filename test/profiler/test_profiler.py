@@ -70,6 +70,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+from torch.testing._internal.triton_utils import requires_gpu
 
 
 if TYPE_CHECKING:
@@ -2033,38 +2034,42 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             else:
                 self.assertFalse(evt.is_user_annotation)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    @requires_gpu
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_dynamic_toggle(self):
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as p:
+        if torch.cuda.is_available():
+            gpu_activity = ProfilerActivity.CUDA
+            device = "cuda"
+        elif torch.xpu.is_available():
+            device = "xpu"
+        activities = [ProfilerActivity.CPU, gpu_activity]
+        with profile(activities=activities) as p:
             with torch.profiler.record_function("test_user_annotation"):
-                x, y = (torch.rand(4, 4).to("cuda") for _ in range(2))
+                x, y = (torch.rand(4, 4).to(device) for _ in range(2))
                 torch.add(x, y)
 
         self.assertTrue(any("aten" in e.name for e in p.events()))
 
-        self.assertTrue(any("cuda" in e.name for e in p.events()))
+        self.assertTrue(any(device in e.name for e in p.events()))
 
         self.assertTrue(any("kernel" in e.name for e in p.events()))
 
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as p1:
-            p1.toggle_collection_dynamic(False, [ProfilerActivity.CUDA])
+        with profile(activities=activities) as p1:
+            p1.toggle_collection_dynamic(False, [gpu_activity])
             with torch.profiler.record_function("test_user_annotation"):
-                x, y = (torch.rand(4, 4).to("cuda") for _ in range(2))
+                x, y = (torch.rand(4, 4).to(device) for _ in range(2))
                 torch.add(x, y)
 
         self.assertTrue(any("aten" in e.name for e in p1.events()))
 
-        self.assertTrue(all("cuda" not in e.name for e in p1.events()))
+        self.assertTrue(all(device not in e.name for e in p1.events()))
 
         self.assertTrue(all("kernel" not in e.name for e in p1.events()))
 
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as p2:
-            p2.toggle_collection_dynamic(
-                False, [ProfilerActivity.CUDA, ProfilerActivity.CPU]
-            )
+        with profile(activities=activities) as p2:
+            p2.toggle_collection_dynamic(False, activities)
             with torch.profiler.record_function("test_user_annotation"):
-                x, y = (torch.rand(4, 4).to("cuda") for _ in range(2))
+                x, y = (torch.rand(4, 4).to(device) for _ in range(2))
                 torch.add(x, y)
         self.assertTrue(len(p2.events()) == 0)
 
