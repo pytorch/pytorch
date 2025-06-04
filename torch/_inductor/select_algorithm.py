@@ -1190,6 +1190,7 @@ class GeneratedCodeCache:
         prefix_args: int,
         suffix_args: int,
         epilogue_fn: Optional[Callable[..., Any]],
+        epilogue_fn_hash: Optional[str],
         subgraphs: Optional[list[ir.Buffer]],  # has to be none to cache
         workspace_arg: Optional[WorkspaceArg],  # has to be none to cache
         layout: ir.Layout,
@@ -1218,12 +1219,16 @@ class GeneratedCodeCache:
                     return True
             return False
 
+        if epilogue_fn is identity:
+            assert epilogue_fn_hash is None
+            epilogue_fn_hash = "identity"
+
         # we do not cache under those conditions right now.
         if (
             has_flexible_layout()
             or subgraphs is not None
             or workspace_arg is not None
-            or epilogue_fn is not identity
+            or epilogue_fn_hash is None
         ):
             return None
 
@@ -1240,6 +1245,7 @@ class GeneratedCodeCache:
                 "layout": layout_key(layout),
                 "num_consumer_groups": num_consumer_groups,
                 "num_buffers_warp_spec": num_buffers_warp_spec,
+                "epilogue_fn_hash": epilogue_fn_hash,
                 "kwargs": kwargs,
             }
         )
@@ -1337,6 +1343,7 @@ class TritonTemplate(KernelTemplate):
         prefix_args: int,
         suffix_args: int,
         epilogue_fn: Optional[Callable[..., Any]],
+        epilogue_fn_hash: Optional[str],
         subgraphs: Optional[list[ir.Buffer]],
         workspace_arg: Optional[WorkspaceArg],
         num_consumer_groups: int,
@@ -1361,6 +1368,7 @@ class TritonTemplate(KernelTemplate):
                 prefix_args,
                 suffix_args,
                 epilogue_fn,
+                epilogue_fn_hash,
                 subgraphs,
                 workspace_arg,
                 layout,
@@ -1528,6 +1536,7 @@ class TritonTemplate(KernelTemplate):
         prefix_args: int = 0,
         suffix_args: int = 0,
         epilogue_fn: Optional[Callable[..., Any]] = identity,
+        epilogue_fn_hash: Optional[str] = None,
         subgraphs: Optional[list[ir.Buffer]] = None,
         mutated_inputs: Optional[list[ir.IRNode]] = None,
         call_sizes: Optional[list[sympy.core.symbol.Symbol]] = None,
@@ -1569,6 +1578,7 @@ class TritonTemplate(KernelTemplate):
             prefix_args,
             suffix_args,
             epilogue_fn,
+            epilogue_fn_hash,
             subgraphs,
             workspace_arg,
             num_consumer_groups,
