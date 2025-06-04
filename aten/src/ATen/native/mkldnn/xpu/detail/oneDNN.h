@@ -23,7 +23,7 @@ sycl::event scaled_matmul(
     const std::optional<at::Tensor>& bias,
     const at::Tensor& scale_a,
     const at::Tensor& scale_b,
-    Attr attr,
+    Attr& attr,
     const std::vector<sycl::event>& deps = {});
 
 TORCH_API sycl::event convolution(
