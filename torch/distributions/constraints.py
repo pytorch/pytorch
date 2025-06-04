@@ -58,6 +58,8 @@ __all__ = [
     "Boolean",
     "Cat",
     "CorrCholesky",
+    "Dependent",
+    "DependentProperty",
     "GreaterThan",
     "GreaterThanEq",
     "HalfOpenInterval",
@@ -105,21 +107,21 @@ __all__ = [
     "square",
     "symmetric",
     "unit_interval",
+    # functions
+    "is_dependent",
     # aliases
     "cat",
     "dependent_property",
-    "independent",
-    "integer_interval",
-    "mixture_same_family",
-    "stack",
-    "interval",
-    "half_open_interval",
     "greater_than",
     "greater_than_eq",
+    "half_open_interval",
+    "independent",
+    "integer_interval",
+    "interval",
     "less_than",
+    "mixture_same_family",
     "multinomial",
-    # functions
-    "is_dependent",
+    "stack",
 ]
 
 
@@ -161,7 +163,7 @@ class Constraint:
 # dependent constraints ----------------------------------------------------------------
 
 
-class _Dependent(Constraint):
+class Dependent(Constraint):
     """
     Placeholder for variables whose support depends on other variables.
     These variables obey no simple coordinate-wise constraints.
@@ -196,7 +198,7 @@ class _Dependent(Constraint):
 
     def __call__(
         self, *, is_discrete: bool = NotImplemented, event_dim: int = NotImplemented
-    ) -> "_Dependent":
+    ) -> "Dependent":
         """
         Support for syntax to customize static attributes::
 
@@ -206,13 +208,13 @@ class _Dependent(Constraint):
             is_discrete = self._is_discrete
         if event_dim is NotImplemented:
             event_dim = self._event_dim
-        return _Dependent(is_discrete=is_discrete, event_dim=event_dim)
+        return Dependent(is_discrete=is_discrete, event_dim=event_dim)
 
     def check(self, x: Tensor) -> Tensor:
         raise ValueError("Cannot determine validity of dependent constraint")
 
 
-def is_dependent(constraint: Constraint) -> TypeIs[_Dependent]:
+def is_dependent(constraint: Constraint) -> TypeIs[Dependent]:
     """
     Checks if ``constraint`` is a ``_Dependent`` object.
 
@@ -235,14 +237,14 @@ def is_dependent(constraint: Constraint) -> TypeIs[_Dependent]:
         >>>     if is_dependent(constraint):
         >>>         continue
     """
-    return isinstance(constraint, _Dependent)
+    return isinstance(constraint, Dependent)
 
 
 T = TypeVar("T", covariant=True)
 R = TypeVar("R", covariant=True)
 
 
-class _DependentProperty(property, _Dependent, Generic[T, R]):
+class DependentProperty(property, Dependent, Generic[T, R]):
     """
     Decorator that extends @property to act like a `Dependent` constraint when
     called on a class and act like a property when called on an object.
@@ -276,7 +278,7 @@ class _DependentProperty(property, _Dependent, Generic[T, R]):
         event_dim: int = NotImplemented,
     ) -> None:
         property.__init__(self, fn)
-        _Dependent.__init__(self, is_discrete=is_discrete, event_dim=event_dim)
+        Dependent.__init__(self, is_discrete=is_discrete, event_dim=event_dim)
 
     if TYPE_CHECKING:
         # Needed because subclassing property is not fully supported in mypy
@@ -295,7 +297,7 @@ class _DependentProperty(property, _Dependent, Generic[T, R]):
         *,
         is_discrete: bool = NotImplemented,
         event_dim: int = NotImplemented,
-    ) -> "_DependentProperty[_T, _R]":
+    ) -> "DependentProperty[_T, _R]":
         """
         Support for syntax to customize static attributes::
 
@@ -306,7 +308,7 @@ class _DependentProperty(property, _Dependent, Generic[T, R]):
             is_discrete = self._is_discrete
         if event_dim is NotImplemented:
             event_dim = self._event_dim
-        return _DependentProperty(fn, is_discrete=is_discrete, event_dim=event_dim)
+        return DependentProperty(fn, is_discrete=is_discrete, event_dim=event_dim)
 
 
 # generic constraints ------------------------------------------------------------------
@@ -848,7 +850,7 @@ class PositiveDefinite(Symmetric):
 
 # canonical instances
 # dependent constraints
-dependent: Final[_Dependent] = _Dependent()
+dependent: Final[Dependent] = Dependent()
 # value constraints
 boolean: Final[Boolean] = Boolean()
 real: Final[Real] = Real()
@@ -873,7 +875,7 @@ symmetric: Final[Symmetric] = Symmetric()
 
 
 # aliases
-dependent_property = _DependentProperty
+dependent_property = DependentProperty
 # generic constraints
 cat = Cat
 independent = Independent
