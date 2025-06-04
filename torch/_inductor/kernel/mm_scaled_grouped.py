@@ -100,7 +100,7 @@ def early_config_prune(g, m, configs, named_args):
 
         # 1. Prune NV configs depending on g and m.
         if not torch.version.hip:
-            if not has_free_symbols((m,)):
+            if not has_free_symbols((g, m)):
                 a_is_2d, b_is_2d = named_args["A_IS_2D"], named_args["B_IS_2D"]
                 m_avg = m // g if a_is_2d and not b_is_2d else m
                 if m_avg <= 16:

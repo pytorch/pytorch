@@ -49,10 +49,19 @@ def has_triton_tma_device():
             and torch.cuda.get_device_capability() >= (9, 0)
             and not torch.version.hip
         ):
+            # old API
             try:
                 from triton.language import (  # noqa: F401
                     _experimental_make_tensor_descriptor,
                 )
+
+                return True
+            except ImportError:
+                pass
+
+            # new API
+            try:
+                from triton.language import make_tensor_descriptor  # noqa: F401
 
                 return True
             except ImportError:
