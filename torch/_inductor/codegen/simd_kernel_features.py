@@ -24,6 +24,8 @@ from ..virtualized import V
 if typing.TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
+    from torch._inductor.tiling_utils import CoalesceVarAnalysis
+
 
 class NodeScheduleMarker:
     @staticmethod
@@ -80,12 +82,14 @@ class SIMDKernelFeatures:
         node_schedule: list[NodeScheduleEntry],
         numel: sympy.Expr,
         reduction_numel: sympy.Expr = sympy.S.One,
+        coalesce_analysis: Optional[CoalesceVarAnalysis] = None,
     ):
         self.node_schedule = node_schedule
         # numel excludes reduction_numel
         self.numel: sympy.Expr = V.graph.sizevars.simplify(numel)
         self.reduction_numel: sympy.Expr = V.graph.sizevars.simplify(reduction_numel)
         self._stats_cache: dict[tuple[sympy.Expr, ...], MemoryStats] = {}
+        self.coalesce_analysis = coalesce_analysis
 
     @cache_on_self
     def is_reduction(self) -> bool:
