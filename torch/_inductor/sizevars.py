@@ -574,7 +574,7 @@ class SizeVarAllocator:
 
     def size_hints(
         self,
-        exprs: Iterable[Union[Expr, int]],
+        exprs: Iterable[Expr],
         *,
         fallback: Optional[int] = None,
     ) -> tuple[int, ...]:
