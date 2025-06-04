@@ -41,6 +41,7 @@ DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
     std::filesystem::create_directories(cacheDirPath);
     auto defaultLocation = cacheDirPath / "nccl_trace_rank_";
 
+    // For internal bc compatibility, we keep the old the ENV check.
     std::string fileNamePrefix = getCvarString(
         {"TORCH_FR_DUMP_TEMP_FILE", "TORCH_NCCL_DEBUG_INFO_TEMP_FILE"},
         defaultLocation.string().c_str());
@@ -78,4 +79,26 @@ float getDurationFromEvent<c10::Event>(
 // use an Event type other than c10::Event, one also needs to registers here to
 // avoid linking errors.
 template struct FlightRecorder<c10::Event>;
+
+std::string dump_fr_trace(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive) {
+  return FlightRecorder<c10::Event>::get()->dump(
+      std::unordered_map<
+          std::string,
+          std::unordered_map<std::string, std::string>>{},
+      includeCollectives,
+      includeStackTraces,
+      onlyActive);
+}
+
+std::string dump_fr_trace_json(bool includeCollectives, bool onlyActive) {
+  return FlightRecorder<c10::Event>::get()->dump_json(
+      std::unordered_map<
+          std::string,
+          std::unordered_map<std::string, std::string>>{},
+      includeCollectives,
+      onlyActive);
+}
 } // namespace c10d

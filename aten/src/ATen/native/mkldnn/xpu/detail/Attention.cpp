@@ -1,8 +1,10 @@
+#include <ATen/OpMathType.h>
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
-
 #include <oneapi/dnnl/dnnl.hpp>
+
+namespace {
 
 using namespace at::native::onednn;
 using logical_tensor = dnnl::graph::logical_tensor;
@@ -11,7 +13,13 @@ using dims = logical_tensor::dims;
 using op = dnnl::graph::op;
 using partition = dnnl::graph::partition;
 
-namespace {
+inline data_type to_logical_tensor_data_type(c10::ScalarType scalar_type) {
+  return scalar_type == c10::ScalarType::Float   ? data_type::f32
+      : scalar_type == c10::ScalarType::Half     ? data_type::f16
+      : scalar_type == c10::ScalarType::BFloat16 ? data_type::bf16
+                                                 : data_type::undef;
+}
+
 struct SDPALogicalParams {
   enum class TensorID {
     query,
@@ -39,11 +47,7 @@ struct SDPALogicalParams {
       const std::optional<at::Tensor>& attn_mask_,
       const at::Tensor& output_,
       bool is_causal) {
-    const data_type dtype = // to logical_tensor data type
-        query_.scalar_type() == c10::ScalarType::Float      ? data_type::f32
-        : query_.scalar_type() == c10::ScalarType::Half     ? data_type::f16
-        : query_.scalar_type() == c10::ScalarType::BFloat16 ? data_type::bf16
-                                                            : data_type::undef;
+    const data_type dtype = to_logical_tensor_data_type(query_.scalar_type());
     TORCH_INTERNAL_ASSERT(
         (dtype != data_type::undef),
         "Only FP16/BF16/FP32 datatypes are currently supported");
@@ -84,22 +88,27 @@ struct SDPALogicalParams {
         reshaped_key.strides().vec()};
     scale = {
         static_cast<size_t>(TensorID::scale),
-        dtype,
+        to_logical_tensor_data_type(at::toOpMathType(query_.scalar_type())),
         scalar_shape,
         logical_tensor::layout_type::strided,
         logical_tensor::property_type::constant};
     if (is_causal) {
       neg_inf = {
           static_cast<size_t>(TensorID::neg_inf),
-          dtype,
+          to_logical_tensor_data_type(at::toOpMathType(query_.scalar_type())),
           scalar_shape,
           logical_tensor::layout_type::strided,
           logical_tensor::property_type::constant};
     }
     if (attn_mask_.has_value()) {
+      const data_type mask_dtype =
+          to_logical_tensor_data_type(attn_mask_->scalar_type());
+      TORCH_INTERNAL_ASSERT(
+          (mask_dtype != data_type::undef),
+          "Only FP16/BF16/FP32 datatypes are currently supported for attn_mask");
       attn_mask = {
           static_cast<size_t>(TensorID::attn_mask),
-          dtype,
+          mask_dtype,
           reshaped_attn_mask.sizes().vec(),
           reshaped_attn_mask.strides().vec()};
     }
@@ -147,7 +156,12 @@ partition create_sdpa_graph_partition(
   size_t lt_id = static_cast<size_t>(SDPALogicalParams::TensorID::end);
   size_t op_id = 0;
 
-  logical_tensor matmul_qk_out{lt_id++, dtype};
+  // OneDNN graph has optimized implementation for `f16` or `bf16` SDPA with
+  // `f32` intermediate data type on Intel Graphics Products with Intel(R) Xe
+  // Matrix Extensions (Intel(R) XMX) support, which means the
+  // Q/K/V tensors have bf16 or f16 data type while the output of the first
+  // MatMul, Scale, Mask, and the input of SoftMax are in f32 data type.
+  logical_tensor matmul_qk_out{lt_id++, data_type::f32};
   op matmul_qk{
       op_id++,
       op::kind::MatMul,
@@ -156,7 +170,7 @@ partition create_sdpa_graph_partition(
       "matmul_qk"};
   matmul_qk.set_attr<bool>(op::attr::transpose_b, true);
 
-  logical_tensor scaled_qk_out{lt_id++, dtype};
+  logical_tensor scaled_qk_out{lt_id++, data_type::f32};
   op scale_mul{
       op_id++,
       op::kind::Multiply,
@@ -181,7 +195,7 @@ partition create_sdpa_graph_partition(
   if (params.attn_mask.has_value()) {
     TORCH_INTERNAL_ASSERT(
         !is_causal, "Additive mask cannot use with is_causal.");
-    masked_qk_out = {lt_id++, dtype};
+    masked_qk_out = {lt_id++, data_type::f32};
     mask_add = {
         op_id++,
         op::kind::Add,
@@ -216,7 +230,7 @@ partition create_sdpa_graph_partition(
         {mask_gt_out.value()},
         "mask_gt"};
 
-    masked_qk_out = {lt_id++, dtype};
+    masked_qk_out = {lt_id++, data_type::f32};
     mask_select = {
         op_id++,
         op::kind::Select,
@@ -316,6 +330,39 @@ partition& find_or_create_graph_partition(
   }
   return *partition_;
 }
+
+void alloc_with_matching_layout(
+    const at::Tensor& q,
+    at::Tensor& output,
+    const std::vector<int64_t>& shape) {
+  TORCH_INTERNAL_ASSERT(
+      shape.size() == q.sizes().size(),
+      "OneDNN SDPA alloc_with_matching_layout got requested shape ndim != q ndim");
+
+  if (std::equal(q.sizes().begin(), q.sizes().end(), shape.begin())) {
+    output = at::empty_like(q);
+    return;
+  }
+
+  // get the "fill order," which is just an argsort on the strides
+  std::vector<int> fill_order(shape.size());
+  std::iota(fill_order.begin(), fill_order.end(), 0);
+  const auto q_strides = q.strides();
+  std::stable_sort(
+      fill_order.begin(), fill_order.end(), [&q_strides](int idx1, int idx2) {
+        return q_strides[idx1] < q_strides[idx2];
+      });
+  std::vector<int64_t> ordered_strides(shape.size());
+  int64_t current_stride = 1;
+  for (const int dim_idx : fill_order) {
+    ordered_strides[dim_idx] = current_stride;
+    current_stride *= shape[dim_idx];
+  }
+  output = at::empty(at::IntArrayRef(shape), q.options())
+               .as_strided(
+                   at::IntArrayRef(shape), at::IntArrayRef(ordered_strides), 0);
+}
+
 } // namespace
 
 namespace at::native::onednn {
@@ -333,7 +380,14 @@ void gpu_float_sdpa(
     std::optional<at::Tensor> attn_mask,
     bool is_causal,
     float softmax_scale,
-    const Tensor& output) {
+    Tensor& output) {
+  if (!output.defined()) {
+    // allocate output tensor with layout matched to query
+    std::vector<int64_t> output_shape = {
+        batch_size, num_head, seq_len_q, head_dim_v};
+    alloc_with_matching_layout(query, output, output_shape);
+  }
+
   auto& eng = GpuEngineManager::Instance().get_engine();
   auto& strm = GpuStreamManager::Instance().get_stream();
 
@@ -349,24 +403,16 @@ void gpu_float_sdpa(
         at::scalar_tensor(-std::numeric_limits<float>::infinity(), opts));
   };
 
-  static bool driver_support_implict_causal = true;
-  if (attn_mask.has_value()) {
-    TORCH_INTERNAL_ASSERT(
-        !is_causal,
-        "scaled_dot_product_fused_attention_overrideable_xpu: "
-        "attn_mask cannot present with is_causal");
-  } else {
-    // Currenetly implict mask only supports square fp16 cases
-    const bool support_implict_causal = driver_support_implict_causal &&
-        (query.dtype() == at::kHalf || query.dtype() == at::kBFloat16) &&
-        seq_len_q == seq_len_k;
-    if (is_causal && !support_implict_causal) {
-      attn_mask = get_tril_mask();
-      is_causal = false;
-    }
+  // OneDNN doesn't support fp32 ukernel for implicit causal mask,
+  // and the reference implementation is worse than aten math + explict causal
+  // mask. Fall back to explict causal mask until OneDNN v3.9 which has fp32
+  // ukernel for implicit causal mask.
+  if (is_causal && query.dtype() == at::kFloat) {
+    attn_mask = get_tril_mask();
+    is_causal = false;
   }
 
-  std::vector<logical_tensor> l_inputs, l_outputs;
+  std::vector<dnnl::graph::logical_tensor> l_inputs, l_outputs;
   std::optional<dnnl::graph::compiled_partition> compiled_partition;
 
   auto get_compiled_partition = [&]() {
@@ -388,24 +434,18 @@ void gpu_float_sdpa(
     return compiled_partition;
   };
 
-  // maybe retry without causal mask
-  try {
-    compiled_partition = get_compiled_partition();
-  } catch (std::exception& e) {
-    if (is_causal) {
-      attn_mask = get_tril_mask();
-      is_causal = false;
-      compiled_partition = get_compiled_partition();
-      driver_support_implict_causal = false;
-    } else {
-      throw e;
-    }
-  }
+  compiled_partition = get_compiled_partition();
 
-  Tensor softmax_scale1 = at::full({}, softmax_scale, query.options());
+  Tensor softmax_scale1 = at::full(
+      {},
+      softmax_scale,
+      query.options().dtype(at::toOpMathType(query.scalar_type())));
   std::optional<at::Tensor> neg_inf;
   if (is_causal) {
-    neg_inf = at::full({}, -INFINITY, query.options());
+    neg_inf = at::full(
+        {},
+        -INFINITY,
+        query.options().dtype(at::toOpMathType(query.scalar_type())));
   }
 
   std::vector<dnnl::graph::tensor> outputs = {
