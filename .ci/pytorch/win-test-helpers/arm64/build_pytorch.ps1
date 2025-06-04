@@ -15,7 +15,6 @@ if ($env:DEBUG -eq "1") {
 
 $env:INSTALLER_DIR = Join-Path $env:SCRIPT_HELPERS_DIR "installation-helpers"
 
-Write-Output "Resuming script..."
 cd ..
 
 # Environment variables
@@ -42,10 +41,6 @@ if ($env:ENABLE_APL -eq "1") {
     $env:BLAS = "OpenBLAS"
     $env:OpenBLAS_HOME = Join-Path $env:DEPENDENCIES_DIR "OpenBLAS\install"
 }
-
-# Activate Visual Studio environment
-cmd.exe /c `"\"C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat\" arm64
-where.exe cl.exe
 
 # Change to source directory
 Set-Location $env:PYTORCH_ROOT
