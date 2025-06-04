@@ -61,6 +61,7 @@ from .codegen.triton import (
 from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
+from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
 from .runtime.benchmarking import benchmarker
@@ -482,11 +483,19 @@ class TritonTemplateKernel(TritonKernel):
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
         num_bytes = []
         for i, inp in enumerate(itertools.chain(self.input_nodes, (self.output_node,))):
-            size = V.graph.sizevars.size_hints(inp.get_size())
+            size = V.graph.sizevars.size_hints(inp.get_size(), fallback=0)
             numel = functools.reduce(operator.mul, size, 1)
             dtype_size = get_dtype_size(inp.get_dtype())
             num_bytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
         return sum(num_bytes)
+
+    def estimate_flops(self) -> int:
+        for node in self.input_nodes:
+            for fx_node in node._current_origins:
+                f = count_flops_fx(fx_node)
+                if f is not None:
+                    return V.graph.sizevars.size_hint(f, fallback=0)
+        return 0
 
     def jit_lines(self):
         if self.use_jit:
@@ -523,6 +532,9 @@ class TritonTemplateKernel(TritonKernel):
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
+        if config.benchmark_kernel:
+            flops = self.estimate_flops()
+            inductor_meta["kernel_flop"] = flops
 
         template_args = f"""
             num_stages={self.num_stages},
@@ -2067,7 +2079,7 @@ def create_precompile_key(
             inputs_key,
             torch.get_float32_matmul_precision(),
         ]
-        + [choice.hash_key() for choice in choices]
+        + [choice.kernel_hash_key() for choice in choices]
     )
 
 
@@ -2434,7 +2446,7 @@ class AlgorithmSelectorCache(PersistentCache):
         seen_choices: OrderedSet[str] = OrderedSet()
         for c in choices:
             # Skip choices which we have already issued a precompile
-            if c.hash_key() in seen_choices:
+            if c.kernel_hash_key() in seen_choices:
                 log.debug("Skipping already seen choice: %s", c)
                 continue
             else:
@@ -2754,11 +2766,11 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # prune choices based on prescreening timings
         candidates_to_prune = OrderedSet(
-            candidate.hash_key() for candidate in sorted_candidates[num_to_keep:]
+            candidate.kernel_hash_key() for candidate in sorted_candidates[num_to_keep:]
         )
         for candidate in sorted_candidates[:num_to_keep]:
             if candidate_timings[candidate] == float("inf"):
-                candidates_to_prune.add(candidate.hash_key())
+                candidates_to_prune.add(candidate.kernel_hash_key())
             else:
                 if isinstance(candidate, CUDATemplateCaller):
                     candidate.bmreq.ensure_dll_loaded()
@@ -2766,7 +2778,7 @@ class AlgorithmSelectorCache(PersistentCache):
         choices = [
             choice
             for choice in choices
-            if choice.hash_key() not in candidates_to_prune  # type: ignore[attr-defined]
+            if choice.kernel_hash_key() not in candidates_to_prune  # type: ignore[attr-defined]
         ]
 
         log.debug("After pruning using prescreening timings, %d choices", len(choices))

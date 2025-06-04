@@ -614,7 +614,8 @@ class CUDATemplateCaller(ChoiceCaller):
         """
         return "-".join(
             [
-                self.kernel_hash_key(),
+                self.category,
+                self.bmreq.hash_key,
                 str(self.info_dict().get("swizzle")),
             ]
         )
