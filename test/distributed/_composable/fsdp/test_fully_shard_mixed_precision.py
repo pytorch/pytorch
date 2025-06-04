@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import dataclasses
 import functools
 from typing import Optional, Union
 
@@ -592,6 +593,30 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             inp = torch.randn((4, 32), device=device_type.type)
             loss = model(inp).sum()
             loss.backward()
+
+    @skip_if_lt_x_gpu(1)
+    def test_dataclass_input(self):
+        @dataclasses.dataclass
+        class Input:
+            x: torch.Tensor
+
+        class Model(nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self._layer = nn.Linear(10, 10)
+
+            def forward(self, input: Input):
+                return self._layer(input.x)
+
+        mp_policy = MixedPrecisionPolicy(
+            torch.bfloat16, torch.bfloat16, torch.bfloat16, True
+        )
+        model = Model()
+        inp = Input(torch.randn(2, 10).cuda())
+
+        fully_shard(model, mp_policy=mp_policy)
+        loss = model(inp).sum()
+        loss.backward()
 
 
 if __name__ == "__main__":

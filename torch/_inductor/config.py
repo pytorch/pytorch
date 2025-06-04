@@ -1681,6 +1681,9 @@ class test_configs:
 
     graphsafe_rng_func_ignores_fallback_random = False
 
+    # TODO - temporary config before enabled by default
+    global_tiling_analysis: bool = False
+
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
