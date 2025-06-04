@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import copy
 import functools
-import warnings
+import typing_extensions
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
@@ -238,6 +238,10 @@ def _get_not_module_type_or_name_filter(
 
 
 @compatibility(is_backward_compatible=False)
+@typing_extensions.deprecated(
+    "XNNPACKQuantizer is deprecated! Please use xnnpack quantizer in "
+    "ExecuTorch (https://github.com/pytorch/executorch/tree/main/backends/xnnpack/quantizer) instead."
+)
 class XNNPACKQuantizer(Quantizer):
     """
     !!! DEPRECATED !!!
@@ -278,7 +282,6 @@ class XNNPACKQuantizer(Quantizer):
 
     def __init__(self) -> None:
         super().__init__()
-        warnings.warn(f"{self.__class__.__name__} is deprecated!")
         self.global_config: Optional[QuantizationConfig] = None
         self.operator_type_config: dict[
             torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
