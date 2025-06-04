@@ -466,7 +466,7 @@ at::Tensor nvshmem_all_to_all_vdev_2d(
         output offsets (OUT).
    *  - `group_name` is the name of the group to use for the collective operation.
    *  - `major_align` is the alignment of the "major dimension" of the output
-        tensor. See below for details.
+        sequence. See below for details.
 
    *  A 2D AllToAllv shuffle is illustrated below:
         (world_size = 2, ne = 2, total number of experts = 4)
@@ -481,11 +481,11 @@ at::Tensor nvshmem_all_to_all_vdev_2d(
         transpose from rank-major order at input to expert-major order at
         output.
 
-   *  If `major_align` is not 1, the output offset of c1 will be up-aligned to
-      this value. For example, if c0 has length 5 and d0 has length 7 (making a
-      total of 12), if and the `major_align` is 16, the output offset of c1 will
-      be 16. Similar for c2 and c3. This value has no effect on the offset of
-      the minor dimensions, i.e.  d0, d1, d2 and d3.
+   *  If `major_align` is not 1, the output offsets of c1, c2, c3 will be
+      up-aligned to this value. For example, if c0 has length 5 and d0 has
+      length 7 (making a total of 12), and if the `major_align` is set to 16,
+      the output offset of c1 will be 16. Similar for c2 and c3. This value has
+      no effect on the offset of the minor dimension, i.e.  d0, d1, d2 and d3.
   */
   auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
   auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
