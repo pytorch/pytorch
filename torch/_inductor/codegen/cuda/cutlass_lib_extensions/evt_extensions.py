@@ -1,6 +1,4 @@
-from typing import Any, Callable, Union
-
-from sympy import Expr
+from typing import Any, Union
 
 from torch._inductor.ir import (
     ComputedBuffer,
@@ -63,13 +61,18 @@ if try_import_cutlass():
     def create_example_tensors(
         var_name_to_buffer_name: dict[str, str],
         name_to_buffer: dict[str, Buffer],
-        size_hint_fn: Callable[[Expr | int], int],
     ) -> dict[str, CutlassTensor]:
         def cutlass_tensor_from_buffer(buffer: Buffer) -> CutlassTensor:
             shape = buffer.get_layout().size
             stride = buffer.get_layout().stride
-            shape = tuple(size_hint_fn(x) for x in shape)
-            stride = tuple(size_hint_fn(x) for x in stride)
+            assert all(isinstance(x, int) or x.is_integer for x in shape), (
+                f"{buffer.get_name()}'s shape {shape} contains symints which aren't supported for cutlass EVT"
+            )
+            assert all(isinstance(x, int) or x.is_integer for x in stride), (
+                f"{buffer.get_name()}'s stride {stride} contains symints which aren't supported for cutlass EVT"
+            )
+            shape = tuple(int(x) for x in shape)
+            stride = tuple(int(x) for x in stride)
 
             is_row_major = is_contiguous_strides_for_shape(stride, shape)
             is_column_major = is_contiguous_strides_for_shape(stride[::-1], shape[::-1])
