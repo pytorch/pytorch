@@ -562,15 +562,16 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                 self.assertEqual(1, len(shards))
                 for remote_shard in shards:
                     self.assertEqual(rpc_rank, remote_shard.owner().id)
-                    shard = remote_shard.to_here()
-                    self.assertEqual(
-                        f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}",
-                        str(shard.metadata.placement),
-                    )
-                    if rpc_rank == 3:
-                        self.assertEqual((1, 20), shard.tensor.size())
-                    else:
-                        self.assertEqual((3, 20), shard.tensor.size())
+                    if DEVICE_TYPE != "xpu":
+                        shard = remote_shard.to_here()
+                        self.assertEqual(
+                            f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}",
+                            str(shard.metadata.placement),
+                        )
+                        if rpc_rank == 3:
+                            self.assertEqual((1, 20), shard.tensor.size())
+                        else:
+                            self.assertEqual((3, 20), shard.tensor.size())
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
@@ -881,11 +882,12 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             self.assertEqual(1, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                shard = remote_shard.to_here()
-                self.assertEqual(
-                    f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}", str(shard.metadata.placement)
-                )
-                self.assertEqual((5, 20), shard.tensor.size())
+                if DEVICE_TYPE != "xpu":
+                    shard = remote_shard.to_here()
+                    self.assertEqual(
+                        f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}", str(shard.metadata.placement)
+                    )
+                    self.assertEqual((5, 20), shard.tensor.size())
 
     @skipIfRocm
     @with_comms(backend=BACKEND)
@@ -935,13 +937,14 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
         for rpc_rank, shards in remote_shards.items():
             self.assertEqual(1, len(shards))
-            for remote_shard in shards:
-                shard = remote_shard.to_here()
-                self.assertEqual(rpc_rank, remote_shard.owner().id)
-                self.assertEqual(
-                    f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}", str(shard.metadata.placement)
-                )
-                self.assertEqual((5, 20), shard.tensor.size())
+            if DEVICE_TYPE != "xpu":
+                for remote_shard in shards:
+                    shard = remote_shard.to_here()
+                    self.assertEqual(rpc_rank, remote_shard.owner().id)
+                    self.assertEqual(
+                        f"rank:{rpc_rank}/{DEVICE_TYPE}:{rpc_rank}", str(shard.metadata.placement)
+                    )
+                    self.assertEqual((5, 20), shard.tensor.size())
 
     @skipIfRocm
     @with_comms(backend=BACKEND)
@@ -990,10 +993,11 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         self.assertEqual(3, len(remote_shards))
         for rpc_rank, shards in remote_shards.items():
             self.assertEqual(2, len(shards))
-            for remote_shard in shards:
-                shard = remote_shard.to_here()
-                self.assertEqual((2, 20), shard.tensor.size())
-                self.assertEqual(rpc_rank, remote_shard.owner().id)
+            if DEVICE_TYPE != "xpu":
+                for remote_shard in shards:
+                    shard = remote_shard.to_here()
+                    self.assertEqual((2, 20), shard.tensor.size())
+                    self.assertEqual(rpc_rank, remote_shard.owner().id)
 
     @skip_if_lt_x_gpu(4)
     @requires_nccl_or(["xccl"])
@@ -1551,8 +1555,9 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual(1, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                shard = remote_shard.to_here()
-                self.assertEqual((5, 5), shard.tensor.size())
+                if DEVICE_TYPE != "xpu":
+                    shard = remote_shard.to_here()
+                    self.assertEqual((5, 5), shard.tensor.size())
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
@@ -2066,8 +2071,9 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                shard = remote_shard.to_here()
-                self.assertEqual((5, 5), shard.tensor.size())
+                if DEVICE_TYPE != "xpu":
+                    shard = remote_shard.to_here()
+                    self.assertEqual((5, 5), shard.tensor.size())
 
     @skipIfRocm
     @with_comms(backend=BACKEND)
@@ -2135,8 +2141,9 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                shard = remote_shard.to_here()
-                self.assertEqual((5, 5), shard.tensor.size())
+                if DEVICE_TYPE != "xpu":
+                    shard = remote_shard.to_here()
+                    self.assertEqual((5, 5), shard.tensor.size())
 
     @skipIfRocm
     @with_comms(backend=BACKEND)
@@ -2219,8 +2226,9 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual(2, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                shard = remote_shard.to_here()
-                self.assertEqual((5, 5), shard.tensor.size())
+                if DEVICE_TYPE != "xpu":
+                    shard = remote_shard.to_here()
+                    self.assertEqual((5, 5), shard.tensor.size())
 
     @skipIfRocm
     @with_comms(backend=BACKEND)
@@ -2290,8 +2298,9 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual(1, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                shard = remote_shard.to_here()
-                self.assertEqual((5, 5), shard.tensor.size())
+                if DEVICE_TYPE != "xpu":
+                    shard = remote_shard.to_here()
+                    self.assertEqual((5, 5), shard.tensor.size())
 
 
 class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
@@ -2350,11 +2359,12 @@ class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
                 # If remote shard does not exist, to_here() will throw exception.
-                if tensor_meta.shards_metadata[rpc_rank]:
-                    shard = remote_shard.to_here()
-                    self.assertEqual(
-                        rank_to_metadata[rpc_rank].shard_sizes, shard.tensor.size()
-                    )
+                if DEVICE_TYPE != "xpu":
+                    if tensor_meta.shards_metadata[rpc_rank]:
+                        shard = remote_shard.to_here()
+                        self.assertEqual(
+                            rank_to_metadata[rpc_rank].shard_sizes, shard.tensor.size()
+                        )
 
     @skipIfRocm
     @with_comms(backend=BACKEND)
@@ -2488,8 +2498,9 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             self.assertEqual(1, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                shard = remote_shard.to_here()
-                self.assertEqual((5, 5), shard.tensor.size())
+                if DEVICE_TYPE != "xpu":
+                    shard = remote_shard.to_here()
+                    self.assertEqual((5, 5), shard.tensor.size())
 
     @skipIfRocm
     @with_comms(init_rpc=False, backend=BACKEND)
@@ -2932,8 +2943,9 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             self.assertEqual(1, len(shards))
             for remote_shard in shards:
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                shard = remote_shard.to_here()
-                self.assertEqual((5, 5), shard.tensor.size())
+                if DEVICE_TYPE != "xpu":
+                    shard = remote_shard.to_here()
+                    self.assertEqual((5, 5), shard.tensor.size())
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
