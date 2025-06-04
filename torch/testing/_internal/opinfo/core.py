@@ -3126,8 +3126,7 @@ def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
 
 
 def gradcheck_wrapper_ctc_loss(op, input, *args, **kwargs):
-    """Gradcheck wrapper for ctc loss. This is needed to test the existing restricted cases in which the
-    ctc loss implementation is accurate and consistent across devices."""
+    """Gradcheck wrapper for ctc loss to project onto log-simplex space."""
     # See https://github.com/pytorch/pytorch/issues/52241
     return op(input.log_softmax(dim=2), *args, **kwargs)
 
