@@ -6109,16 +6109,6 @@ def prims_fill(x, fill_value):
     )
 
 
-@register_lowering(prims.full, type_promotion_kind=None)
-def prims_full(shape, fill_value, *, dtype, device, requires_grad):
-    return Pointwise.create(
-        device=device,
-        dtype=dtype,
-        inner_fn=lambda _: ops.constant(fill_value, dtype),
-        ranges=list(shape),
-    )
-
-
 @register_lowering(aten.copy_, type_promotion_kind=None)
 def copy_(dst, src, non_blocking=False):
     if dst is src:
