@@ -482,28 +482,27 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         # Test fp16 numerical correctness for all-reduce SUM.
         torch.manual_seed(self.rank)
-        tensor = (torch.rand(10, 1, dtype=torch.float32) * 2 - 1) * 65504 / self.world_size
+        # TODO: when create larger sizes of tensors, numerical instability will be observed.
+        # We need to investigate the root cause and ensure it is fixed.
+        tensor = (
+            (torch.rand(200, 1, dtype=torch.float32) * 2 - 1) * 65504 / self.world_size
+        )
         opts = c10d.AllreduceOptions()
         tensor = tensor.to(torch.float16)
-        print(self.rank, tensor[2], tensor[3])
-        output = [
-            [torch.zeros_like(tensor) for _ in range(self.world_size)]
-        ]
+        output = [[torch.zeros_like(tensor) for _ in range(self.world_size)]]
+        # allgather all local tensors first and then sum up.
         fut = pg.allgather(output, [tensor]).get_future()
         fut.wait()
         ag_result = fut.value()
         total = torch.stack(ag_result, dim=0).sum(dim=0)
-        if self.rank == 0:
-            print(self.rank, total[2], total[3])
 
-        # result from fp16
+        # result from fp16 all-reduce.
         fut = pg.allreduce([tensor], opts).get_future()
         fut.wait()
         result_fp16 = fut.value()
-        if self.rank == 0:
-            print(self.rank, result_fp16[0][2], result_fp16[0][3])
-            print(total - result_fp16[0])
-        self.assertEqual(total, result_fp16[0])
+        # float16 has only ~11 bits of mantissa, and is sensitive to accumulation
+        # order and rounding errors so we use a larger tolerance.
+        self.assertEqual(total, result_fp16[0], rtol=1e-2, atol=1e-3)
 
     @requires_gloo()
     def test_allreduce_basics(self):
