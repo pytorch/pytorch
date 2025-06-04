@@ -12903,6 +12903,7 @@ graph():
     @testing.expectedFailureCppSerDes  # TODO: When we deserialize we somehow hardcode sympy.lower to 2
     @testing.expectedFailureSerDerNonStrict
     @testing.expectedFailureSerDer
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
     def test_baddbmm(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -12921,7 +12922,6 @@ graph():
         x2 = torch.randn(64, 1, 64, dtype=torch.float16)
         m = M()
 
-        torch.fx.experimental._config.backed_size_oblivious = True
         ep = export(m, (x2,), dynamic_shapes=({1: Dim("batch")},))
 
         self.assertTrue(torch.allclose(m(x2), ep.module()(x2)))
@@ -13387,6 +13387,7 @@ def forward(self, x):
         self.assertTrue(torch.allclose(comp_mod(inp1), mod(inp1)))
         self.assertTrue(torch.allclose(comp_mod(inp2), mod(inp2)))
 
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
     def test_repeat_interleave(self):
         class M(torch.nn.Module):
             def forward(self, values, batch_sizes):
@@ -13398,7 +13399,6 @@ def forward(self, x):
                 )
 
         inp = (torch.randint(0, 10, (1, 3)), torch.randint(0, 10, (1,)))
-        torch.fx.experimental._config.backed_size_oblivious = True
         ep = torch.export.export(
             M(), inp, dynamic_shapes=({0: Dim("dim")}, {0: Dim("dim")})
         )
