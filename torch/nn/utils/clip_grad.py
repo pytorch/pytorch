@@ -1,9 +1,11 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
 import functools
 import types
 import typing
 import warnings
-from typing import Callable, cast, Optional, TypeVar, Union
-from typing_extensions import deprecated, ParamSpec, TypeAlias
+from typing import cast, Optional, Union
+from typing_extensions import deprecated
 
 import torch
 from torch import Tensor
@@ -21,22 +23,19 @@ __all__ = [
 ]
 
 
-_TensorOrTensors: TypeAlias = Union[
+_tensor_or_tensors = Union[
     torch.Tensor,
     typing.Iterable[torch.Tensor],  # noqa: UP006 - needed until XLA's patch is updated
 ]
 
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
 
-
-def _no_grad(func: Callable[_P, _R]) -> Callable[_P, _R]:
+def _no_grad(func):
     """
     This wrapper is needed to avoid a circular import when using @torch.no_grad on the exposed functions
     clip_grad_norm_ and clip_grad_value_ themselves.
     """
 
-    def _no_grad_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+    def _no_grad_wrapper(*args, **kwargs):
         with torch.no_grad():
             return func(*args, **kwargs)
 
@@ -46,7 +45,7 @@ def _no_grad(func: Callable[_P, _R]) -> Callable[_P, _R]:
 
 @_no_grad
 def _get_total_norm(
-    tensors: _TensorOrTensors,
+    tensors: _tensor_or_tensors,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
     foreach: Optional[bool] = None,
@@ -117,7 +116,7 @@ def _get_total_norm(
 
 @_no_grad
 def _clip_grads_with_norm_(
-    parameters: _TensorOrTensors,
+    parameters: _tensor_or_tensors,
     max_norm: float,
     total_norm: torch.Tensor,
     foreach: Optional[bool] = None,
@@ -181,7 +180,7 @@ def _clip_grads_with_norm_(
 
 @_no_grad
 def clip_grad_norm_(
-    parameters: _TensorOrTensors,
+    parameters: _tensor_or_tensors,
     max_norm: float,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
@@ -236,7 +235,7 @@ def clip_grad_norm_(
     category=FutureWarning,
 )
 def clip_grad_norm(
-    parameters: _TensorOrTensors,
+    parameters: _tensor_or_tensors,
     max_norm: float,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
@@ -253,7 +252,7 @@ def clip_grad_norm(
 
 @_no_grad
 def clip_grad_value_(
-    parameters: _TensorOrTensors,
+    parameters: _tensor_or_tensors,
     clip_value: float,
     foreach: Optional[bool] = None,
 ) -> None:

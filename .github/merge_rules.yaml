@@ -123,6 +123,8 @@
   - torch/*docs.py
   approved_by:
   - svekars
+  - sekyondaMeta
+  - AlannaBurke
   mandatory_checks_name:
   - EasyCLA
   - Lint

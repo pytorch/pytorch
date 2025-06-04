@@ -16,8 +16,8 @@ from torch.distributed._composable_state import (
     _State,
 )
 from torch.distributed.device_mesh import _get_device_handle
-from torch.distributed.utils import _to_kwargs
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.distributed.utils import _apply_to_tensors, _to_kwargs
+from torch.utils._pytree import tree_flatten
 
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import (
@@ -175,10 +175,6 @@ class FSDPState(_State):
                 state._is_root = False
             self._state_ctx.all_states.append(state)
             visited_states.add(state)
-        if self._fsdp_param_group:
-            # For the root, do not reshard after forward since for training,
-            # the parameters would be freed and all-gathered immediately
-            self._fsdp_param_group.post_forward_mesh_info = None
         self._init_fqns()
         self._init_shared_state()
         # Run parameter group lazy inits after initializing FQNs for improved
@@ -235,7 +231,10 @@ class FSDPState(_State):
                 cast_fn = functools.partial(
                     _cast_fp_tensor, self._mp_policy.param_dtype
                 )
-                args, kwargs = tree_map(cast_fn, args), tree_map(cast_fn, kwargs)
+                args, kwargs = (
+                    _apply_to_tensors(cast_fn, args),
+                    _apply_to_tensors(cast_fn, kwargs),
+                )
         if self._fsdp_param_group:
             args, kwargs = self._fsdp_param_group.pre_forward(module, args, kwargs)
         for fsdp_state in self._states_to_forward_prefetch:
@@ -265,7 +264,7 @@ class FSDPState(_State):
             self._state_ctx.iter_forward_root = None
         if self._mp_policy.output_dtype is not None:
             with torch.profiler.record_function("FSDP::cast_forward_outputs"):
-                output = tree_map(
+                output = _apply_to_tensors(
                     functools.partial(_cast_fp_tensor, self._mp_policy.output_dtype),
                     output,
                 )

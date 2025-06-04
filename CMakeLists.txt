@@ -265,6 +265,8 @@ cmake_dependent_option(USE_RCCL "Use RCCL" ON USE_NCCL OFF)
 cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
 cmake_dependent_option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF "USE_NCCL"
                        OFF)
+cmake_dependent_option(USE_NVSHMEM "Use NVSHMEM" ON
+                       "USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
 option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
 cmake_dependent_option(USE_NUMA "Use NUMA. Only available on Linux." ON "LINUX"
@@ -526,6 +528,7 @@ if(USE_LIGHTWEIGHT_DISPATCH AND NOT STATIC_DISPATCH_BACKEND)
 endif()
 option(TRACING_BASED
        "Master flag to build Lite Interpreter with tracing build option" OFF)
+option(BUILD_EXECUTORCH "Master flag to build Executorch" ON)
 # This is a fix for a rare build issue on Ubuntu: symbol lookup error:
 # miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol:
 # mkl_blas_dsyrk

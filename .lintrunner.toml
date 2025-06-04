@@ -87,6 +87,7 @@ include_patterns = [
     'torch/csrc/**/*.cpp',
     'torch/nativert/**/*.h',
     'torch/nativert/**/*.cpp',
+    'torch/standalone/**/*.h',
     'test/cpp/**/*.h',
     'test/cpp/**/*.cpp',
 ]
@@ -240,6 +241,7 @@ include_patterns = [
     'torch/nativert/*.cpp',
     'torch/nativert/**/*.h',
     'torch/nativert/**/*.cpp',
+    'torch/standalone/**/*.h',
 ]
 exclude_patterns = [
     # The negative filters below are to exclude files that include onnx_pb.h or
