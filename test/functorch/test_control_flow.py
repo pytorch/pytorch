@@ -1429,7 +1429,11 @@ def forward(self, pred_1, x_1):
             control_flow.map(f, x, y)
 
         with self.assertRaisesRegex(
-            RuntimeError, "Expect outputs of map only contains tensors"
+            # Should be
+            # torch._dynamo.exc.UncapturedHigherOrderOpError,
+            # "Expected all leaves to be of torch.Tensor type.*",
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "map doesn't work unless it is captured completely with torch.compile.*",
         ):
             control_flow.map(f1, x, y)
 
@@ -1532,6 +1536,40 @@ def forward(self, pred_1, x_1):
         true_outs = fwbw(control_flow.map, f, x, y)
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
+
+    def test_map_autograd_higher_order(self):
+        from torch.autograd.functional import hessian as hes, jacobian as jac
+
+        def f(x, y):
+            return x.sin().cos() + y
+
+        def wrapper_jac(x, y):
+            return control_flow.map(f, x, y)
+
+        def wrapper_jac_fake(x, y):
+            return _fake_map(f, x, y)
+
+        def wrapper_hes(x, y):
+            return control_flow.map(f, x, y).sum()
+
+        def wrapper_hes_fake(x, y):
+            return _fake_map(f, x, y).sum()
+
+        for g_fct, (wrap, wrap_fake) in [
+            (jac, [wrapper_jac, wrapper_jac_fake]),
+            (hes, [wrapper_hes, wrapper_hes_fake]),
+        ]:
+            xs = torch.ones(3, 2, 2, requires_grad=True)
+            # Disable the gradient computation for y
+            y = torch.ones(2, requires_grad=False)
+            res = control_flow.map(f, xs, y)
+            expected_res = _fake_map(f, xs, y)
+            self.assertEqual(expected_res, res)
+
+            expected_grads = g_fct(wrap_fake, (xs, y))
+            grads = g_fct(wrap, (xs, y))
+            self.assertEqual(expected_res, res)
+            self.assertEqual(expected_grads, grads)
 
     def test_scan_y_less_ndim_then_dim(self):
         def combine_fn(carry, x):
