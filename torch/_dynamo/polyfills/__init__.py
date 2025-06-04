@@ -9,7 +9,7 @@ Python polyfills for common builtins.
 # mypy: allow-untyped-defs
 
 import types
-from collections.abc import Iterable, MutableMapping, Sequence
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from itertools import repeat as _repeat
 from typing import Any, Callable, TYPE_CHECKING
 
@@ -99,6 +99,30 @@ def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequenc
 
     # No more pairs to compare, so compare sizes.
     return op(len(left), len(right))
+
+
+def dict___eq__(d, other):
+    if (len(d) != len(other)) or (d.keys() != other.keys()):
+        return False
+
+    for k, v in d.items():
+        if v != other[k]:
+            return False
+
+    return True
+
+
+def dict___ior__(d, other):
+    if not isinstance(other, (Iterable, Mapping)):
+        raise TypeError(f"unsupported operand type(s) for |: 'dict' and {type(other)}")
+
+    if isinstance(other, Mapping):
+        for k in other:
+            d[k] = other.__getitem__(k)
+    else:
+        for k, v in other:
+            d[k] = v
+    return d
 
 
 def set_symmetric_difference(set1, set2):
@@ -217,6 +241,9 @@ def construct_dict(cls, /, *args, **kwargs):
     if args:
         src = args[0]
 
+        if not isinstance(src, Iterable):
+            raise TypeError(f"{type(src)} object is not iterable")
+
         # Ensure that the overridden __iter__ method is invoked
         if isinstance(src, (dict, MutableMapping)):
             for key in src:
@@ -232,6 +259,10 @@ def construct_dict(cls, /, *args, **kwargs):
             dst[key] = kwargs[key]
 
     return dst
+
+
+def assert_sequence_equal(unit, a, b, msg=None, seq_type=None):
+    unit.assertTrue(a == b, msg)
 
 
 def foreach_map_fn(*args):
