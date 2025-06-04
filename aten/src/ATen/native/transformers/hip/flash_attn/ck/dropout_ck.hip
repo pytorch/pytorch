@@ -28,10 +28,7 @@ at::Tensor rand_uniform_int(
     double dropout_prob,
     const at::Tensor& out_pattern) // [Batches, num_head, query_len, key_len]
 {
-  std::cout << "ANDY LUGO: " << dropout_prob << std::endl;
-    
-  return out_pattern;
-  /*
+    std::cout << "ANDY LUGO" << std::endl;
   int B = out_pattern.size(0);
   int num_heads = out_pattern.size(1);
   int M = out_pattern.size(2);
@@ -90,7 +87,6 @@ at::Tensor rand_uniform_int(
   (void)hipStreamSynchronize(stream);
 
   return randvals;
-  */
 }
 
 
