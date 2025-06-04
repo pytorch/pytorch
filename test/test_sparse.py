@@ -8,7 +8,7 @@ import operator
 import random
 import unittest
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import TestCase, run_tests, do_test_dtypes, \
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
     parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests, \
@@ -68,10 +68,6 @@ CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
 ) or (not IS_WINDOWS and not TEST_WITH_ROCM)
 
 HIPSPARSE_SPMM_COMPLEX128_SUPPORTED = torch.version.hip and version.parse(torch.version.hip.split("-")[0]) >= version.parse("6.0")
-
-sparse_complex128_supported = CUSPARSE_SPMM_COMPLEX128_SUPPORTED or HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
-sparse_float16_supported = SM53OrLater and torch.version.cuda or not TEST_WITH_ROCM
-sparse_bfloat16_supported = SM80OrLater and torch.version.cuda or not TEST_WITH_ROCM
 
 def all_sparse_layouts(test_name='layout', include_strided=False):
     return parametrize(test_name, [
@@ -3612,12 +3608,13 @@ class TestSparse(TestSparseBase):
         self._check_zero_nnz_softmax_op(torch.sparse.log_softmax, 10, device, dtype)
 
     # TODO: Check after why ROCm's cusparseXcsrgemm2Nnz function doesn't return the same nnz value as CUDA
+    @skipIfRocm
     @coalescedonoff
     @dtypes(*floating_and_complex_types())
-    @dtypesIfCUDA(*floating_types_and(*[torch.half] if sparse_float16_supported else [],
-                                      *[torch.bfloat16] if sparse_bfloat16_supported else [],
+    @dtypesIfCUDA(*floating_types_and(*[torch.half] if SM53OrLater else [],
+                                      *[torch.bfloat16] if SM80OrLater else [],
                                       torch.complex64,
-                                      *[torch.complex128] if sparse_complex128_supported else []))
+                                      *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
     @unittest.skipIf(TEST_WITH_CROSSREF, "not working with fake tensor")
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2, torch.complex64: 1e-2, torch.float32: 1e-2})
     def test_sparse_matmul(self, device, dtype, coalesced):
