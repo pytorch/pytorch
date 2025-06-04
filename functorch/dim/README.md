@@ -69,7 +69,7 @@ Install dim. You will be asked for github credentials to access the fairinternal
 
 ```sh
 pip install ninja  # Makes the build go faster
-pip install "git+https://github.com/facebookresearch/torchdim"
+pip install --user "git+https://github.com/facebookresearch/torchdim"
 ```
 
 Creating and Binding Dims
