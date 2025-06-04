@@ -2658,8 +2658,8 @@ class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
     def proxy_submod(self, tx, arg):
-        assert isinstance(arg.source, DictGetItemSource)
-        submod_name = tx.output.install_subgraph(arg.source.index, arg.value)
+        assert isinstance(arg.source.base, DictGetItemSource)
+        submod_name = tx.output.install_subgraph(arg.source.base.index, arg.value)
         p_submod = make_attr(tx, submod_name)
         set_example_value(p_submod.node, arg.value)
         return p_submod
