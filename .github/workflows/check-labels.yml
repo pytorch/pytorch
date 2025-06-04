@@ -56,7 +56,7 @@ jobs:
       - name: Install requirements
         id: requirements
         run: |
-          pip install -r .github/requirements-gha-cache.txt
+          pip install -r .github/requirements-gha-cache.txt --user
 
       - name: Check labels
         env:
