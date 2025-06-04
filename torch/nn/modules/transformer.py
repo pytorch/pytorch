@@ -55,7 +55,7 @@ def _get_seq_len(src: Tensor, batch_first: bool) -> Optional[int]:
 
 
 class Transformer(Module):
-    r"""A transformer model.
+    r"""A basic transformer layer.
 
 
     This Transformer layer implements the original Transformer architecture described
