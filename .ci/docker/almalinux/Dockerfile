@@ -78,7 +78,7 @@ RUN bash ./install_mnist.sh
 FROM base as all_cuda
 COPY --from=cuda11.8  /usr/local/cuda-11.8 /usr/local/cuda-11.8
 COPY --from=cuda12.6  /usr/local/cuda-12.6 /usr/local/cuda-12.6
-COPY --from=cuda12.4  /usr/local/cuda-12.8 /usr/local/cuda-12.8
+COPY --from=cuda12.8  /usr/local/cuda-12.8 /usr/local/cuda-12.8
 
 # Final step
 FROM ${BASE_TARGET} as final
