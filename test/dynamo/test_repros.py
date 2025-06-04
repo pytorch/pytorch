@@ -3461,6 +3461,40 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(obj1.b.item(), 0)
         self.assertEqual(obj2.a.item(), 2)
 
+    def test_delattr_return(self):
+        class MyObject:
+            def __init__(self, val):
+                self.val = val
+                self.deletion_attempted = False
+
+            def __delattr__(self, attr):
+                if attr == "val":
+                    self.deletion_attempted = True
+                else:
+                    super().__delattr__(attr)
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def test_delattr(input_tensor):
+            instance_a = MyObject(1)
+            instance_b = MyObject(2)
+            del instance_a.val
+            del instance_b.val
+            exists_a = hasattr(instance_a, "val")
+            exists_b = hasattr(instance_b, "val")
+            deletion_attempted_a = instance_a.deletion_attempted
+            deletion_attempted_b = instance_b.deletion_attempted
+            return (
+                input_tensor + 1,
+                exists_a,
+                exists_b,
+                deletion_attempted_a,
+                deletion_attempted_b,
+            )
+
+        result = test_delattr(torch.ones(1))
+        self.assertEqual(result[0], torch.tensor([2.0]))
+        self.assertEqual(result[1:], (True, True, True, True))
+
     def test_delattr_raises(self):
         class MyObj:
             def __init__(self, a, b):
