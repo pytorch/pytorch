@@ -1,3 +1,4 @@
+(torch.compiler_dynamo_deepdive)=
 # Dynamo Deep-Dive
 
 TorchDynamo (or simply Dynamo) is the tracer within `torch.compile`,
@@ -343,6 +344,7 @@ A graph stores operations on tensors… and operations on symbolic
 integers. We will discuss symbolic integers later on, but first we will
 discuss how Dynamo addresses a rather important correctness issue.
 
+(making-dynamo-sound-guards)=
 ## Making Dynamo Sound: Guards
 
 At this point, we have a way to trace programs completely disregarding control flow.
