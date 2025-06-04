@@ -7397,7 +7397,7 @@ def forward(self, x):
         ):
             ep.module()(torch.tensor([3, 6, 5]))
         with self.assertRaisesRegex(
-            RuntimeError, r".* expression u2 <= 5 .*"
+            RuntimeError, r".* expression u[\d]+ <= 5 .*"
         ):
             ep.module()(torch.tensor([6, 6, 6]))
 
