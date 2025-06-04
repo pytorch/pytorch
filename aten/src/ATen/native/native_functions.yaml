@@ -7973,7 +7973,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA, Meta, MPS: set_
+    CPU, CUDA, Meta, MPS, MTIA: set_
   autogen: set.source_Storage, set.source_Storage_out
   tags: inplace_view
 
@@ -8003,7 +8003,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA, Meta, MPS: set_tensor_
+    CPU, CUDA, Meta, MPS, MTIA: set_tensor_
   autogen: set.source_Tensor, set.source_Tensor_out
   tags: inplace_view
 
