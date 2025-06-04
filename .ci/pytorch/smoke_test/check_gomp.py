@@ -46,6 +46,9 @@ def get_gomp_thread():
 
     # use the default gomp path of AlmaLinux OS
     libgomp_path = "/usr/lib64/libgomp.so.1"
+    # if it does not exist, try Ubuntu path
+    if not os.path.exists(libgomp_path):
+        libgomp_path = f"/usr/lib/{os.uname().machine}-linux-gnu/libgomp.so.1"
 
     os.environ["GOMP_CPU_AFFINITY"] = "0-3"
 
