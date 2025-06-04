@@ -15,7 +15,7 @@
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace/pytorch,type=bind,consistency=cached",
   "workspaceFolder": "/workspace/pytorch",
   "containerEnv": {
-    "PIP_USER": "0" // <‑‑ disable implicit
+    "PIP_USER": "0" // <‑‑ disable implicit --user
   },
 
   // Features to add to the dev container. More info: https://containers.dev/features.
