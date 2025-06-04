@@ -37,7 +37,7 @@ def amax_to_scale(
     if float8_dtype == e4m3_type:
         res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
     elif float8_dtype == e5m2_type:
-        res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
+        res = E5M2_MAX_POS / torch.clamp(amax, min=EPS)
     else:
         raise ValueError(f"Unsupported float8_dtype: {float8_dtype}")
 
