@@ -1,8 +1,12 @@
-torch.xpu
-===================================
+# torch.xpu
+```{eval-rst}
 .. automodule:: torch.xpu
+```
+```{eval-rst}
 .. currentmodule:: torch.xpu
+```
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -26,9 +30,10 @@ torch.xpu
     set_stream
     stream
     synchronize
+```
 
-Random Number Generator
--------------------------
+## Random Number Generator
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -42,19 +47,20 @@ Random Number Generator
     seed_all
     set_rng_state
     set_rng_state_all
+```
 
-Streams and events
-------------------
+## Streams and events
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     Event
     Stream
+```
 
-
-Memory management
------------------
+## Memory management
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -69,10 +75,12 @@ Memory management
      memory_stats_as_nested_dict
      reset_accumulated_memory_stats
      reset_peak_memory_stats
+```
 
-
-.. This module needs to be documented. Adding here in the meantime
-.. for tracking purposes
+<!-- This module needs to be documented. Adding here in the meantime
+for tracking purposes -->
+```{eval-rst}
 .. py:module:: torch.xpu.memory
 .. py:module:: torch.xpu.random
 .. py:module:: torch.xpu.streams
+```
