@@ -29,11 +29,14 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
       MempoolId_t pool = {0, 0},
       cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);
   void capture_end();
+  void instantiate();
   void replay();
   void reset();
   MempoolId_t pool();
   void enable_debug_mode();
   void debug_dump(const std::string& debug_path);
+
+  cudaGraph_t raw_cuda_graph();
 
  protected:
   cudaGraph_t graph_ = nullptr;
