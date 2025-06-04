@@ -2,6 +2,7 @@
 #include <fmt/core.h>
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
+#include <csignal>
 #include <optional>
 
 #ifndef _MSC_VER
@@ -280,6 +281,8 @@ static PyObject* THPModule_crashIfvptrUBSAN(PyObject* module, PyObject* noarg) {
     virtual ~Baz() = default;
   };
   Baz x{};
+  // Purposely cast through `void*` so there's no fixups applied.
+  // NOLINTNEXTLINE(bugprone-casting-through-void,-warnings-as-errors)
   auto y = static_cast<Foo*>(static_cast<void*>(&x));
   auto rc = y->bar();
   return THPUtils_packInt32(rc);
@@ -1248,6 +1251,7 @@ static PyObject* THPModule_setQEngine(PyObject* /* unused */, PyObject* arg) {
       "but got ",
       THPUtils_typename(arg));
   auto qengine = THPUtils_unpackLong(arg);
+  // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
   at::globalContext().setQEngine(static_cast<at::QEngine>(qengine));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -1742,6 +1746,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {nullptr, nullptr, 0, nullptr}};
 
 #ifdef USE_CUDA
+// NOLINTBEGIN(misc-use-internal-linkage)
 void THCPStream_init(PyObject* module);
 void THCPEvent_init(PyObject* module);
 void THCPGraph_init(PyObject* module);
@@ -1750,6 +1755,7 @@ PyMethodDef* THCPModule_methods();
 namespace torch::cuda {
 void initModule(PyObject* module);
 } // namespace torch::cuda
+// NOLINTEND(misc-use-internal-linkage)
 #endif
 
 #ifdef USE_XPU
@@ -1790,6 +1796,60 @@ class WeakTensorRef {
     return weakref_.expired();
   }
 };
+
+namespace {
+
+using SigHandler = void (*)(int);
+
+SigHandler* _getOldHandler(int signum) {
+#define SIG_CHECK(n)                     \
+  if (signum == (n)) {                   \
+    static SigHandler handler = nullptr; \
+    return &handler;                     \
+  }
+
+  SIG_CHECK(SIGSEGV);
+  SIG_CHECK(SIGILL);
+
+  throw std::runtime_error("unexpected signal number");
+#undef SIG_CHECK
+}
+
+extern "C" void _signalHandler(int signum) {
+  // Note that technically there's not much you're allowed to do here - but
+  // we're probably dying anyway so give it a try...
+
+  auto oldAction = *_getOldHandler(signum);
+  *_getOldHandler(signum) = nullptr;
+
+  // If we hit another signal don't run this handler again.
+  std::signal(signum, oldAction);
+
+  fprintf(
+      stderr,
+      "Process %d crashed with signal %s (%d):\n",
+      getpid(),
+      strsignal(signum),
+      signum);
+
+  auto bt = c10::get_backtrace();
+  fwrite(bt.data(), 1, bt.size(), stderr);
+
+  // Try to run the previous signal handler
+  if (oldAction != SIG_IGN && oldAction != SIG_DFL) {
+    oldAction(signum);
+  }
+  if (oldAction != SIG_IGN) {
+    _exit(-1);
+  }
+}
+
+void _initCrashHandler() {
+  *_getOldHandler(SIGILL) = std::signal(SIGILL, _signalHandler);
+  *_getOldHandler(SIGSEGV) = std::signal(SIGSEGV, _signalHandler);
+}
+
+} // anonymous namespace
 
 extern "C" TORCH_PYTHON_API PyObject* initModule();
 // separate decl and defn for msvc error C2491
@@ -1969,6 +2029,7 @@ PyObject* initModule() {
   });
 
   auto py_module = py::reinterpret_borrow<py::module>(module);
+  py_module.def("_initCrashHandler", &_initCrashHandler);
   py_module.def("_demangle", &c10::demangle);
   py_module.def("_log_api_usage_once", &LogAPIUsageOnceFromPython);
   py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
@@ -2365,7 +2426,7 @@ Call this whenever a new thread is created in order to propagate values from
         auto acc = at::getAccelerator(check.value_or(false));
         if (acc.has_value()) {
           bool is_available = at::globalContext()
-                                  .getAcceleratorHooksInterface(acc.value())
+                                  .getAcceleratorHooksInterface(acc)
                                   .isAvailable();
 
           if (!is_available) {
