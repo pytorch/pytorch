@@ -68,6 +68,8 @@ _like_tensor_constructors = ordered_set(
     aten.randn_like.default,
     aten.randn_like.out,
     aten.randint_like.default,
+    aten.randint_like.Tensor,
+    aten.randint_like.Tensor_out,
     aten.randint_like.out,
     aten.randint_like.low_dtype,
     aten.randint_like.low_dtype_out,
@@ -634,8 +636,11 @@ def has_meta(func):
     return torch._C._dispatch_has_computed_kernel_for_dispatch_key(func.name(), "Meta")
 
 
+# These are for the `torch._foreach_...` ops like `torch._foreach_add`.
 @register_op_impl(
-    lambda func: is_builtin(func) and "foreach" in func.name() and has_meta(func)
+    lambda func: is_builtin(func)
+    and func.name().startswith("aten::_foreach_")
+    and has_meta(func)
 )
 def foreach_run_and_map_input_device(fake_mode, func, *args, **kwargs):
     tensor_lists = [
