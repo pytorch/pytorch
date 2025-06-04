@@ -49,4 +49,7 @@ minimum
 size
 
 # torch/standalone/macros/Export.h
-C10_API
+TORCH_STANDALONE_API
+
+# torch/standalone/util/Exception.h
+TORCH_STANDALONE_CHECK

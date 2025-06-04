@@ -29,39 +29,29 @@
 // C10_BUILD_SHARED_LIB to check whether pytorch is building shared or static
 // libraries.
 
-// For build systems that do not directly depend on CMake and directly build
-// from the source directory (such as Buck), one may not have a cmake_macros.h
-// file at all. In this case, the build system is responsible for providing
-// correct macro definitions corresponding to the cmake_macros.h.in file.
-//
-// In such scenarios, one should define the macro
-//     C10_USING_CUSTOM_GENERATED_MACROS
-// to inform this header that it does not need to include the cmake_macros.h
-// file.
-
 #ifdef _WIN32
-#define C10_HIDDEN
+#define TORCH_STANDALONE_HIDDEN
 #if defined(C10_BUILD_SHARED_LIBS)
-#define C10_EXPORT __declspec(dllexport)
-#define C10_IMPORT __declspec(dllimport)
+#define TORCH_STANDALONE_EXPORT __declspec(dllexport)
+#define TORCH_STANDALONE_IMPORT __declspec(dllimport)
 #else
-#define C10_EXPORT
-#define C10_IMPORT
+#define TORCH_STANDALONE_EXPORT
+#define TORCH_STANDALONE_IMPORT
 #endif
 #else // _WIN32
 #if defined(__GNUC__)
-#define C10_EXPORT __attribute__((__visibility__("default")))
-#define C10_HIDDEN __attribute__((__visibility__("hidden")))
+#define TORCH_STANDALONE_EXPORT __attribute__((__visibility__("default")))
+#define TORCH_STANDALONE_HIDDEN __attribute__((__visibility__("hidden")))
 #else // defined(__GNUC__)
-#define C10_EXPORT
-#define C10_HIDDEN
+#define TORCH_STANDALONE_EXPORT
+#define TORCH_STANDALONE_HIDDEN
 #endif // defined(__GNUC__)
-#define C10_IMPORT C10_EXPORT
+#define TORCH_STANDALONE_IMPORT TORCH_STANDALONE_EXPORT
 #endif // _WIN32
 
 #ifdef NO_EXPORT
-#undef C10_EXPORT
-#define C10_EXPORT
+#undef TORCH_STANDALONE_EXPORT
+#define TORCH_STANDALONE_EXPORT
 #endif
 
 // Definition of an adaptive XX_API macro, that depends on whether you are
@@ -81,7 +71,7 @@
 
 // This one is being used by libc10.so
 #ifdef C10_BUILD_MAIN_LIB
-#define C10_API C10_EXPORT
+#define TORCH_STANDALONE_API TORCH_STANDALONE_EXPORT
 #else
-#define C10_API C10_IMPORT
+#define TORCH_STANDALONE_API TORCH_STANDALONE_IMPORT
 #endif
