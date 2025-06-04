@@ -218,3 +218,14 @@ def unwrap_maybe_dynamic_int(x: Union[torch.Tensor, int]) -> int:
         # x.size() is expected to be [0, dynamic_int]
         return x.size(1)
     return x
+
+
+def wrap_inline_with_set_fullgraph(
+    fn: Callable[_P, _R], fullgraph: bool
+) -> Callable[_P, _R]:
+    @functools.wraps(fn)
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        with torch._dynamo.set_fullgraph(fullgraph):
+            return fn(*args, **kwargs)
+
+    return wrapper
