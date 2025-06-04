@@ -40,35 +40,6 @@ function install_cudnn {
   rm -rf tmp_cudnn
 }
 
-<<<<<<< HEAD
-function install_118 {
-    CUDNN_VERSION=9.1.0.70
-    echo "Installing CUDA 11.8 and cuDNN ${CUDNN_VERSION} and NCCL and cuSparseLt-0.4.0"
-    install_cuda 11.8.0 cuda_11.8.0_520.61.05_linux
-
-    install_cudnn 11 $CUDNN_VERSION
-
-    CUDA_VERSION=11.8 bash install_nccl.sh
-
-    CUDA_VERSION=11.8 bash install_cusparselt.sh
-
-    ldconfig
-=======
-function install_124 {
-  CUDNN_VERSION=9.1.0.70
-  echo "Installing CUDA 12.4.1 and cuDNN ${CUDNN_VERSION} and NCCL and cuSparseLt-0.6.2"
-  install_cuda 12.4.1 cuda_12.4.1_550.54.15_linux
-
-  install_cudnn 12 $CUDNN_VERSION
-
-  CUDA_VERSION=12.4 bash install_nccl.sh
-
-  CUDA_VERSION=12.4 bash install_cusparselt.sh
-
-  ldconfig
->>>>>>> 1f1c9d667d2 (Remove CUDA 11.8 CI code)
-}
-
 function install_126 {
   CUDNN_VERSION=9.5.1.17
   echo "Installing CUDA 12.6.3 and cuDNN ${CUDNN_VERSION} and NCCL and cuSparseLt-0.6.3"
@@ -137,12 +108,6 @@ function install_128 {
 while test $# -gt 0
 do
     case "$1" in
-<<<<<<< HEAD
-    11.8) install_118; prune_118
-=======
-    12.4) install_124; prune_124
->>>>>>> 1f1c9d667d2 (Remove CUDA 11.8 CI code)
-        ;;
     12.6|12.6.*) install_126; prune_126
         ;;
     12.8|12.8.*) install_128;
