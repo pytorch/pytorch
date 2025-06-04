@@ -3265,6 +3265,9 @@ Example::
           "global_ranks_in_group",
           &::c10d::ProcessGroupNCCL::Options::global_ranks_in_group)
       .def_readwrite(
+          "profiling_ranks_in_group",
+          &::c10d::ProcessGroupNCCL::Options::profiling_ranks_in_group)
+      .def_readwrite(
           "group_name", &::c10d::ProcessGroupNCCL::Options::group_name);
 #endif
 
