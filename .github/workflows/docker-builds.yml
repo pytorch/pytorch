@@ -54,6 +54,8 @@ jobs:
           pytorch-linux-jammy-cuda12.6-cudnn9-py3.12-gcc9-inductor-benchmarks,
           pytorch-linux-jammy-cuda12.6-cudnn9-py3.13-gcc9-inductor-benchmarks,
           pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks,
+          pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc9-inductor-benchmarks,
+          pytorch-linux-jammy-cuda12.8-cudnn9-py3.13-gcc9-inductor-benchmarks,
           pytorch-linux-focal-cuda12.8-cudnn9-py3-gcc9,
           pytorch-linux-focal-py3.9-clang10,
           pytorch-linux-focal-py3.11-clang10,
