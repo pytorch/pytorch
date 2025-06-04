@@ -5766,17 +5766,6 @@ def full_like(
         )
         return result.to(memory_format=memory_format)
 
-    elif not utils.is_non_overlapping_and_dense(a):
-        return torch.full(
-            a.shape,
-            fill_value,
-            dtype=dtype,
-            layout=layout,
-            device=device,
-            pin_memory=pin_memory,
-            requires_grad=requires_grad,
-        )
-
     else:
         shape, permutation = _get_shape_permutation_like(a, layout)
         result = torch.full(
