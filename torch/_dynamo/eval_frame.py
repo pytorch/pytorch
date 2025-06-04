@@ -529,6 +529,7 @@ class _TorchDynamoContext:
         export=False,
         dynamic=None,
         compiler_config=None,
+        package=None,
     ) -> None:
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -541,6 +542,7 @@ class _TorchDynamoContext:
         self.compiler_config = compiler_config
         self.cleanup_fns: list[Callable[[], Any]] = []
         self.enter_exit_hooks = []
+        self._package = package
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
@@ -790,6 +792,7 @@ class OptimizeContext(_TorchDynamoContext):
         rebuild_ctx: Optional[
             Callable[[], Union[OptimizeContext, _NullDecorator]]
         ] = None,
+        package=None,
     ) -> None:
         def on_enter():
             install_generation_tagging_init()
@@ -803,6 +806,7 @@ class OptimizeContext(_TorchDynamoContext):
             export=export,
             dynamic=dynamic,
             compiler_config=compiler_config,
+            package=package,
         )
 
         if config.compiled_autograd:
@@ -918,6 +922,7 @@ def _optimize_catch_errors(
     dynamic=None,
     compiler_config=None,
     rebuild_ctx=None,
+    package=None,
 ):
     return OptimizeContext(
         convert_frame.catch_errors_wrapper(compile_fn, hooks),
@@ -927,6 +932,7 @@ def _optimize_catch_errors(
         dynamic=dynamic,
         compiler_config=compiler_config,
         rebuild_ctx=rebuild_ctx,
+        package=package,
     )
 
 
@@ -1018,6 +1024,7 @@ def _optimize(
     frame_traced_fn=None,
     disable=False,
     dynamic=None,
+    package=None,
 ) -> Union[OptimizeContext, _NullDecorator]:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -1071,6 +1078,7 @@ def _optimize(
             dynamic=dynamic,
             hooks=hooks,
             rebuild_ctx=rebuild_ctx,
+            package=package,
         )
 
     backend = get_compiler_fn(backend)
@@ -1082,7 +1090,7 @@ def _optimize(
     # _optimize_catch_errors in the field _torchdynamo_orig_callable. This can
     # be used by eval_frame.c to insert a guard on the backend.
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend, hooks=hooks),
+        convert_frame.convert_frame(backend, hooks=hooks, package=package),
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
@@ -1092,6 +1100,7 @@ def _optimize(
             else None
         ),
         rebuild_ctx=rebuild_ctx,
+        package=package,
     )
 
 
@@ -1982,6 +1991,7 @@ def _optimize_assert(
     export=False,
     export_constraints=None,
     dynamic=None,
+    package=None,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
@@ -1993,13 +2003,17 @@ def _optimize_assert(
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(
-            backend, export=export, export_constraints=export_constraints
+            backend,
+            export=export,
+            export_constraints=export_constraints,
+            package=package,
         ),
         hooks,
         backend_ctx_ctor,
         export=export,
         dynamic=dynamic,
         rebuild_ctx=rebuild_ctx,
+        package=package,
     )
 
 
@@ -2109,7 +2123,10 @@ class TorchPatcher:
         return inner_fn
 
 
-def skip_code(code: types.CodeType):
+def skip_code(code: types.CodeType, recursive: bool = False):
     set_code_exec_strategy(
-        code, FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)
+        code,
+        FrameExecStrategy(
+            FrameAction.SKIP, FrameAction.SKIP if recursive else FrameAction.DEFAULT
+        ),
     )
