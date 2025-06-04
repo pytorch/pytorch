@@ -1,9 +1,11 @@
-ONNX Backend for TorchDynamo
-============================
+# ONNX Backend for TorchDynamo
 
-For a quick overview of ``torch.compiler``, see :ref:`torch.compiler_overview`.
+For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
-.. warning::
+```{warning}
   The ONNX backend for torch.compile is a rapidly evolving beta technology.
+```
 
+```{eval-rst}
 .. autofunction:: torch.onnx.is_onnxrt_backend_supported
+```
