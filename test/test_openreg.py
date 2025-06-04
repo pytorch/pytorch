@@ -273,15 +273,15 @@ class TestOpenReg(TestCase):
 
         tensor = torch.randn(10)
         storage = tensor.storage()
-        self.assertFalse(storage.is_pinned())
-        pinned_storage = storage.pin_memory()
-        self.assertTrue(pinned_storage.is_pinned())
+        self.assertFalse(storage.is_pinned("openreg"))
+        pinned_storage = storage.pin_memory("openreg")
+        self.assertTrue(pinned_storage.is_pinned("openreg"))
 
         tensor = torch.randn(10)
         untyped_storage = tensor.untyped_storage()
-        self.assertFalse(untyped_storage.is_pinned())
-        pinned_untyped_storage = untyped_storage.pin_memory()
-        self.assertTrue(pinned_untyped_storage.is_pinned())
+        self.assertFalse(untyped_storage.is_pinned("openreg"))
+        pinned_untyped_storage = untyped_storage.pin_memory("openreg")
+        self.assertTrue(pinned_untyped_storage.is_pinned("openreg"))
 
     @skipIfTorchDynamo("unsupported aten.is_pinned.default")
     def test_rewrapped_storage(self):
