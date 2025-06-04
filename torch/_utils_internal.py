@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 import tempfile
+import warnings
 from typing import Any, Callable, Optional, TypeVar
 from typing_extensions import ParamSpec
 
@@ -282,3 +283,62 @@ def record_chromium_event_internal(
 
 def profiler_allow_cudagraph_cupti_lazy_reinit_cuda12():
     return True
+
+
+def deprecate(version: str):
+    """Decorator that deprecates functions at a specified version.
+
+    Effects:
+    1) Emits a deprecation warning when function is called
+    2) Creates a public alias without the leading underscore
+
+    Args:
+        version: The version when the function will be removed
+    """
+
+    def decorator(func: Callable[_P, _T]) -> Callable[_P, _T]:
+        # Validate naming convention – single leading underscore, not dunder
+        if not (func.__name__.startswith("_")):
+            raise ValueError(
+                "@deprecate must decorate a function whose name "
+                "starts with a single leading underscore (e.g. '_foo') as the api should be considered internal before deprecation."
+            )
+
+        public_name = func.__name__[1:]  # drop exactly one leading underscore
+        module = sys.modules[func.__module__]
+
+        # Don't clobber an existing symbol accidentally.
+        if hasattr(module, public_name):
+            raise RuntimeError(
+                f"Cannot create alias '{public_name}' -> symbol already exists in {module.__name__}. \
+                 Please rename it or consult a pytorch developer on what to do"
+            )
+
+        warning_msg = (
+            f"{func.__name__} is deprecated and will be removed in version {version}. "
+        )
+
+        # public alias
+        @functools.wraps(func)
+        def alias(*args: _P.args, **kwargs: _P.kwargs):  # type: ignore[misc]
+            warnings.warn(warning_msg, DeprecationWarning, stacklevel=2)
+            return func(*args, **kwargs)
+
+        alias.__name__ = public_name
+
+        # Adjust qualname if nested inside a class or another function
+        if "." in func.__qualname__:
+            alias.__qualname__ = func.__qualname__.rsplit(".", 1)[0] + "." + public_name
+        else:
+            alias.__qualname__ = public_name
+
+        setattr(module, public_name, alias)
+
+        @functools.wraps(func)
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs):  # type: ignore[misc]
+            warnings.warn(warning_msg, DeprecationWarning, stacklevel=2)
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
