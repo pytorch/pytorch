@@ -1301,6 +1301,19 @@ class TestFusedObsFakeQuant(TestCase):
         self.assertEqual(dX, x.grad)
         self.assertTrue(x.grad.dtype == torch.float32)
 
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),)
+    @settings(deadline=None)
+    def test_fake_quantize_per_tensor_affine_inf(self, device) -> None:
+        # https://github.com/pytorch/pytorch/issues/154328
+        input_tensor = torch.tensor([torch.inf], dtype=torch.float32)
+        scale = 0.01
+        zero_point = 0
+        quant_min = 0
+        quant_max = 255
+        result = torch.fake_quantize_per_tensor_affine(input_tensor, scale, zero_point, quant_min, quant_max)
+        ref_result = (min(quant_max, max(quant_min, torch.round(input_tensor / scale) + zero_point)) - zero_point) * scale
+        self.assertEqual(result, ref_result)
+
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_quantization.py TESTNAME\n\n"
