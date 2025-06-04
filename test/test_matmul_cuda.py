@@ -929,12 +929,16 @@ class TestFP8MatmulCuda(TestCase):
         BLOCK_SIZE = 32
         require_exact_match = True
 
+        if torch.version.hip:
+            if not (M % 32 == 0 and K % 32 == 0 and N % 32 == 0):
+                raise unittest.SkipTest("Matrix dimensions must be multiples of 32 on ROCm, skipping")
+
         def ceil_div(a, b):
             return (a + b - 1) // b
 
         if test_case_name == "a_eye_b_eye":
             if not ((M == K) and (M == N)):
-                return unittest.skip("this test is only defined for M == K == N, skipping")
+                raise unittest.SkipTest("this test is only defined for M == K == N, skipping")
             A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
             B_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
 
@@ -943,9 +947,6 @@ class TestFP8MatmulCuda(TestCase):
 
             A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
             B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
-            # convert to swizzled format
-            A_scale = to_blocked(A_scale)
-            B_scale = to_blocked(B_scale)
 
         elif test_case_name == "a_ones_b_ones":
             A_ref = torch.ones(M, K, device=device, dtype=torch.bfloat16)
@@ -956,9 +957,6 @@ class TestFP8MatmulCuda(TestCase):
 
             A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
             B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
-            # convert to swizzled format
-            A_scale = to_blocked(A_scale)
-            B_scale = to_blocked(B_scale)
 
         elif test_case_name == "a_ones_modified_b_ones":
             A_ref = torch.ones(M, K, device=device, dtype=torch.bfloat16)
@@ -972,9 +970,6 @@ class TestFP8MatmulCuda(TestCase):
 
             A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
             B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
-            # convert to swizzled format
-            A_scale = to_blocked(A_scale)
-            B_scale = to_blocked(B_scale)
 
         elif test_case_name == "a_ones_b_ones_modified":
             A_ref = torch.ones(M, K, device=device, dtype=torch.bfloat16)
@@ -988,9 +983,6 @@ class TestFP8MatmulCuda(TestCase):
 
             A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
             B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
-            # convert to swizzled format
-            A_scale = to_blocked(A_scale)
-            B_scale = to_blocked(B_scale)
 
         elif test_case_name == "a_scale_modified_b_ones":
             A_ref = torch.ones(M, K, device=device, dtype=torch.bfloat16)
@@ -1006,10 +998,6 @@ class TestFP8MatmulCuda(TestCase):
             A[1][0:BLOCK_SIZE] = 2
             A_scale[1][0] = 2
 
-            # convert to swizzled format
-            A_scale = to_blocked(A_scale)
-            B_scale = to_blocked(B_scale)
-
         elif test_case_name == "a_ones_b_scale_modified":
             A_ref = torch.ones(M, K, device=device, dtype=torch.bfloat16)
             B_ref = torch.ones(N, K, device=device, dtype=torch.bfloat16)
@@ -1023,10 +1011,6 @@ class TestFP8MatmulCuda(TestCase):
             B_ref[1][0:BLOCK_SIZE] = 4
             B[1][0:BLOCK_SIZE] = 2
             B_scale[1][0] = 2
-
-            # convert to swizzled format
-            A_scale = to_blocked(A_scale)
-            B_scale = to_blocked(B_scale)
 
         elif test_case_name == "data_random_scales_one":
             require_exact_match = False
@@ -1045,13 +1029,9 @@ class TestFP8MatmulCuda(TestCase):
             A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
             B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
 
-            # convert to swizzled format
-            A_scale = to_blocked(A_scale)
-            B_scale = to_blocked(B_scale)
-
         elif test_case_name == "data_random_scales_from_data":
             if not K % BLOCK_SIZE == 0:
-                return unittest.skip(f"this test is only defined for K a multiple of {BLOCK_SIZE}, skipping")
+                raise unittest.SkipTest(f"this test is only defined for K a multiple of {BLOCK_SIZE}, skipping")
             require_exact_match = False
             # random data, scales from data
             A_ref = torch.randn((M, K), device=device, dtype=torch.bfloat16) * 1000
@@ -1069,7 +1049,8 @@ class TestFP8MatmulCuda(TestCase):
             B = (B_ref.reshape(-1, BLOCK_SIZE) / B_scale.reshape(N * ceil_div(K, BLOCK_SIZE), 1).float()).reshape(N, K)
             B = B.clamp(min=min_val, max=max_val).to(torch.float8_e4m3fn)
 
-            # convert to swizzled format
+        # convert to swizzled format
+        if not torch.version.hip:
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
 

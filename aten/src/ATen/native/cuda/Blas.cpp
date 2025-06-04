@@ -1020,12 +1020,15 @@ ScalingType get_scaling_type(
     auto expected_b_size =
         BLOCK_SIZE_MN * ceil_div(dim_n, BLOCK_SIZE_MN) * padded_num_k_blocks;
 
+    //TODO: enable the checks for ROCm
+#ifndef USE_ROCM
     TORCH_CHECK(scale_a.numel() == expected_a_size,
                 "For BlockWise scaling: Expected scale_a size to be ",
                 expected_a_size, " but got ", scale_a.numel());
     TORCH_CHECK(scale_b.numel() == expected_b_size,
                 "For BlockWise scaling: Expected scale_b size to be ",
                 expected_b_size, " but got ", scale_b.numel());
+#endif
 
     TORCH_CHECK(
         scale_a.is_contiguous() && scale_b.is_contiguous(),
@@ -1092,6 +1095,7 @@ ScalingType get_scaling_type(
 
 } // namespace
 
+
 // Computes matrix multiply + bias while applying scaling to input and output matrices
 // Scales are only applicable when matrices are of Float8 type and assumed to be equal to 1.0 by default.
 // If output matrix type is 16 or 32-bit type, scale_result is not applied.
@@ -1156,6 +1160,14 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   TORCH_CHECK(mat1.scalar_type() != ScalarType::Float8_e5m2 || mat2.scalar_type() != ScalarType::Float8_e5m2,
         "Multiplication of two Float8_e5m2 matrices is not supported");
 #endif
+#ifdef USE_ROCM
+  if (mat1.scalar_type() == ScalarType::Float8_e5m2 || mat2.scalar_type() == ScalarType::Float8_e5m2) {
+    TORCH_CHECK(ROCM_VERSION >= 60000, "Float8_e5m2 is only supported for ROCm 6.0 and above");
+  }
+  if (mat1.scalar_type() == ScalarType::Float8_e4m3fn || mat2.scalar_type() == ScalarType::Float8_e4m3fn) {
+    TORCH_CHECK(ROCM_VERSION >= 60000, "Float8_e4m3fn is only supported for ROCm 6.0 and above");
+  }
+#endif
   if (bias) {
     TORCH_CHECK(out.scalar_type() != kFloat, "Bias is not supported when out_dtype is set to Float32");
     TORCH_CHECK(bias->scalar_type() == ScalarType::BFloat16 || bias->scalar_type() == ScalarType::Half,
@@ -1211,7 +1223,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   }
 #else
   if (scaling_choice == ScalingType::RowWise) {
-    // For ROCm, match behavior of f8f8bf16_rowwise type checking, for unit test purposes.
+    // For ROCm, match behavior of f8f8bf16_rowwise type checking
     Tensor b = mat2;
     if (_scaled_mm_is_fnuz()) {
       TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fnuz);
@@ -1219,9 +1231,25 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     else {
       TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fn);
     }
-    // Until more than bf16 is supported.
+    // Until more than bf16 is supported
     TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16,
-         "hipblaslt rowwise _scaled_mm only supports BFloat16 output but got ", out.scalar_type());
+         "hipblaslt rowwise _scaled_mm only supports BFloat16 output");
+  }
+  else if (scaling_choice == ScalingType::BlockWise) {
+#if ROCM_VERSION >= 70000
+    TORCH_CHECK(at::detail::getCUDAHooks().isGPUArch(0, {"gfx950"}),
+               "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
+
+    TORCH_CHECK(mat1.size(0) % 32 == 0 && mat1.size(1) % 32 == 0 &&
+               mat2.size(0) % 32 == 0 && mat2.size(1) % 32 == 0,
+               "Matrix dimensions must be multiples of 32 for block-wise scaling");
+
+    TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16 ||
+                out.scalar_type() == ScalarType::Half,
+                "Block-wise scaling only supports BFloat16 or Half output types");
+#else
+    TORCH_CHECK(false, "Block-wise scaling for Float8_e8m0fnu requires ROCm 7.0 or later");
+#endif
   }
 #endif
 
@@ -1300,10 +1328,12 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       params.k = args.k;
       params.a = args.mata->data_ptr();
       params.a_scale_ptr = args.scale_mata_ptr;
+      params.a_scale_dtype = scale_a.scalar_type();
       params.lda = args.lda;
       params.a_dtype = args.mata->scalar_type();
       params.b = args.matb->data_ptr();
       params.b_scale_ptr = args.scale_matb_ptr;
+      params.b_scale_dtype = scale_b.scalar_type();
       params.ldb = args.ldb;
       params.b_dtype = args.matb->scalar_type();
       params.bias_ptr = bias ? bias->data_ptr(): nullptr;
