@@ -1,8 +1,13 @@
-torch.utils
-===================================
+# torch.utils
+```{eval-rst}
 .. automodule:: torch.utils
-.. currentmodule:: torch.utils
+```
 
+```{eval-rst}
+.. currentmodule:: torch.utils
+```
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -12,9 +17,11 @@ torch.utils
     get_cpp_backtrace
     set_module
     swap_tensors
+```
 
-.. This module needs to be documented. Adding here in the meantime
-.. for tracking purposes
+<!-- This module needs to be documented. Adding here in the meantime
+for tracking purposes -->
+```{eval-rst}
 .. py:module:: torch.utils.backend_registration
 .. py:module:: torch.utils.benchmark.examples.compare
 .. py:module:: torch.utils.benchmark.examples.fuzzer
@@ -87,3 +94,4 @@ torch.utils
 .. py:module:: torch.utils.tensorboard.writer
 .. py:module:: torch.utils.throughput_benchmark
 .. py:module:: torch.utils.weak
+```
