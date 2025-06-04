@@ -61,6 +61,9 @@ pip install -r requirements.txt
 # Set DISTUTILS_USE_SDK after psutil install
 export DISTUTILS_USE_SDK=1
 
+# Add link.exe to PATH
+set PATH=C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.43.34808\bin\Hostarm64\arm64;%PATH%
+
 # Print environment variables (debugging)
 env
 
