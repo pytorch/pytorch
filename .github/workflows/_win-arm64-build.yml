@@ -136,7 +136,7 @@ jobs:
 
       - name: Build
         id: build
-        shell: cmd
+        shell: pwsh
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -161,11 +161,7 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
           cd pytorch
-          set GIT_BASH=C:\Program Files\Git\bin\bash.exe
-          set "PATH=C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\14.43.34808\bin\Hostarm64\arm64;%PATH%"
-          where link
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" arm64
-          "%GIT_BASH%" -c "bash --noprofile --norc .ci/pytorch/win-arm64-build.sh"
+          .ci/pytorch/win-arm64-build.ps1
           
       - name: Upload artifacts
         uses: actions/upload-artifact@v4.4.0
