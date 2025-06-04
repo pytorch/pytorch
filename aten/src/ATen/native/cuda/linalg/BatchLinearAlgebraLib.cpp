@@ -1598,9 +1598,11 @@ static void linalg_eigh_rocsolver_syevd_batched(const Tensor& eigenvalues, const
 
 void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
 #if defined(USE_ROCM)
-  if (ROCSOLVER_SYEVD_BATCHED_ENABLED && batchCount(eigenvectors) > 1 && (eigenvectors.scalar_type() == at::kFloat || eigenvectors.scalar_type() == at::kDouble))
+#if ROCSOLVER_SYEVD_BATCHED_ENABLED
+  if (batchCount(eigenvectors) > 1 && (eigenvectors.scalar_type() == at::kFloat || eigenvectors.scalar_type() == at::kDouble))
     linalg_eigh_rocsolver_syevd_batched(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
   else // not ROCSOLVER_SYEVD_BATCHED_ENABLED or batch==1 or complex input
+#endif // ROCSOLVER_SYEVD_BATCHED_ENABLED
     linalg_eigh_cusolver_syevd(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
 #else // not USE_ROCM
   if (use_cusolver_syevj_batched_ && batchCount(eigenvectors) > 1 && eigenvectors.size(-1) <= 32) {
