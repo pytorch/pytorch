@@ -271,6 +271,16 @@ _pre_fusion_custom_pass: Optional[
     ]
 ] = None
 
+# Registers a custom pass to be run right after fusion in Inductor scheduler.
+# WARNING: Inductor scheduler IR is at prototype stage and subject to change,
+# hence custom IR passes built on top of it might break in the future.
+_post_fusion_custom_pass: Optional[
+    Callable[
+        [list["torch._inductor.scheduler.BaseSchedulerNode"]],
+        list["torch._inductor.scheduler.BaseSchedulerNode"],
+    ]
+] = None
+
 # Deprecated
 split_cat_fx_passes = True
 
@@ -1670,6 +1680,9 @@ class test_configs:
     autotune_choice_desc_regex: Optional[str] = None
 
     graphsafe_rng_func_ignores_fallback_random = False
+
+    # TODO - temporary config before enabled by default
+    global_tiling_analysis: bool = False
 
 
 if TYPE_CHECKING:

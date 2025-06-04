@@ -8,6 +8,7 @@
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 #include <optional>
 
 namespace c10d {
@@ -161,7 +162,7 @@ struct FlightRecorder {
     // acquire the GIL. If you don't want to block the current thread or take
     // the risk of a GIL deadlock, you can use an asynchronous calling mechanism
     // like std::async.
-    std::string getTraceback();
+    TORCH_API std::string getTraceback();
   };
 
   bool enabled_ = false;
@@ -191,7 +192,7 @@ struct FlightRecorder {
       std::shared_ptr<ProcessGroupStatus> pg_status,
       bool isP2P);
 
-  void record_pg_ranks(
+  TORCH_API void record_pg_ranks(
       const std::tuple<std::string, std::string>& pg_name,
       std::vector<uint64_t> ranks);
 
@@ -203,7 +204,7 @@ struct FlightRecorder {
 
   // Returns the entry with the given id, if it exists. Otherwise, returns
   // std::nullopt.
-  std::optional<Entry> getEntry(std::optional<size_t> id);
+  TORCH_API std::optional<Entry> getEntry(std::optional<size_t> id);
 
   /*
   Mark an Event as completed and free its events.
@@ -215,7 +216,9 @@ struct FlightRecorder {
   never hang. (timing must also be enabled for compute_duration - see
   TORCH_NCCL_ENABLE_TIMING).
   */
-  void retire_id(std::optional<size_t> id, bool compute_duration = true);
+  TORCH_API void retire_id(
+      std::optional<size_t> id,
+      bool compute_duration = true);
 
   const c10::List<c10::IValue> getCollectiveTrace(
       bool includeStacktraces,
@@ -248,4 +251,18 @@ struct FlightRecorder {
       bool includeStackTraces,
       bool onlyActive);
 };
+
+// Dumps the fr traces and additional information about the Process
+// Group.
+TORCH_API std::string dump_fr_trace(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive);
+
+// Dumps the fr traces and additional information about the Process
+// Group in JSON formatted string.
+// We don't include stack traces in JSON format as it is far too much data.
+TORCH_API std::string dump_fr_trace_json(
+    bool includeCollectives,
+    bool onlyActive);
 } // namespace c10d
