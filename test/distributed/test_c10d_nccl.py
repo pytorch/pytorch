@@ -546,7 +546,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         try:
             pg._allgather_base(output, nan_tensor)
         except Exception:
-            sys.exit(-signal.SIGABRT)  # This will give -6
+            os._exit(-signal.SIGABRT)  # This will actually give -6
 
         dist.destroy_process_group()
 
