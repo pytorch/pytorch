@@ -18,8 +18,8 @@
 
 #if !AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     const Tensor& self, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
@@ -76,8 +76,8 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
   TORCH_CHECK(false, "_new_batch_norm_backward_mkldnn: ATen not compiled with MKLDNN support");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
+
 
 #else // AT_MKLDNN_ENABLED
 
@@ -85,8 +85,7 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
 #include <ATen/native/layer_norm.h>
 #include <ideep/abstract_types.hpp>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
     const Tensor& input,
@@ -138,9 +137,9 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
-  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
-  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+  const Tensor& bias = bias_opt.value_or(Tensor());
+  const Tensor& running_mean = running_mean_opt.value_or(Tensor());
+  const Tensor& running_var = running_var_opt.value_or(Tensor());
 
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
@@ -211,8 +210,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
 std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_mkldnn(
     const Tensor& input, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
     Tensor& running_mean, Tensor& running_var, double momentum, double eps) {
-  Tensor output, save_mean, save_var;
-  std::tie(output, save_mean, save_var) =
+  auto [output, save_mean, save_var] =
     mkldnn_batch_norm(input, weight_opt, bias_opt, running_mean, running_var, /*train*/true, momentum, eps);
   Tensor reserve = empty_mkldnn({0}, input.scalar_type());
   return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, save_mean, save_var, reserve);
@@ -254,8 +252,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& save_mean = c10::value_or_else(save_mean_opt, [] {return Tensor();});
-  const Tensor& save_invstd = c10::value_or_else(save_invstd_opt, [] {return Tensor();});
+  const Tensor& save_mean = save_mean_opt.value_or(Tensor());
+  const Tensor& save_invstd = save_invstd_opt.value_or(Tensor());
 
   TORCH_CHECK(train, "mkldnn_batch_norm_backward: currently mkldnn only support train model");
   ideep::tensor& grady = itensor_from_mkldnn(grad_output);
@@ -280,7 +278,6 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
                                               weight.options().device_opt())));
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED

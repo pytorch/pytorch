@@ -1,9 +1,9 @@
 #pragma once
 
+#include <torch/csrc/utils/variadic.h>
 #include <torch/nn/modules/container/any_value.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 class Module;
 
@@ -26,7 +26,7 @@ struct AnyModulePlaceholder : public AnyValue::Placeholder {
 
   /// Returns a `AnyModulePlaceholder` with a deep copy of this `AnyModule`.
   virtual std::unique_ptr<AnyModulePlaceholder> clone_module(
-      optional<Device> device) const = 0;
+      std::optional<Device> device) const = 0;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AnyModuleHolder ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -46,7 +46,8 @@ struct AnyModuleHolder : public AnyModulePlaceholder {
       if (auto* maybe_value = value.template try_get<std::decay_t<T>>()) {
         return std::move(*maybe_value);
       }
-      AT_ERROR(
+      TORCH_CHECK(
+          false,
           "Expected argument #",
           index,
           " to be of type ",
@@ -54,6 +55,7 @@ struct AnyModuleHolder : public AnyModulePlaceholder {
           ", but received value of type ",
           c10::demangle(value.type_info().name()));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     std::vector<AnyValue>& arguments_;
   };
 
@@ -63,6 +65,7 @@ struct AnyModuleHolder : public AnyModulePlaceholder {
     AnyValue operator()(Ts&&... ts) {
       return AnyValue(module_->forward(std::forward<Ts>(ts)...));
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     std::shared_ptr<ModuleType>& module_;
   };
 
@@ -120,7 +123,7 @@ struct AnyModuleHolder : public AnyModulePlaceholder {
   }
 
   std::unique_ptr<AnyModulePlaceholder> clone_module(
-      optional<Device> device) const override {
+      std::optional<Device> device) const override {
     return std::make_unique<AnyModuleHolder>(
         std::dynamic_pointer_cast<ModuleType>(module->clone(device)));
   }
@@ -129,5 +132,4 @@ struct AnyModuleHolder : public AnyModulePlaceholder {
   std::shared_ptr<ModuleType> module;
 };
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

@@ -12,9 +12,9 @@
 namespace at::functorch {
 
 template <typename Func>
-std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>>
+static std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>>
 max_pool_with_indices_batch_rule_helper(
-  const Tensor& self, optional<int64_t> self_bdim,
+  const Tensor& self, std::optional<int64_t> self_bdim,
   IntArrayRef kernel_size, IntArrayRef stride,
   IntArrayRef padding, IntArrayRef dilation, bool ceil_mode, int64_t n, Func pooling_fn) {
 
@@ -28,8 +28,10 @@ max_pool_with_indices_batch_rule_helper(
     return std::make_tuple(std::move(std::get<0>(result)), 0, std::move(std::get<1>(result)), 0);
   }
   // Tensor[B, N, logical_rank...] -> Tensor[B * N, logical_rank...]
-  auto bdim_size = self.size(*self_bdim);
-  auto self_ = reshape_dim_into(*self_bdim, 0, self);
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  auto bdim_size = self.size(self_bdim.value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  auto self_ = reshape_dim_into(self_bdim.value(), 0, self);
   auto result = pooling_fn(
       self_, kernel_size, stride, padding, dilation, ceil_mode);
   return std::make_tuple(
@@ -37,17 +39,17 @@ max_pool_with_indices_batch_rule_helper(
       reshape_dim_outof(0, bdim_size, std::get<1>(result)), 0);
 }
 
-static std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>>
+static std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>>
 max_pool3d_with_indices_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim,
+    const Tensor& self, std::optional<int64_t> self_bdim,
     IntArrayRef kernel_size, IntArrayRef stride,
     IntArrayRef padding, IntArrayRef dilation, bool ceil_mode) {
     return max_pool_with_indices_batch_rule_helper(self, self_bdim, kernel_size, stride, padding, dilation, ceil_mode, 3, at::max_pool3d_with_indices);
 }
 
-static std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>>
+static std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>>
 max_pool2d_with_indices_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim,
+    const Tensor& self, std::optional<int64_t> self_bdim,
     IntArrayRef kernel_size, IntArrayRef stride,
     IntArrayRef padding, IntArrayRef dilation, bool ceil_mode) {
     return max_pool_with_indices_batch_rule_helper(self, self_bdim, kernel_size, stride, padding, dilation, ceil_mode, 2, at::max_pool2d_with_indices);

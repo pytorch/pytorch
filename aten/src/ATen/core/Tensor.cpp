@@ -51,9 +51,8 @@ TensorBase TensorBase::to(
 }
 
 void TensorBase::enforce_invariants() {
-  if (impl_.get() == nullptr) {
-    throw std::runtime_error("TensorImpl with nullptr is not supported");
-  }
+  TORCH_CHECK(
+      impl_.get() != nullptr, "TensorImpl with nullptr is not supported");
   // Following line throws if the method is not a POD data type or is not
   // supported by ATen
   scalar_type();
@@ -89,6 +88,8 @@ std::string TensorBase::toString() const {
       dispatchkey_str = c10::get_privateuse1_backend();
     } else if (dispatchkey == c10::DispatchKey::AutocastPrivateUse1) {
       dispatchkey_str = "Autocast" + c10::get_privateuse1_backend();
+    } else if (dispatchkey == c10::DispatchKey::QuantizedPrivateUse1) {
+      dispatchkey_str = "Quantized" + c10::get_privateuse1_backend();
     } else {
       dispatchkey_str = at::toString(dispatchkey);
     }

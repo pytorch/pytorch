@@ -4,20 +4,22 @@
 from __future__ import annotations
 
 import glob
-import io
 import os
 import shutil
-import zipfile
-from typing import Any, List, Mapping, Set, Tuple, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.jit._trace
 import torch.serialization
-from torch.onnx import _constants, _exporter_states, errors
-from torch.onnx._internal import _beartype, jit_utils, registration
+from torch.onnx import errors
+from torch.onnx._internal import jit_utils, registration
 
 
-@_beartype.beartype
+if TYPE_CHECKING:
+    import io
+    from collections.abc import Mapping
+
+
 def export_as_test_case(
     model_bytes: bytes, inputs_data, outputs_data, name: str, dir: str
 ) -> str:
@@ -55,7 +57,6 @@ def export_as_test_case(
     _export_file(
         model_bytes,
         os.path.join(test_case_dir, "model.onnx"),
-        _exporter_states.ExportTypes.PROTOBUF_FILE,
         {},
     )
     data_set_dir = os.path.join(test_case_dir, "test_data_set_0")
@@ -73,8 +74,7 @@ def export_as_test_case(
     return test_case_dir
 
 
-@_beartype.beartype
-def load_test_case(dir: str) -> Tuple[bytes, Any, Any]:
+def load_test_case(dir: str) -> tuple[bytes, Any, Any]:
     """Load a self contained ONNX test case from a directory.
 
     The test case must contain the model and the inputs/outputs data. The directory structure
@@ -124,7 +124,6 @@ def load_test_case(dir: str) -> Tuple[bytes, Any, Any]:
     return model_bytes, inputs, outputs
 
 
-@_beartype.beartype
 def export_data(data, value_info_proto, f: str) -> None:
     """Export data to ONNX protobuf format.
 
@@ -163,54 +162,17 @@ def export_data(data, value_info_proto, f: str) -> None:
             )
 
 
-@_beartype.beartype
 def _export_file(
     model_bytes: bytes,
-    f: Union[io.BytesIO, str],
-    export_type: str,
+    f: io.BytesIO | str,
     export_map: Mapping[str, bytes],
 ) -> None:
     """export/write model bytes into directory/protobuf/zip"""
-    if export_type == _exporter_states.ExportTypes.PROTOBUF_FILE:
-        assert len(export_map) == 0
-        with torch.serialization._open_file_like(f, "wb") as opened_file:
-            opened_file.write(model_bytes)
-    elif export_type in {
-        _exporter_states.ExportTypes.ZIP_ARCHIVE,
-        _exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE,
-    }:
-        compression = (
-            zipfile.ZIP_DEFLATED
-            if export_type == _exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE
-            else zipfile.ZIP_STORED
-        )
-        with zipfile.ZipFile(f, "w", compression=compression) as z:
-            z.writestr(_constants.ONNX_ARCHIVE_MODEL_PROTO_NAME, model_bytes)
-            for k, v in export_map.items():
-                z.writestr(k, v)
-    elif export_type == _exporter_states.ExportTypes.DIRECTORY:
-        if isinstance(f, io.BytesIO) or not os.path.isdir(f):  # type: ignore[arg-type]
-            raise ValueError(
-                f"f should be directory when export_type is set to DIRECTORY, instead get type(f): {type(f)}"
-            )
-        if not os.path.exists(f):  # type: ignore[arg-type]
-            os.makedirs(f)  # type: ignore[arg-type]
-
-        model_proto_file = os.path.join(f, _constants.ONNX_ARCHIVE_MODEL_PROTO_NAME)  # type: ignore[arg-type]
-        with torch.serialization._open_file_like(model_proto_file, "wb") as opened_file:
-            opened_file.write(model_bytes)
-
-        for k, v in export_map.items():
-            weight_proto_file = os.path.join(f, k)  # type: ignore[arg-type]
-            with torch.serialization._open_file_like(
-                weight_proto_file, "wb"
-            ) as opened_file:
-                opened_file.write(v)
-    else:
-        raise ValueError("Unknown export type")
+    assert len(export_map) == 0
+    with torch.serialization._open_file_like(f, "wb") as opened_file:
+        opened_file.write(model_bytes)
 
 
-@_beartype.beartype
 def _add_onnxscript_fn(
     model_bytes: bytes,
     custom_opsets: Mapping[str, int],
@@ -230,8 +192,8 @@ def _add_onnxscript_fn(
 
     # Iterate graph nodes to insert only the included custom
     # function_proto into model_proto
-    onnx_function_list = list()  # type: ignore[var-annotated]
-    included_node_func = set()  # type: Set[str]
+    onnx_function_list = []  # type: ignore[var-annotated]
+    included_node_func: set[str] = set()
     # onnx_function_list and included_node_func are expanded in-place
     _find_onnxscript_op(
         model_proto.graph, included_node_func, custom_opsets, onnx_function_list
@@ -243,12 +205,11 @@ def _add_onnxscript_fn(
     return model_bytes
 
 
-@_beartype.beartype
 def _find_onnxscript_op(
     graph_proto,
-    included_node_func: Set[str],
+    included_node_func: set[str],
     custom_opsets: Mapping[str, int],
-    onnx_function_list: List,
+    onnx_function_list: list,
 ):
     """Recursively iterate ModelProto to find ONNXFunction op as it may contain control flow Op."""
     for node in graph_proto.node:

@@ -1,11 +1,12 @@
+#include <c10/util/env.h>
 #include <torch/csrc/lazy/core/debug_util.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 namespace {
 std::string GetFirstUserFrameInPythonIfEnabled() {
   static const auto LTC_ENABLE_SOURCE_INFO =
-      std::getenv("LTC_ENABLE_SOURCE_INFO");
-  if (!LTC_ENABLE_SOURCE_INFO) {
+      c10::utils::has_env("LTC_ENABLE_SOURCE_INFO");
+  if (LTC_ENABLE_SOURCE_INFO) {
     return {};
   }
 
@@ -13,8 +14,7 @@ std::string GetFirstUserFrameInPythonIfEnabled() {
 }
 } // namespace
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 static hash_t OperandHashes(
     const OpList& operands,
@@ -101,5 +101,4 @@ TSOpVector TensorList::Lower(
   return {listnode->output()};
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

@@ -2,16 +2,17 @@
 
 import os
 import sys
-import unittest
 import warnings
 from typing import Dict, List, Optional
 
 import torch
 
+
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
+
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -28,7 +29,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
     def test_annotated_falsy_base_type(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x: int = 0
 
@@ -42,7 +43,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
     def test_annotated_nonempty_container(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x: List[int] = [1, 2, 3]
 
@@ -56,7 +57,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
     def test_annotated_empty_tensor(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x: torch.Tensor = torch.empty(0)
 
@@ -70,7 +71,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
     def test_annotated_with_jit_attribute(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x = torch.jit.Attribute([], List[int])
 
@@ -86,7 +87,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
         class M(torch.nn.Module):
             x: List[int]
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x = []
 
@@ -102,7 +103,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
         class M(torch.nn.Module):
             x: List[int]
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x: List[int] = []
 
@@ -118,7 +119,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
         class M(torch.nn.Module):
             x: List[int]
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x: List[int] = torch.jit.annotate(List[int], [])
 
@@ -132,7 +133,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
     def test_annotated_empty_list(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x: List[int] = []
 
@@ -151,12 +152,9 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
             ):
                 torch.jit.script(M())
 
-    @unittest.skipIf(
-        sys.version_info[:2] < (3, 9), "Requires lowercase static typing (Python 3.9+)"
-    )
     def test_annotated_empty_list_lowercase(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x: list[int] = []
 
@@ -177,7 +175,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
     def test_annotated_empty_dict(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x: Dict[str, int] = {}
 
@@ -196,12 +194,9 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
             ):
                 torch.jit.script(M())
 
-    @unittest.skipIf(
-        sys.version_info[:2] < (3, 9), "Requires lowercase static typing (Python 3.9+)"
-    )
     def test_annotated_empty_dict_lowercase(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x: dict[str, int] = {}
 
@@ -222,7 +217,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
     def test_annotated_empty_optional(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x: Optional[str] = None
 
@@ -243,7 +238,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
     def test_annotated_with_jit_empty_list(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x = torch.jit.annotate(List[int], [])
 
@@ -262,12 +257,9 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
             ):
                 torch.jit.script(M())
 
-    @unittest.skipIf(
-        sys.version_info[:2] < (3, 9), "Requires lowercase static typing (Python 3.9+)"
-    )
     def test_annotated_with_jit_empty_list_lowercase(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x = torch.jit.annotate(list[int], [])
 
@@ -288,7 +280,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
     def test_annotated_with_jit_empty_dict(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x = torch.jit.annotate(Dict[str, int], {})
 
@@ -307,12 +299,9 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
             ):
                 torch.jit.script(M())
 
-    @unittest.skipIf(
-        sys.version_info[:2] < (3, 9), "Requires lowercase static typing (Python 3.9+)"
-    )
     def test_annotated_with_jit_empty_dict_lowercase(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x = torch.jit.annotate(dict[str, int], {})
 
@@ -333,7 +322,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
     def test_annotated_with_jit_empty_optional(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x = torch.jit.annotate(Optional[str], None)
 
@@ -356,7 +345,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
         from torch import jit
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x = jit.annotate(Optional[str], None)
 

@@ -5,13 +5,12 @@ import logging
 import os
 import re
 import sys
-import time
 from functools import partial, wraps
 
 import torch
 import torch.distributed as dist
+from torch.distributed.c10d_logger import _c10d_logger, _exception_logger
 
-from torch.distributed.c10d_logger import _c10d_logger, _exception_logger, _time_logger
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -19,6 +18,7 @@ if not dist.is_available():
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase, TEST_SKIPS
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -117,15 +117,13 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
                 re.search("({.+})", captured.output[0]).group(0).replace("'", '"')
             )
 
-            self.assertEqual(len(error_msg_dict), 10)
+            self.assertEqual(len(error_msg_dict), 9)
 
             self.assertIn("pg_name", error_msg_dict.keys())
             self.assertEqual("None", error_msg_dict["pg_name"])
 
             self.assertIn("func_name", error_msg_dict.keys())
             self.assertEqual("broadcast", error_msg_dict["func_name"])
-
-            self.assertIn("args", error_msg_dict.keys())
 
             self.assertIn("backend", error_msg_dict.keys())
             self.assertEqual("nccl", error_msg_dict["backend"])
@@ -149,54 +147,6 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
             # In this test case, local_rank = global_rank, since we don't have multiple processes on one node.
             self.assertIn("local_rank", error_msg_dict.keys())
             self.assertIn(str(dist.get_rank()), error_msg_dict["local_rank"])
-
-    @_time_logger
-    def _dummy_sleep(self):
-        time.sleep(5)
-
-    @with_comms
-    def test_time_logger(self) -> None:
-        with self.assertLogs(_c10d_logger, level="DEBUG") as captured:
-            self._dummy_sleep()
-            msg_dict = json.loads(
-                re.search("({.+})", captured.output[0]).group(0).replace("'", '"')
-            )
-            self.assertEqual(len(msg_dict), 10)
-
-            self.assertIn("pg_name", msg_dict.keys())
-            self.assertEqual("None", msg_dict["pg_name"])
-
-            self.assertIn("func_name", msg_dict.keys())
-            self.assertEqual("_dummy_sleep", msg_dict["func_name"])
-
-            self.assertIn("args", msg_dict.keys())
-
-            self.assertIn("backend", msg_dict.keys())
-            self.assertEqual("nccl", msg_dict["backend"])
-
-            self.assertIn("nccl_version", msg_dict.keys())
-            nccl_ver = torch.cuda.nccl.version()
-            self.assertEqual(
-                ".".join(str(v) for v in nccl_ver), msg_dict["nccl_version"]
-            )
-
-            # In this test case, group_size = world_size, since we don't have multiple processes on one node.
-            self.assertIn("group_size", msg_dict.keys())
-            self.assertEqual(str(self.world_size), msg_dict["group_size"])
-
-            self.assertIn("world_size", msg_dict.keys())
-            self.assertEqual(str(self.world_size), msg_dict["world_size"])
-
-            self.assertIn("global_rank", msg_dict.keys())
-            self.assertIn(str(dist.get_rank()), msg_dict["global_rank"])
-
-            # In this test case, local_rank = global_rank, since we don't have multiple processes on one node.
-            self.assertIn("local_rank", msg_dict.keys())
-            self.assertIn(str(dist.get_rank()), msg_dict["local_rank"])
-
-            self.assertIn("time_spent", msg_dict.keys())
-            time_ns = re.findall(r"\d+", msg_dict["time_spent"])[0]
-            self.assertEqual(5, int(float(time_ns) / pow(10, 9)))
 
 
 if __name__ == "__main__":

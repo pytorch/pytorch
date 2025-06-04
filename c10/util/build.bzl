@@ -36,12 +36,17 @@ def define_targets(rules):
             ":bit_cast",
             "//c10/macros",
             "@fmt",
+            "@moodycamel//:moodycamel",
         ] + rules.select({
             "//c10:using_gflags": ["@com_github_gflags_gflags//:gflags"],
             "//conditions:default": [],
         }) + rules.select({
             "//c10:using_glog": ["@com_github_glog//:glog"],
             "//conditions:default": [],
+        }),
+        linkopts = rules.select({
+            "@bazel_tools//src/conditions:windows": [],
+            "//conditions:default": ["-ldl"],
         }),
         # This library uses flags and registration. Do not let the
         # linker remove them.
@@ -74,6 +79,18 @@ def define_targets(rules):
             "//c10/core:ScalarType",
             "//c10/macros",
         ],
+    )
+
+    rules.cc_library(
+        name = "base_headers",
+        hdrs = rules.glob(
+            ["*.h"],
+            exclude = [
+                "bit_cast.h",
+                "ssize.h",
+            ],
+        ),
+        visibility = ["//visibility:public"],
     )
 
     rules.filegroup(

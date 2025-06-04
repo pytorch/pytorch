@@ -1,4 +1,23 @@
 # mypy: allow-untyped-defs
+
+"""
+Utilities for reproducing and debugging issues in Dynamo after graph capture.
+
+This file provides tools and infrastructure for debugging problems that occur
+after Dynamo has captured the graph but before/during backend compilation.
+Key components include:
+
+- Minification tools to reduce large graphs to minimal failing examples
+- Accuracy testing to validate compiled graph outputs match eager mode
+- Repro generation to create standalone reproduction scripts
+- Debug backends for capturing and analyzing failures
+- Utilities for saving/loading graph states and inputs
+
+The tools here focus specifically on the post-graph-capture stage, making them
+useful for debugging backend compilation issues, AOTAutograd problems, and
+accuracy discrepancies between compiled and eager execution.
+"""
+
 import argparse
 import copy
 import functools
@@ -12,7 +31,7 @@ from typing import Union
 
 import torch
 import torch.fx as fx
-
+from torch._dynamo.backends.registry import CompiledFn
 from torch._dynamo.debug_utils import (
     AccuracyError,
     backend_accuracy_fails,
@@ -20,6 +39,7 @@ from torch._dynamo.debug_utils import (
     BuckTargetWriter,
     extra_imports,
     generate_config_string,
+    generate_env_vars_string,
     helper_for_dump_minify,
     InputReader,
     InputWriter,
@@ -35,6 +55,7 @@ from torch.hub import tqdm
 from .. import config
 from ..backends.registry import lookup_backend, register_debug_backend
 from ..debug_utils import clone_inputs_retaining_gradness
+
 
 log = logging.getLogger(__name__)
 
@@ -58,7 +79,7 @@ def _accuracy_fails(gm, example_inputs, compiler_fn):
 
 
 class WrapBackendDebug:
-    def __init__(self, unconfigured_compiler_fn, compiler_name: str):
+    def __init__(self, unconfigured_compiler_fn, compiler_name: str) -> None:
         functools.wraps(unconfigured_compiler_fn)(self)
         self._torchdynamo_orig_callable = unconfigured_compiler_fn  # type: ignore[attr-defined]
         self._compiler_name = compiler_name
@@ -178,6 +199,7 @@ def generate_dynamo_fx_repro_string(
 
     return textwrap.dedent(
         f"""
+{generate_env_vars_string(stable_output=stable_output)}
 from math import inf
 import torch
 from torch import tensor, device
@@ -271,8 +293,10 @@ def dump_to_minify_after_dynamo(gm, args, compiler_name):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-@register_debug_backend
-def dynamo_minifier_backend(gm, example_inputs, compiler_name):
+@register_debug_backend  # type: ignore[arg-type]
+def dynamo_minifier_backend(
+    gm: fx.GraphModule, example_inputs, compiler_name: CompiledFn
+):
     from functorch.compile import minifier
 
     compiler_fn = lookup_backend(compiler_name)
@@ -311,7 +335,7 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
     return gm
 
 
-@register_debug_backend
+@register_debug_backend  # type: ignore[arg-type]
 def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
     from functorch.compile import minifier
 
@@ -361,12 +385,11 @@ def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
         run_fwd_maybe_bwd(gm, clone_inputs_retaining_gradness(example_inputs))
         compiled_gm = compiler_fn(gm, example_inputs)
         run_fwd_maybe_bwd(compiled_gm, clone_inputs_retaining_gradness(example_inputs))
-        return False
     except Exception as e:
         new_failure = str(e)
         if SequenceMatcher(None, orig_failure, new_failure).ratio() > 0.5:
             return True
-        return False
+    return False
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -423,7 +446,7 @@ def repro_minify(options, mod, load_args):
     )
     opt_mod = torch._dynamo.optimize(dynamo_minifier_backend)(mod)
 
-    with torch.cuda.amp.autocast(enabled=options.autocast):
+    with torch.amp.autocast("cuda", enabled=options.autocast):
         opt_mod(*args)
 
 
@@ -434,7 +457,7 @@ def repro_run(options, mod, load_args):
         mod.eval()
         opt_mod.eval()
 
-        with torch.cuda.amp.autocast(enabled=options.autocast):
+        with torch.amp.autocast("cuda", enabled=options.autocast):
             # TODO: disable clone
             args = run_load_args(options, mod, load_args)
             assert same_two_models(mod, mod, args), "Eager itself failed"
@@ -447,15 +470,13 @@ def repro_run(options, mod, load_args):
             ):
                 raise AccuracyError("Dynamo failed")
     else:
-        with torch.cuda.amp.autocast(enabled=options.autocast):
+        with torch.amp.autocast("cuda", enabled=options.autocast):
             args = run_load_args(options, mod, load_args)
-            ref = run_fwd_maybe_bwd(
-                mod, args, only_fwd=options.only_fwd, disable_clone=True
-            )
+            run_fwd_maybe_bwd(mod, args, only_fwd=options.only_fwd, disable_clone=True)
             del args
 
             args = run_load_args(options, mod, load_args)
-            res = run_fwd_maybe_bwd(
+            run_fwd_maybe_bwd(
                 opt_mod, args, only_fwd=options.only_fwd, disable_clone=True
             )
 

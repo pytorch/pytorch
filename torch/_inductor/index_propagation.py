@@ -5,24 +5,26 @@ propagation of sympy expressions downstream of ops.index_expr calls.
 
 For example, say we have the IR:
 
-   tmp0 = ops.index_expr(x, torch.int32)
-   tmp1 = ops.constant(2, torch.int32)
-   tmp2 = ops.mul(tmp0, tmp1)
-   tmp3 = ops.indirect_indexing(tmp2, x_size)
-   tmp4 = ops.load("buf0", tmp3)
+    tmp0 = ops.index_expr(x, torch.int32)
+    tmp1 = ops.constant(2, torch.int32)
+    tmp2 = ops.mul(tmp0, tmp1)
+    tmp3 = ops.indirect_indexing(tmp2, x_size)
+    tmp4 = ops.load("buf0", tmp3)
 
 The underlying handler would just see:
 
-   ops.load("buf0", x * 2)
+    ops.load("buf0", x * 2)
 
 This is limited by the set of operators handled in the sympy expression
 printers. So simple operations like minimum and maximum cannot be translated to
 SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 
 """
+
 import itertools
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Literal, Optional, overload, Tuple, Union
+from typing import Any, Literal, Optional, overload, Union
 from typing_extensions import TypeAlias
 
 import sympy
@@ -31,8 +33,10 @@ import torch
 from torch._prims_common import dtype_to_type, is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
-from .utils import generate_assert
 
+from .ops_handler import DefaultHandler
+from .sizevars import evaluate_expr
+from .utils import generate_assert
 from .virtualized import V
 
 
@@ -86,7 +90,10 @@ class SymPyOps:
 
     @staticmethod
     def to_dtype(
-        value: TypedExpr, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None
+        value: TypedExpr,
+        dtype: torch.dtype,
+        src_dtype: Optional[torch.dtype] = None,
+        use_compute_types: bool = False,
     ) -> TypedExpr:
         return TypedExpr(value.expr, dtype)
 
@@ -131,7 +138,7 @@ class SymPyOps:
         if not is_integer_dtype(result_type):
             return NotImplemented
 
-        result_expr = ModularIndexing(x.expr, sympy.Integer(1), y.expr)
+        result_expr = ModularIndexing(x.expr, sympy.S.One, y.expr)
         return TypedExpr(result_expr, result_type)
 
     @staticmethod
@@ -148,7 +155,7 @@ class SymPyOps:
             x_expr.is_nonnegative is not None
             and x_expr.is_nonnegative == y_expr.is_positive
         ):
-            result_expr = ModularIndexing(x.expr, sympy.Integer(1), y.expr)
+            result_expr = ModularIndexing(x.expr, sympy.S.One, y.expr)
             return TypedExpr(result_expr, result_type)
         return NotImplemented
 
@@ -173,15 +180,15 @@ class IndexPropVar:
         return IndexPropVar(expr, is_symbolic=True)
 
     def __post_init__(self):
-        assert not self.is_symbolic or isinstance(
-            self.value, TypedExpr
-        ), "Symbolic IndexPropVar must contain a TypedExpr"
+        assert not self.is_symbolic or isinstance(self.value, TypedExpr), (
+            "Symbolic IndexPropVar must contain a TypedExpr"
+        )
 
 
-IndexPropResult: TypeAlias = Union[IndexPropVar, Tuple["IndexPropResult", ...]]
+IndexPropResult: TypeAlias = Union[IndexPropVar, tuple["IndexPropResult", ...]]
 
 
-class IndexPropagation:
+class IndexPropagation(DefaultHandler):
     """Ops wrapper that tries to propagate constant and index_expr values through the computation.
 
     This aims to maximize the compile time simplification possible, and convert
@@ -189,7 +196,12 @@ class IndexPropagation:
 
     """
 
-    def __init__(self, inner: Any, iter_ranges: Dict[sympy.Symbol, sympy.Expr]):
+    def __init__(
+        self,
+        inner: Any,
+        iter_ranges: dict[sympy.Symbol, sympy.Expr],
+        indirect_var_ranges: dict[sympy.Symbol, sympy.Expr],
+    ) -> None:
         self._inner = inner
         self.shape_env = V.graph.sizevars.shape_env
 
@@ -199,6 +211,9 @@ class IndexPropagation:
         self.var_to_range = tuple(
             itertools.chain(self.shape_env.var_to_range.items(), var_to_range.items())
         )
+        # NOTE: this is intentionally kept as a reference so the caller can
+        # update it in-place
+        self.indirect_var_ranges = indirect_var_ranges
 
         axioms = []
         for x, s in iter_ranges.items():
@@ -235,19 +250,17 @@ class IndexPropagation:
     def fallback(
         self,
         name: Literal["indirect_indexing"],
-        args: Tuple[Any, ...],
-        kwargs: Dict[str, Any],
-    ) -> IndexPropVar:
-        ...
+        args: Sequence[Any],
+        kwargs: dict[str, Any],
+    ) -> IndexPropVar: ...
 
     @overload
     def fallback(
-        self, name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> IndexPropResult:
-        ...
+        self, name: str, args: Sequence[Any], kwargs: dict[str, Any]
+    ) -> IndexPropResult: ...
 
     def fallback(
-        self, name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+        self, name: str, args: Sequence[Any], kwargs: dict[str, Any]
     ) -> IndexPropResult:
         # Fallback to the wrapped handler
         new_args = [self.unwrap(a) for a in args]
@@ -255,7 +268,7 @@ class IndexPropagation:
         return self.wrap(getattr(self._inner, name)(*new_args, **new_kwargs))
 
     def propagate_sympy(
-        self, name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+        self, name: str, args: Sequence[Any], kwargs: dict[str, Any]
     ) -> IndexPropResult:
         # Build a new SymPy expression from this ops call
         def unwrap(a: Union[Any, IndexPropVar]) -> Any:
@@ -269,29 +282,25 @@ class IndexPropagation:
         is_valid_expr = new_expr is not NotImplemented and (
             # Inductor doesn't expect floating point in sympy expressions, but
             # allow floating point constants to be propagated
-            new_expr.is_constant()
-            or new_expr.expr.is_integer
+            new_expr.is_constant() or new_expr.expr.is_integer
         )
         if not is_valid_expr:
             return self.fallback(name, args, kwargs)
         return IndexPropVar.new_symbolic(new_expr)
 
-    def __getattr__(self, name: str) -> Callable[..., IndexPropResult]:
-        def inner(*args: Any, **kwargs: Any) -> IndexPropResult:
-            if not hasattr(SymPyOps, name):
-                return self.fallback(name, args, kwargs)
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        if not hasattr(SymPyOps, name):
+            return self.fallback(name, args, kwargs)
 
-            var_arguments = [
-                a
-                for a in itertools.chain(args, kwargs.values())
-                if isinstance(a, IndexPropVar)
-            ]
-            if not all(v.is_symbolic for v in var_arguments):
-                return self.fallback(name, args, kwargs)
+        var_arguments = [
+            a
+            for a in itertools.chain(args, kwargs.values())
+            if isinstance(a, IndexPropVar)
+        ]
+        if not all(v.is_symbolic for v in var_arguments):
+            return self.fallback(name, args, kwargs)
 
-            return self.propagate_sympy(name, args, kwargs)
-
-        return inner
+        return self.propagate_sympy(name, args, kwargs)
 
     def statically_true(self, e):
         """
@@ -306,15 +315,21 @@ class IndexPropagation:
               to perform wrap_expr and in CSEProxy.check_bounds to elide upper / lower bounds also
               for indirect_indexing
         """
-        evaluated = self.shape_env._maybe_evaluate_static(
-            e,
-            axioms=self.axioms,
-            var_to_range=self.var_to_range,
+        var_to_range = (
+            *self.var_to_range,
+            *(
+                (k, ValueRanges(0, upper_bound(v) - 1))
+                for k, v in self.indirect_var_ranges.items()
+            ),
         )
-        return bool(evaluated)
+        return evaluate_expr(self.shape_env, e, self.axioms, var_to_range)
 
     def indirect_indexing(
-        self, index: Union[Any, IndexPropVar], size: Any, check: bool = True
+        self,
+        index: Union[Any, IndexPropVar],
+        size: Any,
+        check: bool = True,
+        wrap_neg=True,
     ) -> Any:
         if isinstance(index, IndexPropVar) and index.is_symbolic:
             # If we find something we can convert into a direct indexing we do so
@@ -339,7 +354,8 @@ class IndexPropagation:
                 -size <= expr
             )
             can_prove_upper = self.statically_true(expr < size)
-            expr = wrap_expr(expr)
+            if wrap_neg:
+                expr = wrap_expr(expr)
             if generate_assert(check):
                 self.fallback(
                     "check_bounds",
@@ -349,11 +365,6 @@ class IndexPropagation:
             return expr
 
         indirect_var = self.fallback(
-            "indirect_indexing", (index, size, check), {}
+            "indirect_indexing", (index, size, check, wrap_neg), {}
         ).value
-        assert (
-            indirect_var not in self.var_to_range
-        ), f"{indirect_var} should've been created in the fallback."
-        indirect_range = (indirect_var, ValueRanges(0, upper_bound(size) - 1))
-        self.var_to_range = self.var_to_range + (indirect_range,)
         return indirect_var

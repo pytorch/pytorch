@@ -16,8 +16,7 @@
 
 #include <mutex>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 #define CHECK_RESULT(RESULT, VAR)                                          \
   if (!(RESULT.is_sparse() || VAR.is_sparse() || RESULT.is_sparse_csr() || \
@@ -51,8 +50,8 @@ struct TORCH_API AccumulateGrad : public Node {
     return impl::hooks(variable);
   }
 
-  std::unique_ptr<PostAccumulateGradHook>& tensor_post_acc_grad_hooks() noexcept
-      override {
+  std::unique_ptr<PostAccumulateGradHook>& tensor_post_acc_grad_hooks()
+      const noexcept override {
     // NB: Since the AccumulateGrad Node is only a weak ref from the Tensor,
     //     it can be destroyed even though the Tensor is still alive (contrary
     //     to all other Nodes). So we must lazily read the Tensor hooks here.
@@ -224,7 +223,7 @@ struct TORCH_API AccumulateGrad : public Node {
         //   variable_grad += new_grad;
         // } else {
         //   result = at::empty_strided(variable.sizes(), variable.strides(),
-        //                              variable.options().memory_format(c10::nullopt));
+        //                              variable.options().memory_format(std::nullopt));
         //   update_grad(at::native::add_out(result, variable_grad,
         //   new_grad, 1.0);
         // }
@@ -263,7 +262,7 @@ struct TORCH_API AccumulateGrad : public Node {
     }
   }
 
-  void compiled_args(CompiledNodeArgs& args) override;
+  void compiled_args(CompiledNodeArgs& args) const override;
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
@@ -273,5 +272,4 @@ struct TORCH_API AccumulateGrad : public Node {
 
 #undef CHECK_RESULT
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

@@ -21,7 +21,7 @@ class TestLiteFuseFx(QuantizationLiteTestCase):
 
     def test_embedding(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=12)
 
@@ -31,14 +31,14 @@ class TestLiteFuseFx(QuantizationLiteTestCase):
         model = M().eval()
         indices = torch.randint(low=0, high=10, size=(20,))
 
-        quantized_node = ns.call_module(nnq.Embedding)
+        ns.call_module(nnq.Embedding)
         configs = [
             (float_qparams_weight_only_qconfig, ns.call_module(nnq.Embedding)),
             (None, ns.call_module(nn.Embedding)),
             (default_qconfig, ns.call_module(nn.Embedding)),
         ]
 
-        for qconfig, node in configs:
+        for qconfig, _ in configs:
             qconfig_dict = {"": qconfig}
             m = prepare_fx(
                 model,
@@ -50,7 +50,7 @@ class TestLiteFuseFx(QuantizationLiteTestCase):
 
     def test_conv2d(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(1, 1, 1)
                 self.conv2 = nn.Conv2d(1, 1, 1)

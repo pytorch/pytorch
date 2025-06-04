@@ -12,10 +12,10 @@ namespace at::native {
 namespace{
 
 template <typename scalar_t, typename opmath_t, ADAM_MODE adam_mode>
-typename std::enable_if<
-    std::is_same<scalar_t, Half>::value || std::is_same<scalar_t, BFloat16>::value,
-    void>::
-    type inline adam_math(
+std::enable_if_t<
+    std::is_same_v<scalar_t, Half> || std::is_same_v<scalar_t, BFloat16>,
+    void>
+    inline adam_math(
   scalar_t* param_ptr,
   scalar_t* exp_avg_ptr,
   scalar_t* exp_avg_sq_ptr,
@@ -38,22 +38,16 @@ typename std::enable_if<
   double step_size = lr / bias_correction1;
   using lpVec = at::vec::Vectorized<scalar_t>;
   using fVec = at::vec::Vectorized<opmath_t>;
-  lpVec grad_vec_to_store;
   int64_t d = 0;
-  fVec param_vec1, param_vec2;
-  fVec grad_vec1, grad_vec2;
-  fVec exp_avg_vec1, exp_avg_vec2;
-  fVec exp_avg_sq_vec1, exp_avg_sq_vec2;
-  fVec max_exp_avg_sq_vec1, max_exp_avg_sq_vec2;
   for (; d < size - (size % lpVec::size()); d += lpVec::size()) {
     lpVec param_lpvec = lpVec::loadu(param_ptr + d);
-    std::tie(param_vec1, param_vec2) = vec::convert_to_float<scalar_t>(param_lpvec);
+    auto [param_vec1, param_vec2] = vec::convert_to_float<scalar_t>(param_lpvec);
     lpVec grad_lpvec = lpVec::loadu(grad_ptr + d);
-    std::tie(grad_vec1, grad_vec2) = vec::convert_to_float<scalar_t>(grad_lpvec);
+    auto [grad_vec1, grad_vec2] = vec::convert_to_float<scalar_t>(grad_lpvec);
     if (grad_scale_ptr) {
       grad_vec1 = grad_vec1 / fVec(float(*grad_scale_ptr));
       grad_vec2 = grad_vec2 / fVec(float(*grad_scale_ptr));
-      grad_vec_to_store = vec::convert_from_float<scalar_t>(grad_vec1, grad_vec2);
+      lpVec grad_vec_to_store = vec::convert_from_float<scalar_t>(grad_vec1, grad_vec2);
       grad_vec_to_store.store(grad_ptr + d);
     }
     if (maximize){
@@ -71,7 +65,7 @@ typename std::enable_if<
     }
 
     lpVec exp_avg_lpvec = lpVec::loadu(exp_avg_ptr + d);
-    std::tie(exp_avg_vec1, exp_avg_vec2) = vec::convert_to_float<scalar_t>(exp_avg_lpvec);
+    auto [exp_avg_vec1, exp_avg_vec2] = vec::convert_to_float<scalar_t>(exp_avg_lpvec);
 
     // exp_avg.lerp_(grad, 1 - beta1)
     const fVec lerp_weight = fVec(opmath_t(exp_avg_grad_coefficient));
@@ -85,7 +79,7 @@ typename std::enable_if<
     exp_avg_vec2 = vec::fmadd(coeff, grad_vec2 - exp_avg_vec2, base2);
 
     lpVec exp_avg_sq_lpvec = lpVec::loadu(exp_avg_sq_ptr + d);
-    std::tie(exp_avg_sq_vec1, exp_avg_sq_vec2) = vec::convert_to_float<scalar_t>(exp_avg_sq_lpvec);
+    auto [exp_avg_sq_vec1, exp_avg_sq_vec2] = vec::convert_to_float<scalar_t>(exp_avg_sq_lpvec);
     exp_avg_sq_vec1 = exp_avg_sq_vec1 * fVec(opmath_t(beta2)) +
         fVec(opmath_t(exp_avg_sq_grad_coefficient)) * grad_vec1 * grad_vec1;
     exp_avg_sq_vec2 = exp_avg_sq_vec2 * fVec(opmath_t(beta2)) +
@@ -97,7 +91,7 @@ typename std::enable_if<
     fVec denom_vec1, denom_vec2;
     if (amsgrad) {
       lpVec max_exp_avg_sq_lpvec = lpVec::loadu(max_exp_avg_sq_ptr + d);
-      std::tie(max_exp_avg_sq_vec1, max_exp_avg_sq_vec2) = vec::convert_to_float<scalar_t>(max_exp_avg_sq_lpvec);
+      auto [max_exp_avg_sq_vec1, max_exp_avg_sq_vec2] = vec::convert_to_float<scalar_t>(max_exp_avg_sq_lpvec);
       max_exp_avg_sq_vec1 = maximum(max_exp_avg_sq_vec1, exp_avg_sq_vec1);
       max_exp_avg_sq_vec2 = maximum(max_exp_avg_sq_vec2, exp_avg_sq_vec2);
       vec::convert_from_float<scalar_t>(max_exp_avg_sq_vec1, max_exp_avg_sq_vec2).store(max_exp_avg_sq_ptr + d);
@@ -115,14 +109,12 @@ typename std::enable_if<
     param_vec2 = param_vec2 + fVec(opmath_t(-step_size)) * exp_avg_vec2 / denom_vec2;
     vec::convert_from_float<scalar_t>(param_vec1, param_vec2).store(param_ptr + d);
   }
-  scalar_t grad_val_to_store;
   for (; d < size; d++) {
     opmath_t grad_val = grad_ptr[d];
     opmath_t param_val = param_ptr[d];
     if (grad_scale_ptr) {
       grad_val = grad_ptr[d] / float(*grad_scale_ptr);
-      grad_val_to_store = scalar_t(grad_val);
-      grad_ptr[d] = grad_val_to_store;
+      grad_ptr[d] = grad_val;
     }
     if (maximize) grad_val = -grad_val;
     if (weight_decay != 0.f){
@@ -163,10 +155,10 @@ typename std::enable_if<
 
 
 template <typename scalar_t, typename opmath_t, ADAM_MODE adam_mode>
-typename std::enable_if<
-    std::is_same<scalar_t, float>::value || std::is_same<scalar_t, double>::value,
-    void>::
-    type inline adam_math(
+std::enable_if_t<
+    std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>,
+    void>
+    inline adam_math(
   scalar_t* param_ptr,
   scalar_t* exp_avg_ptr,
   scalar_t* exp_avg_sq_ptr,
@@ -188,14 +180,13 @@ typename std::enable_if<
 ){
   double step_size = lr / bias_correction1;
   using Vec = at::vec::Vectorized<scalar_t>;
-  Vec grad_vec_to_store;
   int64_t d = 0;
   for (; d < size - (size % Vec::size()); d += Vec::size()) {
     Vec param_vec = Vec::loadu(param_ptr + d);
     Vec grad_vec = Vec::loadu(grad_ptr + d);
     if (grad_scale_ptr) {
       grad_vec = grad_vec / Vec(scalar_t(*grad_scale_ptr));
-      grad_vec_to_store = grad_vec;
+      Vec grad_vec_to_store = grad_vec;
       grad_vec_to_store.store(grad_ptr + d);
     }
     if (maximize) grad_vec = grad_vec * Vec(scalar_t(-1.0));
@@ -233,13 +224,11 @@ typename std::enable_if<
     param_vec = param_vec + Vec(scalar_t(-step_size)) * exp_avg_vec / denom_vec;
     param_vec.store(param_ptr + d);
   }
-  scalar_t grad_val_to_store;
   for (; d < size; d++) {
     scalar_t grad_val = grad_ptr[d];
     if (grad_scale_ptr) {
       grad_val = grad_ptr[d] / scalar_t(*grad_scale_ptr);
-      grad_val_to_store = grad_val;
-      grad_ptr[d] = grad_val_to_store;
+      grad_ptr[d] = grad_val;
     }
     if (maximize) grad_val = -grad_val;
     if (weight_decay != 0.f){
@@ -375,5 +364,5 @@ void fused_adam_kernel(
 
 }
 
-REGISTER_DISPATCH(fused_adam_stub, &fused_adam_kernel);
+REGISTER_DISPATCH(fused_adam_stub, &fused_adam_kernel)
 } // namespace at::native

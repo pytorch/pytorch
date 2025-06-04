@@ -1,7 +1,7 @@
-# mypy: ignore-errors
+# mypy: allow-untyped-defs
 
 import sys
-from functools import wraps, partial
+from functools import partial, wraps
 
 import torch
 import torch.distributed as dist
@@ -12,7 +12,9 @@ from torch.testing._internal.common_distributed import (
     tp_transports,
 )
 
+
 TEST_GPU_NUM = 4
+
 
 class ShardedTensorTestBase(MultiProcessTestCase):
     @property
@@ -34,9 +36,10 @@ class ShardedTensorTestBase(MultiProcessTestCase):
         if backend == "nccl":
             torch.cuda.set_device(self.rank)
 
-
     def init_rpc(self):
-        rpc_backend_options = rpc.TensorPipeRpcBackendOptions(_transports=tp_transports())
+        rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
+            _transports=tp_transports()
+        )
         rpc_backend_options.init_method = f"file://{self.file_name}"
         for rank in range(self.world_size):
             rpc_backend_options.set_device_map(
@@ -44,7 +47,7 @@ class ShardedTensorTestBase(MultiProcessTestCase):
             )
 
         rpc.init_rpc(
-            name="worker%d" % self.rank,
+            name=f"worker{self.rank:d}",
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=rpc_backend_options,
@@ -79,6 +82,7 @@ class ShardedTensorTestBase(MultiProcessTestCase):
         self.assertEqual(st1.sharding_spec(), st2.sharding_spec())
         self.assertEqual(len(st1.remote_shards()), len(st2.remote_shards()))
 
+
 # wrapper to initialize comms (processgroup + rpc)
 def with_comms(func=None, init_rpc=True, backend="nccl"):
     if func is None:
@@ -95,4 +99,5 @@ def with_comms(func=None, init_rpc=True, backend="nccl"):
         self.init_comms(init_rpc=init_rpc, backend=backend)
         func(self, *args, **kwargs)
         self.destroy_comms(destroy_rpc=init_rpc)
+
     return wrapper

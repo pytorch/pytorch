@@ -25,7 +25,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     bool training,
     double exponential_average_factor,
     double epsilon) {
-  AT_ERROR("cudnn_batch_norm: ATen not compiled with cuDNN support");
+  TORCH_CHECK(false, "cudnn_batch_norm: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
@@ -38,13 +38,15 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const std::optional<Tensor>& save_var_opt,
     double epsilon,
     const Tensor& reservedSpace) {
-  AT_ERROR("cudnn_batch_norm_backward: ATen not compiled with cuDNN support");
+  TORCH_CHECK(
+      false, "cudnn_batch_norm_backward: ATen not compiled with cuDNN support");
 }
 
 size_t _get_cudnn_batch_norm_reserve_space_size(
     const Tensor& input_t,
     bool training) {
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "_get_cudnn_batch_norm_reserve_space_size: ATen not compiled with cuDNN support");
 }
 
@@ -131,10 +133,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
   c10::MaybeOwned<Tensor> bias_t_maybe_owned =
       at::borrow_from_optional_tensor(bias_t_opt);
   const Tensor& bias_t = *bias_t_maybe_owned;
-  const Tensor& running_mean_t =
-      c10::value_or_else(running_mean_t_opt, [] { return Tensor(); });
-  const Tensor& running_var_t =
-      c10::value_or_else(running_var_t_opt, [] { return Tensor(); });
+  const Tensor& running_mean_t = running_mean_t_opt.value_or(Tensor());
+  const Tensor& running_var_t = running_var_t_opt.value_or(Tensor());
 
   TensorArg input{input_t, "input", 1}, weight{weight_t, "weight", 2},
       bias{bias_t, "bias", 3}, running_mean{running_mean_t, "running_mean", 4},
@@ -281,10 +281,8 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     double epsilon,
     const Tensor& reserveSpace) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& save_mean_t =
-      c10::value_or_else(save_mean_t_opt, [] { return Tensor(); });
-  const Tensor& save_var_t =
-      c10::value_or_else(save_var_t_opt, [] { return Tensor(); });
+  const Tensor& save_mean_t = save_mean_t_opt.value_or(Tensor());
+  const Tensor& save_var_t = save_var_t_opt.value_or(Tensor());
 
   // TODO: Is it worth it to have a contiguous call or maybe we should go with
   // whatever format is given here.

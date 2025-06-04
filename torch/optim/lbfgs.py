@@ -1,8 +1,11 @@
 # mypy: allow-untyped-defs
-from typing import Optional
+from typing import Optional, Union
 
 import torch
-from .optimizer import Optimizer, ParamsT
+from torch import Tensor
+
+from .optimizer import _to_scalar, Optimizer, ParamsT
+
 
 __all__ = ["LBFGS"]
 
@@ -198,23 +201,23 @@ class LBFGS(Optimizer):
 
     Args:
         params (iterable): iterable of parameters to optimize. Parameters must be real.
-        lr (float): learning rate (default: 1)
-        max_iter (int): maximal number of iterations per optimization step
+        lr (float, optional): learning rate (default: 1)
+        max_iter (int, optional): maximal number of iterations per optimization step
             (default: 20)
-        max_eval (int): maximal number of function evaluations per optimization
+        max_eval (int, optional): maximal number of function evaluations per optimization
             step (default: max_iter * 1.25).
-        tolerance_grad (float): termination tolerance on first order optimality
+        tolerance_grad (float, optional): termination tolerance on first order optimality
             (default: 1e-7).
-        tolerance_change (float): termination tolerance on function
+        tolerance_change (float, optional): termination tolerance on function
             value/parameter changes (default: 1e-9).
-        history_size (int): update history size (default: 100).
-        line_search_fn (str): either 'strong_wolfe' or None (default: None).
+        history_size (int, optional): update history size (default: 100).
+        line_search_fn (str, optional): either 'strong_wolfe' or None (default: None).
     """
 
     def __init__(
         self,
         params: ParamsT,
-        lr: float = 1,
+        lr: Union[float, Tensor] = 1,
         max_iter: int = 20,
         max_eval: Optional[int] = None,
         tolerance_grad: float = 1e-7,
@@ -222,6 +225,10 @@ class LBFGS(Optimizer):
         history_size: int = 100,
         line_search_fn: Optional[str] = None,
     ):
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
+        if not 0.0 <= lr:
+            raise ValueError(f"Invalid learning rate: {lr}")
         if max_eval is None:
             max_eval = max_iter * 5 // 4
         defaults = dict(
@@ -237,7 +244,7 @@ class LBFGS(Optimizer):
 
         if len(self.param_groups) != 1:
             raise ValueError(
-                "LBFGS doesn't support per-parameter options " "(parameter groups)"
+                "LBFGS doesn't support per-parameter options (parameter groups)"
             )
 
         self._params = self.param_groups[0]["params"]
@@ -305,7 +312,7 @@ class LBFGS(Optimizer):
         closure = torch.enable_grad()(closure)
 
         group = self.param_groups[0]
-        lr = group["lr"]
+        lr = _to_scalar(group["lr"])
         max_iter = group["max_iter"]
         max_eval = group["max_eval"]
         tolerance_grad = group["tolerance_grad"]

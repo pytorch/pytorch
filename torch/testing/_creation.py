@@ -3,11 +3,13 @@ This module contains tensor creation utilities.
 """
 
 import collections.abc
+import functools
 import math
 import warnings
-from typing import cast, List, Optional, Tuple, Union
+from typing import cast, Optional, Union
 
 import torch
+
 
 _INTEGRAL_TYPES = [
     torch.uint8,
@@ -41,7 +43,7 @@ def _uniform_random_(t: torch.Tensor, low: float, high: float) -> torch.Tensor:
 
 
 def make_tensor(
-    *shape: Union[int, torch.Size, List[int], Tuple[int, ...]],
+    *shape: Union[int, torch.Size, list[int], tuple[int, ...]],
     dtype: torch.dtype,
     device: Union[str, torch.device],
     low: Optional[float] = None,
@@ -130,7 +132,7 @@ def make_tensor(
         highest_exclusive: float,
         default_low: float,
         default_high: float,
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         """
         Modifies (and raises ValueError when appropriate) low and high values given by the user (input_low, input_high)
         if required.
@@ -175,7 +177,7 @@ def make_tensor(
 
     if len(shape) == 1 and isinstance(shape[0], collections.abc.Sequence):
         shape = shape[0]  # type: ignore[assignment]
-    shape = cast(Tuple[int, ...], tuple(shape))
+    shape = cast(tuple[int, ...], tuple(shape))
 
     if noncontiguous and memory_format is not None:
         raise ValueError(
@@ -188,9 +190,15 @@ def make_tensor(
             f"`requires_grad=True` is not supported for boolean and integral dtypes, but got {dtype=}"
         )
 
+    noncontiguous = noncontiguous and functools.reduce(lambda x, y: x * y, shape, 1) > 1
+    if noncontiguous:
+        # Double the size of the shape in the last dimension, so that we have
+        # non-identical values when we make the non-contiguous operation.
+        shape = cast(tuple[int, ...], (*shape[:-1], 2 * shape[-1]))
+
     if dtype is torch.bool:
         low, high = cast(
-            Tuple[int, int],
+            tuple[int, int],
             modify_low_high(
                 low,
                 high,
@@ -203,7 +211,7 @@ def make_tensor(
         result = torch.randint(low, high, shape, device=device, dtype=dtype)
     elif dtype in _BOOLEAN_OR_INTEGRAL_TYPES:
         low, high = cast(
-            Tuple[int, int],
+            tuple[int, int],
             modify_low_high(
                 low,
                 high,
@@ -251,9 +259,9 @@ def make_tensor(
             " To request support, file an issue at: https://github.com/pytorch/pytorch/issues"
         )
 
-    if noncontiguous and result.numel() > 1:
-        result = torch.repeat_interleave(result, 2, dim=-1)
-        result = result[..., ::2]
+    if noncontiguous:
+        # Offset by 1 to also catch offsetting issues
+        result = result[..., 1::2]
     elif memory_format is not None:
         result = result.clone(memory_format=memory_format)
 

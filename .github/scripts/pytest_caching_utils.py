@@ -1,7 +1,7 @@
 import hashlib
 import os
 from pathlib import Path
-from typing import Dict, NamedTuple
+from typing import NamedTuple
 
 from file_io_utils import (
     copy_file,
@@ -13,6 +13,7 @@ from file_io_utils import (
     write_json_file,
     zip_folder,
 )
+
 
 PYTEST_CACHE_KEY_PREFIX = "pytest_cache"
 PYTEST_CACHE_DIR_NAME = ".pytest_cache"
@@ -29,8 +30,10 @@ UNZIPPED_CACHES = "unzipped-caches"
 # Since the pr identifier can be based on include user defined text (like a branch name)
 # we hash it to sanitize the input and avoid corner cases
 class PRIdentifier(str):
+    __slots__ = ()
+
     def __new__(cls, value: str) -> "PRIdentifier":
-        md5 = hashlib.md5(value.encode("utf-8")).hexdigest()
+        md5 = hashlib.md5(value.encode("utf-8"), usedforsecurity=False).hexdigest()
         return super().__new__(cls, md5)
 
 
@@ -218,8 +221,8 @@ def _merge_lastfailed_files(source_pytest_cache: Path, dest_pytest_cache: Path) 
 
 
 def _merged_lastfailed_content(
-    from_lastfailed: Dict[str, bool], to_lastfailed: Dict[str, bool]
-) -> Dict[str, bool]:
+    from_lastfailed: dict[str, bool], to_lastfailed: dict[str, bool]
+) -> dict[str, bool]:
     """
     The lastfailed files are dictionaries where the key is the test identifier.
     Each entry's value appears to always be `true`, but let's not count on that.

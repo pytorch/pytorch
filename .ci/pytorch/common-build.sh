@@ -6,6 +6,12 @@ if [[ "$BUILD_ENVIRONMENT" != *win-* ]]; then
     # Save the absolute path in case later we chdir (as occurs in the gpu perf test)
     script_dir="$( cd "$(dirname "${BASH_SOURCE[0]}")" || exit ; pwd -P )"
 
+    if [[ "${BUILD_ENVIRONMENT}" == *-pch* ]]; then
+        # This is really weird, but newer sccache somehow produces broken binary
+        # see https://github.com/pytorch/pytorch/issues/139188
+        sudo mv /opt/cache/bin/sccache-0.2.14a /opt/cache/bin/sccache
+    fi
+
     if which sccache > /dev/null; then
         # Save sccache logs to file
         sccache --stop-server > /dev/null  2>&1 || true

@@ -39,7 +39,6 @@ from packaging import version
 
 import torch
 import torch.autograd.forward_ad as fwAD
-
 from torch import inf, nan
 from torch.autograd import grad
 from torch.autograd.functional import jacobian
@@ -58,6 +57,7 @@ from torch.distributions import (
     ExponentialFamily,
     FisherSnedecor,
     Gamma,
+    GeneralizedPareto,
     Geometric,
     Gumbel,
     HalfCauchy,
@@ -118,6 +118,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -151,7 +152,7 @@ def is_all_nan(tensor):
 Example = namedtuple("Example", ["Dist", "params"])
 
 
-# Register all distributions for generic tests.
+# Register all distributions for generic tests by appending to this list.
 def _get_examples():
     return [
         Example(
@@ -800,9 +801,20 @@ def _get_examples():
                 },
             ],
         ),
+        Example(
+            GeneralizedPareto,
+            [
+                {
+                    "loc": torch.randn(5, 5, requires_grad=True).mul(10),
+                    "scale": torch.randn(5, 5).abs().requires_grad_(),
+                    "concentration": torch.randn(5, 5).div(10).requires_grad_(),
+                },
+            ],
+        ),
     ]
 
 
+# Register all distributions for bad examples by appending to this list.
 def _get_bad_examples():
     return [
         Example(
@@ -1199,6 +1211,21 @@ def _get_bad_examples():
                 },
             ],
         ),
+        Example(
+            GeneralizedPareto,
+            [
+                {
+                    "loc": torch.tensor([0.0, 0.0], requires_grad=True),
+                    "scale": torch.tensor([-1.0, -100.0], requires_grad=True),
+                    "concentration": torch.tensor([0.0, 0.0], requires_grad=True),
+                },
+                {
+                    "loc": torch.tensor([1.0, 1.0], requires_grad=True),
+                    "scale": torch.tensor([0.0, 0.0], requires_grad=True),
+                    "concentration": torch.tensor([-1.0, -100.0], requires_grad=True),
+                },
+            ],
+        ),
     ]
 
 
@@ -1314,7 +1341,7 @@ class TestDistributions(DistributionsTestCase):
         if not msk.all():
             counts = np.concatenate([counts[msk], np.sum(counts[~msk], keepdims=True)])
             pmf = np.concatenate([pmf[msk], np.sum(pmf[~msk], keepdims=True)])
-        chisq, p = scipy.stats.chisquare(counts, pmf * num_samples)
+        _, p = scipy.stats.chisquare(counts, pmf * num_samples)
         self.assertGreater(p, failure_rate, message)
 
     def _check_enumerate_support(self, dist, examples):
@@ -1526,7 +1553,7 @@ class TestDistributions(DistributionsTestCase):
 
         self._check_forward_ad(torch.bernoulli)
         self._check_forward_ad(lambda x: x.bernoulli_())
-        self._check_forward_ad(lambda x: x.bernoulli_(x.clone().detach()))
+        self._check_forward_ad(lambda x: x.bernoulli_(x.detach().clone()))
         self._check_forward_ad(lambda x: x.bernoulli_(x))
 
     def test_bernoulli_enumerate_support(self):
@@ -1841,6 +1868,21 @@ class TestDistributions(DistributionsTestCase):
             torch.tensor([[total_count, 0], [0, total_count]], dtype=torch.float64),
         )
 
+    def test_multinomial_sequential_draw(self):
+        # Adapted after script mentioned in https://github.com/pytorch/pytorch/issues/132395
+        torch.manual_seed(0xDE0B6B3A764007E8)
+        prob = torch.ones(26)
+        dups_mult = 0
+        perm_counts_mult = {}
+        for _ in range(300_000):
+            p = tuple(torch.multinomial(prob, prob.numel(), replacement=False).tolist())
+            if p in perm_counts_mult:
+                dups_mult += 1
+                perm_counts_mult[p] += 1
+            else:
+                perm_counts_mult[p] = 1
+        self.assertLess(dups_mult, 10)
+
     @set_default_dtype(torch.double)
     def test_categorical_1d(self):
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
@@ -1912,9 +1954,7 @@ class TestDistributions(DistributionsTestCase):
     @set_default_dtype(torch.double)
     def test_one_hot_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
-        probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
         p = torch.tensor(probabilities, requires_grad=True)
-        s = torch.tensor(probabilities_1, requires_grad=True)
         self.assertEqual(OneHotCategorical(p).sample().size(), (2, 3))
         self.assertEqual(
             OneHotCategorical(p).sample(sample_shape=(3, 4)).size(), (3, 4, 2, 3)
@@ -2074,13 +2114,11 @@ class TestDistributions(DistributionsTestCase):
     @set_default_dtype(torch.double)
     def test_relaxed_one_hot_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
-        probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
         temp = torch.tensor([3.0], requires_grad=True)
         # The lower the temperature, the more unstable the log_prob gradcheck is
         # w.r.t. the sample. Values below 0.25 empirically fail the default tol.
         temp_2 = torch.tensor([0.25], requires_grad=True)
         p = torch.tensor(probabilities, requires_grad=True)
-        s = torch.tensor(probabilities_1, requires_grad=True)
         self.assertEqual(RelaxedOneHotCategorical(temp, p).sample().size(), (2, 3))
         self.assertEqual(
             RelaxedOneHotCategorical(temp, p).sample(sample_shape=(3, 4)).size(),
@@ -2520,10 +2558,10 @@ class TestDistributions(DistributionsTestCase):
         )
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    def test_mixture_same_family_log_prob(self):
-        probs = torch.rand(5, 5).softmax(dim=-1)
-        loc = torch.randn(5, 5)
-        scale = torch.rand(5, 5)
+    def test_mixture_same_family_normal_log_prob(self):
+        probs = torch.rand(10, 5).softmax(dim=-1)
+        loc = torch.randn(10, 5)
+        scale = torch.rand(10, 5)
 
         def ref_log_prob(idx, x, log_prob):
             p = probs[idx].numpy()
@@ -2536,6 +2574,27 @@ class TestDistributions(DistributionsTestCase):
 
         self._check_log_prob(
             MixtureSameFamily(Categorical(probs=probs), Normal(loc, scale)),
+            ref_log_prob,
+        )
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_mixture_same_family_binomial_log_prob(self):
+        max_count = 20
+        probs = torch.rand(10, 5).softmax(dim=-1)
+        binom_probs = torch.rand(10, 5)
+
+        def ref_log_prob(idx, x, log_prob):
+            p = probs[idx].numpy()
+            binom_p = binom_probs[idx].numpy()
+            mix = scipy.stats.multinomial(1, p)
+            comp = scipy.stats.binom(max_count, binom_p)
+            expected = scipy.special.logsumexp(comp.logpmf(x) + np.log(mix.p))
+            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
+
+        self._check_log_prob(
+            MixtureSameFamily(
+                Categorical(probs=probs), Binomial(max_count, binom_probs)
+            ),
             ref_log_prob,
         )
 
@@ -3487,6 +3546,51 @@ class TestDistributions(DistributionsTestCase):
             )
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_generalized_pareto(self):
+        loc = torch.randn(2, 3).requires_grad_()
+        scale = torch.randn(2, 3).abs().requires_grad_()
+        concentration = torch.randn(2, 3).requires_grad_()
+        loc_1d = torch.randn(1).requires_grad_()
+        scale_1d = torch.randn(1).abs().requires_grad_()
+        concentration_1d = torch.randn(1).requires_grad_()
+        self.assertEqual(
+            GeneralizedPareto(loc, scale, concentration).sample().size(), (2, 3)
+        )
+        self.assertEqual(
+            GeneralizedPareto(loc, scale, concentration).sample((5,)).size(), (5, 2, 3)
+        )
+        self.assertEqual(
+            GeneralizedPareto(loc_1d, scale_1d, concentration_1d).sample((1,)).size(),
+            (1, 1),
+        )
+        self.assertEqual(
+            GeneralizedPareto(loc_1d, scale_1d, concentration_1d).sample().size(), (1,)
+        )
+        self.assertEqual(GeneralizedPareto(1.0, 1.0, 1.0).sample().size(), ())
+        self.assertEqual(GeneralizedPareto(1.0, 1.0, 1.0).sample((1,)).size(), (1,))
+
+        def ref_log_prob(idx, x, log_prob):
+            l = loc.view(-1)[idx].detach()
+            s = scale.view(-1)[idx].detach()
+            c = concentration.view(-1)[idx].detach()
+            expected = scipy.stats.genpareto.logpdf(x, c, loc=l, scale=s)
+            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
+
+        self._check_log_prob(GeneralizedPareto(loc, scale, concentration), ref_log_prob)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_generalized_pareto_sample(self):
+        set_rng_seed(1)  # see note [Randomized statistical tests]
+        for loc, scale, concentration in product(
+            [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0], [-0.5, 0.0, 0.5]
+        ):
+            self._check_sampler_sampler(
+                GeneralizedPareto(loc, scale, concentration),
+                scipy.stats.genpareto(c=concentration, loc=loc, scale=scale),
+                f"GeneralizedPareto(loc={loc}, scale={scale}, concentration={concentration})",
+                failure_rate=7e-4,
+            )
+
     def test_gumbel(self):
         loc = torch.randn(2, 3, requires_grad=True)
         scale = torch.randn(2, 3).abs().requires_grad_()
@@ -3939,7 +4043,7 @@ class TestDistributions(DistributionsTestCase):
         for dim in range(2, 5):
             log_probs = []
             lkj = LKJCholesky(dim, concentration=1.0, validate_args=True)
-            for i in range(2):
+            for _ in range(2):
                 sample = lkj.sample()
                 sample_tril = tril_matrix_to_vec(sample, diag=-1)
                 log_prob = lkj.log_prob(sample)
@@ -5784,6 +5888,7 @@ class TestKL(DistributionsTestCase):
             ),
             0,
         )
+        self.assertEqual(kl_divergence(Uniform(0, 1), Beta(1, 1)), 0)
 
     def test_kl_shape(self):
         for Dist, params in _get_examples():
@@ -6241,7 +6346,7 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
             except NotImplementedError:
                 pass
             self.assertNotIn("probs", dist.__dict__, msg=message)
-            batch_shape, event_shape = dist.batch_shape, dist.event_shape
+            dist.batch_shape, dist.event_shape
             self.assertNotIn("probs", dist.__dict__, msg=message)
 
     def test_lazy_probs_initialization(self):
@@ -6258,7 +6363,7 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
             except NotImplementedError:
                 pass
             self.assertNotIn("logits", dist.__dict__, msg=message)
-            batch_shape, event_shape = dist.batch_shape, dist.event_shape
+            dist.batch_shape, dist.event_shape
             self.assertNotIn("logits", dist.__dict__, msg=message)
 
 
@@ -6308,6 +6413,14 @@ class TestAgainstScipy(DistributionsTestCase):
             (
                 Gumbel(random_var, positive_var2),
                 scipy.stats.gumbel_r(random_var, positive_var2),
+            ),
+            (
+                GeneralizedPareto(
+                    loc=random_var, scale=positive_var, concentration=random_var / 10
+                ),
+                scipy.stats.genpareto(
+                    c=random_var / 10, loc=random_var, scale=positive_var
+                ),
             ),
             (HalfCauchy(positive_var), scipy.stats.halfcauchy(scale=positive_var)),
             (HalfNormal(positive_var2), scipy.stats.halfnorm(scale=positive_var2)),
@@ -6565,6 +6678,7 @@ class TestFunctors(DistributionsTestCase):
         expected_jac = sum(
             [t1.log_abs_det_jacobian(x1, y1), t2.log_abs_det_jacobian(x2, y2)]
         )
+        self.assertEqual(actual_jac, expected_jac)
 
     def test_stack_transform(self):
         x1 = -1 * torch.arange(1, 101, dtype=torch.float)
@@ -6628,18 +6742,18 @@ class TestValidation(DistributionsTestCase):
                 for v in torch.tensor([-2.0, -1.0, 0.0, 1.0, 2.0]):
                     # samples with incorrect shape must throw ValueError only
                     try:
-                        log_prob = d_val.log_prob(v)
+                        d_val.log_prob(v)
                     except ValueError:
                         pass
                     # get sample of correct shape
                     val = torch.full(d_val.batch_shape + d_val.event_shape, v)
                     # check samples with incorrect support
                     try:
-                        log_prob = d_val.log_prob(val)
+                        d_val.log_prob(val)
                     except ValueError as e:
                         if e.args and "must be within the support" in e.args[0]:
                             try:
-                                log_prob = d_nonval.log_prob(val)
+                                d_nonval.log_prob(val)
                             except RuntimeError:
                                 pass
 
@@ -6711,6 +6825,12 @@ class TestJit(DistributionsTestCase):
     def _perturb_tensor(self, value, constraint):
         if isinstance(constraint, constraints._IntegerGreaterThan):
             return value + 1
+        if isinstance(constraint, constraints._LessThan):
+            return value - torch.rand(value.shape)
+        if isinstance(
+            constraint, (constraints._GreaterThan, constraints._GreaterThanEq)
+        ):
+            return value + torch.rand(value.shape)
         if isinstance(
             constraint,
             (constraints._PositiveDefinite, constraints._PositiveSemidefinite),
@@ -6729,15 +6849,19 @@ class TestJit(DistributionsTestCase):
 
     def _perturb(self, Dist, keys, values, sample):
         with torch.no_grad():
-            if Dist is Uniform:
-                param = dict(zip(keys, values))
-                param["low"] = param["low"] - torch.rand(param["low"].shape)
-                param["high"] = param["high"] + torch.rand(param["high"].shape)
-                values = [param[key] for key in keys]
-            else:
+            if isinstance(Dist.arg_constraints, dict):
                 values = [
                     self._perturb_tensor(
                         value, Dist.arg_constraints.get(key, constraints.real)
+                    )
+                    for key, value in zip(keys, values)
+                ]
+            else:
+                # arg_constraints is parameter-dependent
+                dist = Dist(**dict(zip(keys, values)))
+                values = [
+                    self._perturb_tensor(
+                        value, dist.arg_constraints.get(key, constraints.real)
                     )
                     for key, value in zip(keys, values)
                 ]

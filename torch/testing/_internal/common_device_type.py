@@ -9,11 +9,14 @@ import sys
 import threading
 import unittest
 from collections import namedtuple
+from collections.abc import Iterable, Sequence
 from enum import Enum
 from functools import partial, wraps
-from typing import Any, ClassVar, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Callable, ClassVar, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
+from torch._inductor.utils import GPU_TYPES
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     _get_torch_rocm_version,
@@ -28,6 +31,8 @@ from torch.testing._internal.common_utils import (
     dtype_name,
     get_tracked_input,
     IS_FBCODE,
+    IS_MACOS,
+    is_privateuse1_backend_available,
     IS_REMOTE_GPU,
     IS_SANDCASTLE,
     IS_WINDOWS,
@@ -48,6 +53,9 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 try:
     import psutil  # type: ignore[import]
@@ -273,35 +281,6 @@ except ModuleNotFoundError:
 # they are run. This makes it useful for initializing devices and dependencies.
 
 
-# Note [Overriding methods in generic tests]
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#
-# Device generic tests look a lot like normal test classes, but they differ
-# from ordinary classes in some important ways.  In particular, overriding
-# methods in generic tests doesn't work quite the way you expect.
-#
-#     class TestFooDeviceType(TestCase):
-#         # Intention is to override
-#         def assertEqual(self, x, y):
-#             # This DOESN'T WORK!
-#             super().assertEqual(x, y)
-#
-# If you try to run this code, you'll get an error saying that TestFooDeviceType
-# is not in scope.  This is because after instantiating our classes, we delete
-# it from the parent scope.  Instead, you need to hardcode a direct invocation
-# of the desired subclass call, e.g.,
-#
-#     class TestFooDeviceType(TestCase):
-#         # Intention is to override
-#         def assertEqual(self, x, y):
-#             TestCase.assertEqual(x, y)
-#
-# However, a less error-prone way of customizing the behavior of TestCase
-# is to either (1) add your functionality to TestCase and make it toggled
-# by a class attribute, or (2) create your own subclass of TestCase, and
-# then inherit from it for your generic test.
-
-
 def _dtype_test_suffix(dtypes):
     """Returns the test suffix for a dtype, sequence of dtypes, or None."""
     if isinstance(dtypes, (list, tuple)):
@@ -371,7 +350,7 @@ class DeviceTypeTestBase(TestCase):
         try:
             return cls.get_primary_device()
         except Exception:
-            # For CUDATestBase, XLATestBase, and possibly others, the primary device won't be available
+            # For CUDATestBase, XPUTestBase, XLATestBase, and possibly others, the primary device won't be available
             # until setUpClass() sets it. Call that manually here if needed.
             if hasattr(cls, "setUpClass"):
                 cls.setUpClass()
@@ -487,7 +466,7 @@ class DeviceTypeTestBase(TestCase):
 
             def dtype_parametrize_fn(test, generic_cls, device_cls, dtypes=dtypes):
                 for dtype in dtypes:
-                    param_kwargs: Dict[str, Any] = {}
+                    param_kwargs: dict[str, Any] = {}
                     _update_param_kwargs(param_kwargs, "dtype", dtype)
 
                     # Note that an empty test suffix is set here so that the dtype can be appended
@@ -506,7 +485,12 @@ class DeviceTypeTestBase(TestCase):
             decorator_fn,
         ) in parametrize_fn(test, generic_cls, cls):
             test_suffix = "" if test_suffix == "" else "_" + test_suffix
-            device_suffix = "_" + cls.device_type
+            cls_device_type = (
+                cls.device_type
+                if cls.device_type != "privateuse1"
+                else torch._C._get_privateuse1_backend_name()
+            )
+            device_suffix = "_" + cls_device_type
 
             # Note: device and dtype suffix placement
             # Special handling here to place dtype(s) after device according to test name convention.
@@ -649,7 +633,7 @@ class XPUTestBase(DeviceTypeTestBase):
 
     @classmethod
     def setUpClass(cls):
-        cls.primary_device = "xpu:0"
+        cls.primary_device = f"xpu:{torch.xpu.current_device()}"
 
     def _should_stop_test_suite(self):
         return False
@@ -705,7 +689,7 @@ class PrivateUse1TestBase(DeviceTypeTestBase):
 def get_device_type_test_bases():
     # set type to List[Any] due to mypy list-of-union issue:
     # https://github.com/python/mypy/issues/3351
-    test_bases: List[Any] = list()
+    test_bases: list[Any] = []
 
     if IS_SANDCASTLE or IS_FBCODE:
         if IS_REMOTE_GPU:
@@ -719,9 +703,7 @@ def get_device_type_test_bases():
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
 
-        device_type = torch._C._get_privateuse1_backend_name()
-        device_mod = getattr(torch, device_type, None)
-        if hasattr(device_mod, "is_available") and device_mod.is_available():
+        if is_privateuse1_backend_available():
             test_bases.append(PrivateUse1TestBase)
         # Disable MPS testing in generic device testing temporarily while we're
         # ramping up support.
@@ -742,6 +724,24 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
     assert (
         not intersect
     ), f"device ({intersect}) appeared in both except_for and only_for"
+
+    # Replace your privateuse1 backend name with 'privateuse1'
+    if is_privateuse1_backend_available():
+        privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+
+        def func_replace(x: str):
+            return x.replace(privateuse1_backend_name, "privateuse1")
+
+        except_for = (
+            ([func_replace(x) for x in except_for] if except_for is not None else None)
+            if not isinstance(except_for, str)
+            else func_replace(except_for)
+        )
+        only_for = (
+            ([func_replace(x) for x in only_for] if only_for is not None else None)
+            if not isinstance(only_for, str)
+            else func_replace(only_for)
+        )
 
     if except_for:
         device_type_test_bases = filter(
@@ -868,20 +868,7 @@ def instantiate_device_type_tests(
     # are not discoverable.
     del scope[generic_test_class.__name__]
 
-    # Creates an 'empty' version of the generic_test_class
-    # Note: we don't inherit from the generic_test_class directly because
-    #   that would add its tests to our test classes and they would be
-    #   discovered (despite not being runnable). Inherited methods also
-    #   can't be removed later, and we can't rely on load_tests because
-    #   pytest doesn't support it (as of this writing).
-    empty_name = generic_test_class.__name__ + "_base"
-    empty_class = type(empty_name, generic_test_class.__bases__, {})
-
-    # Acquires members names
-    # See Note [Overriding methods in generic tests]
-    generic_members = set(generic_test_class.__dict__.keys()) - set(
-        empty_class.__dict__.keys()
-    )
+    generic_members = set(generic_test_class.__dict__.keys())
     generic_tests = [x for x in generic_members if x.startswith("test")]
 
     # Creates device-specific test cases
@@ -892,7 +879,30 @@ def instantiate_device_type_tests(
 
         # type set to Any and suppressed due to unsupport runtime class:
         # https://github.com/python/mypy/wiki/Unsupported-Python-Features
-        device_type_test_class: Any = type(class_name, (base, empty_class), {})
+        device_type_test_class: Any = type(class_name, (base, generic_test_class), {})
+
+        # Arrange for setUpClass and tearDownClass methods defined both in the test template
+        # class and in the generic base to be called. This allows device-parameterized test
+        # classes to support setup and teardown.
+        # NB: This should be done before instantiate_test() is called as that invokes setup.
+        @classmethod
+        def _setUpClass(cls):
+            # This should always be called, whether or not the test class invokes
+            # super().setUpClass(), to set the primary device.
+            base.setUpClass()
+            # We want to call the @classmethod defined in the generic base, but pass
+            # it the device-specific class object (cls), hence the __func__ call.
+            generic_test_class.setUpClass.__func__(cls)
+
+        @classmethod
+        def _tearDownClass(cls):
+            # We want to call the @classmethod defined in the generic base, but pass
+            # it the device-specific class object (cls), hence the __func__ call.
+            generic_test_class.tearDownClass.__func__(cls)
+            base.tearDownClass()
+
+        device_type_test_class.setUpClass = _setUpClass
+        device_type_test_class.tearDownClass = _tearDownClass
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
@@ -906,29 +916,10 @@ def instantiate_device_type_tests(
                     )
                 else:
                     device_type_test_class.instantiate_test(name, copy.deepcopy(test))
-            else:  # Ports non-test member
-                assert (
-                    name not in device_type_test_class.__dict__
-                ), f"Redefinition of directly defined member {name}"
+            # Ports non-test member. Setup / teardown have already been handled above
+            elif name not in device_type_test_class.__dict__:
                 nontest = getattr(generic_test_class, name)
                 setattr(device_type_test_class, name, nontest)
-
-        # The dynamically-created test class derives from the test template class
-        # and the empty class. Arrange for both setUpClass and tearDownClass methods
-        # to be called. This allows the parameterized test classes to support setup
-        # and teardown.
-        @classmethod
-        def _setUpClass(cls):
-            base.setUpClass()
-            empty_class.setUpClass()
-
-        @classmethod
-        def _tearDownClass(cls):
-            empty_class.tearDownClass()
-            base.tearDownClass()
-
-        device_type_test_class.setUpClass = _setUpClass
-        device_type_test_class.tearDownClass = _tearDownClass
 
         # Mimics defining the instantiated class in the caller's file
         # by setting its module to the given class's and adding
@@ -937,11 +928,18 @@ def instantiate_device_type_tests(
         device_type_test_class.__module__ = generic_test_class.__module__
         scope[class_name] = device_type_test_class
 
+    # Delete the generic form of the test functions (e.g. TestFoo.test_bar()) so they're
+    # not discoverable. This mutates the original class (TestFoo), which was removed from
+    # scope above. At this point, device-specific tests (e.g. TestFooCUDA.test_bar_cuda)
+    # have already been created and the generic forms are no longer needed.
+    for name in generic_tests:
+        delattr(generic_test_class, name)
+
 
 # Category of dtypes to run an OpInfo-based test for
 # Example use: @ops(dtype=OpDTypes.supported)
 #
-# There are 5 categories:
+# There are 7 categories:
 # - supported: Every dtype supported by the operator. Use for exhaustive
 #              testing of all dtypes.
 # - unsupported: Run tests on dtypes not supported by the operator. e.g. for
@@ -952,6 +950,7 @@ def instantiate_device_type_tests(
 #     operator supports in both forward and backward.
 # - none: Useful for tests that are not dtype-specific. No dtype will be passed to the test
 #         when this is selected.
+# - any_common_cpu_cuda_one: Pick a dtype that supports both CPU and CUDA.
 class OpDTypes(Enum):
     supported = 0  # Test all supported dtypes (default)
     unsupported = 1  # Test only unsupported dtypes
@@ -978,6 +977,8 @@ ANY_DTYPE_ORDER = (
     torch.int8,
     torch.uint8,
     torch.bool,
+    torch.float8_e4m3fn,
+    torch.float8_e5m2,
 )
 
 
@@ -1021,6 +1022,8 @@ def _serialize_sample(sample_input):
 #     operator supports. The dtype supports forward and backward if possible.
 #   OpDTypes.none - the test is instantiated without any dtype. The test signature
 #     should not include a dtype kwarg in this case.
+#   OpDTypes.any_common_cpu_cuda_one - the test is instantiated for a dtype
+#     that supports both CPU and CUDA.
 #
 # These options allow tests to have considerable control over the dtypes
 #   they're instantiated for.
@@ -1054,7 +1057,7 @@ class ops(_TestParametrizer):
         op = check_exhausted_iterator = object()
         for op in self.op_list:
             # Determine the set of dtypes to use.
-            dtypes: Union[Set[torch.dtype], Set[None]]
+            dtypes: Union[set[torch.dtype], set[None]]
             if isinstance(self.opinfo_dtypes, Sequence):
                 dtypes = set(self.opinfo_dtypes)
             elif self.opinfo_dtypes == OpDTypes.unsupported_backward:
@@ -1105,6 +1108,16 @@ class ops(_TestParametrizer):
             # See [Note: device and dtype suffix placement]
             test_name = op.formatted_name
 
+            # Filter sample skips / xfails to only those that apply to the OpInfo.
+            # These are defined on the test function via decorators.
+            sample_skips_and_xfails = getattr(test, "sample_skips_and_xfails", None)
+            if sample_skips_and_xfails is not None:
+                sample_skips_and_xfails = [
+                    rule
+                    for rule in sample_skips_and_xfails
+                    if rule.op_match_fn(device_cls.device_type, op)
+                ]
+
             for dtype in dtypes:
                 # Construct parameter kwargs to pass to the test.
                 param_kwargs = {"op": op}
@@ -1125,11 +1138,13 @@ class ops(_TestParametrizer):
                         except Exception as e:
                             tracked_input = get_tracked_input()
                             if PRINT_REPRO_ON_FAILURE and tracked_input is not None:
-                                raise Exception(  # noqa: TRY002
+                                e_tracked = Exception(  # noqa: TRY002
                                     f"Caused by {tracked_input.type_desc} "
                                     f"at index {tracked_input.index}: "
                                     f"{_serialize_sample(tracked_input.val)}"
-                                ) from e
+                                )
+                                e_tracked._tracked_input = tracked_input  # type: ignore[attr]
+                                raise e_tracked from e
                             raise e
                         finally:
                             clear_tracked_input()
@@ -1151,6 +1166,9 @@ class ops(_TestParametrizer):
                         device_cls.device_type,
                         dtype,
                     )
+
+                    if sample_skips_and_xfails is not None:
+                        test_wrapper.sample_skips_and_xfails = sample_skips_and_xfails
 
                     yield (test_wrapper, test_name, param_kwargs, decorator_fn)
                 except Exception as ex:
@@ -1181,7 +1199,14 @@ class skipIf:
     def __call__(self, fn):
         @wraps(fn)
         def dep_fn(slf, *args, **kwargs):
-            if self.device_type is None or self.device_type == slf.device_type:
+            if (
+                self.device_type is None
+                or self.device_type == slf.device_type
+                or (
+                    isinstance(self.device_type, Iterable)
+                    and slf.device_type in self.device_type
+                )
+            ):
                 if (isinstance(self.dep, str) and getattr(slf, self.dep, True)) or (
                     isinstance(self.dep, bool) and self.dep
                 ):
@@ -1202,6 +1227,18 @@ class skipCPUIf(skipIf):
 class skipCUDAIf(skipIf):
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type="cuda")
+
+
+# Skips a test on XPU if the condition is true.
+class skipXPUIf(skipIf):
+    def __init__(self, dep, reason):
+        super().__init__(dep, reason, device_type="xpu")
+
+
+# Skips a test on XPU or CUDA if the condition is true.
+class skipGPUIf(skipIf):
+    def __init__(self, dep, reason):
+        super().__init__(dep, reason, device_type=GPU_TYPES)
 
 
 # Skips a test on Lazy if the condition is true.
@@ -1248,7 +1285,10 @@ def _has_sufficient_memory(device, size):
         # torch.cuda.mem_get_info, aka cudaMemGetInfo, returns a tuple of (free memory, total memory) of a GPU
         if device == "cuda":
             device = "cuda:0"
-        return torch.cuda.memory.mem_get_info(device)[0] >= size
+        return (
+            torch.cuda.memory.mem_get_info(device)[0]
+            * torch.cuda.memory.get_per_process_memory_fraction(device)
+        ) >= size
 
     if device == "xla":
         raise unittest.SkipTest("TODO: Memory availability checks for XLA?")
@@ -1274,7 +1314,7 @@ def _has_sufficient_memory(device, size):
     return psutil.virtual_memory().available >= effective_size
 
 
-def largeTensorTest(size, device=None):
+def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
     """Skip test if the device has insufficient memory to run the test
 
     size may be a number of bytes, a string of the form "N GB", or a callable
@@ -1290,8 +1330,19 @@ def largeTensorTest(size, device=None):
     def inner(fn):
         @wraps(fn)
         def dep_fn(self, *args, **kwargs):
-            size_bytes = size(self, *args, **kwargs) if callable(size) else size
-            _device = device if device is not None else self.get_primary_device()
+            size_bytes: int = size(self, *args, **kwargs) if callable(size) else size
+            _device = device
+            if _device is None:
+                if hasattr(self, "get_primary_device"):
+                    _device = self.get_primary_device()
+                else:
+                    _device = self.device
+
+            # If this is running with GPU cpp_wrapper, the autotuning step will generate
+            # an additional array of the same size as the input.
+            if inductor and torch._inductor.config.cpp_wrapper and _device != "cpu":
+                size_bytes *= 2
+
             if not _has_sufficient_memory(_device, size_bytes):
                 raise unittest.SkipTest(f"Insufficient {_device} memory")
 
@@ -1373,9 +1424,9 @@ class deviceCountAtLeast:
 
 
 # Only runs the test on the native device type (currently CPU, CUDA, Meta and PRIVATEUSE1)
-def onlyNativeDeviceTypes(fn):
+def onlyNativeDeviceTypes(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     @wraps(fn)
-    def only_fn(self, *args, **kwargs):
+    def only_fn(self, *args: _P.args, **kwargs: _P.kwargs) -> _T:
         if self.device_type not in NATIVE_DEVICES:
             reason = f"onlyNativeDeviceTypes: doesn't run on {self.device_type}"
             raise unittest.SkipTest(reason)
@@ -1383,6 +1434,25 @@ def onlyNativeDeviceTypes(fn):
         return fn(self, *args, **kwargs)
 
     return only_fn
+
+
+# Only runs the test on the native device types and devices specified in the devices list
+def onlyNativeDeviceTypesAnd(devices=None):
+    def decorator(fn):
+        @wraps(fn)
+        def only_fn(self, *args, **kwargs):
+            if (
+                self.device_type not in NATIVE_DEVICES
+                and self.device_type not in devices
+            ):
+                reason = f"onlyNativeDeviceTypesAnd {devices} : doesn't run on {self.device_type}"
+                raise unittest.SkipTest(reason)
+
+            return fn(self, *args, **kwargs)
+
+        return only_fn
+
+    return decorator
 
 
 # Specifies per-dtype precision overrides.
@@ -1512,6 +1582,11 @@ class dtypesIfMPS(dtypes):
         super().__init__(*args, device_type="mps")
 
 
+class dtypesIfHPU(dtypes):
+    def __init__(self, *args):
+        super().__init__(*args, device_type="hpu")
+
+
 class dtypesIfPRIVATEUSE1(dtypes):
     def __init__(self, *args):
         super().__init__(*args, device_type=torch._C._get_privateuse1_backend_name())
@@ -1602,6 +1677,32 @@ def expectedFailureXLA(fn):
 
 def expectedFailureHPU(fn):
     return expectedFailure("hpu")(fn)
+
+
+def expectedFailureMPS(fn):
+    return expectedFailure("mps")(fn)
+
+
+def expectedFailureMPSPre15(fn):
+    import platform
+
+    version = float(".".join(platform.mac_ver()[0].split(".")[:2]) or -1)
+    if not version or version < 1.0:  # cpu or other unsupported device
+        return fn
+    if version < 15.0:
+        return expectedFailure("mps")(fn)
+    return fn
+
+
+def expectedFailureMPSPre14(fn):
+    import platform
+
+    version = float(".".join(platform.mac_ver()[0].split(".")[:2]) or -1)
+    if not version or version < 1.0:  # cpu or other unsupported device
+        return fn
+    if version < 14.0:
+        return expectedFailure("mps")(fn)
+    return fn
 
 
 # Skips a test on CPU if LAPACK is not available.
@@ -1732,7 +1833,7 @@ def skipCUDAIfNotMiopenSuggestNHWC(fn):
 
 
 # Skips a test for specified CUDA versions, given in the form of a list of [major, minor]s.
-def skipCUDAVersionIn(versions: List[Tuple[int, int]] = None):
+def skipCUDAVersionIn(versions: Optional[list[tuple[int, int]]] = None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
@@ -1750,7 +1851,7 @@ def skipCUDAVersionIn(versions: List[Tuple[int, int]] = None):
 
 
 # Skips a test for CUDA versions less than specified, given in the form of [major, minor].
-def skipCUDAIfVersionLessThan(versions: Tuple[int, int] = None):
+def skipCUDAIfVersionLessThan(versions: Optional[tuple[int, int]] = None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
@@ -1847,5 +1948,34 @@ def skipPRIVATEUSE1(fn):
 
 # TODO: the "all" in the name isn't true anymore for quite some time as we have also have for example XLA and MPS now.
 #  This should probably enumerate all available device type test base classes.
-def get_all_device_types() -> List[str]:
+def get_all_device_types() -> list[str]:
     return ["cpu"] if not torch.cuda.is_available() else ["cpu", "cuda"]
+
+
+# skip since currently flex attention requires at least `avx2` support on CPU.
+IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED = (
+    not torch.xpu.is_available()
+    and not torch.cuda.is_available()
+    and not IS_MACOS
+    and torch.cpu._is_avx2_supported()
+    and os.getenv("ATEN_CPU_CAPABILITY") != "default"
+)
+flex_attention_supported_platform = unittest.skipUnless(
+    IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED
+    or (
+        torch.cuda.is_available()
+        and torch.utils._triton.has_triton()
+        and torch.cuda.get_device_capability() >= (8, 0)
+    ),
+    "Requires CUDA and Triton, or CPU with avx2 and later",
+)
+if torch.version.hip and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName:
+    e4m3_type = torch.float8_e4m3fnuz
+    e5m2_type = torch.float8_e5m2fnuz
+    E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fnuz).max
+    E5M2_MAX_POS = torch.finfo(torch.float8_e5m2fnuz).max
+else:
+    e4m3_type = torch.float8_e4m3fn
+    e5m2_type = torch.float8_e5m2
+    E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
+    E5M2_MAX_POS = torch.finfo(torch.float8_e5m2).max

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.4.1)
+cmake_minimum_required(VERSION 3.5)
 option(BUILD_LITE_INTERPRETER "Master flag to build pytorch_jni_lite" ON)
 message(
   STATUS
@@ -112,6 +112,7 @@ if(ANDROID_ABI)
   import_static_lib(libc10)
   import_static_lib(libnnpack)
   import_static_lib(libXNNPACK)
+  import_static_lib(libmicrokernels-prod)
   import_static_lib(libpytorch_qnnpack)
   import_static_lib(libpthreadpool)
   import_static_lib(libeigen_blas)
@@ -129,6 +130,7 @@ if(ANDROID_ABI)
       libc10
       libnnpack
       libXNNPACK
+      libmicrokernels-prod
       libpytorch_qnnpack
       libpthreadpool
       libeigen_blas
@@ -151,6 +153,7 @@ else()
 
   if(USE_XNNPACK)
     list(APPEND pytorch_jni_LIBS XNNPACK)
+    list(APPEND pytorch_jni_LIBS microkernels-prod)
   endif()
 
   if(USE_SYSTEM_PTHREADPOOL)

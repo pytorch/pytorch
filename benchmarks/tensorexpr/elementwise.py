@@ -208,7 +208,6 @@ class SimpleElementBench(benchmark.Benchmark):
         return "simple_element"
 
     def memory_workload(self):
-        input_count = len(self.inputs)
         if self.mode == "fwd":
             sol_count = 2
             algorithmic_count = 2

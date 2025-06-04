@@ -16,8 +16,10 @@
 #include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/profiler_python.h>
+#include <torch/csrc/autograd/python_autograd.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -62,6 +64,12 @@ struct EnableTorchFunction {
     at::impl::PythonTorchFunctionTLS::set_disabled_state(
         at::impl::TorchFunctionDisabledState::ENABLED);
   }
+
+  EnableTorchFunction(const EnableTorchFunction& other) = delete;
+  EnableTorchFunction(EnableTorchFunction&& other) = delete;
+  EnableTorchFunction& operator=(const EnableTorchFunction& other) = delete;
+  EnableTorchFunction& operator=(EnableTorchFunction&& other) = delete;
+
   ~EnableTorchFunction() {
     at::impl::PythonTorchFunctionTLS::set_disabled_state(old_);
   }
@@ -72,6 +80,12 @@ struct EnablePythonDispatcher {
   EnablePythonDispatcher() : old_(c10::impl::PythonDispatcherTLS::get_state()) {
     c10::impl::PythonDispatcherTLS::set_state(getPyInterpreter());
   }
+  EnablePythonDispatcher(const EnablePythonDispatcher& other) = delete;
+  EnablePythonDispatcher(EnablePythonDispatcher&& other) = delete;
+  EnablePythonDispatcher& operator=(const EnablePythonDispatcher& other) =
+      delete;
+  EnablePythonDispatcher& operator=(EnablePythonDispatcher&& other) = delete;
+
   ~EnablePythonDispatcher() {
     c10::impl::PythonDispatcherTLS::set_state(old_);
   }
@@ -130,6 +144,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   if (!ParameterClass)
     return nullptr;
 
+  py::class_<at::TensorGeometry>(m, "TensorGeometry")
+      .def("sizes", &at::TensorGeometry::sizes)
+      .def("strides", &at::TensorGeometry::strides)
+      .def("storage_offset", &at::TensorGeometry::storage_offset);
+
   py::class_<LegacyEvent>(m, "ProfilerEvent")
       .def("kind", &LegacyEvent::kindStr)
       .def("name", [](const LegacyEvent& e) { return e.name(); })
@@ -184,9 +203,29 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("NO_GRAD_MODE", CreationMeta::NO_GRAD_MODE)
       .value("INFERENCE_MODE", CreationMeta::INFERENCE_MODE);
 
+  py::class_<torch::autograd::InputMetadata>(m, "_InputMetadata")
+      .def_property_readonly(
+          "dtype",
+          [](const torch::autograd::InputMetadata& m) {
+            PyObject* raw_obj =
+                (PyObject*)torch::getTHPDtype(m.dtype().toScalarType());
+            return py::reinterpret_borrow<py::object>(raw_obj);
+          })
+      .def_property_readonly("device", &torch::autograd::InputMetadata::device)
+      .def_property_readonly(
+          "shape", &torch::autograd::InputMetadata::shape_as_dim_vector)
+      .def_property_readonly(
+          "is_nested_tensor", &torch::autograd::InputMetadata::is_nested_tensor)
+      .def_property_readonly(
+          "is_cpp_nested_tensor",
+          &torch::autograd::InputMetadata::is_cpp_nested_tensor);
+
   py::class_<KinetoEvent>(m, "_KinetoEvent")
       // name of the event
       .def("name", [](const KinetoEvent& e) { return e.name(); })
+      .def(
+          "overload_name",
+          [](const KinetoEvent& e) { return e.overload_name(); })
       // PyTorch thread id of the start callback
       .def(
           "start_thread_id",
@@ -228,6 +267,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
                 });
             return as_pyobj;
           })
+      .def(
+          "kwinputs",
+          [](const KinetoEvent& e) {
+            std::unordered_map<std::string, py::object> inputs;
+            for (const auto& [key, value] : e.kwinputs()) {
+              inputs[key] = torch::jit::toPyObject(value);
+            }
+            return inputs;
+          })
       // stack traces of the PyTorch CPU events
       .def("stack", [](const KinetoEvent& e) { return e.stack().vec(); })
       // type of the RecordFunction that generated a PyTorch CPU event
@@ -251,6 +299,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("is_async", [](const KinetoEvent& e) { return e.isAsync(); })
       .def("cuda_elapsed_us", &KinetoEvent::cudaElapsedUs)
       .def("privateuse1_elapsed_us", &KinetoEvent::privateuse1ElapsedUs)
+      .def(
+          "is_user_annotation",
+          [](const KinetoEvent& e) {
+            return e.activityType() ==
+                (uint8_t)libkineto::ActivityType::USER_ANNOTATION ||
+                e.activityType() ==
+                (uint8_t)libkineto::ActivityType::GPU_USER_ANNOTATION;
+          })
       .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); });
 
   m.def("_soft_assert_raises", &setSoftAssertRaises);
@@ -275,6 +331,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   m.def(
       "_prepare_profiler",
       prepareProfiler,
+      py::call_guard<py::gil_scoped_release>());
+  m.def(
+      "_toggle_collection_dynamic",
+      toggleCollectionDynamic,
       py::call_guard<py::gil_scoped_release>());
   m.def("_add_metadata_json", addMetadataJson); // Only if `USE_KINETO` is set
   m.def("_kineto_step", profilerStep); // Only if `USE_KINETO` is set
@@ -324,12 +384,21 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         torch::profiler::impl::ActivityType::CPU};
 #if defined(USE_KINETO) && \
     (!defined(LIBKINETO_NOCUPTI) || !defined(LIBKINETO_NOROCTRACER))
+    if (at::hasMTIA()) {
+      activities.insert(torch::profiler::impl::ActivityType::MTIA);
+    }
+    if (at::hasHPU()) {
+      activities.insert(torch::profiler::impl::ActivityType::HPU);
+    }
     if (at::getNumGPUs() > 0) {
       activities.insert(torch::profiler::impl::ActivityType::CUDA);
     }
 #elif defined(USE_KINETO)
     if (at::hasXPU()) {
       activities.insert(torch::profiler::impl::ActivityType::XPU);
+    }
+    if (at::hasHPU()) {
+      activities.insert(torch::profiler::impl::ActivityType::HPU);
     }
     if (at::hasMTIA()) {
       activities.insert(torch::profiler::impl::ActivityType::MTIA);
@@ -341,10 +410,23 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     return activities;
   });
 
-  m.def("_unsafe_set_version_counter", [](const at::Tensor& t, int64_t i) {
-    auto vc = torch::autograd::impl::version_counter(t);
-    vc.set_version(i);
-  });
+  m.def(
+      "_unsafe_set_version_counter",
+      [](const std::vector<at::Tensor>& tensors,
+         const std::vector<int64_t>& versions) {
+        auto tensors_len = tensors.size();
+        auto versions_len = versions.size();
+        TORCH_CHECK(
+            tensors_len == versions_len,
+            "tensors_len=",
+            tensors_len,
+            ", versions_len=",
+            versions_len);
+        for (const auto i : c10::irange(tensors_len)) {
+          auto vc = torch::autograd::impl::version_counter(tensors[i]);
+          vc.set_version(versions[i]);
+        }
+      });
 
   m.def("_enable_profiler_legacy", enableProfilerLegacy);
   py::class_<ProfilerDisableOptions>(m, "_ProfilerDisableOptions")
@@ -373,7 +455,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       "_saved_tensors_hooks_is_enabled",
       at::SavedTensorDefaultHooks::is_enabled);
   m.def("_saved_tensors_hooks_enable", at::SavedTensorDefaultHooks::enable);
-  m.def("_saved_tensors_hooks_disable", at::SavedTensorDefaultHooks::disable);
+  m.def(
+      "_saved_tensors_hooks_disable",
+      at::SavedTensorDefaultHooks::disable,
+      py::arg("error_message"),
+      py::arg("fail_if_non_empty") = true);
   m.def(
       "_saved_tensors_hooks_set_tracing",
       at::SavedTensorDefaultHooks::set_tracing);
@@ -389,6 +475,27 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   m.def("_pop_saved_tensors_default_hooks", []() {
     torch::autograd::PyDefaultSavedVariableHooks::pop_hooks();
   });
+  m.def(
+      "_top_saved_tensors_default_hooks",
+      [](bool ignore_is_tracing)
+          -> std::optional<std::pair<py::function, py::function>> {
+        auto out = at::SavedTensorDefaultHooks::get_hooks(ignore_is_tracing);
+
+        if (!out.has_value()) {
+          return std::nullopt;
+        }
+
+        auto [pack_hook, unpack_hook] = *out;
+        // gil for destructor of pack_hook, unpack_hook that decrements
+        // reference
+        py::gil_scoped_acquire gil;
+
+        return std::make_pair(
+            py::reinterpret_steal<py::function>(pack_hook.release()),
+            py::reinterpret_steal<py::function>(unpack_hook.release()));
+      }
+
+  );
 
   m.def("_get_creation_meta", [](const at::Tensor& t) {
     auto* meta = torch::autograd::impl::get_view_autograd_meta(t);
@@ -403,6 +510,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         TORCH_CHECK(meta != nullptr);
         meta->set_creation_meta(new_creation_meta);
       });
+
+  m.def("_get_current_graph_task_keep_graph", []() {
+    return torch::autograd::get_current_graph_task_keep_graph();
+  });
+
+  m.def(
+      "_get_data_attr", [](const at::Tensor& t) { return t.variable_data(); });
 
   _C_m.def(
       "_register_py_class_for_device",
@@ -490,7 +604,7 @@ static PyObject* set_autocast_enabled(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
-      {"set_autocast_enabled(c10::string_view device_type, bool enabled)",
+      {"set_autocast_enabled(std::string_view device_type, bool enabled)",
        "set_autocast_enabled(bool enabled)"}); // this signature is depracated.
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -513,7 +627,7 @@ static PyObject* is_autocast_enabled(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
-      {"is_autocast_enabled(c10::string_view device_type)",
+      {"is_autocast_enabled(std::string_view device_type)",
        "is_autocast_enabled()"}); // this signature is depracated.
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -536,7 +650,7 @@ static PyObject* get_autocast_dtype(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
-      {"get_autocast_dtype(c10::string_view device_type)"});
+      {"get_autocast_dtype(std::string_view device_type)"});
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto device_type = at::Device(r.string(0)).type();
@@ -551,7 +665,7 @@ static PyObject* set_autocast_dtype(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
-      {"set_autocast_dtype(c10::string_view device_type, ScalarType dtype)"});
+      {"set_autocast_dtype(std::string_view device_type, ScalarType dtype)"});
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto device_type = at::Device(r.string(0)).type();
@@ -583,7 +697,7 @@ static PyObject* is_autocast_available(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
-      {"_is_autocast_available(c10::string_view device_type)"});
+      {"_is_autocast_available(std::string_view device_type)"});
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto device_type = at::Device(r.string(0)).type();
@@ -866,6 +980,133 @@ static PyObject* is_fwd_grad_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+template <bool skip_tensors_in_non_tensorlist>
+static bool visit(
+    PyObject* o,
+    const std::function<bool(at::Tensor&)>& visit_tensor) {
+  if (THPVariable_Check(o)) {
+    auto t = THPVariable_Unpack(o);
+    if (visit_tensor(t)) {
+      return true;
+    }
+  } else if (PyList_Check(o)) {
+    // Check that this List is TensorList
+    if constexpr (skip_tensors_in_non_tensorlist) {
+      for (const auto i : c10::irange(PyList_GET_SIZE(o))) {
+        if (!THPVariable_Check(PyList_GET_ITEM(o, i))) {
+          return false;
+        }
+      }
+    }
+    for (const auto i : c10::irange(PyList_GET_SIZE(o))) {
+      if (visit<skip_tensors_in_non_tensorlist>(
+              PyList_GET_ITEM(o, i), visit_tensor)) {
+        return true;
+      };
+    }
+  }
+  return false;
+}
+
+// Visiting of tensors in args and kwargs,
+// only List container is visited.
+// skip_tensors_in_non_tensorlist will skip any List with non-Tensor.
+// Lambda returning true means short circuit, traversal stops after that.
+template <bool skip_tensors_in_non_tensorlist>
+static void visit_tensors(
+    PyObject* args,
+    PyObject* kwargs,
+    const std::function<bool(at::Tensor&)>& visit_tensor) {
+  if (args && PyTuple_Check(args)) {
+    for (const auto i : c10::irange(PyTuple_GET_SIZE(args))) {
+      if (visit<skip_tensors_in_non_tensorlist>(
+              PyTuple_GET_ITEM(args, i), visit_tensor)) {
+        return;
+      }
+    }
+  }
+  if (kwargs && PyDict_Check(kwargs)) {
+    auto vals = THPObjectPtr{PyDict_Values(kwargs)};
+    for (const auto i : c10::irange(PyList_Size(vals))) {
+      if (visit<skip_tensors_in_non_tensorlist>(
+              PyList_GetItem(vals, i), visit_tensor)) {
+        return;
+      }
+    }
+  }
+}
+
+// Returns true if any of the args, kwargs tensor leaves have requires_grad.
+// Only List[Tensor] container in args is supported.
+static PyObject* any_requires_grad(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  bool has_requires_grad = false;
+  visit_tensors<true>(args, kwargs, [&has_requires_grad](at::Tensor& t) {
+    if (t.requires_grad()) {
+      has_requires_grad = true;
+      return true;
+    }
+    return false;
+  });
+  if (has_requires_grad) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
+// Checks aliasing constraint for custom ops:
+// Returns true if any of outputs is alias to any of inputs or another output
+// Args:
+// args[0] - inputs args
+// args[1] - inputs kwargs
+// args[2] - outputs
+// Only List container is supported.
+// Tensors in Lists that has not only Tensor are checked.
+static PyObject* any_output_is_alias_to_input_or_output(
+    PyObject* _unused,
+    PyObject* args) {
+  HANDLE_TH_ERRORS
+  PyObject* inps = PyTuple_GET_ITEM(args, 0);
+  PyObject* inps_kwargs = PyTuple_GET_ITEM(args, 1);
+  PyObject* outs = PyTuple_GET_ITEM(args, 2);
+  std::unordered_set<void*> s;
+  visit_tensors<false>(inps, inps_kwargs, [&s](at::Tensor& t) {
+    if (!t.storage()) {
+      return false;
+    }
+    auto* cp = t.storage().data_ptr().get_context();
+    if (cp) {
+      s.insert(cp);
+    }
+    return false;
+  });
+  bool ret = false;
+  visit_tensors<false>(outs, nullptr, [&s, &ret](at::Tensor& t) {
+    if (!t.storage()) {
+      return false;
+    }
+    auto* cp = t.storage().data_ptr().get_context();
+    if (!cp) {
+      return false;
+    }
+    if (s.find(cp) != s.end()) {
+      ret = true;
+      return true;
+    }
+    s.insert(cp);
+    return false;
+  });
+  if (ret) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* set_multithreading_enabled(
     PyObject* self,
     PyObject* args,
@@ -1086,7 +1327,7 @@ static PyObject* push_on_torch_dispatch_stack(
     using c10::impl::TorchDispatchModeKey;
     // When we push a mode onto the mode stack, we need to
     // check if it's an "infra" mode, by checking its _mode_key attribute.
-    std::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
+    std::optional<c10::impl::TorchDispatchModeKey> mode_key;
     py::object maybe_mode_key_obj =
         PyObject_FastGetAttrString(arg, "_mode_key");
     if (maybe_mode_key_obj) {
@@ -1110,7 +1351,7 @@ static PyObject* pop_torch_dispatch_stack(
     PyObject* _unused,
     PyObject* maybe_mode_key) {
   HANDLE_TH_ERRORS
-  std::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
+  std::optional<c10::impl::TorchDispatchModeKey> mode_key;
   PyObject* r = nullptr;
   if (maybe_mode_key != Py_None) {
     mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key);
@@ -1176,10 +1417,9 @@ static PyObject* get_dispatch_mode(PyObject* _unused, PyObject* arg) {
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
 
   auto maybe_mode = c10::impl::TorchDispatchModeTLS::get_mode(mode_key);
-  if (maybe_mode == c10::nullopt) {
+  if (!maybe_mode.has_value()) {
     Py_RETURN_NONE;
   }
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto* r = maybe_mode.value()->ptr(getPyInterpreter());
   Py_INCREF(r);
   return r;
@@ -1192,10 +1432,9 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
 
   const auto maybe_mode = c10::impl::TorchDispatchModeTLS::unset_mode(mode_key);
-  if (maybe_mode == c10::nullopt) {
+  if (!maybe_mode.has_value()) {
     Py_RETURN_NONE;
   }
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto* r = maybe_mode.value()->ptr(getPyInterpreter());
   Py_INCREF(r);
   return r;
@@ -1209,23 +1448,44 @@ static PyObject* len_torch_dispatch_stack(PyObject* _unused, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPModule_increment_version(PyObject* _unused, PyObject* tensor) {
+static PyObject* THPModule_increment_version(
+    PyObject* _unused,
+    PyObject* tensor_list) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      THPVariable_Check(tensor), "increment_version expect a Tensor as input");
-  torch::autograd::increment_version((THPVariable_Unpack(tensor)));
+  auto iterator = THPObjectPtr(PyObject_GetIter(tensor_list));
+  TORCH_CHECK(iterator, "increment_version expect a Iterable[Tensor] as input");
+  auto item = THPObjectPtr(PyIter_Next(iterator));
+  while (item) {
+    TORCH_CHECK(
+        THPVariable_Check(item),
+        "increment_version expects each element of the iterable to be a tensor");
+    auto t = THPVariable_Unpack(item);
+    if (!t.is_inference()) {
+      torch::autograd::increment_version(t);
+    }
+    item = THPObjectPtr(PyIter_Next(iterator));
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 // autograd methods on torch._C
-static PyMethodDef methods[] = { // NOLINT
+// NOLINTNEXTLINE(*array*)
+static PyMethodDef methods[] = {
     {"_set_grad_enabled",
      castPyCFunctionWithKeywords(set_grad_enabled),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"is_grad_enabled", is_grad_enabled, METH_NOARGS, nullptr},
     {"_set_fwd_grad_enabled", set_fwd_grad_enabled, METH_O, nullptr},
+    {"_any_requires_grad",
+     castPyCFunctionWithKeywords(any_requires_grad),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_any_output_is_alias_to_input_or_output",
+     any_output_is_alias_to_input_or_output,
+     METH_VARARGS,
+     nullptr},
     {"_is_fwd_grad_enabled", is_fwd_grad_enabled, METH_NOARGS, nullptr},
     {"is_inference_mode_enabled",
      is_inference_mode_enabled,

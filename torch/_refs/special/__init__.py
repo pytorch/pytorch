@@ -6,7 +6,6 @@ import torch
 import torch._prims as prims
 import torch._prims_common as utils
 import torch._refs as refs
-
 from torch import Tensor
 from torch._decomp import register_decomposition
 from torch._prims_common import (
@@ -138,7 +137,7 @@ def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
         eps = -1.0
     lo = eps
     hi = 1 - eps
-    self = torch.clamp(self, lo, hi)
+    self = torch.where(self < lo, lo, torch.where(self > hi, hi, self))
     return torch.log(torch.true_divide(self, torch.sub(1, self)))
 
 

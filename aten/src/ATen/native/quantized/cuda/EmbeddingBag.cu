@@ -19,8 +19,7 @@
 #include <ATen/ops/resize_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // BEGIN QUANTIZE HELPER FUNCTIONS
 __device__ __forceinline__ float bfe(uint32_t val, uint32_t pos, uint32_t len) {
@@ -240,7 +239,7 @@ at::Tensor& embedding_bag_byte_impl(
   }
 
   const std::vector<int64_t> shape = {output_size, D};
-  at::native::resize_(output, shape, c10::nullopt);
+  at::native::resize_(output, shape, std::nullopt);
   AT_DISPATCH_INDEX_TYPES(
       indices.scalar_type(), "embedding_bag_byte_rowwise_offsets_kernel", ([&] {
         embedding_bag_nbits_rowwise_offsets_kernel<index_t, 8><<<
@@ -422,7 +421,7 @@ at::Tensor& embedding_bag_4bit_impl(
   }
 
   const std::vector<int64_t> shape = {output_size, D};
-  at::native::resize_(output, shape, c10::nullopt);
+  at::native::resize_(output, shape, std::nullopt);
   AT_DISPATCH_INDEX_TYPES(
       indices.scalar_type(), "embedding_bag_4bit_rowwise_offsets_kernel", ([&] {
         embedding_bag_nbits_rowwise_offsets_kernel<index_t, 4><<<
@@ -577,5 +576,4 @@ TORCH_LIBRARY_IMPL(quantized, CUDA, m) {
       TORCH_FN(embedding_bag_4bit_rowwise_offsets));
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

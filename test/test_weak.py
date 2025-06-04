@@ -4,19 +4,11 @@ import copy
 import gc
 import random
 import threading
-
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import (
-    find_library_location,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
-    IS_WINDOWS,
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import IS_MACOS, run_tests, TestCase
+from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 from torch.utils.weak import _WeakHashRef, WeakIdKeyDictionary
 
 
@@ -37,8 +29,9 @@ class WeakTest(TestCase):
     def test_make_weak_keyed_dict_from_weak_keyed_dict(self):
         o = torch.randn(3)
         dict = WeakIdKeyDictionary({o: 364})
-        dict2 = WeakIdKeyDictionary(dict)
         self.assertEqual(dict[o], 364)
+        dict2 = WeakIdKeyDictionary(dict)
+        self.assertEqual(dict2[o], 364)
 
     def check_popitem(self, klass, key1, value1, key2, value2):
         weakdict = klass()
@@ -220,13 +213,7 @@ class WeakTest(TestCase):
             del k
             del v
 
-        t_copy = threading.Thread(
-            target=dict_copy,
-            args=(
-                d,
-                exc,
-            ),
-        )
+        t_copy = threading.Thread(target=dict_copy, args=(d, exc))
         t_collect = threading.Thread(target=pop_and_collect, args=(keys,))
 
         t_copy.start()
@@ -445,7 +432,7 @@ class WeakKeyDictionaryTestCase(TestCase):
         outerself = self
 
         class SimpleUserDict:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.d = outerself.reference
 
             def keys(self):
@@ -476,7 +463,7 @@ class WeakKeyDictionaryTestCase(TestCase):
         class FailingUserDict:
             def keys(self):
                 class BogonIter:
-                    def __init__(self):
+                    def __init__(self) -> None:
                         self.i = 1
 
                     def __iter__(self):
@@ -498,7 +485,7 @@ class WeakKeyDictionaryTestCase(TestCase):
         class FailingUserDict:
             def keys(self):
                 class BogonIter:
-                    def __init__(self):
+                    def __init__(self) -> None:
                         self.i = ord("a")
 
                     def __iter__(self):
@@ -600,18 +587,10 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
 
     def __init__(self, *args, **kw):
         unittest.TestCase.__init__(self, *args, **kw)
-        if IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        elif IS_MACOS:
-            # don't load the library, just skip the tests in setUp
-            return
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            if IS_WINDOWS:
-                lib_file_path = find_library_location("torchbind_test.dll")
-            torch.ops.load_library(str(lib_file_path))
+        try:
+            load_torchbind_test_lib()
+        except unittest.SkipTest:
+            return  # Skip in setup
 
         self.reference = self._reference().copy()
 
@@ -786,7 +765,7 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
         outerself = self
 
         class SimpleUserDict:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.d = outerself.reference
 
             def keys(self):
@@ -817,7 +796,7 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
         class FailingUserDict:
             def keys(self):
                 class BogonIter:
-                    def __init__(self):
+                    def __init__(self) -> None:
                         self.i = 1
 
                     def __iter__(self):
@@ -839,7 +818,7 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
         class FailingUserDict:
             def keys(self):
                 class BogonIter:
-                    def __init__(self):
+                    def __init__(self) -> None:
                         self.i = ord("a")
 
                     def __iter__(self):

@@ -2,18 +2,21 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Sequence, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from torchgen import dest
 
+
 # disable import sorting to avoid circular dependency.
-from torchgen.api.types import DispatcherSignature  # usort:skip
+from torchgen.api.types import DispatcherSignature  # usort: skip
 from torchgen.context import method_with_native_function
 from torchgen.model import BaseTy, BaseType, DispatchKey, NativeFunction, Variant
 from torchgen.utils import concatMap, Target
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torchgen.executorch.model import ETKernelIndex
     from torchgen.selective_build.selector import SelectiveBuilder
 
@@ -62,9 +65,9 @@ class ComputeNativeFunctionStub:
                 {comma.join([r.name for r in f.func.arguments.out])}
             )"""
         else:
-            assert all(
-                a.type == BaseType(BaseTy.Tensor) for a in f.func.returns
-            ), f"Only support tensor returns but got {f.func.returns}"
+            assert all(a.type == BaseType(BaseTy.Tensor) for a in f.func.returns), (
+                f"Only support tensor returns but got {f.func.returns}"
+            )
             # Returns a tuple of empty tensors
             tensor_type = "at::Tensor"
             comma = ", "
@@ -128,7 +131,7 @@ def gen_custom_ops_registration(
         static_init_dispatch_registrations += f"""
 TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
 {dispatch_registrations_body}
-}};"""
+}}"""
     anonymous_definition = "\n".join(
         list(
             concatMap(

@@ -25,7 +25,7 @@ class TestModTracker(TestCase):
                 return {"a": torch.mm(x, x)}
 
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = Foo()
                 self.b = torch.nn.ModuleDict({"nest": Foo()})
@@ -80,7 +80,7 @@ class TestModTracker(TestCase):
     @xfailIfTorchDynamo
     def test_user_hooks(self):
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Linear(10, 10)
 
@@ -192,6 +192,8 @@ class TestModTracker(TestCase):
             ("post_fw", "Foo.linears.1", True, True),
             ("post_bw", "Foo.linears.1", True, True),
             ("pre_bw", "Foo.linears.0", True, True),
+            ("post_bw", "Foo.linears.0", True, True),
+            ("post_bw", "Foo", True, True),
         ]
         self.assertEqual(test_op, expected_op)
 

@@ -2,7 +2,7 @@
 import warnings
 from abc import ABC, abstractmethod
 from types import TracebackType
-from typing import Any, List, NamedTuple, Optional, Type
+from typing import Any, NamedTuple, Optional
 
 import torch
 import torch.distributed as dist
@@ -28,7 +28,6 @@ class JoinHook:
 
         Training iteration i.e., in one forward pass, backward pass, and optimizer step.
         """
-        ...
 
     def post_hook(self, is_last_joiner: bool) -> None:
         r"""
@@ -40,7 +39,6 @@ class JoinHook:
             is_last_joiner (bool): ``True`` if the rank is one of the last to
                 join; ``False`` otherwise.
         """
-        ...
 
 
 class Joinable(ABC):
@@ -55,7 +53,7 @@ class Joinable(ABC):
     """
 
     @abstractmethod
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._join_config = _JoinConfig.construct_disabled_join_config()
 
@@ -167,7 +165,7 @@ class Join:
 
     def __init__(
         self,
-        joinables: List[Joinable],
+        joinables: list[Joinable],
         enable: bool = True,
         throw_on_early_termination: bool = False,
         **kwargs,
@@ -225,12 +223,11 @@ class Join:
         self._rank = dist.get_rank(self._process_group)
         self._device = device
 
-    def __enter__(self):
-        ...
+    def __enter__(self): ...
 
     def __exit__(
         self,
-        type: Optional[Type[BaseException]],
+        type: Optional[type[BaseException]],
         value: Optional[BaseException],
         traceback: Optional[TracebackType],
     ):

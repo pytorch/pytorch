@@ -6,16 +6,17 @@
 #include <c10/core/Stream.h>
 #include <c10/util/Registry.h>
 
+#include <c10/core/Allocator.h>
+
+#include <c10/util/python_stub.h>
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
 #include <string>
-
 namespace at {
 class Context;
 }
 
 namespace at {
-
 constexpr const char* MTIA_HELP =
     "The MTIA backend requires MTIA extension for PyTorch;"
     "this error has occurred because you are trying "
@@ -29,7 +30,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
 
   ~MTIAHooksInterface() override = default;
 
-  virtual void initMTIA() const {
+  void init() const override {
     // Avoid logging here, since MTIA needs init devices first then it will know
     // how many devices are available. Make it as no-op if mtia extension is not
     // dynamically loaded.
@@ -44,7 +45,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     return 0;
   }
 
-  virtual void deviceSynchronize(c10::DeviceIndex device_index) const {
+  virtual void deviceSynchronize(c10::DeviceIndex /*device_index*/) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
@@ -52,11 +53,11 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
-  bool hasPrimaryContext(DeviceIndex device_index) const override {
+  bool hasPrimaryContext(DeviceIndex /*device_index*/) const override {
     return false;
   }
 
-  void setCurrentDevice(DeviceIndex device) const override {
+  void setCurrentDevice(DeviceIndex /*device*/) const override {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
@@ -65,34 +66,94 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     return -1;
   }
 
-  DeviceIndex exchangeDevice(DeviceIndex device) const override {
+  DeviceIndex exchangeDevice(DeviceIndex /*device*/) const override {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return -1;
   }
 
-  DeviceIndex maybeExchangeDevice(DeviceIndex device) const override {
+  DeviceIndex maybeExchangeDevice(DeviceIndex /*device*/) const override {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return -1;
   }
 
-  virtual c10::Stream getCurrentStream(DeviceIndex device) const {
+  virtual c10::Stream getCurrentStream(DeviceIndex /*device*/) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return c10::Stream::unpack3(-1, 0, c10::DeviceType::MTIA);
   }
 
-  virtual c10::Stream getDefaultStream(DeviceIndex device) const {
+  virtual int64_t getCurrentRawStream(DeviceIndex /*device*/) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return -1;
+  }
+
+  virtual c10::Stream getDefaultStream(DeviceIndex /*device*/) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return c10::Stream::unpack3(-1, 0, c10::DeviceType::MTIA);
   }
 
-  virtual void setCurrentStream(const c10::Stream& stream) const {
+  virtual void setCurrentStream(const c10::Stream& /*stream*/ ) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
+  }
+
+  bool isPinnedPtr(const void* /*data*/) const override {
+    return false;
+  }
+
+  Allocator* getPinnedMemoryAllocator() const override {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return nullptr;
+  }
+
+  virtual PyObject* memoryStats(DeviceIndex /*device*/) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return nullptr;
+  }
+
+  virtual PyObject* getDeviceCapability(DeviceIndex /*device*/) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return nullptr;
+  }
+
+  virtual PyObject* getDeviceProperties(DeviceIndex device) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return nullptr;
+  }
+
+  virtual void emptyCache() const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+  }
+
+
+  virtual void recordMemoryHistory(
+    const std::optional<std::string>& /*enabled*/,
+    const std::string& /*stacks*/,
+    size_t /*max_entries*/) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+  }
+
+  virtual PyObject* memorySnapshot(const std::optional<std::string>& local_path) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return nullptr;
+  }
+
+  virtual DeviceIndex getDeviceCount() const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return 0;
+  }
+
+  virtual void resetPeakMemoryStats(DeviceIndex /*device*/) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+  }
+
+  virtual void attachOutOfMemoryObserver(PyObject* observer) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return;
   }
 };
 
 struct TORCH_API MTIAHooksArgs {};
 
-C10_DECLARE_REGISTRY(MTIAHooksRegistry, MTIAHooksInterface, MTIAHooksArgs);
+TORCH_DECLARE_REGISTRY(MTIAHooksRegistry, MTIAHooksInterface, MTIAHooksArgs);
 #define REGISTER_MTIA_HOOKS(clsname) \
   C10_REGISTER_CLASS(MTIAHooksRegistry, clsname, clsname)
 

@@ -4,7 +4,7 @@ import inspect
 import itertools
 import warnings
 from collections import OrderedDict
-from typing import Any, List, Optional, Tuple
+from typing import Any, Optional
 from typing_extensions import deprecated
 
 import torch
@@ -13,6 +13,7 @@ import torch._functorch as _functorch
 import torch.utils.hooks as hooks
 from torch._C import _functions
 from torch._functorch.autograd_function import custom_function_call
+
 
 __all__ = [
     "FunctionCtx",
@@ -41,6 +42,7 @@ class FunctionCtx:
         with ``save_for_backward`` (as opposed to directly on ``ctx``) to prevent
         incorrect gradients and memory leaks, and enable the application of saved
         tensor hooks. See :class:`torch.autograd.graph.saved_tensors_hooks`.
+        See :ref:`extending-autograd` for more details.
 
         Note that if intermediary tensors, tensors that are neither inputs
         nor outputs of :func:`forward`, are saved for backward, your custom Function
@@ -62,6 +64,7 @@ class FunctionCtx:
         See :ref:`extending-autograd` for more details on how to use this method.
 
         Example::
+
             >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
             >>> class Func(Function):
             >>>     @staticmethod
@@ -105,6 +108,7 @@ class FunctionCtx:
         See :ref:`extending-autograd` for more details on how to use this method.
 
         Example::
+
             >>> # xdoctest: +SKIP
             >>> class Func(torch.autograd.Function):
             >>>     @staticmethod
@@ -232,6 +236,7 @@ class FunctionCtx:
         prior to calling the :func:`backward` and :func:`jvp` methods.
 
         Example::
+
             >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
             >>> class SimpleFunc(Function):
             >>>     @staticmethod
@@ -330,9 +335,9 @@ class FunctionMeta(type):
             name + "Backward", (BackwardCFunction,), {"_forward_cls": cls}
         )
         backward_fn._autograd_function_id = next(AUTOGRAD_FUNCTION_COUNTER)  # type: ignore[attr-defined]
-        backward_fn._compiled_autograd_should_lift = attrs.get(  # type: ignore[attr-defined]
-            "_compiled_autograd_should_lift", True
-        )
+        backward_fn._bw_module = None  # type: ignore[attr-defined]
+        if getattr(cls, "_lazy_backward_info", None):
+            backward_fn._bw_module = cls._lazy_backward_info.bw_module  # type: ignore[attr-defined]
         cls._backward_cls = backward_fn
 
         super().__init__(name, bases, attrs)
@@ -388,7 +393,7 @@ class _SingleLevelFunction(
         )
 
     @staticmethod
-    def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> Any:
+    def setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> Any:
         r"""There are two ways to define the forward pass of an autograd.Function.
 
         Either:
@@ -496,7 +501,7 @@ class Function(_SingleLevelFunction):
 
     def __init__(self, *args, **kwargs):
         warnings.warn(
-            f"{self.__class__} should not be instantiated. Methods on autograd functions"
+            f"{self.__class__} should not be instantiated. Methods on autograd functions "
             "are all static, so you should invoke them on the class itself. "
             "Instantiating an autograd function will raise an "
             "error in a future version of PyTorch.",
@@ -721,7 +726,7 @@ def _unflatten(input, proto):
     # unflatten a list or tuple input into a nested list/tuple structure
     # specified by proto
     def unflatten_helper(input, proto):
-        res: List[Optional[torch.Tensor]] = []
+        res: list[Optional[torch.Tensor]] = []
         if hasattr(proto, "_jit_wrap"):
             return proto._jit_wrap(input)
         if not isinstance(proto, (list, tuple)):
@@ -771,7 +776,6 @@ class NestedIOFunction(Function):
         self._nested_input = input
         flat_input = tuple(_iter_tensors(input))
         flat_output = super()._do_forward(*flat_input)  # type: ignore[misc]
-        nested_output = self._nested_output
         nested_tensors = _unflatten(flat_output, self._nested_output)
         return nested_tensors
 

@@ -19,7 +19,7 @@ static Tensor& bincount_mps_impl(const Tensor& self, const Tensor& weights, Tens
   bool has_weights = weights.defined();
 
   @autoreleasepool {
-    string key = "bincount_mps_impl" + getTensorsStringKey({self, weights});
+    std::string key = "bincount_mps_impl" + getTensorsStringKey({self, weights});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
       MPSGraphTensor* scatterDataTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSScalarType(output.scalar_type()));
@@ -73,7 +73,7 @@ static Tensor& bincount_mps_impl(const Tensor& self, const Tensor& weights, Tens
   return output;
 }
 
-Tensor _bincount_mps(const Tensor& self, const c10::optional<Tensor>& weights_opt, int64_t minlength) {
+Tensor _bincount_mps(const Tensor& self, const std::optional<Tensor>& weights_opt, int64_t minlength) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weights_maybe_owned = at::borrow_from_optional_tensor(weights_opt);
   const Tensor& weights = *weights_maybe_owned;
@@ -82,7 +82,7 @@ Tensor _bincount_mps(const Tensor& self, const c10::optional<Tensor>& weights_op
   TORCH_CHECK(minlength >= 0, "minlength should be >= 0");
 
   if (self.dim() == 1 && self.numel() == 0) {
-    return at::zeros({minlength}, kLong, c10::nullopt /* layout */, kMPS, c10::nullopt /* pin_memory */);
+    return at::zeros({minlength}, kLong, std::nullopt /* layout */, kMPS, std::nullopt /* pin_memory */);
   }
   TORCH_CHECK(self.dim() == 1 && self.min().item<int64_t>() >= 0,
               "bincount only supports 1-d non-negative integral inputs.");
@@ -107,7 +107,7 @@ Tensor _bincount_mps(const Tensor& self, const c10::optional<Tensor>& weights_op
                        weights_.options().device_opt(),
                        weights_.options().pinned_memory_opt());
   } else {
-    output = at::zeros({nbins}, kLong, c10::nullopt /* layout */, kMPS, c10::nullopt /* pin_memory */);
+    output = at::zeros({nbins}, kLong, std::nullopt /* layout */, kMPS, std::nullopt /* pin_memory */);
   }
 
   return bincount_mps_impl(self, weights_, output);

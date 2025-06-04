@@ -6,12 +6,14 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
-    (parametrize, run_tests, TestCase, DeterministicGuard)
+    (parametrize, run_tests, TestCase, DeterministicGuard, TEST_WITH_ROCM)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA,
      toleranceOverride, tol,)
 from torch.testing._internal.common_dtype import \
     (get_all_dtypes,)
+
+from torch.testing._internal.common_cuda import CDNA3OrLater
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -62,6 +64,63 @@ class TestScatterGather(TestCase):
             expected, idx = src.max(2, True)
             actual = torch.gather(src, 2, idx)
             self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @dtypes(torch.int8, torch.bfloat16)
+    def test_gather_large(self, device, dtype):
+        # test larger shapes to check vectorized implementation
+        for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100)):
+            src = make_tensor((m, k), device=device, dtype=dtype)
+            alloc0 = torch.empty(src.nelement() * 2, device=device, dtype=dtype)
+            discontig = alloc0.view(m, 2 * k)[:, ::2].copy_(src)
+            alloc1 = torch.empty(src.nelement() + 1, device=device, dtype=dtype)
+            misaligned = alloc1[1:].view(m, k).copy_(src)
+            alloc2 = torch.empty(m, k + 4, device=device, dtype=dtype)
+            misaligned1 = alloc2[:, :-4].copy_(src)
+            num_ind = n
+            for dim in (0, 1):
+                max_ind = src.shape[dim]
+                ind0 = torch.randint(max_ind, (num_ind,), device=device)
+                ind_discontig0 = torch.empty(num_ind * 2, device=device, dtype=torch.int64)[::2].copy_(ind0)
+                shape_ind = [1] * src.ndim
+                shape_ind[dim] = ind0.shape[0]
+                shape_out = list(src.shape)
+                shape_out[dim] = ind0.shape[0]
+                ind = ind0.view(shape_ind).expand(shape_out)
+                ind_discontig = ind_discontig0.view(shape_ind).expand(shape_out)
+                res = torch.gather(src, dim=dim, index=ind)
+                ref = src[ind0] if dim == 0 else src[:, ind0]
+                self.assertEqual(res, ref, atol=0, rtol=0)
+                if res.device.type == "cuda":
+                    ref_cpu = src.cpu()[ind0.cpu()] if dim == 0 else src.cpu()[:, ind0.cpu()]
+                    self.assertEqual(res.cpu(), ref_cpu, atol=0, rtol=0)
+                res = torch.gather(src, dim=dim, index=ind_discontig)
+                self.assertEqual(res, ref, atol=0, rtol=0)
+                res_ind = src[ind_discontig0] if dim == 0 else src[:, ind_discontig0]
+                self.assertEqual(res_ind, ref, atol=0, rtol=0)
+                res_ind_neg = src[ind0 - src.shape[dim]] if dim == 0 else src[:, ind0 - src.shape[1]]
+                self.assertEqual(res_ind_neg, ref, atol=0, rtol=0)
+                res = torch.gather(discontig, dim=dim, index=ind)
+                self.assertEqual(res, ref, atol=0, rtol=0)
+                res_ind = discontig[ind0] if dim == 0 else discontig[:, ind0]
+                self.assertEqual(res_ind, ref, atol=0, rtol=0)
+                res = torch.gather(misaligned, dim=dim, index=ind)
+                self.assertEqual(res, ref, atol=0, rtol=0)
+                res_ind = misaligned[ind0] if dim == 0 else misaligned[:, ind0]
+                self.assertEqual(res_ind, ref, atol=0, rtol=0)
+                res_ind = misaligned1[ind0] if dim == 0 else misaligned[:, ind0]
+                self.assertEqual(res_ind, ref, atol=0, rtol=0)
+                res_gather = torch.gather(misaligned1, dim=dim, index=ind)
+                self.assertEqual(res_gather, ref, atol=0, rtol=0)
+        # test gather along 1st dim that can accidentally trigger fast path
+        # because due to index dimension in the gather dim being 1
+        # an unexpected squashing in tensorIterator happens
+        src = make_tensor((16, 2, 16), device=device, dtype=dtype)
+        ind = torch.randint(2, (16, 1), device=device).view(16, 1, 1).expand(16, 1, 16)
+        res = torch.gather(src, dim=1, index=ind)
+        if res.device.type == "cuda":
+            ref_cpu = torch.gather(src.cpu(), dim=1, index=ind.cpu())
+            self.assertEqual(res.cpu(), ref_cpu, atol=0, rtol=0)
+
 
     @dtypes(torch.bool)
     def test_gather_bool(self, device, dtype):
@@ -155,7 +214,13 @@ class TestScatterGather(TestCase):
             # precision types can be small differences
             self.assertEqual(actual, expected, atol=0.04, rtol=0.05)
         else:
-            self.assertEqual(actual, expected, atol=0, rtol=0)
+            # When we are running opportunistic_fastatomics, we will expect some floating point rounding
+            # errors as the order of operation is not guaranteed.
+            if TEST_WITH_ROCM and CDNA3OrLater() \
+                    and not torch.are_deterministic_algorithms_enabled():
+                self.assertEqual(actual, expected, atol=1e-9, rtol=1e-6)
+            else:
+                self.assertEqual(actual, expected, atol=0, rtol=0)
 
         # Tests empty index
         dst = make_tensor((2, 2), device=device, dtype=dtype)
@@ -347,6 +412,26 @@ class TestScatterGather(TestCase):
             out = torch.gather(input, 0, idx)
             out2 = torch.gather(input2, 0, idx2)
 
+            self.assertEqual(out, out2)
+
+            # test unsqueezed index
+            # expanded_index kernel can not handle the case:
+            # the size > 1 and stride == 1 at a dimension.
+            # for example: the index with size of [1, 8, 7],  stride of [1, 1, 0].
+            # see https://github.com/pytorch/pytorch/issues/129093
+            def unsqueeze_helper(idx, dim):
+                if dim == 2:
+                    return idx.unsqueeze(1).t()
+                else:
+                    return unsqueeze_helper(idx, dim - 1).unsqueeze(dim - 1)
+
+            idx = torch.randint(0, dim_size, (input.shape[1],))
+            idx = unsqueeze_helper(idx, len(input_size))
+            expanded_shape[0] = 1
+            idx = idx.expand(expanded_shape)
+            idx2 = idx.contiguous()
+            out = torch.gather(input, 0, idx)
+            out2 = torch.gather(input2, 0, idx2)
             self.assertEqual(out, out2)
 
         helper([50, 17], 100)

@@ -6,11 +6,12 @@
 
 # reference python implementations for C ops
 import torch
-
 from functorch._C import dim as _C
+
 from . import op_properties
 from .batch_tensor import _enable_layers
 from .tree_map import tree_flatten, tree_map
+
 
 DimList = _C.DimList
 import operator
@@ -138,6 +139,8 @@ def seq(a, b):
 
 
 class isin:
+    __slots__ = ()
+
     def __contains__(self, item):
         for x in self:
             if seq(item, x):
@@ -152,11 +155,11 @@ class isin:
 
 
 class llist(isin, list):
-    pass
+    __slots__ = ()
 
 
 class ltuple(isin, tuple):
-    pass
+    __slots__ = ()
 
 
 empty_dict = {}
@@ -197,7 +200,6 @@ def __torch_function__(self, orig, cls, args, kwargs=empty_dict):
 
     if orig in pointwise:
         result_levels = llist()
-        arg_levels = llist()
         to_expand = []
         for i, f in enumerate(flat_args):
             if isinstance(f, TensorLike):
@@ -267,7 +269,6 @@ def positional(self, *dims):
             needs_view = True
 
     permute = list(range(len(levels)))
-    nflat = len(flat_dims)
     for i, d in enumerate(flat_dims):
         try:
             idx = levels.index(d)
@@ -382,7 +383,7 @@ _orig_getitem = torch.Tensor.__getitem__
 
 
 class dim_tracker:
-    def __init__(self):
+    def __init__(self) -> None:
         self.dims = llist()
         self.count = []
 
@@ -407,7 +408,6 @@ def t__getitem__(self, input):
     #   (keep track of whether we have to call super)
     # * call super if needed
     # * if we have dims to bind, bind them (it will help if we eliminated ... and None before)
-
     # this handles bool indexing handling, as well as some other simple cases.
 
     is_simple = (
@@ -625,9 +625,9 @@ def split(self, split_size_or_sections, dim=0):
             unbound.append(i)
 
     if unbound:
-        assert (
-            total_bound_size <= size
-        ), f"result dimensions are larger than original: {total_bound_size} vs {size} ({split_size_or_sections})"
+        assert total_bound_size <= size, (
+            f"result dimensions are larger than original: {total_bound_size} vs {size} ({split_size_or_sections})"
+        )
         remaining_size = size - total_bound_size
         chunk_size = -(-remaining_size // len(unbound))
         for u in unbound:
@@ -636,9 +636,9 @@ def split(self, split_size_or_sections, dim=0):
             sizes[u] = sz
             remaining_size -= sz
     else:
-        assert (
-            total_bound_size == size
-        ), f"result dimensions do not match original: {total_bound_size} vs {size} ({split_size_or_sections})"
+        assert total_bound_size == size, (
+            f"result dimensions do not match original: {total_bound_size} vs {size} ({split_size_or_sections})"
+        )
     return tuple(
         t.index(dim, d)
         for d, t in zip(split_size_or_sections, _orig_split(self, sizes, dim=dim))

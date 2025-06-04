@@ -6,28 +6,30 @@ import dataclasses
 import enum
 import functools
 import logging
+import re
 import threading
 import traceback
 import unittest.mock
 import weakref
 from abc import abstractmethod
+from collections import defaultdict
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import (
     Any,
     Callable,
-    Dict,
     Generic,
-    List,
     NamedTuple,
     Optional,
-    Set,
-    Tuple,
     TYPE_CHECKING,
     TypeVar,
+    Union,
 )
 
+import torch
 from torch.utils import _pytree as pytree
-from torch.utils._traceback import CapturedTraceback
+from torch.utils._backport_slots import dataclass_slots
+from torch.utils._traceback import CapturedTraceback, format_frame
 from torch.utils.weak import WeakTensorKeyDictionary
 
 
@@ -35,12 +37,9 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    import sympy
+    from types import CodeType
 
-    # Import the following modules during type checking to enable code intelligence features,
-    # such as auto-completion in tools like pylance, even when these modules are not explicitly
-    # imported in user code.
-    import torch
+    import sympy
 
 
 """
@@ -50,18 +49,74 @@ An important thing to keep in mind here is the preservation of layering. There s
 and no guard installation notions here.
 """
 
+COMPILE_ID_PATTERN = re.compile(r"^(?P<frame_id>\d+)/(?P<frame_compile_id>\d+)$")
+CA_COMPILE_ID_PATTERN = re.compile(
+    r"^!(?P<compiled_autograd_id>\d+)(?:/(?P<frame_id>\d+)/(?P<frame_compile_id>\d+))?$"
+)
 
-class CompileId(NamedTuple):
-    frame_id: int
+# [Note: Updating CompiledId]
+#
+# CompiledId represents a unique program-level identifier, and we want to keep that
+# property as the codebase evolves. This property is relied on even outside of the pytorch
+# repo, e.g. tlparse or other internal tooling. The in-memory format can be freely changed,
+# as those dependencies only consume the string serialization.
+#
+# The string form should be:
+# 1. Program-level uid: CompileId can uniquely identify a compiled graph.
+# 2. Storage efficient: This object is logged in nearly every entry. We should elide symbols when possible.
+# 3. Compact: The string form is directly displayed by some tools. Special symbols are okay.
+
+
+# TODO: mark as kw_only=True once we drop support for <Python 3.10
+@dataclass(frozen=True)
+class CompileId:
+    frame_id: Optional[int]
     # This id is per-frame, and counts how many times we've compiled this
     # frame.  This could have been a global id but having this be per-frame
     # gives you a better intuitive sense for how many recompiles have occurred
     # so far.
-    frame_compile_id: int
+    frame_compile_id: Optional[int]
+
+    # torch.compiling a compiled autograd graph
+    compiled_autograd_id: Optional[int] = None
+
     # TODO: consider also tracking the recompilation count
+    # See Note: Updating CompileId
 
     def __str__(self):
-        return f"{self.frame_id}/{self.frame_compile_id}"
+        # NOTE: Keep this in sync with both from_string and the tlparse repo
+        if self.compiled_autograd_id is not None:
+            assert (self.frame_id is None) == (self.frame_compile_id is None)
+            frame_str = ""
+            if self.frame_id is not None:
+                frame_str = f"/{self.frame_id}/{self.frame_compile_id}"
+
+            return f"!{self.compiled_autograd_id}{frame_str}"
+        else:
+            assert self.frame_id is not None and self.frame_compile_id is not None
+            return f"{self.frame_id}/{self.frame_compile_id}"
+
+    @classmethod
+    def from_string(cls, compile_id: Optional[str]):
+        """
+        Factory method that creates a CompileId from its string representation.
+        Keep this in sync with the __str__ method.
+        """
+        if compile_id is None:
+            return None
+        try:
+            for pattern in (COMPILE_ID_PATTERN, CA_COMPILE_ID_PATTERN):
+                if match := pattern.match(compile_id):
+                    groups = match.groupdict()
+                    for k, v in groups.items():
+                        if v is not None:
+                            groups[k] = int(v)
+                    return cls(**groups)  # type: ignore[arg-type]
+            else:
+                raise ValueError
+
+        except Exception as e:
+            raise ValueError(f"Invalid compile_id '{compile_id}'") from e
 
 
 class TraceId(NamedTuple):
@@ -71,6 +126,7 @@ class TraceId(NamedTuple):
     attempt: int
 
     def __str__(self):
+        # Keep this in sync with tlparse repo
         if self.attempt == 0:
             return str(self.compile_id)
         else:
@@ -80,8 +136,8 @@ class TraceId(NamedTuple):
 class GuardSource(enum.Enum):
     LOCAL = 0
     GLOBAL = 1
-    LOCAL_NN_MODULE = 2
-    GLOBAL_NN_MODULE = 3
+    LOCAL_SPECIALIZED_NN_MODULE = 2
+    GLOBAL_SPECIALIZED_NN_MODULE = 3
     CONSTANT = 4
     RANDOM_VALUE = 5
     SHAPE_ENV = 6
@@ -90,25 +146,52 @@ class GuardSource(enum.Enum):
     BACKWARD_STATE = 9
     EPHEMERAL = 10
     SYNTHETIC_LOCAL = 11
+    LOCAL_UNSPECIALIZED_NN_MODULE = 12
+    GLOBAL_UNSPECIALIZED_NN_MODULE = 13
+    LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE = 14
+    GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE = 15
 
     def is_fsdp_module(self) -> bool:
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
 
-    def is_nn_module(self) -> bool:
-        return (
-            self
-            in (
-                GuardSource.GLOBAL_NN_MODULE,
-                GuardSource.LOCAL_NN_MODULE,
+    def is_specialized_nn_module(self) -> bool:
+        import torch._dynamo.config as config
+
+        if config._unsafe_skip_fsdp_module_guards:
+            return (
+                self
+                in (
+                    GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
+                    GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
+                )
+                or self.is_fsdp_module()
             )
-            or self.is_fsdp_module()
+        return self in (
+            GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
+            GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
+        )
+
+    def is_unspecialized_nn_module(self) -> bool:
+        return self in (
+            GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+            GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+        )
+
+    def is_unspecialized_builtin_nn_module(self) -> bool:
+        return self in (
+            GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
         )
 
     def is_local(self):
         return self in (
             GuardSource.LOCAL,
-            GuardSource.LOCAL_NN_MODULE,
+            GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
             GuardSource.LOCAL_FSDP_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
         )
 
 
@@ -130,11 +213,30 @@ class GuardBuilderBase:
     pass
 
 
+@dataclasses.dataclass(frozen=True)
+class SLoc:
+    framework_loc: Optional[Union[traceback.FrameSummary, str]]
+    maybe_user_loc: Optional[str]
+
+    def __str__(self):
+        floc = (
+            self.framework_loc
+            if isinstance(self.framework_loc, str)
+            else format_frame(self.framework_loc)
+        )
+        if self.maybe_user_loc is not None:
+            return f"{self.maybe_user_loc} ({floc})"
+        else:
+            return f"({floc})"
+
+
 class ShapeGuard(NamedTuple):
-    expr: sympy.Expr
-    stack: CapturedTraceback
+    expr: sympy.logic.boolalg.Boolean
+    sloc: SLoc
+    size_oblivious: bool
 
 
+@dataclass_slots
 @dataclasses.dataclass
 class Guard:
     # originating_source is the source that called the make_guard method to
@@ -158,8 +260,8 @@ class Guard:
     create_fn: Callable[[GuardBuilderBase, Guard], None]
 
     # Export only. These values are written to at time of guard check_fn creation.
-    guard_types: Optional[List[str]] = None
-    code_list: Optional[List[str]] = None
+    guard_types: Optional[list[str]] = None
+    code_list: Optional[list[str]] = None
     obj_weakref: Optional[object] = None
     guarded_class_weakref: Optional[type] = None
 
@@ -175,11 +277,10 @@ class Guard:
     def sort_key(self):
         # Put the duplicate input guards at the end. The duplicate guards have
         # two sources while guard.name only considers one source.
-        from torch._dynamo.guards import GuardBuilder
 
         is_duplicate_input = (
             isinstance(self.create_fn, functools.partial)
-            and self.create_fn.func is GuardBuilder.DUPLICATE_INPUT
+            and self.create_fn.func is torch._dynamo.guards.GuardBuilder.DUPLICATE_INPUT
         )
         return (
             is_duplicate_input,
@@ -263,8 +364,8 @@ class Guard:
                 log.error("Created at:\n%s", "".join(self.stack.format()[-4:]).rstrip())
             raise
 
-    def is_nn_module(self):
-        return self.source.is_nn_module()
+    def is_specialized_nn_module(self):
+        return self.source.is_specialized_nn_module()
 
     def is_fsdp_module(self):
         return self.source.is_fsdp_module()
@@ -274,7 +375,7 @@ class Guard:
 
     def set_export_info(self, guard_type, guarded_class, code_list, obj_weakref):
         if not self.guard_types:
-            self.guard_types = list()
+            self.guard_types = []
 
         self.guard_types.append(guard_type)
 
@@ -294,11 +395,7 @@ class Guard:
         # invocation of set_export_info calls. So a dead weakref is also
         # acceptable.
         assert (
-            self.obj_weakref
-            in (
-                obj_weakref,
-                None,
-            )
+            self.obj_weakref in (obj_weakref, None)
             or callable(self.obj_weakref)
             and self.obj_weakref() is None
         ), "Guarded object must be identical, None or ephemeral (dead weakref)"
@@ -315,7 +412,7 @@ torch._dynamo.guards._parse_guard_env_guards to avoid a RuntimeError.
 """
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class GuardEnvExpr:
     pass
 
@@ -326,13 +423,33 @@ input_pos_a and input_pos_b are input positions we have deduped.
 """
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class DuplicateInputs(GuardEnvExpr):
     input_source_a: Source
     input_source_b: Source
 
     def __post_init__(self):
         assert self.input_source_a != self.input_source_b
+
+
+"""
+A class representing storage overlap relations among inputs that aliases the same storage.
+
+Given that a set of tensors alias the same storage, this guard checks whether they actually
+have overlapping storages.
+
+While non_overlapping_sources represent input tensors that definitely don't have any storage
+overlapping with any other input, overlapping_sources represent tensors that either:
+
+1. Do overlap some other input tensor
+2. Might not overlap some other input tensor, but we are not sure
+"""
+
+
+@dataclasses.dataclass(frozen=True)
+class StorageOverlap(GuardEnvExpr):
+    overlapping_sources: list[Source]
+    non_overlapping_sources: list[Source]
 
 
 """
@@ -350,12 +467,10 @@ In the future, it will have a closer coupling to a generic Checkpoint management
 
 class Checkpointable(Generic[T]):
     @abstractmethod
-    def copy_graphstate(self) -> T:
-        ...
+    def copy_graphstate(self) -> T: ...
 
     @abstractmethod
-    def restore_graphstate(self, state: T):
-        ...
+    def restore_graphstate(self, state: T): ...
 
 
 class GuardsCheckpointState:
@@ -363,7 +478,7 @@ class GuardsCheckpointState:
     The GuardCheckpointState - it is the T of Checkpointable[T] for GuardsContext
     """
 
-    dynamo_guards: Set[Guard] = set()
+    dynamo_guards: set[Guard] = set()
 
     def __init__(self, dynamo_guards):
         self.dynamo_guards = dynamo_guards
@@ -385,7 +500,7 @@ class GuardsCheckpointState:
 
 
 class ModuleContextCheckpointState:
-    nn_modules: Dict[str, torch.nn.Module] = {}
+    nn_modules: dict[str, torch.nn.Module] = {}
 
     def __init__(self, nn_modules):
         self.nn_modules = nn_modules
@@ -407,8 +522,8 @@ class ModuleContextCheckpointState:
 
 
 class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
-    def __init__(self):
-        self.nn_modules: Dict[str, Any] = {}
+    def __init__(self) -> None:
+        self.nn_modules: dict[str, Any] = {}
 
     def copy_graphstate(self):
         return ModuleContextCheckpointState(dict(self.nn_modules))
@@ -419,7 +534,7 @@ class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
 
 
 class GlobalContextCheckpointState:
-    global_state: Dict[str, Tuple[Callable, ...]] = {}
+    global_state: dict[str, tuple[Callable, ...]] = {}
 
     def __init__(self, global_states):
         self.global_state = global_states
@@ -448,7 +563,6 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
 
     _supported_global_states = {
         "grad_enabled",
-        "torch_function_enabled",
         "autocast_enabled",
         "autocast_cpu_enabled",
         "autocast_gpu_dtype",
@@ -456,8 +570,8 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
         "autocast_cache_enabled",
     }
 
-    def __init__(self):
-        self.global_state: Dict[str, Tuple[Callable, ...]] = {}
+    def __init__(self) -> None:
+        self.global_state: dict[str, tuple[Callable, ...]] = {}
 
     def copy_graphstate(self):
         return GlobalContextCheckpointState(dict(self.global_state))
@@ -471,14 +585,6 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
         ), "Global state mismatch"
         for func, args in self.global_state.values():
             func(args)
-
-
-"""
-A GuardsContext is a checkpointable representation of all the guards in the current tracing
-context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
-directly outside of it. For passing around internal state representations of this object,
-prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
-"""
 
 
 # Like a Set[Guard] but will record the user stack on all guards at the
@@ -513,20 +619,32 @@ class GuardsSet:
                 guard.user_stack = TracingContext.extract_stack()
         self.inner.add(guard)
 
-    def update(self, *others: Set[Guard]):
+    def update(self, *others: set[Guard]):
         for o in others:
             for g in o:
                 self.add(g, skip=1)
 
     def remove_guards_with_source(self, source):
-        """Delete all guards with a given source"""
-        self.inner = {g for g in self.inner if g.originating_source != source}
+        """Delete all guards that contains a given source"""
+        from ._dynamo.source import is_from_source
+
+        self.inner = {
+            g for g in self.inner if not is_from_source(g.originating_source, source)
+        }
+
+
+"""
+A GuardsContext is a checkpointable representation of all the guards in the current tracing
+context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
+directly outside of it. For passing around internal state representations of this object,
+prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
+"""
 
 
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
-    def __init__(self):
+    def __init__(self) -> None:
         self.dynamo_guards: GuardsSet = GuardsSet()
-        self.aotautograd_guards: List[GuardEnvExpr] = []
+        self.aotautograd_guards: list[GuardEnvExpr] = []
 
     def copy_graphstate(self):
         return GuardsCheckpointState(set(self.dynamo_guards.inner))
@@ -535,6 +653,99 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
         # NB: "steals" the passed in state
         assert isinstance(state, GuardsCheckpointState)
         self.dynamo_guards = GuardsSet(state.dynamo_guards)
+
+
+class HopSubgraphCache:
+    @abstractmethod
+    def add_dynamo_installed_submodule(self, fn_id: int, identifier: str): ...
+
+    @abstractmethod
+    def get_dynamo_installed_submodules(self, fn_id: int) -> list[str]: ...
+
+    @abstractmethod
+    def add_autograd_key_entry(self, identifier: str, key: Callable): ...
+
+    @abstractmethod
+    def get_autograd_key_entry(self, identifier: str): ...
+
+    @abstractmethod
+    def add_proxy_dispatch_entry(self, identifier: str, key: Callable): ...
+
+    @abstractmethod
+    def get_proxy_dispatch_entry(self, identifier: str): ...
+
+    @abstractmethod
+    def add_lazy_bwd_entry(
+        self,
+        identifier: str,
+        tangent_metadata: tuple[object],
+        gmod: torch.fx.GraphModule,
+    ): ...
+
+    @abstractmethod
+    def get_lazy_bwd_entry(
+        self, identifier: str, tangent_metadata: tuple[object]
+    ) -> int: ...
+
+
+class InvokeSubgraphCache(HopSubgraphCache):
+    def __init__(self) -> None:
+        self.autograd_cache: dict[str, Callable] = {}
+        self.proxy_dispatch_cache: dict[str, Callable] = {}
+        self.dynamo_installed_submodules: dict[int, list[str]] = defaultdict(list)
+        self.lazy_bwd_cache: dict[
+            str, dict[tuple[object], tuple[torch.fx.GraphModule, int]]
+        ] = defaultdict(dict)
+
+    def add_dynamo_installed_submodule(self, fn_id: int, identifier: str):
+        self.dynamo_installed_submodules[fn_id].append(identifier)
+
+    def get_dynamo_installed_submodules(self, fn_id: int) -> list[str]:
+        return self.dynamo_installed_submodules.get(fn_id, [])
+
+    def add_autograd_key_entry(self, identifier: str, key: Callable):
+        self.autograd_cache[identifier] = key
+
+    def get_autograd_key_entry(self, identifier: str):
+        return self.autograd_cache.get(identifier, None)
+
+    def add_proxy_dispatch_entry(self, identifier: str, key: Callable):
+        self.proxy_dispatch_cache[identifier] = key
+
+    def get_proxy_dispatch_entry(self, identifier: str):
+        return self.proxy_dispatch_cache.get(identifier, None)
+
+    def add_lazy_bwd_entry(
+        self,
+        identifier: str,
+        tangent_metadata: tuple[object],
+        gmod: torch.fx.GraphModule,
+    ):
+        # Save the number of existing graph modules in the dictionary to get the suffix
+        num_gmods = len(self.lazy_bwd_cache[identifier])
+        self.lazy_bwd_cache[identifier][tangent_metadata] = (gmod, num_gmods)
+        return num_gmods
+
+    def get_lazy_bwd_entry(self, identifier: str, tangent_metadata: tuple[object]):
+        if identifier not in self.lazy_bwd_cache:
+            return (None, None)
+
+        return self.lazy_bwd_cache[identifier].get(tangent_metadata, (None, None))
+
+
+class HopDispatchSetCache:
+    def __init__(self) -> None:
+        # Delayed import to avoid circular dependency
+        from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
+
+        self.hop_cache_map = {invoke_subgraph: InvokeSubgraphCache()}
+
+    def get_cache(
+        self, op: torch._ops.HigherOrderOperator
+    ) -> Optional[HopSubgraphCache]:
+        if op not in self.hop_cache_map:
+            return None
+        return self.hop_cache_map[op]  # type: ignore[index]
 
 
 _TLS = threading.local()
@@ -572,6 +783,8 @@ class CompileContext:
         assert compile_id is None or isinstance(compile_id, CompileId)
         self.compile_id: Optional[CompileId] = compile_id
         self.attempt = 0
+        # Verbose ShapeEnv guards produced.
+        self.shape_env_guards: list[str] = []
 
     @staticmethod
     def current_compile_id():
@@ -614,6 +827,8 @@ class TracingContext:
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
+        self.previously_inlined_functions = dict()
+        self.previously_cleaned_instructions = dict()
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
         # This is morally part of frame_summary_stack, but it is kept separate
@@ -628,6 +843,8 @@ class TracingContext:
         # this is only set after aot_autograd
         self.aot_graph_name = None
         self.params_flat = None
+        self.params_flat_unwrap_subclasses = None
+        self.params_unwrapped_to_flat_index = None
         # this is for extended return calling convention from backend
         # compiler to aot_autograd
         # Per output, what the compiler specified stride of the output is,
@@ -637,7 +854,7 @@ class TracingContext:
         # careful not to accidentally induce guards on the SymInt if
         # you ever do change this in aot_autograd.py; you should check
         # on permutations preferentially.)
-        self.output_strides: Optional[List[Optional[Tuple[int, ...]]]] = None
+        self.output_strides: Optional[list[Optional[tuple[int, ...]]]] = None
         # When this is True, whenever we encounter an int in Dynamo tracing,
         # we will (1) force unspec it and (2) force it as a size-like unbacked
         # integer.  This is currently used when processing certain lists of
@@ -651,11 +868,16 @@ class TracingContext:
         # meta on the first invocation
         # see note: [Returning Fake Tensors on First AOT Autograd Call]
         self.fakify_first_call = False
+        self.hop_dispatch_set_cache = HopDispatchSetCache()
+        # list of code objects for inlined functions
+        self.traced_code: list[CodeType] = []
 
     def clear(self):
         # Look at the note in output_graph.py in function `save_global_state`
         # for the context on clearing global context.
         self.global_context.global_state = {}
+        self.previously_inlined_functions.clear()
+        self.previously_cleaned_instructions.clear()
 
     @staticmethod
     @contextmanager
@@ -681,8 +903,13 @@ class TracingContext:
             return traceback.StackSummary()
         stack = self.frame_summary_stack
         if self.loc_in_frame is not None:
-            stack = stack + [self.loc_in_frame]
+            stack = stack + [self._populate_loc_in_frame_summary()]
         return traceback.StackSummary.from_list(stack)
+
+    def _populate_loc_in_frame_summary(self):
+        assert self.loc_in_frame is not None
+        filename, lineno, frame_name = self.loc_in_frame
+        return traceback.FrameSummary(filename, lineno, frame_name, lookup_line=False)
 
     # Call this when you want to call into some code that isn't necessarily
     # associated with the current frame state
@@ -690,9 +917,10 @@ class TracingContext:
     @contextlib.contextmanager
     def clear_frame():
         tc = TracingContext.get()
-        with unittest.mock.patch.object(
-            tc, "frame_summary_stack", []
-        ), unittest.mock.patch.object(tc, "loc_in_frame", None):
+        with (
+            unittest.mock.patch.object(tc, "frame_summary_stack", []),
+            unittest.mock.patch.object(tc, "loc_in_frame", None),
+        ):
             try:
                 yield
             except Exception as e:
@@ -754,9 +982,9 @@ class TracingContext:
 
     @staticmethod
     def set_current_loc(filename, lineno, frame_name):
-        TracingContext.get().loc_in_frame = traceback.FrameSummary(
-            filename, lineno, frame_name, lookup_line=False
-        )
+        # Save the current location in the frame. Lazily generate the
+        # framesummary.
+        TracingContext.get().loc_in_frame = (filename, lineno, frame_name)
 
 
 @contextmanager
@@ -820,8 +1048,8 @@ class Source:
             raise NotImplementedError
         return Guard(self, fn)
 
-    def is_nn_module(self) -> bool:
-        return self.guard_source().is_nn_module()
+    def is_specialized_nn_module(self) -> bool:
+        return self.guard_source().is_specialized_nn_module()
 
     def subguards_allowed(self):
         """True if you can guard on attributes of this"""
@@ -839,6 +1067,12 @@ class ChainedSource(Source):
 
     def is_ephemeral(self):
         return self.base.is_ephemeral()
+
+    def get_base(self) -> Source:
+        current: Source = self
+        while isinstance(current, ChainedSource):
+            current = current.base
+        return current
 
 
 def detect_fake_mode(inputs: Any = None):

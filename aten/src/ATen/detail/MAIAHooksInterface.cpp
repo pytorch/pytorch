@@ -1,25 +1,19 @@
 #include <ATen/detail/MAIAHooksInterface.h>
 
-#include <c10/util/CallOnce.h>
-#include <c10/util/Registry.h>
-
-#include <cstddef>
-#include <memory>
-
 namespace at {
 namespace detail {
 
 // See getCUDAHooks for some more commentary
 const MAIAHooksInterface& getMAIAHooks() {
-  static std::unique_ptr<MAIAHooksInterface> maia_hooks;
-  static c10::once_flag once;
-  c10::call_once(once, [] {
-    maia_hooks = MAIAHooksRegistry()->Create("MAIAHooks", {});
-    if (!maia_hooks) {
-      maia_hooks = std::make_unique<MAIAHooksInterface>();
+  auto create_impl = [] {
+    auto hooks = MAIAHooksRegistry()->Create("MAIAHooks", {});
+    if (hooks) {
+      return hooks;
     }
-  });
-  return *maia_hooks;
+    return std::make_unique<MAIAHooksInterface>();
+  };
+  static auto hooks = create_impl();
+  return *hooks;
 }
 } // namespace detail
 

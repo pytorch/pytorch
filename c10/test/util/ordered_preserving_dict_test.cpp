@@ -35,14 +35,12 @@ dict_int_int test_dict(dict_int_int& dict) {
 
   // erase via iterators
   auto begin = dict.begin();
-  for (const auto i : c10::irange(20)) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(20)) {
     begin++;
   }
 
   auto end = begin;
-  for (const auto i : c10::irange(20)) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(20)) {
     erase_set.insert(end->first);
     end++;
   }
@@ -136,13 +134,11 @@ TEST(OrderedPreservingDictTest, DictCollisions) {
 
     // erase a few entries via iterator
     auto begin = dict.begin();
-    for (const auto j : c10::irange(10)) {
-      (void)j; // Suppress unused variable warning
+    for ([[maybe_unused]] const auto j : c10::irange(10)) {
       begin++;
     }
     auto end = begin;
-    for (const auto j : c10::irange(7)) {
-      (void)j; // Suppress unused variable warning
+    for ([[maybe_unused]] const auto j : c10::irange(7)) {
       erase_set.insert(end->first);
       end++;
     }
@@ -187,8 +183,15 @@ TEST(OrderedPreservingDictTest, test_range_insert) {
 
   ASSERT_EQUAL_PRIM(map.at(-2), 0);
 
-  for (int i = 10, j = 2; i < nb_values - 5; i++, j++) {
+  auto begin = map.begin();
+  begin++;
+  begin++;
+  for (int i = 10; i < nb_values - 5; i++, begin++) {
+    // Check range inserted kv pairs: map(i) = i + 1 for i = 10,....995
     ASSERT_EQUAL_PRIM(map.at(i), i + 1);
+    // Check range inserted kv pairs are correctly indexed/ordered
+    TORCH_INTERNAL_ASSERT(begin->first == i);
+    TORCH_INTERNAL_ASSERT(begin->second == i + 1);
   }
 }
 

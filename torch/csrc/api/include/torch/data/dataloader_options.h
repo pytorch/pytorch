@@ -6,8 +6,7 @@
 #include <chrono>
 #include <cstddef>
 
-namespace torch {
-namespace data {
+namespace torch::data {
 
 /// Options to configure a `DataLoader`.
 struct DataLoaderOptions {
@@ -24,10 +23,10 @@ struct DataLoaderOptions {
 
   /// The maximum number of jobs to enqueue for fetching by worker threads.
   /// Defaults to two times the number of worker threads.
-  TORCH_ARG(optional<size_t>, max_jobs);
+  TORCH_ARG(std::optional<size_t>, max_jobs);
 
   /// An optional limit on the time to wait for the next batch.
-  TORCH_ARG(optional<std::chrono::milliseconds>, timeout);
+  TORCH_ARG(std::optional<std::chrono::milliseconds>, timeout);
 
   /// Whether to enforce ordering of batches when multiple are loaded
   /// asynchronously by worker threads. Set to `false` for better performance if
@@ -57,9 +56,8 @@ struct FullDataLoaderOptions {
   size_t batch_size;
   size_t workers;
   size_t max_jobs;
-  optional<std::chrono::milliseconds> timeout;
+  std::optional<std::chrono::milliseconds> timeout;
   bool enforce_ordering;
   bool drop_last;
 };
-} // namespace data
-} // namespace torch
+} // namespace torch::data

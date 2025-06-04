@@ -130,6 +130,10 @@ struct PythonPrintImpl {
         stack->push_back(n->sourceRange());
       }
     }
+    WithSourceRange(const WithSourceRange&) = delete;
+    WithSourceRange(WithSourceRange&&) = delete;
+    WithSourceRange& operator=(const WithSourceRange&) = delete;
+    WithSourceRange& operator=(WithSourceRange&&) = delete;
 
     ~WithSourceRange() {
       stack->pop_back();
@@ -361,8 +365,9 @@ struct PythonPrintImpl {
       std::unordered_set<std::string>& used) {
     std::string name = candidate;
     while (used.count(name) || reserved_names.count(name)) {
-      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-      name = candidate + std::to_string(next_id[name]++);
+      auto suffix = (next_id[name]++);
+      name.resize(candidate.size());
+      name.append(std::to_string(suffix));
     }
     used.insert(name);
     return name;
@@ -436,8 +441,7 @@ struct PythonPrintImpl {
   size_t level = 0;
   // indent to the current indent level
   TaggedStringStream& indent() {
-    for (const auto i : c10::irange(level)) {
-      (void)i; // Suppress unused variable warning
+    for ([[maybe_unused]] const auto i : c10::irange(level)) {
       body_ << "  ";
     }
     return body_;
@@ -455,7 +459,7 @@ struct PythonPrintImpl {
     auto it_b = list_b.begin();
 
     if (list_a.size() != list_b.size()) {
-      AT_ERROR("Python printer expected 2 lists of same size");
+      TORCH_CHECK(false, "Python printer expected 2 lists of same size");
     }
 
     for (; it_a != list_a.end(); ++it_a, ++it_b) {
@@ -1299,8 +1303,7 @@ struct PythonPrintImpl {
   IValue createBroadList(dtype value, const int64_t& N) {
     c10::List<dtype> repeated;
     repeated.reserve(N);
-    for (const auto i : c10::irange(N)) {
-      (void)i; // Suppress unused variable warning
+    for ([[maybe_unused]] const auto i : c10::irange(N)) {
       repeated.push_back(value);
     }
     return repeated;
@@ -1587,7 +1590,7 @@ struct PythonPrintImpl {
     } else if (auto enumType = type->cast<EnumType>()) {
       body_ << "class " << enumType->qualifiedClassName().name() << "(Enum):\n";
 
-      std::string value_wrapper = "";
+      std::string value_wrapper;
       if (enumType->getValueType() == StringType::get()) {
         value_wrapper = "\"";
       }
@@ -1731,7 +1734,7 @@ static std::optional<std::string> printType(
   if (namedType && namedType->name()) {
     return type_name_uniquer.getUniqueName(namedType).qualifiedName();
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 void jitModuleToPythonCodeAndConstants(

@@ -26,7 +26,7 @@ fi
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
 set +ex
-grep -E -R 'PyLong_(From|As)(Unsigned|)Long\(' --exclude=python_numbers.h --exclude=eval_frame.c torch/
+grep -E -R 'PyLong_(From|As)(Unsigned|)Long\(' --exclude=python_numbers.h  --exclude=pythoncapi_compat.h --exclude=eval_frame.c torch/
 PYLONG_API_CHECK=$?
 if [[ $PYLONG_API_CHECK == 0 ]]; then
   echo "Usage of PyLong_{From,As}{Unsigned}Long API may lead to overflow errors on Windows"
@@ -38,7 +38,7 @@ if [[ $PYLONG_API_CHECK == 0 ]]; then
   echo "PyLong_AsUnsignedLong -> THPUtils_unpackUInt32 / THPUtils_unpackUInt64"
   exit 1
 fi
-set -ex
+set -ex -o pipefail
 
 "$SCRIPT_HELPERS_DIR"/build_pytorch.bat
 

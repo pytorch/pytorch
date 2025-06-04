@@ -7,10 +7,12 @@ from typing import List
 import torch
 from torch.testing import FileCheck
 
+
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import freeze_rng_state, JitTestCase
+
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -194,7 +196,7 @@ class TestRemoveMutation(JitTestCase):
 
         def intermediary_use():
             a = [1, 2]
-            b = len(a)
+            b = len(a)  # noqa: F841
             a.append(3)
             return a
 

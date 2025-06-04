@@ -5,7 +5,7 @@
 
 using namespace c10::guts;
 
-// NOLINTBEGIN(modernize*)
+// NOLINTBEGIN(modernize*, cppcoreguidelines-special-member-functions)
 namespace {
 
 namespace test_function_traits {
@@ -68,8 +68,7 @@ static_assert(
 } // namespace test_function_traits
 
 struct MovableOnly {
-  constexpr MovableOnly(int val_) : val(val_) { /* no default constructor */
-  }
+  constexpr MovableOnly(int val_) : val(val_) { /* no default constructor */ }
   MovableOnly(const MovableOnly&) = delete;
   MovableOnly(MovableOnly&&) = default;
   MovableOnly& operator=(const MovableOnly&) = delete;
@@ -88,10 +87,10 @@ using is_my_movable_only_class =
     std::is_same<MovableOnly, std::remove_cv_t<std::remove_reference_t<T>>>;
 
 struct CopyCounting {
-  int move_count;
-  int copy_count;
+  int move_count{0};
+  int copy_count{0};
 
-  CopyCounting() : move_count(0), copy_count(0) {}
+  CopyCounting() {}
   CopyCounting(const CopyCounting& rhs)
       : move_count(rhs.move_count), copy_count(rhs.copy_count + 1) {}
   CopyCounting(CopyCounting&& rhs) noexcept
@@ -230,6 +229,7 @@ TEST(MetaprogrammingTest, TupleMap_mapsToDifferentTypes) {
 
 TEST(MetaprogrammingTest, TupleMap_differentiatesLRValueReferences) {
   struct Mapper {
+    // NOLINTNEXTLINE(*move*)
     std::string operator()(std::string&& a) const {
       return "moved";
     }
@@ -301,4 +301,4 @@ TEST(MetaprogrammingTest, TupleMap_canBeUsedWithAutoLambdas) {
 } // namespace test_tuple_map
 
 } // namespace
-// NOLINTEND(modernize*)
+// NOLINTEND(modernize*, cppcoreguidelines-special-member-functions)

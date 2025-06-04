@@ -2,33 +2,33 @@
 
 #include <ATen/core/ATen_fwd.h>
 #include <ATen/core/interned_strings.h>
+#include <ATen/native/ConvUtils.h>
+#include <ATen/native/mkldnn/xpu/FusionUtils.h>
+#include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
+#include <ATen/native/utils/ParamUtils.h>
 #include <ATen/ops/full.h>
 #include <ATen/ops/neg.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
-#include <ATen/native/utils/ParamUtils.h>
-#include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <torch/library.h>
-#include <ATen/native/ConvUtils.h>
+#include <optional>
 
 using namespace dnnl;
 using namespace at::native;
 using namespace at::native::onednn;
 
-namespace at::native {
-namespace xpu {
+namespace at::native::xpu {
 namespace impl {
 
 struct ConvParams {
   std::vector<int64_t> stride;
   std::vector<int64_t> padding;
   std::vector<int64_t> dilation;
-  bool transposed;
+  bool transposed{};
   std::vector<int64_t> output_padding;
-  int groups;
-  bool benchmark;
-  bool deterministic;
+  int64_t groups{};
+  bool benchmark{};
+  bool deterministic{};
 
   bool is_strided() const;
   bool is_dilated() const;
@@ -58,7 +58,7 @@ std::ostream& operator<<(std::ostream& out, const ConvParams& params) {
 
 bool ConvParams::is_strided() const {
   bool is_strided = false;
-  for (int s : stride) {
+  for (auto s : stride) {
     is_strided |= (s != 1);
   }
   return is_strided;
@@ -66,7 +66,7 @@ bool ConvParams::is_strided() const {
 
 bool ConvParams::is_dilated() const {
   bool is_dilated = false;
-  for (int d : dilation) {
+  for (auto d : dilation) {
     is_dilated |= (d != 1);
   }
   return is_dilated;
@@ -74,7 +74,7 @@ bool ConvParams::is_dilated() const {
 
 bool ConvParams::is_padded() const {
   bool is_padded = false;
-  for (int p : padding) {
+  for (auto p : padding) {
     is_padded |= (p != 0);
   }
   return is_padded;
@@ -82,7 +82,7 @@ bool ConvParams::is_padded() const {
 
 bool ConvParams::is_output_padding_neg() const {
   bool is_non_neg = false;
-  for (int p : output_padding) {
+  for (auto p : output_padding) {
     is_non_neg |= (p < 0);
   }
   return is_non_neg;
@@ -99,7 +99,7 @@ bool ConvParams::is_output_padding_big() const {
 
 bool ConvParams::is_padding_neg() const {
   bool is_non_neg = false;
-  for (int p : padding) {
+  for (auto p : padding) {
     is_non_neg |= (p < 0);
   }
   return is_non_neg;
@@ -107,7 +107,7 @@ bool ConvParams::is_padding_neg() const {
 
 bool ConvParams::is_stride_nonpos() const {
   bool is_nonpos = false;
-  for (int s : stride) {
+  for (auto s : stride) {
     is_nonpos |= (s <= 0);
   }
   return is_nonpos;
@@ -246,7 +246,7 @@ static void check_shape_forward(
       std::ostringstream output_ss;
       std::string separator = "";
 
-      for (int i = 0, len = input_shape.size(); i < len; ++i) {
+      for (size_t i = 0, len = input_shape.size(); i < len; ++i) {
         input_ss << separator << input_shape[i];
         kernel_ss << separator << kernel_shape[i];
         separator = " x ";
@@ -310,77 +310,6 @@ static at::Tensor view3d(const at::Tensor& tensor) {
   return tensor.squeeze(2);
 }
 
-Attr get_onednn_conv_sum_attr(
-    const Tensor& input_r,
-    const Tensor& weight_r,
-    IntArrayRef stride_,
-    IntArrayRef padding_,
-    IntArrayRef dilation_,
-    Tensor& accumu,
-    double scale,
-    Tensor& output,
-    bool& is_fused,
-    Attr attr = Attr(),
-    bool force_inplace = false) {
-  is_fused = true;
-  if (scale == 0.f)
-    return attr;
-
-  auto ndim = input_r.ndimension();
-  auto output_size = conv_dst_size(
-      ndim,
-      input_r.sizes(),
-      weight_r.sizes(),
-      padding_,
-      padding_,
-      stride_,
-      dilation_);
-  MemoryFormat mem_fmt = at::MemoryFormat::Contiguous;
-  auto input_fmt = input_r.suggest_memory_format();
-  auto input_is_cl = (input_fmt == at::MemoryFormat::ChannelsLast || input_fmt == at::MemoryFormat::ChannelsLast3d);
-  auto weight_fmt = weight_r.suggest_memory_format();
-  auto weight_is_cl = (weight_fmt == at::MemoryFormat::ChannelsLast || weight_fmt == at::MemoryFormat::ChannelsLast3d);
-
-  bool propagate_channels_last = input_is_cl || weight_is_cl;
-  if (propagate_channels_last)
-    mem_fmt = get_cl_tag_by_ndim(ndim);
-
-  Tensor out = at::empty(output_size, input_r.options().memory_format(mem_fmt));
-  if (!onednn::binary_valid(out, accumu)) {
-    is_fused = false;
-    return attr;
-  }
-
-  // For post-sum and post-binary-add, onednn needs sum/binary scale=1.f
-  // Thus we need the following transformation
-  // conv(src, wei) + scale * accumu
-  // scale * (1/scale * conv(src, wei) + sum (or binary))
-  if (scale != 1.f)
-    attr.append_post_eltwise(
-        /* scale */ 1.f,
-        /* alpha */ 1.f / scale,
-        /* beta */ 0.f,
-        attr.kind_with_linear);
-
-  if (force_inplace) {
-    // If sizes are the same, post sum is used.
-    output = accumu;
-    attr.append_post_sum(/* sum_scale */ 1.f);
-  } else {
-    // If sizes are different, post binary is used.
-    attr.append_post_binary(attr.kind_with_binary_add, accumu);
-  }
-
-  if (scale != 1.f)
-    attr.append_post_eltwise(
-        /* scale */ 1.f,
-        /* alpha */ scale,
-        /* beta */ 0.f,
-        attr.kind_with_linear);
-
-  return attr;
-}
-
 } // namespace impl
 
 using namespace impl;
@@ -398,12 +327,18 @@ Tensor _convolution_out(
     int64_t groups_,
     Attr attr,
     IntArrayRef pad_nd = IntArrayRef({})) {
+  CheckedFrom c = "xpu_convolution";
+  TensorArg input_t{input_r, "input", 1}, weight_t{weight_r, "weight", 2};
+  checkAllSameType(c, {input_t, weight_t});
+  checkAllSameGPU(c, {input_t, weight_t});
+  c10::DeviceGuard device_guard(input_r.device());
   auto ndim = input_r.ndimension();
   TORCH_CHECK(
       3 == ndim || 4 == ndim || 5 == ndim,
       "convolution only supports 3D, 4D, 5D tensor");
   // get computation format for Conv/TransposedConv
-  bool is_channels_last_suggested = use_channels_last_for_conv(input_r, weight_r, transposed_);
+  bool is_channels_last_suggested =
+      use_channels_last_for_conv(input_r, weight_r);
 
   Tensor input = input_r, weight = weight_r;
   // PyTorch does not support ChannelsLast1D case,
@@ -467,6 +402,8 @@ Tensor _convolution_out(
           params.output_padding,
           params.groups);
       output = at::empty(dst_tz, input.options(), mfmt);
+    } else {
+      output = output_r;
     }
 
     onednn::deconvolution(
@@ -491,15 +428,15 @@ Tensor _convolution_out(
     // (padding_left, padding_right,
     //  padding_top, padding_bottom,
     //  padding_front, padding_back)
-    if (pad_nd.vec().size() > 0) {
-      for (int i = 0; i < dim; ++i) {
+    if (!pad_nd.vec().empty()) {
+      for (int64_t i = 0; i < dim; ++i) {
         padding_front_top_left[i] += pad_nd[2 * dim - 2 * i - 2]; // 4, 2, 0
         padding_back_bottom_right[i] += pad_nd[2 * dim - 2 * i - 1]; // 5, 3, 1
       }
     }
 
     // create output and propagate memory format
-    if (! output_r.defined()) {
+    if (!output_r.defined()) {
       auto dst_tz = conv_dst_size(
           input.ndimension(),
           input.sizes(),
@@ -509,6 +446,8 @@ Tensor _convolution_out(
           params.stride,
           params.dilation);
       output = at::empty(dst_tz, input.options(), mfmt);
+    } else {
+      output = output_r;
     }
     onednn::convolution(
         output,
@@ -577,7 +516,8 @@ Tensor convolution_overrideable(
   auto k = weight_r.ndimension();
   at::MemoryFormat backend_memory_format = at::MemoryFormat::Contiguous;
   if (xpu_conv_use_channels_last(input_r, weight_r)) {
-      backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
+    backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d
+                                     : at::MemoryFormat::ChannelsLast;
   }
   Tensor input_c = input_r.contiguous(backend_memory_format);
   Tensor weight_c = weight_r.contiguous(backend_memory_format);
@@ -606,6 +546,8 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
     IntArrayRef output_padding,
     int64_t groups,
     std::array<bool, 3> output_mask) {
+  CheckedFrom c = "xpu_convolution_backward";
+  c10::DeviceGuard device_guard(grad_output.device());
   auto ndim = input.ndimension();
   TORCH_CHECK(
       3 == ndim || 4 == ndim || 5 == ndim,
@@ -618,12 +560,12 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
       "so far only support float, bfloat16, half and double convolution backward in XPU backend, your data type is ",
       grad_output.scalar_type());
 
-  bool is_channels_last_suggested = use_channels_last_for_conv(input, weight, transposed);
+  bool is_channels_last_suggested = use_channels_last_for_conv(input, weight);
 
   Tensor grad_output_, input_, weight_;
   IntArrayRef stride_, padding_, dilation_, output_padding_;
-  bool transposed_;
-  int64_t groups_;
+  bool transposed_ = false;
+  int64_t groups_ = 0;
   ConvParams params;
   if (3 == ndim) {
     grad_output_ = view4d(grad_output);
@@ -655,9 +597,10 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
   }
 
   // ensure the tensors are contiguous
-  auto mfmt = is_channels_last_suggested ? get_cl_tag_by_ndim(input_.ndimension())
+  auto mfmt = is_channels_last_suggested
+      ? get_cl_tag_by_ndim(input_.ndimension())
       : at::MemoryFormat::Contiguous;
-  grad_output_ =  grad_output_.contiguous(mfmt);
+  grad_output_ = grad_output_.contiguous(mfmt);
   weight_ = weight_.contiguous(mfmt);
   input_ = input_.contiguous(mfmt);
 
@@ -669,6 +612,10 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
     grad_bias = at::empty({grad_output_.size(1)}, opt);
 
   if (output_mask[0]) {
+    TensorArg grad_output_t{grad_output, "grad_output", 1},
+        input_t{input, "input", 2};
+    checkAllSameType(c, {grad_output_t, input_t});
+    checkAllSameGPU(c, {grad_output_t, input_t});
     if (input.numel() > 0) {
       if (transposed_) {
         onednn::deconvolution_backward_data(
@@ -695,6 +642,10 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
     }
   }
   if (output_mask[1] || output_mask[2]) {
+    TensorArg grad_output_t{grad_output, "grad_output", 1},
+        weight_t{weight, "weight", 2};
+    checkAllSameType(c, {grad_output_t, weight_t});
+    checkAllSameGPU(c, {grad_output_t, weight_t});
     if (input.numel() > 0) {
       if (transposed_) {
         onednn::deconvolution_backward_weights(
@@ -730,10 +681,136 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }
 
-TORCH_LIBRARY_IMPL(aten, XPU, m){
-  m.impl("convolution_overrideable", TORCH_FN(convolution_overrideable));
-  m.impl("convolution_backward_overrideable", TORCH_FN(convolution_backward_overrideable));
+Tensor convolution_pointwise(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const std::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    std::string_view attr,
+    torch::List<std::optional<at::Scalar>> scalars,
+    std::optional<std::string_view> algorithm) {
+  c10::DeviceGuard device_guard(input_t.device());
+  Attr att;
+  att = construct_unary_attr(att, attr, scalars, algorithm);
+  const Tensor bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
+
+  return _convolution(
+      input_t,
+      weight_t,
+      bias,
+      stride,
+      padding,
+      dilation,
+      /*transposed*/ false,
+      /*output_padding*/ {0},
+      groups,
+      att);
 }
 
-} // namespace xpu
-} // namespace at::native
+Tensor convolution_pointwise_binary(
+    const Tensor& input_t,
+    const Tensor& other_t,
+    const Tensor& weight_t,
+    const std::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    std::string_view binary_attr,
+    std::optional<at::Scalar> alpha,
+    std::optional<std::string_view> unary_attr,
+    torch::List<std::optional<at::Scalar>> unary_scalars,
+    std::optional<std::string_view> unary_algorithm) {
+  c10::DeviceGuard device_guard(input_t.device());
+  Tensor output;
+  Tensor bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
+  // Step1: Construct binary attr
+  Attr attr;
+  attr = construct_binary_attr(attr, binary_attr, other_t);
+  // Step2: Append unary attr
+  if (unary_attr.has_value())
+    attr = construct_unary_attr(
+        attr, unary_attr.value(), unary_scalars, unary_algorithm);
+
+  Tensor res = _convolution_out(
+      output,
+      input_t,
+      weight_t,
+      bias,
+      stride,
+      padding,
+      dilation,
+      /*transposed*/ false,
+      /*output_padding*/ {0},
+      groups,
+      attr);
+
+  // Step3: Run conv
+  return res;
+}
+
+Tensor& convolution_pointwise_binary_(
+    Tensor& other_t,
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const std::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    std::string_view binary_attr,
+    std::optional<at::Scalar> alpha,
+    std::optional<std::string_view> unary_attr,
+    torch::List<std::optional<at::Scalar>> unary_scalars,
+    std::optional<std::string_view> unary_algorithm) {
+  c10::DeviceGuard device_guard(input_t.device());
+  Tensor bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
+  // Step1: Construct binary attr
+  Attr attr;
+  attr = construct_binary_attr(attr, binary_attr, other_t);
+
+  // Step2: Append unary attr
+  if (unary_attr.has_value())
+    attr = construct_unary_attr(
+        attr, unary_attr.value(), unary_scalars, unary_algorithm);
+
+  _convolution_out(
+      other_t,
+      input_t,
+      weight_t,
+      bias,
+      stride,
+      padding,
+      dilation,
+      /*transposed*/ false,
+      /*output_padding*/ {0},
+      groups,
+      attr);
+
+  // Step3: Run conv
+  return other_t;
+}
+
+TORCH_LIBRARY_IMPL(aten, XPU, m) {
+  m.impl("convolution_overrideable", TORCH_FN(convolution_overrideable));
+  m.impl(
+      "convolution_backward_overrideable",
+      TORCH_FN(convolution_backward_overrideable));
+}
+
+TORCH_LIBRARY_IMPL(mkldnn, XPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise"),
+      TORCH_FN(convolution_pointwise));
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise.binary"),
+      TORCH_FN(convolution_pointwise_binary));
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise_.binary"),
+      TORCH_FN(convolution_pointwise_binary_));
+}
+
+} // namespace at::native::xpu

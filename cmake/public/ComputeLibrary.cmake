@@ -21,10 +21,10 @@ if("${ACL_VERSION_FILE}" STREQUAL "")
   message(WARNING "Build may fail: Could not determine ACL version (minimum required is ${ACL_MINIMUM_VERSION})")
 else()
   file(READ ${ACL_VERSION_FILE} ACL_VERSION_STRING)
-  string(REGEX MATCH "v([0-9]+\\.[0-9]+)" ACL_VERSION ${ACL_VERSION_STRING})
+  string(REGEX MATCH "v([0-9]+\\.[0-9]+)" ACL_VERSION "${ACL_VERSION_STRING}")
   set(ACL_VERSION "${CMAKE_MATCH_1}")
 
-  if(${ACL_VERSION} VERSION_EQUAL "0.0")
+  if("${ACL_VERSION}" VERSION_EQUAL "0.0")
     # Unreleased ACL versions come with version string "v0.0-unreleased", and may not be compatible with oneDNN.
     # It is recommended to use the latest release of ACL.
     message(WARNING "Build may fail: Using unreleased ACL version (minimum required is ${ACL_MINIMUM_VERSION})")

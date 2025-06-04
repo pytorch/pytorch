@@ -30,9 +30,7 @@ std::mutex& fusionBackendLock() {
 }
 } // namespace
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 static std::unordered_map<at::Device::Type, FusedKernelConstructor>&
 getFusionBackends() {
@@ -70,8 +68,8 @@ size_t nCompiledKernels() {
 
 int debugFuser() {
   if (debug_fusion < 0) {
-    const char* debug_env = getenv("PYTORCH_FUSION_DEBUG");
-    debug_fusion = debug_env ? atoi(debug_env) : 0;
+    const auto debug_env = c10::utils::get_env("PYTORCH_FUSION_DEBUG");
+    debug_fusion = debug_env ? atoi(debug_env->c_str()) : 0;
   }
   return debug_fusion;
 }
@@ -203,7 +201,7 @@ std::shared_ptr<FusedKernel> compileKernel(
     const KernelSpec& spec,
     const ArgSpec& arg_spec,
     const std::vector<int64_t>& map_size,
-    const at::Device device) {
+    const at::Device& device) {
   const std::vector<TensorDesc>& input_desc = arg_spec.descs();
 
   auto graph = spec.graph()->copy();
@@ -231,7 +229,7 @@ std::shared_ptr<FusedKernel> compileKernel(
     size_t input_index = 0;
     for (const auto& p : graph->inputs()) {
       if (p->type()->isSubtypeOf(*FloatType::get())) {
-        flat_inputs.emplace_back(p, c10::nullopt);
+        flat_inputs.emplace_back(p, std::nullopt);
       }
       if (!p->type()->isSubtypeOf(*TensorType::get())) {
         continue;
@@ -297,6 +295,4 @@ std::shared_ptr<FusedKernel> compileKernel(
       spec.hasRandom());
 }
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

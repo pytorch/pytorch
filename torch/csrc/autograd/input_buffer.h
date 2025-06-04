@@ -9,16 +9,20 @@
 #include <vector>
 
 #include <c10/core/Stream.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/autograd/variable.h>
+#include <optional>
 
 namespace torch::autograd {
 
 struct InputBuffer {
-  explicit InputBuffer(size_t size) : buffer(size) {}
+  explicit InputBuffer(size_t size)
+      : buffer(size),
+        opt_accum_streams(size),
+        ready_events(size),
+        ready_streams(size) {}
   InputBuffer(const InputBuffer& other) = delete;
   InputBuffer(InputBuffer&& other) = default;
-  explicit InputBuffer(variable_list&& inputs) : buffer(std::move(inputs)){};
+  explicit InputBuffer(variable_list&& inputs) : buffer(std::move(inputs)) {}
   InputBuffer& operator=(InputBuffer&& other) = default;
 
   // Accumulates the variable at a specified index.
@@ -30,8 +34,6 @@ struct InputBuffer {
       const std::optional<c10::Stream>& opt_producer_stream,
       const std::optional<c10::Stream>& opt_consumer_stream);
 
-  at::Device device() const;
-
   Variable operator[](size_t pos) {
     return buffer[pos];
   }
@@ -40,6 +42,14 @@ struct InputBuffer {
   static std::vector<Variable> variables(InputBuffer&& g);
 
   std::vector<Variable> buffer;
+  // The stream used for accumulation when a variable is used multiple times.
+  std::vector<std::optional<c10::Stream>> opt_accum_streams;
+  // The events you need to wait for to ensure the corresponding buffers
+  // are ready. The events are updated as we accumulate into the buffer.
+  std::vector<std::optional<c10::Event>> ready_events;
+  // The streams corresponding to the events above. This is only used to
+  // check if more synchronization is needed or not.
+  std::vector<std::optional<c10::Stream>> ready_streams;
 };
 
 } // namespace torch::autograd

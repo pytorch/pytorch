@@ -11,6 +11,7 @@ from pathlib import Path
 import torch
 from torch.testing._internal.common_utils import run_tests, set_cwd, TestCase
 
+
 try:
     import mypy.api
 
@@ -38,7 +39,6 @@ def get_all_examples():
         "_np",
         "_InputT",
     }
-    allexamples = ""
 
     example_file_lines = [
         "# mypy: allow-untyped-defs",

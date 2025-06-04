@@ -9,7 +9,7 @@
 #include <vector>
 
 #include <c10/macros/Macros.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 namespace c10 {
 class Scalar;
@@ -36,7 +36,7 @@ Tensor NestedTensor_times_Tensor_plus_Tensor_addmm(
     const Tensor& mat2,
     const c10::Scalar& beta,
     const c10::Scalar& alpha,
-    std::optional<bool> use_gelu = c10::nullopt);
+    std::optional<bool> use_gelu = std::nullopt);
 
 Tensor NestedTensor_add_NestedTensor_in_place(
     const Tensor& self,
@@ -50,7 +50,7 @@ Tensor NestedTensor_from_padded_tensor_cpu(
     const Tensor& padded,
     const NestedTensorImpl& nt);
 
-Tensor NestedTensor_to_mask(const Tensor& nt, std::optional<int64_t> mask_dim, std::optional<int64_t> mask_dim_length);
+TORCH_API Tensor NestedTensor_to_mask(const Tensor& nt, std::optional<int64_t> mask_dim, std::optional<int64_t> mask_dim_length);
 
 template <typename T>
 void remove_padding_kernelLauncher(
@@ -59,8 +59,8 @@ void remove_padding_kernelLauncher(
     const int* offsets,
     const int* input_sizes,
     const int* output_sizes,
-    int output_dim,
-    const int batch_size);
+    int64_t output_dim,
+    const int64_t batch_size);
 
 template <typename T>
 void remove_padding_transform0213_kernelLauncher(
@@ -69,8 +69,8 @@ void remove_padding_transform0213_kernelLauncher(
     const int* offsets,
     const int* input_sizes,
     const int* output_sizes,
-    int output_dim,
-    const int batch_size);
+    int64_t output_dim,
+    const int64_t batch_size);
 
 template <typename T>
 void add_padding_kernelLauncher(

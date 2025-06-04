@@ -5,9 +5,9 @@ git submodule sync
 git submodule update --init --recursive
 
 # This takes some time
-make setup_lint
+make setup-lint
 
 # Add CMAKE_PREFIX_PATH to bashrc
-echo 'export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}' >> ~/.bashrc
+echo 'export CMAKE_PREFIX_PATH=/usr/local' >> ~/.bashrc
 # Add linker path so that cuda-related libraries can be found
-echo 'export LDFLAGS="-L${CONDA_PREFIX}/lib/ $LDFLAGS"' >> ~/.bashrc
+echo 'export LDFLAGS="-L/usr/local/cuda/lib64/ $LDFLAGS"' >> ~/.bashrc

@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 from typing_extensions import deprecated
 
 from torch import Tensor
@@ -80,11 +80,11 @@ class L1Loss(_Loss):
         \end{cases}
 
     :math:`x` and :math:`y` are tensors of arbitrary shapes with a total
-    of :math:`n` elements each.
+    of :math:`N` elements each.
 
-    The sum operation still operates over all the elements, and divides by :math:`n`.
+    The sum operation still operates over all the elements, and divides by :math:`N`.
 
-    The division by :math:`n` can be avoided if one sets ``reduction = 'sum'``.
+    The division by :math:`N` can be avoided if one sets ``reduction = 'sum'``.
 
     Supports real-valued and complex-valued inputs.
 
@@ -111,7 +111,7 @@ class L1Loss(_Loss):
         - Output: scalar. If :attr:`reduction` is ``'none'``, then
           :math:`(*)`, same shape as the input.
 
-    Examples::
+    Examples:
 
         >>> loss = nn.L1Loss()
         >>> input = torch.randn(3, 5, requires_grad=True)
@@ -154,8 +154,8 @@ class NLLLoss(_WeightedLoss):
     The unreduced (i.e. with :attr:`reduction` set to ``'none'``) loss can be described as:
 
     .. math::
-        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-        l_n = - w_{y_n} x_{n,y_n}, \quad
+        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \\
+        l_n = - w_{y_n} x_{n,y_n}, \\
         w_{c} = \text{weight}[c] \cdot \mathbb{1}\{c \not= \text{ignore\_index}\},
 
     where :math:`x` is the input, :math:`y` is the target, :math:`w` is the weight, and
@@ -207,7 +207,7 @@ class NLLLoss(_WeightedLoss):
           :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1` in the case of K-dimensional loss.
           Otherwise, scalar.
 
-    Examples::
+    Examples:
 
         >>> log_softmax = nn.LogSoftmax(dim=1)
         >>> loss_fn = nn.NLLLoss()
@@ -317,7 +317,7 @@ class PoissonNLLLoss(_Loss):
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
-    Examples::
+    Examples:
 
         >>> loss = nn.PoissonNLLLoss()
         >>> log_input = torch.randn(5, 2, requires_grad=True)
@@ -397,12 +397,12 @@ class GaussianNLLLoss(_Loss):
           but with one dimension equal to 1 (to allow for broadcasting)
         - Var: :math:`(N, *)` or :math:`(*)`, same shape as the input, or same shape as the input but
           with one dimension equal to 1, or same shape as the input but with one fewer
-          dimension (to allow for broadcasting)
+          dimension (to allow for broadcasting), or a scalar value
         - Output: scalar if :attr:`reduction` is ``'mean'`` (default) or
           ``'sum'``. If :attr:`reduction` is ``'none'``, then :math:`(N, *)`, same
           shape as the input
 
-    Examples::
+    Examples:
         >>> loss = nn.GaussianNLLLoss()
         >>> input = torch.randn(5, 2, requires_grad=True)
         >>> target = torch.randn(5, 2)
@@ -438,7 +438,9 @@ class GaussianNLLLoss(_Loss):
         self.full = full
         self.eps = eps
 
-    def forward(self, input: Tensor, target: Tensor, var: Tensor) -> Tensor:
+    def forward(
+        self, input: Tensor, target: Tensor, var: Union[Tensor, float]
+    ) -> Tensor:
         return F.gaussian_nll_loss(
             input, target, var, full=self.full, eps=self.eps, reduction=self.reduction
         )
@@ -513,14 +515,14 @@ class KLDivLoss(_Loss):
         - Output: scalar by default. If :attr:`reduction` is `'none'`, then :math:`(*)`,
           same shape as the input.
 
-    Examples::
+    Examples:
         >>> kl_loss = nn.KLDivLoss(reduction="batchmean")
         >>> # input should be a distribution in the log space
         >>> input = F.log_softmax(torch.randn(3, 5, requires_grad=True), dim=1)
         >>> # Sample a batch of distributions. Usually this would come from the dataset
         >>> target = F.softmax(torch.rand(3, 5), dim=1)
         >>> output = kl_loss(input, target)
-
+        >>>
         >>> kl_loss = nn.KLDivLoss(reduction="batchmean", log_target=True)
         >>> log_target = F.log_softmax(torch.rand(3, 5), dim=1)
         >>> output = kl_loss(input, log_target)
@@ -564,11 +566,11 @@ class MSELoss(_Loss):
         \end{cases}
 
     :math:`x` and :math:`y` are tensors of arbitrary shapes with a total
-    of :math:`n` elements each.
+    of :math:`N` elements each.
 
-    The mean operation still operates over all the elements, and divides by :math:`n`.
+    The mean operation still operates over all the elements, and divides by :math:`N`.
 
-    The division by :math:`n` can be avoided if one sets ``reduction = 'sum'``.
+    The division by :math:`N` can be avoided if one sets ``reduction = 'sum'``.
 
     Args:
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
@@ -591,7 +593,7 @@ class MSELoss(_Loss):
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Target: :math:`(*)`, same shape as the input.
 
-    Examples::
+    Examples:
 
         >>> loss = nn.MSELoss()
         >>> input = torch.randn(3, 5, requires_grad=True)
@@ -673,7 +675,7 @@ class BCELoss(_WeightedLoss):
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same
           shape as input.
 
-    Examples::
+    Examples:
 
         >>> m = nn.Sigmoid()
         >>> loss = nn.BCELoss()
@@ -744,7 +746,7 @@ class BCEWithLogitsLoss(_Loss):
     then ``pos_weight`` for the class should be equal to :math:`\frac{300}{100}=3`.
     The loss would act as if the dataset contains :math:`3\times 100=300` positive examples.
 
-    Examples::
+    Examples:
 
         >>> target = torch.ones([10, 64], dtype=torch.float32)  # 64 classes, batch size = 10
         >>> output = torch.full([10, 64], 1.5)  # A prediction (logit)
@@ -792,7 +794,7 @@ class BCEWithLogitsLoss(_Loss):
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same
           shape as input.
 
-     Examples::
+    Examples:
 
         >>> loss = nn.BCEWithLogitsLoss()
         >>> input = torch.randn(3, requires_grad=True)
@@ -937,7 +939,7 @@ class MultiLabelMarginLoss(_Loss):
         - Target: :math:`(C)` or :math:`(N, C)`, label targets padded by -1 ensuring same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
 
-    Examples::
+    Examples:
 
         >>> loss = nn.MultiLabelMarginLoss()
         >>> x = torch.FloatTensor([[0.1, 0.2, 0.4, 0.8]])
@@ -1243,8 +1245,10 @@ class CrossEntropyLoss(_WeightedLoss):
         - Input: Shape :math:`(C)`, :math:`(N, C)` or :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of `K`-dimensional loss.
         - Target: If containing class indices, shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with
-          :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`.
-          If containing class probabilities, same shape as the input and each value should be between :math:`[0, 1]`.
+          :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`. The
+          target data type is required to be long when using class indices. If containing class probabilities, the
+          target must be the same shape input, and each value should be between :math:`[0, 1]`. This means the target
+          data type is required to be float when using class probabilities.
         - Output: If reduction is 'none', shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of K-dimensional loss, depending on the shape of the input. Otherwise, scalar.
 
@@ -1257,7 +1261,7 @@ class CrossEntropyLoss(_WeightedLoss):
                 N ={} & \text{batch size} \\
             \end{aligned}
 
-    Examples::
+    Examples:
 
         >>> # Example of target with class indices
         >>> loss = nn.CrossEntropyLoss()
@@ -1397,7 +1401,7 @@ class CosineEmbeddingLoss(_Loss):
         - Target: :math:`(N)` or :math:`()`.
         - Output: If :attr:`reduction` is ``'none'``, then :math:`(N)`, otherwise scalar.
 
-    Examples::
+    Examples:
 
         >>> loss = nn.CosineEmbeddingLoss()
         >>> input1 = torch.randn(3, 5, requires_grad=True)
@@ -1462,7 +1466,7 @@ class MarginRankingLoss(_Loss):
         - Target: :math:`(N)` or :math:`()`, same shape as the inputs.
         - Output: scalar. If :attr:`reduction` is ``'none'`` and Input size is not :math:`()`, then :math:`(N)`.
 
-    Examples::
+    Examples:
 
         >>> loss = nn.MarginRankingLoss()
         >>> input1 = torch.randn(3, requires_grad=True)
@@ -1541,7 +1545,7 @@ class MultiMarginLoss(_WeightedLoss):
         - Target: :math:`(N)` or :math:`()`, where each value is :math:`0 \leq \text{targets}[i] \leq C-1`.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then same shape as the target.
 
-    Examples::
+    Examples:
 
         >>> loss = nn.MultiMarginLoss()
         >>> x = torch.tensor([[0.1, 0.2, 0.4, 0.8]])
@@ -1641,7 +1645,7 @@ class TripletMarginLoss(_Loss):
         - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'`` and
           input shape is :math:`(N, D)`; a scalar otherwise.
 
-    Examples::
+    Examples:
 
     >>> triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2, eps=1e-7)
     >>> anchor = torch.randn(100, 128, requires_grad=True)
@@ -1651,7 +1655,7 @@ class TripletMarginLoss(_Loss):
     >>> output.backward()
 
     .. _Learning shallow convolutional feature descriptors with triplet losses:
-        http://www.bmva.org/bmvc/2016/papers/paper119/index.html
+        https://bmva-archive.org.uk/bmvc/2016/papers/paper119/index.html
     """
     __constants__ = ["margin", "p", "eps", "swap", "reduction"]
     margin: float
@@ -1752,7 +1756,7 @@ class TripletMarginWithDistanceLoss(_Loss):
         - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'``, or a scalar
           otherwise.
 
-    Examples::
+    Examples:
 
     >>> # Initialize embeddings
     >>> embedding = nn.Embedding(1000, 128)
@@ -1788,7 +1792,7 @@ class TripletMarginWithDistanceLoss(_Loss):
 
     Reference:
         V. Balntas, et al.: Learning shallow convolutional feature descriptors with triplet losses:
-        http://www.bmva.org/bmvc/2016/papers/paper119/index.html
+        https://bmva-archive.org.uk/bmvc/2016/papers/paper119/index.html
     """
     __constants__ = ["margin", "swap", "reduction"]
     margin: float
@@ -1882,7 +1886,7 @@ class CTCLoss(_Loss):
           ``'sum'``. If :attr:`reduction` is ``'none'``, then :math:`(N)` if input is batched or
           :math:`()` if input is unbatched, where :math:`N = \text{batch size}`.
 
-    Examples::
+    Examples:
 
         >>> # Target are to be padded
         >>> T = 50      # Input sequence length

@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+# mypy: disable-error-code=arg-type
 """This file exports ONNX ops for opset 17.
 
 Note [ONNX Operators that are added/updated in opset 17]
@@ -17,12 +18,14 @@ New operators:
 """
 
 import functools
-from typing import Optional, Sequence
+from collections.abc import Sequence
+from typing import Optional
 
 import torch
 from torch import _C
 from torch.onnx import _type_utils, errors, symbolic_helper
-from torch.onnx._internal import _beartype, jit_utils, registration
+from torch.onnx._internal import jit_utils, registration
+
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in README.md
@@ -95,8 +98,7 @@ def _compute_edge_sizes(n_fft, window_size):
 
 
 @_onnx_symbolic("aten::stft")
-@symbolic_helper.parse_args("v", "i", "i", "i", "v", "b", "b", "b")
-@_beartype.beartype
+@symbolic_helper.parse_args("v", "i", "i", "i", "v", "b", "b", "b", "b")
 def stft(
     g: jit_utils.GraphContext,
     input: _C.Value,
@@ -107,6 +109,7 @@ def stft(
     normalized: bool = False,
     onesided: Optional[bool] = True,
     return_complex: Optional[bool] = False,
+    align_to_window: Optional[bool] = None,
 ) -> _C.Value:
     """Associates `torch.stft` with the `STFT` ONNX operator.
     Note that torch.stft calls _VF.stft, without centering or padding options.
@@ -135,6 +138,12 @@ def stft(
             msg="STFT does not currently support complex types", value=input
         )
 
+    if align_to_window is not None:
+        raise errors.SymbolicValueError(
+            msg="STFT does not currently support the align_to_window option",
+            value=input,
+        )  # TODO(#145944): add compatibility with align_to_window option.
+
     # Get STFT sizes
     frame_step_value = hop_length if hop_length is not None else n_fft // 4
     frame_step_const = g.op(
@@ -154,7 +163,7 @@ def stft(
             signal,
             g.op("Constant", value_t=torch.tensor([0], dtype=torch.int64)),
         )
-    elif signal_rank > 2:
+    elif signal_rank is None or signal_rank > 2:
         raise errors.SymbolicValueError(
             msg="STFT can only take inputs of 1 [signal] or 2 [batch, signal] dimensions. "
             f"Current rank of signal is {signal_rank}, please reduce it.",

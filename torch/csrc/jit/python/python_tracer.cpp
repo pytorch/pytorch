@@ -22,7 +22,7 @@ namespace torch::jit::tracer {
 
 // Python interpreter retrieval routine adapted from
 // https://stackoverflow.com/a/8706144
-std::vector<StackEntry> _pythonCallstack() {
+static std::vector<StackEntry> _pythonCallstack() {
   pybind11::gil_scoped_acquire gil;
   PyFrameObject* frame = PyEval_GetFrame();
   Py_XINCREF(frame);
@@ -74,7 +74,7 @@ SourceRange getPythonInterpreterSourceRange() {
 std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracingWithDict(
     const py::function& func,
     const py::dict& inputs_dict,
-    Stack trace_inputs,
+    const Stack& trace_inputs,
     const py::function& var_name_lookup_fn,
     bool strict,
     bool force_outplace,
@@ -110,12 +110,13 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracingWithDict(
 
   auto outs = tracer::trace(
       std::move(compact_trace_inputs),
-      [&](Stack inputs) -> Stack {
+      [&](const Stack& inputs) -> Stack {
         // We just leave the inputs_dict as it was and pass it to forward
         // method.
         auto out = func(**inputs_dict);
         if (out.ptr() == Py_None) {
-          AT_ERROR(
+          TORCH_CHECK(
+              false,
               "The traced function didn't return any values! Side-effects are not "
               "captured in traces, so it would be a no-op.");
         }
@@ -155,7 +156,8 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
         }
         auto out = func(*py_inputs);
         if (out.ptr() == Py_None) {
-          AT_ERROR(
+          TORCH_CHECK(
+              false,
               "The traced function didn't return any values! Side-effects are not "
               "captured in traces, so it would be a no-op.");
         }
@@ -194,11 +196,11 @@ Node* preRecordPythonTrace(
   return n;
 }
 
-void pythonRecordSourceLocation(Node* n) {
+static void pythonRecordSourceLocation(Node* n) {
   n->setSourceRange(getPythonInterpreterSourceRange());
 }
 
-void pythonWarn(const std::string& reason) {
+static void pythonWarn(const std::string& reason) {
   pybind11::gil_scoped_acquire gil;
   auto warn_class = py::module::import("torch.jit").attr("TracerWarning");
   PyErr_WarnEx(warn_class.ptr(), reason.c_str(), 1);

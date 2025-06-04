@@ -2,8 +2,7 @@
 #include <ATen/core/type_factory.h>
 #include <torch/csrc/jit/mobile/register_ops_common_utils.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 int64_t normalizeIndex(int64_t idx, int64_t list_size) {
   if (idx < 0) {
@@ -99,5 +98,4 @@ IValue tensorToListRecursive(
   return result;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

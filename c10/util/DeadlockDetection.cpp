@@ -1,6 +1,5 @@
 #include <c10/util/DeadlockDetection.h>
-
-#include <cstdlib>
+#include <c10/util/env.h>
 
 namespace c10::impl {
 
@@ -8,7 +7,7 @@ namespace {
 PythonGILHooks* python_gil_hooks = nullptr;
 
 bool disable_detection() {
-  return std::getenv("TORCH_DISABLE_DEADLOCK_DETECTION") != nullptr;
+  return c10::utils::has_env("TORCH_DISABLE_DEADLOCK_DETECTION");
 }
 } // namespace
 

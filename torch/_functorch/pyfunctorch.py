@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import contextlib
 from abc import ABC, abstractmethod
-from typing import Any, List, Tuple
+from functools import cached_property
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -17,6 +18,7 @@ from torch._C._functorch import (
     TransformType,
 )
 from torch.autograd.forward_ad import _set_fwd_grad_enabled
+
 
 """
 This file contains the functorch integration with PyDispatcher.
@@ -78,6 +80,11 @@ class FuncTorchInterpreter(ABC):
     def check_state(self, state):
         return state == self.get_state()
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop("_cptr", None)
+        return state
+
 
 @contextlib.contextmanager
 def temporarily_pop_interpreter_stack():
@@ -122,7 +129,10 @@ class VmapInterpreter(FuncTorchInterpreter):
         # cdata is a generic CInterpreter. We wrap it in a CVmapInterpreterPtr
         # so that we can access methods specific to the vmap interpreter
         self._cdata = cdata
-        self._cptr = CVmapInterpreterPtr(cdata)
+
+    @cached_property
+    def _cptr(self):
+        return CVmapInterpreterPtr(self._cdata)
 
     def process(self, op, args, kwargs):
         kernel = op.functorch_table[TransformType.Vmap]
@@ -158,7 +168,10 @@ class GradInterpreter(FuncTorchInterpreter):
         assert cdata.key() == TransformType.Grad
         # See NOTE: [Interpreter cdata vs cptr]
         self._cdata = cdata
-        self._cptr = CGradInterpreterPtr(cdata)
+
+    @cached_property
+    def _cptr(self):
+        return CGradInterpreterPtr(self._cdata)
 
     def lift(self, args, kwargs):
         args, kwargs = pytree.tree_map_only(
@@ -192,7 +205,10 @@ class JvpInterpreter(FuncTorchInterpreter):
         assert cdata.key() == TransformType.Jvp
         # See NOTE: [Interpreter cdata vs cptr]
         self._cdata = cdata
-        self._cptr = CJvpInterpreterPtr(cdata)
+
+    @cached_property
+    def _cptr(self):
+        return CJvpInterpreterPtr(self._cdata)
 
     def lift(self, args, kwargs):
         args, kwargs = pytree.tree_map_only(
@@ -225,7 +241,10 @@ class FunctionalizeInterpreter(FuncTorchInterpreter):
     def __init__(self, cdata: CInterpreter):
         assert cdata.key() == TransformType.Functionalize
         self._cdata = cdata
-        self._cptr = CFunctionalizeInterpreterPtr(cdata)
+
+    @cached_property
+    def _cptr(self):
+        return CFunctionalizeInterpreterPtr(self._cdata)
 
     def process(self, op, args, kwargs):
         kernel = op.functorch_table[TransformType.Functionalize]
@@ -257,14 +276,14 @@ def retrieve_current_functorch_interpreter() -> FuncTorchInterpreter:
     return coerce_cinterpreter(interpreter)
 
 
-def retrieve_all_functorch_interpreters() -> List[FuncTorchInterpreter]:
+def retrieve_all_functorch_interpreters() -> list[FuncTorchInterpreter]:
     cis = torch._C._functorch.get_interpreter_stack()
     if cis is None:
         return []
     return [coerce_cinterpreter(ci) for ci in cis]
 
 
-def compare_functorch_state(states: List[Tuple[Any, ...]]) -> bool:
+def compare_functorch_state(states: list[tuple[Any, ...]]) -> bool:
     # There are four possible cases covered here:
     # 1. Current stack empty AND stack when generated not empty -> Invalidate
     # 2. Current stack not empty AND stack when generated empty -> Invalidate

@@ -5,7 +5,7 @@ import logging
 import math
 
 import torch
-from torch.nn.attention import sdpa_kernel, SDPBackend
+
 from ..._dynamo.utils import counters
 from ..pattern_matcher import (
     filter_nodes,
@@ -14,18 +14,12 @@ from ..pattern_matcher import (
     joint_fwd_bwd,
 )
 
+
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
 
-if torch.version.hip:
-
-    def _scaled_dot_product_attention(*args, **kwargs):
-        with sdpa_kernel(backends=[SDPBackend.MATH, SDPBackend.FLASH_ATTENTION]):
-            return aten.scaled_dot_product_attention(*args, **kwargs)
-
-else:
-    _scaled_dot_product_attention = aten.scaled_dot_product_attention
+_scaled_dot_product_attention = aten.scaled_dot_product_attention
 
 
 def _sfdp_pattern_1(query, key, value, inv_scale):
@@ -40,9 +34,9 @@ def _sfdp_pattern_1(query, key, value, inv_scale):
 def _sfdp_replacement_1(query, key, value, inv_scale):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+        query,
+        key,
+        value,
         attn_mask=None,
         dropout_p=0.0,
         is_causal=False,
@@ -62,9 +56,9 @@ def _sfdp_pattern_2(query, key, value, scale_factor):
 def _sfdp_replacement_2(query, key, value, scale_factor):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+        query,
+        key,
+        value,
         attn_mask=None,
         dropout_p=0.0,
         is_causal=False,
@@ -84,9 +78,9 @@ def _sfdp_pattern_3(query, key, value, inv_scale_factor, dropout_p):
 def _sfdp_replacement_3(query, key, value, inv_scale_factor, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+        query,
+        key,
+        value,
         attn_mask=None,
         dropout_p=dropout_p,
         is_causal=False,
@@ -104,9 +98,9 @@ def _sfdp_pattern_4(query, key, value, scale_factor, dropout_p):
 def _sfdp_replacement_4(query, key, value, scale_factor, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+        query,
+        key,
+        value,
         attn_mask=None,
         dropout_p=dropout_p,
         is_causal=False,
@@ -125,9 +119,9 @@ def _sfdp_pattern_5(query, key, value, attn_mask):
 def _sfdp_replacement_5(query, key, value, attn_mask):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+        query,
+        key,
+        value,
         attn_mask=attn_mask.to(dtype=query.dtype),
         dropout_p=0.0,
         is_causal=False,
@@ -145,9 +139,9 @@ def _sfdp_pattern_6(query, key, value, attn_mask, dropout_p):
 def _sfdp_replacement_6(query, key, value, attn_mask, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+        query,
+        key,
+        value,
         attn_mask=attn_mask.to(dtype=query.dtype),
         dropout_p=dropout_p,
         is_causal=False,
@@ -548,6 +542,46 @@ def _sfdp_replacement_19(query, key, value, causal_mask, attn_mask, dropout_p):
     )
 
 
+def _sfdp_pattern_20(query, key, value, attn_mask, dropout_p):
+    # for DistilBert with dropout transformers==4.44.2
+    q = query.permute([0, 2, 1, 3])
+    k = key.permute([0, 2, 1, 3])
+    v = value.permute([0, 2, 1, 3])
+    bs = q.size(0)
+    k_len = k.size(-2)
+    q = q.div(math.sqrt(q.size(-1)))
+    scores = q @ k.transpose(-2, -1)
+    fill_value = torch.full((), -float("inf"), dtype=query.dtype, device=query.device)
+    attn_mask = (attn_mask == 0).view((bs, 1, 1, k_len)).expand_as(scores)
+    return (
+        torch.nn.functional.dropout(
+            torch.softmax(scores.masked_fill(attn_mask, fill_value), dim=-1), dropout_p
+        )
+        @ v
+    )
+
+
+def _sfdp_replacement_20(query, key, value, attn_mask, dropout_p):
+    counters["inductor"]["fuse_attention"] += 1
+    bs = query.size(0)
+    n_head = query.size(2)
+    q_len = query.size(1)
+    k_len = key.size(1)
+    # do attn_mask->logical_not() in _scaled_dot_product_attention
+    attn_mask = (
+        (attn_mask == 1).view((bs, 1, 1, k_len)).expand((bs, n_head, q_len, k_len))
+    )
+    return _scaled_dot_product_attention(
+        query.transpose(1, 2),
+        key.transpose(1, 2),
+        value.transpose(1, 2),
+        attn_mask=attn_mask.to(dtype=torch.bool),
+        dropout_p=dropout_p,
+        is_causal=False,
+        scale=1.0 / math.sqrt(query.size(-1)),
+    )
+
+
 def _sfdp_params_check(match):
     assert all(k in match.kwargs for k in ("query", "key", "value"))
     query = match.kwargs["query"].meta["val"]
@@ -575,6 +609,13 @@ def _sfdp_params_check(match):
                 or attn_mask.dtype == torch.float
             )
             or query.device != attn_mask.device
+            # When we tensorify floats we end up turning floats
+            # into 0d scalar tensors. It doesn't make any sense
+            # to have a 0d scalar tensor attention mask so
+            # conveniently we can insert this check to get
+            # tests that erroneously passing in a float
+            # attention mask to fail as expected.
+            or attn_mask.dim() == 0
         ):
             return False
     return True
@@ -640,6 +681,8 @@ def _get_sfdp_patterns():
     # attn_mask
     b_inp = functools.partial(torch.empty, (1, 1, 8, 8), device=device)
     m_inp = functools.partial(torch.empty, (2, 1, 1, 4), device=device)
+    # need 2d attn_mask to generate patterns with view op
+    m_inp_2d = functools.partial(torch.empty, (2, 4), device=device)
     # inv_scale
     c_inp = functools.partial(torch.tensor, 2.0, device=device)
     # workaround https://github.com/pytorch/pytorch/issues/97894
@@ -669,6 +712,7 @@ def _get_sfdp_patterns():
         m = functools.partial(m_inp, dtype=dtype)
         m_float = functools.partial(m_inp, dtype=torch.float)
         m_bool = functools.partial(m_inp, dtype=torch.bool)
+        m_2d = functools.partial(m_inp_2d, dtype=dtype)
         c = functools.partial(c_inp, dtype=dtype)
         g_3d = functools.partial(g_3d_inp, dtype=dtype)
         g_bs1 = functools.partial(g_bs1_inp, dtype=dtype)
@@ -778,7 +822,7 @@ def _get_sfdp_patterns():
             (
                 _sfdp_pattern_15,
                 _sfdp_replacement_15,
-                [g(), g(), g(), m(), c()],
+                [g(), g(), g(), m_2d(), c()],
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
             ),
@@ -800,7 +844,7 @@ def _get_sfdp_patterns():
             (
                 _sfdp_pattern_17,
                 _sfdp_replacement_17,
-                [g(), g(), g(), m(), c()],
+                [g(), g(), g(), m_2d(), c()],
                 d,
                 _sfdp_extra_check(aten.div.Tensor),
             ),
@@ -809,16 +853,14 @@ def _get_sfdp_patterns():
                 _sfdp_replacement_18,
                 [g(), g(), g(), m_bool()],
                 d,
-                # CUDA AOT Inductor CI job's GPT2ForSequenceClassification accuracy test failed
-                _sfdp_extra_check(disable_cuda=True),
+                _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_18,
                 _sfdp_replacement_18,
                 [g_bs1(), g_bs1(), g_bs1(), m_bs1_bool()],
                 d,
-                # CUDA AOT Inductor CI job's GPT2ForSequenceClassification accuracy test failed
-                _sfdp_extra_check(disable_cuda=True),
+                _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_19,
@@ -826,6 +868,13 @@ def _get_sfdp_patterns():
                 [g(), g(), g(), b_bool(), b_float()],
                 d,
                 _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_20,
+                _sfdp_replacement_20,
+                [g(), g(), g(), m_2d()],
+                d,
+                _sfdp_extra_check(aten.div.Tensor),
             ),
         ]
         mask_fp32_patterns = ["pattern_16"]
@@ -867,15 +916,18 @@ def _get_sfdp_patterns():
                 name += "_bs1"
 
             training_name = name + "_training"
-            yield training_name, {
-                "search_fn": pattern,
-                "replace_fn": replacement,
-                "example_inputs": args,
-                "trace_fn": joint_fwd_bwd,
-                "pass_dicts": patterns,
-                "extra_check": extra_check,
-                "scalar_workaround": workaround,
-            }
+            yield (
+                training_name,
+                {
+                    "search_fn": pattern,
+                    "replace_fn": replacement,
+                    "example_inputs": args,
+                    "trace_fn": joint_fwd_bwd,
+                    "pass_dicts": patterns,
+                    "extra_check": extra_check,
+                    "scalar_workaround": workaround,
+                },
+            )
 
             if workaround:
                 assert len(workaround) == 1 and "dropout_p" in workaround
@@ -887,18 +939,21 @@ def _get_sfdp_patterns():
                 workaround = {}
 
             inference_name = name + "_inference"
-            yield inference_name, {
-                "search_fn": pattern,
-                "replace_fn": replacement,
-                "example_inputs": args,
-                "trace_fn": fwd_only,
-                "pass_dicts": patterns,
-                "extra_check": extra_check,
-                "scalar_workaround": workaround,
-                # with dropout turned into clone, we end up with a number of
-                # semantically identical graphs
-                "skip_duplicates": True,
-            }
+            yield (
+                inference_name,
+                {
+                    "search_fn": pattern,
+                    "replace_fn": replacement,
+                    "example_inputs": args,
+                    "trace_fn": fwd_only,
+                    "pass_dicts": patterns,
+                    "extra_check": extra_check,
+                    "scalar_workaround": workaround,
+                    # with dropout turned into clone, we end up with a number of
+                    # semantically identical graphs
+                    "skip_duplicates": True,
+                },
+            )
 
 
 @functools.lru_cache(None)

@@ -43,30 +43,100 @@ on:
 env:
   # Needed for conda builds
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
-  ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
   BUILD_ENVIRONMENT: !{{ build_environment }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
+  OS: !{{ os }}
+{%- if os == "windows-arm64" %}
+  PYTORCH_ROOT: /pytorch
+  DOWNLOADS_DIR: c:\temp\downloads
+  DEPENDENCIES_DIR: c:\temp\dependencies
+  ENABLE_APL: 1
+  ENABLE_OPENBLAS: 0
+  MSVC_VERSION : 14.42
+{%- endif %}
 !{{ common.concurrency(build_environment) }}
 
 jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
-    timeout-minutes: !{{ common.timeout_minutes }}
+    needs: get-label-type
+    {%- if os == "windows-arm64" %}
+    runs-on: "windows-11-arm64-preview"
+    {%- else %}
+    {%- if branches == "nightly" %}
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+    {%- else %}
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+    {%- endif %}
+    {%- endif %}
+    timeout-minutes: !{{ common.timeout_minutes_windows_binary }}
     !{{ upload.binary_env(config, True) }}
     {%- if config.pytorch_extra_install_requirements is defined and config.pytorch_extra_install_requirements|d('')|length > 0  %}
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
     {%- endif %}
     steps:
-      !{{ common.setup_ec2_windows() }}
+{%- if os == "windows-arm64" %}
+      - name: Populate binary env
+        shell: cmd
+        run: |
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
+      - name: Bootstrap folders
+        shell: cmd
+        run: |
+          mkdir "%NIGHTLIES_PYTORCH_ROOT%"
+          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
+      - name: Enable long paths
+        shell: cmd
+        run: |
+          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
+          git config --system core.longpaths true
+      - name: Git checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          path: "pytorch"
+          submodules: recursive
+      - name: Bootstrap Python
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+      - name: Bootstrap APL
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+      - name: Bootstrap Rust
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+      - name: Bootstrap sccache
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_sccache.bat"
+      - name: Bootstrap Libuv
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
+{%- else %}
       !{{ set_runner_specific_vars() }}
+      !{{ common.setup_ec2_windows() }}
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-      !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
+{%- endif %}
       - name: Populate binary env
         shell: bash
         run: |
@@ -82,31 +152,73 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+{%- if os != "windows-arm64" %}
       !{{ common.wait_and_kill_ssh_windows('pytorch') }}
+{% endif %}
   !{{ config["build_name"] }}-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: !{{ config["build_name"] }}-build
+    needs:
+      - !{{ config["build_name"] }}-build
+      - get-label-type
+{%- if os == "windows-arm64" %}
+    runs-on: "windows-11-arm64-preview"
+{%- else %}
 {%- if config["gpu_arch_type"] == "cuda" %}
 {%- if branches == "nightly" %}
-    runs-on: windows.8xlarge.nvidia.gpu
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
 {%- else %}
-    runs-on: windows.8xlarge.nvidia.gpu.nonephemeral
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge.nonephemeral"
 {%- endif %}
 {%- else %}
-    runs-on: windows.4xlarge.nonephemeral
+{%- if branches == "nightly" %}
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+{%- else %}
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
 {%- endif %}
-    timeout-minutes: !{{ common.timeout_minutes }}
+{%- endif %}
+{%- endif %}
+    timeout-minutes: !{{ common.timeout_minutes_windows_binary }}
     !{{ upload.binary_env(config, True) }}
     steps:
+{%- if os == "windows-arm64" %}
+      - name: Populate binary env
+        shell: cmd
+        run: |
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
+      - name: Enable long paths
+        shell: cmd
+        run: |
+          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
+          git config --system core.longpaths true
+      - name: Git checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          path: "pytorch"
+          submodules: recursive
+      - name: Bootstrap APL
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+      - name: Bootstrap Python
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+      - name: Bootstrap Rust
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+{%- else %}
       !{{ common.setup_ec2_windows() }}
+      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       !{{ set_runner_specific_vars() }}
+{%- endif %}
       - uses: !{{ common.download_artifact_action }}
         name: Download Build Artifacts
         with:
           name: !{{ config["build_name"] }}
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-      !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
       - name: Populate binary env
         shell: bash
         run: |
@@ -115,7 +227,9 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
+{%- if os != "windows-arm64" %}
       !{{ common.wait_and_kill_ssh_windows('pytorch') }}
+{%- endif %}
   {%- if branches == "nightly" %}
   !{{ upload.upload_binaries(config, True) }}
   {%- endif %}

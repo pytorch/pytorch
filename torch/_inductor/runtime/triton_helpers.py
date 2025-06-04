@@ -1,39 +1,78 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-import triton
-import triton.language as tl
+import math as pymath
+import warnings
+from typing import Any, TypeVar
+
+from .triton_compat import _log2, libdevice, math, tl, triton  # noqa: F401
 
 
-# In the latest triton, math functions were shuffled around into different modules:
-# https://github.com/openai/triton/pull/3172
-try:
-    from triton.language.extra import libdevice
-
-    libdevice = tl.extra.libdevice  # noqa: F811
-    math = tl.math
-except ImportError:
-    if hasattr(tl.extra, "cuda") and hasattr(tl.extra.cuda, "libdevice"):
-        libdevice = tl.extra.cuda.libdevice
-        math = tl.math
-    elif hasattr(tl.extra, "intel") and hasattr(tl.extra.intel, "libdevice"):
-        libdevice = tl.extra.intel.libdevice
-        math = tl.math
-    else:
-        libdevice = tl.math
-        math = tl
+_T = TypeVar("_T")
+_LOG_2_E: tl.constexpr = tl.constexpr(pymath.log2(pymath.e))
 
 
-try:
-    from triton.language.standard import _log2
-except ImportError:
+def set_driver_to_cpu():
+    driver = triton.runtime.driver
+    if backend := triton.backends.backends.get("cpu", None):
+        if isinstance(driver.active, backend.driver):
+            # Don't re-initialize backend if it is already active
+            return
+        driver.set_active(backend.driver())
+        return
+    # This can be a hard error once triton-cpu is merged into fbcode
+    warnings.warn(
+        "Could not find an active CPU backend. Generated kernels will not be executable!"
+    )
 
-    def _log2(x):
-        raise NotImplementedError
+
+def set_driver_to_gpu():
+    driver = triton.runtime.driver
+    for name, backend in triton.backends.backends.items():
+        if backend.driver.is_active() and name != "cpu":
+            # After https://github.com/triton-lang/triton/commit/b844d519bc5e86edf00fe6b3c6c2d1badcd509a4,
+            # `driver.active` can be of `LazyProxy` type and the sign of this - `_obj` attribute.
+            if (
+                isinstance(driver.active, backend.driver)
+                or hasattr(driver.active, "_obj")
+                and isinstance(driver.active._obj, backend.driver)
+            ):
+                # Don't re-initialize backend if it is already active
+                return
+            driver.set_active(backend.driver())
+            return
+    raise RuntimeError("Could not find an active GPU backend")
+
+
+def get_backend_options():
+    from triton.runtime import driver
+
+    target = driver.active.get_current_target()
+    backend = triton.compiler.compiler.make_backend(target)
+    options = backend.parse_options(dict())
+    return options.__dict__
 
 
 @triton.jit
 def promote_to_tensor(x):
     # Addition promotes to tensor for us
     return x + tl.zeros((1,), tl.int1)
+
+
+@triton.jit
+def div_floor_integer(a, b):
+    # NOTE: a // b is C division, but we want floor division
+    # Based on c10::div_floor_integer
+    quot = a // b
+    remainder = a % b
+    fixed = tl.where(remainder != 0, quot - 1, quot)
+    return tl.where((a < 0) != (b < 0), fixed, quot)
+
+
+@triton.jit
+def remainder_integer(a, b):
+    # NOTE: a % b matches C division, not floor division
+    remainder = a % b
+    return tl.where(remainder != 0 and ((a < 0) != (b < 0)), remainder + b, remainder)
 
 
 @triton.jit
@@ -120,6 +159,47 @@ def max_with_index(value, index, dim):
 
 
 @triton.jit
+def exp(x, use_fast_math: tl.constexpr):
+    if use_fast_math:
+        return libdevice.exp2(x * _LOG_2_E)
+    else:
+        return math.exp(x)
+
+
+@triton.jit
+def online_softmax_reduce(lhs_max, lhs_sum, dim, use_fast_math: tl.constexpr):
+    out_max = max2(lhs_max, dim)
+    out_max_keepdim = out_max[:, None]
+    delta = tl.where(out_max_keepdim == float("-inf"), 0, lhs_max - out_max_keepdim)
+    out_sum = tl.sum(lhs_sum * exp(delta, use_fast_math), dim)
+    return out_max, out_sum
+
+
+@triton.jit
+def online_softmax_combine(lhs_max, lhs_sum, rhs_max, use_fast_math: tl.constexpr):
+    """
+    When we do combine, we assume lhs is the accumulator and rhs is the next
+    block of data.
+    Then rhs_sum is always 1. With that assumption, we can save some registers
+    and computation.
+    """
+    out_max = maximum(lhs_max, rhs_max)
+
+    lhs_scale = tl.where(
+        out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
+    )
+    rhs_scale = tl.where(
+        out_max == float("-inf"), 1.0, exp(rhs_max - out_max, use_fast_math)
+    )
+
+    # Should be
+    #   out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
+    # but since rhs_sum is all 1, we can simpliy it.
+    out_sum = lhs_sum * lhs_scale + rhs_scale
+    return out_max, out_sum
+
+
+@triton.jit
 def welford_reduce(value, mean, m2, weight, first_iteration):
     if first_iteration:
         new_weight = tl.full(weight.shape, 1, weight.dtype)
@@ -158,7 +238,7 @@ def device_assert_then(cond, msg, r):
 
 @triton.jit
 def randint64(seed, offset, low, high):
-    r0, r1, r2, r3 = tl.randint4x(seed, offset)
+    r0, r1, _r2, _r3 = tl.randint4x(seed, offset)
     r0 = r0.to(tl.uint64)
     r1 = r1.to(tl.uint64)
     result = r0 | (r1 << 32)
@@ -180,25 +260,70 @@ def any(a, dim):
 
 @triton.jit
 def bucketize_binary_search(
-    values,  # 1D tensor
-    offsets_ptr,
-    indexing_dtype,
-    right,  # bool: if true, use intervals closed on the left; see [Note: Inductor bucketize op]
-    OFFSETS_SIZE: int,
-    BLOCK_SHAPE,  # tuple/list of block shape
+    values: tl.tensor,
+    boundaries_ptr: tl.tensor,
+    BOUNDARIES_SIZE: int,
+    BOUNDARIES_UNDERLYING_NUMEL: int,
+    BOUNDARIES_STRIDE: int,
+    boundary_indices: tl.tensor,
+    indexing_dtype: tl.dtype,
+    right: "bool",  # triton can't handle the unquoted bool annotation
+    sorter_ptr: tl.tensor,
+    SORTER_STRIDE: int,
+    sorter_indices: tl.tensor,
 ):
     """
     See [Note: Inductor bucketize op]
+
+    Inputs:
+    -------
+    values: the values to bucketize.
+    boundaries_ptr: a pointer to the beginning of the boundaries tensor, in 1-D.
+    BOUNDARIES_SIZE: the length of the last dimension of the boundaries tensor (i.e. one
+    individual set of boundaries).
+    BOUNDARIES_UNDERLYING_NUMEL: the length of the boundaries tensor, in 1-D, ignoring
+    any striding.
+    BOUNDARIES_STRIDE: the stride of the last dimension of the boundaries tensor
+    boundary_indices: a tensor of the same size as "values"; each element is an index
+    into a 1-D, un-strided boundaries tensor, pointing to the first element in the set
+    of boundaries used for that value.
+    indexing_dtype: the dtype used for indexing into the boundaries tensor, and the
+    return dtype.
+    right: if true, use boundary intervals closed on the left; otherwise use intervals
+    closed on the right.
+    sorter_ptr: an optional pointer to a sorter tensor of the same shape as boundaries,
+    but potentially different striding.  If present, this allows us to treat boundaries
+    as sorted even if the elements of boundaries are unsorted.
+    SORTER_STRIDE: must be present if sorter_ptr is non-None; the stride of the last
+    dimension of the sorter tensor.
+    sorter_indices: must be present if sorter_ptr is non-None; see "boundary_indices".
+    BLOCK_SHAPE: the shape of the data block being processed.
     """
 
-    low = tl.zeros(BLOCK_SHAPE, dtype=indexing_dtype)
-    high = tl.full(BLOCK_SHAPE, OFFSETS_SIZE, dtype=indexing_dtype)
+    low = tl.zeros(values.shape, dtype=indexing_dtype)
+    high = tl.full(values.shape, BOUNDARIES_SIZE, dtype=indexing_dtype)
 
-    full_range = OFFSETS_SIZE + 1
+    full_range = BOUNDARIES_SIZE + 1
     while full_range > 1:
         mid = (high + low) // 2
-        mask = mid < OFFSETS_SIZE
-        bucket_upper_bound = tl.load(offsets_ptr + mid, mask=mask, other=0.0)
+        mask = (
+            mid * BOUNDARIES_STRIDE + boundary_indices
+        ) < BOUNDARIES_UNDERLYING_NUMEL and mid < BOUNDARIES_SIZE
+        mid_indices = (
+            mid
+            if sorter_ptr is None or SORTER_STRIDE is None
+            else tl.load(
+                sorter_ptr + sorter_indices + SORTER_STRIDE * mid,
+                mask=mask,
+                other=0,
+            )
+        )
+
+        bucket_upper_bound = tl.load(
+            boundaries_ptr + boundary_indices + BOUNDARIES_STRIDE * mid_indices,
+            mask=mask,
+            other=0,
+        )
         if right:
             is_above = values >= bucket_upper_bound
         else:
@@ -220,7 +345,7 @@ def pack_value_flag(
     DTYPE_PACK: tl.constexpr,
 ):
     # Workaround for triton bug, tensor.to doesn't unwrap constexpr values
-    DTYPE_VALUE_AS_UINT = tl.core._constexpr_to_value(DTYPE_VALUE_AS_UINT)
+    DTYPE_VALUE_AS_UINT = tl.core._unwrap_if_constexpr(DTYPE_VALUE_AS_UINT)
     bitwidth = DTYPE_VALUE_AS_UINT.primitive_bitwidth
     uv = value.to(DTYPE_VALUE_AS_UINT, bitcast=True).to(DTYPE_PACK)
     return flag.to(DTYPE_PACK) | (uv << bitwidth)
@@ -233,8 +358,8 @@ def unpack_value(
     DTYPE_VALUE_AS_UINT,
 ):
     # Workaround for triton bug, tensor.to doesn't unwrap constexpr values
-    DTYPE_VALUE = tl.core._constexpr_to_value(DTYPE_VALUE)
-    DTYPE_VALUE_AS_UINT = tl.core._constexpr_to_value(DTYPE_VALUE_AS_UINT)
+    DTYPE_VALUE = tl.core._unwrap_if_constexpr(DTYPE_VALUE)
+    DTYPE_VALUE_AS_UINT = tl.core._unwrap_if_constexpr(DTYPE_VALUE_AS_UINT)
     bitwidth = DTYPE_VALUE_AS_UINT.primitive_bitwidth
     value_uint = (pack >> bitwidth).to(DTYPE_VALUE_AS_UINT)
     return value_uint.to(DTYPE_VALUE, bitcast=True)
@@ -386,7 +511,7 @@ def frexp(x):
 def _compare_and_swap_with_index(
     x,
     idxs,
-    valid_mask,
+    rnumel,
     flip,
     i: tl.constexpr,
     n_dims: tl.constexpr,
@@ -403,8 +528,8 @@ def _compare_and_swap_with_index(
     # slice left/right with 'stride' 2**(n_dims - i - 1)
     right_mask = tl.arange(0, 2)[None, :, None].to(idtype)
     left_mask = (1 - right_mask).to(idtype)
-    ileft = tl.broadcast_to(tl.sum(iy * left_mask, 1)[:, None, :], shape)
-    iright = tl.broadcast_to(tl.sum(iy * right_mask, 1)[:, None, :], shape)
+    ileft = tl.broadcast_to(tl.sum(iy * left_mask, 1).to(idtype)[:, None, :], shape)
+    iright = tl.broadcast_to(tl.sum(iy * right_mask, 1).to(idtype)[:, None, :], shape)
     ileft = tl.reshape(ileft, x.shape)
     iright = tl.reshape(iright, x.shape)
     left = ileft.to(x.dtype, bitcast=True)
@@ -422,19 +547,12 @@ def _compare_and_swap_with_index(
     right_idx = tl.reshape(right_idx, x.shape)
 
     # valid
-    if valid_mask is None:
+    if rnumel is None:
         left_valid_mask = tl.full(x.shape, True, tl.int1)
         right_valid_mask = tl.full(x.shape, True, tl.int1)
     else:
-        y_valid_mask = tl.reshape(valid_mask, shape)
-        left_valid_mask = tl.broadcast_to(
-            tl.sum(y_valid_mask * left_mask.to(tl.int8), 1)[:, None, :], shape
-        ).to(tl.int1)
-        right_valid_mask = tl.broadcast_to(
-            tl.sum(y_valid_mask * right_mask.to(tl.int8), 1)[:, None, :], shape
-        ).to(tl.int1)
-        left_valid_mask = tl.reshape(left_valid_mask, x.shape)
-        right_valid_mask = tl.reshape(right_valid_mask, x.shape)
+        left_valid_mask = left_idx < rnumel
+        right_valid_mask = right_idx < rnumel
 
     # actual compare-and-swap
     ix = x.to(idtype, bitcast=True)
@@ -451,24 +569,18 @@ def _compare_and_swap_with_index(
     cond = (right_valid_mask > left_valid_mask) | (
         (right_valid_mask == left_valid_mask) & cond
     )
-    cond = cond ^ flip
+    cond = (cond ^ flip).to(tl.int1)
     ret = ix ^ tl.where(cond, ileft ^ iright, tl.zeros_like(ix))
     new_idxs = idxs ^ tl.where(cond, left_idx ^ right_idx, tl.zeros_like(idxs))
-    if valid_mask is None:
-        new_valid_mask = tl.full(x.shape, True, tl.int1)
-    else:
-        new_valid_mask = valid_mask ^ tl.where(
-            cond, left_valid_mask ^ right_valid_mask, tl.zeros_like(valid_mask)
-        )
 
-    return ret.to(x.dtype, bitcast=True), new_idxs, new_valid_mask
+    return ret.to(x.dtype, bitcast=True), new_idxs
 
 
 @triton.jit
 def _bitonic_merge_with_index(
     x,
     idxs,
-    mask,
+    rnumel,
     stage: tl.constexpr,
     alternating: tl.constexpr,
     n_dims: tl.constexpr,
@@ -490,28 +602,23 @@ def _bitonic_merge_with_index(
     else:
         flip = False
     # perform `stage` rounds of `compare-and-swap`
-    next_mask = mask
     for i in tl.static_range(stage):
-        x, idxs, next_mask = _compare_and_swap_with_index(
-            x, idxs, mask, flip, i + (n_dims - stage), n_dims, stable, descending
+        x, idxs = _compare_and_swap_with_index(
+            x, idxs, rnumel, flip, i + (n_dims - stage), n_dims, stable, descending
         )
-        if mask is not None:
-            mask = next_mask
-    return x, idxs, next_mask
+    return x, idxs
 
 
 @triton.jit
 def sort_with_index(
     x,  # value
     idxs,  # index
-    mask,  # mask if current value is valid (invalid values sort to the end)
+    rnumel,  # number of elements
     dim: tl.constexpr = None,
     stable: tl.constexpr = tl.constexpr(False),
     descending: tl.constexpr = tl.constexpr(False),
 ):
     x, idxs = tl.broadcast(x, idxs)
-    if mask is not None:
-        x, mask = tl.broadcast(x, mask)
     # handle default dimension or check that it is the most minor dim
     _dim: tl.constexpr = len(x.shape) - 1 if dim is None else dim
     tl.static_assert(
@@ -521,16 +628,196 @@ def sort_with_index(
     n_dims: tl.constexpr = _log2(x.shape[_dim])
 
     for i in tl.static_range(1, n_dims + 1):
-        x, idxs, next_mask = _bitonic_merge_with_index(
+        x, idxs = _bitonic_merge_with_index(
             x,
             idxs,
-            mask,
+            rnumel,
             i,
             alternating=i < n_dims,
             n_dims=n_dims,
             stable=stable,
             descending=descending,
         )
-        if mask is not None:
-            mask = next_mask
     return x, idxs
+
+
+@triton.jit
+def select_one(x, mask, dim, keep_dims=False):
+    idtype = tl.core.get_int_dtype(x.dtype.primitive_bitwidth, signed=False)
+    ix = x.to(idtype, bitcast=True)
+    iy = tl.sum(ix * mask, dim, keep_dims=keep_dims)
+    return iy.to(x.dtype, bitcast=True)
+
+
+@triton.jit
+def x_grid_barrier(sem):
+    """
+    Wait for all other thread blocks in grid sharing same y/z program_id
+    to reach this barrier before returning.
+
+    Args:
+        sem: an uint32 semaphores, zero or 0x80000000 initialized.  Must be unique to each y/z program ID.
+    """
+    # ensure stores before this are visible
+    tl.debug_barrier()
+
+    one_i32 = 1
+    one_u32 = one_i32.to(tl.uint32)  # type: ignore[attr-defined]
+    expected = tl.num_programs(0).to(tl.uint32)
+    if tl.program_id(0) == 0:
+        nb = 0x80000000 - (expected - one_u32)
+    else:
+        nb = one_u32
+
+    old_arrive = tl.atomic_add(sem, nb, sem="release")
+
+    bar_flipped = False
+    while not bar_flipped:
+        # want a `ld.acquire.gpu.u32 $0,[$1];` but Triton doesn't have it
+        current_arrive = tl.atomic_add(sem, 0, sem="acquire")
+        # current_arrive = tl.load(sem, volatile=True)
+        bar_flipped = ((old_arrive ^ current_arrive) & 0x80000000) != 0
+
+    # TODO(jansel): is this needed?
+    tl.debug_barrier()
+
+
+def triton_builtin(f: _T) -> _T:
+    """
+    Decorator to mark a function as a Triton built-in function.  These functions
+    are evaluated at compile time.
+
+    Args:
+        f (function): The function to be marked as a Triton built-in.
+
+    Returns:
+        function: The same function, marked as a Triton built-in.
+    """
+    f.__triton_builtin__ = True  # type: ignore[attr-defined]
+    return f
+
+
+@triton_builtin
+def constexpr_next_power_of_2(
+    n: tl.constexpr, *, _builder: object = None
+) -> tl.constexpr:
+    """
+    A version triton.next_power_of_two that can be used within a kernel on constants.
+    """
+    assert isinstance(n, tl.constexpr)
+    return tl.constexpr(triton.next_power_of_2(n.value))
+
+
+@triton_builtin
+def if_mask(mask: Any, val, *, _builder: object = None) -> tl.constexpr:
+    """
+    Work around triton compile error: `ValueError: `other` cannot be provided without `mask``
+    A compile-time to check to return either `val` or `None` depending on the value of mask.
+    """
+    if isinstance(mask, tl.constexpr) and mask.value is None:
+        return tl.constexpr(None)
+    return val
+
+
+HAS_NEW_TMA_API = hasattr(tl, "make_tensor_descriptor")
+
+
+"""
+Helper function that dispatches to either `tl.make_tensor_descriptor` or
+`triton.language.extra.cuda.experimental_device_tensormap_create2d` based on `HAS_NEW_TMA_API`.
+
+Parameters:
+- base_ptr: The base pointer to the tensor data (used as `base` or `global_address`)
+- shape: The shape of the tensor (used as `shape` or `global_size`)
+- strides: The strides of the tensor (only used with `make_tensor_descriptor`)
+- block_shape: The block shape (used as `block_shape` or `load_size`)
+- desc_ptr: The descriptor pointer (only used with `experimental_device_tensormap_create2d`)
+- element_ty: The element type (only used with `experimental_device_tensormap_create2d`)
+
+Returns:
+- The tensor descriptor or None depending on the API used
+"""
+if HAS_NEW_TMA_API:
+
+    @triton.jit
+    def make_tensor_descriptor(
+        base_ptr,
+        global_shape,
+        strides,
+        block_shape,
+        desc_ptr,
+        element_ty,
+    ):
+        return tl.make_tensor_descriptor(
+            base=base_ptr,
+            shape=global_shape,
+            strides=strides,
+            block_shape=block_shape,
+        )
+
+    @triton.jit
+    def load_tensor_descriptor(
+        desc,
+        offsets,
+        shape,
+        dtype,
+    ):
+        return tl.load_tensor_descriptor(desc, offsets)
+
+    @triton.jit
+    def store_tensor_descriptor(
+        desc,
+        value,
+        offsets,
+    ):
+        return tl.store_tensor_descriptor(desc, offsets, value)
+
+    @triton.jit
+    def tensormap_fenceproxy_acquire(
+        desc,
+    ):
+        pass
+
+else:
+
+    @triton.jit
+    def make_tensor_descriptor(
+        base_ptr,
+        global_shape,
+        strides,
+        block_shape,
+        desc_ptr,
+        element_ty,
+    ):
+        tl.extra.cuda.experimental_device_tensormap_create2d(
+            desc_ptr=desc_ptr,
+            global_address=base_ptr,
+            load_size=block_shape,
+            global_size=global_shape,
+            element_ty=element_ty,
+        )
+
+        return desc_ptr
+
+    @triton.jit
+    def load_tensor_descriptor(
+        desc,
+        offsets,
+        shape,
+        dtype,
+    ):
+        return tl._experimental_descriptor_load(desc, offsets, shape, dtype)
+
+    @triton.jit
+    def store_tensor_descriptor(
+        desc,
+        value,
+        offsets,
+    ):
+        return tl._experimental_descriptor_store(desc, value, offsets)
+
+    @triton.jit
+    def tensormap_fenceproxy_acquire(
+        desc,
+    ):
+        tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(desc)

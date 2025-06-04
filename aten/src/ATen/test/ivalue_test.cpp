@@ -609,6 +609,33 @@ TEST(IValueTest, isAliasOf) {
   }
 }
 
+TEST(IValueTest, toSymIntList) {
+  std::vector<int64_t> int_list = {2, 3};
+  auto iv = IValue(int_list);
+  auto result = iv.toSymIntList();
+  EXPECT_EQ(result.size(), 2);
+  EXPECT_EQ(result.get(0), 2);
+  EXPECT_EQ(result.get(1), 3);
+}
+
+TEST(IValueTest, toSymIntListTemplate) {
+  std::vector<int64_t> int_list = {2, 3};
+  auto iv = IValue(int_list);
+  auto result = iv.to<c10::List<c10::SymInt>>();
+  EXPECT_EQ(result.size(), 2);
+  EXPECT_EQ(result.get(0), 2);
+  EXPECT_EQ(result.get(1), 3);
+}
+
+TEST(IValueTest, toSymIntVector) {
+  std::vector<int64_t> int_list = {2, 3};
+  auto iv = IValue(int_list);
+  auto result = iv.to<std::vector<c10::SymInt>>();
+  EXPECT_EQ(result.size(), 2);
+  EXPECT_EQ(result[0], 2);
+  EXPECT_EQ(result[1], 3);
+}
+
 TEST(IValueTest, internalToPointer) {
   IValue tensor(at::rand({3, 4}));
   IValue str("hello");
@@ -769,7 +796,7 @@ TEST(IValueTest, getSubValues) {
 
   IValue dict(std::move(m));
 
-  auto objType = ClassType::create(nullopt, {});
+  auto objType = ClassType::create(std::nullopt, {});
   objType->addAttribute("t1", tv1.type());
   objType->addAttribute("t2", tv2.type());
 

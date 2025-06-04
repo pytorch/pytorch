@@ -13,12 +13,14 @@ from functorch_additional_op_db import additional_op_db
 
 import torch
 import torch.utils._pytree as pytree
-
 from functorch import vmap
 from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch.testing._internal.common_device_type import toleranceOverride
 from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
 from torch.testing._internal.common_modules import module_db
+from torch.testing._internal.custom_op_db import custom_op_db
+from torch.testing._internal.opinfo.core import sample_skips_and_xfails, XFailRule
+
 
 IS_FBCODE = os.getenv("FUNCTORCH_TEST_FBCODE") == "1"
 
@@ -38,8 +40,26 @@ def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
         flat_out, out_spec = pytree.tree_flatten(out)
         outs.append(flat_out)
 
+    # use the same out_dim for all outputs
+    if isinstance(out_dim, int):
+        flat_out_dim = [out_dim for _ in flat_out]
+    else:
+        flat_out_dim, _ = pytree.tree_flatten(out_dim)
+
     outs = zip(*outs)
-    result = [torch.stack(out_lst) for out_lst in outs]
+
+    result = []
+    for i, out_lst in enumerate(outs):
+        if flat_out_dim[i] is not None:
+            if not all(isinstance(x, torch.Tensor) for x in out_lst):
+                raise ValueError(
+                    f"vmap `{op}` must only return "
+                    "Tensors. Did you mean to set out_dims= to None for output?"
+                )
+            result.append(torch.stack(out_lst))
+        else:
+            # not batched over, result should be the same for all batches
+            result.append(out_lst[0])
     return pytree.tree_unflatten(result, out_spec)
 
 
@@ -317,9 +337,9 @@ def _compute_quantities_for_vmap_test(
     inner_in_dims = (0,) + pytree.tree_map(lambda x: None, in_dims)
     outer_in_dims = (0,) + in_dims
     batched_args, kwarg_values = maybe_clone_inputs()
-    vmapvmap_output = vmap(vmap(f, inner_in_dims), outer_in_dims)(
-        dummy, *batched_args, **kwarg_values
-    )
+    vmapvmap_output = vmap(
+        vmap(f, inner_in_dims, out_dims=out_dim), outer_in_dims, out_dims=out_dim
+    )(dummy, *batched_args, **kwarg_values)
 
     yield (batched_out, loop_out, vmapvmap_output, vmapvmap_expected)
 
@@ -429,6 +449,27 @@ def xfail(op_name, variant_name="", *, device_type=None, dtypes=None):
     )
 
 
+# fail_fn should be a callable that accepts a single SampleInput and returns True if failure
+# is expected
+def xfailIf(op_name, fail_fn, variant_name="", *, device_type=None, dtypes=None):
+    return decorate(
+        op_name=op_name,
+        variant_name=variant_name,
+        decorator=sample_skips_and_xfails(
+            [
+                XFailRule(
+                    # op matching is already handled by DecorateMeta
+                    op_match_fn=lambda device, op: True,
+                    # device matching is already handled by DecorateMeta
+                    sample_match_fn=lambda device, sample: fail_fn(sample),
+                )
+            ]
+        ),
+        device_type=device_type,
+        dtypes=dtypes,
+    )
+
+
 def skip(op_name, variant_name="", *, device_type=None, dtypes=None):
     return decorate(
         op_name=op_name,
@@ -440,7 +481,7 @@ def skip(op_name, variant_name="", *, device_type=None, dtypes=None):
 
 
 def skipOps(test_case_name, base_test_name, to_skip):
-    all_opinfos = op_db + additional_op_db + autograd_function_db
+    all_opinfos = op_db + additional_op_db + autograd_function_db + custom_op_db
     for decorate_meta in to_skip:
         matching_opinfos = [
             o
@@ -573,3 +614,29 @@ def check_vmap_fallback(test_case, thunk, opinfo, dry_run=False):
             print(f"xfail('{opinfo.name}', '{opinfo.variant_test_name}'),")
         else:
             print(f"xfail('{opinfo.name}'),")
+
+
+def saved_tensors_hooks_to_gm(
+    pack_fn, unpack_fn, pack_cache_hash, unpack_cache_hash, symbolic_tracing=True
+):
+    if symbolic_tracing:
+        pack_gm = torch.fx.symbolic_trace(pack_fn)
+        unpack_gm = torch.fx.symbolic_trace(unpack_fn)
+    else:
+        from torch.functorch import make_fx
+
+        inp = torch.randn(2, 3)
+        torch._dynamo.mark_dynamic(inp, 0)
+        torch._dynamo.mark_dynamic(inp, 1)
+        pack_out = pack_fn(inp)
+        pack_gm = make_fx(pack_fn)(inp)
+        unpack_gm = make_fx(unpack_fn)(pack_out)
+
+    def set_manual_hash(g, manual_hash):
+        node = next(iter(g.nodes))
+        node.meta["user_cache_hash"] = manual_hash
+
+    set_manual_hash(pack_gm.graph, pack_cache_hash)
+    set_manual_hash(unpack_gm.graph, unpack_cache_hash)
+
+    return pack_gm, unpack_gm

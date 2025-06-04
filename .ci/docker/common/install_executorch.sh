@@ -13,7 +13,7 @@ clone_executorch() {
   # and fetch the target commit
   pushd executorch
   git checkout "${EXECUTORCH_PINNED_COMMIT}"
-  git submodule update --init
+  git submodule update --init --recursive
   popd
 
   chown -R jenkins executorch
@@ -36,25 +36,23 @@ install_conda_dependencies() {
 }
 
 install_pip_dependencies() {
-  pushd executorch/.ci/docker
-  # Install PyTorch CPU build beforehand to avoid installing the much bigger CUDA
-  # binaries later, ExecuTorch only needs CPU
-  pip_install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-  # Install all Python dependencies
-  pip_install -r requirements-ci.txt
+  pushd executorch
+  as_jenkins bash install_executorch.sh
+
+  # A workaround, ExecuTorch has moved to numpy 2.0 which is not compatible with the current
+  # numba and scipy version used in PyTorch CI
+  conda_run pip uninstall -y numba scipy
+
   popd
 }
 
 setup_executorch() {
   pushd executorch
-  # Setup swiftshader and Vulkan SDK which are required to build the Vulkan delegate
-  as_jenkins bash .ci/scripts/setup-vulkan-linux-deps.sh
 
   export PYTHON_EXECUTABLE=python
-  export EXECUTORCH_BUILD_PYBIND=ON
-  export CMAKE_ARGS="-DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
+  export CMAKE_ARGS="-DEXECUTORCH_BUILD_PYBIND=ON -DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
 
-  as_jenkins .ci/scripts/setup-linux.sh cmake
+  as_jenkins .ci/scripts/setup-linux.sh --build-tool cmake || true
   popd
 }
 

@@ -6,6 +6,7 @@ Try to keep this list in sync with that.
 """
 import operator
 
+
 top_torch = [
     ("t", 6837449),
     ("tensor", 585786),
@@ -624,8 +625,5 @@ def get_nn_functional_top_list():
     return top_nn_functional_
 
 
-usage_count = {}
-for k, v in get_nn_functional_top_list():
-    usage_count[k] = v
-for k, v in top_torch:
-    usage_count[k] = v
+usage_count = dict(get_nn_functional_top_list())
+usage_count.update(top_torch)

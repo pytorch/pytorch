@@ -7,18 +7,20 @@
 # LICENSE file in the root directory of this source tree.
 
 import subprocess
+import threading
+import time
 from base64 import b64encode
 from typing import cast, ClassVar
 from unittest import TestCase
 
 from etcd import EtcdKeyNotFound  # type: ignore[import]
-
 from rendezvous_backend_test import RendezvousBackendTestMixin
 
 from torch.distributed.elastic.rendezvous import (
     RendezvousConnectionError,
     RendezvousParameters,
 )
+from torch.distributed.elastic.rendezvous.api import RendezvousStoreInfo
 from torch.distributed.elastic.rendezvous.etcd_rendezvous_backend import (
     create_backend,
     EtcdRendezvousBackend,
@@ -147,3 +149,32 @@ class CreateBackendTest(TestCase):
                     ValueError, r"^The read timeout must be a positive integer.$"
                 ):
                     create_backend(self._params)
+
+    def test_get_waits_for_store_prefix_key(self) -> None:
+        def store_get(store, result_dict):
+            start_time = time.perf_counter()
+            result_dict["get_result"] = store.get(
+                RendezvousStoreInfo.MASTER_ADDR_KEY
+            ).decode(encoding="UTF-8")
+            end_time = time.perf_counter()
+            result_dict["time"] = end_time - start_time
+
+        def store_set(store):
+            time.sleep(2)
+            store.set(RendezvousStoreInfo.MASTER_ADDR_KEY, b"foo")
+
+        backend, store = create_backend(self._params)
+        backend.set_state(b"dummy_state")
+        result_dict = {}
+
+        get_thread = threading.Thread(target=store_get, args=(store, result_dict))
+        set_thread = threading.Thread(target=store_set, args=(store,))
+
+        get_thread.start()
+        set_thread.start()
+
+        get_thread.join()
+        set_thread.join()
+
+        assert result_dict["get_result"] == "foo"
+        assert result_dict["time"] >= 2

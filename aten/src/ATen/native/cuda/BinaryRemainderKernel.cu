@@ -55,7 +55,7 @@ void fmod_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-REGISTER_DISPATCH(remainder_stub, &remainder_kernel_cuda);
-REGISTER_DISPATCH(fmod_stub, &fmod_kernel_cuda);
+REGISTER_DISPATCH(remainder_stub, &remainder_kernel_cuda)
+REGISTER_DISPATCH(fmod_stub, &fmod_kernel_cuda)
 
 } // namespace at::native

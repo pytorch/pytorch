@@ -1,15 +1,15 @@
 # Owner(s): ["module: dispatch"]
-
+# ruff: noqa: F841
 import itertools
 import os
 import re
-
 from collections import namedtuple
 
 import torch._C as C
 import torch.utils.cpp_extension
 from torch._python_dispatcher import PythonDispatcher
 from torch.testing._internal.common_utils import run_tests, TestCase
+
 
 # TODO: Expand the dispatcher API to be a generic API for interfacing with
 # the dispatcher from Python!
@@ -151,7 +151,7 @@ class TestDispatch(TestCase):
             active_ops.add(op_ix)
             try:
                 ops[op_ix](refs[op_ix])
-                check_invariants(f"running ctors {ctor_order[:i + 1]}")
+                check_invariants(f"running ctors {ctor_order[: i + 1]}")
             except RuntimeError as e:
                 if not expect_raises:
                     raise
@@ -160,7 +160,7 @@ class TestDispatch(TestCase):
                 expected, _, expected_provenance = results.setdefault(
                     frozenset(active_ops),
                     Result(
-                        actual, "", f"error after running ctors {ctor_order[:i + 1]}"
+                        actual, "", f"error after running ctors {ctor_order[: i + 1]}"
                     ),
                 )
                 self.assertMultiLineEqual(expected, actual, expected_provenance)
@@ -195,7 +195,7 @@ class TestDispatch(TestCase):
             else:
                 active_ops.remove(op_ix)
             check_invariants(
-                f"running ctors {ctor_order[:last_ctor + 1]}, then running dtors {dtor_order[:i + 1]}"
+                f"running ctors {ctor_order[: last_ctor + 1]}, then running dtors {dtor_order[: i + 1]}"
             )
         return results[set_to_report][0]
 
@@ -913,9 +913,9 @@ alias analysis kind: PURE_FUNCTION
 
     def test_multiple_fallback(self):
         global_m = C._dispatch_library("IMPL", "_", "XLA")
-        global_m.fallback_fallthrough(),
+        global_m.fallback_fallthrough()
         try:
-            global_m.fallback_fallthrough(),
+            global_m.fallback_fallthrough()
         except RuntimeError as e:
             self.assertExpectedInline(
                 str(e),
@@ -961,9 +961,7 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ b
         )
         module = torch.utils.cpp_extension.load(
             name="dangling_impl_extension",
-            sources=[
-                extension_path,
-            ],
+            sources=[extension_path],
             extra_cflags=["-g"],
             verbose=True,
         )

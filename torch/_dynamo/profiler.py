@@ -1,7 +1,21 @@
-# mypy: allow-untyped-defs
+"""
+Dynamo profiling implementation.
+
+This module provides profiling functionality for Dynamo, including:
+- ProfileMetrics: Class for collecting and aggregating performance metrics like
+  execution time, operator counts, and fusion statistics
+- ProfileResult: Class for analyzing and reporting profiling results
+- Utilities for tracking missed/uncaptured operations
+- Functions for instrumenting FX graphs with profiling capabilities
+
+The profiler helps measure and optimize the performance of Dynamo-compiled code
+by tracking both captured and total operations, timing, and graph statistics.
+"""
+
 import dataclasses
 import os
-from typing import Any, List
+from typing import Any
+from typing_extensions import Self
 
 import torch
 
@@ -15,13 +29,13 @@ class ProfileMetrics:
     fusions: int = 0
     graphs: int = 0
 
-    def __iadd__(self, other: "ProfileMetrics"):
+    def __iadd__(self, other: Self) -> Self:
         self.microseconds += other.microseconds
         self.operators += other.operators
         self.fusions += other.fusions
         return self
 
-    def __add__(self, other: "ProfileMetrics"):
+    def __add__(self, other: "ProfileMetrics") -> "ProfileMetrics":
         assert isinstance(other, ProfileMetrics)
         return ProfileMetrics(
             self.microseconds + other.microseconds,
@@ -29,7 +43,7 @@ class ProfileMetrics:
             self.fusions + other.fusions,
         )
 
-    def __truediv__(self, other):
+    def __truediv__(self, other: Any) -> "ProfileMetrics":
         if isinstance(other, int):
             other = ProfileMetrics(other, other, other)
         return ProfileMetrics(
@@ -38,36 +52,38 @@ class ProfileMetrics:
             self.fusions / max(1, other.fusions),
         )
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.operators:4.0%} ops {self.microseconds:4.0%} time"
 
-    def tocsv(self):
+    def tocsv(self) -> list[float]:
         return [self.operators, self.microseconds]
 
 
 class ProfileResult:
-    def __init__(self, captured, total, unique_graphs):
+    def __init__(
+        self, captured: ProfileMetrics, total: ProfileMetrics, unique_graphs: int
+    ) -> None:
         self.captured: ProfileMetrics = captured or ProfileMetrics()
         self.total: ProfileMetrics = total or ProfileMetrics()
         self.unique_graphs: int = unique_graphs
 
-    def __iadd__(self, other: "ProfileResult"):
+    def __iadd__(self, other: Self) -> Self:
         self.captured += other.captured
         self.total += other.total
         self.unique_graphs += other.unique_graphs
         return self
 
-    def percent(self):
+    def percent(self) -> ProfileMetrics:
         return self.captured / self.total
 
-    def __str__(self):
+    def __str__(self) -> str:
         return (
             f"{self.unique_graphs:2} graphs {self.captured.graphs:2} graph calls "
             f"{self.captured.operators:4}/{self.total.operators:4} = "
             + str(self.percent())
         )
 
-    def tocsv(self):
+    def tocsv(self) -> list[Any]:
         return [
             self.unique_graphs,
             self.captured.graphs,
@@ -76,11 +92,11 @@ class ProfileResult:
         ] + self.percent().tocsv()
 
 
-def should_print_missing():
+def should_print_missing() -> bool:
     return os.environ.get("TORCHDYNAMO_PRINT_MISSING") == "1"
 
 
-def print_missing(stack):
+def print_missing(stack: list[str]) -> None:
     if any("/torch/autograd/profiler.py" in x for x in stack):
         return
     stack = [
@@ -90,15 +106,15 @@ def print_missing(stack):
 
 
 class Profiler:
-    unique_graphs = 0
+    unique_graphs: int = 0
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.prof = torch.profiler.profile(
             activities=[torch.profiler.ProfilerActivity.CPU],
             with_stack=should_print_missing(),
         )
 
-    def results(self):
+    def results(self) -> ProfileResult:
         captured_regions = 0
         captured_ops = 0
         captured_microseconds = 0
@@ -147,8 +163,8 @@ class Profiler:
         )
 
 
-def fx_insert_profiling(gm: torch.fx.GraphModule, example_inputs: List[Any]):
-    def _wrapped(*args):
+def fx_insert_profiling(gm: torch.fx.GraphModule, example_inputs: list[Any]) -> Any:
+    def _wrapped(*args: Any) -> Any:
         with torch.profiler.record_function("TORCHDYNAMO"):
             return gm.forward(*args)
 

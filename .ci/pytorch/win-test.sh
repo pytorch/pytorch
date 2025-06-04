@@ -1,5 +1,5 @@
 #!/bin/bash
-set -ex
+set -ex -o pipefail
 
 SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
@@ -18,6 +18,9 @@ export PYTORCH_FINAL_PACKAGE_DIR="${PYTORCH_FINAL_PACKAGE_DIR:-/c/w/build-result
 PYTORCH_FINAL_PACKAGE_DIR_WIN=$(cygpath -w "${PYTORCH_FINAL_PACKAGE_DIR}")
 export PYTORCH_FINAL_PACKAGE_DIR_WIN
 
+# enable debug asserts in serialization
+export TORCH_SERIALIZATION_DEBUG=1
+
 mkdir -p "$TMP_DIR"/build/torch
 
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
@@ -35,10 +38,19 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
 fi
 
 # TODO: Move both of them to Windows AMI
-python -m pip install pytest-rerunfailures==10.3 pytest-cpp==2.3.0 tensorboard==2.13.0
+python -m pip install pytest-rerunfailures==10.3 pytest-cpp==2.3.0 tensorboard==2.13.0 protobuf==5.29.4 pytest-subtests==0.13.1
 
 # Install Z3 optional dependency for Windows builds.
 python -m pip install z3-solver==4.12.2.0
+
+# Install tlparse for test\dynamo\test_structured_trace.py UTs.
+python -m pip install tlparse==0.3.30
+
+# Install parameterized
+python -m pip install parameterized==0.8.1
+
+# Install pulp for testing ilps under torch\distributed\_tools
+python -m pip install pulp==2.9.0
 
 run_tests() {
     # Run nvidia-smi if available

@@ -3,9 +3,7 @@
 #include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 using rpc::RpcCommandBase;
 
 constexpr auto kProfileEventsStartIdx = 3;
@@ -118,7 +116,7 @@ std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
   rpc::MessageType wrappedMsgType =
       static_cast<rpc::MessageType>(tupleElements[0].toInt());
   rpc::ProfilingId profilingId = rpc::ProfilingId::fromIValue(tupleElements[1]);
-  int profiledEventsSize = tupleElements[2].toInt();
+  auto profiledEventsSize = tupleElements[2].toInt();
   std::vector<torch::autograd::profiler::LegacyEvent> remoteEvents;
   remoteEvents.reserve(profiledEventsSize);
   for (const auto i : c10::irange(
@@ -146,6 +144,4 @@ std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
       std::move(remoteEvents),
       profilingId);
 }
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

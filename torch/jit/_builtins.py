@@ -2,16 +2,21 @@
 import cmath
 import math
 import warnings
-
 from collections import OrderedDict
-from typing import Dict, Optional
+from typing import Optional
 
 import torch
 import torch.backends.cudnn as cudnn
+from torch.nn.modules.utils import (
+    _list_with_default,
+    _pair,
+    _quadruple,
+    _single,
+    _triple,
+)
 
-from ..nn.modules.utils import _list_with_default, _pair, _quadruple, _single, _triple
 
-_builtin_table: Optional[Dict[int, str]] = None
+_builtin_table: Optional[dict[int, str]] = None
 
 _modules_containing_builtins = (torch, torch._C._nn, torch._C._fft, torch._C._linalg, torch._C._nested, torch._C._sparse, torch._C._special)  # type: ignore[attr-defined] # noqa: B950
 

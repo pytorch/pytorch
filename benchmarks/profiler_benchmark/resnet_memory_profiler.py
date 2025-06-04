@@ -1,8 +1,8 @@
-import torchvision.models as models
+from torchvision import models
 
 import torch
-
 import torch.autograd.profiler as profiler
+
 
 for with_cuda in [False, True]:
     model = models.resnet18()

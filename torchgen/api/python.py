@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 from torchgen.api import cpp
 from torchgen.api.types import Binding, CppSignature, CppSignatureGroup
@@ -18,6 +18,10 @@ from torchgen.model import (
     Type,
     Variant,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -197,6 +201,30 @@ from torchgen.model import (
 # For examples, only pyi signatures include return types.
 
 
+def format_function_signature(
+    name: str, arguments: Iterable[str] = (), return_type: str | None = None
+) -> str:
+    if not isinstance(arguments, (list, tuple)):
+        arguments = tuple(arguments)
+    return_type = f" -> {return_type}" if return_type is not None else ""
+
+    sig = f"def {name}({', '.join(arguments)}){return_type}: ..."
+    if len(sig) <= 80 or len(arguments) == 0 or tuple(arguments) == ("self",):
+        return sig
+
+    arguments = [f"    {arg}," for arg in arguments]
+    return "\n".join(
+        (
+            f"def {name}(",
+            *(
+                arg if len(arg) <= 80 else f"    # fmt: off\n{arg}\n    # fmt: on"
+                for arg in arguments
+            ),
+            f"){return_type}: ...",
+        )
+    ).replace("    # fmt: off\n    # fmt: on\n", "")
+
+
 @dataclass(frozen=True)
 class PythonReturns:
     returns: tuple[Return, ...]
@@ -236,7 +264,6 @@ class PythonArgument:
         if self.default is not None:
             default = {
                 "nullptr": "None",
-                "c10::nullopt": "None",
                 "::std::nullopt": "None",
                 "std::nullopt": "None",
                 "{}": "None",
@@ -262,7 +289,7 @@ class PythonArgument:
 
         # pyi merges the _out and functional variants into the same signature, with an optional out arg
         if name == "out" and type_str == "Tensor" and not deprecated:
-            type_str = "Optional[" + type_str + "]"
+            type_str = f"{type_str} | None".replace(" | None | None", " | None")
 
         # pyi deprecated signatures don't get defaults for their out arg
         treat_as_no_default = (
@@ -285,11 +312,10 @@ class PythonArgument:
             else:
                 default = {
                     "nullptr": "None",
-                    "c10::nullopt": "None",
                     "::std::nullopt": "None",
                     "std::nullopt": "None",
                     "{}": "None",
-                    "MemoryFormat::Contiguous": "contiguous_format",
+                    "c10::MemoryFormat::Contiguous": "contiguous_format",
                     "QScheme::PER_TENSOR_AFFINE": "per_tensor_affine",
                 }.get(self.default, self.default)
             return f"{name}: {type_str} = {default}"
@@ -403,7 +429,7 @@ class PythonSignature:
         if len(schema_formals) > positional_argc:
             schema_formals.insert(positional_argc, "*")
 
-        return f'{self.name}({", ".join(schema_formals)})'
+        return f"{self.name}({', '.join(schema_formals)})"
 
     def signature_str_pyi(self, *, skip_outputs: bool = False) -> str:
         args = self.arguments(skip_outputs=skip_outputs)
@@ -419,7 +445,7 @@ class PythonSignature:
         # pyi also includes self (with no typing/defaults) for methods
         if self.method:
             schema_formals.insert(0, "self")
-        return f'def {self.name}({", ".join(schema_formals)}) -> {returns_str}: ...'
+        return format_function_signature(self.name, schema_formals, returns_str)
 
     def signature_str_pyi_vararg(self, *, skip_outputs: bool = False) -> str | None:
         # only pyi uses vararg signatures
@@ -429,19 +455,17 @@ class PythonSignature:
         ]
         # vararg only applies to pyi signatures. vararg variants are not generated for all signatures
         num_args = self.arguments_count()
+        if num_args == 0:
+            return None
+
         num_positionalargs = len(self.input_args)
 
-        have_vararg_version = False
-        if num_args > 0:
-            vararg_type = args[0].type
-            if (
-                isinstance(vararg_type, ListType)
-                and str(vararg_type.elem) in ["int", "SymInt"]
-                and num_positionalargs == 1
-            ):
-                have_vararg_version = True
-
-        if not have_vararg_version:
+        vararg_type = args[0].type
+        if not (
+            isinstance(vararg_type, ListType)
+            and str(vararg_type.elem) in ["int", "SymInt"]
+            and num_positionalargs == 1
+        ):
             return None
 
         # Below are the major changes in vararg vs. regular pyi signatures
@@ -455,7 +479,7 @@ class PythonSignature:
         # pyi also includes self (with no typing/defaults) for methods
         if self.method:
             schema_formals.insert(0, "self")
-        return f'def {self.name}({", ".join(schema_formals)}) -> {returns_str}: ...'
+        return format_function_signature(self.name, schema_formals, returns_str)
 
 
 # The deprecated python signature involves some special logic, so create a
@@ -496,7 +520,7 @@ class PythonSignatureDeprecated(PythonSignature):
             schema_formals.insert(positional_argc, "*")
 
         returns_str = returns_str_pyi(self)
-        return f'def {self.name}({", ".join(schema_formals)}) -> {returns_str}: ...'
+        return format_function_signature(self.name, schema_formals, returns_str)
 
     def signature_str_pyi_vararg(self, *, skip_outputs: bool = False) -> str | None:
         # the codegen doesn't include vararg variants for deprecated signatures
@@ -553,9 +577,9 @@ class PythonSignatureGroup:
 
         # Out overloads in C++ don't have TensorOptions arguments,
         # so take these from the functional variant
-        signature_kwargs[
-            "tensor_options_args"
-        ] = functional.signature.tensor_options_args
+        signature_kwargs["tensor_options_args"] = (
+            functional.signature.tensor_options_args
+        )
 
         return PythonSignatureGroup(
             signature=type(out.signature)(**signature_kwargs),
@@ -654,15 +678,14 @@ def argument_type_str(
     t: Type, *, simple_type: bool = False, symint: bool = True
 ) -> str:
     if isinstance(t, BaseType):
-        if t.name == BaseTy.Tensor:
-            return "Tensor"
-        elif t.name == BaseTy.int:
+        if t.name == BaseTy.int:
             return "int64_t"
         elif t.name == BaseTy.float:
             return "double"
         elif t.name == BaseTy.str:
             return "c10::string_view"
         elif t.name in [
+            BaseTy.Tensor,
             BaseTy.bool,
             BaseTy.QScheme,
             BaseTy.Scalar,
@@ -675,16 +698,12 @@ def argument_type_str(
             BaseTy.MemoryFormat,
             BaseTy.Dimname,
             BaseTy.Stream,
-            BaseTy.ConstQuantizerPtr,
             BaseTy.SymInt,
         ]:
             # These python schema type names line up with their function schema names
             return t.name.name
 
     elif isinstance(t, OptionalType):
-        if str(t.elem) == "Tensor":
-            # Is it desired to keep '?' for simple_type with new style dispatcher?
-            return "Tensor?"
         elem = argument_type_str(t.elem, simple_type=simple_type, symint=symint)
         return f"{elem}?"
     elif isinstance(t, ListType):
@@ -918,17 +937,18 @@ def argument_type_str_pyi(t: Type) -> str:
         t = t.elem
         add_optional = True
 
+    ret = ""
     if isinstance(t, BaseType):
         if t.name in [BaseTy.int, BaseTy.DeviceIndex]:
             ret = "_int"
         if t.name == BaseTy.SymInt:
-            ret = "Union[_int, SymInt]"
+            ret = "_int | SymInt"
         elif t.name == BaseTy.float:
             ret = "_float"
         elif t.name == BaseTy.str:
             ret = "str"
         elif t.name == BaseTy.Scalar:
-            ret = "Union[Number, _complex]"
+            ret = "Number | _complex"
         elif t.name == BaseTy.ScalarType:
             ret = "_dtype"
         elif t.name == BaseTy.bool:
@@ -938,36 +958,35 @@ def argument_type_str_pyi(t: Type) -> str:
         elif t.name == BaseTy.Layout:
             ret = "_layout"
         elif t.name == BaseTy.Device:
-            ret = "Optional[DeviceLikeType]"
+            ret = "DeviceLikeType | None"
         elif t.name == BaseTy.MemoryFormat:
             ret = "memory_format"
         elif t.name == BaseTy.Dimname:
-            ret = "Union[str, ellipsis, None]"
+            ret = "str | EllipsisType | None"
         elif t.name == BaseTy.Storage:
-            ret = "Union[Storage, UntypedStorage]"
+            ret = "Storage | UntypedStorage"
         elif t.name in [BaseTy.Tensor, BaseTy.Generator, BaseTy.Stream]:
             # These python schema type names line up with their function schema names
             ret = t.name.name
 
     elif isinstance(t, ListType):
         if str(t.elem) == "int":
-            ret = "Union[_int, _size]" if t.size is not None else "_size"
+            ret = "_int | _size" if t.size is not None else "_size"
         elif t.is_tensor_like():
             # TODO: this doesn't seem right...
-            # Tensor?[] currently translates to Optional[Union[Tuple[Tensor, ...], List[Tensor]]]
-            # It should probably translate to   Union[Tuple[Optional[Tensor], ...], List[Optional[Tensor]]]
-            if isinstance(t.elem, OptionalType):
-                add_optional = True
+            # Tensor?[] currently translates to tuple[Tensor, ...] | list[Tensor] | None
+            # It should probably translate to   tuple[Tensor | None, ...] | list[Tensor | None]
+            add_optional = True
             ret = (
-                "Union[Tensor, Tuple[Tensor, ...], List[Tensor]]"
+                "Tensor | tuple[Tensor, ...] | list[Tensor]"
                 if t.size is not None
-                else "Union[Tuple[Tensor, ...], List[Tensor]]"
+                else "tuple[Tensor, ...] | list[Tensor]"
             )
         elif str(t.elem) == "float":
             ret = "Sequence[_float]"
         elif str(t.elem) == "SymInt" and t.size is not None:
             elem = argument_type_str_pyi(t.elem)
-            ret = f"Union[{elem}, Sequence[{elem}]]"
+            ret = f"{elem} | Sequence[{elem}]"
         else:
             elem = argument_type_str_pyi(t.elem)
             ret = f"Sequence[{elem}]"
@@ -976,7 +995,7 @@ def argument_type_str_pyi(t: Type) -> str:
         raise RuntimeError(f"unrecognized type {repr(t)}")
 
     if add_optional:
-        ret = "Optional[" + ret + "]"
+        ret = f"{ret} | None".replace(" | None | None", " | None")
 
     return ret
 
@@ -987,19 +1006,19 @@ def return_type_str_pyi(t: Type) -> str:
 
     if isinstance(t, OptionalType):
         inner = return_type_str_pyi(t.elem)
-        return f"Optional[{inner}]"
+        return f"{inner} | None".replace(" | None | None", " | None")
 
     if isinstance(t, BaseType):
         if t.name == BaseTy.Device:
             return "_device"
         elif t.name == BaseTy.Dimname:
-            ret = "Optional[str]"
+            return "str | None"
         else:
             return argument_type_str_pyi(t)
 
     if isinstance(t, ListType):
         inner = return_type_str_pyi(t.elem)
-        return f"Tuple[{inner}, ...]"
+        return f"tuple[{inner}, ...]"
 
     return argument_type_str_pyi(t)
 
@@ -1012,23 +1031,27 @@ def returns_structseq_pyi(signature: PythonSignature) -> tuple[str, str] | None:
         # These types are structseq objects which act like named NamedTuples, but
         # the constructor acts like the constructor of tuple. Using typing.NamedTuple
         # does not allow us to override __init__.
-        seq_type = f"Tuple[{', '.join(python_returns)}]"
+        seq_type = f"tuple[{', '.join(python_returns)}]"
         structseq_def_lines = [
-            f"class {structseq_name}({seq_type}):",
+            f"class {structseq_name}({seq_type}):  # fmt: skip",
         ]
-        for name, typ in zip(field_names, python_returns):
+        for name, ret_type in zip(field_names, python_returns):
             structseq_def_lines.extend(
                 [
                     "    @property",
-                    f"    def {name}(self) -> {typ}: ...",
+                    f"    def {name}(self) -> {ret_type}: ...",
                 ]
             )
         structseq_def_lines.extend(
             [
-                f"    def __new__(cls, sequence: {seq_type}): ...",
-                f"    n_fields: _int = {len(field_names)}",
-                f"    n_sequeunce_fields: _int = {len(field_names)}",
-                "    n_unnamed_fields: _int = 0",
+                "    def __new__(",
+                "        cls,",
+                f"        sequence: {seq_type},",
+                "    ) -> Self:  # fmt: skip",
+                "        ...",
+                f"    n_fields: Final[_int] = {len(field_names)}",
+                f"    n_sequence_fields: Final[_int] = {len(field_names)}",
+                "    n_unnamed_fields: Final[_int] = 0",
                 "    def __init_subclass__(cls) -> NoReturn: ...  # prohibit subclassing",
                 "",  # add an extra newline
             ]
@@ -1036,15 +1059,19 @@ def returns_structseq_pyi(signature: PythonSignature) -> tuple[str, str] | None:
         structseq_def = "\n".join(structseq_def_lines)
         # Example:
         # structseq_def = (
-        #     "class max(Tuple[Tensor, Tensor]):\n"
+        #     "class max(tuple[Tensor, Tensor]):  # fmt: skip\n"
         #     "    @property\n"
         #     "    def values(self) -> Tensor: ...\n"
         #     "    @property\n"
         #     "    def indices(self) -> Tensor: ...\n"
-        #     "    def __new__(cls, sequence: Tuple[Tensor, Tensor]): ...\n"
-        #     "    n_fields: _int = 2",
-        #     "    n_sequeunce_fields: _int = 2",
-        #     "    n_unnamed_fields: _int = 0",
+        #     "    def __new__(\n"
+        #     "        cls,\n"
+        #     "        sequence: tuple[Tensor, Tensor],\n"
+        #     "    ) -> Self:  # fmt: skip\n"
+        #     "        ...\n"
+        #     "    n_fields: Final[_int] = 2",
+        #     "    n_sequence_fields: Final[_int] = 2",
+        #     "    n_unnamed_fields: Final[_int] = 0",
         #     "    def __init_subclass__(cls) -> NoReturn: ...  # prohibit subclassing",
         # )
         return structseq_name, structseq_def
@@ -1058,7 +1085,7 @@ def returns_str_pyi(signature: PythonSignature) -> str:
 
     python_returns = [return_type_str_pyi(r.type) for r in signature.returns.returns]
     if len(python_returns) > 1:
-        return "Tuple[" + ", ".join(python_returns) + "]"
+        return "tuple[" + ", ".join(python_returns) + "]"
     if len(python_returns) == 1:
         return python_returns[0]
     return "None"
@@ -1230,7 +1257,7 @@ def cpp_dispatch_exprs(
 ) -> tuple[str, ...]:
     cpp_args: Sequence[Binding] = _cpp_signature(f, method=False).arguments()
 
-    exprs: tuple[str, ...] = tuple()
+    exprs: tuple[str, ...] = ()
     if not isinstance(python_signature, PythonSignatureDeprecated):
         # By default the exprs are consistent with the C++ signature.
         exprs = tuple(a.name for a in cpp_args)
@@ -1320,7 +1347,6 @@ def arg_parser_unpack_method(
         elif not has_default_init and default in (
             None,
             "None",
-            "c10::nullopt",
             "::std::nullopt",
             "std::nullopt",
         ):
@@ -1479,11 +1505,11 @@ def dispatch_lambda_exprs(
         inits.append(
             f"""\
 const auto options = TensorOptions()
-    .dtype({arg_parser_outputs['dtype'].expr})
-    .device({arg_parser_outputs['device'].expr})
-    .layout({arg_parser_outputs['layout'].expr})
-    .requires_grad({arg_parser_outputs['requires_grad'].expr})
-    .pinned_memory({arg_parser_outputs['pin_memory'].expr});
+    .dtype({arg_parser_outputs["dtype"].expr})
+    .device({arg_parser_outputs["device"].expr})
+    .layout({arg_parser_outputs["layout"].expr})
+    .requires_grad({arg_parser_outputs["requires_grad"].expr})
+    .pinned_memory({arg_parser_outputs["pin_memory"].expr});
 torch::utils::maybe_initialize_device(options);
 """
         )
@@ -1505,9 +1531,9 @@ torch::utils::maybe_initialize_device(options);
 
             inits.append(
                 f"""\
-check_out_type_matches({arg_parser_outputs['out'].expr}, {arg_parser_outputs['dtype'].expr},
-                       {arg_parser_outputs['dtype'].is_none_expr}, {arg_parser_outputs['layout'].expr},
-                       {arg_parser_outputs['device'].expr}, {arg_parser_outputs['device'].is_none_expr});
+check_out_type_matches({arg_parser_outputs["out"].expr}, {arg_parser_outputs["dtype"].expr},
+                       {arg_parser_outputs["dtype"].is_none_expr}, {arg_parser_outputs["layout"].expr},
+                       {arg_parser_outputs["device"].expr}, {arg_parser_outputs["device"].is_none_expr});
 """
             )
         # we'll set requires_grad on outgoing tensor

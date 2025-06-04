@@ -251,20 +251,12 @@ Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction, bool
 }
 
 Tensor binary_cross_entropy_cpu(const Tensor& input, const Tensor& target, const std::optional<Tensor>& weight_opt, int64_t reduction) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
     Tensor loss = at::empty_like(input);
     return at::native::binary_cross_entropy_out_cpu(
-        input, target, weight, reduction, loss);
+        input, target, weight_opt, reduction, loss);
 }
 
 Tensor& binary_cross_entropy_out_cpu(const Tensor& input, const Tensor& target, const std::optional<Tensor>& weight_opt, int64_t reduction, Tensor& loss) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
     Tensor loss_squeezed = at::squeeze(loss);
 
     auto iter = TensorIteratorConfig()
@@ -297,8 +289,8 @@ Tensor& binary_cross_entropy_out_cpu(const Tensor& input, const Tensor& target, 
               });
         });
 
-    if (weight.defined()) {
-        loss.mul_(weight);
+    if (weight_opt.has_value() && weight_opt->defined()) {
+        loss.mul_(*weight_opt);
     }
     if (reduction != at::Reduction::None) {
         Tensor loss_reduced = apply_loss_reduction(loss, reduction);
@@ -308,20 +300,12 @@ Tensor& binary_cross_entropy_out_cpu(const Tensor& input, const Tensor& target, 
 }
 
 Tensor binary_cross_entropy_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor& target, const std::optional<Tensor>& weight_opt, int64_t reduction) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
     Tensor grad_input = at::empty_like(input);
     return at::native::binary_cross_entropy_backward_out_cpu(
-        grad, input, target, weight, reduction, grad_input);
+        grad, input, target, weight_opt, reduction, grad_input);
 }
 
 Tensor& binary_cross_entropy_backward_out_cpu(const Tensor& grad, const Tensor& input, const Tensor& target, const std::optional<Tensor>& weight_opt, int64_t reduction, Tensor& grad_input) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
     Tensor grad_input_squeezed = at::squeeze(grad_input);
 
     auto iter = TensorIteratorConfig()
@@ -350,8 +334,8 @@ Tensor& binary_cross_entropy_backward_out_cpu(const Tensor& grad, const Tensor& 
               });
         });
 
-    if (weight.defined()) {
-        grad_input.mul_(weight);
+    if (weight_opt.has_value() && weight_opt->defined()) {
+        grad_input.mul_(*weight_opt);
     }
     if (reduction == at::Reduction::Mean) {
         grad_input.div_(input.numel());
@@ -360,23 +344,17 @@ Tensor& binary_cross_entropy_backward_out_cpu(const Tensor& grad, const Tensor& 
 }
 
 Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& target, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& pos_weight_opt, int64_t reduction) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  c10::MaybeOwned<Tensor> pos_weight_maybe_owned = at::borrow_from_optional_tensor(pos_weight_opt);
-  const Tensor& pos_weight = *pos_weight_maybe_owned;
-
   auto log_sigmoid_input = at::log_sigmoid(input);
-  if (pos_weight.defined()) {
+  if (pos_weight_opt.has_value() && pos_weight_opt->defined()) {
       // pos_weight need to be broadcasted, thus mul(target) is not inplace.
-      auto log_weight = (pos_weight - 1).mul(target).add_(1);
+      auto log_weight = (*pos_weight_opt- 1).mul(target).add_(1);
       log_sigmoid_input.mul_(log_weight);
   }
 
   Tensor loss = (1 - target).mul_(input).sub_(log_sigmoid_input);
 
-  if (weight.defined()) {
-      loss.mul_(weight);
+  if (weight_opt.has_value() && weight_opt->defined()) {
+      loss.mul_(*weight_opt);
   }
 
   return apply_loss_reduction(loss, reduction);

@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from collections import OrderedDict
 
+
 """
 This file contains helper functions that implement experimental functionality
 for named tensors in python. All of these are experimental, unstable, and

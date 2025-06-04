@@ -3,7 +3,6 @@
 import sys
 
 import torch
-
 from torch.distributed._shard import sharded_tensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
@@ -12,6 +11,7 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
 )
+
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -40,8 +40,6 @@ class TestShardedTensorNNInit(ShardedTensorTestBase):
             ],
         )
         h, w = 8, 2
-        expected_h = 2
-        expected_device = torch.device(f"cuda:{self.rank}")
         a, b = 10, 20
 
         seed = 1234
@@ -75,8 +73,6 @@ class TestShardedTensorNNInit(ShardedTensorTestBase):
             ],
         )
         h, w = 8, 2
-        expected_h = 2
-        expected_device = torch.device(f"cuda:{self.rank}")
         mean, std = 10, 5
 
         seed = 1234
@@ -110,8 +106,6 @@ class TestShardedTensorNNInit(ShardedTensorTestBase):
             ],
         )
         h, w = 8, 2
-        expected_h = 2
-        expected_device = torch.device(f"cuda:{self.rank}")
         a, mode, nonlinearity = 0, "fan_in", "leaky_relu"
 
         seed = 1234

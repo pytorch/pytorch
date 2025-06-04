@@ -1,6 +1,9 @@
 # mypy: allow-untyped-defs
-import torch
 from warnings import warn
+
+import torch
+
+
 __all__ = [
     "ReLU6",
     "Hardswish",
@@ -9,8 +12,9 @@ __all__ = [
     "Sigmoid",
     "Softmax",
     "MultiheadAttention",
-    "PReLU"
+    "PReLU",
 ]
+
 
 class ReLU6(torch.nn.ReLU):
     r"""Applies the element-wise function:
@@ -36,6 +40,7 @@ class ReLU6(torch.nn.ReLU):
         >>> input = torch.quantize_per_tensor(input, 1.0, 0, dtype=torch.qint32)
         >>> output = m(input)
     """
+
     def __init__(self, inplace=False):
         super().__init__(inplace)
         self.inplace = inplace
@@ -44,11 +49,12 @@ class ReLU6(torch.nn.ReLU):
         return torch.ops.quantized.relu6(input, self.inplace)
 
     def _get_name(self):
-        return 'QuantizedReLU6'
+        return "QuantizedReLU6"
 
     @staticmethod
     def from_float(mod, use_precomputed_fake_quant=False):
         return ReLU6(mod.inplace)
+
 
 class Hardswish(torch.nn.Hardswish):
     r"""This is the quantized version of :class:`~torch.nn.Hardswish`.
@@ -57,17 +63,18 @@ class Hardswish(torch.nn.Hardswish):
         scale: quantization scale of the output tensor
         zero_point: quantization zero point of the output tensor
     """
+
     def __init__(self, scale, zero_point, device=None, dtype=None):
-        factory_kwargs = {'device': device, 'dtype': dtype}
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
-        self.register_buffer('scale', torch.tensor(scale, **factory_kwargs))
-        self.register_buffer('zero_point', torch.tensor(zero_point, **factory_kwargs))
+        self.register_buffer("scale", torch.tensor(scale, **factory_kwargs))
+        self.register_buffer("zero_point", torch.tensor(zero_point, **factory_kwargs))
 
     def forward(self, input):
         return torch.ops.quantized.hardswish(input, self.scale, self.zero_point)
 
     def _get_name(self):
-        return 'QuantizedHardswish'
+        return "QuantizedHardswish"
 
     @staticmethod
     def from_float(mod, use_precomputed_fake_quant=False):
@@ -78,6 +85,7 @@ class Hardswish(torch.nn.Hardswish):
     def from_reference(cls, mod, scale, zero_point):
         return cls(float(scale), int(zero_point))
 
+
 class ELU(torch.nn.ELU):
     r"""This is the quantized equivalent of :class:`~torch.nn.ELU`.
 
@@ -86,17 +94,19 @@ class ELU(torch.nn.ELU):
         zero_point: quantization zero point of the output tensor
         alpha: the alpha constant
     """
-    def __init__(self, scale, zero_point, alpha=1.):
+
+    def __init__(self, scale, zero_point, alpha=1.0):
         super().__init__(alpha)
         self.scale = scale
         self.zero_point = zero_point
 
     def forward(self, input):
         return torch.ao.nn.quantized.functional.elu(
-            input, self.scale, self.zero_point, self.alpha)
+            input, self.scale, self.zero_point, self.alpha
+        )
 
     def _get_name(self):
-        return 'QuantizedELU'
+        return "QuantizedELU"
 
     @staticmethod
     def from_float(mod, use_precomputed_fake_quant=False):
@@ -107,6 +117,7 @@ class ELU(torch.nn.ELU):
     def from_reference(cls, mod, scale, zero_point):
         return cls(float(scale), int(zero_point), mod.alpha)
 
+
 class LeakyReLU(torch.nn.LeakyReLU):
     r"""This is the quantized equivalent of :class:`~torch.nn.LeakyReLU`.
 
@@ -115,19 +126,28 @@ class LeakyReLU(torch.nn.LeakyReLU):
         zero_point: quantization zero point of the output tensor
         negative_slope: Controls the angle of the negative slope. Default: 1e-2
     """
-    def __init__(self, scale: float, zero_point: int, negative_slope: float = 1e-2,
-                 inplace: bool = False, device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+
+    def __init__(
+        self,
+        scale: float,
+        zero_point: int,
+        negative_slope: float = 1e-2,
+        inplace: bool = False,
+        device=None,
+        dtype=None,
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__(negative_slope, inplace)
-        self.register_buffer('scale', torch.tensor(scale, **factory_kwargs))
-        self.register_buffer('zero_point', torch.tensor(zero_point, **factory_kwargs))
+        self.register_buffer("scale", torch.tensor(scale, **factory_kwargs))
+        self.register_buffer("zero_point", torch.tensor(zero_point, **factory_kwargs))
 
     def forward(self, input):
         return torch.ops.quantized.leaky_relu(
-            input, self.negative_slope, self.inplace, self.scale, self.zero_point)
+            input, self.negative_slope, self.inplace, self.scale, self.zero_point
+        )
 
     def _get_name(self):
-        return 'QuantizedLeakyReLU'
+        return "QuantizedLeakyReLU"
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
@@ -137,6 +157,7 @@ class LeakyReLU(torch.nn.LeakyReLU):
     @classmethod
     def from_reference(cls, mod, scale, zero_point):
         return cls(float(scale), int(zero_point), mod.negative_slope, mod.inplace)
+
 
 class Sigmoid(torch.nn.Sigmoid):
     r"""This is the quantized equivalent of :class:`~torch.nn.Sigmoid`.
@@ -152,12 +173,18 @@ class Sigmoid(torch.nn.Sigmoid):
         self.output_zero_point = output_zero_point
 
     def forward(self, input):
-        return torch.ops.quantized.sigmoid(input, self.output_scale, self.output_zero_point)
+        return torch.ops.quantized.sigmoid(
+            input, self.output_scale, self.output_zero_point
+        )
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
-        output_scale, output_zero_point = mod.activation_post_process.calculate_qparams()
+        (
+            output_scale,
+            output_zero_point,
+        ) = mod.activation_post_process.calculate_qparams()
         return cls(float(output_scale), int(output_zero_point))
+
 
 class Softmax(torch.nn.Softmax):
     r"""This is the quantized version of :class:`~torch.nn.Softmax`.
@@ -167,6 +194,7 @@ class Softmax(torch.nn.Softmax):
         scale: quantization scale of the output tensor
         zero_point: quantization zero point of the output tensor
     """
+
     def __init__(self, dim=None, scale=1.0, zero_point=0):
         super().__init__()
         self.dim = dim
@@ -180,12 +208,12 @@ class Softmax(torch.nn.Softmax):
             # Note: adding the mypy ignore on _get_softmax_dim seems less bad
             # than making `_get_softmax_dim` an official API.
             dim = torch.nn.functional._get_softmax_dim(  # type: ignore[attr-defined]
-                "softmax", input.dim(), stacklevel)
-        return torch.ops.quantized.softmax(
-            input, dim, self.scale, self.zero_point)
+                "softmax", input.dim(), stacklevel
+            )
+        return torch.ops.quantized.softmax(input, dim, self.scale, self.zero_point)
 
     def _get_name(self):
-        return 'QuantizedSoftmax'
+        return "QuantizedSoftmax"
 
     @staticmethod
     def from_float(mod, use_precomputed_fake_quant=False):
@@ -207,16 +235,21 @@ class MultiheadAttention(torch.ao.nn.quantizable.MultiheadAttention):
     def from_float(cls, other):
         # The whole flow is float -> observed -> quantized
         # This class does observed -> quantized only
-        raise NotImplementedError("It looks like you are trying to convert a "
-                                  "non-observed MHA module. Please, see "
-                                  "the examples on quantizable MHAs.")
+        raise NotImplementedError(
+            "It looks like you are trying to convert a "
+            "non-observed MHA module. Please, see "
+            "the examples on quantizable MHAs."
+        )
 
     @classmethod
     def from_observed(cls, other):
-        converted = torch.ao.quantization.convert(other, mapping=None,
-                                                  inplace=False,
-                                                  remove_qconfig=True,
-                                                  convert_custom_config_dict=None)
+        converted = torch.ao.quantization.convert(
+            other,
+            mapping=None,
+            inplace=False,
+            remove_qconfig=True,
+            convert_custom_config_dict=None,
+        )
         converted.__class__ = cls
         # Remove the parameters for the bias_k and bias_v to quantize them
         # TODO: This is a potential source of accuracy drop.
@@ -224,23 +257,24 @@ class MultiheadAttention(torch.ao.nn.quantizable.MultiheadAttention):
         #       element, which might lose the precision in the bias_k
         #       and the bias_v (which are cat'ed with k/v being first).
         if converted.bias_k is not None:
-            bias_k = converted._parameters.pop('bias_k')
-            sc, zp = torch._choose_qparams_per_tensor(bias_k,
-                                                      reduce_range=False)
+            bias_k = converted._parameters.pop("bias_k")
+            sc, zp = torch._choose_qparams_per_tensor(bias_k, reduce_range=False)
             bias_k = torch.quantize_per_tensor(bias_k, sc, zp, torch.quint8)
-            setattr(converted, 'bias_k', bias_k)  # noqa: B010
+            setattr(converted, "bias_k", bias_k)  # noqa: B010
 
         if converted.bias_v is not None:
-            bias_v = converted._parameters.pop('bias_v')
-            sc, zp = torch._choose_qparams_per_tensor(bias_k,  # type: ignore[possibly-undefined]
-                                                      reduce_range=False)
+            bias_v = converted._parameters.pop("bias_v")
+            sc, zp = torch._choose_qparams_per_tensor(
+                bias_k, reduce_range=False  # type: ignore[possibly-undefined]
+            )
             bias_v = torch.quantize_per_tensor(bias_v, sc, zp, torch.quint8)
-            setattr(converted, 'bias_v', bias_v)  # noqa: B010
+            setattr(converted, "bias_v", bias_v)  # noqa: B010
 
         del converted.in_proj_weight
         del converted.in_proj_bias
 
         return converted
+
 
 class PReLU(torch.nn.Module):
     r"""This is the quantized equivalent of :class:`~torch.nn.PReLU`.
@@ -250,8 +284,10 @@ class PReLU(torch.nn.Module):
         zero_point: quantization zero point of the output tensor
         num_parameters: number of parameters: 1, or the number of channels at input. Default: 1
     """
-    def __init__(self, output_scale: float, output_zero_point: int,
-                 num_parameters: int = 1) -> None:
+
+    def __init__(
+        self, output_scale: float, output_zero_point: int, num_parameters: int = 1
+    ) -> None:
         super().__init__()
         self.num_parameters = num_parameters
         self.scale = output_scale
@@ -264,10 +300,12 @@ class PReLU(torch.nn.Module):
         self.weight = w
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        return torch.ops.quantized.prelu(input, self.weight, self.scale, self.zero_point)
+        return torch.ops.quantized.prelu(
+            input, self.weight, self.scale, self.zero_point
+        )
 
     def _get_name(self):
-        return 'QuantizedPReLU'
+        return "QuantizedPReLU"
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
@@ -282,7 +320,8 @@ class PReLU(torch.nn.Module):
             )
         wt_scale, wt_zp = observer.calculate_qparams()
         qweight = torch.quantize_per_tensor(
-            float_wt, float(wt_scale), int(wt_zp), torch.quint8)
+            float_wt, float(wt_scale), int(wt_zp), torch.quint8
+        )
         qprelu.set_weight(qweight)
         return qprelu
 
@@ -298,6 +337,7 @@ class PReLU(torch.nn.Module):
             )
         wt_scale, wt_zp = observer.calculate_qparams()
         qweight = torch.quantize_per_tensor(
-            float_wt, float(wt_scale), int(wt_zp), torch.quint8)
+            float_wt, float(wt_scale), int(wt_zp), torch.quint8
+        )
         qprelu.set_weight(qweight)
         return qprelu

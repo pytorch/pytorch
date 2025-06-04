@@ -2,7 +2,6 @@ import argparse
 import re
 
 from common import download_reports, get_testcases, key, open_test_results, skipped_test
-
 from passrate import compute_pass_rate
 
 
@@ -109,7 +108,7 @@ def failures_histogram(eager_dir, dynamo_dir, verbose=False, format_issues=False
 def as_issue(count, msg, repro, tests):
     tests = "\n".join(tests)
     result = f"""
-{'-' * 50}
+{"-" * 50}
 {count} Dynamo test are failing with \"{msg}\".
 
 ## Repro

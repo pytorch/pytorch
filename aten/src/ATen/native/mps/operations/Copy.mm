@@ -48,7 +48,7 @@ static void copy_cast_mps(at::Tensor& dst,
 
   @autoreleasepool {
     const bool needs_conj = src.is_conj() != dst.is_conj();
-    string key = "copy_cast_mps" + getTensorsStringKey({src, dst}, true, /*exclude_shape*/ true) + ":" +
+    std::string key = "copy_cast_mps" + getTensorsStringKey({src, dst}, true, /*exclude_shape*/ true) + ":" +
         std::to_string(needs_conj);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, srcDType);
@@ -89,12 +89,12 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
   Tensor dst = dst_;
   Tensor src = src_;
 
-  if (!dst_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) {
+  if (dst_.strides() != src_.strides()) {
     dst = at::empty_like(dst_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   auto storage_byte_offset = src_.storage_offset() * src_.itemsize();
-  if (!src_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) {
+  if (dst_.strides() != src_.strides()) {
     Tensor emptyShell = Tensor();
     src = gatherViewTensor(src_, emptyShell);
     if (src.has_storage()) {
@@ -131,7 +131,7 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
         needsBlit = false;
         maybeCastedSourceBuffer = destBuffer;
       } else if (src.element_size() < dst.element_size()) {
-        maybeCastedSource = at::empty(dst.sizes(), dst.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+        maybeCastedSource = at::empty(dst.sizes(), dst.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
         maybeCastedSourceBuffer = getMTLBufferStorage(maybeCastedSource);
       }
 
@@ -294,7 +294,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
       }
     } else if (dst_byte_offset) {
       auto maybeCastedSource =
-          at::empty(dst_.sizes(), dst_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+          at::empty(dst_.sizes(), dst_.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
       auto maybeCastedSourceBuffer = getMTLBufferStorage(maybeCastedSource);
       copy_cast_mps(maybeCastedSource, src, maybeCastedSourceBuffer, sourceBuffer);
 

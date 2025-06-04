@@ -4,9 +4,9 @@ from collections import OrderedDict
 
 import torch
 from torch import nn
-
 from torch.jit.annotations import Dict
 from torch.nn import functional as F
+
 
 try:
     from scipy.optimize import linear_sum_assignment
@@ -401,8 +401,6 @@ class FCN(_SimpleSegmentationModel):
             the backbone and returns a dense prediction.
         aux_classifier (nn.Module, optional): auxiliary classifier used during training
     """
-
-    pass
 
 
 class FCNHead(nn.Sequential):
@@ -886,9 +884,9 @@ class HungarianMatcher(nn.Module):
         self.cost_class = cost_class
         self.cost_bbox = cost_bbox
         self.cost_giou = cost_giou
-        assert (
-            cost_class != 0 or cost_bbox != 0 or cost_giou != 0
-        ), "all costs cant be 0"
+        assert cost_class != 0 or cost_bbox != 0 or cost_giou != 0, (
+            "all costs cant be 0"
+        )
 
     @torch.no_grad()
     def forward(self, outputs, targets):

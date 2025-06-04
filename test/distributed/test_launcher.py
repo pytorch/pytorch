@@ -8,6 +8,7 @@ import torch.distributed as dist
 import torch.distributed.launch as launch
 from torch.distributed.elastic.utils import get_socket_with_port
 
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -34,7 +35,6 @@ class TestDistributedLaunch(TestCase):
     def test_launch_user_script(self):
         nnodes = 1
         nproc_per_node = 4
-        world_size = nnodes * nproc_per_node
         sock = get_socket_with_port()
         with closing(sock):
             master_port = sock.getsockname()[1]

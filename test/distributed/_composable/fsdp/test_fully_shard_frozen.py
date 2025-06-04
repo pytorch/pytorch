@@ -3,22 +3,22 @@
 import copy
 import functools
 import itertools
-
-from typing import List, Union
+from typing import Union
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._composable import checkpoint, replicate
-from torch.distributed._composable.fsdp import fully_shard
-from torch.distributed._composable.fsdp._fsdp_param_group import (
+from torch.distributed.fsdp import fully_shard
+from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
     RegisterPostBackwardFunction,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     FSDPTest,
+    get_devtype,
     MLP,
     patch_reduce_scatter,
     patch_register_post_backward_hook_backward,
@@ -27,10 +27,13 @@ from torch.testing._internal.common_fsdp import (
 from torch.testing._internal.common_utils import run_tests
 
 
+device_type = torch.device(get_devtype())
+
+
 class TestFullyShardFrozen(FSDPTest):
     @property
     def world_size(self) -> int:
-        return min(4, torch.cuda.device_count())
+        return min(4, torch.get_device_module(device_type).device_count())
 
     @skip_if_lt_x_gpu(2)
     def test_train_mixed_requires_grad_per_group(self):
@@ -67,7 +70,7 @@ class TestFullyShardFrozen(FSDPTest):
                 if "bias" not in param_name:
                     param.requires_grad_(False)
         ref_model = replicate(
-            copy.deepcopy(model).cuda(),
+            copy.deepcopy(model).to(device_type),
             device_ids=[self.rank],
             find_unused_parameters=freeze_after_init,
         )
@@ -111,13 +114,13 @@ class TestFullyShardFrozen(FSDPTest):
             return orig_backward(*args, **kwargs)
 
         torch.manual_seed(42 + self.rank + 1)
-        device = torch.device("cuda")
+        device = device_type
         with patch_reduce_scatter(
             reduce_scatter
         ), patch_register_post_backward_hook_backward(backward_with_count):
             for iter_idx in range(10):
                 inp = torch.randn((8, lin_dim), device=device)
-                losses: List[torch.Tensor] = []
+                losses: list[torch.Tensor] = []
                 for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                     _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
                     losses.append(_model(inp).sum())
@@ -152,12 +155,12 @@ class TestFullyShardFrozen(FSDPTest):
     ):
         torch.manual_seed(42)
         num_linears, lin_dim = (6, 32)
-        modules: List[nn.Module] = []
+        modules: list[nn.Module] = []
         for _ in range(num_linears):
             modules += [nn.Linear(lin_dim, lin_dim), nn.ReLU()]
         model = nn.Sequential(*modules)
         ref_model = replicate(
-            copy.deepcopy(model).cuda(),
+            copy.deepcopy(model).to(device_type),
             device_ids=[self.rank],
             find_unused_parameters=True,
         )
@@ -185,10 +188,10 @@ class TestFullyShardFrozen(FSDPTest):
         _set_requires_grad(ref_model, False)
         num_iters, no_grad_iter_idx = (3, 1)
         torch.manual_seed(42 + self.rank)
-        inp = torch.randn((8, lin_dim), device="cuda")
+        inp = torch.randn((8, lin_dim), device=device_type)
         with patch_register_post_backward_hook_backward(backward_with_count):
             for iter_idx in range(num_iters):
-                losses: List[torch.Tensor] = []
+                losses: list[torch.Tensor] = []
                 for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                     # Unfreeze the parameters on the last step to emulate some
                     # kinds of fine-tuning
@@ -243,7 +246,9 @@ class TestFullyShardFrozen(FSDPTest):
 
         torch.manual_seed(42)
         model = MultiForwardModule(torch.device("cpu"))
-        ref_model = replicate(copy.deepcopy(model).cuda(), device_ids=[self.rank])
+        ref_model = replicate(
+            copy.deepcopy(model).to(device_type), device_ids=[self.rank]
+        )
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         for module in model.modules():
             if isinstance(module, nn.Linear):
@@ -251,8 +256,8 @@ class TestFullyShardFrozen(FSDPTest):
         fully_shard(model, reshard_after_forward=reshard_after_forward)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         for iter_idx in range(10):
-            inp = torch.randn((8, 5), device="cuda")
-            losses: List[torch.Tensor] = []
+            inp = torch.randn((8, 5), device=device_type)
+            losses: list[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
                 losses.append(_model(inp).sum())

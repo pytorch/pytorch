@@ -3,16 +3,15 @@
 #include <ATen/CPUFunctions.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/mps/MPSAllocator.h>
-#include <ATen/ops/_pin_memory_native.h>
-#include <ATen/ops/is_pinned_native.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/Storage.h>
+#include <c10/util/env.h>
 
 #include <iostream>
 
 namespace at::mps {
 
-C10_DEFINE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
+C10_DEFINE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback)
 
 namespace HeapAllocator {
 
@@ -23,19 +22,19 @@ void MPSHeapAllocatorImpl::init_allocator() {
   init_buffer_pools();
 
   // debug verbosity flags (see DebugVerbosity enum)
-  static const char* verbosity_str = getenv("PYTORCH_DEBUG_MPS_ALLOCATOR");
-  m_debug_verbosity = verbosity_str ? strtol(verbosity_str, nullptr, 0) : DebugVerbosity::SILENT;
+  static const auto verbosity_str = c10::utils::get_env("PYTORCH_DEBUG_MPS_ALLOCATOR");
+  m_debug_verbosity = verbosity_str ? strtol(verbosity_str->c_str(), nullptr, 0) : DebugVerbosity::SILENT;
 
-  static const char* high_watermark_ratio_str = getenv("PYTORCH_MPS_HIGH_WATERMARK_RATIO");
+  static const auto high_watermark_ratio_str = c10::utils::get_env("PYTORCH_MPS_HIGH_WATERMARK_RATIO");
   const double high_watermark_ratio =
-      high_watermark_ratio_str ? strtod(high_watermark_ratio_str, nullptr) : default_high_watermark_ratio;
+      high_watermark_ratio_str ? strtod(high_watermark_ratio_str->c_str(), nullptr) : default_high_watermark_ratio;
   setHighWatermarkRatio(high_watermark_ratio);
 
   const double default_low_watermark_ratio =
       m_device.hasUnifiedMemory ? default_low_watermark_ratio_unified : default_low_watermark_ratio_discrete;
-  static const char* low_watermark_ratio_str = getenv("PYTORCH_MPS_LOW_WATERMARK_RATIO");
+  static const auto low_watermark_ratio_str = c10::utils::get_env("PYTORCH_MPS_LOW_WATERMARK_RATIO");
   const double low_watermark_ratio =
-      low_watermark_ratio_str ? strtod(low_watermark_ratio_str, nullptr) : default_low_watermark_ratio;
+      low_watermark_ratio_str ? strtod(low_watermark_ratio_str->c_str(), nullptr) : default_low_watermark_ratio;
   setLowWatermarkRatio(low_watermark_ratio);
 }
 
@@ -640,7 +639,7 @@ IntArrayRef MPSHeapAllocatorImpl::getBufferShape(const void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
-  if (buffer_block && buffer_block->shape.size() > 0) {
+  if (buffer_block && !buffer_block->shape.empty()) {
     return IntArrayRef{buffer_block->shape};
   }
   return IntArrayRef();
@@ -701,19 +700,7 @@ ssize_t MPSHeapAllocatorImpl::getLowWatermarkValue() {
 }
 
 inline std::string MPSHeapAllocatorImpl::format_size(uint64_t size) const {
-  std::ostringstream os;
-  os.precision(2);
-  os << std::fixed;
-  if (size <= 1024UL) {
-    os << size << " bytes";
-  } else if (size <= 1048576UL) {
-    os << ((float)size / 1024.0) << " KB";
-  } else if (size <= 1073741824UL) {
-    os << ((float)size / 1048576.0) << " MB";
-  } else {
-    os << ((float)size / 1073741824.0) << " GB";
-  }
-  return os.str();
+  return c10::CachingAllocator::format_size(size);
 }
 
 } // namespace HeapAllocator
@@ -860,31 +847,12 @@ IMPSAllocator* getIMPSAllocator(bool sharedAllocator) {
   return nullptr;
 }
 
-} // namespace at::mps
-
-namespace at::native {
-
 // torch.is_pinned() implementation
 // Pinned memory will be helpful on Apple Silicon Macs with Unified memory as we
 // will be able to use SharedStorageMode for MTLBuffer allocations. This will
 // avoid extra copies on DataLoading operations.
-bool is_pinned_mps(const Tensor& self, c10::optional<Device> device) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!device.has_value() || device->is_mps());
-  return at::mps::_getSharedAllocator().isSharedBuffer(self.storage().data());
+bool isMPSPinnedPtr(const void* data) {
+  return at::mps::_getSharedAllocator().isSharedBuffer(data);
 }
 
-// torch.pin_memory() implementation
-Tensor _pin_memory_mps(const Tensor& self, c10::optional<Device> device) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!device.has_value() || device->is_mps());
-  auto* shared_allocator = at::mps::getIMPSAllocator(true);
-  TORCH_CHECK(shared_allocator, "unable to pin memory on a non-unified memory device");
-
-  const size_t storage_size = at::detail::computeStorageNbytes(self.sizes(), self.strides(), self.dtype().itemsize());
-  std::cerr << "Pinning memory of size " << storage_size / 1024UL << " KB\n";
-  auto storage = Storage(Storage::use_byte_size_t(), storage_size, shared_allocator, false);
-  auto tensor = at::cpu::empty({0}, self.options()).set_(storage, 0, self.sizes(), self.strides());
-  tensor.copy_(self);
-  return tensor;
-}
-
-} // namespace at::native
+} // namespace at::mps

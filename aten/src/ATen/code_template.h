@@ -19,6 +19,10 @@ namespace at::jit {
 struct TemplateEnv {
   TemplateEnv() = default;
   TemplateEnv(TemplateEnv& parent) : parent(&parent) {}
+  TemplateEnv(TemplateEnv&&) = delete;
+  TemplateEnv& operator=(const TemplateEnv& parent) = delete;
+  TemplateEnv& operator=(TemplateEnv&& parent) = delete;
+  ~TemplateEnv() = default;
 
   using string_list = std::vector<std::string>;
 
@@ -109,10 +113,8 @@ struct CodeTemplate {
       char c = template_text[pos];
       if (c == '$') {
         std::stringstream kss;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        bool comma_before;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        bool comma_after;
+        bool comma_before = false;
+        bool comma_after = false;
         size_t new_pos = parseKey(pos, kss, comma_before, comma_after);
         std::string k = kss.str();
         bool is_string = env.keyIsString(k);
@@ -206,7 +208,7 @@ struct CodeTemplate {
   // or trailing newlines. It's the responsibility of the calling function
   // to indent correctly in the context.
   void emitIndent(std::ostream& out, size_t indent) const {
-    for (C10_UNUSED const auto i : c10::irange(indent)) {
+    for ([[maybe_unused]] const auto i : c10::irange(indent)) {
       out << " ";
     }
   }

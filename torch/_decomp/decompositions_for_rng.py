@@ -1,16 +1,18 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 from collections import defaultdict
-from typing import Callable, Dict
+from typing import Callable
 
 import torch
 import torch._decomp as decomp
 from torch._decomp import get_decompositions
 from torch._ops import OpOverload
 
+
 aten = torch.ops.aten
 
-rng_decompositions: Dict[str, Dict[OpOverload, Callable]] = defaultdict(dict)
+rng_decompositions: dict[str, dict[OpOverload, Callable]] = defaultdict(dict)
 
 
 def register_rng_decomposition(aten_op):
@@ -69,7 +71,7 @@ class PhiloxState:
     trace time.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.reset()
 
     def reset(self):

@@ -23,7 +23,7 @@ suitable for coordinate-wise optimization algorithms like Adam::
 
     loc = torch.zeros(100, requires_grad=True)
     unconstrained = torch.zeros(100, requires_grad=True)
-    scale = transform_to(Normal.arg_constraints['scale'])(unconstrained)
+    scale = transform_to(Normal.arg_constraints["scale"])(unconstrained)
     loss = -Normal(loc, scale).log_prob(data).sum()
 
 The ``biject_to()`` registry is useful for Hamiltonian Monte Carlo, where
@@ -66,9 +66,9 @@ You can create your own registry by creating a new :class:`ConstraintRegistry`
 object.
 """
 
-import numbers
-
 from torch.distributions import constraints, transforms
+from torch.types import _Number
+
 
 __all__ = [
     "ConstraintRegistry",
@@ -126,9 +126,9 @@ class ConstraintRegistry:
         Looks up a transform to constrained space, given a constraint object.
         Usage::
 
-            constraint = Normal.arg_constraints['scale']
+            constraint = Normal.arg_constraints["scale"]
             scale = transform_to(constraint)(torch.zeros(1))  # constrained
-            u = transform_to(constraint).inv(scale)           # unconstrained
+            u = transform_to(constraint).inv(scale)  # unconstrained
 
         Args:
             constraint (:class:`~torch.distributions.constraints.Constraint`):
@@ -220,12 +220,10 @@ def _transform_to_less_than(constraint):
 def _transform_to_interval(constraint):
     # Handle the special case of the unit interval.
     lower_is_0 = (
-        isinstance(constraint.lower_bound, numbers.Number)
-        and constraint.lower_bound == 0
+        isinstance(constraint.lower_bound, _Number) and constraint.lower_bound == 0
     )
     upper_is_1 = (
-        isinstance(constraint.upper_bound, numbers.Number)
-        and constraint.upper_bound == 1
+        isinstance(constraint.upper_bound, _Number) and constraint.upper_bound == 1
     )
     if lower_is_0 and upper_is_1:
         return transforms.SigmoidTransform()

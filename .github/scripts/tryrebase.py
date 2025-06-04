@@ -5,11 +5,13 @@ import os
 import re
 import subprocess
 import sys
-from typing import Any, Generator
+from collections.abc import Generator
+from typing import Any
 
 from github_utils import gh_post_pr_comment as gh_post_comment
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from trymerge import GitHubPR
+
 
 SAME_SHA_ERROR = (
     "\n```\nAborting rebase because rebasing the branch resulted in the same sha as the target branch.\n"
@@ -130,17 +132,17 @@ def rebase_ghstack_onto(
         # The contents of a successful push result should look like:
         # Summary of changes (ghstack 0.6.0)
 
-        #  - Updated https://github.com/clee2000/random-testing/pull/2
-        #  - Updated https://github.com/clee2000/random-testing/pull/1
+        #  - Updated https://github.com/clee2000/random-testing-public/pull/2
+        #  - Updated https://github.com/clee2000/random-testing-public/pull/1
 
         # Facebook employees can import your changes by running
         # (on a Facebook machine):
 
-        #     ghimport -s https://github.com/clee2000/random-testing/pull/2
+        #     ghimport -s https://github.com/clee2000/random-testing-public/pull/2
 
         # If you want to work on this diff stack on another machine:
 
-        #     ghstack checkout https://github.com/clee2000/random-testing/pull/2
+        #     ghstack checkout https://github.com/clee2000/random-testing-public/pull/2
         org, project = repo.gh_owner_and_name()
         for line in push_result.splitlines():
             if "Updated" in line:

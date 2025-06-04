@@ -4,8 +4,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <memory>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Run TensorExpressions-based fuser.
 // If add_composed_op is true, creates a single operation that
@@ -70,6 +69,9 @@ TORCH_API bool isSupported(Node* node);
 /// @return Reference of the custome operator set
 ///
 TORCH_API OperatorSet& getCustomOperatorSet();
+
 } // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
+
+C10_DECLARE_bool(torch_jit_disable_cat);
+C10_DECLARE_bool(torch_jit_enable_dynamic_shape_fusion);

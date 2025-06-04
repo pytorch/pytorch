@@ -12,7 +12,7 @@ class PyProcessGroup : public ProcessGroup {
  public:
   // PyWork is a pybind11 trampoline class to allow a Python
   // class to inherit from torch.distributed.Work
-  class PyWork : public Work {
+  class TORCH_PYTHON_API PyWork : public Work {
    public:
     PyWork() = default;
 
@@ -43,22 +43,119 @@ class PyProcessGroup : public ProcessGroup {
     }
   };
 
+#define WORK_OVERRIDE(cname, name, ...)                                 \
+  do {                                                                  \
+    pybind11::gil_scoped_acquire gil;                                   \
+    pybind11::function override =                                       \
+        pybind11::get_override(static_cast<const cname*>(this), #name); \
+    if (override) {                                                     \
+      auto o = override(__VA_ARGS__);                                   \
+      return c10::make_intrusive<PyWorkHolder>(o);                      \
+    }                                                                   \
+    return cname::name(__VA_ARGS__);                                    \
+  } while (false)
+
+  // This class is used to wrap a PyWork trampoline with it's corresponding
+  // Python object to prevent the Python object from being garbage collected.
+  class PyWorkHolder : public Work {
+   public:
+    PyWorkHolder(const c10::intrusive_ptr<Work>& work, py::object pyWork)
+        : work_(work), pyWork_(std::move(pyWork)) {}
+
+    PyWorkHolder(py::object pyWork)
+        : work_(pyWork.cast<c10::intrusive_ptr<Work>>()),
+          pyWork_(std::move(pyWork)) {}
+
+    ~PyWorkHolder() override {
+      // GIL must be held when freeing python objects.
+      py::gil_scoped_acquire gil;
+      pyWork_ = py::object();
+    }
+
+    bool wait(std::chrono::milliseconds timeout = kNoTimeout) override {
+      return work_->wait(timeout);
+    }
+
+    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
+      return work_->getFuture();
+    }
+
+   private:
+    c10::intrusive_ptr<Work> work_;
+    py::object pyWork_;
+  };
+
   using ProcessGroup::ProcessGroup;
 
   const std::string getBackendName() const override {
-    PYBIND11_OVERRIDE_PURE(
+    PYBIND11_OVERRIDE(
         std::string, /* Return type */
         ProcessGroup, /* Parent class */
         getBackendName, /* Name of function in C++ */
     );
   }
 
+  int getRank() const override {
+    PYBIND11_OVERRIDE(
+        int, /* Return type */
+        ProcessGroup, /* Parent class */
+        getRank, /* Name of function in C++ */
+    );
+  }
+
+  int getSize() const override {
+    PYBIND11_OVERRIDE(
+        int, /* Return type */
+        ProcessGroup, /* Parent class */
+        getSize, /* Name of function in C++ */
+    );
+  }
+
+  void abort() override {
+    PYBIND11_OVERRIDE(
+        void, /* Return type */
+        ProcessGroup, /* Parent class */
+        abort, /* Name of function in C++ */
+    );
+  }
+
+  const std::string& getGroupName() const override {
+    PYBIND11_OVERRIDE(
+        const std::string&, /* Return type */
+        ProcessGroup, /* Parent class */
+        getGroupName, /* Name of function in C++ */
+    );
+  }
+
+  void setGroupName(const std::string& group_name) override {
+    PYBIND11_OVERRIDE(
+        void, /* Return type */
+        ProcessGroup, /* Parent class */
+        setGroupName, /* Name of function in C++ */
+        group_name);
+  }
+
+  const std::string& getGroupDesc() const override {
+    PYBIND11_OVERRIDE(
+        const std::string&, /* Return type */
+        ProcessGroup, /* Parent class */
+        getGroupDesc, /* Name of function in C++ */
+    );
+  }
+
+  void setGroupDesc(const std::string& group_desc) override {
+    PYBIND11_OVERRIDE(
+        void, /* Return type */
+        ProcessGroup, /* Parent class */
+        setGroupDesc, /* Name of function in C++ */
+        group_desc);
+  }
+
   c10::intrusive_ptr<Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override {
-    PYBIND11_OVERRIDE(
-        c10::intrusive_ptr<Work>, /* Return type */
+    WORK_OVERRIDE(
         ProcessGroup, /* Parent class */
         allgather, /* Name of function in C++ */
         outputTensors,
@@ -70,8 +167,7 @@ class PyProcessGroup : public ProcessGroup {
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override {
-    PYBIND11_OVERRIDE(
-        c10::intrusive_ptr<Work>, /* Return type */
+    WORK_OVERRIDE(
         ProcessGroup, /* Parent class */
         allgather_into_tensor_coalesced, /* Name of function in C++ */
         outputTensors,
@@ -82,8 +178,8 @@ class PyProcessGroup : public ProcessGroup {
   c10::intrusive_ptr<Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override {
-    PYBIND11_OVERRIDE(
-        c10::intrusive_ptr<Work>, /* Return type */
+    WORK_OVERRIDE(
+        // py::object, /* Return type */
         ProcessGroup, /* Parent class */
         allreduce, /* Name of function in C++ */
         tensors,
@@ -94,8 +190,7 @@ class PyProcessGroup : public ProcessGroup {
       std::vector<at::Tensor>& tensors,
       const AllreduceCoalescedOptions& opts =
           AllreduceCoalescedOptions()) override {
-    PYBIND11_OVERRIDE(
-        c10::intrusive_ptr<Work>, /* Return type */
+    WORK_OVERRIDE(
         ProcessGroup, /* Parent class */
         allreduce_coalesced, /* Name of function in C++ */
         tensors,
@@ -108,8 +203,7 @@ class PyProcessGroup : public ProcessGroup {
       std::vector<int64_t>& outputSplitSizes,
       std::vector<int64_t>& inputSplitSizes,
       const AllToAllOptions& opts = AllToAllOptions()) override {
-    PYBIND11_OVERRIDE(
-        c10::intrusive_ptr<Work>, /* Return type */
+    WORK_OVERRIDE(
         ProcessGroup, /* Parent class */
         alltoall_base, /* Name of function in C++ */
         outputBuffer,
@@ -121,8 +215,7 @@ class PyProcessGroup : public ProcessGroup {
 
   c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override {
-    PYBIND11_OVERRIDE(
-        c10::intrusive_ptr<Work>, /* Return type */
+    WORK_OVERRIDE(
         ProcessGroup, /* Parent class */
         barrier, /* Name of function in C++ */
         opts);
@@ -131,8 +224,7 @@ class PyProcessGroup : public ProcessGroup {
   c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override {
-    PYBIND11_OVERRIDE(
-        c10::intrusive_ptr<Work>, /* Return type */
+    WORK_OVERRIDE(
         ProcessGroup, /* Parent class */
         broadcast, /* Name of function in C++ */
         tensors,
@@ -143,8 +235,7 @@ class PyProcessGroup : public ProcessGroup {
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
-    PYBIND11_OVERRIDE(
-        c10::intrusive_ptr<Work>, /* Return type */
+    WORK_OVERRIDE(
         ProcessGroup, /* Parent class */
         reduce_scatter, /* Name of function in C++ */
         outputTensors,
@@ -156,8 +247,7 @@ class PyProcessGroup : public ProcessGroup {
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
-    PYBIND11_OVERRIDE(
-        c10::intrusive_ptr<Work>, /* Return type */
+    WORK_OVERRIDE(
         ProcessGroup, /* Parent class */
         reduce_scatter_tensor_coalesced, /* Name of function in C++ */
         outputTensors,
@@ -169,8 +259,7 @@ class PyProcessGroup : public ProcessGroup {
       std::vector<at::Tensor>& tensors,
       int dstRank,
       int tag) override {
-    PYBIND11_OVERRIDE(
-        c10::intrusive_ptr<Work>, /* Return type */
+    WORK_OVERRIDE(
         ProcessGroup, /* Parent class */
         send, /* Name of function in C++ */
         tensors,
@@ -182,8 +271,7 @@ class PyProcessGroup : public ProcessGroup {
       std::vector<at::Tensor>& tensors,
       int srcRank,
       int tag) override {
-    PYBIND11_OVERRIDE(
-        c10::intrusive_ptr<Work>, /* Return type */
+    WORK_OVERRIDE(
         ProcessGroup, /* Parent class */
         recv, /* Name of function in C++ */
         tensors,
@@ -197,7 +285,9 @@ class TORCH_PYTHON_API PythonOnCompletionHook {
   // Wraps a py::object hook and acquires Python GIL in dtor before
   // destructing the hook object.
   PythonOnCompletionHook(py::object hook) : hook_(std::move(hook)) {}
+  PythonOnCompletionHook(const PythonOnCompletionHook&) = default;
 
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~PythonOnCompletionHook() {
     py::gil_scoped_acquire ag;
     hook_.dec_ref();

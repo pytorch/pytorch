@@ -5,8 +5,7 @@
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // Used for a segmented reduction
 struct ModeUnsignedBoolPair {
@@ -194,9 +193,7 @@ __device__ inline void bitonicSortKeys(
 // dimension as the innermost dim, such that we can get the particular slice for
 // a Tensor via its linear block dimension * the slice size.
 template <typename T, unsigned int Power2Size>
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11070
 __launch_bounds__(1024, 1)
-#endif
 __global__ void compute_mode(
     const T* input,
     at::cuda::detail::TensorInfo<T, unsigned int> values,
@@ -431,5 +428,4 @@ __global__ void compute_mode(
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

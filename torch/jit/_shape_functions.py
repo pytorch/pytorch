@@ -2,6 +2,7 @@
 import math
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+
 number = Union[int, float]
 # flake8: noqa
 
@@ -23,11 +24,11 @@ number = Union[int, float]
 import torch
 
 
-def broadcast(a: List[int], b: List[int]):
+def broadcast(a: list[int], b: list[int]):
     dimsA = len(a)
     dimsB = len(b)
     ndim = max(dimsA, dimsB)
-    expandedSizes: List[int] = []
+    expandedSizes: list[int] = []
 
     for i in range(ndim):
         offset = ndim - 1 - i
@@ -47,21 +48,21 @@ def broadcast(a: List[int], b: List[int]):
     return expandedSizes
 
 
-def broadcast_three(a: List[int], b: List[int], c: List[int]):
+def broadcast_three(a: list[int], b: list[int], c: list[int]):
     return broadcast(broadcast(a, b), c)
 
 
-def broadcast_one_three(a: List[int], b: Any, c: List[int]):
+def broadcast_one_three(a: list[int], b: Any, c: list[int]):
     return broadcast(a, c)
 
 
-def adaptive_avg_pool2d(self: List[int], out: List[int]):
+def adaptive_avg_pool2d(self: list[int], out: list[int]):
     assert len(out) == 2
     assert len(self) == 3 or len(self) == 4
     for i in range(1, len(self)):
         assert self[i] != 0
 
-    shape: List[int] = []
+    shape: list[int] = []
     for i in range(0, len(self) - 2):
         shape.append(self[i])
     for elem in out:
@@ -69,18 +70,18 @@ def adaptive_avg_pool2d(self: List[int], out: List[int]):
     return shape
 
 
-def _copy(self: List[int]):
-    out: List[int] = []
+def _copy(self: list[int]):
+    out: list[int] = []
     for elem in self:
         out.append(elem)
     return out
 
 
-def unary(self: List[int]):
+def unary(self: list[int]):
     return _copy(self)
 
 
-def broadcast_inplace(a: List[int], b: List[int]):
+def broadcast_inplace(a: list[int], b: list[int]):
     dimsA = len(a)
     dimsB = len(b)
     if dimsB > dimsA:
@@ -100,13 +101,13 @@ def broadcast_inplace(a: List[int], b: List[int]):
     return _copy(a)
 
 
-def expand(self: List[int], sizes: List[int]):
+def expand(self: list[int], sizes: list[int]):
     assert len(sizes) >= len(self)
     ndim = len(sizes)
     tensor_dim = len(self)
     if ndim == 0:
         return _copy(sizes)
-    out: List[int] = []
+    out: list[int] = []
     for i in range(ndim):
         offset = ndim - 1 - i
         dim = tensor_dim - 1 - offset
@@ -122,11 +123,11 @@ def expand(self: List[int], sizes: List[int]):
     return out
 
 
-def expand_one_unused(self: List[int], sizes: List[int], inp0: Any):
+def expand_one_unused(self: list[int], sizes: list[int], inp0: Any):
     return expand(self, sizes)
 
 
-def infer_size_impl(shape: List[int], numel: int) -> List[int]:
+def infer_size_impl(shape: list[int], numel: int) -> list[int]:
     newsize = 1
     infer_dim: Optional[int] = None
     for dim in range(len(shape)):
@@ -149,27 +150,27 @@ def infer_size_impl(shape: List[int], numel: int) -> List[int]:
     return out
 
 
-def numel(sizes: List[int]):
+def numel(sizes: list[int]):
     numel = 1
     for elem in sizes:
         numel *= elem
     return numel
 
 
-def view(self: List[int], sizes: List[int]):
+def view(self: list[int], sizes: list[int]):
     return infer_size_impl(sizes, numel(self))
 
 
-def view_one_unused(self: List[int], sizes: List[int], *, implicit: bool = False):
+def view_one_unused(self: list[int], sizes: list[int], *, implicit: bool = False):
     return view(self, sizes)
 
 
 def sum_mean_dim(
-    self: List[int], opt_dims: Optional[List[int]], keep_dim: bool, dt: Any
+    self: list[int], opt_dims: Optional[list[int]], keep_dim: bool, dt: Any
 ):
-    out: List[int] = []
+    out: list[int] = []
     if opt_dims is None or len(opt_dims) == 0:
-        dims: List[int] = list(range(len(self)))
+        dims: list[int] = list(range(len(self)))
     else:
         dims = opt_dims
 
@@ -186,7 +187,7 @@ def sum_mean_dim(
     return out
 
 
-def max_dim(self: List[int], dim: int, keep_dim: bool):
+def max_dim(self: list[int], dim: int, keep_dim: bool):
     out = sum_mean_dim(self, [dim], keep_dim, None)
     return out, out
 
@@ -238,7 +239,7 @@ def pooling_output_shape(
 
 
 def pool2d_shape_check(
-    input: List[int],
+    input: list[int],
     kH: int,
     kW: int,
     dH: int,
@@ -254,7 +255,6 @@ def pool2d_shape_check(
     outputWidth: int,
 ):
     ndim = len(input)
-    nOutputPlane = nInputPlane
 
     assert kW > 0 and kH > 0
     assert dW > 0 and dH > 0
@@ -273,11 +273,11 @@ def pool2d_shape_check(
 
 
 def max_pool2d(
-    input: List[int],
-    kernel_size: List[int],
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    input: list[int],
+    kernel_size: list[int],
+    stride: list[int],
+    padding: list[int],
+    dilation: list[int],
     ceil_mode: bool,
 ):
     assert (
@@ -343,11 +343,11 @@ def max_pool2d(
 
 
 def max_pool2d_with_indices(
-    input: List[int],
-    kernel_size: List[int],
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    input: list[int],
+    kernel_size: list[int],
+    stride: list[int],
+    padding: list[int],
+    dilation: list[int],
     ceil_mode: bool,
 ):
     out = max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode)
@@ -355,11 +355,11 @@ def max_pool2d_with_indices(
 
 
 def upsample_nearest2d(
-    input: List[int],
-    output_size: Optional[List[int]],
-    scale_factors: Optional[List[float]],
+    input: list[int],
+    output_size: Optional[list[int]],
+    scale_factors: Optional[list[float]],
 ):
-    out: List[int] = []
+    out: list[int] = []
     out.append(input[0])
     out.append(input[1])
 
@@ -385,7 +385,7 @@ def upsample_nearest2d(
     return out
 
 
-def mm(self: List[int], mat2: List[int]):
+def mm(self: list[int], mat2: list[int]):
     assert len(self) == 2, "self must be a matrix"
     assert len(mat2) == 2, "mat2 must be a matrix"
 
@@ -393,37 +393,37 @@ def mm(self: List[int], mat2: List[int]):
     return [self[0], mat2[1]]
 
 
-def dot(self: List[int], tensor: List[int]):
+def dot(self: list[int], tensor: list[int]):
     assert len(self) == 1 and len(tensor) == 1
     assert self[0] == tensor[0]
-    out: List[int] = []
+    out: list[int] = []
     return out
 
 
-def mv(self: List[int], vec: List[int]):
+def mv(self: list[int], vec: list[int]):
     assert len(self) == 2 and len(vec) == 1
     assert self[1] == vec[0]
     # TODO: return self
     return [self[0]]
 
 
-def unsqueeze(li: List[int], dim: int):
+def unsqueeze(li: list[int], dim: int):
     dim = maybe_wrap_dim(dim, len(li) + 1)
     out = _copy(li)
     out.insert(dim, 1)
     return out
 
 
-def squeeze_nodim(li: List[int]):
-    out: List[int] = []
+def squeeze_nodim(li: list[int]):
+    out: list[int] = []
     for i in range(len(li)):
         if li[i] != 1:
             out.append(li[i])
     return out
 
 
-def squeeze(li: List[int], dim: int):
-    out: List[int] = []
+def squeeze(li: list[int], dim: int):
+    out: list[int] = []
     wrapped_dim = maybe_wrap_dim(dim, len(li))
     for i in range(len(li)):
         if i == wrapped_dim:
@@ -434,13 +434,13 @@ def squeeze(li: List[int], dim: int):
     return out
 
 
-def squeeze_dims(li: List[int], dims: List[int]):
+def squeeze_dims(li: list[int], dims: list[int]):
     if len(dims) == 0:
         return li
     wrapped_dims = _copy(dims)
     for i in range(len(dims)):
         wrapped_dims[i] = maybe_wrap_dim(wrapped_dims[i], len(li))
-    result: List[int] = []
+    result: list[int] = []
     for i in range(len(li)):
         if li[i] == 1:
             if i not in wrapped_dims:
@@ -450,12 +450,12 @@ def squeeze_dims(li: List[int], dims: List[int]):
     return result
 
 
-def index_select(self: List[int], dim: int, index: List[int]):
+def index_select(self: list[int], dim: int, index: list[int]):
     dim = maybe_wrap_dim(dim, len(self))
     numel = multiply_integers(index)
     assert len(index) <= 1
     assert dim == 0 or dim < len(self)
-    result_size: List[int] = []
+    result_size: list[int] = []
     for i in range(len(self)):
         if dim == i:
             result_size.append(numel)
@@ -465,8 +465,8 @@ def index_select(self: List[int], dim: int, index: List[int]):
 
 
 def embedding(
-    weight: List[int],
-    indices: List[int],
+    weight: list[int],
+    indices: list[int],
     padding_idx: int = -1,
     scale_grad_by_freq: bool = False,
     sparse: bool = False,
@@ -484,7 +484,7 @@ def max_int():
 
 
 def slice(
-    self: List[int], dim: int, start: Optional[int], end: Optional[int], step: int
+    self: list[int], dim: int, start: Optional[int], end: Optional[int], step: int
 ):
     ndim = len(self)
     assert ndim != 0
@@ -512,12 +512,12 @@ def slice(
     return out
 
 
-def check_cat_no_zero_dim(tensors: List[List[int]]):
+def check_cat_no_zero_dim(tensors: list[list[int]]):
     for tensor in tensors:
         assert len(tensor) > 0
 
 
-def legacy_cat_wrap_dim(dim: int, tensor_sizes: List[List[int]]):
+def legacy_cat_wrap_dim(dim: int, tensor_sizes: list[list[int]]):
     out_dim: Optional[int] = None
     for size in tensor_sizes:
         if not (len(size) == 1 and size[0] == 0):
@@ -528,12 +528,12 @@ def legacy_cat_wrap_dim(dim: int, tensor_sizes: List[List[int]]):
     return out_dim
 
 
-def should_skip(tensor: List[int]):
+def should_skip(tensor: list[int]):
     return numel(tensor) == 0 and len(tensor) == 1
 
 
 def check_cat_shape_except_dim(
-    first: List[int], second: List[int], dimension: int, index: int
+    first: list[int], second: list[int], dimension: int, index: int
 ):
     first_dims = len(first)
     second_dims = len(second)
@@ -545,11 +545,11 @@ def check_cat_shape_except_dim(
             ), "Sizes of tensors must match except in dimension"
 
 
-def cat(tensors: List[List[int]], dim: int):
+def cat(tensors: list[list[int]], dim: int):
     check_cat_no_zero_dim(tensors)
     dim = legacy_cat_wrap_dim(dim, tensors)
     assert len(tensors) > 0
-    not_skipped_tensor: Optional[List[int]] = None
+    not_skipped_tensor: Optional[list[int]] = None
     for tensor in tensors:
         if not should_skip(tensor):
             not_skipped_tensor = tensor
@@ -569,15 +569,15 @@ def cat(tensors: List[List[int]], dim: int):
     return result_size
 
 
-def stack(tensors: List[List[int]], dim: int):
-    unsqueezed_tensors: List[List[int]] = []
+def stack(tensors: list[list[int]], dim: int):
+    unsqueezed_tensors: list[list[int]] = []
     for tensor in tensors:
         unsqueezed = unsqueeze(tensor, dim)
         unsqueezed_tensors.append(unsqueezed)
     return cat(unsqueezed_tensors, dim)
 
 
-def select(self: List[int], dim: int, index: int):
+def select(self: list[int], dim: int, index: int):
     ndim = len(self)
     assert ndim != 0
     dim = maybe_wrap_dim(dim, ndim)
@@ -585,14 +585,14 @@ def select(self: List[int], dim: int, index: int):
     assert not (index < -size or index >= size)
     if index < 0:
         index += size
-    out: List[int] = []
+    out: list[int] = []
     for i in range(ndim):
         if i != dim:
             out.append(self[i])
     return out
 
 
-def matmul(tensor1: List[int], tensor2: List[int]):
+def matmul(tensor1: list[int], tensor2: list[int]):
     dim_tensor1 = len(tensor1)
     dim_tensor2 = len(tensor2)
     if dim_tensor1 == 1 and dim_tensor2 == 1:
@@ -607,14 +607,12 @@ def matmul(tensor1: List[int], tensor2: List[int]):
         # We are multiplying b1 x n x m1 by x2 x m2 x p (where b1 can be a list);
         # we track m1 vs m2 separately even though they must match for nicer error messages
         n = tensor1[-2] if dim_tensor1 > 1 else 1
-        m1 = tensor1[-1]
-        batch_tensor1: List[int] = []
+        batch_tensor1: list[int] = []
         # TODO: handling of slice
         for i in range(dim_tensor1 - 2):
             batch_tensor1.append(tensor1[i])
-        m2 = tensor2[-1] if dim_tensor2 > 1 else 1
         p = tensor2[-1]
-        batch_tensor2: List[int] = []
+        batch_tensor2: list[int] = []
         # TODO: handling of slice
         for i in range(dim_tensor2 - 2):
             batch_tensor2.append(tensor2[i])
@@ -635,11 +633,11 @@ def matmul(tensor1: List[int], tensor2: List[int]):
         assert False, "both  arguments to matmul need to be at least 1D"
 
 
-def t(self: List[int]):
+def t(self: list[int]):
     assert len(self) <= 2
     self_len = len(self)
     if self_len == 0:
-        out: List[int] = []
+        out: list[int] = []
         return out
     elif self_len == 1:
         return [self[0]]
@@ -647,13 +645,13 @@ def t(self: List[int]):
         return [self[1], self[0]]
 
 
-def transpose(self: List[int], dim0: int, dim1: int):
+def transpose(self: list[int], dim0: int, dim1: int):
     ndims = len(self)
     dim0 = maybe_wrap_dim(dim0, ndims)
     dim1 = maybe_wrap_dim(dim1, ndims)
     if dim0 == dim1:
         return _copy(self)
-    out: List[int] = []
+    out: list[int] = []
     for i in range(ndims):
         if i == dim0:
             out.append(self[dim1])
@@ -664,18 +662,18 @@ def transpose(self: List[int], dim0: int, dim1: int):
     return out
 
 
-def linear(input: List[int], weight: List[int], bias: Optional[List[int]]):
+def linear(input: list[int], weight: list[int], bias: Optional[list[int]]):
     out = matmul(input, t(weight))
     if bias is not None:
         assert broadcast(bias, out) == out
     return out
 
 
-def addmm(self: List[int], mat1: List[int], mat2: List[int], beta: Any, alpha: Any):
+def addmm(self: list[int], mat1: list[int], mat2: list[int], beta: Any, alpha: Any):
     return broadcast(self, mm(mat1, mat2))
 
 
-def check_non_negative(array: List[int]) -> bool:
+def check_non_negative(array: list[int]) -> bool:
     # TODO: look into rewriting with early return and getting loop unrolling to fire
     non_negative = False
     for val in array:
@@ -685,12 +683,12 @@ def check_non_negative(array: List[int]) -> bool:
 
 
 def check_shape_forward(
-    input: List[int],
-    weight_sizes: List[int],
-    bias: Optional[List[int]],
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    input: list[int],
+    weight_sizes: list[int],
+    bias: Optional[list[int]],
+    stride: list[int],
+    padding: list[int],
+    dilation: list[int],
     groups: int,
 ):
     k = len(input)
@@ -716,12 +714,12 @@ def check_shape_forward(
 
 
 def conv_output_size(
-    input_size: List[int],
-    weight_size: List[int],
-    bias: Optional[List[int]],
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    input_size: list[int],
+    weight_size: list[int],
+    bias: Optional[list[int]],
+    stride: list[int],
+    padding: list[int],
+    dilation: list[int],
     groups: int,
 ):
     check_shape_forward(
@@ -730,7 +728,7 @@ def conv_output_size(
 
     has_dilation = len(dilation) > 0
     dim = len(input_size)
-    output_size: List[int] = []
+    output_size: list[int] = []
     input_batch_size_dim = 0
     weight_output_channels_dim = 0
     output_size.append(input_size[input_batch_size_dim])
@@ -746,12 +744,12 @@ def conv_output_size(
 
 
 def conv1d(
-    input: List[int],
-    weight: List[int],
-    bias: Optional[List[int]],
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    input: list[int],
+    weight: list[int],
+    bias: Optional[list[int]],
+    stride: list[int],
+    padding: list[int],
+    dilation: list[int],
     groups: int,
 ):
     assert len(weight) == 3
@@ -760,12 +758,12 @@ def conv1d(
 
 
 def conv2d(
-    input: List[int],
-    weight: List[int],
-    bias: Optional[List[int]],
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    input: list[int],
+    weight: list[int],
+    bias: Optional[list[int]],
+    stride: list[int],
+    padding: list[int],
+    dilation: list[int],
     groups: int,
 ):
     assert len(weight) == 4
@@ -774,25 +772,25 @@ def conv2d(
 
 
 def conv_backwards(
-    grad_output: List[int],
-    input: List[int],
-    weight: List[int],
-    biases: Optional[List[int]],
+    grad_output: list[int],
+    input: list[int],
+    weight: list[int],
+    biases: Optional[list[int]],
 ):
     # Bias gradient is always generated regardess of if biases is supplied
     return _copy(input), _copy(weight), [grad_output[1]]
 
 
 def conv_transpose2d_input(
-    input: List[int],
-    weight: List[int],
-    bias: Optional[List[int]] = None,
-    stride: Optional[List[int]] = None,
-    padding: Optional[List[int]] = None,
-    output_padding: Optional[List[int]] = None,
+    input: list[int],
+    weight: list[int],
+    bias: Optional[list[int]] = None,
+    stride: Optional[list[int]] = None,
+    padding: Optional[list[int]] = None,
+    output_padding: Optional[list[int]] = None,
     groups: int = 1,
-    dilation: Optional[List[int]] = None,
-) -> List[int]:
+    dilation: Optional[list[int]] = None,
+) -> list[int]:
     if stride is None:
         stride = [1, 1]
     if padding is None:
@@ -803,7 +801,7 @@ def conv_transpose2d_input(
         dilation = [1, 1]
     has_dilation = len(dilation) > 0
     dim = len(input)
-    output_size: List[int] = []
+    output_size: list[int] = []
     input_batch_size_dim = 0
     weight_output_channels_dim = 1
     output_size.append(input[input_batch_size_dim])
@@ -823,20 +821,20 @@ def conv_transpose2d_input(
 
 
 def conv_forwards(
-    input: List[int],
-    weight: List[int],
-    bias: Optional[List[int]],
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    input: list[int],
+    weight: list[int],
+    bias: Optional[list[int]],
+    stride: list[int],
+    padding: list[int],
+    dilation: list[int],
     transposed: bool,
-    output_padding: List[int],
+    output_padding: list[int],
     groups: int,
-) -> List[int]:
+) -> list[int]:
     has_dilation = len(dilation) > 0
     has_output_padding = len(output_padding) > 0
     dim = len(input)
-    output_size: List[int] = []
+    output_size: list[int] = []
     input_batch_size_dim = 0
     weight_output_channels_dim = 1 if transposed else 0
     output_size.append(input[input_batch_size_dim])
@@ -866,20 +864,20 @@ def conv_forwards(
 
 
 def _conv_forwards(
-    input: List[int],
-    weight: List[int],
-    bias: Optional[List[int]],
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    input: list[int],
+    weight: list[int],
+    bias: Optional[list[int]],
+    stride: list[int],
+    padding: list[int],
+    dilation: list[int],
     transposed: bool,
-    output_padding: List[int],
+    output_padding: list[int],
     groups: int,
     benchmark: bool,
     deterministic: bool,
     cudnn_enabled: bool,
     allow_tf32: bool,
-) -> List[int]:
+) -> list[int]:
     return conv_forwards(
         input,
         weight,
@@ -894,29 +892,29 @@ def _conv_forwards(
 
 
 def batch_norm(
-    input: List[int],
-    weight: Optional[List[int]],
-    bias: Optional[List[int]],
-    running_mean: Optional[List[int]],
-    running_var: Optional[List[int]],
+    input: list[int],
+    weight: Optional[list[int]],
+    bias: Optional[list[int]],
+    running_mean: Optional[list[int]],
+    running_var: Optional[list[int]],
     training: bool,
     momentum: float,
     eps: float,
     cudnn_enabled: bool,
 ):
-    out: List[int] = []
+    out: list[int] = []
     for elem in input:
         out.append(elem)
     return out
 
 
 def conv3d(
-    input: List[int],
-    weight: List[int],
-    bias: Optional[List[int]],
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    input: list[int],
+    weight: list[int],
+    bias: Optional[list[int]],
+    stride: list[int],
+    padding: list[int],
+    dilation: list[int],
     groups: int,
 ):
     assert len(weight) == 5
@@ -937,11 +935,11 @@ def maybe_wrap_dim(dim: int, dim_post_expr: int, wrap_scalar: bool = True):
 
 
 def zero_dim_tensor(input: Any):
-    out: List[int] = []
+    out: list[int] = []
     return out
 
 
-def multiply_integers(li: List[int]):
+def multiply_integers(li: list[int]):
     out = 1
     for elem in li:
         out = out * elem
@@ -972,11 +970,11 @@ def arange_start_step(
     return [int(math.ceil((end - start) / step))]
 
 
-def permute(input: List[int], dims: List[int]):
+def permute(input: list[int], dims: list[int]):
     assert len(input) == len(dims)
     ndim = len(dims)
-    seen_dims: List[int] = []
-    newSizes: List[int] = []
+    seen_dims: list[int] = []
+    newSizes: list[int] = []
     for i in range(ndim):
         dim = maybe_wrap_dim(dims[i], ndim)
         seen_dims.append(dim)
@@ -987,12 +985,12 @@ def permute(input: List[int], dims: List[int]):
     return newSizes
 
 
-def movedim(self: List[int], source: List[int], destination: List[int]) -> List[int]:
+def movedim(self: list[int], source: list[int], destination: list[int]) -> list[int]:
     self_dim = len(self)
     if self_dim <= 1:
         return self
-    normalized_src: List[int] = []
-    normalized_dst: List[int] = []
+    normalized_src: list[int] = []
+    normalized_dst: list[int] = []
     for i in range(len(source)):
         normalized_src.append(maybe_wrap_dim(source[i], self_dim))
         normalized_dst.append(maybe_wrap_dim(destination[i], self_dim))
@@ -1005,8 +1003,8 @@ def movedim(self: List[int], source: List[int], destination: List[int]) -> List[
         src_dims[normalized_src[i]] = -1
         dst_dims[normalized_dst[i]] = -1
 
-    source_dims: List[int] = []
-    destination_dims: List[int] = []
+    source_dims: list[int] = []
+    destination_dims: list[int] = []
     for ele in src_dims:
         if ele != -1:
             source_dims.append(ele)
@@ -1020,7 +1018,7 @@ def movedim(self: List[int], source: List[int], destination: List[int]) -> List[
     return permute(self, order)
 
 
-def flatten(input: List[int], start_dim: int, end_dim: int):
+def flatten(input: list[int], start_dim: int, end_dim: int):
     start_dim = maybe_wrap_dim(start_dim, len(input))
     end_dim = maybe_wrap_dim(end_dim, len(input))
     assert start_dim <= end_dim
@@ -1028,7 +1026,7 @@ def flatten(input: List[int], start_dim: int, end_dim: int):
         return [1]
     if start_dim == end_dim:
         # TODO: return self
-        out: List[int] = []
+        out: list[int] = []
         for elem in input:
             out.append(elem)
         return out
@@ -1037,7 +1035,7 @@ def flatten(input: List[int], start_dim: int, end_dim: int):
         slice_numel *= input[i]
     # TODO: use slicing when slice optimization has landed
     # slice_numel = multiply_integers(input[start_dim:end_dim - start_dim + 1])
-    shape: List[int] = []
+    shape: list[int] = []
     for i in range(start_dim):
         shape.append(input[i])
     shape.append(slice_numel)
@@ -1046,17 +1044,17 @@ def flatten(input: List[int], start_dim: int, end_dim: int):
     return shape
 
 
-def nonzero_lower_bound(input: List[int]):
+def nonzero_lower_bound(input: list[int]):
     return [0, len(input)]
 
 
-def nonzero_upper_bound(input: List[int]):
+def nonzero_upper_bound(input: list[int]):
     return [numel(input), len(input)]
 
 
-def _reduce_along_dim(self: List[int], dim: int, keepdim: bool):
+def _reduce_along_dim(self: list[int], dim: int, keepdim: bool):
     dim = maybe_wrap_dim(dim, len(self))
-    out: List[int] = []
+    out: list[int] = []
     for i, self_dim in enumerate(self):
         if i == dim:
             if keepdim:
@@ -1067,14 +1065,14 @@ def _reduce_along_dim(self: List[int], dim: int, keepdim: bool):
 
 
 def argmax(
-    self: List[int], dim: Optional[int] = None, keepdim: bool = False
-) -> List[int]:
+    self: list[int], dim: Optional[int] = None, keepdim: bool = False
+) -> list[int]:
     if dim is None:
         return []
     return _reduce_along_dim(self, dim, keepdim)
 
 
-def bmm(self: List[int], mat2: List[int]) -> List[int]:
+def bmm(self: list[int], mat2: list[int]) -> list[int]:
     assert len(self) == 3, "bmm only supports 3D tensors"
     assert len(mat2) == 3, "bmm only supports 3D tensors"
     assert self[0] == mat2[0], "mismatching batch dimension"
@@ -1082,13 +1080,13 @@ def bmm(self: List[int], mat2: List[int]) -> List[int]:
     return [self[0], self[1], mat2[2]]
 
 
-def _shape_as_tensor(self: List[int]) -> List[int]:
+def _shape_as_tensor(self: list[int]) -> list[int]:
     return [len(self)]
 
 
-def topk(self: List[int], k: int, dim: int = -1) -> Tuple[List[int], List[int]]:
+def topk(self: list[int], k: int, dim: int = -1) -> tuple[list[int], list[int]]:
     if len(self) == 0:
-        result: List[int] = []
+        result: list[int] = []
     else:
         assert (
             k <= self[dim]
@@ -1099,8 +1097,8 @@ def topk(self: List[int], k: int, dim: int = -1) -> Tuple[List[int], List[int]]:
 
 
 def nll_loss_forward(
-    self: List[int], target: List[int], weight: Optional[List[int]], reduction: int
-) -> Tuple[List[int], List[int]]:
+    self: list[int], target: list[int], weight: Optional[list[int]], reduction: int
+) -> tuple[list[int], list[int]]:
     # This is taken shamelessly from the meta function in LossNLL.cpp
     self_dim = len(self)
     target_dim = len(target)
@@ -1109,7 +1107,7 @@ def nll_loss_forward(
     no_batch_dim = self_dim == 1 and target_dim == 0
     assert no_batch_dim or (self[0] == target[0])
     n_classes = self[-1]
-    scalar_shape: List[int] = []
+    scalar_shape: list[int] = []
     assert weight is None or (len(weight) == 1 and weight[0] == n_classes)
     if reduction == 0 and self_dim == 2:
         reduction_shape = [self[0]]
@@ -1119,9 +1117,9 @@ def nll_loss_forward(
 
 
 def native_layer_norm(
-    input: List[int], normalized_shape: List[int]
-) -> Tuple[List[int], List[int], List[int]]:
-    reduction_shape: List[int] = []
+    input: list[int], normalized_shape: list[int]
+) -> tuple[list[int], list[int], list[int]]:
+    reduction_shape: list[int] = []
     num_unreduced_dimensions = len(input) - len(normalized_shape)
     assert num_unreduced_dimensions >= 0
     for i in range(num_unreduced_dimensions):
@@ -1132,13 +1130,13 @@ def native_layer_norm(
 
 
 def native_batch_norm(
-    input: List[int],
-    weight: Optional[List[int]],
-    bias: Optional[List[int]],
-    running_mean: Optional[List[int]],
-    running_var: Optional[List[int]],
+    input: list[int],
+    weight: Optional[list[int]],
+    bias: Optional[list[int]],
+    running_mean: Optional[list[int]],
+    running_var: Optional[list[int]],
     training: bool,
-) -> Tuple[List[int], List[int], List[int]]:
+) -> tuple[list[int], list[int], list[int]]:
     if training:
         _size = [input[1]]
     else:
@@ -1147,24 +1145,24 @@ def native_batch_norm(
 
 
 def _batch_norm_with_update(
-    input: List[int],
-    weight: Optional[List[int]],
-    bias: Optional[List[int]],
-    running_mean: Optional[List[int]],
-    running_var: Optional[List[int]],
-) -> Tuple[List[int], List[int], List[int], List[int]]:
+    input: list[int],
+    weight: Optional[list[int]],
+    bias: Optional[list[int]],
+    running_mean: Optional[list[int]],
+    running_var: Optional[list[int]],
+) -> tuple[list[int], list[int], list[int], list[int]]:
     _size = [input[1]]
     return _copy(input), _size, _size, [0]
 
 
 def cross_entropy_loss(
-    self: List[int],
-    target: List[int],
-    weight: Optional[List[int]] = None,
+    self: list[int],
+    target: list[int],
+    weight: Optional[list[int]] = None,
     reduction: int = 1,
     ignore_index: int = -100,
     label_smoothing: float = 0.0,
-) -> List[int]:
+) -> list[int]:
     result_shape = nll_loss_forward(self, target, weight, reduction)[0]
     return result_shape
 
@@ -1189,9 +1187,9 @@ def index_Tensor(self: List[int], indices: List[Optional[List[int]]]) -> List[in
 """
 
 ScriptFn = torch._C.ScriptFunction
-shape_compute_graph_mapping: Dict[str, ScriptFn] = {}
-bounded_compute_graph_mapping: Dict[str, Tuple[ScriptFn, ScriptFn]] = {}
-script_func_map: Dict[Callable, ScriptFn] = {}
+shape_compute_graph_mapping: dict[str, ScriptFn] = {}
+bounded_compute_graph_mapping: dict[str, tuple[ScriptFn, ScriptFn]] = {}
+script_func_map: dict[Callable, ScriptFn] = {}
 
 
 def process_func(func: Callable):

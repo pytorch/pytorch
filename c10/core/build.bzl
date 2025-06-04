@@ -80,6 +80,7 @@ def define_targets(rules):
         deps = [
             ":ScalarType",
             "//third_party/cpuinfo",
+            "//:torch_standalone_headers",
             "//c10/macros",
             "//c10/util:TypeCast",
             "//c10/util:base",
@@ -88,6 +89,22 @@ def define_targets(rules):
         # This library uses flags and registration. Do not let the
         # linker remove them.
         alwayslink = True,
+    )
+
+    rules.cc_library(
+        name = "base_headers",
+        srcs = [],
+        hdrs = rules.glob(
+            [
+                "*.h",
+                "impl/*.h",
+            ],
+            exclude = [
+                "CPUAllocator.h",
+                "impl/alloc_cpu.h",
+            ],
+        ),
+        visibility = ["//visibility:public"],
     )
 
     rules.filegroup(
@@ -101,5 +118,5 @@ def define_targets(rules):
                 "alignment.h",
             ],
         ),
-        visibility = ["//c10:__pkg__"],
+        visibility = ["//visibility:public"],
     )

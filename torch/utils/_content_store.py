@@ -34,14 +34,12 @@ import hashlib
 import os.path
 import struct
 from collections import defaultdict
-from typing import Dict, Optional, Set
+from typing import Optional
 
 import torch
 import torch._prims as prims
 import torch._utils
 import torch.nn.functional as F
-from torch._C import default_generator
-
 from torch.multiprocessing.reductions import StorageWeakRef
 
 
@@ -106,17 +104,19 @@ def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) ->
         buf = (ctypes.c_byte * cpu_storage.nbytes()).from_address(
             cpu_storage.data_ptr()
         )
-        sha1 = hashlib.sha1()
+        sha1 = hashlib.sha1(usedforsecurity=False)
         sha1.update(buf)
         return sha1.hexdigest()
 
     # TODO: factor this into a random utility
     if device_type == "cpu":
-        generator = default_generator
+        generator = torch._C.default_generator
     elif device_type == "cuda":
-        import torch.cuda
-
         generator = torch.cuda.default_generators[storage.device.index]
+    elif device_type == "mps":
+        generator = torch.mps._get_default_mps_generator()
+    elif device_type == "xpu":
+        generator = torch.xpu.default_generators[storage.device.index]
     else:
         raise AssertionError(f"unhandled device type {device_type}")
     state = generator.get_state()
@@ -148,7 +148,7 @@ class ContentStoreWriter:
     #     name
     def __init__(self, loc: str, stable_hash: bool = False) -> None:
         self.loc: str = loc
-        self.seen_storage_hashes: Set[str] = set()
+        self.seen_storage_hashes: set[str] = set()
         self.stable_hash = stable_hash
 
     # TODO: offer some sort of non-blocking API to speed things up
@@ -194,7 +194,7 @@ class ContentStoreReader:
     def __init__(self, loc: str, *, cache=True) -> None:
         self.loc = loc
         self.storage_cache: Optional[
-            Dict[Optional[torch.device], Dict[str, StorageWeakRef]]
+            dict[Optional[torch.device], dict[str, StorageWeakRef]]
         ] = None
         if cache:
             self.storage_cache = defaultdict(dict)

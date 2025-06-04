@@ -25,7 +25,11 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db, SampleInput
 from torch.testing._internal.common_modules import module_db, modules
-from torch.testing._internal.common_nn import module_tests, new_module_tests, TestBase
+from torch.testing._internal.common_nn import (
+    get_new_module_tests,
+    module_tests,
+    TestBase,
+)
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
     make_tensor,
@@ -893,7 +897,7 @@ class TestExpandedWeightModule(TestCase):
 
     def test_per_sample_api_compute_batch_size(self):
         class CustomModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(5, 5)
 
@@ -926,7 +930,7 @@ class TestExpandedWeightModule(TestCase):
             elem2: torch.Tensor
 
         class CustomModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(5, 5)
 
@@ -1011,7 +1015,7 @@ def filter_supported_tests(t):
 # TODO: Once all of these use ModuleInfo, replace with ModuleInfo tests
 # These currently use the legacy nn tests
 supported_tests = [
-    t for t in module_tests + new_module_tests if filter_supported_tests(t)
+    t for t in module_tests + get_new_module_tests() if filter_supported_tests(t)
 ]
 for test_param in supported_tests:
     if "constructor" not in test_param:

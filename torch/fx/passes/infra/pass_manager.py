@@ -1,19 +1,21 @@
 # mypy: allow-untyped-defs
 import inspect
 import logging
-from queue import Queue
 from functools import wraps
-from typing import Callable, Dict, List
+from queue import Queue
+from typing import Callable
 
 import torch.nn as nn
-from torch.fx.graph_module import GraphModule
 from torch.fx._compatibility import compatibility
+from torch.fx.graph_module import GraphModule
 from torch.fx.passes.infra.pass_base import PassResult
+
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
 
-__all__ = ['pass_result_wrapper', 'this_before_that_pass_constraint', 'PassManager']
+__all__ = ["pass_result_wrapper", "this_before_that_pass_constraint", "PassManager"]
+
 
 @compatibility(is_backward_compatible=False)
 def pass_result_wrapper(fn: Callable) -> Callable:
@@ -46,8 +48,9 @@ def pass_result_wrapper(fn: Callable) -> Callable:
 
     return wrapped_fn
 
+
 def _validate_pass_schedule_constraint(
-    constraint: Callable[[Callable, Callable], bool], passes: List[Callable]
+    constraint: Callable[[Callable, Callable], bool], passes: list[Callable]
 ) -> None:
     for i, a in enumerate(passes):
         for j, b in enumerate(passes[i + 1 :]):
@@ -59,9 +62,10 @@ def _validate_pass_schedule_constraint(
                 f" list."
             )
 
+
 def _topological_sort_passes(
-    passes: List[Callable], constraints: List[Callable]
-) -> List[Callable]:
+    passes: list[Callable], constraints: list[Callable]
+) -> list[Callable]:
     """
     Args
         passes: Passes that we are ordering
@@ -75,8 +79,8 @@ def _topological_sort_passes(
         return passes
 
     # Contruct a graph mapping nodes to a list of their users
-    graph: Dict[Callable, List[Callable]] = {p : [] for p in passes}
-    indegree_map: Dict[Callable, int] = dict.fromkeys(passes, 0)
+    graph: dict[Callable, list[Callable]] = {p: [] for p in passes}
+    indegree_map: dict[Callable, int] = dict.fromkeys(passes, 0)
     candidates: Queue = Queue()
     for a in passes:
         for b in passes:
@@ -91,8 +95,8 @@ def _topological_sort_passes(
         if indegree_map[a] == 0:
             candidates.put(a)
 
-    visited: Dict[Callable, bool] = dict.fromkeys(passes, False)
-    sorted_passes: List[Callable] = []
+    visited: dict[Callable, bool] = dict.fromkeys(passes, False)
+    sorted_passes: list[Callable] = []
 
     while not candidates.empty():
         p = candidates.get()
@@ -108,10 +112,13 @@ def _topological_sort_passes(
     # Check if there are unvisited nodes (aka cycles in the graph)
     cycle_passes = list(filter(lambda p: indegree_map[p] != 0, indegree_map.keys()))
     if len(cycle_passes) != 0:
-        error = f"Circular dependency detected within the following passes: {cycle_passes}"
+        error = (
+            f"Circular dependency detected within the following passes: {cycle_passes}"
+        )
         raise RuntimeError(error)
 
     return sorted_passes
+
 
 @compatibility(is_backward_compatible=False)
 def this_before_that_pass_constraint(this: Callable, that: Callable) -> Callable:
@@ -123,9 +130,7 @@ def this_before_that_pass_constraint(this: Callable, that: Callable) -> Callable
     ```
     passes = [pass_b, pass_a]
 
-    constraints = [
-        this_before_that_pass_constraint(pass_a, pass_b)
-    ]
+    constraints = [this_before_that_pass_constraint(pass_a, pass_b)]
     ```
 
     Args:
@@ -137,9 +142,7 @@ def this_before_that_pass_constraint(this: Callable, that: Callable) -> Callable
     """
 
     def depends_on(a: Callable, b: Callable):
-        if a == that and b == this:
-            return False
-        return True
+        return a != that or b != this
 
     return depends_on
 
@@ -166,8 +169,8 @@ class PassManager:
             checks
     """
 
-    passes: List[Callable[[nn.Module], PassResult]]
-    constraints: List[Callable[[Callable, Callable], bool]]
+    passes: list[Callable[[nn.Module], PassResult]]
+    constraints: list[Callable[[Callable, Callable], bool]]
     _validated: bool = False
     steps: int = 1
 
@@ -233,7 +236,9 @@ class PassManager:
         sig = inspect.signature(check)
 
         if len(list(sig.parameters.values())) != 1:
-            raise TypeError("PassManager check function should only take in one variable, a module")
+            raise TypeError(
+                "PassManager check function should only take in one variable, a module"
+            )
 
         setattr(self, "check", check)  # noqa: B010
 

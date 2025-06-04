@@ -3,7 +3,6 @@ r"""Pruning methods."""
 import numbers
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
-from typing import Tuple
 
 import torch
 
@@ -49,7 +48,6 @@ class BasePruningMethod(ABC):
         Returns:
             mask (torch.Tensor): mask to apply to ``t``, of same dims as ``t``
         """
-        pass
 
     def apply_mask(self, module):
         r"""Simply handles the multiplication between the parameter being pruned and the generated mask.
@@ -271,7 +269,7 @@ class PruningContainer(BasePruningMethod):
     """
 
     def __init__(self, *args):
-        self._pruning_methods: Tuple[BasePruningMethod, ...] = tuple()
+        self._pruning_methods: tuple[BasePruningMethod, ...] = ()
         if not isinstance(args, Iterable):  # only 1 item
             self._tensor_name = args._tensor_name
             self.add_pruning_method(args)
@@ -396,6 +394,8 @@ class PruningContainer(BasePruningMethod):
                 raise ValueError(f"Unrecognized PRUNING_TYPE {method.PRUNING_TYPE}")
 
             # compute the new mask on the unpruned slice of the tensor t
+            if isinstance(slc, list):
+                slc = tuple(slc)
             partial_mask = method.compute_mask(t[slc], default_mask=mask[slc])
             new_mask[slc] = partial_mask.to(dtype=new_mask.dtype)
 
@@ -627,6 +627,7 @@ class RandomStructured(BasePruningMethod):
             mask = torch.zeros_like(t)
             slc = [slice(None)] * len(t.shape)
             slc[dim] = channel_mask
+            slc = tuple(slc)
             mask[slc] = 1
             return mask
 
@@ -741,6 +742,7 @@ class LnStructured(BasePruningMethod):
             # replace a None at position=dim with indices
             # e.g.: slc = [None, None, [0, 2, 3]] if dim=2 & indices=[0,2,3]
             slc[dim] = indices
+            slc = tuple(slc)
             # use slc to slice mask and replace all its entries with 1s
             # e.g.: mask[:, :, [0, 2, 3]] = 1
             mask[slc] = 1

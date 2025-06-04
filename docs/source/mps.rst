@@ -18,6 +18,7 @@ torch.mps
     current_allocated_memory
     driver_allocated_memory
     recommended_max_memory
+    compile_shader
 
 MPS Profiler
 ------------
@@ -28,6 +29,10 @@ MPS Profiler
     profiler.start
     profiler.stop
     profiler.profile
+
+    profiler.is_capturing_metal
+    profiler.is_metal_capture_enabled
+    profiler.metal_capture
 
 MPS Event
 ------------

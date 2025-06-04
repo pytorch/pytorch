@@ -11,7 +11,6 @@ from weakref import ReferenceType
 
 import torch
 import torch.fx.traceback as fx_traceback
-from torch._functorch._aot_autograd.functional_utils import is_fun
 from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -89,6 +88,8 @@ def check_backward_validity(inputs: Iterable[Any]) -> None:
 
 
 def _get_device_module(device="cuda"):
+    if device == "meta":
+        return torch.device("meta")
     device_module = getattr(torch, device)
     return device_module
 
@@ -167,13 +168,12 @@ def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
 
     def add_device_ids(arg):
         nonlocal fwd_device_ids
-        if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu":
+        if isinstance(arg, torch.Tensor) and arg.device.type not in {"cpu", "meta"}:
             fwd_device_ids.append(arg.get_device())
     tree_map(add_device_ids, args)
 
     fwd_device_states = []
     device_module = _get_device_module(_infer_device_type(*args))
-
     for device_id in fwd_device_ids:
         with device_module.device(device_id):
             fwd_device_states.append(device_module.get_rng_state())
@@ -193,6 +193,8 @@ def set_device_states(devices, states, *, device_type=None) -> None:
     """
     if device_type is None:
         device_type = DefaultDeviceType.get_device_type()
+    if device_type == "meta":
+        return
     device_module = _get_device_module(device_type)
     for device, state in zip(devices, states):
         with device_module.device(device):
@@ -273,7 +275,6 @@ class CheckpointFunction(torch.autograd.Function):
         inputs = list(ctx.inputs)
         tensor_indices = ctx.tensor_indices
         tensors = ctx.saved_tensors
-        device_module = _get_device_module(ctx.device_type)
 
         # Fill in inputs with appropriate saved tensors.
         for i, idx in enumerate(tensor_indices):
@@ -327,6 +328,7 @@ class CheckpointFunction(torch.autograd.Function):
 def noop_context_fn():
     return contextlib.nullcontext(), contextlib.nullcontext()
 
+# Note: [torch.compile and checkpoint]
 # TorchDynamo does not step inside utils.checkpoint function.  The flow
 # looks likes this
 #  1) TorchDynamo tries to wrap utils.checkpoint in a HigherOrderOp by
@@ -430,7 +432,7 @@ def checkpoint(
         use_reentrant(bool):
             specify whether to use the activation checkpoint variant that
             requires reentrant autograd. This parameter should be passed
-            explicitly. In version 2.4 we will raise an exception if
+            explicitly. In version 2.5 we will raise an exception if
             ``use_reentrant`` is not passed. If ``use_reentrant=False``,
             ``checkpoint`` will use an implementation that does not require
             reentrant autograd. This allows ``checkpoint`` to support additional
@@ -461,7 +463,7 @@ def checkpoint(
     if use_reentrant is None:
         warnings.warn(
             "torch.utils.checkpoint: the use_reentrant parameter should be "
-            "passed explicitly. In version 2.4 we will raise an exception "
+            "passed explicitly. In version 2.5 we will raise an exception "
             "if use_reentrant is not passed. use_reentrant=False is "
             "recommended, but if you need to preserve the current default "
             "behavior, you can pass use_reentrant=True. Refer to docs for more "
@@ -530,7 +532,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
         use_reentrant(bool):
             specify whether to use the activation checkpoint variant that
             requires reentrant autograd. This parameter should be passed
-            explicitly. In version 2.4 we will raise an exception if
+            explicitly. In version 2.5 we will raise an exception if
             ``use_reentrant`` is not passed. If ``use_reentrant=False``,
             ``checkpoint`` will use an implementation that does not require
             reentrant autograd. This allows ``checkpoint`` to support additional
@@ -550,7 +552,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
         warnings.warn(
             "torch.utils.checkpoint.checkpoint_sequential: the use_reentrant "
             "parameter should be passed explicitly. "
-            "In version 2.4 we will raise an exception if use_reentrant "
+            "In version 2.5 we will raise an exception if use_reentrant "
             "is not passed. use_reentrant=False is "
             "recommended, but if you need to preserve the current default "
             "behavior, you can pass use_reentrant=True. Refer to docs for more "
@@ -769,7 +771,7 @@ class _Handle:
 
 class _Holder:
     def __init__(self):
-        self.handles: Dict[int, Optional[_Handle]] = dict()
+        self.handles: Dict[int, Optional[_Handle]] = {}
 
 
 class _NoopSaveInputs(torch.autograd.Function):
@@ -1093,6 +1095,16 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
         super().__init__(pack_hook, unpack_hook)
 
 
+# torch._disable_dynamo creates a reference cycle with decorated function
+# This function is used to ensure that the decorated function does not have
+# a closure, so that other objects aren't also kept alive.
+# https://github.com/pytorch/pytorch/issues/154642
+# Note: does not work when fn is compiled
+@torch._disable_dynamo
+def _run_fn_with_dynamo_disabled(fn, *args, **kwargs):
+    return fn(*args, **kwargs)
+
+
 class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
     def __init__(self, frame):
         def pack_hook(x):
@@ -1119,7 +1131,8 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                     with _recomputation_hook(
                         weakref.ref(frame), gid
                     ), torch.autograd.enable_grad():
-                        frame.recompute_fn(*args)
+                        # See Note: [compiled autograd and checkpoint unpack hook]
+                        _run_fn_with_dynamo_disabled(frame.recompute_fn, *args)
                 except _StopRecomputationError:
                     pass
                 frame.is_recomputed[gid] = True
@@ -1151,12 +1164,8 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
 def _is_compiling(func, args, kwargs):
     # Check if we are under AOTAutograd tracing
-    # There should probably be a better way to do this...
-    # TODO: unify _is_compiling across all compile stacks
-    for arg in args:
-        if isinstance(arg, torch.Tensor) and is_fun(arg):
-            return True
-    return False
+    # Checking that a functional mode is active should always do what we want
+    return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL) is not None
 
 
 class _VersionWrapper:
@@ -1428,7 +1437,7 @@ def _checkpoint_without_reentrant_generator(
     """Checkpointing without reentrant autograd.
 
     Args:
-        function: describes what to run in the forward pass of the model or
+        fn: describes what to run in the forward pass of the model or
             part of the model. It should also know how to handle the inputs
             passed as the tuple. For example, in LSTM, if user passes
             ``(activation, hidden)``, :attr:`function` should correctly use the
@@ -1544,3 +1553,17 @@ def _checkpoint_without_reentrant_generator(
         )
 
     return
+
+# Note: [compiled autograd and checkpoint unpack hook]
+# When tracing via compiled autograd, this hook will be visible to the
+# compiler if the forward of this checkpointed region ran in eager.
+# If the forward had ran under compile, it would have been wrapped in a
+# higher order op. See Note: [torch.compile and checkpoint].
+#
+# Since we run the recomputation hook under a enable_grad context,
+# AOTDispatch will trace a joint graph for this hook, and may
+# save different activations than in eager. This conflicts with the
+# strict activation count checks in `frame.check_recomputed_tensors_match`.
+# So, we disable this hook to force it to recompute eager checkpointed regions
+# in eager. This could be removed if we can disable the partitioner for this
+# graph segment.

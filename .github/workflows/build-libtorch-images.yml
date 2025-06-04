@@ -1,0 +1,66 @@
+name: Build libtorch docker images
+
+on:
+  push:
+    branches:
+      - main
+      - release/*
+    tags:
+      # NOTE: Binary build pipelines should only get triggered on release candidate or nightly builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+    paths:
+      - .ci/docker/**
+      - .github/workflows/build-libtorch-images.yml
+      - .github/actions/binary-docker-build/**
+  pull_request:
+    paths:
+      - .ci/docker/**
+      - .github/workflows/build-libtorch-images.yml
+      - .github/actions/binary-docker-build/**
+
+env:
+  DOCKER_REGISTRY: "docker.io"
+  DOCKER_BUILDKIT: 1
+  WITH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release')) }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  build:
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
+    needs: get-label-type
+    runs-on: ${{ needs.get-label-type.outputs.label-type }}linux.9xlarge.ephemeral
+    name: libtorch-cxx11-builder:${{ matrix.tag }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: [
+          { tag: "cuda12.8" },
+          { tag: "cuda12.6" },
+          { tag: "cuda11.8" },
+          { tag: "rocm6.3"  },
+          { tag: "rocm6.4"  },
+          { tag: "cpu"      },
+        ]
+    steps:
+      - name: Build docker image
+        uses: pytorch/pytorch/.github/actions/binary-docker-build@main
+        with:
+          docker-image-name: libtorch-cxx11-builder
+          custom-tag-prefix: ${{ matrix.tag }}
+          docker-build-dir: libtorch
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+          DOCKER_ID: ${{ secrets.DOCKER_ID }}

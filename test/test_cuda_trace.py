@@ -8,6 +8,7 @@ import torch
 import torch.cuda._gpu_trace as gpu_trace
 from torch.testing._internal.common_utils import NoTest, run_tests, TEST_CUDA, TestCase
 
+
 # NOTE: Each test needs to be run in a brand new process, to reset the registered hooks
 # and make sure the CUDA streams are initialized for each test that uses them.
 
@@ -78,7 +79,7 @@ class TestCudaTrace(TestCase):
         if torch.version.hip:
             user_stream = torch.cuda.Stream()
             with torch.cuda.stream(user_stream):
-                tensor = torch.ones(5, device="cuda")
+                torch.ones(5, device="cuda")
         else:
             torch.cuda.Stream()
 

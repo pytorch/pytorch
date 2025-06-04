@@ -12,6 +12,8 @@
 #include <c10/util/TypeTraits.h>
 #include <torch/custom_class_detail.h>
 #include <torch/library.h>
+
+#include <functional>
 #include <sstream>
 
 namespace torch {
@@ -60,7 +62,7 @@ decltype(auto) init(Func&& f) {
 template <class CurClass>
 class class_ : public ::torch::detail::class_base {
   static_assert(
-      std::is_base_of<CustomClassHolder, CurClass>::value,
+      std::is_base_of_v<CustomClassHolder, CurClass>,
       "torch::class_<T> requires T to inherit from CustomClassHolder");
 
  public:
@@ -117,7 +119,7 @@ class class_ : public ::torch::detail::class_base {
                                    c10::tagged_capsule<CurClass> self,
                                    ParameterTypes... arg) {
       c10::intrusive_ptr<CurClass> classObj =
-          at::guts::invoke(func, std::forward<ParameterTypes>(arg)...);
+          std::invoke(func, std::forward<ParameterTypes>(arg)...);
       auto object = self.ivalue.toObject();
       object->setSlot(0, c10::IValue::make_capsule(classObj));
     };
@@ -322,9 +324,9 @@ class class_ : public ::torch::detail::class_base {
         typename SetStateTraits::parameter_types>;
     auto setstate_wrapper = [set_state = std::forward<SetStateFn>(set_state)](
                                 c10::tagged_capsule<CurClass> self,
-                                SetStateArg&& arg) {
+                                SetStateArg arg) {
       c10::intrusive_ptr<CurClass> classObj =
-          at::guts::invoke(set_state, std::forward<SetStateArg>(arg));
+          std::invoke(set_state, std::move(arg));
       auto object = self.ivalue.toObject();
       object->setSlot(0, c10::IValue::make_capsule(classObj));
     };

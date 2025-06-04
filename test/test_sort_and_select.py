@@ -7,7 +7,6 @@ import numpy as np
 
 import torch
 from torch import nan
-
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -51,11 +50,10 @@ class TestSortAndSelect(TestCase):
                 return ((b != b) | (a <= b)).all().item()
 
         else:
-            error(  # noqa: F821
+            raise ValueError(
                 f'unknown order "{order}", must be "ascending" or "descending"'
             )
 
-        are_ordered = True
         for k in range(1, SIZE):
             self.assertTrue(
                 check_order(mxx[:, k - 1], mxx[:, k]),
@@ -63,7 +61,6 @@ class TestSortAndSelect(TestCase):
             )
 
         seen = set()
-        indicesCorrect = True
         size0 = x.size(0)
         size = x.size(x.dim() - 1)
         x = x.tolist()
@@ -178,6 +175,14 @@ class TestSortAndSelect(TestCase):
         y = x.sort(stable=None).values
         self.assertTrue(torch.all(y == torch.ones(10)).item())
 
+    @onlyCPU
+    def test_complex_unsupported_cpu(self):
+        x = torch.tensor([3.0 + 2j, 4.0 + 3j])
+        with self.assertRaisesRegex(
+            ValueError, "Sort currently does not support complex dtypes on CPU."
+        ):
+            torch.sort(input=x)
+
     @onlyCUDA
     def test_sort_large_slice(self, device):
         # tests direct cub path
@@ -194,8 +199,7 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(res1val, res1val_cpu.cuda())
         self.assertEqual(res1ind, res1ind_cpu.cuda())
 
-    # FIXME: remove torch.bool from unsupported types once support is added for cub sort
-    @dtypes(*all_types_and(torch.half, torch.bfloat16))
+    @dtypes(*all_types_and(torch.bool, torch.half, torch.bfloat16))
     def test_stable_sort(self, device, dtype):
         sizes = (100, 1000, 10000)
         for ncopies in sizes:
@@ -324,8 +328,7 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(indices, indices_cont)
             self.assertEqual(values, values_cont)
 
-    # FIXME: remove torch.bool from unsupported types once support is added for cub sort
-    @dtypes(*all_types_and(torch.half, torch.bfloat16))
+    @dtypes(*all_types_and(torch.bool, torch.half, torch.bfloat16))
     def test_stable_sort_against_numpy(self, device, dtype):
         if dtype in floating_types_and(torch.float16, torch.bfloat16):
             inf = float("inf")
@@ -403,10 +406,10 @@ class TestSortAndSelect(TestCase):
             if tensor.size() != torch.Size([]):
                 if dtype is torch.bfloat16:
                     expected = torch.from_numpy(
-                        np.msort(tensor.float().cpu().numpy())
+                        np.sort(tensor.float().cpu().numpy(), axis=0)
                     ).bfloat16()
                 else:
-                    expected = torch.from_numpy(np.msort(tensor.cpu().numpy()))
+                    expected = torch.from_numpy(np.sort(tensor.cpu().numpy(), axis=0))
             else:
                 expected = tensor  # numpy.msort() does not support empty shapes tensor
 
@@ -419,12 +422,8 @@ class TestSortAndSelect(TestCase):
 
         shapes = (
             [],
-            [
-                0,
-            ],
-            [
-                20,
-            ],
+            [0],
+            [20],
             [1, 20],
             [30, 30],
             [10, 20, 30],
@@ -727,7 +726,8 @@ class TestSortAndSelect(TestCase):
                     dtype=dtype,
                     device=device,
                 )
-            expected_y_unique = torch.tensor(
+
+            expected_y_unique = torch.tensor(  # noqa: F841
                 [[0, 1], [1, 2], [3, 4], [0, 1], [3, 4], [1, 2]],
                 dtype=dtype,
                 device=device,

@@ -9,7 +9,6 @@ class TSBuiltinOpsModule(torch.nn.Module):
         x = torch.tensor(1)
         y = torch.tensor(0.5)
         b = float(1)
-        s = "abcde"
         l = ["1", "2", "test", "a{}b"]
         d = {"key": 1}
         d2 = {0: 100}

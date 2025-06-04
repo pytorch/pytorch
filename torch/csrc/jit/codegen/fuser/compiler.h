@@ -11,9 +11,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 // Performs device-independent "upfront" compilation of the given fusion_group,
 // if it has not been registered already.
@@ -27,7 +25,7 @@ TORCH_API std::shared_ptr<FusedKernel> compileKernel(
     const KernelSpec& spec,
     const ArgSpec& arg_spec,
     const std::vector<int64_t>& map_size,
-    const at::Device device);
+    const at::Device& device);
 
 TORCH_API size_t nCompiledKernels();
 
@@ -47,14 +45,12 @@ TORCH_API void registerFusionBackend(
     at::Device::Type backend_type,
     FusedKernelConstructor ctor);
 TORCH_API bool hasFusionBackend(at::Device::Type backend_type);
-struct TORCH_API RegisterFusionBackend {
-  RegisterFusionBackend(
-      at::Device::Type backend_type,
-      FusedKernelConstructor ctor) {
+struct TORCH_API RegisterFusionBackend{RegisterFusionBackend(
+    at::Device::Type backend_type,
+    FusedKernelConstructor ctor){
     registerFusionBackend(backend_type, std::move(ctor));
-  }
-};
+} // namespace torch::jit::fuser
+}
+;
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

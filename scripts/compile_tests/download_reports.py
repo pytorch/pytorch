@@ -8,15 +8,15 @@ import requests
 
 
 CONFIGS = {
-    "dynamo38": {
-        "linux-focal-py3.8-clang10 / test (dynamo, 1, 3, linux.2xlarge)",
-        "linux-focal-py3.8-clang10 / test (dynamo, 2, 3, linux.2xlarge)",
-        "linux-focal-py3.8-clang10 / test (dynamo, 3, 3, linux.2xlarge)",
+    "dynamo39": {
+        "linux-focal-py3.9-clang10 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
+        "linux-focal-py3.9-clang10 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
+        "linux-focal-py3.9-clang10 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
     },
     "dynamo311": {
-        "linux-focal-py3.11-clang10 / test (dynamo, 1, 3, linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (dynamo, 2, 3, linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (dynamo, 3, 3, linux.2xlarge)",
+        "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
+        "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
+        "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
     },
     "eager311": {
         "linux-focal-py3.11-clang10 / test (default, 1, 3, linux.2xlarge)",
@@ -26,7 +26,7 @@ CONFIGS = {
 }
 
 
-def download_reports(commit_sha, configs=("dynamo38", "dynamo311", "eager311")):
+def download_reports(commit_sha, configs=("dynamo39", "dynamo311", "eager311")):
     log_dir = "tmp_test_reports_" + commit_sha
 
     def subdir_path(config):
@@ -62,9 +62,9 @@ def download_reports(commit_sha, configs=("dynamo38", "dynamo311", "eager311")):
     for config in configs:
         required_jobs.extend(list(CONFIGS[config]))
     for job in required_jobs:
-        assert (
-            job in workflow_jobs
-        ), f"{job} not found, is the commit_sha correct? has the job finished running? The GitHub API may take a couple minutes to update."
+        assert job in workflow_jobs, (
+            f"{job} not found, is the commit_sha correct? has the job finished running? The GitHub API may take a couple minutes to update."
+        )
 
     # This page lists all artifacts.
     listings = requests.get(

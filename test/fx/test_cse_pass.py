@@ -6,7 +6,6 @@ import torch
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.dialect.common.cse_pass import CSEPass, get_CSE_banned_ops
-
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -236,7 +235,7 @@ class TestCSEPass(TestCase):
             return a + b
 
         t = torch.randn(2, 2)
-        P_ban_add = P = CSEPass(banned_ops=[torch.ops.aten.add])
+        P_ban_add = CSEPass(banned_ops=[torch.ops.aten.add])
         check(self, f, t, 0, P=P_ban_add)  # check that add is banned
         check(self, f, t, 1)  # check that add is not banned by default
 

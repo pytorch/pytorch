@@ -53,13 +53,13 @@
 #include <utility>
 #include <vector>
 
+// clang-format off
 C10_DEFINE_bool(
     torch_jit_execution_plan_reuse_code_graph,
     false,
-    "Directly reuse the preprocessed graph in the CodeImpl to reduce the memory consumption. This is aggressive memory saving, and please be cautious!");
+    "Directly reuse the preprocessed graph in the CodeImpl to reduce the memory consumption. This is aggressive memory saving, and please be cautious!")
 
 namespace torch::jit {
-
 EnableProfilingGuard::EnableProfilingGuard() {
   auto& executor_mode = getExecutorMode();
   old_executor_mode = executor_mode;
@@ -82,7 +82,7 @@ c10::AliasAnalysisKind aliasAnalysisInternalSpecialCase() {
 // for debugging it is helpful to be able to force autodiff subgraphs
 // to be created, to check their correctness, even when the
 // size of the of the subgraph is too small to be profitable.
-thread_local bool autodiff_subgraph_inlining = true;
+static thread_local bool autodiff_subgraph_inlining = true;
 void debugSetAutodiffSubgraphInlining(bool state) {
   autodiff_subgraph_inlining = state;
 }
@@ -102,7 +102,7 @@ bool getFusionGroupInlining() {
   return fusion_group_inlining;
 }
 
-thread_local std::weak_ptr<Graph> last_executed_optimized_graph;
+static thread_local std::weak_ptr<Graph> last_executed_optimized_graph;
 std::shared_ptr<Graph> lastExecutedOptimizedGraph() {
   return last_executed_optimized_graph.lock();
 }
@@ -121,7 +121,7 @@ struct CaptureList {
   }
 
   void captureTensor(const at::Tensor& tensor, bool is_output) {
-    var_captures_.emplace_back(Variable(tensor), is_output);
+    var_captures_.emplace_back(tensor, is_output);
   }
 
   void capture(const IValue& val, bool is_output) {
@@ -322,9 +322,8 @@ struct DifferentiableGraphBackward : public autograd::Node {
   }
 
   void addOutputForTensor(const at::Tensor& tensor) {
-    auto v = Variable(tensor);
     add_next_edge(
-        v.defined() ? torch::autograd::impl::gradient_edge(v)
+        tensor.defined() ? torch::autograd::impl::gradient_edge(tensor)
                     : autograd::Edge{});
   }
   void addOutputForIValue(const IValue& value) {
@@ -432,8 +431,8 @@ struct DifferentiableGraphOp {
 
     {
       auto inputs = last(stack, num_inputs);
-      // hook up the outputs of df to the gradient functions of the inputs that
-      // require gradients
+      // hook up the outputs of df to the gradient functions of the inputs
+      // that require gradients
       for (auto idx : grad.df_output_vjps) {
         grad_fn->addOutputForIValue(inputs[idx]);
       }
@@ -455,8 +454,8 @@ struct DifferentiableGraphOp {
       // TODO - XXX - if any output is the same tensor multiple times, views
       // have to be setup here. We need to refactor autograd until it is safe
       // for tensors to be constructed without all the viewing infrastructure.
-      // this is currently intentionally not done here so we can get an idea of
-      // our perf before introducing overhead for correctness
+      // this is currently intentionally not done here so we can get an idea
+      // of our perf before introducing overhead for correctness
       for (auto idx : grad.df_input_vjps) {
         grad_fn->addInputIValue(outputs[idx]);
       }
@@ -487,7 +486,6 @@ struct DifferentiableGraphOp {
       for (auto& tensor : lst) {
         tensor = detach(tensor);
       }
-      // NOLINTNEXTLINE(performance-move-const-arg)
       v = std::move(lst);
     }
   }
@@ -502,7 +500,8 @@ struct DifferentiableGraphOp {
       detach(stack[i]);
     }
   }
-  // Capture (save) inputs that would be required to subsequently run backwards
+  // Capture (save) inputs that would be required to subsequently run
+  // backwards
   void captureInputs(
       DifferentiableGraphBackward& grad_fn,
       at::ArrayRef<IValue> inputs) const {
@@ -543,7 +542,7 @@ Gradient getGradient(const Node* n) {
 }
 } // anonymous namespace
 
-RegisterOperators reg_graph_executor_ops({Operator(
+static RegisterOperators reg_graph_executor_ops({Operator(
     prim::DifferentiableGraph,
     [](const Node* n) -> Operation {
       return DifferentiableGraphOp(getGradient(n));
@@ -737,8 +736,10 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     runOptimization(opt_graph);
 
     // Phase 4. If this graph will be differentiated, we need to slice out the
-    //          symbolically differentiable subgraphs for further optimizations.
-    // Phase 5. Apply non-differentiable optimizations to the graphs we've found
+    //          symbolically differentiable subgraphs for further
+    //          optimizations.
+    // Phase 5. Apply non-differentiable optimizations to the graphs we've
+    // found
     //          (or the whole graph if we know we won't need its derivative).
     if (needsGradient(opt_graph)) {
       auto diff_nodes = CreateAutodiffSubgraphs(
@@ -782,8 +783,8 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ArgumentSpecCreator arg_spec_creator_;
-  // Populated only when optimize is false (and in that case plan_cache will be
-  // unused). The compiled version of graph.
+  // Populated only when optimize is false (and in that case plan_cache will
+  // be unused). The compiled version of graph.
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ExecutionPlan fallback;
 
@@ -862,7 +863,7 @@ bool GraphExecutor::isOptimized() const {
 
 TORCH_API bool IsNewExecutorEnabled() {
   static const auto disable_new_executor =
-      std::getenv("TORCH_JIT_DISABLE_NEW_EXECUTOR");
+      c10::utils::has_env("TORCH_JIT_DISABLE_NEW_EXECUTOR");
   return getExecutorMode() && FLAGS_torch_jit_enable_new_executor &&
       !disable_new_executor;
 }

@@ -42,10 +42,29 @@
   desc: |
           This tag indicates if an operator doesn't guarantee bitwise equivalence
           across different runs of an operator with identical inputs.
+- tag: needs_exact_strides
+  desc: |
+          This tag indicates that the operator should be passed Tensors following
+          the same strides as observed in eager when compiled in inductor.
+          Only one of {needs_exact_strides, needs_contiguous_strides, needs_fixed_stride_order, flexible_layout}
+          can apply; if multiple are assigned then we assume the most restrictive one.
+- tag: needs_contiguous_strides
+  desc: |
+          This tag indicates that the operator should be passed contiguous Tensors.
+          Failure to do so will result in undefined behavior.
 - tag: needs_fixed_stride_order
   desc: |
           This tag indicates that the operator should be passed Tensors following
           the same stride permutation as observed in eager when compiled in inductor.
+          Only one of {needs_exact_strides, needs_contiguous_strides, needs_fixed_stride_order, flexible_layout}
+          can apply; if multiple are assigned then we assume the most restrictive one.
+- tag: flexible_layout
+  desc: |
+          This tag indicates that the custom operator can accept inputs with varying
+          strides/storage_offset and that when compiled, Inductor is allowed to change
+          the strides/storage_offset of inputs to the custom operator.
+          Only one of {needs_exact_strides, needs_contiguous_strides, needs_fixed_stride_order, flexible_layout}
+          can apply; if multiple are assigned then we assume the most restrictive one.
 
 # NOTE [Core ATen Ops]
 - tag: core
@@ -63,3 +82,14 @@
           Pointwise operators are operators where each element of the output is computed only by accessing
           the corresponding element of all the broadcasted inputs. The output shape will be the broadcasted
           shape of the inputs.
+- tag: maybe_aliasing_or_mutating
+  desc: |
+          For some ops, we can't statically determine whether the op is functional or not. Note that this is only
+          relevant to CIA ops that decompose before functionalization/autograd. It is useful to
+          know this information for export as we would want to decompose these ops as they are unsafe to be
+          preserved.
+- tag: cudagraph_unsafe
+  desc: |
+          This operator does not support cudagraphs. The presence of this tag on an operator will cause
+          Inductor to split the graph around this operator. Note that operators without this tag may still
+          not support CUDAGraphs. Inductor may have other hardcoded lists around that.

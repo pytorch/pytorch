@@ -631,6 +631,17 @@ TEST_F(FunctionalTest, GridSample) {
 
   ASSERT_TRUE(output.allclose(expected));
 
+  // bicubic, zeros, true
+  options = F::GridSampleFuncOptions()
+                .mode(torch::kBicubic)
+                .padding_mode(torch::kZeros)
+                .align_corners(true);
+  output = F::grid_sample(input, grid, options);
+  expected = torch::tensor(
+      {{{{0., 0., 1.}, {3., 4., 5.}, {7., 8., 0.}}}}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+
   // bilinear, border, true
   options = F::GridSampleFuncOptions()
                 .mode(torch::kBilinear)
@@ -1063,7 +1074,7 @@ TEST_F(FunctionalTest, ELU) {
       x_bf16.resize_({size, size, size});
 
       auto y_exp = torch::max(torch::zeros_like(x), x) +
-          torch::min(torch::zeros_like(x), alpha * (torch::exp(x) - 1.0));
+          torch::min(torch::zeros_like(x), alpha * (torch::expm1(x)));
       auto y = F::elu(x, F::ELUFuncOptions().alpha(alpha).inplace(inplace));
       auto y_bf16 =
           F::elu(x_bf16, F::ELUFuncOptions().alpha(alpha).inplace(inplace));
@@ -1090,8 +1101,7 @@ TEST_F(FunctionalTest, SELU) {
       auto input_bf16 = input.clone().to(torch::kBFloat16);
       auto expected = scale *
           (torch::max(torch::zeros_like(input), input) +
-           torch::min(
-               torch::zeros_like(input), alpha * (torch::exp(input) - 1)));
+           torch::min(torch::zeros_like(input), alpha * (torch::expm1(input))));
       auto output = F::selu(input, inplace);
       auto output_bf16 = F::selu(input_bf16, inplace);
 
@@ -1343,8 +1353,7 @@ TEST_F(FunctionalTest, GumbelSoftmax) {
 
     auto counts = torch::zeros_like(logits);
     torch::Tensor y_draw;
-    for (const auto i : c10::irange(num_draws)) {
-      (void)i; // Suppress unused variable warning
+    for ([[maybe_unused]] const auto i : c10::irange(num_draws)) {
       y_draw =
           F::gumbel_softmax(logits, F::GumbelSoftmaxFuncOptions().hard(true));
       counts += y_draw;
@@ -1712,8 +1721,7 @@ TEST_F(FunctionalTest, CELU) {
       x.resize_({size, size, size});
       auto x_bf16 = x.clone().to(torch::kBFloat16);
       auto y_exp = torch::max(torch::zeros_like(x), x) +
-          torch::min(torch::zeros_like(x),
-                     alpha * (torch::exp(x / alpha) - 1.0));
+          torch::min(torch::zeros_like(x), alpha * (torch::expm1(x / alpha)));
       auto y = F::celu(x, F::CELUFuncOptions().alpha(alpha).inplace(inplace));
       auto y_bf16 =
           F::celu(x_bf16, F::CELUFuncOptions().alpha(alpha).inplace(inplace));
@@ -1738,7 +1746,7 @@ TEST_F(FunctionalTest, CELUDefaultOptions) {
   x.resize_({size, size, size});
   auto x_bf16 = x.clone().to(torch::kBFloat16);
   auto y_exp = torch::max(torch::zeros_like(x), x) +
-      torch::min(torch::zeros_like(x), alpha * (torch::exp(x / alpha) - 1.0));
+      torch::min(torch::zeros_like(x), alpha * (torch::expm1(x / alpha)));
   auto y = F::celu(x);
   auto y_bf16 = F::celu(x_bf16);
 
@@ -2330,7 +2338,7 @@ TEST_F(FunctionalTest, Interpolate) {
     auto tensor = torch::rand({2, 3, 32, 32});
     std::vector<int64_t> osize = {8, 10};
     auto expected =
-        at::native::_upsample_nearest_exact2d(tensor, osize, torch::nullopt);
+        at::native::_upsample_nearest_exact2d(tensor, osize, std::nullopt);
 
     auto options = F::InterpolateFuncOptions()
                        .size(osize)
@@ -2343,8 +2351,8 @@ TEST_F(FunctionalTest, Interpolate) {
   {
     auto tensor = torch::rand({2, 3, 32, 32});
     std::vector<int64_t> osize = {8, 10};
-    auto expected = at::native::_upsample_bilinear2d_aa(
-        tensor, osize, false, torch::nullopt);
+    auto expected =
+        at::native::_upsample_bilinear2d_aa(tensor, osize, false, std::nullopt);
 
     auto options = F::InterpolateFuncOptions()
                        .size(osize)
@@ -2357,8 +2365,8 @@ TEST_F(FunctionalTest, Interpolate) {
   {
     auto tensor = torch::rand({2, 3, 32, 32});
     std::vector<int64_t> osize = {8, 10};
-    auto expected = at::native::_upsample_bicubic2d_aa(
-        tensor, osize, false, torch::nullopt);
+    auto expected =
+        at::native::_upsample_bicubic2d_aa(tensor, osize, false, std::nullopt);
 
     auto options = F::InterpolateFuncOptions()
                        .size(osize)

@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional, overload, Sequence, Tuple, TypeVar, Union
+from collections.abc import Sequence
+from typing import Any, Optional, overload, TypeVar, Union
 from typing_extensions import deprecated
 
 import torch
-
-from ._functions import Gather, Scatter
+from torch.nn.parallel._functions import Gather, Scatter
 
 
 __all__ = ["scatter", "scatter_kwargs", "gather"]
@@ -35,7 +35,7 @@ def scatter(
     inputs: torch.Tensor,
     target_gpus: Sequence[Union[int, torch.device]],
     dim: int = ...,
-) -> Tuple[torch.Tensor, ...]:
+) -> tuple[torch.Tensor, ...]:
     ...
 
 
@@ -44,7 +44,7 @@ def scatter(
     inputs: T,
     target_gpus: Sequence[Union[int, torch.device]],
     dim: int = ...,
-) -> List[T]:
+) -> list[T]:
     ...
 
 
@@ -80,11 +80,11 @@ def scatter(inputs, target_gpus, dim=0):
 
 
 def scatter_kwargs(
-    inputs: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]],
+    inputs: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]],
     target_gpus: Sequence[Union[int, torch.device]],
     dim: int = 0,
-) -> Tuple[Tuple[Any, ...], Tuple[Dict[str, Any], ...]]:
+) -> tuple[tuple[Any, ...], tuple[dict[str, Any], ...]]:
     r"""Scatter with support for kwargs dictionary."""
     scattered_inputs = scatter(inputs, target_gpus, dim) if inputs else []
     scattered_kwargs = scatter(kwargs, target_gpus, dim) if kwargs else []

@@ -17,8 +17,6 @@
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 
-#include <c10/util/CallOnce.h>
-
 #include <mpi.h>
 
 namespace c10d {
@@ -87,7 +85,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
         std::vector<at::Tensor> outputTensors,
         const char* profilingTitle = nullptr,
         const std::optional<std::vector<at::Tensor>>& inputTensors =
-            c10::nullopt)
+            std::nullopt)
         : Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
           outputTensors_(std::move(outputTensors)),
           future_(c10::make_intrusive<at::ivalue::Future>(
@@ -115,7 +113,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
         std::vector<at::Tensor> outputTensors,
         const char* profilingTitle = nullptr,
         const std::optional<std::vector<at::Tensor>>& inputTensors =
-            c10::nullopt);
+            std::nullopt);
 
     ~AsyncWork() override;
 
@@ -146,7 +144,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
   ~ProcessGroupMPI() override;
 
   // Abort the MPI program, needs to be called when exception is detected
-  void abort();
+  void abort() override;
 
   const std::string getBackendName() const override {
     return std::string(MPI_BACKEND_NAME);
@@ -199,6 +197,11 @@ class TORCH_API ProcessGroupMPI : public Backend {
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
+  c10::intrusive_ptr<Work> _reduce_scatter_base(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
+
   c10::intrusive_ptr<Work> alltoall_base(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
@@ -244,7 +247,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
       std::unique_ptr<WorkEntry> entry,
       const char* profilingTitle = nullptr,
       const std::optional<std::vector<at::Tensor>>& inputTensors =
-          c10::nullopt);
+          std::nullopt);
 
   bool stop_;
 
@@ -258,7 +261,6 @@ class TORCH_API ProcessGroupMPI : public Backend {
   // Global states
   static void initMPIOnce();
   static void mpiExit();
-  static c10::once_flag onceFlagInitMPI;
 
   static std::mutex pgGlobalMutex_;
   static int mpiThreadSupport_;

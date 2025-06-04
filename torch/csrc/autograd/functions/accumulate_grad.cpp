@@ -12,8 +12,7 @@
 #include <stdexcept>
 #include <utility>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 // AccumulateGrad sets sequence_nr to the max value so it's always called
 // ASAP during backwards.
@@ -22,6 +21,7 @@ AccumulateGrad::AccumulateGrad(Variable variable_)
   add_input_metadata(variable);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
   check_input_variables("AccumulateGrad", grads, 1, 0);
 
@@ -66,12 +66,13 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
   return variable_list();
 }
 
-void AccumulateGrad::compiled_args(CompiledNodeArgs& args) {
+void AccumulateGrad::compiled_args(CompiledNodeArgs& args) const {
   if (args.cond(variable.defined() && variable.requires_grad())) {
     args.collect(variable);
     args.collect(variable.grad());
   }
-  auto& hook = tensor_post_acc_grad_hooks();
+  args.collect(GradMode::is_enabled());
+  const auto& hook = tensor_post_acc_grad_hooks();
   if (hook != nullptr) {
     hook->compiled_args(args);
   }
@@ -89,11 +90,12 @@ variable_list AccumulateGrad::apply_with_saved(
   saved.before(variable_copy);
   saved.before(grad_copy);
   variable_copy.mutable_grad() = grad_copy;
-  // op is intentionally static
-  static auto op = c10::Dispatcher::singleton()
-                       .findSchemaOrThrow("inductor::accumulate_grad_", "")
-                       .typed<void(const at::Tensor&, const at::Tensor&)>();
-  op.call(variable_copy, grads[0]);
+
+  // proxy a call to torch.ops.inductor.accumulate_grad_.default
+  const auto& pyinterface = torch::dynamo::autograd::getPyCompilerInterface();
+  pyinterface->call_accumulate_grad(
+      saved.get_py_compiler(), variable_copy, grads[0]);
+
   auto& hook = tensor_post_acc_grad_hooks();
   if (hook != nullptr) {
     hook->apply_with_saved(variable_copy, saved);
@@ -104,5 +106,4 @@ variable_list AccumulateGrad::apply_with_saved(
   return variable_list();
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

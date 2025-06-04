@@ -8,9 +8,7 @@
 
 using xnnpack_operator = at::native::xnnpack::Operator;
 
-namespace at {
-namespace native {
-namespace xnnp_utils {
+namespace at::native::xnnp_utils {
 
 /*
  * Return shape in the same order as the memory format
@@ -328,8 +326,6 @@ enum xnn_status xnnp_setup_fully_connected_nc(
     );
 }
 
-} // namespace xnnp_utils
-} // namespace native
-} // namespace at
+} // namespace at::native::xnnp_utils
 
 #endif // USE_XNNPACK

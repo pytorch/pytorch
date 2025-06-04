@@ -3,10 +3,12 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Float4_e2m1fn_x2.h>
 #include <c10/util/Float8_e4m3fn.h>
 #include <c10/util/Float8_e4m3fnuz.h>
 #include <c10/util/Float8_e5m2.h>
 #include <c10/util/Float8_e5m2fnuz.h>
+#include <c10/util/Float8_e8m0fnu.h>
 #include <c10/util/Half.h>
 #include <c10/util/bits.h>
 #include <c10/util/complex.h>
@@ -30,6 +32,11 @@ namespace c10 {
 // of these dtypes will be implemented in python with Tensor subclass
 template <unsigned int N>
 struct dummy_uint1_7_t {};
+
+// dummy struct for int1 to int7, actual functionality
+// of these dtypes will be implemented in python with Tensor subclass
+template <unsigned int N>
+struct dummy_int1_7_t {};
 
 // For the macros below:
 //
@@ -90,7 +97,16 @@ struct dummy_uint1_7_t {};
   _(c10::dummy_uint1_7_t<4>, UInt4) /* 33 */             \
   _(c10::dummy_uint1_7_t<5>, UInt5) /* 34 */             \
   _(c10::dummy_uint1_7_t<6>, UInt6) /* 35 */             \
-  _(c10::dummy_uint1_7_t<7>, UInt7) /* 36 */
+  _(c10::dummy_uint1_7_t<7>, UInt7) /* 36 */             \
+  _(c10::dummy_int1_7_t<1>, Int1) /* 37 */               \
+  _(c10::dummy_int1_7_t<2>, Int2) /* 38 */               \
+  _(c10::dummy_int1_7_t<3>, Int3) /* 39 */               \
+  _(c10::dummy_int1_7_t<4>, Int4) /* 40 */               \
+  _(c10::dummy_int1_7_t<5>, Int5) /* 41 */               \
+  _(c10::dummy_int1_7_t<6>, Int6) /* 42 */               \
+  _(c10::dummy_int1_7_t<7>, Int7) /* 43 */               \
+  _(c10::Float8_e8m0fnu, Float8_e8m0fnu) /* 44 */        \
+  _(c10::Float4_e2m1fn_x2, Float4_e2m1fn_x2) /* 45 */
 
 // If you want to support ComplexHalf for real, add ComplexHalf
 // into this macro (and change the name).  But beware: convert()
@@ -134,7 +150,8 @@ struct dummy_uint1_7_t {};
   _(at::Float8_e5m2, Float8_e5m2)              \
   _(at::Float8_e4m3fn, Float8_e4m3fn)          \
   _(at::Float8_e5m2fnuz, Float8_e5m2fnuz)      \
-  _(at::Float8_e4m3fnuz, Float8_e4m3fnuz)
+  _(at::Float8_e4m3fnuz, Float8_e4m3fnuz)      \
+  _(at::Float8_e8m0fnu, Float8_e8m0fnu)
 
 enum class ScalarType : int8_t {
 #define DEFINE_ST_ENUM_VAL_(_1, n) n,
@@ -305,6 +322,13 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
   _(c10::quint4x2, QUInt4x2)    \
   _(c10::quint2x4, QUInt2x4)
 
+#define AT_FORALL_FLOAT8_TYPES(_)         \
+  _(at::Float8_e5m2, Float8_e5m2)         \
+  _(at::Float8_e4m3fn, Float8_e4m3fn)     \
+  _(at::Float8_e5m2fnuz, Float8_e5m2fnuz) \
+  _(at::Float8_e4m3fnuz, Float8_e4m3fnuz) \
+  _(at::Float8_e8m0fnu, Float8_e8m0fnu)
+
 #define AT_FORALL_COMPLEX_TYPES(_)     \
   _(c10::complex<float>, ComplexFloat) \
   _(c10::complex<double>, ComplexDouble)
@@ -360,11 +384,13 @@ inline bool isIntegralType(ScalarType t) {
 
 inline bool isFloat8Type(ScalarType t) {
   return t == ScalarType::Float8_e5m2 || t == ScalarType::Float8_e5m2fnuz ||
-      t == ScalarType::Float8_e4m3fn || t == ScalarType::Float8_e4m3fnuz;
+      t == ScalarType::Float8_e4m3fn || t == ScalarType::Float8_e4m3fnuz ||
+      t == ScalarType::Float8_e8m0fnu;
 }
 
 inline bool isReducedFloatingType(ScalarType t) {
-  return t == ScalarType::Half || t == ScalarType::BFloat16 || isFloat8Type(t);
+  return t == ScalarType::Half || t == ScalarType::BFloat16 ||
+      isFloat8Type(t) || t == ScalarType::Float4_e2m1fn_x2;
 }
 
 inline bool isFloatingType(ScalarType t) {
@@ -434,6 +460,10 @@ inline bool isSignedType(ScalarType t) {
     return std::numeric_limits< \
         ::c10::impl::ScalarTypeToCPPTypeT<ScalarType::name>>::is_signed;
 
+  // TODO(#146647): If we expect to have numeric_limits for everything,
+  // let's just have a big macro for the whole thing.
+  // If we're hardcoding it, let's just use the macro and a "true"/"false"
+  // below?
   switch (t) {
     case ScalarType::QInt8:
     case ScalarType::QUInt8:
@@ -455,6 +485,7 @@ inline bool isSignedType(ScalarType t) {
       CASE_ISSIGNED(Float8_e5m2fnuz);
       CASE_ISSIGNED(Float8_e4m3fn);
       CASE_ISSIGNED(Float8_e4m3fnuz);
+      CASE_ISSIGNED(Float8_e8m0fnu);
       CASE_ISSIGNED(Byte);
       CASE_ISSIGNED(Char);
       CASE_ISSIGNED(Short);
@@ -467,6 +498,15 @@ inline bool isSignedType(ScalarType t) {
       CASE_ISSIGNED(ComplexFloat);
       CASE_ISSIGNED(ComplexDouble);
       CASE_ISSIGNED(Bool);
+    case ScalarType::Int1:
+    case ScalarType::Int2:
+    case ScalarType::Int3:
+    case ScalarType::Int4:
+    case ScalarType::Int5:
+    case ScalarType::Int6:
+    case ScalarType::Int7:
+    case ScalarType::Float4_e2m1fn_x2:
+      return true;
     case ScalarType::UInt1:
     case ScalarType::UInt2:
     case ScalarType::UInt3:
@@ -474,7 +514,7 @@ inline bool isSignedType(ScalarType t) {
     case ScalarType::UInt5:
     case ScalarType::UInt6:
     case ScalarType::UInt7:
-      return true;
+      return false;
     case ScalarType::Undefined:
     case ScalarType::NumOptions:
       break;

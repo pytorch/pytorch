@@ -8,15 +8,13 @@ and /cudnn/linear_unpack_impl.cpp, for cudnn.
 */
 #include <ATen/ATen.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/library.h>
+#include <ATen/native/quantized/PackedParams.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
-int register_linear_params();
-
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 class QLinearUnpackWeightInt8 final {
@@ -76,5 +74,4 @@ TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native

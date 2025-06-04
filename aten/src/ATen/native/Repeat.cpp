@@ -74,7 +74,7 @@ Tensor repeat_interleave_symint(
   }
 
   Tensor repeats_ = repeats;
-  if (repeats.dim() == 0 || (repeats.dim() == 1 && repeats.sym_size(0) == 1)) {
+  if (repeats.dim() == 0 || (repeats.dim() == 1 && TORCH_GUARD_OR_FALSE(repeats.sym_size(0).sym_eq(1)))) {
     repeats_ = repeats.reshape({1}).expand_symint({input.sym_size(dim.value())});
   } else if (repeats.dim() == 1) {
     TORCH_CHECK(
@@ -83,11 +83,11 @@ Tensor repeat_interleave_symint(
         repeats.sym_size(0), " and input.size(", dim.value(), ") = ", input.sym_size(dim.value())
     );
   } else {
-    AT_ERROR("repeats must be 0-dim or 1-dim tensor");
+    TORCH_CHECK(false, "repeats must be 0-dim or 1-dim tensor");
   }
 
   auto ret = input.index_select(
-      dim.value(), at::repeat_interleave_symint(repeats_, output_size));
+      dim.value(), at::repeat_interleave_symint(repeats_, std::move(output_size)));
   // Restore conj and neg bits
   if (conj) {
     ret = ret.conj();

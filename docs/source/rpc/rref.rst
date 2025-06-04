@@ -132,7 +132,7 @@ to Y, and Y forks to Z:
   OwnerRRef -> A -> Y -> Z
 
 If all of Z's messages, including the delete message, are processed by the
-owner before Y's messages. the owner will learn of Z's deletion befores
+owner before Y's messages. the owner will learn of Z's deletion before
 knowing Y exists. Nevertheless, this does not cause any problem. Because, at least
 one of Y's ancestors will be alive (A) and it will
 prevent the owner from deleting the ``OwnerRRef``. More specifically, if the
@@ -204,7 +204,7 @@ will create the ``OwnerRRef``, and returns an ACK to acknowledge ``{100, 1}``
 **G2**, the ``OwnerRRef`` is a child of the ``UserRRef``, and the ``UserRRef``
 is not deleted until it receives the ACK from the owner.
 
-.. image:: https://user-images\.githubusercontent\.com/16999635/69164772-98181300-0abe-11ea-93a7-9ad9f757cd94.png
+.. image:: https://user-images.githubusercontent.com/16999635/69164772-98181300-0abe-11ea-93a7-9ad9f757cd94.png
     :alt: user_to_owner_ret.png
     :width: 500 px
 

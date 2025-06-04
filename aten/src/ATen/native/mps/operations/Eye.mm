@@ -54,12 +54,6 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
   MPSStream* stream = getCurrentMPSStream();
 
   auto outputDataType = result.scalar_type();
-  ScalarType inputDataType = outputDataType;
-  if (!is_macos_13_or_newer() && outputDataType == kBool) {
-    // workaround for unsupported bool constant on macOS 12.
-    inputDataType = kByte;
-  }
-
   // Derive from MPSCachedGraph
   // This structure is used to cache an MPSGraph with certain keys, so that we don't have to compile the same MPSGraph
   // time and time again for the same operation The keys of this structure are based on the inputs and outputs needed
@@ -75,11 +69,11 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
   @autoreleasepool {
     // A key is used to identify the MPSGraph which was created once, and can be reused if the parameters, data types
     // etc match the earlier created MPSGraph
-    string key = "eye_out_mps:" + getTensorsStringKey({result});
+    std::string key = "eye_out_mps:" + getTensorsStringKey({result});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto* mpsGraph, auto* newCachedGraph) {
       MPSGraphTensor* onesTensor = [mpsGraph constantWithScalar:1.0f
                                                           shape:getMPSShape(result)
-                                                       dataType:getMPSDataType(inputDataType)];
+                                                       dataType:getMPSDataType(outputDataType)];
 
       // Here we can call the MPSGraph API needed to execute the operation.
       // The API details can be found here:

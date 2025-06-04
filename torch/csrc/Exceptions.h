@@ -74,6 +74,7 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
   _CATCH_GENERIC_ERROR(TypeError, PyExc_TypeError, retstmnt)                  \
   _CATCH_GENERIC_ERROR(                                                       \
       NotImplementedError, PyExc_NotImplementedError, retstmnt)               \
+  _CATCH_GENERIC_ERROR(SyntaxError, PyExc_SyntaxError, retstmnt)              \
   _CATCH_GENERIC_ERROR(LinAlgError, THPException_LinAlgError, retstmnt)       \
   _CATCH_GENERIC_ERROR(                                                       \
       OutOfMemoryError, THPException_OutOfMemoryError, retstmnt)              \
@@ -81,8 +82,16 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
       DistBackendError, THPException_DistBackendError, retstmnt)              \
   _CATCH_GENERIC_ERROR(                                                       \
       DistNetworkError, THPException_DistNetworkError, retstmnt)              \
+  _CATCH_GENERIC_ERROR(                                                       \
+      DistQueueEmptyError, THPException_DistQueueEmptyError, retstmnt)        \
   _CATCH_GENERIC_ERROR(DistStoreError, THPException_DistStoreError, retstmnt) \
   _CATCH_GENERIC_ERROR(DistError, THPException_DistError, retstmnt)           \
+  catch (c10::AcceleratorError & e) {                                         \
+    auto exc = torch::detail::_new_accelerator_error_object(e);               \
+    PyErr_SetObject(THPException_AcceleratorError, exc);                      \
+    Py_XDECREF(exc);                                                          \
+    retstmnt;                                                                 \
+  }                                                                           \
   _CATCH_GENERIC_ERROR(Error, PyExc_RuntimeError, retstmnt)                   \
   catch (torch::PyTorchError & e) {                                           \
     auto msg = torch::processErrorMsg(e.what());                              \
@@ -107,16 +116,16 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
     throw;                                                          \
   }                                                                 \
   }                                                                 \
-  catch (py::error_already_set & e) {                               \
+  catch (py::error_already_set&) {                                  \
     throw;                                                          \
   }                                                                 \
-  catch (py::builtin_exception & e) {                               \
+  catch (py::builtin_exception&) {                                  \
     throw;                                                          \
   }                                                                 \
-  catch (torch::jit::JITException & e) {                            \
+  catch (torch::jit::JITException&) {                               \
     throw;                                                          \
   }                                                                 \
-  catch (const std::exception& e) {                                 \
+  catch (const std::exception&) {                                   \
     torch::translate_exception_to_python(std::current_exception()); \
     throw py::error_already_set();                                  \
   }
@@ -138,7 +147,8 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
 extern PyObject *THPException_FatalError, *THPException_LinAlgError,
     *THPException_OutOfMemoryError, *THPException_DistError,
     *THPException_DistBackendError, *THPException_DistNetworkError,
-    *THPException_DistStoreError;
+    *THPException_DistStoreError, *THPException_DistQueueEmptyError,
+    *THPException_AcceleratorError;
 
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.
@@ -165,6 +175,9 @@ struct python_error : public std::exception {
     other.value = nullptr;
     other.traceback = nullptr;
   }
+
+  python_error& operator=(const python_error& other) = delete;
+  python_error& operator=(python_error&& other) = delete;
 
   // NOLINTNEXTLINE(bugprone-exception-escape)
   ~python_error() override {
@@ -290,7 +303,7 @@ struct TypeError : public PyTorchError {
 
 // Translates to Python AttributeError
 struct AttributeError : public PyTorchError {
-  AttributeError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
+  using PyTorchError::PyTorchError;
   PyObject* python_type() override {
     return PyExc_AttributeError;
   }
@@ -335,6 +348,7 @@ namespace detail {
 struct noop_gil_scoped_release {
   // user-defined constructor (i.e. not defaulted) to avoid
   // unused-variable warnings at usage sites of this class
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   noop_gil_scoped_release() {}
 };
 
@@ -349,7 +363,6 @@ using Arg = typename invoke_traits<Func>::template arg<i>::type;
 
 template <typename Func, size_t... Is, bool release_gil>
 auto wrap_pybind_function_impl_(
-    // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
     Func&& f,
     std::index_sequence<Is...>,
     std::bool_constant<release_gil>) {
@@ -359,10 +372,12 @@ auto wrap_pybind_function_impl_(
   return [f = std::forward<Func>(f)](Arg<Func, Is>... args) {
     HANDLE_TH_ERRORS
     conditional_gil_scoped_release<release_gil> no_gil;
-    return c10::guts::invoke(f, std::forward<Arg<Func, Is>>(args)...);
+    return std::invoke(f, std::forward<Arg<Func, Is>>(args)...);
     END_HANDLE_TH_ERRORS_PYBIND
   };
 }
+
+PyObject* _new_accelerator_error_object(const c10::AcceleratorError&);
 } // namespace detail
 
 // Wrap a function with TH error and warning handling.

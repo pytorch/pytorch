@@ -6,13 +6,14 @@ import sys
 import unittest
 from copy import deepcopy
 from enum import Enum
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Union
 
 import torch
 from torch import Tensor
 from torch.nn import Parameter
 from torch.optim import (
     Adadelta,
+    Adafactor,
     Adagrad,
     Adam,
     Adamax,
@@ -39,8 +40,9 @@ from torch.testing._internal.common_device_type import tol, toleranceOverride
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_utils import (
     _TestParametrizer,
-    skipIfMps,
+    skipIfMPS,
     skipIfTorchDynamo,
+    skipIfXpu,
     TEST_WITH_TORCHDYNAMO,
 )
 from torch.utils._foreach_utils import _get_foreach_kernels_supported_devices
@@ -53,8 +55,10 @@ class OptimizerInput:
 
     def __init__(
         self,
-        params: Union[List[Parameter], List[Tensor], Dict[Any, Any]],
-        kwargs: Dict[str, Any],
+        params: Union[
+            list[Parameter], list[Tensor], dict[Any, Any], list[dict[str, Any]]
+        ],
+        kwargs: dict[str, Any],
         desc: str = "",
     ):
         # params can be a list of Tensors OR param_groups OR None
@@ -119,9 +123,19 @@ class OptimizerInfo:
         ),
         # A subset of the global-cliquey flags (fused, foreach, differentiable) the optimizer
         # supports. See NOTE: [optimizer kwarg categories] for what global-cliquey means.
-        supported_impls: Tuple[str] = ("foreach", "differentiable"),
+        supported_impls: tuple[str, ...] = ("foreach", "differentiable"),
+        # A subset of all flags, signifying which ones were only supported after the
+        # original optimizer had already been released. aka impls where we need to check BC.
+        not_og_supported_flags: tuple[str, ...] = (
+            "foreach",
+            "differentiable",
+            "maximize",
+            "capturable",
+        ),
         # the optim supports passing in sparse gradients as well as dense grads
         supports_sparse: bool = False,
+        # the optimizer constructor supports passing in capturable as a kwarg
+        has_capturable_arg: bool = False,
         # the optim only supports one config: sparse grads w/ dense params, see SparseAdam
         only_supports_sparse_grads: bool = False,
         # Tuple of (optimizer kwargs, schedulers_constructors) specifically for sparse tests,
@@ -139,13 +153,15 @@ class OptimizerInfo:
         skips=(),  # Indicates which tests to skip
         decorators=None,  # Additional decorators to apply to generated tests
         optim_error_inputs_func=None,  # Function to generate optim inputs that error
-        supports_fused_on: Tuple[str] = (),
+        supports_fused_on: tuple[str, ...] = (),
     ):
         self.optim_cls = optim_cls
         self.optim_inputs_func = optim_inputs_func
         self.scheduler_inputs = scheduler_inputs
         self.supported_impls = supported_impls
+        self.not_og_supported_flags = not_og_supported_flags
         self.supports_sparse = supports_sparse
+        self.has_capturable_arg = has_capturable_arg
         self.metadata_for_sparse = metadata_for_sparse
         self.only_supports_sparse_grads = only_supports_sparse_grads
         self.supports_complex = supports_complex
@@ -230,6 +246,7 @@ class optims(_TestParametrizer):
 def get_error_inputs_for_all_optims(device, dtype):
     if _get_device_type(device) == "cpu":
         sample_param = Parameter(torch.randn(1, device=device, dtype=dtype))
+        sample_param2 = Parameter(torch.randn(1, device=device, dtype=dtype))
         return [
             ErrorOptimizerInput(
                 OptimizerInput(
@@ -257,6 +274,37 @@ def get_error_inputs_for_all_optims(device, dtype):
                 ),
                 error_type=ValueError,
                 error_regex="some parameters appear in more than one parameter group",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=torch.tensor([0.001, 0.001])),
+                    desc="Tensor lr must be 1-element",
+                ),
+                error_type=ValueError,
+                error_regex="Tensor lr must be 1-element",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[("weight", sample_param), sample_param2],
+                    kwargs={},
+                    desc="all optimizer params should be with/without names",
+                ),
+                error_type=ValueError,
+                error_regex="all optimizer params should be with/without names. Some param names are missing",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[
+                        {"params": [sample_param], "lr": 1e-2},
+                        {"params": [("weight", sample_param2)]},
+                    ],
+                    kwargs={},
+                    desc="all optimizer param groups should be with/without names.",
+                ),
+                error_type=ValueError,
+                error_regex="all optimizer param groups should be with/without names. "
+                "cannot add param group with names to the optimizer",
             ),
         ]
     else:
@@ -310,10 +358,11 @@ def optim_inputs_func_adadelta(device, dtype=None):
         OptimizerInput(
             params=None, kwargs={"weight_decay": 0.1}, desc="nonzero weight_decay"
         ),
+        OptimizerInput(params=None, kwargs={"maximize": True}, desc="maximize"),
         OptimizerInput(
             params=None,
             kwargs={"weight_decay": 0.1, "maximize": True},
-            desc="maximize",
+            desc="maximize, weight_decay",
         ),
         OptimizerInput(
             params=None, kwargs={"rho": 0.95, "weight_decay": 0.9}, desc="rho"
@@ -333,6 +382,79 @@ def optim_error_inputs_func_adadelta(device, dtype):
                 ),
                 error_type=ValueError,
                 error_regex="Invalid rho value: 1.1",
+            ),
+        ]
+    return error_inputs
+
+
+def optim_inputs_func_adafactor(device, dtype=None):
+    return [
+        OptimizerInput(params=None, kwargs={}, desc="default"),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "lr": 0.01},
+            desc="nonzero weight_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "maximize": True},
+            desc="maximize",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"beta2_decay": -1.0},
+            desc="non-default beta2_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"d": 1.5},
+            desc="non-default clipping threshold d",
+        ),
+    ]
+
+
+def optim_error_inputs_func_adafactor(device, dtype):
+    error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    if _get_device_type(device) == "cpu":
+        complex_param = torch.rand(2, 3, device=device, dtype=torch.complex64)
+        complex_param.grad = torch.rand_like(complex_param)
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(eps=(-1e-30, 1e-3)),
+                    desc="epsilon1 should be >= 0",
+                ),
+                error_type=ValueError,
+                error_regex="epsilon1 should be >= 0",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(d=0.0),
+                    desc="invalid d",
+                ),
+                error_type=ValueError,
+                error_regex="Clipping threshold d should be >= 1",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(beta2_decay=0.8),
+                    desc="invalid beta2_decay",
+                ),
+                error_type=ValueError,
+                error_regex="beta2_decay should be <= 0",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[complex_param],
+                    kwargs=dict(),
+                    desc="does not support complex parameters",
+                ),
+                error_type=RuntimeError,
+                error_regex="Adafactor does not support complex parameters",
+                error_on=OptimizerErrorEnum.STEP_ERROR,
             ),
         ]
     return error_inputs
@@ -399,6 +521,26 @@ def optim_inputs_func_adam(device, dtype=None):
             params=None,
             kwargs={"lr": torch.tensor(0.001), "amsgrad": True, "capturable": True},
             desc="Tensor lr with capturable and amsgrad",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "lr": torch.tensor(0.001),
+                "betas": (torch.tensor(0.9), torch.tensor(0.99)),
+                "amsgrad": True,
+                "capturable": True,
+            },
+            desc="Tensor lr, Tensor betas, with capturable and amsgrad",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "lr": torch.tensor(0.001),
+                "betas": (torch.tensor(0.9), torch.tensor(0.99)),
+                "amsgrad": False,
+                "capturable": True,
+            },
+            desc="Tensor lr, Tensor betas, with capturable",
         ),
     ]
     mps_supported_configs = [
@@ -474,6 +616,37 @@ def optim_error_inputs_func_adam(device, dtype):
                 error_type=ValueError,
                 error_regex="lr as a Tensor is not supported for capturable=False and foreach=True",
             ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, betas=(0.9, torch.tensor(0.99))),
+                    desc="betas must be either both floats or both Tensors",
+                ),
+                error_type=ValueError,
+                error_regex="betas must be either both floats or both Tensors",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, betas=(torch.tensor(0.9), 0.99)),
+                    desc="betas must be either both floats or both Tensors",
+                ),
+                error_type=ValueError,
+                error_regex="betas must be either both floats or both Tensors",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(
+                        lr=1e-2,
+                        betas=(torch.tensor(0.9), torch.tensor(0.99)),
+                        foreach=True,
+                    ),
+                    desc=r"betas\[0\] as a Tensor is not supported for capturable=False and foreach=True",
+                ),
+                error_type=ValueError,
+                error_regex=r"betas\[0\] as a Tensor is not supported for capturable=False and foreach=True",
+            ),
         ]
     if _get_device_type(device) == "cuda":
         sample_tensor = torch.empty((), device=device, dtype=dtype)
@@ -538,8 +711,13 @@ def optim_inputs_func_adamax(device, dtype=None):
         ),
         OptimizerInput(
             params=None,
-            kwargs={"weight_decay": 0.1, "maximize": True},
+            kwargs={"maximize": True},
             desc="maximize",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "maximize": True},
+            desc="maximize, weight_decay",
         ),
     ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
 
@@ -637,6 +815,9 @@ def optim_inputs_func_lbfgs(device, dtype=None):
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 0.01}, desc="non-default lr"),
         OptimizerInput(
+            params=None, kwargs={"lr": torch.tensor(0.001)}, desc="Tensor lr"
+        ),
+        OptimizerInput(
             params=None, kwargs={"tolerance_grad": 1e-6}, desc="tolerance_grad"
         ),
         OptimizerInput(
@@ -692,8 +873,15 @@ def optim_inputs_func_nadam(device, dtype=None):
         ),
         OptimizerInput(
             params=None,
-            kwargs={"weight_decay": 0.1, "momentum_decay": 6e-3},
+            kwargs={
+                "weight_decay": 0.1,
+            },
             desc="weight_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "momentum_decay": 6e-3},
+            desc="weight_decay, momentum_decay",
         ),
         OptimizerInput(
             params=None,
@@ -839,8 +1027,23 @@ def optim_inputs_func_rmsprop(device, dtype=None):
         ),
         OptimizerInput(
             params=None,
+            kwargs={
+                "maximize": True,
+            },
+            desc="maximize",
+        ),
+        OptimizerInput(
+            params=None,
             kwargs={"weight_decay": 0.1, "centered": True},
             desc="centered",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "maximize": True,
+                "weight_decay": 0.1,
+            },
+            desc="maximize, weight_decay",
         ),
         OptimizerInput(
             params=None,
@@ -855,7 +1058,7 @@ def optim_inputs_func_rmsprop(device, dtype=None):
                 "momentum": 0.1,
                 "maximize": True,
             },
-            desc="maximize",
+            desc="maximize, centered, weight_decay, w/ momentum",
         ),
     ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
 
@@ -926,7 +1129,15 @@ def optim_inputs_func_sgd(device, dtype=None):
         OptimizerInput(
             params=None, kwargs={"lr": torch.tensor(0.001)}, desc="tensor lr"
         ),
+        OptimizerInput(
+            params=None, kwargs={"weight_decay": 0.5}, desc="non-zero weight_decay"
+        ),
         OptimizerInput(params=None, kwargs={"momentum": 0.9}, desc="momentum"),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "maximize": True},
+            desc="maximize",
+        ),
         OptimizerInput(
             params=None,
             kwargs={"momentum": 0.9, "dampening": 0.5},
@@ -935,17 +1146,12 @@ def optim_inputs_func_sgd(device, dtype=None):
         OptimizerInput(
             params=None,
             kwargs={"momentum": 0.9, "weight_decay": 0.1},
-            desc="non-zero weight_decay",
+            desc="weight_decay w/ momentum",
         ),
         OptimizerInput(
             params=None,
             kwargs={"momentum": 0.9, "nesterov": True, "weight_decay": 0.1},
             desc="nesterov",
-        ),
-        OptimizerInput(
-            params=None,
-            kwargs={"weight_decay": 0.1, "maximize": True},
-            desc="maximize",
         ),
     ]
 
@@ -973,6 +1179,9 @@ def optim_inputs_func_sparseadam(device, dtype=None):
         OptimizerInput(
             params=None, kwargs={"lr": 0.01}, desc="non-default lr"
         ),  # TODO: Move out to testing in param_group?
+        OptimizerInput(
+            params=None, kwargs={"lr": torch.tensor(0.001)}, desc="Tensor lr"
+        ),
         OptimizerInput(params=None, kwargs={"maximize": True}, desc="maximize"),
     ]
 
@@ -1027,7 +1236,7 @@ def optim_error_inputs_func_sparseadam(device, dtype):
             ErrorOptimizerInput(
                 OptimizerInput(
                     params=[torch.rand(2, 3, device=device, dtype=torch.complex64)],
-                    kwargs=dict(),
+                    kwargs={},
                     desc="complex not supported",
                 ),
                 error_type=ValueError,
@@ -1047,7 +1256,7 @@ def _get_device_type(device: Union[str, torch.device]) -> str:
 
 def _get_optim_inputs_including_global_cliquey_kwargs(
     device, dtype, optim_info, skip=()
-) -> List[OptimizerInput]:
+) -> list[OptimizerInput]:
     """
     Return a list of all configs for a given optimizer as a list of OptimizerInputs,
     including configs that have supported global cliquey kwargs (foreach, fused,
@@ -1103,19 +1312,14 @@ def _get_optim_inputs_including_global_cliquey_kwargs(
 
 
 # Database of OptimizerInfo entries in alphabetical order.
-optim_db: List[OptimizerInfo] = [
+optim_db: list[OptimizerInfo] = [
     OptimizerInfo(
         Adadelta,
         optim_inputs_func=optim_inputs_func_adadelta,
         optim_error_inputs_func=optim_error_inputs_func_adadelta,
         supported_impls=("foreach", "differentiable"),
+        has_capturable_arg=True,
         skips=(
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
             DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
@@ -1156,10 +1360,161 @@ optim_db: List[OptimizerInfo] = [
         ),
     ),
     OptimizerInfo(
+        Adafactor,
+        optim_inputs_func=optim_inputs_func_adafactor,
+        optim_error_inputs_func=optim_error_inputs_func_adafactor,
+        supported_impls=("foreach",),
+        not_og_supported_flags=("foreach",),
+        supports_complex=False,
+        skips=(
+            DecorateInfo(
+                unittest.skip("See #133268 regarding dtype being None"),
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                device_type="cuda",
+                active_if=lambda kwargs: kwargs.get("use_closure", False),
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_can_load_older_state_dict",
+                device_type="cuda",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_deepcopy_copies_all_public_attrs",
+                device_type="cuda",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_foreach_large_tensor",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_load_nontensor_step",
+                device_type="cuda",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_mixed_device_dtype",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_param_groups_lr",
+                device_type="cuda",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_param_groups_weight_decay",
+                device_type="cuda",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_save_load_equality_with_weights_only",
+                device_type="cuda",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #116028 regarding copy not supported"),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_state_dict_deterministic",
+                device_type="cuda",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_step_is_noop_for_zero_grads",
+                device_type="cuda",
+            ),
+            DecorateInfo(
+                unittest.skip("See #133268 regarding dtype being None"),
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_can_load_older_state_dict",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_deepcopy_copies_all_public_attrs",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_load_nontensor_step",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_param_groups_lr",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_param_groups_weight_decay",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_save_load_equality_with_weights_only",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_state_dict_deterministic",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_step_is_noop_for_zero_grads",
+                device_type="xpu",
+            ),
+        ),
+    ),
+    OptimizerInfo(
         Adagrad,
         optim_inputs_func=optim_inputs_func_adagrad,
         optim_error_inputs_func=optim_error_inputs_func_adagrad,
         supported_impls=("foreach", "differentiable", "fused"),
+        not_og_supported_flags=(
+            "foreach",
+            "differentiable",
+            "fused",
+            "maximize",
+            "capturable",
+        ),
         supports_fused_on=("cpu",),
         supports_sparse=True,
         metadata_for_sparse=(
@@ -1188,16 +1543,11 @@ optim_db: List[OptimizerInfo] = [
         ),
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+                device_type="mps",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
@@ -1243,6 +1593,14 @@ optim_db: List[OptimizerInfo] = [
         ),
         optim_error_inputs_func=optim_error_inputs_func_adam,
         supported_impls=("foreach", "differentiable", "fused"),
+        has_capturable_arg=True,
+        not_og_supported_flags=(
+            "foreach",
+            "differentiable",
+            "fused",
+            "maximize",
+            "capturable",
+        ),
         supports_fused_on=("cpu", "cuda", "mps"),
         decorators=(
             # Expected floating point error between fused and compiled forloop
@@ -1282,16 +1640,11 @@ optim_db: List[OptimizerInfo] = [
         ),
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+                device_type="mps",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1321,18 +1674,14 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adamax,
         optim_error_inputs_func=optim_error_inputs_func_adamax,
         supported_impls=("foreach", "differentiable"),
+        has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+                device_type="mps",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
@@ -1365,7 +1714,15 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adamw,
         optim_error_inputs_func=optim_error_inputs_func_adamw,
         supported_impls=("foreach", "differentiable", "fused"),
+        not_og_supported_flags=(
+            "foreach",
+            "differentiable",
+            "fused",
+            "maximize",
+            "capturable",
+        ),
         supports_fused_on=("cpu", "cuda", "mps"),
+        has_capturable_arg=True,
         decorators=(
             # Expected error between compiled forloop and fused optimizers
             DecorateInfo(
@@ -1407,16 +1764,11 @@ optim_db: List[OptimizerInfo] = [
         ),
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+                device_type="mps",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1446,13 +1798,8 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_asgd,
         optim_error_inputs_func=optim_error_inputs_func_asgd,
         supported_impls=("foreach", "differentiable"),
+        has_capturable_arg=True,
         skips=(
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
@@ -1503,7 +1850,10 @@ optim_db: List[OptimizerInfo] = [
         skips=(
             # Fails on MacOS 13.2.1 in CI https://github.com/pytorch/pytorch/issues/117094
             DecorateInfo(
-                skipIfMps, "TestOptimRenewed", "test_can_load_older_state_dict"
+                skipIfMPS,
+                "TestOptimRenewed",
+                "test_can_load_older_state_dict",
+                device_type="mps",
             ),
             DecorateInfo(
                 toleranceOverride(
@@ -1537,11 +1887,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_param_group_with_lrscheduler_goes_right_direction",
             ),
+            # https://github.com/pytorch/pytorch/issues/131398
             DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+                unittest.expectedFailure,
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                active_if=lambda kwargs: sys.platform == "darwin"
+                and kwargs["use_closure"],
             ),
         ),
     ),
@@ -1550,18 +1902,14 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_nadam,
         optim_error_inputs_func=optim_error_inputs_func_nadam,
         supported_impls=("foreach", "differentiable"),
+        has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+                device_type="mps",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1598,13 +1946,8 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_radam,
         optim_error_inputs_func=optim_error_inputs_func_radam,
         supported_impls=("foreach", "differentiable"),
+        has_capturable_arg=True,
         skips=(
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
@@ -1643,18 +1986,14 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_rmsprop,
         optim_error_inputs_func=optim_error_inputs_func_rmsprop,
         supported_impls=("foreach", "differentiable"),
+        has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+                device_type="mps",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
@@ -1692,18 +2031,14 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_rprop,
         optim_error_inputs_func=optim_error_inputs_func_rprop,
         supported_impls=("foreach", "differentiable"),
+        has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfMps,  # Rprop doesn't update for non-contiguous, see #118117
+                skipIfMPS,  # Rprop doesn't update for non-contiguous, see #118117
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+                device_type="mps",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
@@ -1756,6 +2091,13 @@ optim_db: List[OptimizerInfo] = [
         ),
         optim_error_inputs_func=optim_error_inputs_func_sgd,
         supported_impls=("foreach", "differentiable", "fused"),
+        not_og_supported_flags=(
+            "foreach",
+            "differentiable",
+            "fused",
+            "maximize",
+            "capturable",
+        ),
         supports_sparse=True,
         metadata_for_sparse=(
             {
@@ -1773,12 +2115,6 @@ optim_db: List[OptimizerInfo] = [
             "mps",
         ),
         skips=(
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
@@ -1822,15 +2158,12 @@ optim_db: List[OptimizerInfo] = [
         supports_complex=False,  # Missing complex support, see #118153
         skips=(
             DecorateInfo(
-                skipIfMps,  # SparseAdam does not support MPS
+                skipIfMPS,  # SparseAdam does not support MPS
                 "TestOptimRenewed",
+                device_type="mps",
             ),
             DecorateInfo(
-                unittest.skip(
-                    "SparseAdam does not support dense gradients, see #116507"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_deterministic",
+                skipIfXpu(msg="SparseAdam is not yet supported on the XPU stack"),
             ),
             DecorateInfo(
                 skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
@@ -1903,9 +2236,9 @@ class TensorTracker:
 
     def add(self, tensor):
         """
-        Add a clone().detach()'d version of the tensor
+        Add a detach().clone()'d version of the tensor
         """
-        self.tensors.append(tensor.clone().detach())
+        self.tensors.append(tensor.detach().clone())
 
     # pops from beginning, like a queue and not a stack!
     def pop_check_set(self, tensor_to_set, testcase):

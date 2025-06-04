@@ -67,6 +67,7 @@ Sections start with a reference to the source file where the code related to the
   - [Handling Mutability](#handling-mutability)
     - [Aliasing and mutation in the PyTorch API](#aliasing-and-mutation-in-the-pytorch-api)
     - [Aliasing and mutation annotations in FunctionSchema](#aliasing-and-mutation-annotations-in-functionschema)
+    - [Marking custom ops as side-effectful](#marking-custom-ops-as-side-effectful)
     - [Alias Analysis in the IR](#alias-analysis-in-the-ir)
     - [Writing optimization passes with `AliasDb`](#writing-optimization-passes-with-aliasdb)
 - [Profiling Programs](#profiling-programs)
@@ -197,7 +198,7 @@ Note that the chosen overload is not shown in any way in the textual output. If 
 
 Each node also has a set of attributes which are named integers, strings, floats, `Tensors`, subgraphs, or lists of these types. These are used by special primitive operators to encode additional data in the `Node`. For instance `prim::Constant` defines a compile-time constant value. For `Tensor` constants, it will have a single `Tensor` attribute with the name `attr::value` which contains the value of the constant.
 
-Attributes are _rarely used_. Operators like convolution or matrix-multiply have no attributes and take their arguments through the input list. This includes things that might be typically thought of as constants, like the stride of the convolution. In PyTorch, any of this information is potentially a dynamic property of the program so `Nodes` are always encoded in a way that allows these values to be dynamically determined. However, we recognize that many inputs are almost always constants, so we make it easy to quickly check if an input is constant and get its value with `c10::optional<IValue> Node::get(Symbol name)`, which returns an `IValue` (a concrete value for the input) in the case the node is constant and `nullopt` otherwise.
+Attributes are _rarely used_. Operators like convolution or matrix-multiply have no attributes and take their arguments through the input list. This includes things that might be typically thought of as constants, like the stride of the convolution. In PyTorch, any of this information is potentially a dynamic property of the program so `Nodes` are always encoded in a way that allows these values to be dynamically determined. However, we recognize that many inputs are almost always constants, so we make it easy to quickly check if an input is constant and get its value with `std::optional<IValue> Node::get(Symbol name)`, which returns an `IValue` (a concrete value for the input) in the case the node is constant and `nullopt` otherwise.
 
 ## Block ##
 
@@ -366,7 +367,7 @@ Values are abstract representations of data in the program. When executing, the 
 
 ## Type ##
 
-[aten/src/ATen/core/jit_type.h](/aten/src/ATen/core/jit_type.h)
+[aten/src/ATen/core/jit_type.h](../../../aten/src/ATen/core/jit_type.h)
 
 TorchScript, unlike Python, is statically typed, so every `Value` has a Type associated with it, and every FunctionSchema has a list of argument types and a return type for a function. Type is the base class of a hierarchy of C++ objects that represent the built-in types of TorchScript. Types provide methods such as `Type::isSubtypeOf` that describe the typing relationships. Common type are:
 
@@ -388,7 +389,6 @@ JIT programs are created using either the tracing frontend (`torch.jit.trace`) o
 
 
 [tracer.h](frontend/tracer.h)
-[tracer_state.h](frontend/tracer_state.h)
 
 The tracer produces graphs by recording what actual operations are done on `Tensors`.
 The entry point from Python into C++ for tracing using `torch.jit.trace` is `_create_method_from_trace`.
@@ -397,7 +397,7 @@ A thread local instance of the TracingState object maintains a mapping between a
 
 An initial `IValue` to `Value` mapping is set up between the inputs to the function being traced and symbolic `Value` inputs to the `Graph` being constructed. If we are tracing a `torch.nn.Module`, the tracer also adds Parameters and sub-Modules to the Module being constructed that correspond to the Python `torch.nn.Module` being traced.  Mappings for these values are also added so that uses of the Parameters in the trace will create uses of the Parameters in the `Graph`.
 
-As the trace runs, individual operators create `Nodes` in the `Graph` being traced to record what happens. This code is currently generated per operator in [tools/autograd/gen_variable_type.py](/tools/autograd/gen_variable_type.py). It results in code that looks like the following:
+As the trace runs, individual operators create `Nodes` in the `Graph` being traced to record what happens. This code is currently generated per operator in [tools/autograd/gen_variable_type.py](../../../tools/autograd/gen_variable_type.py). It results in code that looks like the following:
 
 ```cpp
 torch::jit::Node* node = nullptr;
@@ -433,7 +433,7 @@ The resulting `Graph` created by tracing is installed as the 'forward' method of
 
 ## Script ##
 
-The script frontend directly converts Python syntax into Modules. Like many compilers this happens in two phases. First, we generate an abstract syntax tree (AST), which is constructed out of Tree objects. The IR emitter then does semantic analysis on the Tree and lowers it into a Module. We can generate Trees in two ways: (1) using frontend.py, which takes the Python AST and transliterates it into Tree objects, or (2) via the Lexer and Parser which parse Python syntax directly. The Lexer+Parser path may seem redundant but it is crucially important. We need to define builtin functions ([frontend/builtin_functions.cpp](frontend/builtin_functions.cpp)) when Python is not linked because we allow users to generate TorchScript programs directly from strings containing Python source code ([api/include/torch/jit.h](/torch/csrc/api/include/torch/jit.h)) without linking a full Python implementation (e.g. CPython). We also use this Python syntax as the serialization format for TorchScript, since it allows us to make changes to our IR without breaking backward compatibility. Furthermore, the Lexer is reused to implement the FunctionSchema parser, which turns FunctionSchema declarations from strings into FunctionSchema objects.
+The script frontend directly converts Python syntax into Modules. Like many compilers this happens in two phases. First, we generate an abstract syntax tree (AST), which is constructed out of Tree objects. The IR emitter then does semantic analysis on the Tree and lowers it into a Module. We can generate Trees in two ways: (1) using frontend.py, which takes the Python AST and transliterates it into Tree objects, or (2) via the Lexer and Parser which parse Python syntax directly. The Lexer+Parser path may seem redundant but it is crucially important. We need to define builtin functions ([frontend/builtin_functions.cpp](frontend/builtin_functions.cpp)) when Python is not linked because we allow users to generate TorchScript programs directly from strings containing Python source code ([api/include/torch/jit.h](../api/include/torch/jit.h)) without linking a full Python implementation (e.g. CPython). We also use this Python syntax as the serialization format for TorchScript, since it allows us to make changes to our IR without breaking backward compatibility. Furthermore, the Lexer is reused to implement the FunctionSchema parser, which turns FunctionSchema declarations from strings into FunctionSchema objects.
 
 The following sections look into each the stages in the script frontend in detail.
 
@@ -760,7 +760,7 @@ Optimization passes that wish to exploit multi-threaded execution may automatica
 
 ## IValue ##
 
-[ivalue.h](/aten/src/ATen/core/ivalue.h)
+[ivalue.h](../../../aten/src/ATen/core/ivalue.h)
 
 All evaluation involves computation using `IValues`, 16-byte tagged unions that can hold the concrete representation of any type in TorchScript. TorchScript is statically typed, so it would be possible to operate on unboxed primitive types, but the interface between interpreter, built-in ops and user functions would be significantly more complicated. A single tagged union keeps these interfaces simple and since most objects are `Tensors` anyway, the overhead of storing a tag is small compared to the data stored in the `Tensors`.
 
@@ -1360,6 +1360,20 @@ func: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor(a)[]
 
 This annotation language is consumed by the `FunctionSchema` parser, which produces `AliasInfo` objects summarizing the aliasing relationships for each schema `Argument`.
 
+### Marking custom ops as side-effectful
+
+Sometimes, one will register a custom op that is side-effectful. For example, an op that does logging might take in a tensor (or other input), but not return anything. Without further annotation, these types of ops will often be dead-code-eliminated by TorchScript.
+
+To mark a custom op as side-effectful, or otherwise mark it to be handled conservatively by the alias analysis, it can be marked as `c10::AliasAnalysisKind::CONSERVATIVE`:
+
+```c++
+TORCH_LIBRARY(my_library, m) {
+  m.def(torch::schema(
+    "my_logging_op(Tensor data) -> ()",
+    c10::AliasAnalysisKind::CONSERVATIVE"));
+}
+```
+
 ### Alias Analysis in the IR
 
 [ir/alias_analysis.h](ir/alias_analysis.h)
@@ -1392,7 +1406,7 @@ def foo(a : Tensor, b : Tensor):
 ```
 Will produce a graph like this:
 
-![AliasTracker graph](/docs/source/_static/img/aliastracker_graph.png)
+![AliasTracker graph](../../../docs/source/_static/img/aliastracker_graph.png)
 
 A few things to note:
 - "Graph Input Element" is an example of an `Element` that isn't a first-class `Value`. Alias analysis happens on a per-function level, so we don't necessarily know the aliasing relationships of the inputs. The only safe assumption is that `a` and `b` may alias each other, so they point to a special `Element` that describes "the world outside of this function".
@@ -1444,8 +1458,8 @@ When differentiating a graph, each node that has a symbolic gradient will be inc
 Adding/updating symbolic gradient functions must be tested carefully as it's easy to get CI green by comparing autograd result with itself, but potentially cause an autodiff support regression.
 
 If your PR adds/updates a gradient formula for `torch`/`nn` functions, you **MUST** enable/update the corresponding tests in
-- `torch` functions: `method_tests` in [common_method_tests.py](../../../test/common_method_tests.py)
-- `nn` functions: `nn_functional_tests` in [test_jit.py](../../../test/test_jit.py)
+- `torch` functions: `module_tests` in [common_nn.py](../../testing/_internal/common_nn.py)
+- `nn` functions: `nn_functional_tests` in [test_jit.py](../../testing/_internal/jit_metaprogramming_utils.py)
 
 To turn on autodiff check, you can add an optional `check_ad(should_autodiff_node[bool], nonfusible_nodes[str|list[str]], fusible_nodes[str|list[str]])` tuple after the optional test variant name field.
 If `should_autodiff_node=True`, the differentiated traced/script forward graph must have a `prim::DifferentiableGraph`.

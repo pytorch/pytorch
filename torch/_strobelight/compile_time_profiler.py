@@ -1,13 +1,16 @@
 # mypy: disallow-untyped-defs
 
+import json
 import logging
 import os
-
+import re
+import subprocess
 from datetime import datetime
 from socket import gethostname
 from typing import Any, Optional
 
 from torch._strobelight.cli_function_profiler import StrobelightCLIFunctionProfiler
+
 
 logger = logging.getLogger("strobelight_compile_time_profiler")
 
@@ -22,12 +25,70 @@ logger.setLevel(logging.INFO)
 logger.propagate = False
 
 
+def get_fburl(url: str) -> str:
+    short_url = url
+    # Attempt to shorten the URL
+    try:
+        result = subprocess.run(
+            ["fburl", url], capture_output=True, stdin=subprocess.DEVNULL
+        )
+        if result.returncode == 0:
+            short_url = result.stdout.decode("utf-8")
+    except Exception as e:
+        logger.warning("URL shortening failed: %s, using long URL", repr(e))
+    return short_url
+
+
+def get_strobelight_url(identifier: str) -> str:
+    scuba_json = {
+        "aggregateList": [],
+        "aggregation_field": "async_stack_complete",
+        "b_constraints": [[]],
+        "c_constraints": [[]],
+        "cols": ["namespace_id", "namespace_process_id"],
+        "compare": "none",
+        "constraints": [
+            [{"column": "sample_tags", "op": "all", "value": [f'["{identifier}"]']}]
+        ],
+        "derivedCols": [],
+        "end": "now",
+        "enumCols": [],
+        "filterMode": "DEFAULT",
+        "hideEmptyColumns": "false",
+        "ignoreGroupByInComparison": "false",
+        "is_timeseries": "false",
+        "mappedCols": [],
+        "metric": "count",
+        "modifiers": [],
+        "order": "weight",
+        "order_desc": "true",
+        "param_dimensions": [
+            {"dim": "py_async_stack", "op": "edge", "param": "0", "anchor": "0"}
+        ],
+        "purposes": [],
+        "return_remainder": "false",
+        "samplingRatio": "1",
+        "should_pivot": "false",
+        "start": "-30 days",
+        "timezone": "America/Los_Angeles",
+        "top": 10000,
+    }
+    scuba_url_prefix = "https://www.internalfb.com/intern/scuba/query/?dataset=pyperf_experimental/on_demand&drillstate="
+    scuba_url_suff = "&view=GraphProfilerView&&normalized=1726332703&pool=uber"
+    long_url = scuba_url_prefix + json.dumps(scuba_json) + scuba_url_suff
+    return get_fburl(long_url)
+
+
 class StrobelightCompileTimeProfiler:
     success_profile_count: int = 0
     failed_profile_count: int = 0
     ignored_profile_runs: int = 0
     inside_profile_compile_time: bool = False
     enabled: bool = False
+
+    # A regex that can be used to filter out what frames to profile. ex: "1/.*"
+    frame_id_filter: Optional[str] = os.environ.get("COMPILE_STROBELIGHT_FRAME_FILTER")
+
     # A unique identifier that is used as the run_user_name in the strobelight profile to
     # associate all compile time profiles together.
     identifier: Optional[str] = None
@@ -37,7 +98,7 @@ class StrobelightCompileTimeProfiler:
     profiler: Optional[Any] = None
 
     max_stack_length: int = int(
-        os.environ.get("COMPILE_STROBELIGHT_MAX_STACK_LENGTH", 127)
+        os.environ.get("COMPILE_STROBELIGHT_MAX_STACK_LENGTH", 500)
     )
     max_profile_time: int = int(
         os.environ.get("COMPILE_STROBELIGHT_MAX_PROFILE_TIME", 60 * 30)
@@ -46,6 +107,12 @@ class StrobelightCompileTimeProfiler:
     sample_each: int = int(
         float(os.environ.get("COMPILE_STROBELIGHT_SAMPLE_RATE", 1e7))
     )
+
+    @classmethod
+    def get_frame(cls) -> str:
+        from torch._guards import CompileContext
+
+        return (str)(CompileContext.current_trace_id())
 
     @classmethod
     def enable(cls, profiler_class: Any = StrobelightCLIFunctionProfiler) -> None:
@@ -69,6 +136,8 @@ class StrobelightCompileTimeProfiler:
         cls._cls_init()
         # profiler_class should have public API similar to that of StrobelightCLIFunctionProfiler.
         # we have pass different functionProfilerClass for meta-internal fbcode targets.
+        # NB: the actual implementation in Meta is at
+        # fbcode/caffe2/fb/strobelight/function_profiler.py
         cls.profiler = profiler_class(
             sample_each=cls.sample_each,
             max_profile_duration_sec=cls.max_profile_time,
@@ -89,27 +158,8 @@ class StrobelightCompileTimeProfiler:
 
         logger.info("Unique sample tag for this run is: %s", cls.identifier)
         logger.info(
-            "You can use the following link to access the strobelight profile at the end of the run: %s",
-            (
-                "https://www.internalfb.com/intern/scuba/query/?dataset=pyperf_experime"
-                "ntal%2Fon_demand&drillstate=%7B%22purposes%22%3A[]%2C%22end%22%3A%22no"
-                "w%22%2C%22start%22%3A%22-30%20days%22%2C%22filterMode%22%3A%22DEFAULT%"
-                "22%2C%22modifiers%22%3A[]%2C%22sampleCols%22%3A[]%2C%22cols%22%3A[%22n"
-                "amespace_id%22%2C%22namespace_process_id%22]%2C%22derivedCols%22%3A[]%"
-                "2C%22mappedCols%22%3A[]%2C%22enumCols%22%3A[]%2C%22return_remainder%22"
-                "%3Afalse%2C%22should_pivot%22%3Afalse%2C%22is_timeseries%22%3Afalse%2C"
-                "%22hideEmptyColumns%22%3Afalse%2C%22timezone%22%3A%22America%2FLos_Ang"
-                "eles%22%2C%22compare%22%3A%22none%22%2C%22samplingRatio%22%3A%221%22%2"
-                "C%22metric%22%3A%22count%22%2C%22aggregation_field%22%3A%22async_stack"
-                "_complete%22%2C%22top%22%3A10000%2C%22aggregateList%22%3A[]%2C%22param"
-                "_dimensions%22%3A[%7B%22dim%22%3A%22py_async_stack%22%2C%22op%22%3A%22"
-                "edge%22%2C%22param%22%3A%220%22%2C%22anchor%22%3A%220%22%7D]%2C%22orde"
-                "r%22%3A%22weight%22%2C%22order_desc%22%3Atrue%2C%22constraints%22%3A[["
-                "%7B%22column%22%3A%22sample_tags%22%2C%22op%22%3A%22all%22%2C%22value%"
-                f"22%3A[%22[%5C%22{cls.identifier}%5C%22]%22]%7D]]%2C%22c_constraints%22%3A[[]]%2C%22b"
-                "_constraints%22%3A[[]]%2C%22ignoreGroupByInComparison%22%3Afalse%7D&vi"
-                "ew=GraphProfilerView&&normalized=1712358002&pool=uber"
-            ),
+            "URL to access the strobelight profile at the end of the run: %s",
+            get_strobelight_url(cls.identifier),
         )
 
     @classmethod
@@ -125,25 +175,43 @@ class StrobelightCompileTimeProfiler:
     def profile_compile_time(
         cls, func: Any, phase_name: str, *args: Any, **kwargs: Any
     ) -> Any:
-        if not cls.enabled:
+        def skip() -> Any:
             return func(*args, **kwargs)
+
+        if not cls.enabled:
+            return skip()
 
         if cls.profiler is None:
             logger.error("profiler is not set")
             return
 
+        frame_id = cls.get_frame()
+
         if cls.inside_profile_compile_time:
             cls.ignored_profile_runs += 1
             logger.info(
-                "profile_compile_time is requested for phase: %s while already in running phase: %s, recursive call ignored",
+                "profile_compile_time is requested for phase: %s, frame %s, while already in running phase: %s,"
+                "frame %s, recursive call ignored",
                 phase_name,
+                frame_id,
                 cls.current_phase,
+                frame_id,
             )
-            return func(*args, **kwargs)
+            return skip()
+
+        if cls.frame_id_filter is not None:
+            should_run = re.match(cls.frame_id_filter, frame_id) is not None
+            if not should_run:
+                logger.info(
+                    "profiling frame %s is skipped due to frame_id_filter %s",
+                    frame_id,
+                    cls.frame_id_filter,
+                )
+                return skip()
 
         cls.inside_profile_compile_time = True
         cls.current_phase = phase_name
-
+        logger.info("profiling frame %s", frame_id)
         work_result = cls.profiler.profile(func, *args, **kwargs)
 
         if cls.profiler.profile_result is not None:

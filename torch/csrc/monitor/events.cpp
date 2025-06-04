@@ -4,8 +4,7 @@
 #include <mutex>
 #include <vector>
 
-namespace torch {
-namespace monitor {
+namespace torch::monitor {
 
 namespace {
 class EventHandlers {
@@ -33,8 +32,8 @@ class EventHandlers {
   }
 
   static EventHandlers& get() noexcept {
-    static EventHandlers ehs;
-    return ehs;
+    static auto ehsPtr = new EventHandlers();
+    return *ehsPtr;
   }
 
  private:
@@ -55,5 +54,4 @@ void unregisterEventHandler(const std::shared_ptr<EventHandler>& p) {
   EventHandlers::get().unregisterEventHandler(p);
 }
 
-} // namespace monitor
-} // namespace torch
+} // namespace torch::monitor

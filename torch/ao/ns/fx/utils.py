@@ -1,25 +1,24 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import enum
 import operator
+from typing import Callable, Optional, Union
 
 import torch
-import torch.nn as nn
 import torch.ao.nn.intrinsic.quantized as nniq
 import torch.ao.nn.quantized as nnq
-
-toq = torch.ops.quantized
-from typing import Tuple, Callable, Dict, Set, List, Optional, Union
-
+import torch.nn as nn
+from torch.ao.quantization import FakeQuantizeBase, ObserverBase
+from torch.ao.quantization.observer import _is_activation_post_process
+from torch.ao.quantization.utils import getattr_from_fqn
 from torch.fx import GraphModule
 from torch.fx.graph import Node
-from torch.ao.quantization import (
-    ObserverBase,
-    FakeQuantizeBase,
-)
-from torch.ao.quantization.utils import getattr_from_fqn
-from torch.ao.quantization.observer import _is_activation_post_process
 
 from .ns_types import NSNodeTargetType, NSResultsType
+
+
+toq = torch.ops.quantized
+
 
 # TODO(future PR): consider deleting this enum and using the torch types
 # directly.  This might be tricky because it is not a one to one mapping.
@@ -40,9 +39,8 @@ def get_node_first_input_and_output_type(
     node: Node,
     gm: GraphModule,
     logger_cls: Callable,
-    node_type_to_io_type_map: Dict[str, Set[NSNodeTargetType]],
-) -> Tuple[NodeInputOrOutputType, NodeInputOrOutputType]:
-
+    node_type_to_io_type_map: dict[str, set[NSNodeTargetType]],
+) -> tuple[NodeInputOrOutputType, NodeInputOrOutputType]:
     # TODO(future PR): clean this up
     FUNS_IO_TYPE_FP32 = node_type_to_io_type_map["funs_io_type_fp32"]
     FUNS_IO_TYPE_FP16 = node_type_to_io_type_map["funs_io_type_fp16"]
@@ -163,8 +161,8 @@ def get_node_first_input_and_output_type(
 def get_node_input_qparams(
     node: Node,
     gm: GraphModule,
-    node_type_to_io_type_map: Dict[str, Set[NSNodeTargetType]],
-) -> Optional[Tuple[Union[torch.Tensor, float], Union[torch.Tensor, int]]]:
+    node_type_to_io_type_map: dict[str, set[NSNodeTargetType]],
+) -> Optional[tuple[Union[torch.Tensor, float], Union[torch.Tensor, int]]]:
     """
     Returns the qparams (scale, zero_point) of the first input to `node`,
     if they can be inferred from the graph.
@@ -186,7 +184,6 @@ def get_node_input_qparams(
         return (scale_obj, zp_obj)
 
     if prev_node.op == "call_function":
-
         # quantize - read the args directly
         if prev_node.target == torch.quantize_per_tensor:
             return _get_scale_zp_from_function_args(prev_node, gm, 1, 2)
@@ -198,7 +195,6 @@ def get_node_input_qparams(
         # TODO(future PR): handle functional ops which inherit qparams from input
 
     elif prev_node.op == "call_module":
-
         # get type of the module
         assert isinstance(prev_node.target, str)
         module_obj = getattr_from_fqn(gm, prev_node.target)
@@ -297,7 +293,7 @@ def get_number_of_non_param_args(
     return 1
 
 
-def get_arg_indices_of_inputs_to_log(node: Node) -> List[int]:
+def get_arg_indices_of_inputs_to_log(node: Node) -> list[int]:
     """
     Returns the indices of args of the node which we should attach
     loggers to, if input logging is enabled.
@@ -316,10 +312,7 @@ def get_arg_indices_of_inputs_to_log(node: Node) -> List[int]:
         node.target in (torch.add, torch.ops.quantized.add, operator.add)
         or node.target in (torch.mul, torch.ops.quantized.mul, operator.mul)
     ):
-        result = []
-        for i in range(2):
-            if type(node.args[i]) == Node:
-                result.append(i)
+        result = [i for i in range(2) if type(node.args[i]) == Node]
         return result
     return [0]
 
@@ -470,7 +463,7 @@ def compute_normalized_l2_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tenso
     Return:
         float or tuple of floats
     """
-    return torch.sqrt(((x - y) ** 2).sum() / (x ** 2).sum())
+    return torch.sqrt(((x - y) ** 2).sum() / (x**2).sum())
 
 
 @maybe_dequantize_first_two_tensor_args_and_handle_tuples
@@ -492,12 +485,21 @@ def compute_cosine_similarity(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     y = y.reshape(1, -1)
     return torch.nn.functional.cosine_similarity(x, y)
 
+
 def op_type_supports_shadowing(node: Node) -> bool:
-    if node.op == 'call_function':
-        if node.target in (torch.add, torch.mul, operator.add, operator.mul, torch.cat, torch.stack):
+    if node.op == "call_function":
+        if node.target in (
+            torch.add,
+            torch.mul,
+            operator.add,
+            operator.mul,
+            torch.cat,
+            torch.stack,
+        ):
             # shadowing for ops with multiple tensor inputs is not implemented yet
             return False
     return True
+
 
 def get_normalized_nth_input(node: Node, gm: GraphModule, idx: int) -> Node:
     """
@@ -506,7 +508,8 @@ def get_normalized_nth_input(node: Node, gm: GraphModule, idx: int) -> Node:
     """
     try:
         norm_args_and_kwargs = node.normalized_arguments(
-            gm, normalize_to_only_use_kwargs=True)
+            gm, normalize_to_only_use_kwargs=True
+        )
         if norm_args_and_kwargs is not None:
             norm_args, norm_kwargs = norm_args_and_kwargs
             assert len(norm_args) + len(norm_kwargs) > idx

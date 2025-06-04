@@ -11,6 +11,7 @@ aspects of contributing to PyTorch.
 <!-- toc -->
 
 - [Developing PyTorch](#developing-pytorch)
+  - [Setup the development environment](#setup-the-development-environment)
   - [Tips and Debugging](#tips-and-debugging)
 - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
@@ -49,7 +50,6 @@ aspects of contributing to PyTorch.
 - [Windows development tips](#windows-development-tips)
   - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
   - [Building on legacy code and CUDA](#building-on-legacy-code-and-cuda)
-- [Running clang-tidy](#running-clang-tidy)
 - [Pre-commit tidy/linting hook](#pre-commit-tidylinting-hook)
 - [Building PyTorch with ASAN](#building-pytorch-with-asan)
   - [Getting `ccache` to work](#getting-ccache-to-work)
@@ -64,7 +64,25 @@ aspects of contributing to PyTorch.
 <!-- tocstop -->
 
 ## Developing PyTorch
+
 Follow the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source). If you get stuck when developing PyTorch on your machine, check out the [tips and debugging](#tips-and-debugging) section below for common solutions.
+
+### Setup the development environment
+
+First, you need to [fork the PyTorch project on GitHub](https://github.com/pytorch/pytorch/fork) and follow the instructions at [Connecting to GitHub with SSH](https://docs.github.com/en/authentication/connecting-to-github-with-ssh) to setup your SSH authentication credentials.
+
+Then clone the PyTorch project and setup the development environment:
+
+```bash
+git clone git@github.com:<USERNAME>/pytorch.git
+cd pytorch
+git remote add upstream git@github.com:pytorch/pytorch.git
+
+make setup-env
+# Or run `make setup-env-cuda` for pre-built CUDA binaries
+# Or run `make setup-env-rocm` for pre-built ROCm binaries
+source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+```
 
 ### Tips and Debugging
 
@@ -94,16 +112,10 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
   lazy.)
 
   ```bash
-  conda uninstall pytorch -y
-  yes | pip uninstall torch
+  pip uninstall torch
   ```
 
   Next run `python setup.py clean`. After that, you can install in `develop` mode again.
-
-* If a commit is simple and doesn't affect any code (keep in mind that some docstrings contain code
-  that is used in tests), you can add `[skip ci]` (case sensitive) somewhere in your commit message to
-  [skip all build / test steps](https://github.blog/changelog/2021-02-08-github-actions-skip-pull-request-and-push-workflows-with-skip-ci/).
-  Note that changing the pull request body or title on GitHub itself has no effect.
 
 * If you run into errors when running `python setup.py develop`, here are some debugging steps:
   1. Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to make sure
@@ -117,8 +129,8 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
       git submodule deinit -f .
       git clean -xdf
       python setup.py clean
-      git submodule update --init --recursive # very important to sync the submodules
-      python setup.py develop                 # then try running the command again
+      git submodule update --init --recursive
+      python setup.py develop
       ```
   4. The main step within `python setup.py develop` is running `make` from the `build` directory. If you want to
     experiment with some environment variables, you can pass them into the command:
@@ -136,7 +148,7 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
 
   - If you encounter an error such as
     ```
-    fatal: unable to access 'https://github.com/pybind11/pybind11.git': could not load PEM client certificate ...
+    fatal: unable to access 'https://github.com/pybind/pybind11.git': could not load PEM client certificate ...
     ```
     this is likely that you are using HTTP proxying and the certificate expired. To check if the certificate is valid, run
     `git config --global --list` and search for config like `http.proxysslcert=<cert_file>`. Then check certificate valid date by running
@@ -155,7 +167,7 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
 ## Nightly Checkout & Pull
 
 The `tools/nightly.py` script is provided to ease pure Python development of
-PyTorch. This uses `conda` and `git` to check out the nightly development
+PyTorch. This uses `venv` and `git` to check out the nightly development
 version of PyTorch and installs pre-built binaries into the current repository.
 This is like a development or editable install, but without needing the ability
 to compile any C++ code.
@@ -164,26 +176,32 @@ You can use this script to check out a new nightly branch with the following:
 
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch
-conda activate pytorch-deps
+source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 ```
 
-Or if you would like to re-use an existing conda environment, you can pass in
-the regular environment parameters (`--name` or `--prefix`):
+To install the nightly binaries built with CUDA, you can pass in the flag `--cuda`:
 
 ```bash
-./tools/nightly.py checkout -b my-nightly-branch -n my-env
-conda activate my-env
+./tools/nightly.py checkout -b my-nightly-branch --cuda
+source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+```
+
+To install the nightly binaries built with ROCm, you can pass in the flag `--rocm`:
+
+```bash
+./tools/nightly.py checkout -b my-nightly-branch --rocm
+source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 ```
 
 You can also use this tool to pull the nightly commits into the current branch:
 
 ```bash
-./tools/nightly.py pull -n my-env
-conda activate my-env
+./tools/nightly.py pull -p my-env
+source my-env/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 ```
 
-Pulling will reinstall the PyTorch dependencies as well as the nightly binaries
-into the repo directory.
+Pulling will recreate a fresh virtual environment and reinstall the development
+dependencies as well as the nightly binaries into the repo directory.
 
 ## Codebase structure
 
@@ -254,8 +272,6 @@ into the repo directory.
 * [caffe2](caffe2) - The Caffe2 library.
   * [core](caffe2/core) - Core files of Caffe2, e.g., tensor, workspace,
     blobs, etc.
-  * [operators](caffe2/operators) - Operators of Caffe2.
-  * [python](caffe2/python) - Python bindings to Caffe2.
   * ...
 * [.circleci](.circleci) - CircleCI configuration management. [README](.circleci/README.md)
 
@@ -264,10 +280,15 @@ into the repo directory.
 ### Python Unit Testing
 
 **Prerequisites**:
-The following packages should be installed with either `conda` or `pip`:
+The following packages should be installed with `pip`:
 - `expecttest` and `hypothesis` - required to run tests
 - `mypy` - recommended for linting
 - `pytest` - recommended to run tests more selectively
+Running
+```
+pip install -r requirements.txt
+```
+will install these dependencies for you.
 
 All PyTorch test suites are located in the `test` folder and start with
 `test_`. Run the entire test
@@ -325,7 +346,7 @@ command runs tests such as `TestNN.test_BCELoss` and
 Install all prerequisites by running
 
 ```bash
-make setup_lint
+make setup-lint
 ```
 
 You can now run the same linting steps that are used in CI locally via `make`:
@@ -404,7 +425,7 @@ PyTorch has two main types of documentation:
 These are the docs that you see over at [our docs website](https://pytorch.org/docs).
 - **Developer facing documentation**:
 Developer facing documentation is spread around our READMEs in our codebase and in
-the [PyTorch Developer Wiki](https://pytorch.org/wiki).
+the [PyTorch Developer Wiki](https://github.com/pytorch/pytorch/wiki).
 If you're interested in adding new developer docs, please read this [page on the wiki](https://github.com/pytorch/pytorch/wiki/Where-or-how-should-I-add-documentation) on our best practices for where to put it.
 
 The rest of this section is about user-facing documentation.
@@ -467,8 +488,7 @@ pip install -r requirements.txt
 # Or if you prefer an uncontaminated global executable environment or do not want to go through the node configuration:
 # npm install katex && export PATH="$PATH:$(pwd)/node_modules/.bin"
 ```
-> Note: if you installed `nodejs` with a different package manager (e.g.,
-`conda`) then `npm` will probably install a version of `katex` that is not
+> Note: if you installed `nodejs` with a different package manager then `npm` will probably install a version of `katex` that is not
 compatible with your version of `nodejs` and doc builds will fail.
 A combination of versions that is known to work is `node@6.13.1` and
 `katex@0.13.18`. To install the latter with `npm` you can run
@@ -637,16 +657,16 @@ details.
 One downside to using `python setup.py develop` is that your development
 version of PyTorch will be installed globally on your account (e.g., if
 you run `import torch` anywhere else, the development version will be
-used.
+used).
 
 If you want to manage multiple builds of PyTorch, you can make use of
-[conda environments](https://conda.io/docs/using/envs.html) to maintain
+[venv environments](https://docs.python.org/3/library/venv.html) to maintain
 separate Python package environments, each of which can be tied to a
 specific build of PyTorch. To set one up:
 
 ```bash
-conda create -n pytorch-myfeature
-source activate pytorch-myfeature
+python -m venv pytorch-myfeature
+source pytorch-myfeature/bin/activate  # or `& .\pytorch-myfeature\Scripts\Activate.ps1` on Windows
 # if you run python now, torch will NOT be installed
 python setup.py develop
 ```
@@ -724,7 +744,6 @@ same. Using ccache in a situation like this is a real time-saver.
 Before building pytorch, install ccache from your package manager of choice:
 
 ```bash
-conda install ccache -c conda-forge
 sudo apt install ccache
 sudo yum install ccache
 brew install ccache
@@ -763,17 +782,15 @@ python setup.py develop
 
 #### Use a faster linker
 
-If you are editing a single file and rebuilding in a tight loop, the time spent
-linking will dominate. The system linker available in most Linux distributions
-(GNU `ld`) is quite slow. Use a faster linker, like [lld](https://lld.llvm.org/).
+If you are editing a single file and rebuilding in a tight loop, the time spent linking will dominate. The system linker available in most Linux distributions (GNU `ld`) is quite slow. To improve build times, consider using a faster linker such as [mold](https://github.com/rui314/mold) or [lld](https://lld.llvm.org/).
 
-People on Mac, follow [this guide](https://stackoverflow.com/questions/42730345/how-to-install-llvm-for-mac) instead.
+- **mold**: A modern, high-performance linker that significantly reduces linking time. It is typically available via package managers like `apt` or `yum`. Note that `mold` requires GCC version 12 or higher.
+- **lld**: A fast linker from the LLVM project. The easiest way to get `lld` is from a [LLVM release](https://releases.llvm.org/download.html).
 
-The easiest way to use `lld` this is download the
-[latest LLVM binaries](http://releases.llvm.org/download.html#8.0.0) and run:
+Starting with CMake 3.29, you can specify the linker type using the [`CMAKE_LINKER_TYPE`](https://cmake.org/cmake/help/latest/variable/CMAKE_LINKER_TYPE.html) variable. For example, with `mold` installed:
 
-```bash
-ln -s /path/to/downloaded/ld.lld /usr/local/bin/ld
+```sh
+CMAKE_LINKER_TYPE=MOLD python setup.py develop
 ```
 
 #### Use pre-compiled headers
@@ -860,7 +877,7 @@ Process 87741 stopped
 * thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
     frame #0: 0x00000001024e2628 libtorch_python.dylib`at::indexing::impl::applySelect(self=0x00000001004ee8a8, dim=0, index=(data_ = 3), real_dim=0, (null)=0x000000016fdfe535, self_sizes= Has Value=true ) at TensorIndexing.h:239:7
    236         const at::Device& /*self_device*/,
-   237         const c10::optional<SymIntArrayRef>& self_sizes) {
+   237         const std::optional<SymIntArrayRef>& self_sizes) {
    238       // See NOTE [nested tensor size for indexing]
 -> 239       if (self_sizes.has_value()) {
    240         auto maybe_index = index.maybe_as_int();
@@ -960,7 +977,7 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
 3. CUDA supports a lot of C++11/14 features such as, `std::numeric_limits`, `std::nextafter`,
    `std::tuple` etc. in device code. Many of such features are possible because of the
    [--expt-relaxed-constexpr](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#constexpr-functions)
-   nvcc flag. There is a known [issue](https://github.com/ROCm-Developer-Tools/HIP/issues/374)
+   nvcc flag. There is a known [issue](https://github.com/ROCm/hip/issues/374)
    that ROCm errors out on device code, which uses such stl functions.
 4. A good performance metric for a CUDA kernel is the
    [Effective Memory Bandwidth](https://devblogs.nvidia.com/how-implement-performance-metrics-cuda-cc/).
@@ -1018,8 +1035,7 @@ than Linux, which are worth keeping in mind when fixing these problems.
 
 3. If you have a Windows box (we have a few on EC2 which you can request access to) and
    you want to run the build, the easiest way is to just run `.ci/pytorch/win-build.sh`.
-   If you need to rebuild, run `REBUILD=1 .ci/pytorch/win-build.sh` (this will avoid
-   blowing away your Conda environment.)
+   If you need to rebuild, run `REBUILD=1 .ci/pytorch/win-build.sh`.
 
 Even if you don't know anything about MSVC, you can use cmake to build simple programs on
 Windows; this can be helpful if you want to learn more about some peculiar linking behavior
@@ -1062,10 +1078,6 @@ Here are a few well known pitfalls and workarounds:
   might work, but on Windows your program will crash. ASAN may not
   catch all of these problems: stay vigilant to the possibility that
   your crash is due to a real memory problem.
-
-* (NVCC) `c10::optional` does not work when used from device code. Don't use
-  it from kernels. Upstream issue: https://github.com/akrzemi1/Optional/issues/58
-  and our local issue #10329.
 
 * `constexpr` generally works less well on MSVC.
 
@@ -1111,39 +1123,7 @@ CUDA, MSVC, and PyTorch versions are interdependent; please install matching ver
 | 10.2         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |  1.5.0 ~ 1.7.0  |
 | 11.0         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |      1.7.0      |
 
-Note: There's a [compilation issue](https://github.com/oneapi-src/oneDNN/issues/812) in several Visual Studio 2019 versions since 16.7.1, so please make sure your Visual Studio 2019 version is not in 16.7.1 ~ 16.7.5
-
-## Running clang-tidy
-
-[Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/index.html) is a C++
-linter and static analysis tool based on the clang compiler. We run clang-tidy
-in our CI to make sure that new C++ code is safe, sane and efficient. See the
-[`clang-tidy` job in our GitHub Workflow's
-lint.yml file](https://github.com/pytorch/pytorch/blob/main/.github/workflows/lint.yml)
-for the simple commands we use for this.
-
-To run clang-tidy locally, follow these steps:
-
-1. Install clang-tidy.
-We provide custom built binaries which have additional checks enabled. You can install it by running:
-```bash
-python3 -m tools.linter.clang_tidy.generate_build_files
-```
-We currently only support Linux and MacOS (x86).
-
-2. Install clang-tidy driver script dependencies
-```bash
-pip3 install -r tools/linter/clang_tidy/requirements.txt
-```
-
-3. Run clang-tidy
-```bash
-# Run clang-tidy on the entire codebase
-make clang-tidy
-# Run clang-tidy only on your changes
-make clang-tidy CHANGED_ONLY=--changed-only
-```
-This internally invokes our driver script and closely mimics how clang-tidy is run on CI.
+Note: There's a [compilation issue](https://github.com/uxlfoundation/oneDNN/issues/812) in several Visual Studio 2019 versions since 16.7.1, so please make sure your Visual Studio 2019 version is not in 16.7.1 ~ 16.7.5
 
 ## Pre-commit tidy/linting hook
 
@@ -1272,7 +1252,7 @@ in the meantime there will be some separation.
 There are a few "unusual" directories which, for historical reasons,
 are Caffe2/PyTorch specific. Here they are:
 
-- `CMakeLists.txt`, `Makefile`, `binaries`, `cmake`, `conda`, `modules`,
+- `CMakeLists.txt`, `Makefile`, `binaries`, `cmake`, `modules`,
   `scripts` are Caffe2-specific. Don't put PyTorch code in them without
   extra coordination.
 

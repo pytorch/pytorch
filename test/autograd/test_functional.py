@@ -6,7 +6,6 @@ import warnings
 
 import torch
 import torch.autograd.functional as autogradF
-
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     gradcheck,
@@ -18,6 +17,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.logging_tensor import LoggingTensor
+
 
 # Utilities for parametrizing the tensor constructors used in autograd tests
 #
@@ -670,7 +670,7 @@ class TestAutogradFunctional(TestCase):
 
         x = ctors.randn(3)
         with warnings.catch_warnings(record=True) as wa:
-            result = api(foo, x, vectorize=True)
+            api(foo, x, vectorize=True)
         self.assertEqual(len(wa), 0)
 
     @base_and_logging_tensor
@@ -762,7 +762,7 @@ class TestAutogradFunctional(TestCase):
 
         inp = ctors.rand(4)
         with self.assertRaisesRegex(RuntimeError, "not supported together"):
-            res = autogradF.jacobian(foo, inp, strict=True, vectorize=True)
+            autogradF.jacobian(foo, inp, strict=True, vectorize=True)
 
     @base_and_logging_tensor
     def test_jacobian_no_grad(self, ctors):
@@ -1122,7 +1122,7 @@ class TestAutogradFunctional(TestCase):
 
         inp = ctors.rand(4)
         with self.assertRaisesRegex(RuntimeError, "not supported together"):
-            res = autogradF.hessian(foo, inp, strict=True, vectorize=True)
+            autogradF.hessian(foo, inp, strict=True, vectorize=True)
 
     @base_and_logging_tensor
     def test_hessian_no_grad(self, ctors):

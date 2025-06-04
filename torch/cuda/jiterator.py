@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
 import re
-from typing import Callable, List
+from typing import Callable
 
 import torch
 from torch import Tensor
 
-__all__: List[str] = []
+
+__all__: list[str] = []
 
 
 class _CodeParser:

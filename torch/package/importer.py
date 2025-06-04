@@ -1,15 +1,16 @@
 # mypy: allow-untyped-defs
 import importlib
 from abc import ABC, abstractmethod
-from pickle import (  # type: ignore[attr-defined]  # type: ignore[attr-defined]
+from pickle import (  # type: ignore[attr-defined]
     _getattribute,
     _Pickler,
     whichmodule as _pickle_whichmodule,
 )
 from types import ModuleType
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 from ._mangling import demangle, get_mangle_prefix, is_mangled
+
 
 __all__ = ["ObjNotFoundError", "ObjMismatchError", "Importer", "OrderedImporter"]
 
@@ -17,13 +18,9 @@ __all__ = ["ObjNotFoundError", "ObjMismatchError", "Importer", "OrderedImporter"
 class ObjNotFoundError(Exception):
     """Raised when an importer cannot find an object by searching for its name."""
 
-    pass
-
 
 class ObjMismatchError(Exception):
     """Raised when an importer found a different object with the same name as the user-provided one."""
-
-    pass
 
 
 class Importer(ABC):
@@ -47,7 +44,7 @@ class Importer(ABC):
         assert obj1 is obj2
     """
 
-    modules: Dict[str, ModuleType]
+    modules: dict[str, ModuleType]
 
     @abstractmethod
     def import_module(self, module_name: str) -> ModuleType:
@@ -55,9 +52,8 @@ class Importer(ABC):
 
         The contract is the same as for importlib.import_module.
         """
-        pass
 
-    def get_name(self, obj: Any, name: Optional[str] = None) -> Tuple[str, str]:
+    def get_name(self, obj: Any, name: Optional[str] = None) -> tuple[str, str]:
         """Given an object, return a name that can be used to retrieve the
         object from this environment.
 
@@ -188,7 +184,7 @@ class OrderedImporter(Importer):
     """
 
     def __init__(self, *args):
-        self._importers: List[Importer] = list(args)
+        self._importers: list[Importer] = list(args)
 
     def _is_torchpackage_dummy(self, module):
         """Returns true iff this module is an empty PackageNode in a torch.package.

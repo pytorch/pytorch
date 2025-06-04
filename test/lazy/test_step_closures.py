@@ -7,6 +7,7 @@ import torch._lazy
 import torch._lazy.ts_backend
 from torch.testing._internal.common_utils import run_tests, TestCase
 
+
 torch._lazy.ts_backend.init()
 
 
@@ -55,7 +56,7 @@ class ClosuresTest(TestCase):
             torch._lazy.mark_step()
 
             raise AssertionError  # Should not reach here
-        except RuntimeError as e:
+        except RuntimeError:
             assert flag.is_set(), "Should have caught exception from closure"
 
     def test_asynchronous_exception(self):
@@ -80,7 +81,7 @@ class ClosuresTest(TestCase):
             torch._lazy.mark_step()
 
             raise AssertionError  # Should not reach here
-        except RuntimeError as e:
+        except RuntimeError:
             # Should have caught exception from closure1
             pass
 

@@ -188,7 +188,6 @@ class BlockingCounter {
   // returns false.
   bool DecrementCount() {
     const auto count_value = count_.fetch_sub(1, std::memory_order_relaxed) - 1;
-    TORCH_DCHECK_GE(count_value, 0);
     if (count_value == 0) {
       std::lock_guard<std::mutex> g(mutex_);
       cond_.notify_one();
@@ -232,7 +231,10 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
       : task_(nullptr),
         state_(State::ThreadStartup),
         counter_to_decrement_when_ready_(counter_to_decrement_when_ready) {
-    thread_ = std::make_unique<std::thread>([this]() { this->ThreadFunc(); });
+    thread_ = std::make_unique<std::thread>([this]() {
+      c10::setThreadName("pt_thread_pool");
+      this->ThreadFunc();
+    });
   }
 
   ~Worker() {

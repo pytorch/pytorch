@@ -5,25 +5,23 @@ import torch
 import torch.distributed.checkpoint as dist_cp
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributed._tensor import init_device_mesh, Replicate
-
 from torch.distributed.checkpoint.default_planner import (
     DefaultLoadPlanner,
     DefaultSavePlanner,
 )
-
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     ShardingStrategy,
     StateDictType,
 )
+from torch.distributed.tensor import Replicate
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
 )
-
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -32,7 +30,7 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 class SimpleModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.net1 = nn.Linear(5, 8)
         self.relu = nn.ReLU()
@@ -50,7 +48,7 @@ class SimpleModel(torch.nn.Module):
 
 
 class SimpleModelUneven(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.net1 = nn.Linear(5, 10)
         self.relu = nn.ReLU()
@@ -97,7 +95,7 @@ class TestHSDPCheckpoint(DTensorTestBase):
         state_dict = {"model": model.state_dict()}
         state_dict_to_save = deepcopy(state_dict)
 
-        dist_cp.save_state_dict(
+        dist_cp.save(
             state_dict=state_dict_to_save,
             storage_writer=dist_cp.FileSystemWriter(CHECKPOINT_DIR),
             planner=DefaultSavePlanner(),
@@ -116,14 +114,13 @@ class TestHSDPCheckpoint(DTensorTestBase):
             self.assertEqual(v1.placements, v2.placements)
             self.assertNotEqual(v1.to_local(), v2.to_local())
 
-        dist_cp.load_state_dict(
+        dist_cp.load(
             state_dict=state_dict_to_save,
             storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
             planner=DefaultLoadPlanner(),
         )
         model.load_state_dict(state_dict_to_save["model"])
 
-        state_dict_after_load = model.state_dict()
         # After loading, the current model state dict should be the same as state_dict_to_save.
         for (k1, v1), (k2, v2) in zip(
             state_dict_to_save["model"].items(), model.state_dict().items()

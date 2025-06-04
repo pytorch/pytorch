@@ -2,9 +2,8 @@
 
 import unittest
 from functools import partial
-
 from itertools import product
-from typing import Callable, List, Tuple
+from typing import Callable
 
 import numpy
 
@@ -18,6 +17,7 @@ from torch.testing._internal.opinfo.core import (
     SampleInput,
 )
 
+
 if TEST_SCIPY:
     import scipy.signal
 
@@ -29,6 +29,8 @@ def sample_inputs_window(op_info, device, dtype, requires_grad, *args, **kwargs)
     additional keyword arguments.
     """
 
+    # Remove include_conjugated_inputs from kwargs
+    kwargs.pop("include_conjugated_inputs", None)
     # Tests window sizes up to 5 samples.
     for size, sym in product(range(6), (True, False)):
         yield SampleInput(
@@ -285,14 +287,13 @@ def make_signal_windows_opinfo(
     reference_inputs_func: Callable,
     error_inputs_func: Callable,
     *,
-    skips: Tuple[DecorateInfo, ...] = (),
+    skips: tuple[DecorateInfo, ...] = (),
 ):
     r"""Helper function to create OpInfo objects related to different windows."""
     return OpInfo(
         name=name,
         ref=ref if TEST_SCIPY else None,
         dtypes=floating_types(),
-        dtypesIfCUDA=floating_types(),
         sample_inputs_func=sample_inputs_func,
         reference_inputs_func=reference_inputs_func,
         error_inputs_func=error_inputs_func,
@@ -346,7 +347,7 @@ def make_signal_windows_opinfo(
     )
 
 
-op_db: List[OpInfo] = [
+op_db: list[OpInfo] = [
     make_signal_windows_opinfo(
         name="signal.windows.hamming",
         ref=reference_signal_window(scipy.signal.windows.hamming)

@@ -2,24 +2,18 @@
 import importlib
 import os
 import sys
-import unittest
 
 import torch
-from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_xpu_basic yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 importlib.import_module("filelock")
 
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from inductor.test_torchinductor import check_model_gpu, TestCase
+from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+    check_model_gpu,
+    TestCase,
+)
 
 
 # TODO: Remove this file.

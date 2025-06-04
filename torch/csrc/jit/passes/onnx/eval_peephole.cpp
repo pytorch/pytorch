@@ -3,18 +3,16 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/torch.h>
 
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <algorithm>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace onnx {
 using namespace ::c10::onnx;
 }
 
-std::vector<at::Tensor> getValues(
+static std::vector<at::Tensor> getValues(
     Node* node,
     const ValueToParamPairMap& valsToParamsMap) {
   size_t numInputs = node->inputs().size();
@@ -142,7 +140,7 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
   }
 }
 
-void EvalPeepholeONNX(Block* b, ParamMap& paramsDict) {
+static void EvalPeepholeONNX(Block* b, ParamMap& paramsDict) {
   auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
   fuseConvBatchNorm(b, valsToParamsMap);
   buildParamsMapFromValueToParamsMap(valsToParamsMap, paramsDict);
@@ -153,5 +151,4 @@ void EvalPeepholeONNX(std::shared_ptr<Graph>& g, ParamMap& paramsDict) {
   GRAPH_DUMP("After EvalPeepholeONNX:", g);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

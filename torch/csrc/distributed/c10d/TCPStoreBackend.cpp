@@ -1,19 +1,9 @@
 
 #include <c10/util/irange.h>
-#include <fcntl.h>
 #include <algorithm>
 #include <array>
-#include <system_error>
 #include <unordered_map>
 #include <utility>
-
-#ifdef _WIN32
-#include <io.h>
-#include <winsock2.h>
-#else
-#include <poll.h>
-#include <unistd.h>
-#endif
 
 #include <c10/util/thread_name.h>
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
@@ -111,7 +101,7 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   const std::chrono::milliseconds checkTimeout_ = std::chrono::milliseconds{10};
   HANDLE ghStopEvent_{};
 #else
-  std::array<int, 2> controlPipeFd_{{-1, -1}};
+  std::array<int, 2> controlPipeFd_{-1, -1};
 #endif
 };
 
@@ -217,8 +207,10 @@ void TCPStoreMasterDaemon::queryFds(std::vector<struct pollfd>& fds) {
       // we hit an exception here.
       clearSocketWaitState(fds[fdIdx].fd);
 
-      fds.erase(fds.begin() + fdIdx);
-      sockets_.erase(sockets_.begin() + fdIdx - CONNECT_SOCKET_OFFSET);
+      fds.erase(fds.begin() + static_cast<std::ptrdiff_t>(fdIdx));
+      sockets_.erase(
+          sockets_.begin() + static_cast<std::ptrdiff_t>(fdIdx) -
+          CONNECT_SOCKET_OFFSET);
       --fdIdx;
       continue;
     }
@@ -256,7 +248,7 @@ void TCPStoreMasterDaemon::clearSocketWaitState(int socket) {
 // or, in the case of wait
 // type of query | number of args | size of arg1 | arg1 | ...
 void TCPStoreMasterDaemon::query(int socket) {
-  QueryType qt;
+  QueryType qt{};
   tcputil::recvBytes<QueryType>(socket, &qt, 1);
 
   if (isMiscellaneousSocket(socket)) {
@@ -401,13 +393,13 @@ void TCPStoreMasterDaemon::getHandler(int socket) const {
 }
 
 void TCPStoreMasterDaemon::getNumKeysHandler(int socket) const {
-  tcputil::sendValue<int64_t>(socket, tcpStore_.size());
+  tcputil::sendValue<size_t>(socket, tcpStore_.size());
 }
 
 void TCPStoreMasterDaemon::deleteHandler(int socket) {
   std::string key = tcputil::recvString(socket);
   auto numDeleted = tcpStore_.erase(key);
-  tcputil::sendValue<int64_t>(socket, numDeleted);
+  tcputil::sendValue<size_t>(socket, numDeleted);
 }
 
 void TCPStoreMasterDaemon::checkHandler(int socket) const {
@@ -520,8 +512,7 @@ void TCPStoreMasterDaemon::run() {
   tcputil::addPollfd(fds, storeListenSocket_.handle(), POLLIN);
 
   // receive the queries
-  bool finished = false;
-  while (!finished) {
+  while (true) {
     for (const auto i : c10::irange(sockets_.size())) {
       fds[i].revents = 0;
     }
@@ -532,7 +523,6 @@ void TCPStoreMasterDaemon::run() {
     if (res == 0) {
       auto rv = WaitForSingleObject(ghStopEvent_, 0);
       if (rv != WAIT_TIMEOUT) {
-        finished = true;
         break;
       }
       continue;
@@ -575,8 +565,7 @@ void TCPStoreMasterDaemon::run() {
     tcputil::addPollfd(fds, controlPipeFd_[0], POLLIN | POLLHUP);
 
     // receive the queries
-    bool finished = false;
-    while (!finished) {
+    while (true) {
       for (const auto i : c10::irange(sockets_.size())) {
         fds[i].revents = 0;
       }
@@ -610,7 +599,6 @@ void TCPStoreMasterDaemon::run() {
               "Unexpected poll revent on the control pipe's reading fd: " +
                   std::to_string(fds[1].revents));
         }
-        finished = true;
         break;
       }
       queryFds(fds);

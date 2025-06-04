@@ -12,8 +12,8 @@ functionalities in `torch.jit`.
 import torch
 from torch._jit_internal import Future
 from torch.jit._builtins import _register_builtin
-
 from torch.utils import set_module
+
 
 set_module(Future, "torch.jit")
 
@@ -50,11 +50,17 @@ def fork(func, *args, **kwargs):
 
         import torch
         from torch import Tensor
-        def foo(a : Tensor, b : int) -> Tensor:
+
+
+        def foo(a: Tensor, b: int) -> Tensor:
             return a + b
+
+
         def bar(a):
-            fut : torch.jit.Future[Tensor] = torch.jit.fork(foo, a, b=2)
+            fut: torch.jit.Future[Tensor] = torch.jit.fork(foo, a, b=2)
             return torch.jit.wait(fut)
+
+
         script_bar = torch.jit.script(bar)
         input = torch.tensor(2)
         # only the scripted version executes asynchronously
@@ -69,16 +75,23 @@ def fork(func, *args, **kwargs):
 
         import torch
         from torch import Tensor
+
+
         class AddMod(torch.nn.Module):
-            def forward(self, a: Tensor, b : int):
+            def forward(self, a: Tensor, b: int):
                 return a + b
+
+
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super(self).__init__()
                 self.mod = AddMod()
+
             def forward(self, input):
                 fut = torch.jit.fork(self.mod, a, b=2)
                 return torch.jit.wait(fut)
+
+
         input = torch.tensor(2)
         mod = Mod()
         assert mod(input) == torch.jit.script(mod).forward(input)

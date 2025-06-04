@@ -1,12 +1,14 @@
 # mypy: allow-untyped-defs
 import logging
 import warnings
-from typing import Any, Dict, Iterable, Optional, Tuple
+from collections.abc import Iterable
+from typing import Any, Optional
 
 import torch
 import torch.export
 import torch.export._trace
 from torch._utils_internal import log_export_usage
+
 
 log = logging.getLogger(__name__)
 
@@ -16,9 +18,9 @@ __all__ = ["report_exportability"]
 def _generate_inputs_for_submodules(
     model: torch.nn.Module,
     target_submodules: Iterable[str],
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Tuple[Any, Any]]:
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]] = None,
+) -> dict[str, tuple[Any, Any]]:
     """
     Generate inputs for targeting submdoules in the given model. Note that if two submodules refer to the same obj, this
     function doesn't work.
@@ -59,12 +61,12 @@ def _generate_inputs_for_submodules(
 
 def report_exportability(
     mod: torch.nn.Module,
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]] = None,
     *,
     strict: bool = True,
     pre_dispatch: bool = False,
-) -> Dict[str, Optional[Exception]]:
+) -> dict[str, Optional[Exception]]:
     """
     Report exportability issues for a module in one-shot.
 
@@ -90,10 +92,15 @@ def report_exportability(
     all_submod_names = [name for name, _ in mod.named_modules() if name != ""]
     submod_inputs = _generate_inputs_for_submodules(mod, all_submod_names, args, kwargs)
 
-    report: Dict[str, Optional[Exception]] = {}
+    tried_module_types = set()
+    report: dict[str, Optional[Exception]] = {}
 
     def try_export(module, module_name, args, kwargs):
-        nonlocal submod_inputs, report, strict, pre_dispatch
+        nonlocal submod_inputs, report, strict, pre_dispatch, tried_module_types
+
+        if type(module) in tried_module_types:
+            return
+        tried_module_types.add(type(module))
 
         if args is not None or kwargs is not None:
             try:

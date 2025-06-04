@@ -7,10 +7,11 @@ import json
 import os
 import shutil
 from pathlib import Path
-from typing import Any, Callable, cast, Dict
+from typing import Any, Callable, cast
 from urllib.request import urlopen
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def get_disabled_issues() -> list[str]:
@@ -20,7 +21,6 @@ def get_disabled_issues() -> list[str]:
     return issue_numbers
 
 
-SLOW_TESTS_FILE = ".pytorch-slow-tests.json"
 DISABLED_TESTS_FILE = ".pytorch-disabled-tests.json"
 ADDITIONAL_CI_FILES_FOLDER = Path(".additional_ci_files")
 TEST_TIMES_FILE = "test-times.json"
@@ -61,7 +61,7 @@ def fetch_and_cache(
     if os.path.exists(path) and is_cached_file_valid():
         # Another test process already download the file, so don't re-do it
         with open(path) as f:
-            return cast(Dict[str, Any], json.load(f))
+            return cast(dict[str, Any], json.load(f))
 
     for _ in range(3):
         try:
@@ -74,17 +74,6 @@ def fetch_and_cache(
             print(f"Could not download {url} because: {e}.")
     print(f"All retries exhausted, downloading {url} failed.")
     return {}
-
-
-def get_slow_tests(
-    dirpath: str, filename: str = SLOW_TESTS_FILE
-) -> dict[str, float] | None:
-    url = "https://ossci-metrics.s3.amazonaws.com/slow-tests.json"
-    try:
-        return fetch_and_cache(dirpath, filename, url, lambda x: x)
-    except Exception:
-        print("Couldn't download slow test set, leaving all tests enabled...")
-        return {}
 
 
 def get_test_times() -> dict[str, dict[str, float]]:
@@ -109,7 +98,7 @@ def get_disabled_tests(
     def process_disabled_test(the_response: dict[str, Any]) -> dict[str, Any]:
         # remove re-enabled tests and condense even further by getting rid of pr_num
         disabled_issues = get_disabled_issues()
-        disabled_test_from_issues = dict()
+        disabled_test_from_issues = {}
         for test_name, (pr_num, link, platforms) in the_response.items():
             if pr_num not in disabled_issues:
                 disabled_test_from_issues[test_name] = (

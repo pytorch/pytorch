@@ -1,4 +1,4 @@
-# Docker images for GitHub CI
+# Docker images for GitHub CI and CD
 
 This directory contains everything needed to build the Docker images
 that are used in our CI.
@@ -12,7 +12,7 @@ each image as the `BUILD_ENVIRONMENT` environment variable.
 
 See `build.sh` for valid build environments (it's the giant switch).
 
-## Contents
+## Docker CI builds
 
 * `build.sh` -- dispatch script to launch all builds
 * `common` -- scripts used to execute individual Docker build stages
@@ -21,6 +21,12 @@ See `build.sh` for valid build environments (it's the giant switch).
 * `ubuntu-rocm` -- Dockerfile for Ubuntu image with ROCm support
 * `ubuntu-xpu` -- Dockerfile for Ubuntu image with XPU support
 
+### Docker CD builds
+
+* `conda` - Dockerfile and build.sh to build Docker images used in nightly conda builds
+* `manywheel` - Dockerfile and build.sh to build Docker images used in nightly manywheel builds
+* `libtorch` - Dockerfile and build.sh to build Docker images used in nightly libtorch builds
+
 ## Usage
 
 ```bash
@@ -28,5 +34,5 @@ See `build.sh` for valid build environments (it's the giant switch).
 ./build.sh pytorch-linux-bionic-py3.8-gcc9 -t myimage:latest
 
 # Set flags (see build.sh) and build image
-sudo bash -c 'PROTOBUF=1 ./build.sh pytorch-linux-bionic-py3.8-gcc9 -t myimage:latest
+sudo bash -c 'TRITON=1 ./build.sh pytorch-linux-bionic-py3.8-gcc9 -t myimage:latest
 ```

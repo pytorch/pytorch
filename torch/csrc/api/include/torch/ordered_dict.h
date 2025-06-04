@@ -349,7 +349,7 @@ Value& OrderedDict<Key, Value>::operator[](const Key& key) {
   if (auto* value = find(key)) {
     return *value;
   }
-  AT_ERROR(key_description_, " '", key, "' is not defined");
+  TORCH_CHECK(false, key_description_, " '", key, "' is not defined");
 }
 
 template <typename Key, typename Value>
@@ -357,7 +357,7 @@ const Value& OrderedDict<Key, Value>::operator[](const Key& key) const {
   if (auto* value = find(key)) {
     return *value;
   }
-  AT_ERROR(key_description_, " '", key, "' is not defined");
+  TORCH_CHECK(false, key_description_, " '", key, "' is not defined");
 }
 
 template <typename Key, typename Value>
@@ -379,7 +379,7 @@ Value& OrderedDict<Key, Value>::insert(Key key, Value&& value) {
 template <typename Key, typename Value>
 void OrderedDict<Key, Value>::update(OrderedDict&& other) {
   reserve(size() + other.size());
-  for (auto& item : other) {
+  for (auto&& item : std::move(other)) {
     // We want to call `insert()` to prevent duplicate keys.
     insert(std::move(item.key()), std::move(item.value()));
   }

@@ -60,7 +60,7 @@ static PyObject* THXPEvent_get_sycl_event(THXPEvent* self, void* unused) {
 
 static PyObject* THXPEvent_get_device(THXPEvent* self, void* unused) {
   HANDLE_TH_ERRORS
-  at::optional<at::Device> device = self->xpu_event.device();
+  std::optional<at::Device> device = self->xpu_event.device();
   if (!device) {
     Py_RETURN_NONE;
   }
@@ -115,6 +115,7 @@ static PyObject* THXPEvent_synchronize(PyObject* _self, PyObject* noargs) {
 static struct PyGetSetDef THXPEvent_properties[] = {
     {"device", (getter)THXPEvent_get_device, nullptr, nullptr, nullptr},
     {"sycl_event", (getter)THXPEvent_get_sycl_event, nullptr, nullptr, nullptr},
+    {"event_id", (getter)THXPEvent_get_sycl_event, nullptr, nullptr, nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(*c-arrays*, *global-variables)
@@ -126,8 +127,9 @@ static PyMethodDef THXPEvent_methods[] = {
     {(char*)"synchronize", THXPEvent_synchronize, METH_NOARGS, nullptr},
     {nullptr}};
 
-PyTypeObject THXPEventType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._XpuEventBase", /* tp_name */
+static PyTypeObject THXPEventType = {
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._XpuEventBase", /* tp_name */
     sizeof(THXPEvent), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)THXPEvent_dealloc, /* tp_dealloc */
@@ -167,6 +169,9 @@ PyTypeObject THXPEventType = {
 };
 
 void THXPEvent_init(PyObject* module) {
+  TORCH_CHECK(THPEventClass, "THPEvent has not been initialized yet.");
+  Py_INCREF(THPEventClass);
+  THXPEventType.tp_base = THPEventClass;
   THXPEventClass = (PyObject*)&THXPEventType;
   if (PyType_Ready(&THXPEventType) < 0) {
     throw python_error();

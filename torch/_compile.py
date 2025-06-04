@@ -1,12 +1,32 @@
-# mypy: allow-untyped-defs
 """
 APIs related to torch.compile which lazily import torch._dynamo to avoid
 circular dependencies.
 """
+
 import functools
+from typing import Callable, Literal, Optional, overload, TypeVar, Union
+from typing_extensions import ParamSpec
 
 
-def _disable_dynamo(fn=None, recursive=True):
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
+
+@overload
+def _disable_dynamo(
+    fn: Callable[_P, _T], recursive: bool = True
+) -> Callable[_P, _T]: ...
+
+
+@overload
+def _disable_dynamo(
+    fn: Literal[None] = None, recursive: bool = True
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]: ...
+
+
+def _disable_dynamo(
+    fn: Optional[Callable[_P, _T]] = None, recursive: bool = True
+) -> Union[Callable[_P, _T], Callable[[Callable[_P, _T]], Callable[_P, _T]]]:
     """
     This API should be only used inside torch, external users should still use
     torch._dynamo.disable. The main goal of this API is to avoid circular
@@ -19,14 +39,14 @@ def _disable_dynamo(fn=None, recursive=True):
     if fn is not None:
 
         @functools.wraps(fn)
-        def inner(*args, **kwargs):
+        def inner(*args: _P.args, **kwargs: _P.kwargs) -> _T:
             # cache this on the first invocation to avoid adding too much overhead.
             disable_fn = getattr(fn, "__dynamo_disable", None)
             if disable_fn is None:
                 import torch._dynamo
 
                 disable_fn = torch._dynamo.disable(fn, recursive)
-                fn.__dynamo_disable = disable_fn
+                fn.__dynamo_disable = disable_fn  # type: ignore[attr-defined]
 
             return disable_fn(*args, **kwargs)
 

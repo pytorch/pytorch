@@ -16,7 +16,7 @@ Tensor TensorMaker::make_tensor() {
        !deleter_ || !ctx_,
        "The deleter and context arguments are mutually exclusive.");
 
-   if (device_ == nullopt) {
+   if (device_ == std::nullopt) {
      device_ = globalContext().getDeviceFromPtr(data_, opts_.device().type());
    }
 
@@ -38,7 +38,7 @@ Tensor TensorMaker::make_tensor() {
    }
 
    TORCH_CHECK(!resizeable_ || allocator_ != nullptr, "Must specify an allocator with allocator() if you want to use resizeable_storage()");
-   Storage storage{Storage::use_byte_size_t{}, size_bytes, std::move(data_ptr), /*allocator=*/allocator_, /*resizeable=*/resizeable_};
+   Storage storage{Storage::use_byte_size_t{}, size_bytes, std::move(data_ptr), /*allocator=*/allocator_, /*resizable=*/resizeable_};
 
    Tensor tensor = detail::make_tensor<TensorImpl>(
        std::move(storage), opts_.computeDispatchKey(), opts_.dtype());
@@ -53,7 +53,9 @@ Tensor TensorMaker::make_tensor() {
     tensor_impl->set_storage_offset(*storage_offset_);
   }
 
-   return tensor;
+  tensor_impl->set_requires_grad(opts_.requires_grad());
+
+  return tensor;
  }
 
  std::size_t TensorMaker::computeStorageSize() const noexcept {

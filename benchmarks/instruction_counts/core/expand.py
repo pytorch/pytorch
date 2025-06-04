@@ -2,6 +2,9 @@
 
 This is mostly string manipulation, with just a bit of importlib magic.
 """
+
+# mypy: ignore-errors
+
 import importlib.abc
 import importlib.util
 import itertools as it
@@ -9,9 +12,10 @@ import os
 import re
 import textwrap
 import uuid
-from typing import List, Optional, Tuple, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 import torch
+
 
 if TYPE_CHECKING:
     # See the note in api.py for why this is necessary.
@@ -76,9 +80,9 @@ def _generate_torchscript_file(model_src: str, name: str) -> Optional[str]:
 
     # And again, the type checker has no way of knowing that this line is valid.
     jit_model = module.jit_model  # type: ignore[attr-defined]
-    assert isinstance(
-        jit_model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)
-    ), f"Expected ScriptFunction or ScriptModule, got: {type(jit_model)}"
+    assert isinstance(jit_model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)), (
+        f"Expected ScriptFunction or ScriptModule, got: {type(jit_model)}"
+    )
     jit_model.save(artifact_path)  # type: ignore[call-arg]
 
     # Cleanup now that we have the actual serialized model.
@@ -200,7 +204,7 @@ def materialize(benchmarks: FlatIntermediateDefinition) -> FlatDefinition:
     GroupedBenchmarks into multiple TimerArgs, and tagging the results with
     AutoLabels.
     """
-    results: List[Tuple[Label, AutoLabels, TimerArgs]] = []
+    results: list[tuple[Label, AutoLabels, TimerArgs]] = []
 
     for label, args in benchmarks.items():
         if isinstance(args, TimerArgs):

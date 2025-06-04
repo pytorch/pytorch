@@ -1,13 +1,11 @@
 #include <ATen/TensorGeometry.h>
-
-#include <limits>
-#include <cstddef>
+#include <c10/util/overflows.h>
 
 namespace at {
 
 // See TensorGeometry.h on why this is useful now that we cache is_contiguous.
 template <typename T>
-bool _geometry_is_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides) {
+static bool _geometry_is_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides) {
   assert(!overflows<std::int64_t>(sizes.size()));
   auto dim = static_cast<std::int64_t>(sizes.size());
   T expected_stride = 1;

@@ -1,0 +1,71 @@
+name: Build manywheel docker images
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - release/*
+    tags:
+      # NOTE: Binary build pipelines should only get triggered on release candidate or nightly builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+    paths:
+      - .ci/docker/**
+      - .github/workflows/build-manywheel-images.yml
+      - .github/actions/binary-docker-build/**
+  pull_request:
+    paths:
+      - .ci/docker/**
+      - .github/workflows/build-manywheel-images.yml
+      - .github/actions/binary-docker-build/**
+
+env:
+  DOCKER_REGISTRY: "docker.io"
+  DOCKER_BUILDKIT: 1
+  WITH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release')) }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  build:
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
+    needs: get-label-type
+    strategy:
+      fail-fast: false
+      matrix:
+        include: [
+          { name: "manylinux2_28-builder",          tag: "cuda12.8",          runner: "linux.9xlarge.ephemeral" },
+          { name: "manylinux2_28-builder",          tag: "cuda12.6",          runner: "linux.9xlarge.ephemeral" },
+          { name: "manylinux2_28-builder",          tag: "cuda11.8",          runner: "linux.9xlarge.ephemeral" },
+          { name: "manylinuxaarch64-builder",       tag: "cuda12.8",          runner: "linux.arm64.2xlarge.ephemeral" },
+          { name: "manylinux2_28-builder",          tag: "rocm6.3",           runner: "linux.9xlarge.ephemeral" },
+          { name: "manylinux2_28-builder",          tag: "rocm6.4",           runner: "linux.9xlarge.ephemeral" },
+          { name: "manylinux2_28-builder",          tag: "cpu",               runner: "linux.9xlarge.ephemeral" },
+          { name: "manylinux2_28_aarch64-builder",  tag: "cpu-aarch64",       runner: "linux.arm64.2xlarge.ephemeral" },
+          { name: "manylinuxcxx11-abi-builder",     tag: "cpu-cxx11-abi",     runner: "linux.9xlarge.ephemeral" },
+          { name: "manylinux2_28-builder",          tag: "xpu",               runner: "linux.9xlarge.ephemeral" },
+        ]
+    runs-on: ${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}
+    name: ${{ matrix.name }}:${{ matrix.tag }}
+    steps:
+      - name: Build docker image
+        uses: pytorch/pytorch/.github/actions/binary-docker-build@main
+        with:
+          docker-image-name: ${{ matrix.name }}
+          custom-tag-prefix: ${{ matrix.tag }}
+          docker-build-dir: manywheel
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+          DOCKER_ID: ${{ secrets.DOCKER_ID }}

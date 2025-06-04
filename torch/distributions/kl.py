@@ -2,10 +2,10 @@
 import math
 import warnings
 from functools import total_ordering
-from typing import Callable, Dict, Tuple, Type
+from typing import Callable
 
 import torch
-from torch import inf
+from torch import inf, Tensor
 
 from .bernoulli import Bernoulli
 from .beta import Beta
@@ -37,11 +37,12 @@ from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
 from .utils import _sum_rightmost, euler_constant as _euler_gamma
 
-_KL_REGISTRY: Dict[
-    Tuple[Type, Type], Callable
+
+_KL_REGISTRY: dict[
+    tuple[type, type], Callable
 ] = {}  # Source of truth mapping a few general (type, type) pairs to functions.
-_KL_MEMOIZE: Dict[
-    Tuple[Type, Type], Callable
+_KL_MEMOIZE: dict[
+    tuple[type, type], Callable
 ] = {}  # Memoized version mapping many specific (type, type) pairs to functions.
 
 __all__ = ["register_kl", "kl_divergence"]
@@ -147,7 +148,7 @@ def _x_log_x(tensor):
     """
     Utility function for calculating x log x
     """
-    return tensor * tensor.log()
+    return torch.special.xlogy(tensor, tensor)  # produces correct result for x=0
 
 
 def _batch_trace_XXT(bmat):
@@ -160,7 +161,7 @@ def _batch_trace_XXT(bmat):
     return flat_trace.reshape(bmat.shape[:-2])
 
 
-def kl_divergence(p: Distribution, q: Distribution) -> torch.Tensor:
+def kl_divergence(p: Distribution, q: Distribution) -> Tensor:
     r"""
     Compute Kullback-Leibler divergence :math:`KL(p \| q)` between two distributions.
 
@@ -968,4 +969,4 @@ def _add_kl_info():
         )
     kl_info = "\n\t".join(rows)
     if kl_divergence.__doc__:
-        kl_divergence.__doc__ += kl_info  # type: ignore[operator]
+        kl_divergence.__doc__ += kl_info

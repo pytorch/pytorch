@@ -1,9 +1,11 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import collections
 import copyreg
+from collections.abc import Sequence
 from contextlib import contextmanager
 from copy import deepcopy
-from typing import Dict, Optional, Sequence, Tuple, Union
+from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -24,7 +26,7 @@ __all__ = [
 ]
 
 _cache_enabled = 0
-_cache: Dict[Tuple[int, str], Optional[Tensor]] = {}
+_cache: dict[tuple[int, str], Optional[Tensor]] = {}
 
 
 @contextmanager
@@ -159,14 +161,12 @@ class ParametrizationList(ModuleList):
             for module in reversed(self):  # type: ignore[call-overload]
                 if hasattr(module, "right_inverse"):
                     try:
-                        new = module.right_inverse(new)
+                        new = module.right_inverse(new)  # type: ignore[operator]
                     except NotImplementedError:
                         pass
                 # else, or if it throws, we assume that right_inverse is the identity
 
-        if not isinstance(new, Tensor) and not isinstance(
-            new, collections.abc.Sequence
-        ):
+        if not isinstance(new, Tensor) and not isinstance(new, Sequence):
             raise ValueError(
                 "'right_inverse' must return a Tensor or a Sequence of tensors (list, tuple...). "
                 f"Got {type(new).__name__}"
@@ -246,7 +246,7 @@ class ParametrizationList(ModuleList):
             # See https://github.com/pytorch/pytorch/issues/53103
             for module in reversed(self):  # type: ignore[call-overload]
                 if hasattr(module, "right_inverse"):
-                    value = module.right_inverse(value)
+                    value = module.right_inverse(value)  # type: ignore[operator]
                 else:
                     raise RuntimeError(
                         f"parametrization {type(module).__name__} does not implement "
@@ -594,9 +594,9 @@ def register_parametrization(
 
         # add the new parametrization to the parametrization list
         assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
-        module.parametrizations[tensor_name].append(parametrization)
+        module.parametrizations[tensor_name].append(parametrization)  # type: ignore[operator]
         # If unsafe was True in previous parametrization, keep it enabled
-        module.parametrizations[tensor_name].unsafe |= unsafe  # type: ignore[index, union-attr]
+        module.parametrizations[tensor_name].unsafe |= unsafe  # type: ignore[index, union-attr, operator]
     elif tensor_name in module._buffers or tensor_name in module._parameters:
         # Set the parametrization mechanism
         # Fetch the original buffer or parameter
@@ -686,6 +686,7 @@ def remove_parametrizations(
     parametrizations = module.parametrizations[tensor_name]
     if parametrizations.is_tensor:
         original = parametrizations.original
+        assert isinstance(original, torch.Tensor), "is_tensor promised us a Tensor"
         if leave_parametrized:
             with torch.no_grad():
                 t = getattr(module, tensor_name)
@@ -792,7 +793,9 @@ def transfer_parametrizations_and_params(
                 )
 
             # apply the params's parametrizations to to_module
-            for param_func in from_module.parametrizations[parameter_name]:
+            for param_func in from_module.parametrizations[  # type: ignore[attr-defined]
+                parameter_name
+            ]:
                 register_parametrization(to_module, parameter_name, param_func)
             assert isinstance(to_module.parametrizations, ModuleDict)  # for mypy
 

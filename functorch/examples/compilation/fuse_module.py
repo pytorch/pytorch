@@ -2,7 +2,6 @@ import timeit
 
 import torch
 import torch.nn as nn
-
 from functorch.compile import compiled_module, tvm_compile
 
 
@@ -24,7 +23,7 @@ def run(mod, input):
 
 
 class Foo(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.param = nn.Parameter(torch.randn(1))
         self.register_buffer("buf", torch.randn(1))
@@ -52,6 +51,6 @@ for a, b in zip(run(mod, input), run(compiled_mod, input)):
 for _ in range(5):
     i = 10000
     t = timeit.Timer("mod(input)", globals=globals()).timeit(10000)
-    print(f"eager {t/i*1e6}")
+    print(f"eager {t / i * 1e6}")
     t = timeit.Timer("compiled_mod(input)", globals=globals()).timeit(10000)
-    print(f"compiled {t/i*1e6}")
+    print(f"compiled {t / i * 1e6}")

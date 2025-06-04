@@ -18,7 +18,7 @@ __global__ static void compute_cuda_kernel(
     int64_t size,
     int64_t result_size) {
   CUDA_KERNEL_ASSERT(result_size == cumsum_ptr[size - 1]);
-  int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t idx = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   int64_t stride = (blockDim.x * gridDim.x) / C10_WARP_SIZE;
   int warp_id = idx / C10_WARP_SIZE;
   int tid_in_warp = idx % C10_WARP_SIZE;

@@ -10,6 +10,7 @@ from torch._custom_op.impl import (
 )
 from torch.library import get_ctx
 
+
 __all__ = [
     "custom_op",
     "impl",
@@ -51,6 +52,7 @@ def custom_op(qualname, func_or_schema=None):
             schema string.
 
     Example::
+
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> import torch
         >>> import numpy as np
@@ -104,7 +106,7 @@ def custom_op(qualname, func_or_schema=None):
                 f"is passed to `custom_op`"
             )
 
-        schema = infer_schema(func)
+        schema = infer_schema(func, mutates_args=())
         _custom_op_with_schema(qualname, schema)
         return func
 
@@ -133,6 +135,7 @@ def impl(qualname, *, device_types=("cpu", "cuda"), func=None):
         device_types (str or Iterable[str]): the device type(s) to register the function for.
 
     Example::
+
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> import torch
         >>> import numpy as np

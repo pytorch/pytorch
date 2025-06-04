@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/util/StringUtil.h>
-#include <c10/util/string_view.h>
 #include <c10/util/irange.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/symbol.h>
@@ -9,6 +8,7 @@
 #include <ATen/core/alias_info.h>
 #include <ATen/core/operator_name.h>
 #include <ATen/core/dispatch/OperatorOptions.h>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -25,24 +25,24 @@ using AliasTypeSet = std::vector<TypePtr>;
 
 bool operator==(const Argument& lhs, const Argument& rhs);
 
-struct Argument {
+struct TORCH_API Argument {
   Argument(
       std::string name = "",
       const TypePtr& type = nullptr,
-      std::optional<int32_t> N = c10::nullopt,
-      std::optional<IValue> default_value = c10::nullopt,
+      std::optional<int32_t> N = std::nullopt,
+      std::optional<IValue> default_value = std::nullopt,
       bool kwarg_only = false,
-      std::optional<AliasInfo> alias_info = c10::nullopt)
+      std::optional<AliasInfo> alias_info = std::nullopt)
     : Argument(std::move(name), type, type, N, std::move(default_value), kwarg_only, std::move(alias_info)) {}
 
   Argument(
       std::string name,
       TypePtr fake_type,
       TypePtr real_type,
-      std::optional<int32_t> N = c10::nullopt,
-      std::optional<IValue> default_value = c10::nullopt,
+      std::optional<int32_t> N = std::nullopt,
+      std::optional<IValue> default_value = std::nullopt,
       bool kwarg_only = false,
-      std::optional<AliasInfo> alias_info = c10::nullopt)
+      std::optional<AliasInfo> alias_info = std::nullopt)
       : name_(std::move(name)),
         type_(fake_type ? std::move(fake_type) : TensorType::get()),
         real_type_(real_type ? std::move(real_type) : type_),
@@ -82,6 +82,7 @@ struct Argument {
     }
     return *this;
   }
+  ~Argument() = default;
 
   const std::string& name() const {
     return name_;
@@ -94,7 +95,7 @@ struct Argument {
   const TypePtr& real_type() const {
     return real_type_;
   }
-  std::optional<int32_t> N() const {
+  const std::optional<int32_t>& N() const {
     return N_;
   }
   const std::optional<IValue>& default_value() const {
@@ -108,7 +109,7 @@ struct Argument {
     return is_out_;
   }
 
-  C10_NODISCARD const AliasInfo* alias_info() const {
+  [[nodiscard]] const AliasInfo* alias_info() const {
     return alias_info_.get();
   }
 
@@ -150,7 +151,7 @@ struct Argument {
         N_,
         default_value_,
         kwarg_only_,
-        alias_info_ ? std::optional<AliasInfo>(*alias_info_) : c10::nullopt);
+        alias_info_ ? std::optional<AliasInfo>(*alias_info_) : std::nullopt);
   }
 
   // this function checks whether this Argument is backward compatible with
@@ -325,7 +326,7 @@ struct TORCH_API FunctionSchema {
   std::optional<AliasAnalysisKind> alias_kind_;
 
   template <typename T>
-  void checkArg(const IValue& value, const Argument& argument, optional<size_t> pos) const;
+  void checkArg(const IValue& value, const Argument& argument, std::optional<size_t> pos) const;
 
   void checkSchema() const {
     bool seen_default_arg = false;
@@ -394,10 +395,10 @@ struct TORCH_API FunctionSchema {
     const AliasInfo* aliasInfo = getCorrectList(argument.type)[argument.index].alias_info();
     return aliasInfo && aliasInfo->isWrite();
   }
-  bool is_mutable(c10::string_view name) const {
+  bool is_mutable(std::string_view name) const {
     std::optional<int> index = argumentIndexWithName(name);
     TORCH_INTERNAL_ASSERT(
-        index != c10::nullopt, "Schema has no argument named ", name);
+        index.has_value(), "Schema has no argument named ", name);
 
     return is_mutable({c10::SchemaArgType::input, static_cast<size_t>(*index)});
   }
@@ -431,12 +432,12 @@ struct TORCH_API FunctionSchema {
   // output => returns(), input => arguments()
   const std::vector<Argument>& getCorrectList(SchemaArgType type) const;
 
-  std::optional<int> argumentIndexWithName(c10::string_view name) const {
+  std::optional<int> argumentIndexWithName(std::string_view name) const {
     for (const auto i : c10::irange(arguments().size())) {
       if(name == arguments()[i].name())
         return i;
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
   FunctionSchema cloneWithName(std::string name, std::string overload_name) const {
     return FunctionSchema(
@@ -470,8 +471,8 @@ struct TORCH_API FunctionSchema {
   std::string formatTypeMismatchMsg(
       const Argument& expected,
       const std::string& actual_type,
-      std::optional<size_t> position = c10::nullopt,
-      std::optional<std::string> value = c10::nullopt) const;
+      std::optional<size_t> position = std::nullopt,
+      std::optional<std::string> value = std::nullopt) const;
 
   FunctionSchema cloneWithRemappedTypes(
       const std::function<TypePtr(TypePtr)> type_map) const;
@@ -514,7 +515,7 @@ struct TORCH_API FunctionSchema {
     alias_kind_ = v;
   }
 
-  std::optional<c10::string_view> getNamespace() const {
+  std::optional<std::string_view> getNamespace() const {
     return name_.getNamespace();
   }
 
@@ -566,7 +567,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
     if (arg.alias_info() && !arg.alias_info()->containedTypes().empty()){
       out << arg.alias_info()->containedTypes()[0];
     }
-    std::string N = "";
+    std::string N;
     if (arg.N()) {
         N = std::to_string(*arg.N());
     }
@@ -622,7 +623,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   return out;
 }
 
-inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema);
+TORCH_API std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema);
 
 inline std::string toString(const FunctionSchema& schema) {
   std::ostringstream str;
@@ -650,11 +651,13 @@ template<>
       hash = c10::hash_combine(hash, type_hash);
       hash = c10::hash_combine(hash, kwarg_only_hash);
       // hashing optional fields if they exist
-      if (arg.default_value()) {
-        auto default_value_hash = c10::hash<c10::IValue>{}(arg.default_value().value());
+      if (arg.default_value().has_value()) {
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        auto default_value_hash = c10::hash<c10::IValue>{}(*arg.default_value());
         hash = c10::hash_combine(hash, default_value_hash);
       }
-      if (arg.N()) {
+      if (arg.N().has_value()) {
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         auto N_hash = std::hash<int64_t>{}(*arg.N());
         hash = c10::hash_combine(hash, N_hash);
       }

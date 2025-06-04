@@ -9,6 +9,10 @@
 
 #include <cuda.h>
 #include <cuda_runtime.h>
+#ifndef USE_ROCM
+#include <cuda_bf16.h>
+#include <cuda_fp16.h>
+#endif
 
 namespace torch::aot_inductor {
 
@@ -25,7 +29,7 @@ inline void delete_cuda_stream_guard(void* ptr) {
 class AOTICudaGuard {
  public:
   AOTICudaGuard(int32_t device_index) : guard_(nullptr, delete_cuda_guard) {
-    CUDAGuardHandle ptr;
+    CUDAGuardHandle ptr = nullptr;
     AOTI_TORCH_ERROR_CODE_CHECK(
         aoti_torch_create_cuda_guard(device_index, &ptr));
     guard_.reset(ptr);
@@ -44,7 +48,7 @@ class AOTICudaStreamGuard {
  public:
   AOTICudaStreamGuard(cudaStream_t stream, int32_t device_index)
       : guard_(nullptr, delete_cuda_stream_guard) {
-    CUDAStreamGuardHandle ptr;
+    CUDAStreamGuardHandle ptr = nullptr;
     AOTI_TORCH_ERROR_CODE_CHECK(
         aoti_torch_create_cuda_stream_guard(stream, device_index, &ptr));
     guard_.reset(ptr);

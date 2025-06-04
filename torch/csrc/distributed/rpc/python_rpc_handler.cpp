@@ -3,9 +3,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/python_compat.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 namespace {
 
@@ -16,7 +14,7 @@ constexpr auto kInternalModule = "torch.distributed.rpc.internal";
 #define PROFILE_GIL_SCOPED_ACQUIRE                                       \
   std::chrono::time_point<std::chrono::high_resolution_clock> startTime; \
   auto shouldProfileGIL =                                                \
-      RpcAgent::getCurrentRpcAgent() -> isGILProfilingEnabled();         \
+      RpcAgent::getCurrentRpcAgent()->isGILProfilingEnabled();           \
   if (shouldProfileGIL) {                                                \
     startTime = std::chrono::high_resolution_clock::now();               \
   }                                                                      \
@@ -25,7 +23,7 @@ constexpr auto kInternalModule = "torch.distributed.rpc.internal";
     auto dur = std::chrono::duration_cast<std::chrono::microseconds>(    \
         std::chrono::high_resolution_clock::now() - startTime);          \
     RpcAgent::getCurrentRpcAgent()->addGilWaitTime(dur);                 \
-  } // NOLINT
+  }
 
 // PythonTypeResolver that inherits from Script::Resolver to
 // support resolving types together with ScriptTypeParser.
@@ -176,7 +174,7 @@ void PythonRpcHandler::handleExceptionGILHeld(const py::object& obj) {
 
 bool PythonRpcHandler::isRemoteException(const py::object& obj) {
   PROFILE_GIL_SCOPED_ACQUIRE;
-  auto type = obj.get_type();
+  auto type = py::type::handle_of(obj);
   auto moduleName = type.attr("__module__").cast<std::string>();
   auto qualName = type.attr("__qualname__").cast<std::string>();
   return moduleName == kInternalModule && qualName == "RemoteException";
@@ -196,6 +194,4 @@ const PythonRpcHandler::RRefTypeFunctions& PythonRpcHandler::
   return rrefTypeFunctions_;
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

@@ -23,7 +23,7 @@
 namespace at::native {
 namespace mps {
 
-static string reductionToString(int64_t reduction) {
+static std::string reductionToString(int64_t reduction) {
   switch (reduction) {
     case Reduction::Mean:
       return "Mean";
@@ -58,10 +58,14 @@ static Tensor& mse_loss_backward_out_impl(const Tensor& grad_output,
                                           const Tensor& target,
                                           int64_t reduction,
                                           Tensor& grad_input,
-                                          const string op_name) {
+                                          const std::string& op_name) {
   TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
   auto norm = reduction == Reduction::Mean ? 2. / static_cast<double>(input.numel()) : 2.;
 
+  if ((input.numel() == 0) || (target.numel() == 0) || (grad_output.numel() == 0)) {
+    reduction == Reduction::Mean ? grad_input.fill_(std::numeric_limits<float>::quiet_NaN()) : grad_input.zero_();
+    return grad_input;
+  }
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor *inputTensor = nil, *targetTensor = nil;
@@ -69,7 +73,7 @@ static Tensor& mse_loss_backward_out_impl(const Tensor& grad_output,
   };
 
   @autoreleasepool {
-    string key = op_name + reductionToString(reduction) + ":" + std::to_string(grad_input.sizes()[1]) +
+    std::string key = op_name + reductionToString(reduction) + ":" + std::to_string(grad_input.sizes()[1]) +
         getTensorsStringKey({input, target, grad_output});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
@@ -192,11 +196,11 @@ static MPSGraphTensor* bce_backward_mps(CachedGraph* bceGraph) {
 // NOTE: "loss" tensor would be "grad_input" if it's a backward pass
 static Tensor& bce_loss_out_impl(const Tensor& input,
                                  const Tensor& target,
-                                 const c10::optional<Tensor>& weight_opt,
+                                 const std::optional<Tensor>& weight_opt,
                                  int64_t reduction,
                                  Tensor& loss,
-                                 const c10::optional<Tensor>& grad_output_opt,
-                                 const string op_name) {
+                                 const std::optional<Tensor>& grad_output_opt,
+                                 const std::string& op_name) {
   // TODO: add sanity check for the elements of input tensor to be within [0..1]
   TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
 
@@ -213,7 +217,7 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
   Tensor target_squeezed = target.squeeze();
 
   @autoreleasepool {
-    string key =
+    std::string key =
         op_name + reductionToString(reduction) + getTensorsStringKey({input_squeezed, target_squeezed, weight});
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
@@ -277,7 +281,9 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
 } // namespace BCELoss
 
 static inline MPSGraphTensor* divisionNoNaN(MPSGraph* mpsGraph, MPSGraphTensor* divident, MPSGraphTensor* divisor) {
-  auto* div = [mpsGraph divisionWithPrimaryTensor:divident secondaryTensor:divisor name:@"divisionTensor"];
+  auto* div = [mpsGraph divisionWithPrimaryTensor:divident
+                                  secondaryTensor:castMPSTensor(mpsGraph, divisor, divident.dataType)
+                                             name:@"divisionTensor"];
   // Replace NaNs with 0 for divident elements equal to 0
   return [mpsGraph selectWithPredicateTensor:castMPSTensor(mpsGraph, divisor, MPSDataTypeBool)
                          truePredicateTensor:div
@@ -326,7 +332,7 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
     grad_output = grad_output_arg.unsqueeze(channel_dim);
   }
   @autoreleasepool {
-    string key = "nllnd_loss_backward" + getTensorsStringKey({input, grad_output, target, weight, total_weight}) +
+    std::string key = "nllnd_loss_backward" + getTensorsStringKey({input, grad_output, target, weight, total_weight}) +
         std::to_string(numClasses) + ":" + std::to_string(ignore_index) + ":" + std::to_string(isWeightsArrayValid) +
         ":" + std::to_string(isTargetCasted) + ":" + reductionToString(reduction);
 
@@ -437,6 +443,20 @@ static void nllnd_loss_forward_impl(Tensor& output,
   if (output.numel() == 0)
     return;
 
+  // https://github.com/pytorch/pytorch/blob/042f2f7746a064f1527d95d1f1d712b4f0b34186/aten/src/ATen/native/cuda/Loss.cu#L335-L346
+  if (target_arg.numel() == 0) {
+    // Here target (and input) have zero elements
+    // Mean reduction on empty tensors produces NaN. See the discussion in
+    // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
+    if (reduction == Reduction::Mean) {
+      output.fill_(std::numeric_limits<double>::quiet_NaN());
+    } else {
+      output.zero_();
+    }
+    total_weight.zero_();
+    return;
+  }
+
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* inputTensor_ = nil;
@@ -463,9 +483,10 @@ static void nllnd_loss_forward_impl(Tensor& output,
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
     // TODO: Make the key
-    string key = "nllnd_loss_forward_impl:" + std::to_string(ignore_index) + ":" + std::to_string(isWeightsArrayValid) +
-        ":" + reductionToString(reduction) + ":" + [ns_shape_key UTF8String] + ":" + getMPSTypeString(input) + ":" +
-        getMPSTypeString(target) + ":" + std::to_string(isTargetCasted) + ":" + getMPSTypeString(weight);
+    std::string key = "nllnd_loss_forward_impl:" + std::to_string(ignore_index) + ":" +
+        std::to_string(isWeightsArrayValid) + ":" + reductionToString(reduction) + ":" + [ns_shape_key UTF8String] +
+        ":" + getMPSTypeString(input) + ":" + getMPSTypeString(target) + ":" + std::to_string(isTargetCasted) + ":" +
+        getMPSTypeString(weight);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input), input_shape);
       MPSGraphTensor* targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(target), target_shape);
@@ -537,7 +558,9 @@ static void nllnd_loss_forward_impl(Tensor& output,
           mpsGraphBatchSizeTensor = [mpsGraph reductionSumWithTensor:mpsSelectOneTensor
                                                                 axes:nil
                                                                 name:@"batchSizeReductionTensor"];
-          mpsGraphReducedTensor = divisionNoNaN(mpsGraph, mpsGraphReducedTensor, mpsGraphBatchSizeTensor);
+          mpsGraphReducedTensor = [mpsGraph divisionWithPrimaryTensor:mpsGraphReducedTensor
+                                                      secondaryTensor:mpsGraphBatchSizeTensor
+                                                                 name:@"divisionTensor"];
         }
       }
 
@@ -551,14 +574,18 @@ static void nllnd_loss_forward_impl(Tensor& output,
       newCachedGraph->outputTensor_ = mpsGraphReducedTensor;
     });
 
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, input);
-    Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor_, target);
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, input, nil, true, MPSDataTypeInvalid, false);
+    Placeholder targetPlaceholder =
+        Placeholder(cachedGraph->targetTensor_, target, nil, true, MPSDataTypeInvalid, false);
     Placeholder weightPlaceholder = Placeholder();
     if (isWeightsArrayValid)
-      weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight);
-    Placeholder batchSizePlaceholder = Placeholder(cachedGraph->batchSizeTensor_, batchSizeTensor);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
-    Placeholder totalWeightsPlaceholder = Placeholder(cachedGraph->totalWeightTensor_, total_weight);
+      weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight, nil, true, MPSDataTypeInvalid, false);
+    Placeholder batchSizePlaceholder =
+        Placeholder(cachedGraph->batchSizeTensor_, batchSizeTensor, nil, true, MPSDataTypeInvalid, false);
+    Placeholder outputPlaceholder =
+        Placeholder(cachedGraph->outputTensor_, output, nil, true, MPSDataTypeInvalid, false);
+    Placeholder totalWeightsPlaceholder =
+        Placeholder(cachedGraph->totalWeightTensor_, total_weight, nil, true, MPSDataTypeInvalid, false);
 
     // Create dictionary of inputs and outputs
     NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
@@ -597,7 +624,7 @@ static void smooth_l1_loss_impl(const Tensor& input,
     MPSShape* input_shape = getMPSShape(input);
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
-    string key = "smooth_l1_loss_impl:" + reductionToString(reduction) + ":" + [ns_shape_key UTF8String] + ":" +
+    std::string key = "smooth_l1_loss_impl:" + reductionToString(reduction) + ":" + [ns_shape_key UTF8String] + ":" +
         std::to_string(beta) + ":" + getMPSTypeString(input) + ":" + getMPSTypeString(target);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       // smooth_l1_loss_mps:
@@ -678,7 +705,10 @@ static void smooth_l1_loss_template(const Tensor& input,
   TORCH_CHECK(beta >= 0, "smooth_l1_loss does not support negative values for beta.");
   TORCH_CHECK(input.is_mps());
   TORCH_CHECK(target.is_mps());
-
+  if ((input.numel() == 0) || (target.numel() == 0)) {
+    reduction == Reduction::Mean ? output.fill_(std::numeric_limits<float>::quiet_NaN()) : output.zero_();
+    return;
+  }
   MPSShape* mpsInputShape = nil;
   MPSShape* mpsOutputShape = nil;
 
@@ -733,7 +763,7 @@ static void smooth_l1_loss_backward_impl(const Tensor& grad_output,
   };
 
   @autoreleasepool {
-    string key = "smooth_l1_loss_backward" + getTensorsStringKey({input, grad_output, grad_input, target}) + ":" +
+    std::string key = "smooth_l1_loss_backward" + getTensorsStringKey({input, grad_output, grad_input, target}) + ":" +
         reductionToString(reduction) + ":" + std::to_string(beta);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
@@ -795,7 +825,7 @@ static void smooth_l1_loss_backward_impl(const Tensor& grad_output,
 // HuberLoss
 
 Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t reduction, double delta, Tensor& output) {
-  string op_name = __func__;
+  std::string op_name = __func__;
   using namespace mps;
   TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.")
   TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
@@ -816,7 +846,7 @@ Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t re
   };
 
   @autoreleasepool {
-    string key = op_name + ":" + reductionToString(reduction) + ":" + std::to_string(delta) + ":" +
+    std::string key = op_name + ":" + reductionToString(reduction) + ":" + std::to_string(delta) + ":" +
         getTensorsStringKey({input, target});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
@@ -867,7 +897,7 @@ Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t re
 
 Tensor huber_loss_mps(const Tensor& input, const Tensor& target, int64_t reduction, double delta) {
   TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.");
-  Tensor output = at::empty(input.sizes(), input.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor output = at::empty(input.sizes(), input.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
   return huber_loss_out_mps(input, target, reduction, delta, output);
 }
 
@@ -897,8 +927,8 @@ Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
     MPSShape* input_shape = getMPSShape(input);
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
-    string key = "huber_loss_backward_out_mps:" + reductionToString(reduction) + ":" + std::to_string(delta) + ":" +
-        [ns_shape_key UTF8String] + ":" + getMPSTypeString(input) + ":" + getMPSTypeString(target);
+    std::string key = "huber_loss_backward_out_mps:" + reductionToString(reduction) + ":" + std::to_string(delta) +
+        ":" + [ns_shape_key UTF8String] + ":" + getMPSTypeString(input) + ":" + getMPSTypeString(target);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* gradOutputTensor =
           mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(new_grad_output), getMPSShape(new_grad_output));
@@ -975,16 +1005,21 @@ Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
 
 // MSELoss
 TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int64_t reduction, const Tensor& output_) {
-  string op_name = __func__;
+  std::string op_name = "mse_loss_out_mps";
   using namespace mps;
-
-  bool contiguousOutput = output_.is_contiguous();
+  if ((input.numel() == 0) || (target.numel() == 0)) {
+    reduction == Reduction::Mean ? output_.fill_(std::numeric_limits<float>::quiet_NaN()) : output_.zero_();
+    return;
+  }
+  bool contiguousOutput = !needsGather(output_);
   Tensor output = output_;
   if (!contiguousOutput) {
     output = output_.contiguous();
   }
 
-  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
+  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes");
+  TORCH_CHECK(c10::isFloatingType(input.scalar_type()) && c10::isFloatingType(target.scalar_type()),
+              op_name + ": only defined for floating types");
   TORCH_CHECK(output.is_mps());
 
   struct CachedGraph : public MPSCachedGraph {
@@ -995,7 +1030,7 @@ TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int
   };
 
   @autoreleasepool {
-    string key = op_name + reductionToString(reduction) + getTensorsStringKey({input, target});
+    std::string key = op_name + reductionToString(reduction) + getTensorsStringKey({input, target});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
       newCachedGraph->targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
@@ -1035,24 +1070,24 @@ Tensor mse_loss_backward_mps(const Tensor& grad_output, const Tensor& input, con
 // BCELoss
 Tensor& binary_cross_entropy_out_mps(const Tensor& input,
                                      const Tensor& target,
-                                     const c10::optional<Tensor>& weight_opt,
+                                     const std::optional<Tensor>& weight_opt,
                                      int64_t reduction,
                                      Tensor& loss) {
-  return mps::BCELoss::bce_loss_out_impl(input, target, weight_opt, reduction, loss, c10::nullopt, __func__);
+  return mps::BCELoss::bce_loss_out_impl(input, target, weight_opt, reduction, loss, std::nullopt, __func__);
 }
 
 Tensor binary_cross_entropy_mps(const Tensor& input,
                                 const Tensor& target,
-                                const c10::optional<Tensor>& weight_opt,
+                                const std::optional<Tensor>& weight_opt,
                                 int64_t reduction) {
   Tensor loss = at::empty_like(input);
-  return mps::BCELoss::bce_loss_out_impl(input, target, weight_opt, reduction, loss, c10::nullopt, __func__);
+  return mps::BCELoss::bce_loss_out_impl(input, target, weight_opt, reduction, loss, std::nullopt, __func__);
 }
 
 Tensor& binary_cross_entropy_backward_out_mps(const Tensor& grad_output,
                                               const Tensor& input,
                                               const Tensor& target,
-                                              const c10::optional<Tensor>& weight_opt,
+                                              const std::optional<Tensor>& weight_opt,
                                               int64_t reduction,
                                               Tensor& grad_input) {
   return mps::BCELoss::bce_loss_out_impl(input, target, weight_opt, reduction, grad_input, grad_output, __func__);
@@ -1061,7 +1096,7 @@ Tensor& binary_cross_entropy_backward_out_mps(const Tensor& grad_output,
 Tensor binary_cross_entropy_backward_mps(const Tensor& grad_output,
                                          const Tensor& input,
                                          const Tensor& target,
-                                         const c10::optional<Tensor>& weight_opt,
+                                         const std::optional<Tensor>& weight_opt,
                                          int64_t reduction) {
   Tensor grad_input = at::empty_like(input);
   return mps::BCELoss::bce_loss_out_impl(input, target, weight_opt, reduction, grad_input, grad_output, __func__);
@@ -1159,7 +1194,7 @@ static void nll_loss2d_forward_out_mps_template(Tensor& output,
 
 std::tuple<Tensor&, Tensor&> nll_loss2d_forward_out_mps(const Tensor& self,
                                                         const Tensor& target,
-                                                        const c10::optional<Tensor>& weight_opt,
+                                                        const std::optional<Tensor>& weight_opt,
                                                         int64_t reduction,
                                                         int64_t ignore_index,
                                                         Tensor& output,
@@ -1174,7 +1209,7 @@ std::tuple<Tensor&, Tensor&> nll_loss2d_forward_out_mps(const Tensor& self,
 
 std::tuple<Tensor, Tensor> nll_loss2d_forward_mps(const Tensor& self,
                                                   const Tensor& target,
-                                                  const c10::optional<Tensor>& weight_opt,
+                                                  const std::optional<Tensor>& weight_opt,
                                                   int64_t reduction,
                                                   int64_t ignore_index) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -1215,7 +1250,7 @@ static void nll_loss2d_backward_out_mps_template(Tensor& grad_input,
 Tensor& nll_loss2d_backward_out_mps(const Tensor& grad_output,
                                     const Tensor& self,
                                     const Tensor& target,
-                                    const c10::optional<Tensor>& weight_opt,
+                                    const std::optional<Tensor>& weight_opt,
                                     int64_t reduction,
                                     int64_t ignore_index,
                                     const Tensor& total_weight,
@@ -1232,7 +1267,7 @@ Tensor& nll_loss2d_backward_out_mps(const Tensor& grad_output,
 Tensor nll_loss2d_backward_mps(const Tensor& grad_output,
                                const Tensor& self,
                                const Tensor& target,
-                               const c10::optional<Tensor>& weight_opt,
+                               const std::optional<Tensor>& weight_opt,
                                int64_t reduction,
                                int64_t ignore_index,
                                const Tensor& total_weight) {

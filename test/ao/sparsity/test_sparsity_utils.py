@@ -9,7 +9,6 @@ from torch.ao.pruning.sparsifier.utils import (
     get_arg_info_from_tensor_fqn,
     module_to_fqn,
 )
-
 from torch.testing._internal.common_quantization import (
     ConvBnReLUModel,
     ConvModel,
@@ -20,6 +19,7 @@ from torch.testing._internal.common_quantization import (
     TwoLayerLinearModel,
 )
 from torch.testing._internal.common_utils import TestCase
+
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
@@ -124,7 +124,7 @@ class TestSparsityUtilFunctions(TestCase):
             list_of_modules = [m for _, m in model.named_modules()] + [model]
             for module in list_of_modules:
                 module_fqn = module_to_fqn(model, module)
-                for tensor_name, tensor in module.named_parameters(recurse=False):
+                for tensor_name, _ in module.named_parameters(recurse=False):
                     tensor_fqn = (
                         module_fqn + ("." if module_fqn != "" else "") + tensor_name
                     )

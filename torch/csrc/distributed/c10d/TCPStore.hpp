@@ -9,6 +9,33 @@
 namespace c10d {
 namespace detail {
 
+// TCPStore is a key-value store used by PyTorch mainly for distributed
+// rendezvous, but for other purposes as well. (e.g., a centralized storage for
+// synchronization among different processes.)
+//
+// It is run via a classic client-server architecture, where the server runs
+// a separate background thread (alternatively we call it daemon thread). The
+// client and server communicate via TCP sockets.
+//
+// Currently we have two types of server backends:
+// 1. TCPStoreBackend: a single thread to handle all incoming request
+// synchronously.
+// 2. LibUVTCPStoreBackend: an event-driven asynchronous stream processing that
+// leverages libuv library (https://github.com/libuv/libuv) for better
+// performance. And this backend now is recommended to users. (We set the
+// default value of `useLibUV` inside `TCPStoreOptions` to true now, so users
+// should get it by default).
+//
+// Code structure:
+// ├── TCPStore client side API and server setup code:
+// │   TCPStore.hpp/TCPStore.cpp
+// ├── TCPStoreBackend server side API implementation code:
+// │   TCPStoreBackend.hpp/TCPStoreBackend.cpp
+// |   (actual class:`TCPStoreMasterDaemon`)
+// ├── LibUVTCPStoreBackend
+// │   TCPStoreLibUvBackend.cpp
+// |   (actual class: `LibUVStoreDaemon`)
+
 class TCPServer;
 
 class TCPClient;
@@ -18,30 +45,6 @@ struct SocketAddress {
   std::uint16_t port{};
 };
 
-class Counter {
- public:
-  void update(double val);
-  std::unordered_map<std::string, double> observe() const;
-
-  double mean() const noexcept {
-    return mean_;
-  }
-  int64_t count() const noexcept {
-    return count_;
-  }
-  double variance() const noexcept {
-    return m2_ / static_cast<double>(count_);
-  }
-  double sample_variance() const noexcept {
-    return m2_ / static_cast<double>(count_ - 1);
-  }
-
- private:
-  int64_t count_ = 0;
-  double mean_ = 0;
-  double m2_ = 0;
-};
-
 } // namespace detail
 
 struct TCPStoreOptions {
@@ -49,7 +52,7 @@ struct TCPStoreOptions {
 
   std::uint16_t port = kDefaultPort;
   bool isServer = false;
-  std::optional<std::size_t> numWorkers = c10::nullopt;
+  std::optional<std::size_t> numWorkers = std::nullopt;
   bool waitWorkers = true;
   std::chrono::milliseconds timeout = Store::kDefaultTimeout;
 
@@ -60,7 +63,7 @@ struct TCPStoreOptions {
   // If specified, and if isServer is true, the underlying TCPServer will take
   // over the bound socket associated to this fd. This option is useful to avoid
   // port assignment races in certain scenarios.
-  std::optional<int> masterListenFd = c10::nullopt;
+  std::optional<int> masterListenFd = std::nullopt;
 
   // A boolean value indicating whether to use the experimental libUV backend.
   bool useLibUV = true;
@@ -72,15 +75,9 @@ class TORCH_API TCPStore : public Store {
 
   explicit TCPStore(std::string host, const TCPStoreOptions& opts = {});
 
-  [[deprecated("Use TCPStore(host, opts) instead.")]] explicit TCPStore(
-      const std::string& masterAddr,
-      std::uint16_t masterPort,
-      std::optional<int> numWorkers = c10::nullopt,
-      bool isServer = false,
-      const std::chrono::milliseconds& timeout = kDefaultTimeout,
-      bool waitWorkers = true);
-
   ~TCPStore() override;
+
+  c10::intrusive_ptr<Store> clone() override;
 
   void set(const std::string& key, const std::vector<uint8_t>& value) override;
 
@@ -117,6 +114,13 @@ class TORCH_API TCPStore : public Store {
 
   bool hasExtendedApi() const override;
 
+  void queuePush(const std::string& key, const std::vector<uint8_t>& value)
+      override;
+
+  std::vector<uint8_t> queuePop(const std::string& key, bool block) override;
+
+  int64_t queueLen(const std::string& key) override;
+
   // Waits for all workers to join.
   void waitForWorkers();
 
@@ -130,15 +134,14 @@ class TORCH_API TCPStore : public Store {
     return addr_.port;
   }
 
-  std::unordered_map<std::string, std::unordered_map<std::string, double>>
-  collectClientCounters() const noexcept;
-
   bool isLibUvBackend() const noexcept {
     return usingLibUv_;
   }
 
   // note(xilunwu): this function is only for internal testing
   void _splitSet(const std::string& key, const std::vector<uint8_t>& data);
+
+  std::string repr() const;
 
  private:
   int64_t incrementValueBy(const std::string& key, int64_t delta);
@@ -160,7 +163,6 @@ class TORCH_API TCPStore : public Store {
   const std::string initKey_ = "init/";
   const std::string keyPrefix_ = "/";
   std::mutex activeOpLock_;
-  std::unordered_map<std::string, detail::Counter> clientCounters_;
   bool usingLibUv_ = true;
 };
 

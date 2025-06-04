@@ -219,7 +219,7 @@ Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
 }
 
 template <typename op_t>
-Tensor intersection_binary_op_with_wrapped_scalar(const Tensor& sparse, const Tensor& scalar, const op_t& op) {
+static Tensor intersection_binary_op_with_wrapped_scalar(const Tensor& sparse, const Tensor& scalar, const op_t& op) {
   // NOTE: intersection_binary_op_with_wrapped_scalar assumes scalar.numel() == 1.
   const auto result_values = op(sparse.values(), scalar.squeeze()).to(at::result_type(sparse, scalar));
   const auto result_sizes = infer_size(sparse.sizes(), scalar.sizes());
@@ -233,7 +233,7 @@ Tensor intersection_binary_op_with_wrapped_scalar(const Tensor& sparse, const Te
 }
 
 template <typename op_t>
-Tensor& intersection_binary_op_with_wrapped_scalar_(Tensor& sparse, const Tensor& scalar, const string& op_name, const op_t& op) {
+static Tensor& intersection_binary_op_with_wrapped_scalar_(Tensor& sparse, const Tensor& scalar, const std::string& op_name, const op_t& op) {
   // NOTE: intersection_binary_op_with_wrapped_scalar_ assumes scalar.numel() == 1.
   const auto broadcasted_shape = infer_size(sparse.sizes(), scalar.sizes());
   if (sparse.sizes() != broadcasted_shape) {
@@ -344,7 +344,7 @@ Tensor sparse_mask_sparse_compressed(
   }
 
   if (!mask.numel() || !mask._nnz()) {
-    return mask.clone().to(self.device(), self.scalar_type());
+    return mask.to(self.device(), self.scalar_type(), /*non_blocking=*/false, /*copy=*/true);
   }
 
   if (self.layout() == kStrided) {
@@ -433,42 +433,42 @@ Tensor& zero_sparse_csr_(Tensor& self) {
   }
 
 #define CREATE_UNARY_UFUNC(op_name)       \
-  CREATE_UNARY_UFUNC_OUT(op_name);        \
-  CREATE_UNARY_UFUNC_FUNCTIONAL(op_name); \
-  CREATE_UNARY_UFUNC_INPLACE(op_name);
+  CREATE_UNARY_UFUNC_OUT(op_name)         \
+  CREATE_UNARY_UFUNC_FUNCTIONAL(op_name)  \
+  CREATE_UNARY_UFUNC_INPLACE(op_name)
 
 #define CREATE_UNARY_UFUNC_NO_INPLACE(op_name) \
-  CREATE_UNARY_UFUNC_OUT(op_name);             \
-  CREATE_UNARY_UFUNC_FUNCTIONAL(op_name);
+  CREATE_UNARY_UFUNC_OUT(op_name)              \
+  CREATE_UNARY_UFUNC_FUNCTIONAL(op_name)
 
 // Exhaustive list of the unary ufuncs supported by sparse compressed
-CREATE_UNARY_UFUNC(abs);
-CREATE_UNARY_UFUNC(asin);
-CREATE_UNARY_UFUNC(asinh);
-CREATE_UNARY_UFUNC(atan);
-CREATE_UNARY_UFUNC(atanh);
-CREATE_UNARY_UFUNC(ceil);
-CREATE_UNARY_UFUNC(deg2rad);
-CREATE_UNARY_UFUNC(erf);
-CREATE_UNARY_UFUNC(erfinv);
-CREATE_UNARY_UFUNC(expm1);
-CREATE_UNARY_UFUNC(floor);
-CREATE_UNARY_UFUNC(frac);
-CREATE_UNARY_UFUNC(log1p);
-CREATE_UNARY_UFUNC(neg);
-CREATE_UNARY_UFUNC(rad2deg);
-CREATE_UNARY_UFUNC(sign);
-CREATE_UNARY_UFUNC(sin);
-CREATE_UNARY_UFUNC(sinh);
-CREATE_UNARY_UFUNC(sgn);
-CREATE_UNARY_UFUNC(sqrt);
-CREATE_UNARY_UFUNC(tan);
-CREATE_UNARY_UFUNC(tanh);
-CREATE_UNARY_UFUNC(trunc);
-CREATE_UNARY_UFUNC(conj_physical);
+CREATE_UNARY_UFUNC(abs)
+CREATE_UNARY_UFUNC(asin)
+CREATE_UNARY_UFUNC(asinh)
+CREATE_UNARY_UFUNC(atan)
+CREATE_UNARY_UFUNC(atanh)
+CREATE_UNARY_UFUNC(ceil)
+CREATE_UNARY_UFUNC(deg2rad)
+CREATE_UNARY_UFUNC(erf)
+CREATE_UNARY_UFUNC(erfinv)
+CREATE_UNARY_UFUNC(expm1)
+CREATE_UNARY_UFUNC(floor)
+CREATE_UNARY_UFUNC(frac)
+CREATE_UNARY_UFUNC(log1p)
+CREATE_UNARY_UFUNC(neg)
+CREATE_UNARY_UFUNC(rad2deg)
+CREATE_UNARY_UFUNC(sign)
+CREATE_UNARY_UFUNC(sin)
+CREATE_UNARY_UFUNC(sinh)
+CREATE_UNARY_UFUNC(sgn)
+CREATE_UNARY_UFUNC(sqrt)
+CREATE_UNARY_UFUNC(tan)
+CREATE_UNARY_UFUNC(tanh)
+CREATE_UNARY_UFUNC(trunc)
+CREATE_UNARY_UFUNC(conj_physical)
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-function")
-static CREATE_UNARY_UFUNC(relu);
+static CREATE_UNARY_UFUNC(relu)
 C10_DIAGNOSTIC_POP()
 
 // With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
@@ -512,17 +512,17 @@ Tensor& threshold_backward_sparse_compressed_out(
 }
 
 // angle, isneginf, isposinf and signbit currently don't have an inplace variant
-CREATE_UNARY_UFUNC_NO_INPLACE(angle);
-CREATE_UNARY_UFUNC_NO_INPLACE(isneginf);
-CREATE_UNARY_UFUNC_NO_INPLACE(isposinf);
-CREATE_UNARY_UFUNC_NO_INPLACE(signbit);
+CREATE_UNARY_UFUNC_NO_INPLACE(angle)
+CREATE_UNARY_UFUNC_NO_INPLACE(isneginf)
+CREATE_UNARY_UFUNC_NO_INPLACE(isposinf)
+CREATE_UNARY_UFUNC_NO_INPLACE(signbit)
 
 // isnan and isinf don't have an out variant
-CREATE_UNARY_UFUNC_FUNCTIONAL(isnan);
-CREATE_UNARY_UFUNC_FUNCTIONAL(isinf);
+CREATE_UNARY_UFUNC_FUNCTIONAL(isnan)
+CREATE_UNARY_UFUNC_FUNCTIONAL(isinf)
 
 template <typename scalar_t>
-void addmm_out_sparse_csr_native_cpu(
+static void addmm_out_sparse_csr_native_cpu(
     const Tensor& sparse,
     const Tensor& dense,
     const Tensor& r,
@@ -584,12 +584,6 @@ Tensor& addmm_out_sparse_compressed_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-  // TODO: remove this, there are no codegenerated checks for devices yet
-  sparse::impl::_check_is_cpu(self, "self");
-  sparse::impl::_check_is_cpu(mat1, "mat1");
-  sparse::impl::_check_is_cpu(mat2, "mat2");
-  sparse::impl::_check_is_cpu(result, "result");
-
   // All the checks are from addmm_out_cuda_impl (ATen/native/cuda/Blas.cpp) and
   // TORCH_META_FUNC(addmm) (ATen/native/LinearAlgebra.cpp)
   // TODO: remove code duplication and unify code
@@ -822,19 +816,19 @@ static void add_out_dense_sparse_compressed_cpu(
   TORCH_INTERNAL_ASSERT(dense.layout() == kStrided);
   TORCH_INTERNAL_ASSERT(
       src.layout() == kSparseCsr || src.layout() == kSparseCsc);
-  TORCH_INTERNAL_ASSERT(dense.device() == kCPU);
+  TORCH_INTERNAL_ASSERT(dense.device() == kCPU || dense.device() == kMeta);
 
   TORCH_CHECK(
       out.is_contiguous(),
       "out argument must be contiguous, but got: ",
       out.suggest_memory_format());
   TORCH_CHECK(
-      out.device() == kCPU,
-      "add: expected 'out' to be CPU tensor, but got tensor on device: ",
+      out.device() == dense.device(),
+      "add: expected 'out' to match dense tensor, but got tensor on device: ",
       out.device());
   TORCH_CHECK(
-      src.device() == kCPU,
-      "add: expected 'other' to be a CPU tensor, but got tensor on device: ",
+      src.device() == dense.device(),
+      "add: expected 'src' to match dense tensor, but got tensor on device: ",
       src.device());
 
   TORCH_CHECK(
@@ -869,6 +863,8 @@ static void add_out_dense_sparse_compressed_cpu(
   if (src._nnz() == 0) {
     return;
   }
+
+  TORCH_INTERNAL_ASSERT(dense.device() == kCPU);
 
   auto valuesBuffer = src_values.to(commonDtype).reshape({-1, src_values.size(-1)});
   resultBuffer = resultBuffer.view({-1, out.size(-2), out.size(-1)});
@@ -1363,7 +1359,7 @@ Tensor _sparse_csr_prod_cpu(const Tensor& input, IntArrayRef dims_to_reduce, boo
 std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_sparse_csr_cpu(
     const Tensor& self,
     const Tensor& other,
-    const c10::string_view reduce) {
+    const std::string_view reduce) {
 
   auto layout = self.layout();
   TORCH_CHECK(layout == kSparseCsr,
@@ -1415,7 +1411,7 @@ std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_backward_sparse_csr_cpu(
     const Tensor& self,
     const Tensor& grad_out,
     const Tensor& other,
-    const c10::string_view reduce,
+    const std::string_view reduce,
     const Tensor& arg_out,
     std::array<bool, 2> output_mask) {
 

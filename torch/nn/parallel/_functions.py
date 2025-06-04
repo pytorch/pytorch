@@ -1,11 +1,11 @@
 import warnings
-from typing import List, Optional
+from itertools import chain
+from typing import Optional
 
 import torch
 from torch._utils import _get_device_index
 from torch.autograd import Function
-
-from . import comm
+from torch.nn.parallel import comm
 
 
 class Broadcast(Function):
@@ -17,17 +17,16 @@ class Broadcast(Function):
         target_gpus = [_get_device_index(x, True) for x in target_gpus]
         ctx.target_gpus = target_gpus
         if len(inputs) == 0:
-            return tuple()
+            return ()
         ctx.num_inputs = len(inputs)
         ctx.input_device = inputs[0].get_device()
         outputs = comm.broadcast_coalesced(inputs, ctx.target_gpus)
         non_differentiables = []
         for idx, input_requires_grad in enumerate(ctx.needs_input_grad[1:]):
             if not input_requires_grad:
-                for output in outputs:
-                    non_differentiables.append(output[idx])
+                non_differentiables.extend(output[idx] for output in outputs)
         ctx.mark_non_differentiable(*non_differentiables)
-        return tuple([t for tensors in outputs for t in tensors])
+        return tuple(chain.from_iterable(outputs))
 
     @staticmethod
     def backward(ctx, *grad_outputs):
@@ -97,17 +96,15 @@ class Scatter(Function):
         ctx.dim = dim
         ctx.input_device = input.get_device() if input.device.type != "cpu" else -1
         streams = None
-        if torch.cuda.is_available() and ctx.input_device == -1:
+        if torch.accelerator.is_available() and ctx.input_device == -1:
             # Perform CPU to GPU copies in a background stream
-            streams = [
-                _get_stream(torch.device("cuda", device)) for device in target_gpus
-            ]
+            streams = [_get_stream(torch.device(device)) for device in target_gpus]
         outputs = comm.scatter(input, target_gpus, chunk_sizes, ctx.dim, streams)
         # Synchronize with the copy stream
         if streams is not None:
             for i, output in enumerate(outputs):
-                with torch.cuda.device(target_gpus[i]):
-                    main_stream = torch.cuda.current_stream()
+                with torch.accelerator.device_index(target_gpus[i]):
+                    main_stream = torch.accelerator.current_stream()
                     main_stream.wait_stream(streams[i])
                     output.record_stream(main_stream)
         return outputs
@@ -118,19 +115,17 @@ class Scatter(Function):
 
 
 # background streams used for copying
-_streams: Optional[List[Optional[torch.Stream]]] = None
+_streams: Optional[list[Optional[torch.Stream]]] = None
 
 
 def _get_stream(device: torch.device):
     """Get a background stream for copying between CPU and target device."""
     global _streams
-    if device.type == "cpu":
+    if device.type == "cpu" or not torch.accelerator.is_available():
         return None
-    device_mod = getattr(torch, device.type, None)
-    if device_mod is None:
-        return None
+    assert torch.accelerator.current_accelerator().type == device.type
     if _streams is None:
-        _streams = [None] * device_mod.device_count()
+        _streams = [None] * torch.accelerator.device_count()
     if _streams[device.index] is None:
-        _streams[device.index] = device_mod.Stream(device.index)
+        _streams[device.index] = torch.Stream(device.index)
     return _streams[device.index]

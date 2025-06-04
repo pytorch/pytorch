@@ -7,8 +7,9 @@ import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
-from torch.distributed._tensor import DeviceMesh, init_device_mesh, Shard
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.tensor import DeviceMesh, Shard
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -19,6 +20,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -47,7 +49,7 @@ class TestFakePG(TestCase):
         input_tensor = torch.ones(3, 3) * dist.get_rank()
         output_tensors = [torch.empty_like(input_tensor) for _ in range(2)]
         dist.all_gather(output_tensors, input_tensor)
-        for _, out_tensor in enumerate(output_tensors):
+        for out_tensor in output_tensors:
             self.assertEqual(tuple(out_tensor.shape), (3, 3))
 
     def test_reduce_scatter(self):

@@ -3,7 +3,7 @@ import torch.nn as nn
 
 
 class GeneralQuantModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.embedding = torch.ao.nn.quantized.Embedding(
             num_embeddings=10, embedding_dim=12
@@ -22,7 +22,6 @@ class GeneralQuantModule(torch.nn.Module):
         )
         input1 = torch.randn(1, 16, 4)
         input2 = torch.randn(1, 16, 4, 4)
-        input3 = torch.randn(1, 16, 4, 4, 4)
         return len(
             self.func.add(a, b),
             self.func.cat((a, a), 0),
@@ -47,7 +46,7 @@ class GeneralQuantModule(torch.nn.Module):
 
 
 class DynamicQuantModule:
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.module = self.M()
 
@@ -55,7 +54,7 @@ class DynamicQuantModule:
         return torch.ao.quantization.quantize_dynamic(self.module, dtype=torch.qint8)
 
     class M(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super(DynamicQuantModule.M, self).__init__()
             self.rnn = nn.RNN(4, 8, 2)
             self.rnncell = nn.RNNCell(4, 8)
@@ -122,7 +121,7 @@ class StaticQuantModule:
         return model_int8
 
     class M(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super(StaticQuantModule.M, self).__init__()
             self.quant = torch.ao.quantization.QuantStub()
             self.input1d = torch.randn(4, 2, 2)
@@ -182,7 +181,7 @@ class FusedQuantModule:
         return model_int8
 
     class M(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super(FusedQuantModule.M, self).__init__()
             self.quant = torch.ao.quantization.QuantStub()
             self.input1d = torch.randn(4, 2, 2)

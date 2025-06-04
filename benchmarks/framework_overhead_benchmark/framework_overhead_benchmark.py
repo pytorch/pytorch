@@ -1,9 +1,10 @@
 import argparse
 
 from pt_wrapper_module import WrapperModule
-
 from SimpleAddModule import add_tensors_loop, SimpleAddModule
+
 from utils import benchmark_module, BenchmarkConfig, ModuleConfig, ms_to_us
+
 
 """ Framework overhead benchmark script.
 Benchmark framework overhead.
@@ -24,7 +25,7 @@ SUPPORTED_OPS = {"add_op"}
 
 
 def parse_op_args(op):
-    op_list = op.split(",")
+    op_list = op.split(",")  # noqa: F841
 
 
 def print_results(result):

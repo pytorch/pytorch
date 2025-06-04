@@ -16,7 +16,7 @@
 //   For example, at::sin(Tensor self) accepts a Tensor, and the batched kernel
 //   must also accept a Tensor
 // - However, it is more natural for users to write a batching rule like the
-//   following: sin_batch_rule(Tensor self, optional<int> self_bdim)
+//   following: sin_batch_rule(Tensor self, std::optional<int> self_bdim)
 // - There is some codegenerated layer (the "plumbing") that wraps the user
 //   defined batching rule (e.g. sin_batch_rule) in a kernel that can be
 //   registered to the Batched key.
@@ -26,19 +26,19 @@
 
 namespace at::functorch {
 
-void vmap_check_escaped(const optional<DynamicLayer> &layer, const char* what);
+void vmap_check_escaped(const std::optional<DynamicLayer> &layer, const char* what);
 
 // Create a BatchedTensor given a tensor, bdim, and level
-TORCH_API Tensor makeBatched(const Tensor& tensor, optional<int64_t> bdim, int64_t level);
+TORCH_API Tensor makeBatched(Tensor tensor, std::optional<int64_t> bdim, int64_t level);
 
 // Given a Tensor that may or may not be a BatchedTensor, unwrap it.
 // If `tensor` is not a BatchedTensor, or is a BatchedTensor but the level
-// doesn't match, then this returns (tensor, nullopt).
+// doesn't match, then this returns (tensor, std::nullopt).
 // Otherwise, it returns (unwrap(tensor), bdim).
 TORCH_API std::tuple<Tensor, std::optional<int64_t>> unwrapTensorAtLevel(const Tensor& tensor, int64_t level);
 
 // Creates a vector of BatchedTensor
-TORCH_API std::vector<Tensor> makeBatchedVector(const std::vector<Tensor>& tensors, optional<int64_t> bdim, int64_t level);
+TORCH_API std::vector<Tensor> makeBatchedVector(std::vector<Tensor> tensors, std::optional<int64_t> bdim, int64_t level);
 
 // Returns True if ANY tensor in tensors is batched at level
 TORCH_API bool isBatchedAtLevel(ITensorListRef tensors, int64_t level);
@@ -47,7 +47,7 @@ TORCH_API bool isBatchedAtLevel(const Tensor& tensor, int64_t level);
 TORCH_API bool isBatchedAtLevel(const std::optional<Tensor>& maybe_tensor, int64_t level);
 
 // Convenience helper. Returns true if any tensor is batched at level
-TORCH_API bool areAnyBatchedAtLevel(ArrayRef<optional<Tensor>> maybe_tensors, int64_t level);
+TORCH_API bool areAnyBatchedAtLevel(ArrayRef<std::optional<Tensor>> maybe_tensors, int64_t level);
 
 inline bool ivalueParticipatesInCurrentLevel(const IValue& ivalue) {
   if (ivalue.isTensor()) {

@@ -1,22 +1,25 @@
 # Owner(s): ["module: unknown"]
-
+# ruff: noqa: F841
 import functools
 import unittest
 
 import torch
 import torch.nn.functional as F
 import torch.utils.flop_counter
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    PLATFORM_SUPPORTS_CUDNN_ATTENTION
 )
 from torch.testing._internal.common_utils import (
     run_tests,
+    skipIfRocm,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    skipIfRocm,
 )
+
 
 try:
     from torchvision import models as torchvision_models
@@ -420,7 +423,12 @@ class TestFlopCounter(TestCase):
             run_uniform_flops(backend, with_backward=True)
             for backend in ["math", "flash", "mem_efficient", "cudnn"]
         ]
-        flops_fw_bw_math, flops_fw_bw_flash, flops_fw_bw_efficient, flops_fw_bw_cudnn = flops
+        (
+            flops_fw_bw_math,
+            flops_fw_bw_flash,
+            flops_fw_bw_efficient,
+            flops_fw_bw_cudnn,
+        ) = flops
         self.assertEqual(flops_fw_math * 3, flops_fw_bw_math)
         self.assertEqual(flops_fw_math * 7 // 2, flops_fw_bw_flash)
         self.assertEqual(flops_fw_bw_flash, flops_fw_bw_efficient)
@@ -675,6 +683,57 @@ class TestFlopCounter(TestCase):
             ),
         )
 
+    @skipIfRocm  # Nested tensor
+    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Does not support all SDPA backends (pre-SM80 hardware on CUDA)",
+    )
+    def test_nested_attention_fake_tensors(self):
+        x = torch.randn(123, 4, 16, device="cuda", dtype=torch.bfloat16)
+        offsets = torch.tensor([0, 30, 60, 90, 123], device="cuda")
+        max_seqlen = 40
+        with FakeTensorMode() as fake_mode:
+            fake_x = fake_mode.from_tensor(x)
+            fake_offsets = fake_mode.from_tensor(offsets)
+
+            with FlopCounterMode() as fake_flop_counter_mode:
+                torch.ops.aten._flash_attention_forward(
+                    fake_x,
+                    fake_x,
+                    fake_x,
+                    fake_offsets,
+                    fake_offsets,
+                    max_seqlen,
+                    max_seqlen,
+                    0.0,
+                    False,
+                    False,
+                )
+
+        dense_x = torch.randn(
+            4, 40, 4, 16, dtype=torch.bfloat16, device="cuda"
+        ).transpose(1, 2)
+
+        with FlopCounterMode() as real_flop_counter_mode:
+            torch.ops.aten._flash_attention_forward(
+                dense_x,
+                dense_x,
+                dense_x,
+                None,
+                None,
+                max_seqlen,
+                max_seqlen,
+                0.0,
+                False,
+                False,
+            )
+
+        self.assertEqual(
+            int(get_total_flops(fake_flop_counter_mode)),
+            int(get_total_flops(real_flop_counter_mode)),
+        )
+
     def test_addmm_out(self):
         def f(x):
             y = torch.zeros(10, 10)
@@ -704,7 +763,7 @@ class TestFlopCounter(TestCase):
                 return {"a": torch.mm(x, x)}
 
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = Foo()
                 self.b = Foo()
@@ -736,6 +795,78 @@ class TestFlopCounter(TestCase):
         mod = torch.nn.Linear(2, 2)
         with self.assertWarnsRegex(UserWarning, "not needed"):
             FlopCounterMode(mod)
+
+    def test_custom_op(self):
+        from torch.utils.flop_counter import FlopCounterMode, register_flop_formula
+
+        @torch.library.custom_op("mylib::foo", mutates_args=())
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x.sin()
+
+        called = 0
+
+        with self.assertRaisesRegex(
+            ValueError, "expected each target to be OpOverloadPacket"
+        ):
+            register_flop_formula(torch.ops.mylib.foo.default)(lambda x: x)
+
+        @register_flop_formula(torch.ops.mylib.foo)
+        def formula(*args, **kwargs):
+            nonlocal called
+            called += 1
+            return 9001
+
+        x = torch.randn(3)
+        with FlopCounterMode(display=False) as mode:
+            y = foo(x)
+
+        self.assertEqual(called, 1)
+        self.assertExpectedInline(get_total_flops(mode), """9001""")
+
+    @skipIfNoTorchVision
+    def test_inference_mode(self):
+        def get_flops(model):
+            with FlopCounterMode(model) as mode:
+                a = T(1, 3, 224, 224)
+                model(a).sum()
+            return mode
+
+        resnet18 = torchvision_models.resnet18()
+
+        mode_standard = get_flops(resnet18)
+
+        with torch.inference_mode():
+            mode_inference = get_flops(resnet18)
+
+        self.assertEqual(
+            get_total_flops(mode_standard), get_total_flops(mode_inference)
+        )
+
+        layer1_conv_flops_standard = mode_standard.flop_counts["ResNet.layer1"][
+            torch.ops.aten.convolution
+        ]
+        layer1_conv_flops_inference = mode_inference.flop_counts["ResNet.layer1"][
+            torch.ops.aten.convolution
+        ]
+        self.assertEqual(layer1_conv_flops_standard, layer1_conv_flops_inference)
+
+    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
+    def test_scaled_mm(self):
+        dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
+        with FlopCounterMode() as mode:
+            torch._scaled_mm(
+                torch.randn((3 * 16, 5 * 16), device="cuda").to(dtype),
+                torch.randn((7 * 16, 5 * 16), device="cuda").to(dtype).t(),
+                scale_a=torch.ones((), device="cuda"),
+                scale_b=torch.ones((), device="cuda"),
+                out_dtype=torch.bfloat16,
+            )
+
+        self.assertExpectedInline(get_total_flops(mode), """860160""")
 
 
 if __name__ == "__main__":

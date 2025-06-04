@@ -8,6 +8,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <torch/library.h>
 
+#include <c10/util/env.h>
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Operators.h>
 #include <ATen/NativeFunctions.h>
@@ -56,15 +57,15 @@ inline bool has_internal_overlap_helper(const at::Tensor t) {
 inline Tensor to_meta(const Tensor& t) {
     if (!t.defined()) return t;
     return at::native::empty_strided_meta_symint(t.sym_sizes(), t.sym_strides(),
-/*dtype=*/c10::make_optional(t.scalar_type()), /*layout=*/c10::make_optional(t.layout()),
-/*device=*/c10::make_optional(c10::Device(kMeta)), /*pin_memory=*/c10::nullopt);
+/*dtype=*/t.scalar_type(), /*layout=*/t.layout(),
+/*device=*/c10::Device(kMeta), /*pin_memory=*/std::nullopt);
 }
 
 inline std::optional<Tensor> to_meta(const std::optional<Tensor>& t) {
   if (t.has_value()) {
-    return c10::make_optional<Tensor>(to_meta(*t));
+    return to_meta(*t);
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 inline std::vector<Tensor> to_meta(at::ITensorListRef t_list) {
@@ -92,6 +93,11 @@ inline c10::List<::std::optional<Tensor>> to_meta(const c10::List<::std::optiona
     outputs.push_back(to_meta(t_list[i]));
   }
   return outputs;
+}
+
+static bool disable_meta_reference() {
+  static auto env = c10::utils::get_env("TORCH_DISABLE_FUNCTIONALIZATION_META_REFERENCE");
+  return env == "1";
 }
 
 

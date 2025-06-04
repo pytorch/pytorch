@@ -2,8 +2,7 @@
 import ctypes
 
 import torch
-from torch._streambase import _EventBase, _StreamBase
-from .._utils import _dummy_type
+from torch._utils import _dummy_type
 
 
 if not hasattr(torch._C, "_CudaStreamBase"):
@@ -12,20 +11,23 @@ if not hasattr(torch._C, "_CudaStreamBase"):
     torch._C.__dict__["_CudaEventBase"] = _dummy_type("_CudaEventBase")
 
 
-class Stream(torch._C._CudaStreamBase, _StreamBase):
+class Stream(torch._C._CudaStreamBase):
     r"""Wrapper around a CUDA stream.
 
     A CUDA stream is a linear sequence of execution that belongs to a specific
-    device, independent from other streams.  See :ref:`cuda-semantics` for
-    details.
+    device, independent from other streams. It supports with statement as a
+    context manager to ensure the operators within the with block are running
+    on the corresponding stream.  See :ref:`cuda-semantics` for details.
 
     Args:
         device(torch.device or int, optional): a device on which to allocate
             the stream. If :attr:`device` is ``None`` (default) or a negative
             integer, this will use the current device.
-        priority(int, optional): priority of the stream, should be 0 or
-            negative, where negative numbers indicate higher priority. By default,
-            streams have priority 0.
+        priority(int, optional): priority of the stream, which can be positive, 0, or negative.
+            A lower number indicates a higher priority. By default, the priority is set to 0.
+            If the value falls outside of the allowed priority range, it will automatically be
+            mapped to the nearest valid priority (lowest for large positive numbers or
+            highest for large negative numbers).
 
     """
 
@@ -138,7 +140,7 @@ class ExternalStream(Stream):
             return super().__new__(cls, stream_ptr=stream_ptr, **kwargs)
 
 
-class Event(torch._C._CudaEventBase, _EventBase):
+class Event(torch._C._CudaEventBase):
     r"""Wrapper around a CUDA event.
 
     CUDA events are synchronization markers that can be used to monitor the

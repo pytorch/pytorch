@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import itertools
-from typing import Any, Optional, Protocol, Type
+from typing import Any, Optional, Protocol
 
 import torch
 from torch.nn.parameter import is_lazy
@@ -86,7 +86,7 @@ class LazyModuleMixin:
 
     >>> # xdoctest: +SKIP
     >>> class LazyMLP(torch.nn.Module):
-    ...    def __init__(self):
+    ...    def __init__(self) -> None:
     ...        super().__init__()
     ...        self.fc1 = torch.nn.LazyLinear(10)
     ...        self.relu1 = torch.nn.ReLU()
@@ -101,7 +101,7 @@ class LazyModuleMixin:
     >>> lazy_mlp = LazyMLP()
     >>> # transforms the network's device and dtype
     >>> # NOTE: these transforms can and should be applied after construction and before any 'dry runs'
-    >>> lazy_mlp = lazy_mlp.cuda().double()
+    >>> lazy_mlp = lazy_mlp.cuda()
     >>> lazy_mlp
     LazyMLP( (fc1): LazyLinear(in_features=0, out_features=10, bias=True)
       (relu1): ReLU()
@@ -119,7 +119,7 @@ class LazyModuleMixin:
       (relu2): ReLU()
     )
     >>> # attaches an optimizer, since parameters can now be used as usual
-    >>> optim = torch.optim.SGD(mlp.parameters(), lr=0.01)
+    >>> optim = torch.optim.SGD(lazy_mlp.parameters(), lr=0.01)
 
     A final caveat when using lazy modules is that the order of initialization of a network's
     parameters may change, since the lazy modules are always initialized after other modules.
@@ -136,13 +136,10 @@ class LazyModuleMixin:
     >>> lazy_mlp = LazyMLP()
     >>> # The state dict shows the uninitialized parameters
     >>> lazy_mlp.state_dict()
-    OrderedDict([('fc1.weight', Uninitialized parameter),
-                 ('fc1.bias',
-                  tensor([-1.8832e+25,  4.5636e-41, -1.8832e+25,  4.5636e-41, -6.1598e-30,
-                           4.5637e-41, -1.8788e+22,  4.5636e-41, -2.0042e-31,  4.5637e-41])),
-                 ('fc2.weight', Uninitialized parameter),
-                 ('fc2.bias', tensor([0.0019]))])
-
+    OrderedDict({'fc1.weight': <UninitializedParameter>,
+                 'fc1.bias': <UninitializedParameter>,
+                 'fc2.weight': <UninitializedParameter>,
+                 'fc2.bias': <UninitializedParameter>})
 
     Lazy modules can load regular :class:`torch.nn.Parameter` s (i.e. you can serialize/deserialize
     initialized LazyModules and they will remain initialized)
@@ -180,7 +177,7 @@ class LazyModuleMixin:
 
     # modules inheriting from this will change their __class__ to the specified
     # one after they are fully initialized
-    cls_to_become: Optional[Type[Any]] = None
+    cls_to_become: Optional[type[Any]] = None
 
     def __init__(self: _LazyProtocol, *args, **kwargs):
         # Mypy doesnt like this super call in a mixin

@@ -97,7 +97,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
   // Projections are not currently supported, raise an error if needed
   bool has_projections = (hx[0].size(2) != hx[1].size(2));
   if (has_projections) {
-    AT_ERROR("LSTM with projections is not currently supported with MPS.");
+    TORCH_CHECK(false, "LSTM with projections is not currently supported with MPS.");
   }
 
   std::vector<Tensor> kernel_weights;
@@ -131,7 +131,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "lstm_" + getTensorsStringKey({input, hx[0], hx[1]}) + getMPSTypeString(input) + "_num_layers_" +
+    std::string key = "lstm_" + getTensorsStringKey({input, hx[0], hx[1]}) + getMPSTypeString(input) + "_num_layers_" +
         std::to_string(num_layers) + "_bidirectional_" + std::to_string(bidirectional) + "_has_biases_" +
         std::to_string(has_biases) + "_dropout_" + std::to_string(dropout_p) + "_batch_first_" +
         std::to_string(batch_first);
@@ -322,13 +322,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
     Placeholder outputPlaceholder3 = Placeholder(cachedGraph->outputTensors_[3], zState);
     Placeholder outputPlaceholder4 = Placeholder(cachedGraph->outputTensors_[4], cellStateFwd);
 
-    NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = [@{
+    NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = [[@{
       outputPlaceholder0.getMPSGraphTensor() : outputPlaceholder0.getMPSGraphTensorData(),
       outputPlaceholder1.getMPSGraphTensor() : outputPlaceholder1.getMPSGraphTensorData(),
       outputPlaceholder2.getMPSGraphTensor() : outputPlaceholder2.getMPSGraphTensorData(),
       outputPlaceholder3.getMPSGraphTensor() : outputPlaceholder3.getMPSGraphTensorData(),
       outputPlaceholder4.getMPSGraphTensor() : outputPlaceholder4.getMPSGraphTensorData(),
-    } mutableCopy];
+    } mutableCopy] autorelease];
 
     if (num_layers > 1) {
       Placeholder outputPlaceholder5 = Placeholder(cachedGraph->outputTensors_[5], layerOutputs);
@@ -340,9 +340,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
   }
 }
 
-std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(const c10::optional<Tensor>& grad_y_opt,
-                                                                               const c10::optional<Tensor>& grad_hy_opt,
-                                                                               const c10::optional<Tensor>& grad_cy_opt,
+std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(const std::optional<Tensor>& grad_y_opt,
+                                                                               const std::optional<Tensor>& grad_hy_opt,
+                                                                               const std::optional<Tensor>& grad_cy_opt,
                                                                                const Tensor& z_state,
                                                                                const Tensor& cell_state_fwd,
                                                                                const Tensor& input,
@@ -356,9 +356,11 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                                                                                bool bidirectional,
                                                                                bool batch_first) {
   using namespace mps;
-  const Tensor& grad_y_r = c10::value_or_else(grad_y_opt, [] { return Tensor(); });
-  const Tensor& grad_hy_r = c10::value_or_else(grad_hy_opt, [] { return Tensor(); });
-  const Tensor& grad_cy_r = c10::value_or_else(grad_cy_opt, [] { return Tensor(); });
+  bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
+
+  const Tensor& grad_y_r = grad_y_opt.value_or(Tensor());
+  const Tensor& grad_hy_r = grad_hy_opt.value_or(Tensor());
+  const Tensor& grad_cy_r = grad_cy_opt.value_or(Tensor());
   const auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx[0], input.options());
   const auto grad_cy = grad_cy_r.defined() ? grad_cy_r : at::zeros_like(hx[1], input.options());
 
@@ -406,10 +408,10 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
   // Get stream
   MPSStream* stream = getCurrentMPSStream();
   @autoreleasepool {
-    string key = "lstm_backward_" + getTensorsStringKey({input, z_state, cell_state_fwd, grad_y, grad_cy, grad_hy}) +
-        getMPSTypeString(input) + "_num_layers_" + std::to_string(num_layers) + "_bidirectional_" +
-        std::to_string(bidirectional) + "_has_biases_" + std::to_string(has_biases) + "_batch_first_" +
-        std::to_string(batch_first);
+    std::string key = "lstm_backward_" +
+        getTensorsStringKey({input, z_state, cell_state_fwd, grad_y, grad_cy, grad_hy}) + getMPSTypeString(input) +
+        "_num_layers_" + std::to_string(num_layers) + "_bidirectional_" + std::to_string(bidirectional) +
+        "_has_biases_" + std::to_string(has_biases) + "_batch_first_" + std::to_string(batch_first);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       NSMutableArray<MPSGraphTensor*>* kernelWeightsList = [[NSMutableArray alloc] initWithCapacity:params.size()];
       NSMutableArray<MPSGraphTensor*>* recurrentKernelWeightsList =
@@ -529,6 +531,10 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                                                   start:i - num_layers
                                                  length:1
                                                    name:nil];
+          if (is_macos_14_4_or_newer) {
+            // Prevents shape optimization bug in kernel when num_layers > 2
+            iterationInputTensor_ = [mpsGraph identityWithTensor:iterationInputTensor_ name:nil];
+          }
           iterationInputTensor_ = [mpsGraph squeezeTensor:iterationInputTensor_ axis:0 name:nil];
         }
 

@@ -6,23 +6,14 @@
 # LICENSE file in the root directory of this source tree.
 
 import copy
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    NoReturn,
-    Sequence,
-    Tuple,
-    Type,
-    Union,
-)
+from collections.abc import Iterable, Sequence
+from typing import Any, Callable, NoReturn, Union
 
 import torch
 import torch.nn as nn
 from torch import Tensor
 from torch.nn.utils._named_member_accessor import NamedMemberAccessor
+
 
 # Utilities to make nn.Module "functional"
 # In particular the goal is to be able to provide a function that takes as input
@@ -40,9 +31,9 @@ def raise_parameter_tying_error() -> NoReturn:
 
 
 def create_names_map(
-    named_params: Union[Dict[str, Tensor], Iterable[Tuple[str, Tensor]]],
-    tied_named_params: Union[Dict[str, Tensor], Iterable[Tuple[str, Tensor]]],
-) -> Dict[str, List[str]]:
+    named_params: Union[dict[str, Tensor], Iterable[tuple[str, Tensor]]],
+    tied_named_params: Union[dict[str, Tensor], Iterable[tuple[str, Tensor]]],
+) -> dict[str, list[str]]:
     """
     named_params is a dictionary of tensors: {'A': A, 'B': B}
     tied_named_params is another dictionary of tensors {'A': A, 'B': B, 'B_tied': B}
@@ -58,7 +49,7 @@ def create_names_map(
     tied_tensors_dict_keys = set(tied_named_params.keys())
     assert tensors_dict_keys.issubset(tied_tensors_dict_keys)
 
-    tensor_to_mapping: Dict[Tensor, Tuple[str, List[str]]] = {}
+    tensor_to_mapping: dict[Tensor, tuple[str, list[str]]] = {}
     for key, tensor in named_params.items():
         tensor_to_mapping[tensor] = (key, [])
     for key, tensor in tied_named_params.items():
@@ -69,9 +60,9 @@ def create_names_map(
 
 def _extract_members(
     mod: nn.Module,
-    named_members: Callable[..., Iterable[Tuple[str, Tensor]]],
+    named_members: Callable[..., Iterable[tuple[str, Tensor]]],
     subclass: Callable[[Tensor], Tensor],
-) -> Tuple[Tuple[Tensor, ...], Tuple[str, ...], Dict[str, List[str]]]:
+) -> tuple[tuple[Tensor, ...], tuple[str, ...], dict[str, list[str]]]:
     all_named_members = tuple(named_members(remove_duplicate=False))
     unique_named_members = tuple(named_members(remove_duplicate=True))
     names_map = create_names_map(unique_named_members, all_named_members)
@@ -94,7 +85,7 @@ def _extract_members(
 
 def extract_weights(
     mod: nn.Module,
-) -> Tuple[Tuple[Tensor, ...], Tuple[str, ...], Dict[str, List[str]]]:
+) -> tuple[tuple[Tensor, ...], tuple[str, ...], dict[str, list[str]]]:
     """
     This function removes all the Parameters from the model and
     return them as a tuple as well as their original attribute names.
@@ -108,7 +99,7 @@ def extract_weights(
 
 def extract_buffers(
     mod: nn.Module,
-) -> Tuple[Tuple[Tensor, ...], Tuple[str, ...], Dict[str, List[str]]]:
+) -> tuple[tuple[Tensor, ...], tuple[str, ...], dict[str, list[str]]]:
     return _extract_members(mod, mod.named_buffers, lambda x: x)
 
 
@@ -130,9 +121,9 @@ def load_weights(
 
 
 def _swap_state(
-    mod: nn.Module, names_map: Dict[str, List[str]], elems: Iterable[Tensor]
-) -> List[Tensor]:
-    result: List[Tensor] = []
+    mod: nn.Module, names_map: dict[str, list[str]], elems: Iterable[Tensor]
+) -> list[Tensor]:
+    result: list[Tensor] = []
     accessor = NamedMemberAccessor(mod)
     for (_, attr_names), elem in zip(names_map.items(), elems):
         for i, attr_name in enumerate(attr_names):
@@ -260,10 +251,10 @@ class FunctionalModuleWithBuffers(nn.Module):
     def __init__(
         self,
         stateless_model: nn.Module,
-        param_names: Tuple[str, ...],
-        buffer_names: Tuple[str, ...],
-        param_names_map: Dict[str, List[str]],
-        buffer_names_map: Dict[str, List[str]],
+        param_names: tuple[str, ...],
+        buffer_names: tuple[str, ...],
+        param_names_map: dict[str, list[str]],
+        buffer_names_map: dict[str, list[str]],
     ) -> None:
         super().__init__()
         self.stateless_model = stateless_model
@@ -276,7 +267,7 @@ class FunctionalModuleWithBuffers(nn.Module):
     @staticmethod
     def _create_from(
         model: nn.Module, disable_autograd_tracking: bool = False
-    ) -> Tuple["FunctionalModuleWithBuffers", Tuple[Tensor, ...], Tuple[Tensor, ...]]:
+    ) -> tuple["FunctionalModuleWithBuffers", tuple[Tensor, ...], tuple[Tensor, ...]]:
         # TODO: We don't need to copy the model to create a stateless copy
         model_copy = copy.deepcopy(model)
         params, param_names, param_names_map = extract_weights(model_copy)
@@ -316,8 +307,8 @@ class FunctionalModule(nn.Module):
     def __init__(
         self,
         stateless_model: nn.Module,
-        param_names: Tuple[str, ...],
-        names_map: Dict[str, List[str]],
+        param_names: tuple[str, ...],
+        names_map: dict[str, list[str]],
     ) -> None:
         super().__init__()
         self.stateless_model = stateless_model
@@ -327,7 +318,7 @@ class FunctionalModule(nn.Module):
     @staticmethod
     def _create_from(
         model: nn.Module, disable_autograd_tracking: bool = False
-    ) -> Tuple["FunctionalModule", Tuple[Tensor, ...]]:
+    ) -> tuple["FunctionalModule", tuple[Tensor, ...]]:
         # TODO: We don't need to copy the model to create a stateless copy
         model_copy = copy.deepcopy(model)
         params, param_names, names_map = extract_weights(model_copy)
@@ -348,7 +339,7 @@ class FunctionalModule(nn.Module):
 
 def make_functional(
     model: nn.Module, disable_autograd_tracking: bool = False
-) -> Tuple[FunctionalModule, Tuple[Tensor, ...]]:
+) -> tuple[FunctionalModule, tuple[Tensor, ...]]:
     """make_functional(model, disable_autograd_tracking=False) -> func, params
 
     Given a ``torch.nn.Module``, :func:`make_functional` extracts the state
@@ -418,7 +409,7 @@ def make_functional(
 
 def make_functional_with_buffers(
     model: nn.Module, disable_autograd_tracking: bool = False
-) -> Tuple[FunctionalModuleWithBuffers, Tuple[Tensor, ...], Tuple[Tensor, ...]]:
+) -> tuple[FunctionalModuleWithBuffers, tuple[Tensor, ...], tuple[Tensor, ...]]:
     """make_functional_with_buffers(model, disable_autograd_tracking=False) -> func, params, buffers
 
     Given a ``torch.nn.Module``, make_functional_with_buffers extracts the
@@ -478,8 +469,8 @@ def make_functional_with_buffers(
 
 
 def transpose_stack(
-    tuple_of_tuple_of_tensors: Tuple[Tuple[Tensor, ...], ...]
-) -> Tuple[Tensor, ...]:
+    tuple_of_tuple_of_tensors: tuple[tuple[Tensor, ...], ...]
+) -> tuple[Tensor, ...]:
     tuple_of_tuple_of_tensors = tuple(zip(*tuple_of_tuple_of_tensors))
     results = tuple(
         torch.stack(shards).detach() for shards in tuple_of_tuple_of_tensors
@@ -489,7 +480,7 @@ def transpose_stack(
 
 def combine_state_for_ensemble(
     models: Sequence[nn.Module],
-) -> Tuple[FunctionalModuleWithBuffers, Tuple[Tensor, ...], Tuple[Tensor, ...]]:
+) -> tuple[FunctionalModuleWithBuffers, tuple[Tensor, ...], tuple[Tensor, ...]]:
     """combine_state_for_ensemble(models) -> func, params, buffers
 
     Prepares a list of torch.nn.Modules for ensembling with :func:`vmap`.
@@ -550,8 +541,8 @@ def combine_state_for_ensemble(
 
 
 def functional_init(
-    model_class: Type[nn.Module],
-    ensemble_shape: Union[Tuple[()], Tuple[int]] = (),
+    model_class: type[nn.Module],
+    ensemble_shape: Union[tuple[()], tuple[int]] = (),
     device: torch.types.Device = "cpu",
 ):
     def wrapped(*args, **kwargs):
@@ -577,8 +568,8 @@ def functional_init(
 
 
 def functional_init_with_buffers(
-    model_class: Type[nn.Module],
-    ensemble_shape: Union[Tuple[()], Tuple[int]] = (),
+    model_class: type[nn.Module],
+    ensemble_shape: Union[tuple[()], tuple[int]] = (),
     device: torch.types.Device = "cpu",
 ):
     def wrapped(*args, **kwargs):

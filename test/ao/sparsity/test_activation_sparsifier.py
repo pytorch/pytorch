@@ -2,7 +2,6 @@
 
 import copy
 import logging
-from typing import List
 
 import torch
 import torch.nn as nn
@@ -13,13 +12,14 @@ from torch.ao.pruning._experimental.activation_sparsifier.activation_sparsifier 
 from torch.ao.pruning.sparsifier.utils import module_to_fqn
 from torch.testing._internal.common_utils import skipIfTorchDynamo, TestCase
 
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 
 
 class Model(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.conv1 = nn.Conv2d(1, 32, kernel_size=3)
         self.conv2 = nn.Conv2d(32, 32, kernel_size=3)
@@ -246,7 +246,7 @@ class TestActivationSparsifier(TestCase):
                 assert mask2 is None
             else:
                 assert type(mask1) == type(mask2)
-                if isinstance(mask1, List):
+                if isinstance(mask1, list):
                     assert len(mask1) == len(mask2)
                     for idx in range(len(mask1)):
                         assert torch.all(mask1[idx] == mask2[idx])
@@ -257,7 +257,7 @@ class TestActivationSparsifier(TestCase):
         for state in state_dict["state"].values():
             mask = state["mask"]
             if mask is not None:
-                if isinstance(mask, List):
+                if isinstance(mask, list):
                     for idx in range(len(mask)):
                         assert mask[idx].is_sparse
                 else:

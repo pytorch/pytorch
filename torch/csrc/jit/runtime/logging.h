@@ -26,7 +26,9 @@ TORCH_API LoggerBase* setLogger(LoggerBase* logger);
 
 class NoopLogger : public LoggerBase {
  public:
-  void addStatValue(const std::string& stat_name, int64_t val) override {}
+  void addStatValue(
+      const std::string& stat_name [[maybe_unused]],
+      int64_t val [[maybe_unused]]) override {}
   ~NoopLogger() override = default;
 };
 
@@ -46,9 +48,9 @@ class TORCH_API LockingLogger : public LoggerBase {
  private:
   mutable std::mutex m;
   struct RawCounter {
-    RawCounter() : sum(0), count(0) {}
-    int64_t sum;
-    size_t count;
+    RawCounter() = default;
+    int64_t sum{0};
+    size_t count{0};
   };
   std::unordered_map<std::string, RawCounter> raw_counters;
   std::unordered_map<std::string, AggregationType> agg_types;

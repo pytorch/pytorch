@@ -12,9 +12,9 @@
 #pragma once
 
 #include <c10/util/ArrayRef.h>
-#include <c10/util/Optional.h>
 #include <cstdint>
 #include <initializer_list>
+#include <optional>
 #include <type_traits>
 #include <utility>
 
@@ -27,16 +27,16 @@ class OptionalArrayRef final {
 
   constexpr OptionalArrayRef() noexcept = default;
 
-  constexpr OptionalArrayRef(nullopt_t) noexcept {}
+  constexpr OptionalArrayRef(std::nullopt_t) noexcept {}
 
   OptionalArrayRef(const OptionalArrayRef& other) = default;
 
   OptionalArrayRef(OptionalArrayRef&& other) noexcept = default;
 
-  constexpr OptionalArrayRef(const optional<ArrayRef<T>>& other) noexcept
+  constexpr OptionalArrayRef(const std::optional<ArrayRef<T>>& other) noexcept
       : wrapped_opt_array_ref(other) {}
 
-  constexpr OptionalArrayRef(optional<ArrayRef<T>>&& other) noexcept
+  constexpr OptionalArrayRef(std::optional<ArrayRef<T>>&& other) noexcept
       : wrapped_opt_array_ref(std::move(other)) {}
 
   constexpr OptionalArrayRef(const T& value) noexcept
@@ -89,8 +89,8 @@ class OptionalArrayRef final {
 
   // Assignment
 
-  constexpr OptionalArrayRef& operator=(nullopt_t) noexcept {
-    wrapped_opt_array_ref = c10::nullopt;
+  constexpr OptionalArrayRef& operator=(std::nullopt_t) noexcept {
+    wrapped_opt_array_ref = std::nullopt;
     return *this;
   }
 
@@ -99,13 +99,13 @@ class OptionalArrayRef final {
   OptionalArrayRef& operator=(OptionalArrayRef&& other) noexcept = default;
 
   constexpr OptionalArrayRef& operator=(
-      const optional<ArrayRef<T>>& other) noexcept {
+      const std::optional<ArrayRef<T>>& other) noexcept {
     wrapped_opt_array_ref = other;
     return *this;
   }
 
   constexpr OptionalArrayRef& operator=(
-      optional<ArrayRef<T>>&& other) noexcept {
+      std::optional<ArrayRef<T>>&& other) noexcept {
     wrapped_opt_array_ref = std::move(other);
     return *this;
   }
@@ -162,6 +162,7 @@ class OptionalArrayRef final {
   }
 
   constexpr const ArrayRef<T>& value() const& {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return wrapped_opt_array_ref.value();
   }
 
@@ -213,7 +214,7 @@ class OptionalArrayRef final {
   }
 
  private:
-  optional<ArrayRef<T>> wrapped_opt_array_ref;
+  std::optional<ArrayRef<T>> wrapped_opt_array_ref;
 };
 
 using OptionalIntArrayRef = OptionalArrayRef<int64_t>;

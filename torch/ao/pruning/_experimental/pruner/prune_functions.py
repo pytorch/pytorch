@@ -3,18 +3,20 @@
 Collection of conversion functions for linear / conv2d structured pruning
 Also contains utilities for bias propagation
 """
-from typing import cast, List, Optional, Callable, Tuple
+from typing import Callable, cast, Optional
 
 import torch
 from torch import nn, Tensor
 from torch.nn.utils import parametrize
 from torch.nn.utils.parametrize import ParametrizationList
-from .parametrization import FakeStructuredSparsity, BiasHook
+
+from .parametrization import BiasHook, FakeStructuredSparsity
+
 
 # BIAS PROPAGATION
 def _remove_bias_handles(module: nn.Module) -> None:
     if hasattr(module, "_forward_hooks"):
-        bias_hooks: List[int] = []
+        bias_hooks: list[int] = []
         for key, hook in module._forward_hooks.items():
             if isinstance(hook, BiasHook):
                 bias_hooks.append(key)
@@ -63,11 +65,11 @@ def _get_adjusted_next_layer_bias(
         parametrize.is_parametrized(next_layer)
         and getattr(next_layer, "_bias", None) is not None
     ):  # next_layer is parametrized & has original bias ._bias
-        adjusted_bias = nn.Parameter(scaled_biases + next_layer._bias)
+        adjusted_bias = nn.Parameter(scaled_biases + next_layer._bias)  # type: ignore[operator]
     elif (
         not parametrize.is_parametrized(next_layer) and next_layer.bias is not None
     ):  # next_layer not parametrized & has .bias
-        adjusted_bias = nn.Parameter(scaled_biases + next_layer.bias)
+        adjusted_bias = nn.Parameter(scaled_biases + next_layer.bias)  # type: ignore[operator]
     else:  # next_layer has no bias
         adjusted_bias = nn.Parameter(scaled_biases)
     return adjusted_bias
@@ -243,7 +245,7 @@ def prune_conv2d_activation_conv2d(
     prune_bias = getattr(conv2d_1, "prune_bias", False)
     if (
         hasattr(conv2d_2, "padding")
-        and cast(Tuple[int], conv2d_2.padding) > (0, 0)
+        and cast(tuple[int], conv2d_2.padding) > (0, 0)
         and (conv2d_1.bias is not None or getattr(conv2d_1, "_bias", None) is not None)
     ):
         prune_conv2d_padded(conv2d_1)
@@ -263,7 +265,7 @@ def prune_conv2d_activation_conv2d(
         if (
             not (
                 hasattr(conv2d_2, "padding")
-                and cast(Tuple[int], conv2d_2.padding) > (0, 0)
+                and cast(tuple[int], conv2d_2.padding) > (0, 0)
             )
             or conv2d_1.bias is None
         ):
@@ -409,7 +411,7 @@ def prune_lstm_output_layernorm_linear(
                 W_hi, W_hf, W_hg, W_ho = torch.split(
                     getattr(lstm, f"weight_hh_l{i}"), lstm.hidden_size
                 )
-                M_hi, M_hf, M_hg, M_ho = torch.split(mask, lstm.hidden_size)
+                M_hi, M_hf, M_hg, M_ho = torch.split(mask, lstm.hidden_size)  # type: ignore[arg-type]
 
                 # resize each individual weight separately
                 W_hi = W_hi[M_hi][:, M_hi]
@@ -455,22 +457,22 @@ def prune_lstm_output_layernorm_linear(
             # otherwise need to prune the columns of the input of the next LSTM layer
             else:
                 with torch.no_grad():
-                    if parametrize.is_parametrized(lstm, f"weight_ih_l{i+1}"):
+                    if parametrize.is_parametrized(lstm, f"weight_ih_l{i + 1}"):
                         parametrization_dict = cast(
                             nn.ModuleDict, lstm.parametrizations
                         )
                         weight_parameterizations = cast(
                             ParametrizationList,
-                            getattr(parametrization_dict, f"weight_ih_l{i+1}"),
+                            getattr(parametrization_dict, f"weight_ih_l{i + 1}"),
                         )
 
                         weight_parameterizations.original = nn.Parameter(
                             weight_parameterizations.original[:, M_ho]
                         )
                     else:
-                        next_layer_weight = getattr(lstm, f"weight_ih_l{i+1}")
+                        next_layer_weight = getattr(lstm, f"weight_ih_l{i + 1}")
                         setattr(
                             lstm,
-                            f"weight_ih_l{i+1}",
+                            f"weight_ih_l{i + 1}",
                             nn.Parameter(next_layer_weight[:, M_ho]),
                         )

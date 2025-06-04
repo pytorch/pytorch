@@ -6,19 +6,18 @@ from typing import Union
 import torch
 import torch.nn as nn
 from torch.distributed._composable import checkpoint
-from torch.distributed._composable.fsdp import (
-    CPUOffloadPolicy,
-    fully_shard,
-    MixedPrecisionPolicy,
-    OffloadPolicy,
-)
-from torch.distributed._tensor import init_device_mesh
 from torch.distributed._tools.fsdp2_mem_tracker import FSDPMemTracker
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
     CheckpointWrapper,
 )
-
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.fsdp import (
+    CPUOffloadPolicy,
+    fully_shard,
+    MixedPrecisionPolicy,
+    OffloadPolicy,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
 from torch.testing._internal.common_utils import run_tests

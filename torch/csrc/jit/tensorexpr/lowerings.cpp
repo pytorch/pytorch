@@ -15,14 +15,13 @@ FunctionSchemaMap<NNCLoweringFunction>& getNNCLoweringRegistry() {
 
 RegisterNNCLoweringsFunction::RegisterNNCLoweringsFunction(
     const std::vector<std::string>& schemas,
-    NNCLoweringFunction fn) {
+    const NNCLoweringFunction& fn) {
   for (const auto& schema_str : schemas) {
     getNNCLoweringRegistry().insert(parseSchema(schema_str), fn);
   }
 }
 
 namespace {
-// NOLINTNEXTLINE
 int nnc_lowerings_lazy_registration() {
   RegisterNNCLoweringsFunction aten_dropout(
       {"aten::dropout(Tensor input, float p, bool train) -> (Tensor)"},
@@ -1990,7 +1989,7 @@ int nnc_lowerings_lazy_registration() {
 } // namespace
 
 NNCLoweringFunction getStandardLoweringFor(const std::string& schema_str) {
-  C10_UNUSED static const int once = nnc_lowerings_lazy_registration();
+  [[maybe_unused]] static const int once = nnc_lowerings_lazy_registration();
   const auto& lowerings = getNNCLoweringRegistry();
   if (auto l = lowerings.find(parseSchema(schema_str))) {
     return *l;

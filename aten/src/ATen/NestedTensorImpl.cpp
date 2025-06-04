@@ -71,7 +71,7 @@ c10::DispatchKeySet get_view_key_set(const at::Tensor& base) {
 
 namespace at::native {
 
-inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
+inline static std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
   // torch.tensor([]) is considered to have `dim() = 1` and `size(0) = 0`
   // torch.nested_tensor([]) should also has `dim() = 1` and `size(0) = 0`
   if (sizes.dim() == 0) {
@@ -173,14 +173,16 @@ NestedTensorImpl::NestedTensorImpl(
       nested_sizes_(std::move(nested_sizes)),
       nested_strides_(std::move(nested_strides)),
       storage_offsets_(std::move(storage_offsets)),
-      opt_sizes_(c10::nullopt) {
+      opt_sizes_(std::nullopt) {
   C10_LOG_API_USAGE_ONCE("torch.NestedTensor");
   TORCH_WARN_ONCE(
       "The PyTorch API of nested tensors is in prototype stage and will change "
-      "in the near future.");
+      "in the near future. We recommend specifying layout=torch.jagged when constructing "
+      "a nested tensor, as this layout receives active development, has better operator "
+      "coverage, and works with torch.compile.");
   auto storage_device = storage_.device();
   TORCH_INTERNAL_ASSERT(
-      storage_device.is_cpu() || storage_device.is_cuda() || storage_device.is_xpu() || storage_device.is_privateuseone(),
+      storage_device.is_cpu() || storage_device.is_cuda() || storage_device.is_xpu() || storage_device.is_hpu() || storage_device.is_privateuseone(),
       "NestedTensorImpl storage must be either CUDA, CPU, XPU or ", get_privateuse1_backend(), " but got ",
       storage_device);
   validate_nested_tensor_metadata(nested_sizes_, nested_strides_, storage_offsets_);
@@ -230,7 +232,7 @@ NestedTensorImpl::NestedTensorImpl(
       nested_sizes_(std::move(nested_sizes)),
       nested_strides_(std::move(nested_strides)),
       storage_offsets_(std::move(storage_offsets)),
-      opt_sizes_(c10::nullopt) {
+      opt_sizes_(std::nullopt) {
   validate_nested_tensor_metadata(nested_sizes_, nested_strides_, storage_offsets_);
   refresh_dim();
   set_custom_sizes_strides(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
@@ -239,11 +241,11 @@ NestedTensorImpl::NestedTensorImpl(
 std::optional<int64_t> NestedTensorImpl::opt_size(int64_t d) const {
   if (C10_UNLIKELY(!opt_sizes_.has_value())) {
     // Cache the metadata to avoid recomputing it each time.
-    opt_sizes_ = c10::make_optional(construct_opt_sizes(nested_sizes_));
+    opt_sizes_ = construct_opt_sizes(nested_sizes_);
   }
   d = at::maybe_wrap_dim(d, dim(), false);
   if ((*opt_sizes_)[d] == -1) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return (*opt_sizes_)[d];
 }

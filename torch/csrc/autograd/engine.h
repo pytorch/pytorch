@@ -15,8 +15,6 @@
 #include <torch/csrc/autograd/saved_variable_hooks.h>
 #include <torch/csrc/autograd/utils/warnings.h>
 
-#include <c10/util/CallOnce.h>
-
 #include <exception>
 #include <functional>
 #include <memory>
@@ -43,6 +41,12 @@ TORCH_API void validate_outputs(
     const edge_list& edges,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error);
+TORCH_API void validate_outputs(
+    const std::vector<std::optional<InputMetadata>>& input_metadata,
+    variable_list& grads,
+    const std::function<std::string(const std::string&)>& format_error);
+TORCH_API std::vector<std::optional<InputMetadata>> collect_input_metadata(
+    const edge_list& edges);
 
 struct NodeTask {
   std::weak_ptr<GraphTask> base_;
@@ -134,7 +138,7 @@ struct TORCH_API Engine {
   // see [Note: Compiled Autograd]
   typedef variable_list (*compiled_autograd_fn)(
       const std::shared_ptr<Node>& graph_root,
-      GraphTask& graph_task,
+      const GraphTask& graph_task,
       bool accumulate_grad,
       const edge_list& outputs);
   static void set_compiled_autograd(compiled_autograd_fn fn);
@@ -181,7 +185,7 @@ struct TORCH_API Engine {
 
   void initialize_device_threads_pool();
   virtual void thread_on_exception(
-      std::shared_ptr<GraphTask> graph_task,
+      const std::shared_ptr<GraphTask>& graph_task,
       const std::shared_ptr<Node>& fn,
       std::exception& e);
 
@@ -226,9 +230,6 @@ struct TORCH_API Engine {
   void reentrant_thread_init();
   void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
 
-  // Ensures device_ready_queues_ are initialized only once
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  c10::once_flag start_device_threads_flag_;
   // Safe to read device_ready_queues_ without synchronization after
   // initialization
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)

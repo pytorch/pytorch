@@ -212,7 +212,9 @@ headers = {"Authorization": f"token {token}"}
 
 def run_query(query):
     request = requests.post(
-        "https://api.github.com/graphql", json={"query": query}, headers=headers
+        "https://api.github.com/graphql",  # @lint-ignore
+        json={"query": query},
+        headers=headers,
     )
     if request.status_code == 200:
         return request.json()
@@ -287,7 +289,7 @@ def get_features(commit_hash):
     pr_number = parse_pr_number(body, commit_hash, title)
     labels = []
     author = ""
-    accepters = tuple()
+    accepters = ()
     if pr_number is not None:
         labels, author, accepters = github_data(pr_number)
     result = Features(title, body, pr_number, files_changed, labels, author, accepters)

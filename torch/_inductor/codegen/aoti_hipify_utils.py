@@ -1,9 +1,8 @@
-# mypy: allow-untyped-defs
 import re
 
 import torch
-
 from torch.utils.hipify.hipify_python import PYTORCH_MAP, PYTORCH_TRIE
+
 
 # It is not a good idea to directly apply hipify_torch to codegen, which will be vulnerable to cases like:
 #   "...
@@ -16,7 +15,7 @@ def maybe_hipify_code_wrapper(source_codes: str, force_hipify: bool = False) -> 
     if torch.version.hip is None and not force_hipify:
         return source_codes
 
-    def c2_repl(m):
+    def c2_repl(m: re.Match[str]) -> object:
         return PYTORCH_MAP[m.group(0)]
 
     # We need to redefine RE_PYTORCH_PREPROCESSOR here since in hipify_torch,
@@ -28,5 +27,5 @@ def maybe_hipify_code_wrapper(source_codes: str, force_hipify: bool = False) -> 
     # we need to skip replacing "getStreamFromExternal" in "getStreamFromExternalMasqueradingAsCUDA"
     RE_PYTORCH_PREPROCESSOR = re.compile(rf"({PYTORCH_TRIE.export_to_regex()})(?=\W)")
 
-    source_codes = RE_PYTORCH_PREPROCESSOR.sub(c2_repl, source_codes)
+    source_codes = RE_PYTORCH_PREPROCESSOR.sub(c2_repl, source_codes)  # type: ignore[arg-type]
     return source_codes

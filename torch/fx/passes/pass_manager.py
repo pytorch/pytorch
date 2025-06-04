@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
+import logging
 from functools import wraps
 from inspect import unwrap
-from typing import Callable, List, Optional
-import logging
+from typing import Callable, Optional
+
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,7 @@ __all__ = [
     "this_before_that_pass_constraint",
     "these_before_those_pass_constraint",
 ]
+
 
 # for callables which modify object inplace and return something other than
 # the object on which they act
@@ -31,10 +33,11 @@ def inplace_wrapper(fn: Callable) -> Callable:
 
     @wraps(fn)
     def wrapped_fn(gm):
-        val = fn(gm)
+        fn(gm)
         return gm
 
     return wrapped_fn
+
 
 def log_hook(fn: Callable, level=logging.INFO) -> Callable:
     """
@@ -48,16 +51,13 @@ def log_hook(fn: Callable, level=logging.INFO) -> Callable:
     ```
     def my_pass(d: Dict) -> bool:
         changed = False
-        if 'foo' in d:
-            d['foo'] = 'bar'
+        if "foo" in d:
+            d["foo"] = "bar"
             changed = True
         return changed
 
-    pm = PassManager(
-        passes=[
-            inplace_wrapper(log_hook(my_pass))
-        ]
-    )
+
+    pm = PassManager(passes=[inplace_wrapper(log_hook(my_pass))])
     ```
 
     Args:
@@ -67,6 +67,7 @@ def log_hook(fn: Callable, level=logging.INFO) -> Callable:
     Returns:
         wrapped_fn (Callable[Type1, Type2])
     """
+
     @wraps(fn)
     def wrapped_fn(gm):
         val = fn(gm)
@@ -76,8 +77,11 @@ def log_hook(fn: Callable, level=logging.INFO) -> Callable:
     return wrapped_fn
 
 
-
-def loop_pass(base_pass: Callable, n_iter: Optional[int] = None, predicate: Optional[Callable] = None):
+def loop_pass(
+    base_pass: Callable,
+    n_iter: Optional[int] = None,
+    predicate: Optional[Callable] = None,
+):
     """
     Convenience wrapper for passes which need to be applied multiple times.
 
@@ -117,7 +121,7 @@ def loop_pass(base_pass: Callable, n_iter: Optional[int] = None, predicate: Opti
 # Implemented as 'depends on' operators. A constraint is satisfied iff a list
 # has a valid partial ordering according to this comparison operator.
 def _validate_pass_schedule_constraint(
-    constraint: Callable[[Callable, Callable], bool], passes: List[Callable]
+    constraint: Callable[[Callable, Callable], bool], passes: list[Callable]
 ):
     for i, a in enumerate(passes):
         for j, b in enumerate(passes[i + 1 :]):
@@ -137,9 +141,7 @@ def this_before_that_pass_constraint(this: Callable, that: Callable):
     """
 
     def depends_on(a: Callable, b: Callable):
-        if a == that and b == this:
-            return False
-        return True
+        return a != that or b != this
 
     return depends_on
 
@@ -156,9 +158,7 @@ def these_before_those_pass_constraint(these: Callable, those: Callable):
         loop_pass(pass_a, 5),
     ]
 
-    constraints = [
-        these_before_those_pass_constraint(pass_a, pass_b)
-    ]
+    constraints = [these_before_those_pass_constraint(pass_a, pass_b)]
     ```
 
     Args:
@@ -170,9 +170,7 @@ def these_before_those_pass_constraint(these: Callable, those: Callable):
     """
 
     def depends_on(a: Callable, b: Callable):
-        if unwrap(a) == those and unwrap(b) == these:
-            return False
-        return True
+        return unwrap(a) != those or unwrap(b) != these
 
     return depends_on
 
@@ -193,8 +191,8 @@ class PassManager:
             `this_before_that_pass_constraint` for example.
     """
 
-    passes: List[Callable]
-    constraints: List[Callable]
+    passes: list[Callable]
+    constraints: list[Callable]
     _validated: bool = False
 
     def __init__(
@@ -219,13 +217,10 @@ class PassManager:
         self.constraints.append(constraint)
         self._validated = False
 
-    def remove_pass(self, _passes: List[str]):
+    def remove_pass(self, _passes: list[str]):
         if _passes is None:
             return
-        passes_left = []
-        for ps in self.passes:
-            if ps.__name__ not in _passes:
-                passes_left.append(ps)
+        passes_left = [ps for ps in self.passes if ps.__name__ not in _passes]
         self.passes = passes_left
         self._validated = False
 

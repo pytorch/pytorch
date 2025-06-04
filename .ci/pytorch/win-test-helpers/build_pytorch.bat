@@ -24,9 +24,21 @@ call %INSTALLER_DIR%\install_sccache.bat
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 
+if "%USE_XPU%"=="1" (
+  :: Install xpu support packages
+  set CUDA_VERSION=xpu
+  call %SCRIPT_HELPERS_DIR%\..\windows\internal\xpu_install.bat
+  if errorlevel 1 exit /b 1
+)
+
 :: Miniconda has been installed as part of the Windows AMI with all the dependencies.
 :: We just need to activate it here
 call %INSTALLER_DIR%\activate_miniconda3.bat
+if errorlevel 1 goto fail
+if not errorlevel 0 goto fail
+
+:: Update CMake
+call choco upgrade -y cmake --no-progress --installargs 'ADD_CMAKE_TO_PATH=System' --apply-install-arguments-to-dependencies --version=3.27.9
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 
@@ -43,6 +55,17 @@ if "%VC_VERSION%" == "" (
 )
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
+
+if "%USE_XPU%"=="1" (
+  :: Activate xpu environment - VS env is required for xpu
+  call "C:\Program Files (x86)\Intel\oneAPI\compiler\latest\env\vars.bat"
+  call "C:\Program Files (x86)\Intel\oneAPI\ocloc\latest\env\vars.bat"
+  if errorlevel 1 exit /b 1
+  :: Reduce build time. Only have MTL self-hosted runner now
+  SET TORCH_XPU_ARCH_LIST=xe-lpg
+  SET USE_KINETO=0
+)
+
 @echo on
 popd
 
@@ -65,19 +88,12 @@ set CUDA_PATH_V%VERSION_SUFFIX%=%CUDA_PATH%
 set CUDNN_LIB_DIR=%CUDA_PATH%\lib\x64
 set CUDA_TOOLKIT_ROOT_DIR=%CUDA_PATH%
 set CUDNN_ROOT_DIR=%CUDA_PATH%
-set NVTOOLSEXT_PATH=C:\Program Files\NVIDIA Corporation\NvToolsExt
-set PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%
-
-set CUDNN_LIB_DIR=%CUDA_PATH%\lib\x64
-set CUDA_TOOLKIT_ROOT_DIR=%CUDA_PATH%
-set CUDNN_ROOT_DIR=%CUDA_PATH%
-set NVTOOLSEXT_PATH=C:\Program Files\NVIDIA Corporation\NvToolsExt
 set PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%
 
 :cuda_build_end
 
 set DISTUTILS_USE_SDK=1
-set PATH=%TMP_DIR_WIN%\bin;%PATH%
+set PATH=%TMP_DIR_WIN%\bin;C:\Program Files\CMake\bin;%PATH%
 
 :: The latest Windows CUDA test is running on AWS G5 runner with A10G GPU
 if "%TORCH_CUDA_ARCH_LIST%" == "" set TORCH_CUDA_ARCH_LIST=8.6

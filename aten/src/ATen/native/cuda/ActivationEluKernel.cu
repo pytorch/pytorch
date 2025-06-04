@@ -80,7 +80,7 @@ void elu_backward_kernel(
 }
 } // namespace
 
-REGISTER_DISPATCH(elu_stub, &elu_kernel);
-REGISTER_DISPATCH(elu_backward_stub, &elu_backward_kernel);
+REGISTER_DISPATCH(elu_stub, &elu_kernel)
+REGISTER_DISPATCH(elu_backward_stub, &elu_backward_kernel)
 
 } // namespace at::native

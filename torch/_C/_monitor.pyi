@@ -2,6 +2,7 @@
 
 import datetime
 from enum import Enum
+from types import TracebackType
 from typing import Callable
 
 class Aggregation(Enum):
@@ -42,3 +43,16 @@ class EventHandlerHandle: ...
 
 def register_event_handler(handler: Callable[[Event], None]) -> EventHandlerHandle: ...
 def unregister_event_handler(handle: EventHandlerHandle) -> None: ...
+
+class _WaitCounterTracker:
+    def __enter__(self) -> None: ...
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None = None,
+        exc_value: BaseException | None = None,
+        traceback: TracebackType | None = None,
+    ) -> None: ...
+
+class _WaitCounter:
+    def __init__(self, key: str) -> None: ...
+    def guard(self) -> _WaitCounterTracker: ...

@@ -5,22 +5,28 @@ import collections
 import dataclasses
 import itertools
 import pprint
-from typing import Any, Dict, Iterable, List, Optional, Protocol
+from typing import Any, Optional, Protocol, TYPE_CHECKING
 
 import sympy
 
 import torch
-from .. import config, ir
+from torch.utils._ordered_set import OrderedSet
+
+from .. import config
 from ..utils import _align, align, cache_on_self, CachedMethod, IndentedBuffer
 from ..virtualized import V
-
 from .wrapper import (
     AllocateLine,
+    BufferLike,
     FreeIfNotReusedLine,
     MemoryPlanningLine,
     NullLine,
     ReuseLine,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 @dataclasses.dataclass
@@ -129,7 +135,7 @@ class Allocation(AllocationTreeNode):
     Represents memory allocated to a given node in the allocation pool.
     """
 
-    node: ir.Buffer
+    node: BufferLike
     live_range: LiveRange
     size_hint: int
     symbolic_size: sympy.Expr
@@ -208,8 +214,7 @@ class MemorySplitProtocol(Protocol):
     get_size_hint: CachedMethod[[], int]
     get_symbolic_size: CachedMethod[[], sympy.Expr]
 
-    def _allocate(self, block: Allocation, is_last: bool) -> bool:
-        ...
+    def _allocate(self, block: Allocation, is_last: bool) -> bool: ...
 
 
 class ClearCacheOnAllocateMixin(MemorySplitProtocol):
@@ -239,7 +244,7 @@ class TemporalSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
          a.get_live_ranges().overlaps(b.get_live_ranges())
     """
 
-    allocations: List[AllocationTreeNode]
+    allocations: list[AllocationTreeNode]
 
     def _allocate(self, block: Allocation, is_last: bool):
         slot_size = self.get_size_hint()
@@ -369,8 +374,8 @@ class AllocationPool:
     can_expand: bool = True
     restrict_live_range: Optional[LiveRange] = None
     name: Optional[str] = None
-    names_to_del: List[str] = dataclasses.field(default_factory=list)
-    creation_cache: Dict[str, str] = dataclasses.field(default_factory=dict)
+    names_to_del: list[str] = dataclasses.field(default_factory=list)
+    creation_cache: dict[str, str] = dataclasses.field(default_factory=dict)
 
     def allocate(self, block: Allocation, is_last: bool):
         if self.restrict_live_range and not self.restrict_live_range.contains(
@@ -443,7 +448,7 @@ class AllocationPools:
     Collection of many AllocationPool objects grouped by device.
     """
 
-    device_to_pools: Dict[torch.device, List[AllocationPool]] = dataclasses.field(
+    device_to_pools: dict[torch.device, list[AllocationPool]] = dataclasses.field(
         default_factory=dict
     )
 
@@ -506,7 +511,7 @@ class BufferGroup:
     This tracks these collections of buffers sharing underlying memory.
     """
 
-    def __init__(self, node: ir.Buffer):
+    def __init__(self, node: BufferLike):
         self.node = node
         self.names = [node.get_name()]
         self.is_output = False
@@ -607,9 +612,9 @@ class MemoryPlanner:
 
     wrapper: Any
     pools: AllocationPools = dataclasses.field(default_factory=AllocationPools)
-    buffer_groups: Optional[List[BufferGroup]] = None
+    buffer_groups: Optional[list[BufferGroup]] = None
 
-    def plan(self, lines: List[Any]) -> List[Any]:
+    def plan(self, lines: list[Any]) -> list[Any]:
         """Call all the memory planning passes in sequence"""
         lines = [*lines]
         self.drop_removed_buffers(lines)
@@ -650,7 +655,7 @@ class MemoryPlanner:
                     name_to_group[old_name].names.append(new_name)
                     name_to_group[new_name] = name_to_group[old_name]
 
-        outputs = set(V.graph.get_output_names())
+        outputs = OrderedSet(V.graph.get_output_names())
         unique_groups = [*{id(g): g for g in name_to_group.values()}.values()]
         for group in unique_groups:
             group.is_output = any(x in outputs for x in group.names)
@@ -712,8 +717,8 @@ class MemoryPlanner:
         for group in self.buffer_groups:
             group.make_allocation()
 
-        outputs: List[Allocation] = []
-        intermediates: List[Allocation] = []
+        outputs: list[Allocation] = []
+        intermediates: list[Allocation] = []
         for group in self.buffer_groups:
             assert group.allocation
             if group.is_output and config.memory_pool != "combined":
@@ -747,7 +752,7 @@ class MemoryPlanner:
         DeallocFromPoolLine.is_last_pool_usage fields so that pools
         are created/destroyed.
         """
-        seen = set()
+        seen = OrderedSet[AllocationPool]()
         for line in lines:
             if isinstance(line, AllocFromPoolLine):
                 assert line.group.allocation
@@ -757,7 +762,7 @@ class MemoryPlanner:
                     line.is_first_pool_usage = True
                     seen.add(pool)
 
-        seen = set()
+        seen = OrderedSet[AllocationPool]()
         for line in reversed(lines):
             if isinstance(line, DeallocFromPoolLine):
                 assert line.group.allocation

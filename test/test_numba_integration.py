@@ -3,7 +3,6 @@
 import unittest
 
 import torch
-
 import torch.testing._internal.common_utils as common
 from torch.testing._internal.common_cuda import (
     TEST_CUDA,
@@ -11,6 +10,7 @@ from torch.testing._internal.common_cuda import (
     TEST_NUMBA_CUDA,
 )
 from torch.testing._internal.common_utils import TEST_NUMPY
+
 
 if TEST_NUMPY:
     import numpy
@@ -36,7 +36,7 @@ class TestNumbaIntegration(common.TestCase):
             version: (int) Version 0
 
         See:
-        https://numba.pydata.org/numba-doc/latest/cuda/cuda_array_interface.html
+        https://numba.pydata.org/numba-doc/dev/cuda/cuda_array_interface.html
         """
 
         types = [
@@ -114,9 +114,13 @@ class TestNumbaIntegration(common.TestCase):
             torch.float64,
             torch.uint8,
             torch.int8,
+            torch.uint16,
             torch.int16,
+            torch.uint32,
             torch.int32,
+            torch.uint64,
             torch.int64,
+            torch.bool,
         ]
 
         for dt in torch_dtypes:
@@ -182,7 +186,7 @@ class TestNumbaIntegration(common.TestCase):
         with self.assertRaises(TypeError):
             numba.cuda.as_cuda_array(sparset)
 
-        sparse_cuda_t = sparset.cuda()
+        sparset.cuda()
 
         self.assertFalse(numba.cuda.is_cuda_array(sparset))
         with self.assertRaises(TypeError):
@@ -246,7 +250,7 @@ class TestNumbaIntegration(common.TestCase):
         will use the exposed device memory.
 
         See:
-        https://numba.pydata.org/numba-doc/latest/cuda/cuda_array_interface.html
+        https://numba.pydata.org/numba-doc/dev/cuda/cuda_array_interface.html
         """
 
         dtypes = [

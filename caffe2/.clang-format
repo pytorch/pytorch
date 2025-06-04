@@ -43,7 +43,9 @@ ContinuationIndentWidth: 4
 Cpp11BracedListStyle: true
 DerivePointerAlignment: false
 DisableFormat:   false
-ForEachMacros:   [ FOR_EACH_RANGE, FOR_EACH, ]
+ForEachMacros:
+  - FOR_EACH_RANGE
+  - FOR_EACH
 IncludeCategories:
   - Regex:           '^<.*\.h(pp)?>'
     Priority:        1
@@ -57,6 +59,24 @@ IndentWrappedFunctionNames: false
 KeepEmptyLinesAtTheStartOfBlocks: false
 MacroBlockBegin: ''
 MacroBlockEnd:   ''
+Macros:
+  - >-
+    PyObject_HEAD_INIT(type)={
+        /* this is not exactly match with PyObject_HEAD_INIT in Python source code
+         * but it is enough for clang-format */
+        { 0xFFFFFFFF },
+        (type)
+    },
+  - >-
+    PyVarObject_HEAD_INIT(type, size)={
+        {
+            /* manually expand PyObject_HEAD_INIT(type) above
+             * because clang-format do not support recursive expansion */
+            { 0xFFFFFFFF },
+            (type)
+        },
+        (size)
+    },
 MaxEmptyLinesToKeep: 1
 NamespaceIndentation: None
 ObjCBlockIndentWidth: 2
@@ -81,7 +101,11 @@ SpacesInContainerLiterals: true
 SpacesInCStyleCastParentheses: false
 SpacesInParentheses: false
 SpacesInSquareBrackets: false
-Standard:        Cpp11
+Standard:        c++17
+StatementMacros:
+  - PyObject_HEAD
+  - PyObject_VAR_HEAD
+  - PyException_HEAD
 TabWidth:        8
 UseTab:          Never
 ...

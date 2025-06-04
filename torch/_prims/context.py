@@ -1,19 +1,17 @@
 # mypy: allow-untyped-defs
 import functools
+from collections.abc import Sequence
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, Optional, Sequence
+from typing import Any, Callable, Optional
 
 import torch
-
 import torch._decomp
 import torch._prims
-
 import torch._refs
 import torch._refs.nn
 import torch._refs.nn.functional
 import torch._refs.special
 import torch.overrides
-
 from torch._prims_common import torch_function_passthrough
 
 
@@ -31,7 +29,7 @@ def torch_to_refs_map():
         (torch.fft, torch._refs.fft),
         (torch.linalg, torch._refs.linalg),
     ]
-    r: Dict[Any, Any] = {
+    r: dict[Any, Any] = {
         torch.Tensor.__invert__: torch._refs.bitwise_not,
         torch.Tensor.__xor__: torch._refs.bitwise_xor,
         torch.Tensor.__and__: torch._refs.bitwise_and,
@@ -110,7 +108,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         orig_func: Callable,
         types: Sequence,
         args: Sequence[Any] = (),
-        kwargs: Optional[Dict] = None,
+        kwargs: Optional[dict] = None,
     ):
         if kwargs is None:
             kwargs = {}
@@ -130,6 +128,12 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         # see https://github.com/pytorch/pytorch/pull/82657#discussion_r939776417
         if func is None and isinstance(orig_func, torch._ops.OpOverload):
             func = torch._decomp.decomposition_table.get(orig_func, None)
+        elif func is None and isinstance(orig_func, torch._ops.OpOverloadPacket):
+            default = getattr(orig_func, "default", None)
+            if default is None and orig_func._dir:
+                default = getattr(orig_func, orig_func._dir[0], None)
+            if default is not None:
+                func = torch._decomp.decomposition_table.get(default, None)
 
         if func is not None:
             # If the ref exists query whether we should use it or not

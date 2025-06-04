@@ -2,7 +2,7 @@ TorchScript-based ONNX Exporter
 ===============================
 
 .. note::
-    To export an ONNX model using TorchDynamo instead of TorchScript, see :func:`torch.onnx.dynamo_export`.
+    To export an ONNX model using TorchDynamo instead of TorchScript, please see :doc:`Learn more about the TorchDynamo-based ONNX Exporter <onnx_dynamo>`
 
 .. contents:: :local:
 
@@ -452,7 +452,7 @@ ONNX operators that represent the function's behavior in ONNX. For example::
 .. . ``torch::jit::Value::setType``). This is not required, but it can help the exporter's
 .. shape and type inference for down-stream nodes. For a non-trivial example of ``setType``, see
 .. ``test_aten_embedding_2`` in
-.. `test_operators.py <https://github.com/pytorch/pytorch/blob/main/test/onnx/test_operators.py>`_.
+.. `test_operators.py <https://github.com/pytorch/pytorch/blob/release/2.5/test/onnx/test_operators.py#L1179>`_.
 
 .. The example below shows how you can access ``requires_grad`` via the ``Node`` object:
 
@@ -697,14 +697,12 @@ Functions
 ^^^^^^^^^
 
 .. autofunction:: export
-.. autofunction:: export_to_pretty_string
+    :noindex:
 .. autofunction:: register_custom_op_symbolic
 .. autofunction:: unregister_custom_op_symbolic
 .. autofunction:: select_model_mode_for_export
 .. autofunction:: is_in_onnx_export
-.. autofunction:: enable_log
-.. autofunction:: disable_log
-.. autofunction:: torch.onnx.verification.find_mismatch
+    :noindex:
 
 Classes
 ^^^^^^^
@@ -715,5 +713,3 @@ Classes
     :template: classtemplate.rst
 
     JitScalarType
-    torch.onnx.verification.GraphInfo
-    torch.onnx.verification.VerificationOptions

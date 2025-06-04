@@ -1,14 +1,14 @@
 # mypy: allow-untyped-defs
-from typing import Any, cast, List
+import io
+from typing import Any, Callable, cast
 
 import torch
 import torch.distributed as dist
 from torch._utils import _get_device_module
 from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor import ShardedTensor
-from torch.distributed._tensor import DTensor
-from torch.distributed._tensor._utils import compute_local_shape_and_global_offset
-from torch.utils._pytree import tree_map_only_
+from torch.distributed.tensor import DTensor
+from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 
 from .metadata import (
     BytesStorageMetadata,
@@ -33,7 +33,109 @@ from .resharding import (
 )
 
 
-__all__: List[str] = ["create_read_items_for_chunk_list"]
+__all__: list[str] = ["create_read_items_for_chunk_list"]
+
+
+def _compare_save_plans(plan: SavePlan, other_plan: SavePlan) -> bool:
+    """
+    Compare the two Save plans and return True if they are equal.
+
+    Args:
+        plan (SavePlan): First SavePlan to compare.
+        other_plan (SavePlan): Second SavePlan to compare.
+
+    Returns:
+       True if the two plans are equal, False otherwise.
+    """
+    if plan.usable != other_plan.usable:
+        return False
+
+    # Both the plans should have the same number of items
+    if len(plan.items) != len(other_plan.items):
+        return False
+
+    # Both the plans should have the same write items.
+    for plan_item, other_plan_item in zip(plan.items, other_plan.items):
+        # Write item type should be same
+        if plan_item.type != other_plan_item.type:
+            return False
+
+        plan_metadata_index = plan_item.index
+        other_plan_metadata_index = other_plan_item.index
+
+        # Write item metadata_index should be same
+        if (
+            plan_metadata_index.fqn != other_plan_metadata_index.fqn
+            or plan_metadata_index.offset != other_plan_metadata_index.offset
+            or plan_metadata_index.index != other_plan_metadata_index.index
+        ):
+            return False
+
+        # Write item tensor_data should be present in both the write items plans, if it exists in either of them.
+        tensor_data = plan_item.tensor_data
+        other_tensor_data = other_plan_item.tensor_data
+        if (tensor_data and not other_tensor_data) or (
+            not tensor_data and other_tensor_data
+        ):
+            return False
+
+        if tensor_data and other_tensor_data:
+            # Write item tensor_data size should be same
+            if tensor_data.size != other_tensor_data.size:
+                return False
+
+            # Write item tensor_data chunk should be present in both the write items, if it exists in either of them.
+            chunk = tensor_data.chunk
+            other_chunk = other_tensor_data.chunk
+            if (chunk and not other_chunk) or (not chunk and other_chunk):
+                return False
+
+            # Write item tensor_data chunk offsets and sizes should be same
+            if chunk and other_chunk:
+                if (
+                    chunk.offsets != other_chunk.offsets
+                    or chunk.sizes != other_chunk.sizes
+                ):
+                    return False
+
+    return True
+
+
+def _contains_usable_plan(delta_plans: list[SavePlan]) -> bool:
+    """
+    Check if any delta plan is usable, indicating the plan has changed.
+
+    Args:
+        delta_plans (List[SavePlan]): A list of delta plans to check.
+    Returns:
+        True if any delta plan is usable, False otherwise.
+    """
+    return any(delta_plan and delta_plan.usable for delta_plan in delta_plans)
+
+
+def _merge_delta_local_plans(
+    cached_plans: list[SavePlan],
+    delta_plans: list[SavePlan],
+) -> list[SavePlan]:
+    """
+    Merge a list of delta plans into a single plan.
+
+    Args:
+        cached_plans (List[SavePlan]): A list of cached plans.
+        delta_plans (List[SavePlan]): A list of delta plans to merge. It can contain empty plans
+
+    Returns:
+        A single merged plan. If a delta plan is not usable, use the cached plan. Otherwise, use the delta plan.
+    """
+    merged_plans = []
+
+    for cached_plan, delta_plan in zip(cached_plans, delta_plans):
+        if delta_plan and not delta_plan.usable:
+            merged_plans.append(cached_plan)
+        else:
+            merged_plans.append(delta_plan)
+
+    return merged_plans
 
 
 def _create_chunk_from_tensor(tensor: torch.Tensor) -> ChunkStorageMetadata:
@@ -149,8 +251,8 @@ def _create_read_item_for_tensor(
 def create_read_items_for_chunk_list(
     fqn: str,
     checkpoint_md: TensorStorageMetadata,
-    local_chunks: List[ChunkStorageMetadata],
-) -> List[ReadItem]:
+    local_chunks: list[ChunkStorageMetadata],
+) -> list[ReadItem]:
     """
     Create a list of ``ReadItem`` based on the checkpoint and local chunks.
 
@@ -178,7 +280,7 @@ def create_read_items_for_chunk_list(
             dest_offsets = []
             lengths = []
             for (
-                dim,
+                _dim,
                 offset_for_saved_tensor,
                 offset_for_current_tensor,
                 length,
@@ -207,8 +309,10 @@ def _create_default_metadata_only_plan(state_dict: STATE_DICT_TYPE) -> SavePlan:
         if isinstance(obj, DTensor):
             requests.append(_create_write_items_for_dtensor(fqn, obj))
         elif isinstance(obj, ShardedTensor):
-            for shard_md in obj.metadata().shards_metadata:
-                requests.append(_create_write_item_for_shard(fqn, obj, shard_md))
+            requests.extend(
+                _create_write_item_for_shard(fqn, obj, shard_md)
+                for shard_md in obj.metadata().shards_metadata
+            )
         elif isinstance(obj, torch.Tensor):
             requests.append(_create_write_item_for_tensor(fqn, obj))
         else:
@@ -216,7 +320,7 @@ def _create_default_metadata_only_plan(state_dict: STATE_DICT_TYPE) -> SavePlan:
     return SavePlan(requests)
 
 
-def _create_write_items(fqn: str, object: Any) -> List[WriteItem]:
+def _create_write_items(fqn: str, object: Any) -> list[WriteItem]:
     if hasattr(object, "__create_write_items__"):
         # DTensor implements _Checkpointable
         return object.__create_write_items__(fqn, object)
@@ -242,7 +346,7 @@ def _create_chunk_from_dtensor(tensor: DTensor) -> ChunkStorageMetadata:
     )
 
 
-def _create_chunk_list(tensor: torch.Tensor) -> List[ChunkStorageMetadata]:
+def _create_chunk_list(tensor: torch.Tensor) -> list[ChunkStorageMetadata]:
     if hasattr(tensor, "__create_chunk_list__"):
         # DTensor implements _Checkpointable
         local_chunks = tensor.__create_chunk_list__()  # type: ignore[attr-defined]
@@ -261,7 +365,7 @@ def _create_chunk_list(tensor: torch.Tensor) -> List[ChunkStorageMetadata]:
     return local_chunks
 
 
-def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
+def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> list[ReadItem]:
     if not isinstance(md, BytesStorageMetadata):
         try:
             local_chunks = _create_chunk_list(obj)
@@ -284,21 +388,18 @@ def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
         ]
 
 
-def _init_state_dict(state_dict: STATE_DICT_TYPE) -> None:
-    tree_map_only_(torch.Tensor, _init_meta_tensor, state_dict)
-
-
-def _init_meta_tensor(value: Any) -> Any:
+def _init_state_dict(state_dict: dict[str, Any]) -> Any:
     """
-    Initializes tensor, moves it to device for torch.Tensor/DTensor on meta device.
+    Initializes meta tensor if the meta tensor is DTensor or torch.Tensor.
     """
 
-    device = getattr(value, "device", None)
-    # DCP does the initialization if it's meta tensor/DTensor.
-    if device == torch.device("meta"):
-        device_type = dist.distributed_c10d._get_pg_default_device().type
-        device = cast(torch.device, _get_device_module(device_type).current_device())
-        if isinstance(value, DTensor):
+    def dtensor_func(value: DTensor):
+        device = getattr(value, "device", None)
+        if device == torch.device("meta"):
+            device_type = dist.distributed_c10d._get_pg_default_device().type
+            device = cast(
+                torch.device, _get_device_module(device_type).current_device()
+            )
             new_local_tensor = torch.empty_like(value.to_local(), device=device)
             # We need to pass shape and stride explicitly, since DTensor might be
             # sharded unevenly.
@@ -310,12 +411,80 @@ def _init_meta_tensor(value: Any) -> Any:
                 stride=value.stride(),
             )
             return dtensor
-        elif isinstance(value, torch.Tensor):
-            tensor = torch.empty_like(value, device=device)
-            return tensor
         else:
+            return value
+
+    def sharded_tensor_func(value: Any):
+        device = getattr(value, "device", None)
+        if device == torch.device("meta"):
             raise RuntimeError(
                 f"Found unsupported type {type(value)} for meta device loading."
             )
-    else:
-        return value
+        else:
+            return value
+
+    def tensor_func(value: torch.Tensor):
+        device = getattr(value, "device", None)
+        if device == torch.device("meta"):
+            device_type = dist.distributed_c10d._get_pg_default_device().type
+            device = cast(
+                torch.device, _get_device_module(device_type).current_device()
+            )
+            tensor = torch.empty_like(value, device=device)
+            return tensor
+        else:
+            return value
+
+    _iterate_state_dict(
+        state_dict,
+        dtensor_func,
+        sharded_tensor_func,
+        tensor_func,
+    )
+
+
+def _iterate_state_dict(
+    iter_object: Any,
+    dtensor_func: Callable,
+    sharded_tensor_func: Callable,
+    tensor_func: Callable,
+):
+    """
+    Iterate through the state dict, applying the given functions to each tensor type
+    and update the state dict in place.
+
+    Args:
+        iter_object (Any): the target state_dict.
+        sharded_tensor_func (Callable): the function to apply to ShardedTensor
+        dtensor_func (Callable): the function to apply to DTensor
+        tensor_func (Callable): the function to apply to Tensor
+
+    # TODO: let state_dict_util._iterate_state_dict() to support in place option
+    so we don't need to have two versions of _iterate_state_dict.
+    """
+
+    if isinstance(iter_object, DTensor):
+        return dtensor_func(iter_object)
+    elif isinstance(iter_object, ShardedTensor):
+        return sharded_tensor_func(iter_object)
+    elif isinstance(iter_object, torch.Tensor):
+        return tensor_func(iter_object)
+    elif (
+        isinstance(iter_object, (int, float, str, bytes, io.BytesIO))
+        or iter_object is None
+    ):
+        return iter_object
+    elif isinstance(iter_object, dict):
+        for key, value in iter_object.items():
+            iter_object[key] = _iterate_state_dict(
+                value, dtensor_func, sharded_tensor_func, tensor_func
+            )
+        return iter_object
+    elif isinstance(iter_object, (list, tuple)):
+        ret = [
+            _iterate_state_dict(v, dtensor_func, sharded_tensor_func, tensor_func)
+            for v in iter_object
+        ]
+        if isinstance(iter_object, tuple):
+            ret = tuple(ret)  # type: ignore[assignment]
+        return ret

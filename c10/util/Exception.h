@@ -116,8 +116,8 @@ class C10_API Error : public std::exception {
 
 class C10_API Warning {
  public:
-  class C10_API UserWarning {};
-  class C10_API DeprecationWarning {};
+  class C10_API UserWarning{};
+  class C10_API DeprecationWarning{};
 
   using warning_variant_t = std::variant<UserWarning, DeprecationWarning>;
 
@@ -205,6 +205,10 @@ class C10_API WarningHandlerGuard {
       : prev_handler_(c10::WarningUtils::get_warning_handler()) {
     c10::WarningUtils::set_warning_handler(new_handler);
   }
+  WarningHandlerGuard(WarningHandlerGuard&& other) = delete;
+  WarningHandlerGuard(const WarningHandlerGuard&) = delete;
+  WarningHandlerGuard& operator=(const WarningHandlerGuard&) = delete;
+  WarningHandlerGuard& operator=(WarningHandlerGuard&&) = delete;
   ~WarningHandlerGuard() {
     c10::WarningUtils::set_warning_handler(prev_handler_);
   }
@@ -285,6 +289,25 @@ class C10_API OutOfMemoryError : public Error {
   using Error::Error;
 };
 
+// Used for handling syntactic errors in input arguments.
+// These turn into SyntaxError when the cross into Python.
+class C10_API SyntaxError : public Error {
+  using Error::Error;
+};
+
+// Raised when accelerator API call hits an error.
+// These turn into AcceleratorError when the cross into Python
+class C10_API AcceleratorError : public Error {
+  int32_t error_code;
+
+ public:
+  AcceleratorError(SourceLocation loc, int32_t code, const std::string& msg)
+      : Error(loc, msg), error_code(code) {}
+  int32_t get_error_code() const {
+    return error_code;
+  }
+};
+
 // Base error type for all distributed errors.
 // These turn into DistError when they cross into Python.
 class C10_API DistError : public Error {
@@ -307,6 +330,12 @@ class C10_API DistStoreError : public DistError {
 // libraries. These turn into DistNetworkError when they cross into Python.
 class C10_API DistNetworkError : public DistError {
   using DistError::DistError;
+};
+
+// Raised when a queue is empty and a non-blocking pop is called.
+// Translated to torch.distributed.QueueEmptyError in Python
+class C10_API DistQueueEmptyError : public DistStoreError {
+  using DistStoreError::DistStoreError;
 };
 
 // A utility function to return an exception std::string by prepending its
@@ -520,6 +549,43 @@ namespace c10::detail {
 
 } // namespace c10::detail
 
+#ifdef STANDALONE_TORCH_HEADER
+
+// TORCH_CHECK throws std::runtime_error instead of c10::Error which is
+// useful when certain headers are used in a libtorch-independent way,
+// e.g. when Vectorized<T> is used in AOTInductor generated code.
+#ifdef STRIP_ERROR_MESSAGES
+#define TORCH_CHECK(cond, ...)                \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
+    throw std::runtime_error(TORCH_CHECK_MSG( \
+        cond,                                 \
+        "",                                   \
+        __func__,                             \
+        ", ",                                 \
+        __FILE__,                             \
+        ":",                                  \
+        __LINE__,                             \
+        ", ",                                 \
+        __VA_ARGS__));                        \
+  }
+#else
+#define TORCH_CHECK(cond, ...)                \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
+    throw std::runtime_error(TORCH_CHECK_MSG( \
+        cond,                                 \
+        "",                                   \
+        __func__,                             \
+        ", ",                                 \
+        __FILE__,                             \
+        ":",                                  \
+        __LINE__,                             \
+        ", ",                                 \
+        ##__VA_ARGS__));                      \
+  }
+#endif
+
+#else
+
 #ifdef STRIP_ERROR_MESSAGES
 #define TORCH_CHECK(cond, ...)                   \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {          \
@@ -538,6 +604,8 @@ namespace c10::detail {
         static_cast<uint32_t>(__LINE__),           \
         TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
   }
+#endif
+
 #endif
 
 // An utility macro that does what `TORCH_CHECK` does if compiled in the host
@@ -619,12 +687,12 @@ namespace c10::detail {
 // Report a warning to the user only once.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
 //
-#define _TORCH_WARN_ONCE(...)                                             \
-  C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = \
-      [&] {                                                               \
-        TORCH_WARN(__VA_ARGS__);                                          \
-        return true;                                                      \
-      }()
+#define _TORCH_WARN_ONCE(...)                                \
+  [[maybe_unused]] static const auto C10_ANONYMOUS_VARIABLE( \
+      torch_warn_once_) = [&] {                              \
+    TORCH_WARN(__VA_ARGS__);                                 \
+    return true;                                             \
+  }()
 
 #ifdef DISABLE_WARN
 #define TORCH_WARN_ONCE(...) ((void)0);

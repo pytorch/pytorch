@@ -9,7 +9,6 @@ import numpy as np
 
 import torch
 import torch.ao.quantization as tq
-
 from torch import nn
 from torch.ao.pruning.sparsifier.utils import fqn_to_module
 from torch.testing._internal.common_quantized import (
@@ -20,14 +19,20 @@ from torch.testing._internal.common_quantized import (
     qengine_is_qnnpack,
     qengine_is_x86,
 )
-
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+
 
 # TODO: Once more test files are created, move the contents to a ao folder.
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+handler = logging.StreamHandler()
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+handler.setFormatter(formatter)
+
+logger.addHandler(handler)
+logger.propagate = False  # Prevent duplicate logs if root logger also has handlers
 
 
 class TestQuantizedSparseKernels(TestCase):
@@ -79,10 +84,10 @@ class TestQuantizedSparseKernels(TestCase):
 
             for use_channelwise, dynamic_mode in product([True, False], [True, False]):
                 if qengine_is_fbgemm() and dynamic_mode:
-                    logging.info("dynamic sparse qlinear is only available in qnnpack")
+                    logger.info("dynamic sparse qlinear is only available in qnnpack")
                     continue
                 if qengine_is_qnnpack() and not dynamic_mode:
-                    logging.info("static sparse qlinear is only available in fbgemm")
+                    logger.info("static sparse qlinear is only available in fbgemm")
                     continue
                 if use_channelwise:
                     W_q = torch.quantize_per_channel(
@@ -148,7 +153,6 @@ def _sparse_layer_test_helper(
     W_zp = 0
 
     X_fp32 = torch.randn(batch_size, input_channels, dtype=torch.float32)
-    float_bias = torch.randn(output_channels, dtype=torch.float32)
 
     # generate a weight which we'll insert into the model
     W_fp32 = torch.randn(output_channels, input_channels, dtype=torch.float32)
@@ -262,7 +266,6 @@ class SparseQuantizedModel(nn.Module):
 
 class TestQuantizedSparseLayers(TestCase):
     @override_qengines
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_sparse_qlinear(self):
         # Note: At the moment, for sparse kernels
         # fbgemm supports only static quantized sparse linear
@@ -295,7 +298,6 @@ class TestQuantizedSparseLayers(TestCase):
         )
 
     @override_qengines
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_sparse_qlinear_serdes(self):
         # Note: At the moment, for sparse kernels
         # fbgemm supports only static quantized sparse linear

@@ -5,7 +5,7 @@
 #include <type_traits>
 
 #include <ATen/core/jit_type_base.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 namespace c10 {
 
@@ -138,7 +138,7 @@ class DynamicType : public SharedType {
   struct Arguments {
     Arguments() = default;
     Arguments(c10::ArrayRef<TypePtr>);
-    Arguments(const std::vector<c10::string_view>&, c10::ArrayRef<TypePtr>);
+    Arguments(const std::vector<std::string_view>&, c10::ArrayRef<TypePtr>);
     std::vector<LabeledDynamicType> elems;
   };
 
@@ -156,7 +156,12 @@ class DynamicType : public SharedType {
   static TORCH_API DynamicTypePtr create(Type& ty);
 
   explicit DynamicType(Tag, Arguments);
-  explicit DynamicType(Tag, c10::string_view, Arguments);
+  explicit DynamicType(Tag, std::string_view, Arguments);
+
+  DynamicType(DynamicType&& other) = delete;
+  DynamicType(const DynamicType&) = delete;
+  DynamicType& operator=(const DynamicType&) = delete;
+  DynamicType& operator=(DynamicType&&) = delete;
 
   TypePtr containedType(size_t) const override;
   size_t containedTypeSize() const override;
@@ -182,7 +187,9 @@ class DynamicType : public SharedType {
     return false;
   }
   friend struct Type;
-  static std::shared_ptr<const DynamicType> create(const Type& ty);
+  // NOTE: Here we are using SingletonOrSharedTypePtr to mean
+  // "original-type-because-it-was-actually-a-DynamicType or shared".
+  static SingletonOrSharedTypePtr<const DynamicType> create(const Type& ty);
   DynamicType(const Type& other);
   bool equals(const DynamicType& other) const;
 

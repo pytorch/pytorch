@@ -22,12 +22,13 @@ PyObject* THPLayout_New(at::Layout layout, const std::string& name) {
   return self.release();
 }
 
-PyObject* THPLayout_repr(THPLayout* self) {
+static PyObject* THPLayout_repr(THPLayout* self) {
   return THPUtils_packString(self->name);
 }
 
 PyTypeObject THPLayoutType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.layout", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.layout", /* tp_name */
     sizeof(THPLayout), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */

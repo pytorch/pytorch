@@ -53,6 +53,6 @@ void min_all_launch_kernel(TensorIterator &iter) {
   });
 }
 
-REGISTER_DISPATCH(min_values_stub, &min_values_kernel_cuda);
+REGISTER_DISPATCH(min_values_stub, &min_values_kernel_cuda)
 
 } // namespace at::native

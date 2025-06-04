@@ -2,9 +2,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
-
 // This api will be used by serialization/export.cpp to extract function
 // information. It should do conversion on graph to
 //    1. Extract subgraph pattern of functions and define as local function
@@ -15,7 +12,7 @@ namespace jit {
 // represent these info inside Graph object.
 // export.cpp will serialize the ONNX model with function_proto with
 // above information.
-namespace onnx {
+namespace torch::jit::onnx {
 
 // The following return types are used to track information regarding function
 // attributes, that are unable to be traced through Torch IR.
@@ -25,7 +22,7 @@ namespace onnx {
 //
 // clang-format off
 // class M(torch.nn.Module):
-//     def __init__(self):
+//     def __init__(self) -> None:
 //         super().__init__()
 //         self.lns = torch.nn.ModuleList([torch.nn.LayerNorm(3, eps = i) for i in range(2)])
 //         self.celu1 = torch.nn.CELU(1.0)
@@ -64,7 +61,4 @@ TORCH_API void ONNXTrackScopeAttributes(
     std::shared_ptr<Graph>& graph,
     std::map<std::string, IValue>& attributes);
 
-} // namespace onnx
-
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::onnx

@@ -24,7 +24,7 @@
 #include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/MaybeOwned.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <c10/util/OptionalArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/macros/Export.h>
@@ -195,7 +195,7 @@ class TORCH_API Tensor: public TensorBase {
   //
   // TODO: temporarily disabled
 
-  Tensor& operator=(const TensorBase& x) & {
+  Tensor& operator=(const TensorBase& x) & noexcept {
     impl_ = x.getIntrusivePtr();
     return *this;
   }
@@ -204,7 +204,7 @@ class TORCH_API Tensor: public TensorBase {
     return *this;
   }
 
-  Tensor& operator=(const Tensor &x) & {
+  Tensor& operator=(const Tensor &x) & noexcept {
     return operator=(static_cast<const TensorBase&>(x));
   }
   Tensor& operator=(Tensor &&x) & noexcept {
@@ -398,7 +398,7 @@ class TORCH_API Tensor: public TensorBase {
   /// // f requires grad, has no operation creating it
   /// @endcode
 
-  /// \fn void backward(const Tensor & gradient={}, std::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, std::optional<TensorList> inputs=c10::nullopt) const;
+  /// \fn void backward(const Tensor & gradient={}, std::optional<bool> retain_graph=std::nullopt, bool create_graph=false, std::optional<TensorList> inputs=std::nullopt) const;
   ///
   /// Computes the gradient of current tensor with respect to graph leaves.
   ///
@@ -433,7 +433,7 @@ class TORCH_API Tensor: public TensorBase {
   ///     the current implementation will call its grad_fn (even though it is not strictly needed to get this gradients).
   ///     It is an implementation detail on which the user should not rely.
   ///     See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
-  void backward(const Tensor & gradient={}, std::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, std::optional<TensorList> inputs=c10::nullopt) const {
+  void backward(const Tensor & gradient={}, std::optional<bool> retain_graph=std::nullopt, bool create_graph=false, std::optional<TensorList> inputs=std::nullopt) const {
     // NB: Adding this wrapper to _backward here because we'd like our
     // 'backwards' api to accept the 'inputs' argument optionally. Since code gen
     // currently does not support optional of TensorList our approach is to replace
@@ -582,7 +582,7 @@ class TORCH_API Tensor: public TensorBase {
   template <typename T>
   using hook_return_void_t = std::enable_if_t<std::is_void<typename std::invoke_result_t<T&, Tensor>>::value, unsigned>;
   template <typename T>
-  using hook_return_var_t = std::enable_if_t<std::is_same<typename std::invoke_result_t<T&, Tensor>, Tensor>::value, unsigned>;
+  using hook_return_var_t = std::enable_if_t<std::is_same_v<typename std::invoke_result_t<T&, Tensor>, Tensor>, unsigned>;
 
   /// Registers a backward hook.
   ///

@@ -1,16 +1,16 @@
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional, Tuple
+from typing import Any, Optional
 
 import torch
 import torch.distributed as dist
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._shard.sharded_tensor.shard import Shard
-from torch.distributed._tensor import DeviceMesh, DTensor
 from torch.distributed.fsdp._shard_utils import (
     _all_gather_dtensor,
     _create_chunk_dtensor,
     _create_chunk_sharded_tensor,
 )
+from torch.distributed.tensor import DeviceMesh, DTensor
 
 
 class FSDPExtensions(ABC):
@@ -24,7 +24,7 @@ class FSDPExtensions(ABC):
     def pre_flatten_transform(
         self,
         tensor: torch.Tensor,
-    ) -> Tuple[torch.Tensor, Optional[Any]]:
+    ) -> tuple[torch.Tensor, Optional[Any]]:
         """E.g. converting ``DistributedTensor`` to local tensor."""
         ...
 
@@ -64,7 +64,7 @@ class FSDPExtensions(ABC):
     def pre_load_state_dict_transform(
         self,
         tensor: torch.Tensor,
-    ) -> Tuple[torch.Tensor, List[Shard]]:
+    ) -> tuple[torch.Tensor, list[Shard]]:
         """
         This is to be called before loading a *sharded* model state dict and
         should return the tensor and list of shards from which to load data.
@@ -96,7 +96,7 @@ def _set_fsdp_extensions(flattener: FSDPExtensions) -> None:
 def _ext_pre_flatten_transform(
     tensor: torch.Tensor,
     fsdp_extension: Optional[FSDPExtensions] = None,
-) -> Tuple[torch.Tensor, Optional[Any]]:
+) -> tuple[torch.Tensor, Optional[Any]]:
     if fsdp_extension is not None:
         new_tensor, param_extension = fsdp_extension.pre_flatten_transform(tensor)
         if param_extension is not None:
@@ -157,7 +157,7 @@ def _ext_chunk_dtensor(
 def _ext_pre_load_state_dict_transform(
     tensor: torch.Tensor,
     fsdp_extension: Optional[FSDPExtensions] = None,
-) -> Tuple[torch.Tensor, List[Shard]]:
+) -> tuple[torch.Tensor, list[Shard]]:
     if fsdp_extension is not None:
         return fsdp_extension.pre_load_state_dict_transform(tensor)
 

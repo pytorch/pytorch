@@ -36,6 +36,8 @@ struct TORCH_API KinetoEvent {
   const c10::ArrayRef<std::string> dtypes() const;
   bool hasConcreteInputs() const;
   const c10::ArrayRef<c10::IValue> concreteInputs() const;
+  bool hasKwinputs() const;
+  const std::unordered_map<std::string, c10::IValue> kwinputs() const;
   uint64_t flops() const;
   int64_t sequenceNr() const;
   bool hasStack() const;
@@ -45,6 +47,7 @@ struct TORCH_API KinetoEvent {
   const c10::ArrayRef<std::string> moduleHierarchy() const;
   int64_t debugHandle() const;
   std::string name() const;
+  std::string overload_name() const;
   c10::DeviceType deviceType() const;
   int deviceIndex() const;
   int64_t nBytes() const;
@@ -73,6 +76,7 @@ struct TORCH_API KinetoEvent {
   std::vector<std::vector<int64_t>> shapes_;
   std::vector<std::string> dtypes_;
   std::vector<c10::IValue> concrete_inputs_;
+  std::unordered_map<std::string, c10::IValue> kwinputs_;
 };
 
 // Consolidating events returned directly from Kineto
@@ -176,6 +180,14 @@ TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 TORCH_API void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities);
+
+TORCH_API void toggleCollectionDynamic(
+    const bool enable,
+    const std::set<torch::profiler::impl::ActivityType>& activities);
+
+TORCH_API void startMemoryProfile();
+TORCH_API void stopMemoryProfile();
+TORCH_API void exportMemoryProfile(const std::string& path);
 
 /**
  * When a C++ thread really has no control over how the profiler was enabled,

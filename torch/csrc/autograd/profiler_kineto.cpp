@@ -8,7 +8,6 @@
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/util/overloaded.h>
-
 #include <torch/csrc/profiler/api.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/containers.h>
@@ -20,8 +19,6 @@
 #include <torch/csrc/profiler/standalone/nvtx_observer.h>
 #include <torch/csrc/profiler/standalone/privateuse1_observer.h>
 #include <torch/csrc/profiler/util.h>
-
-#include <ATen/Context.h>
 
 #include <stdexcept>
 #include <utility>
@@ -64,6 +61,7 @@ using torch::profiler::impl::EventType;
 using torch::profiler::impl::ExtraFields;
 using torch::profiler::impl::get_record_concrete_inputs_enabled;
 using torch::profiler::impl::ivalueListToStr;
+using torch::profiler::impl::ivalueToStr;
 using torch::profiler::impl::op_input_t;
 using torch::profiler::impl::ProfilerStateBase;
 using torch::profiler::impl::PyExtraFieldsBase;
@@ -258,6 +256,25 @@ struct AddGenericMetadata : public MetadataBase {
       }
     }
 
+    // Add metadata for kwinputs if exist
+    for (const auto& [key, val] : op_event.kwinputs_) {
+      if (key == "stream" && !val.isInt()) {
+        LOG(WARNING) << "Inputted stream is not an int for op: "
+                     << op_event.name_ << " skipping";
+        continue;
+      }
+
+      // Until needed, lets limit the kwargs to only ints, doubles, strings and
+      // bools
+      if (!val.isInt() && !val.isDouble() && !val.isString() && !val.isBool()) {
+        LOG(WARNING) << "Inputted kwarg: " << key
+                     << " is not an int, double, string, or bool for op: "
+                     << op_event.name_ << " skipping";
+        continue;
+      }
+      bool isString = val.isString();
+      addMetadata(key, ivalueToStr(val, isString));
+    }
     // Add extra metadata if any
     for (const auto& [key, val] : op_event.extra_meta_) {
       addMetadata(key, val);
@@ -379,6 +396,14 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
     eventPostProcessCb = std::move(cb);
   }
 
+  void pausePython() {
+    recordQueue.stop();
+  }
+
+  void resumePython() {
+    recordQueue.restart();
+  }
+
   std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>
   finalizeTrace() {
     auto end_time = getTimeNs();
@@ -474,6 +499,15 @@ void onFunctionExit(
   }
   kineto_ctx_ptr->event_->basic_fields_.end_tid_ =
       at::RecordFunction::currentThreadId();
+  if (fn.isNcclMeta()) {
+    auto& extra_meta = *(kineto_ctx_ptr->event_->extra_nccl_meta_);
+    // Record only the outputs in this exit callback of the record function
+    torch::profiler::impl::SaveNcclMetaConfig ncclMetaConfig{
+        true, false, false, true};
+    auto additonal_nccl_meta =
+        torch::profiler::impl::saveNcclMeta(fn, ncclMetaConfig);
+    extra_meta.insert(additonal_nccl_meta.begin(), additonal_nccl_meta.end());
+  }
   if (config.state == ProfilerState::KINETO_GPU_FALLBACK) {
     try {
       auto fallback = kineto_ctx_ptr->fallback_;
@@ -490,10 +524,12 @@ void onFunctionExit(
         nullptr, &fallback->device_event_end_, nullptr);
   }
 
-  if (fn.scope() == at::RecordScope::USER_SCOPE) {
-    torch::profiler::impl::kineto::popUserCorrelationId();
-  } else {
-    torch::profiler::impl::kineto::popCorrelationId();
+  if (!config.experimental_config.disable_external_correlation) {
+    if (fn.scope() == at::RecordScope::USER_SCOPE) {
+      torch::profiler::impl::kineto::popUserCorrelationId();
+    } else {
+      torch::profiler::impl::kineto::popCorrelationId();
+    }
   }
 }
 
@@ -575,7 +611,8 @@ void prepareProfiler(
           at::hasCUDA() || at::hasXPU() || at::hasMTIA() ||
           c10::get_privateuse1_backend() != "privateuseone"),
       activities,
-      config.experimental_config);
+      config.experimental_config,
+      config.trace_id);
 
   if (!config.experimental_config.performance_events.empty()) {
     /* For now only CPU activity is supported */
@@ -601,6 +638,77 @@ void prepareProfiler(
       if (!is_standard_event(e)) {
         TORCH_WARN("Forwarding a non-standard CPU performance event : ", e);
       }
+    }
+  }
+}
+
+static void toggleTorchOpCollectionDynamic(bool enable) {
+  auto state_ptr = ProfilerStateBase::get();
+  if (state_ptr) {
+    const auto& config = state_ptr->config();
+    if (enable) {
+      auto scopes = profiler_state_info_ptr->scopes;
+      config.global() ? pushProfilingCallbacks</*global=*/true>(scopes)
+                      : pushProfilingCallbacks</*global=*/false>(scopes);
+    } else {
+      state_ptr->removeCallback();
+    }
+  }
+}
+
+// Set this function to be unused as profiler implementation needs more
+// refactoring to support Python ops collection dynamic toggling
+#ifdef _MSC_VER
+#define UNUSED
+#else
+#define UNUSED __attribute__((unused))
+#endif
+static UNUSED void togglePythonCollectionDynamic(bool enable) {
+  auto state_ptr = ProfilerStateBase::get();
+  if (state_ptr) {
+    auto global = state_ptr->config().global();
+    KinetoThreadLocalState* kineto_thread_local_state_ptr =
+        KinetoThreadLocalState::get(global);
+    if (enable) {
+      kineto_thread_local_state_ptr->resumePython();
+    } else {
+      kineto_thread_local_state_ptr->pausePython();
+    }
+  }
+}
+
+static void toggleCPUCollectionDynamic(bool enable) {
+  toggleTorchOpCollectionDynamic(enable);
+  // For now we only support Torch Op collection dynamic toggling as
+  // implementing Python ops would require not only string parsing to get rid of
+  // the toggling events as well as other unfinished events as well as changes
+  // in stack logic
+  // togglePythonCollectionDynamic(enable);
+}
+
+void toggleCollectionDynamic(
+    const bool enable,
+    const std::set<torch::profiler::impl::ActivityType>& activities) {
+  if (activities.count(torch::autograd::profiler::ActivityType::CPU) > 0 &&
+      activities.count(torch::autograd::profiler::ActivityType::CUDA) == 0) {
+    LOG(WARNING)
+        << "Toggling CPU activity with CUDA activity on may result in traces with CUDA events on artibrary tracks";
+  } else if (
+      activities.count(torch::autograd::profiler::ActivityType::CUDA) > 0 &&
+      activities.count(torch::autograd::profiler::ActivityType::CPU) == 0) {
+    LOG(WARNING)
+        << "Toggling CUDA activity with CPU activity on may result in traces with incorrect correlation between CPU and CUDA events";
+  }
+  for (auto act : activities) {
+    if (act == torch::autograd::profiler::ActivityType::CUDA) {
+      torch::profiler::impl::kineto::toggleCollectionDynamic(enable);
+    } else if (act == torch::autograd::profiler::ActivityType::CPU) {
+      toggleCPUCollectionDynamic(enable);
+    } else {
+      LOG(WARNING)
+          << "Dynamic toggle is only supported for CPU/GPU activity, skipping toggling of "
+          << actToString(act);
+      continue;
     }
   }
 }
@@ -660,8 +768,9 @@ void enableProfiler(
   KinetoThreadLocalState::push(state_ptr);
 
   if (has_cpu) {
-    config.global() ? pushProfilingCallbacks</*global=*/true>(scopes)
-                    : pushProfilingCallbacks</*global=*/false>(scopes);
+    config.pushGlobalCallbacks()
+        ? pushProfilingCallbacks</*global=*/true>(scopes)
+        : pushProfilingCallbacks</*global=*/false>(scopes);
   }
 
   if (!config.global()) {
@@ -748,6 +857,22 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
 
   return result;
 }
+namespace tracer = torch::profiler::impl::python_tracer;
+static std::unique_ptr<tracer::PythonMemoryTracerBase> memory_tracer;
+void startMemoryProfile() {
+  if (memory_tracer == nullptr) {
+    memory_tracer = tracer::PythonMemoryTracerBase::make();
+  }
+  memory_tracer->start();
+}
+
+void stopMemoryProfile() {
+  memory_tracer->stop();
+}
+
+void exportMemoryProfile(const std::string& filename) {
+  memory_tracer->export_memory_history(filename);
+}
 
 KinetoEvent::KinetoEvent(
     const std::shared_ptr<const torch::profiler::impl::Result>& result,
@@ -770,6 +895,7 @@ KinetoEvent::KinetoEvent(
     shapes_ = std::move(arg_data.shapesForKinetoEvent);
     dtypes_ = std::move(arg_data.dtypes);
     concrete_inputs_ = std::move(arg_data.concreteInputs);
+    kwinputs_ = std::move(op.kwinputs_);
   });
 }
 
@@ -801,6 +927,15 @@ bool KinetoEvent::hasConcreteInputs() const {
 
 const c10::ArrayRef<c10::IValue> KinetoEvent::concreteInputs() const {
   return concrete_inputs_;
+}
+
+bool KinetoEvent::hasKwinputs() const {
+  return !kwinputs_.empty();
+}
+
+const std::unordered_map<std::string, c10::IValue> KinetoEvent::kwinputs()
+    const {
+  return kwinputs_;
 }
 
 const c10::ArrayRef<std::string> KinetoEvent::stack() const {
@@ -914,6 +1049,7 @@ FORWARD_FROM_RESULT(startThreadId, start_tid_)
 FORWARD_FROM_RESULT(endThreadId, endTID())
 FORWARD_FROM_RESULT(activityType, kinetoType())
 FORWARD_FROM_RESULT(name, name())
+FORWARD_FROM_RESULT(overload_name, overload_name())
 FORWARD_FROM_RESULT(deviceType, deviceType())
 FORWARD_FROM_RESULT(startNs, start_time_ns_)
 FORWARD_FROM_RESULT(correlationId, correlationID())

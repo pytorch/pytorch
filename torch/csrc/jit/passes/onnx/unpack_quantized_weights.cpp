@@ -14,8 +14,8 @@
 #include <ATen/Functions.h>
 
 using ::c10::Dispatcher;
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 namespace onnx {
 using namespace ::c10::onnx;
 
@@ -98,7 +98,7 @@ double getScaleFromInput(Node* input_node) {
       input_name);
 }
 
-std::vector<Node*> CreateQuantizedWeights(
+static std::vector<Node*> CreateQuantizedWeights(
     std::shared_ptr<Graph>& graph,
     const at::Tensor& weight,
     int8_t* data,
@@ -191,7 +191,7 @@ std::vector<Node*> CreateQuantizedWeights(
   return {data_node, scale_node, zero_point_node, axis_node};
 }
 
-Node* CreateQuantizedBias(
+static Node* CreateQuantizedBias(
     std::vector<float> data,
     std::shared_ptr<Graph>& graph,
     const std::vector<int64_t>& shapes) {
@@ -206,7 +206,7 @@ Node* CreateQuantizedBias(
   return const_node_1;
 }
 
-Node* createIntTuple(
+static Node* createIntTuple(
     const std::vector<int64_t>& is,
     std::shared_ptr<Graph>& graph) {
   Node* const_node = graph->create(Symbol::onnx("Constant"));
@@ -214,13 +214,13 @@ Node* createIntTuple(
   return const_node;
 }
 
-Node* createInt(int64_t i, std::shared_ptr<Graph>& graph) {
+static Node* createInt(int64_t i, std::shared_ptr<Graph>& graph) {
   Node* const_node = graph->create(Symbol::onnx("Constant"));
   const_node->i_(Symbol::attr("value"), i);
   return const_node;
 }
 
-void ConvertQuantizedWeight(
+static void ConvertQuantizedWeight(
     std::shared_ptr<Graph>& graph,
     Node* node,
     at::Tensor& weight) {
@@ -254,7 +254,7 @@ enum class QuantizedParamsType { CONV1D, CONV, LINEAR };
 // passed to the appropriate unpack function using c10::Dispatcher. We insert
 // the unpacked weights and bias into the graph using
 // caffe2::Int8GivenTensorFill nodes.
-void unpackQuantizedWeightsHelper(
+static void unpackQuantizedWeightsHelper(
     std::shared_ptr<Graph>& graph,
     std::map<std::string, IValue>& paramsDict,
     const std::string& pattern,
@@ -299,10 +299,6 @@ void unpackQuantizedWeightsHelper(
 
     torch::List<int64_t> stride_int, padding_int, dilation_int,
         output_padding_int;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t groups_int;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t transpose_int;
 
     if (itr->second.isTuple()) {
       // Pre-unpacked weights. Comes from Conv/Linear weights which are
@@ -328,23 +324,19 @@ void unpackQuantizedWeightsHelper(
         const int64_t kSpatialDim = config_vals.at(0);
         // skip kSpatialDim
         unsigned idx = 1;
-        for (const auto i : c10::irange(kSpatialDim)) {
-          (void)i; // Suppress unused variable warning
+        for ([[maybe_unused]] const auto i : c10::irange(kSpatialDim)) {
           stride_int.emplace_back(config_vals.at(idx));
           idx++;
         }
-        for (const auto i : c10::irange(kSpatialDim)) {
-          (void)i; // Suppress unused variable warning
+        for ([[maybe_unused]] const auto i : c10::irange(kSpatialDim)) {
           padding_int.emplace_back(config_vals.at(idx));
           idx++;
         }
-        for (const auto i : c10::irange(kSpatialDim)) {
-          (void)i; // Suppress unused variable warning
+        for ([[maybe_unused]] const auto i : c10::irange(kSpatialDim)) {
           dilation_int.emplace_back(config_vals.at(idx));
           idx++;
         }
-        for (const auto i : c10::irange(kSpatialDim)) {
-          (void)i; // Suppress unused variable warning
+        for ([[maybe_unused]] const auto i : c10::irange(kSpatialDim)) {
           output_padding_int.emplace_back(config_vals.at(idx));
           idx++;
         }
@@ -415,9 +407,9 @@ void unpackQuantizedWeightsHelper(
           }
           idx++;
         }
-        groups_int = conv_params_packed[idx].item<int64_t>();
+        auto groups_int = conv_params_packed[idx].item<int64_t>();
         idx++;
-        transpose_int = conv_params_packed[idx].item<int64_t>();
+        auto transpose_int = conv_params_packed[idx].item<int64_t>();
         idx++;
         TORCH_INTERNAL_ASSERT(
             idx == conv_params_packed.numel(),
@@ -459,11 +451,10 @@ void unpackQuantizedWeightsHelper(
           for (const auto& d : dilation_ivalue) {
             dilation_int.emplace_back(d.toTensor()[0].item<int64_t>());
           }
-          groups_int = groups_ivalue.toTensor()[0].item<int64_t>();
+          groups = groups_ivalue.toTensor()[0].item<int64_t>();
           stride = stride_int;
           padding = padding_int;
           dilation = dilation_int;
-          groups = groups_int;
 
           if (expect_output_padding) {
             auto output_padding_ivalue =
@@ -556,7 +547,7 @@ static std::
 
 // Unpack quantized tensor inputs into {value, scale, zero_point},
 // Then create a prim::TupleConstruct node based on these three values.
-void UnpackQuantizedTensorInputs(std::shared_ptr<Graph>& graph) {
+static void UnpackQuantizedTensorInputs(std::shared_ptr<Graph>& graph) {
   for (size_t index = 0; index < graph->inputs().size();) {
     auto g_input = graph->inputs()[index];
     TensorTypePtr shape_type = g_input->type()->cast<TensorType>();
@@ -577,11 +568,11 @@ void UnpackQuantizedTensorInputs(std::shared_ptr<Graph>& graph) {
     auto input_scale =
         graph->insertInput(index + 1, input_name + "_scale")
             ->setType(TensorType::create(
-                at::kDouble, at::kCPU, 0, /*requires_grad=*/c10::nullopt));
+                at::kDouble, at::kCPU, 0, /*requires_grad=*/std::nullopt));
     auto input_zero_point =
         graph->insertInput(index + 2, input_name + "_zero_point")
             ->setType(TensorType::create(
-                at::kLong, at::kCPU, 0, /*requires_grad=*/c10::nullopt));
+                at::kLong, at::kCPU, 0, /*requires_grad=*/std::nullopt));
     std::vector<Value*> converted{input_value, input_scale, input_zero_point};
     auto input_tuple =
         graph->prependNode(graph->createTuple(converted))->output();
@@ -716,7 +707,7 @@ void UnpackQuantizedWeights(
 // Caffe2 expects quantized ops to be in NHWC format while pytorch inputs are in
 // NCHW. This pass inserts permutes to convert from NCHW to NHWC before each
 // conv op and add another permute from NHWC to NCHW after the conv op.
-void insertPermutesHelper(
+static void insertPermutesHelper(
     std::shared_ptr<Graph>& graph,
     std::map<std::string, IValue>& paramsDict,
     const std::string& pattern) {
@@ -770,5 +761,4 @@ void insertPermutes(
   GRAPH_DUMP("After insertPermutes: ", graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

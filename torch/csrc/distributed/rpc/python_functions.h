@@ -5,9 +5,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 // Converts an internal ivalue::Future of Message into a user-facing
 // ivalue::Future of py::object type by creating a new ivalue::Future and call
@@ -65,6 +63,4 @@ PyRRef pyRemoteTorchscript(
     const py::args& args,
     const py::kwargs& kwargs);
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import first_sample, set_default_dtype
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 from torch.testing._internal.jit_utils import JitTestCase
 
+
 """
 Dtype Analysis relies on symbolic shape analysis, which is still in beta
 """
@@ -135,7 +136,7 @@ class TestDtypeBase(JitTestCase):
         try:
             # Eager execution
             expected_res = fn(*args)
-        except RuntimeError as e:
+        except RuntimeError:
             return
 
         expected_dtype = expected_res.dtype

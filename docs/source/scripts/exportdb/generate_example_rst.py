@@ -5,16 +5,15 @@ from pathlib import Path
 
 import torch
 import torch._dynamo as torchdynamo
-
 from torch._export.db.case import ExportCase
 from torch._export.db.examples import all_examples
 from torch.export import export
 
 
 PWD = Path(__file__).absolute().parent
-ROOT = Path(__file__).absolute().parent.parent.parent.parent
-SOURCE = ROOT / Path("source")
-EXPORTDB_SOURCE = SOURCE / Path("generated") / Path("exportdb")
+ROOT = Path(__file__).absolute().parents[3]
+SOURCE = ROOT / "source"
+EXPORTDB_SOURCE = SOURCE / "generated" / "exportdb"
 
 
 def generate_example_rst(example_case: ExportCase):
@@ -50,7 +49,7 @@ def generate_example_rst(example_case: ExportCase):
     # Generate contents of the .rst file
     title = f"{example_case.name}"
     doc_contents = f"""{title}
-{'^' * (len(title))}
+{"^" * (len(title))}
 
 .. note::
 
@@ -79,6 +78,7 @@ Result:
             example_case.example_args,
             example_case.example_kwargs,
             dynamic_shapes=example_case.dynamic_shapes,
+            strict=True,
         )
         graph_output = str(exported_program)
         graph_output = re.sub(r"        # File(.|\n)*?\n", "", graph_output)
@@ -117,7 +117,7 @@ def generate_index_rst(example_cases, tag_to_modules, support_level_to_modules):
         module_contents = "\n\n".join(v)
         support_contents += f"""
 {support_level}
-{'-' * (len(support_level))}
+{"-" * (len(support_level))}
 
 {module_contents}
 """

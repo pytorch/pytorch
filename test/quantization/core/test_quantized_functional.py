@@ -16,10 +16,7 @@ from torch.testing._internal.common_quantization import (
     _make_conv_test_input,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import (
-    IS_PPC,
-    TEST_WITH_UBSAN,
-)
+from torch.testing._internal.common_utils import IS_PPC
 
 class TestQuantizedFunctionalOps(QuantizationTestCase):
     def test_relu_api(self):
@@ -55,7 +52,7 @@ class TestQuantizedFunctionalOps(QuantizationTestCase):
         # Make sure the results match
         # assert_array_almost_equal compares using the following formula:
         #     abs(desired-actual) < 1.5 * 10**(-decimal)
-        # (https://docs.scipy.org/doc/numpy/reference/generated/numpy.testing.assert_almost_equal.html)
+        # (https://numpy.org/doc/stable/reference/generated/numpy.testing.assert_almost_equal.html)
         # We use decimal = 0 to ignore off-by-1 differences between reference
         # and test. Off-by-1 differences arise due to the order of round and
         # zero_point addition operation, i.e., if addition followed by round is
@@ -94,7 +91,7 @@ class TestQuantizedFunctionalOps(QuantizationTestCase):
         if qengine not in torch.backends.quantized.supported_engines:
             return
         if qengine == 'qnnpack':
-            if IS_PPC or TEST_WITH_UBSAN:
+            if IS_PPC:
                 return
             use_channelwise = False
 
@@ -147,7 +144,7 @@ class TestQuantizedFunctionalOps(QuantizationTestCase):
         if qengine not in torch.backends.quantized.supported_engines:
             return
         if qengine == 'qnnpack':
-            if IS_PPC or TEST_WITH_UBSAN:
+            if IS_PPC:
                 return
 
         input_feature_map_size = (H, W)

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import os
 import shutil
 import sys
@@ -7,15 +8,14 @@ from subprocess import check_call
 from tempfile import TemporaryDirectory
 from typing import Optional
 
+
 SCRIPT_DIR = Path(__file__).parent
 REPO_DIR = SCRIPT_DIR.parent.parent
 
 
 def read_triton_pin(device: str = "cuda") -> str:
     triton_file = "triton.txt"
-    if device == "rocm":
-        triton_file = "triton-rocm.txt"
-    elif device == "xpu":
+    if device == "xpu":
         triton_file = "triton-xpu.txt"
     with open(REPO_DIR / ".ci" / "docker" / "ci_commit_pins" / triton_file) as f:
         return f.read().strip()
@@ -52,26 +52,20 @@ def build_triton(
     *,
     version: str,
     commit_hash: str,
-    build_conda: bool = False,
     device: str = "cuda",
     py_version: Optional[str] = None,
     release: bool = False,
+    with_clang_ldd: bool = False,
 ) -> Path:
     env = os.environ.copy()
     if "MAX_JOBS" not in env:
         max_jobs = os.cpu_count() or 1
         env["MAX_JOBS"] = str(max_jobs)
 
-    version_suffix = ""
-    if not release:
-        # Nightly binaries include the triton commit hash, i.e. 2.1.0+e6216047b8
-        # while release build should only include the version, i.e. 2.1.0
-        version_suffix = f"+{commit_hash[:10]}"
-        version += version_suffix
-
     with TemporaryDirectory() as tmpdir:
         triton_basedir = Path(tmpdir) / "triton"
         triton_pythondir = triton_basedir / "python"
+
         triton_repo = "https://github.com/openai/triton"
         if device == "rocm":
             triton_pkg_name = "pytorch-triton-rocm"
@@ -89,58 +83,11 @@ def build_triton(
         else:
             check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
 
-        if build_conda:
-            with open(triton_basedir / "meta.yaml", "w") as meta:
-                print(
-                    f"package:\n  name: torchtriton\n  version: {version}\n",
-                    file=meta,
-                )
-                print("source:\n  path: .\n", file=meta)
-                print(
-                    "build:\n  string: py{{py}}\n  number: 1\n  script: cd python; "
-                    "python setup.py install --record=record.txt\n",
-                    " script_env:\n   - MAX_JOBS\n",
-                    file=meta,
-                )
-                print(
-                    "requirements:\n  host:\n    - python\n    - setuptools\n  run:\n    - python\n"
-                    "    - filelock\n    - pytorch\n",
-                    file=meta,
-                )
-                print(
-                    "about:\n  home: https://github.com/openai/triton\n  license: MIT\n  summary:"
-                    " 'A language and compiler for custom Deep Learning operation'",
-                    file=meta,
-                )
-
-            patch_init_py(
-                triton_pythondir / "triton" / "__init__.py",
-                version=f"{version}",
-            )
-            if py_version is None:
-                py_version = f"{sys.version_info.major}.{sys.version_info.minor}"
-            check_call(
-                [
-                    "conda",
-                    "build",
-                    "--python",
-                    py_version,
-                    "-c",
-                    "pytorch-nightly",
-                    "--output-folder",
-                    tmpdir,
-                    ".",
-                ],
-                cwd=triton_basedir,
-                env=env,
-            )
-            conda_path = next(iter(Path(tmpdir).glob("linux-64/torchtriton*.bz2")))
-            shutil.copy(conda_path, Path.cwd())
-            return Path.cwd() / conda_path.name
-
         # change built wheel name and version
         env["TRITON_WHEEL_NAME"] = triton_pkg_name
-        env["TRITON_WHEEL_VERSION_SUFFIX"] = version_suffix
+        if with_clang_ldd:
+            env["TRITON_BUILD_WITH_CLANG_LLD"] = "1"
+
         patch_init_py(
             triton_pythondir / "triton" / "__init__.py",
             version=f"{version}",
@@ -155,11 +102,19 @@ def build_triton(
             )
             print("ROCm libraries setup for triton installation...")
 
-        check_call(
-            [sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir, env=env
+        # old triton versions have setup.py in the python/ dir,
+        # new versions have it in the root dir.
+        triton_setupdir = (
+            triton_basedir
+            if (triton_basedir / "setup.py").exists()
+            else triton_pythondir
         )
 
-        whl_path = next(iter((triton_pythondir / "dist").glob("*.whl")))
+        check_call(
+            [sys.executable, "setup.py", "bdist_wheel"], cwd=triton_setupdir, env=env
+        )
+
+        whl_path = next(iter((triton_setupdir / "dist").glob("*.whl")))
         shutil.copy(whl_path, Path.cwd())
 
         if device == "rocm":
@@ -176,24 +131,24 @@ def main() -> None:
 
     parser = ArgumentParser("Build Triton binaries")
     parser.add_argument("--release", action="store_true")
-    parser.add_argument("--build-conda", action="store_true")
     parser.add_argument(
-        "--device", type=str, default="cuda", choices=["cuda", "rocm", "xpu"]
+        "--device", type=str, default="cuda", choices=["cuda", "rocm", "xpu", "aarch64"]
     )
     parser.add_argument("--py-version", type=str)
     parser.add_argument("--commit-hash", type=str)
+    parser.add_argument("--with-clang-ldd", action="store_true")
     parser.add_argument("--triton-version", type=str, default=read_triton_version())
     args = parser.parse_args()
 
     build_triton(
         device=args.device,
-        commit_hash=args.commit_hash
-        if args.commit_hash
-        else read_triton_pin(args.device),
+        commit_hash=(
+            args.commit_hash if args.commit_hash else read_triton_pin(args.device)
+        ),
         version=args.triton_version,
-        build_conda=args.build_conda,
         py_version=args.py_version,
         release=args.release,
+        with_clang_ldd=args.with_clang_ldd,
     )
 
 

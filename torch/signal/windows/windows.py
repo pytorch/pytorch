@@ -1,25 +1,28 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Iterable
+from collections.abc import Iterable
+from math import sqrt
+from typing import Callable, Optional, TypeVar
 
 import torch
-from math import sqrt
-
 from torch import Tensor
-from torch._torch_docs import factory_common_args, parse_kwargs, merge_dicts
+from torch._torch_docs import factory_common_args, merge_dicts, parse_kwargs
+
 
 __all__ = [
-    'bartlett',
-    'blackman',
-    'cosine',
-    'exponential',
-    'gaussian',
-    'general_cosine',
-    'general_hamming',
-    'hamming',
-    'hann',
-    'kaiser',
-    'nuttall',
+    "bartlett",
+    "blackman",
+    "cosine",
+    "exponential",
+    "gaussian",
+    "general_cosine",
+    "general_hamming",
+    "hamming",
+    "hann",
+    "kaiser",
+    "nuttall",
 ]
+
+_T = TypeVar("_T")
 
 window_common_args = merge_dicts(
     parse_kwargs(
@@ -33,12 +36,12 @@ window_common_args = merge_dicts(
     factory_common_args,
     {
         "normalization": "The window is normalized to 1 (maximum value is 1). However, the 1 doesn't appear if "
-                         ":attr:`M` is even and :attr:`sym` is `True`.",
-    }
+        ":attr:`M` is even and :attr:`sym` is `True`.",
+    },
 )
 
 
-def _add_docstr(*args):
+def _add_docstr(*args: str) -> Callable[[_T], _T]:
     r"""Adds docstrings to a given decorated function.
 
     Specially useful when then docstrings needs string interpolation, e.g., with
@@ -50,29 +53,37 @@ def _add_docstr(*args):
         args (str):
     """
 
-    def decorator(o):
+    def decorator(o: _T) -> _T:
         o.__doc__ = "".join(args)
         return o
 
     return decorator
 
 
-def _window_function_checks(function_name: str, M: int, dtype: torch.dtype, layout: torch.layout) -> None:
+def _window_function_checks(
+    function_name: str, M: int, dtype: torch.dtype, layout: torch.layout
+) -> None:
     r"""Performs common checks for all the defined windows.
-     This function should be called before computing any window.
+    This function should be called before computing any window.
 
-     Args:
-         function_name (str): name of the window function.
-         M (int): length of the window.
-         dtype (:class:`torch.dtype`): the desired data type of returned tensor.
-         layout (:class:`torch.layout`): the desired layout of returned tensor.
-     """
+    Args:
+        function_name (str): name of the window function.
+        M (int): length of the window.
+        dtype (:class:`torch.dtype`): the desired data type of returned tensor.
+        layout (:class:`torch.layout`): the desired layout of returned tensor.
+    """
     if M < 0:
-        raise ValueError(f'{function_name} requires non-negative window length, got M={M}')
+        raise ValueError(
+            f"{function_name} requires non-negative window length, got M={M}"
+        )
     if layout is not torch.strided:
-        raise ValueError(f'{function_name} is implemented for strided tensors only, got: {layout}')
+        raise ValueError(
+            f"{function_name} is implemented for strided tensors only, got: {layout}"
+        )
     if dtype not in [torch.float32, torch.float64]:
-        raise ValueError(f'{function_name} expects float32 or float64 dtypes, got: {dtype}')
+        raise ValueError(
+            f"{function_name} expects float32 or float64 dtypes, got: {dtype}"
+        )
 
 
 @_add_docstr(
@@ -122,42 +133,46 @@ Examples::
     ),
 )
 def exponential(
-        M: int,
-        *,
-        center: Optional[float] = None,
-        tau: float = 1.0,
-        sym: bool = True,
-        dtype: Optional[torch.dtype] = None,
-        layout: torch.layout = torch.strided,
-        device: Optional[torch.device] = None,
-        requires_grad: bool = False
+    M: int,
+    *,
+    center: Optional[float] = None,
+    tau: float = 1.0,
+    sym: bool = True,
+    dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
         dtype = torch.get_default_dtype()
 
-    _window_function_checks('exponential', M, dtype, layout)
+    _window_function_checks("exponential", M, dtype, layout)
 
     if tau <= 0:
-        raise ValueError(f'Tau must be positive, got: {tau} instead.')
+        raise ValueError(f"Tau must be positive, got: {tau} instead.")
 
     if sym and center is not None:
-        raise ValueError('Center must be None for symmetric windows')
+        raise ValueError("Center must be None for symmetric windows")
 
     if M == 0:
-        return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+        return torch.empty(
+            (0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad
+        )
 
     if center is None:
         center = (M if not sym and M > 1 else M - 1) / 2.0
 
     constant = 1 / tau
 
-    k = torch.linspace(start=-center * constant,
-                       end=(-center + (M - 1)) * constant,
-                       steps=M,
-                       dtype=dtype,
-                       layout=layout,
-                       device=device,
-                       requires_grad=requires_grad)
+    k = torch.linspace(
+        start=-center * constant,
+        end=(-center + (M - 1)) * constant,
+        steps=M,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        requires_grad=requires_grad,
+    )
 
     return torch.exp(-torch.abs(k))
 
@@ -204,32 +219,36 @@ Examples::
     ),
 )
 def cosine(
-        M: int,
-        *,
-        sym: bool = True,
-        dtype: Optional[torch.dtype] = None,
-        layout: torch.layout = torch.strided,
-        device: Optional[torch.device] = None,
-        requires_grad: bool = False
+    M: int,
+    *,
+    sym: bool = True,
+    dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
         dtype = torch.get_default_dtype()
 
-    _window_function_checks('cosine', M, dtype, layout)
+    _window_function_checks("cosine", M, dtype, layout)
 
     if M == 0:
-        return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+        return torch.empty(
+            (0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad
+        )
 
     start = 0.5
     constant = torch.pi / (M + 1 if not sym and M > 1 else M)
 
-    k = torch.linspace(start=start * constant,
-                       end=(start + (M - 1)) * constant,
-                       steps=M,
-                       dtype=dtype,
-                       layout=layout,
-                       device=device,
-                       requires_grad=requires_grad)
+    k = torch.linspace(
+        start=start * constant,
+        end=(start + (M - 1)) * constant,
+        steps=M,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        requires_grad=requires_grad,
+    )
 
     return torch.sin(k)
 
@@ -273,39 +292,43 @@ Examples::
     ),
 )
 def gaussian(
-        M: int,
-        *,
-        std: float = 1.0,
-        sym: bool = True,
-        dtype: Optional[torch.dtype] = None,
-        layout: torch.layout = torch.strided,
-        device: Optional[torch.device] = None,
-        requires_grad: bool = False
+    M: int,
+    *,
+    std: float = 1.0,
+    sym: bool = True,
+    dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
         dtype = torch.get_default_dtype()
 
-    _window_function_checks('gaussian', M, dtype, layout)
+    _window_function_checks("gaussian", M, dtype, layout)
 
     if std <= 0:
-        raise ValueError(f'Standard deviation must be positive, got: {std} instead.')
+        raise ValueError(f"Standard deviation must be positive, got: {std} instead.")
 
     if M == 0:
-        return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+        return torch.empty(
+            (0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad
+        )
 
     start = -(M if not sym and M > 1 else M - 1) / 2.0
 
     constant = 1 / (std * sqrt(2))
 
-    k = torch.linspace(start=start * constant,
-                       end=(start + (M - 1)) * constant,
-                       steps=M,
-                       dtype=dtype,
-                       layout=layout,
-                       device=device,
-                       requires_grad=requires_grad)
+    k = torch.linspace(
+        start=start * constant,
+        end=(start + (M - 1)) * constant,
+        steps=M,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        requires_grad=requires_grad,
+    )
 
-    return torch.exp(-k ** 2)
+    return torch.exp(-(k**2))
 
 
 @_add_docstr(
@@ -348,28 +371,32 @@ Examples::
     ),
 )
 def kaiser(
-        M: int,
-        *,
-        beta: float = 12.0,
-        sym: bool = True,
-        dtype: Optional[torch.dtype] = None,
-        layout: torch.layout = torch.strided,
-        device: Optional[torch.device] = None,
-        requires_grad: bool = False
+    M: int,
+    *,
+    beta: float = 12.0,
+    sym: bool = True,
+    dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
         dtype = torch.get_default_dtype()
 
-    _window_function_checks('kaiser', M, dtype, layout)
+    _window_function_checks("kaiser", M, dtype, layout)
 
     if beta < 0:
-        raise ValueError(f'beta must be non-negative, got: {beta} instead.')
+        raise ValueError(f"beta must be non-negative, got: {beta} instead.")
 
     if M == 0:
-        return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+        return torch.empty(
+            (0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad
+        )
 
     if M == 1:
-        return torch.ones((1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+        return torch.ones(
+            (1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad
+        )
 
     # Avoid NaNs by casting `beta` to the appropriate dtype.
     beta = torch.tensor(beta, dtype=dtype, device=device)
@@ -378,13 +405,15 @@ def kaiser(
     constant = 2.0 * beta / (M if not sym else M - 1)
     end = torch.minimum(beta, start + (M - 1) * constant)
 
-    k = torch.linspace(start=start,
-                       end=end,
-                       steps=M,
-                       dtype=dtype,
-                       layout=layout,
-                       device=device,
-                       requires_grad=requires_grad)
+    k = torch.linspace(
+        start=start,
+        end=end,
+        steps=M,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        requires_grad=requires_grad,
+    )
 
     return torch.i0(torch.sqrt(beta * beta - torch.pow(k, 2))) / torch.i0(beta)
 
@@ -427,14 +456,23 @@ Examples::
         **window_common_args
     ),
 )
-def hamming(M: int,
-            *,
-            sym: bool = True,
-            dtype: Optional[torch.dtype] = None,
-            layout: torch.layout = torch.strided,
-            device: Optional[torch.device] = None,
-            requires_grad: bool = False) -> Tensor:
-    return general_hamming(M, sym=sym, dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+def hamming(
+    M: int,
+    *,
+    sym: bool = True,
+    dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
+) -> Tensor:
+    return general_hamming(
+        M,
+        sym=sym,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        requires_grad=requires_grad,
+    )
 
 
 @_add_docstr(
@@ -474,20 +512,24 @@ Examples::
         **window_common_args
     ),
 )
-def hann(M: int,
-         *,
-         sym: bool = True,
-         dtype: Optional[torch.dtype] = None,
-         layout: torch.layout = torch.strided,
-         device: Optional[torch.device] = None,
-         requires_grad: bool = False) -> Tensor:
-    return general_hamming(M,
-                           alpha=0.5,
-                           sym=sym,
-                           dtype=dtype,
-                           layout=layout,
-                           device=device,
-                           requires_grad=requires_grad)
+def hann(
+    M: int,
+    *,
+    sym: bool = True,
+    dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
+) -> Tensor:
+    return general_hamming(
+        M,
+        alpha=0.5,
+        sym=sym,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        requires_grad=requires_grad,
+    )
 
 
 @_add_docstr(
@@ -526,20 +568,29 @@ Examples::
         **window_common_args
     ),
 )
-def blackman(M: int,
-             *,
-             sym: bool = True,
-             dtype: Optional[torch.dtype] = None,
-             layout: torch.layout = torch.strided,
-             device: Optional[torch.device] = None,
-             requires_grad: bool = False) -> Tensor:
+def blackman(
+    M: int,
+    *,
+    sym: bool = True,
+    dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
+) -> Tensor:
     if dtype is None:
         dtype = torch.get_default_dtype()
 
-    _window_function_checks('blackman', M, dtype, layout)
+    _window_function_checks("blackman", M, dtype, layout)
 
-    return general_cosine(M, a=[0.42, 0.5, 0.08], sym=sym, dtype=dtype, layout=layout, device=device,
-                          requires_grad=requires_grad)
+    return general_cosine(
+        M,
+        a=[0.42, 0.5, 0.08],
+        sym=sym,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        requires_grad=requires_grad,
+    )
 
 
 @_add_docstr(
@@ -580,34 +631,42 @@ Examples::
         **window_common_args
     ),
 )
-def bartlett(M: int,
-             *,
-             sym: bool = True,
-             dtype: Optional[torch.dtype] = None,
-             layout: torch.layout = torch.strided,
-             device: Optional[torch.device] = None,
-             requires_grad: bool = False) -> Tensor:
+def bartlett(
+    M: int,
+    *,
+    sym: bool = True,
+    dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
+) -> Tensor:
     if dtype is None:
         dtype = torch.get_default_dtype()
 
-    _window_function_checks('bartlett', M, dtype, layout)
+    _window_function_checks("bartlett", M, dtype, layout)
 
     if M == 0:
-        return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+        return torch.empty(
+            (0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad
+        )
 
     if M == 1:
-        return torch.ones((1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+        return torch.ones(
+            (1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad
+        )
 
     start = -1
     constant = 2 / (M if not sym else M - 1)
 
-    k = torch.linspace(start=start,
-                       end=start + (M - 1) * constant,
-                       steps=M,
-                       dtype=dtype,
-                       layout=layout,
-                       device=device,
-                       requires_grad=requires_grad)
+    k = torch.linspace(
+        start=start,
+        end=start + (M - 1) * constant,
+        steps=M,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        requires_grad=requires_grad,
+    )
 
     return 1 - torch.abs(k)
 
@@ -649,23 +708,30 @@ Examples::
         **window_common_args
     ),
 )
-def general_cosine(M, *,
-                   a: Iterable,
-                   sym: bool = True,
-                   dtype: Optional[torch.dtype] = None,
-                   layout: torch.layout = torch.strided,
-                   device: Optional[torch.device] = None,
-                   requires_grad: bool = False) -> Tensor:
+def general_cosine(
+    M,
+    *,
+    a: Iterable,
+    sym: bool = True,
+    dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
+) -> Tensor:
     if dtype is None:
         dtype = torch.get_default_dtype()
 
-    _window_function_checks('general_cosine', M, dtype, layout)
+    _window_function_checks("general_cosine", M, dtype, layout)
 
     if M == 0:
-        return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+        return torch.empty(
+            (0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad
+        )
 
     if M == 1:
-        return torch.ones((1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+        return torch.ones(
+            (1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad
+        )
 
     if not isinstance(a, Iterable):
         raise TypeError("Coefficients must be a list/tuple")
@@ -675,16 +741,28 @@ def general_cosine(M, *,
 
     constant = 2 * torch.pi / (M if not sym else M - 1)
 
-    k = torch.linspace(start=0,
-                       end=(M - 1) * constant,
-                       steps=M,
-                       dtype=dtype,
-                       layout=layout,
-                       device=device,
-                       requires_grad=requires_grad)
+    k = torch.linspace(
+        start=0,
+        end=(M - 1) * constant,
+        steps=M,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        requires_grad=requires_grad,
+    )
 
-    a_i = torch.tensor([(-1) ** i * w for i, w in enumerate(a)], device=device, dtype=dtype, requires_grad=requires_grad)
-    i = torch.arange(a_i.shape[0], dtype=a_i.dtype, device=a_i.device, requires_grad=a_i.requires_grad)
+    a_i = torch.tensor(
+        [(-1) ** i * w for i, w in enumerate(a)],
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
+    )
+    i = torch.arange(
+        a_i.shape[0],
+        dtype=a_i.dtype,
+        device=a_i.device,
+        requires_grad=a_i.requires_grad,
+    )
     return (a_i.unsqueeze(-1) * torch.cos(i.unsqueeze(-1) * k)).sum(0)
 
 
@@ -725,21 +803,25 @@ Examples::
         **window_common_args
     ),
 )
-def general_hamming(M,
-                    *,
-                    alpha: float = 0.54,
-                    sym: bool = True,
-                    dtype: Optional[torch.dtype] = None,
-                    layout: torch.layout = torch.strided,
-                    device: Optional[torch.device] = None,
-                    requires_grad: bool = False) -> Tensor:
-    return general_cosine(M,
-                          a=[alpha, 1. - alpha],
-                          sym=sym,
-                          dtype=dtype,
-                          layout=layout,
-                          device=device,
-                          requires_grad=requires_grad)
+def general_hamming(
+    M,
+    *,
+    alpha: float = 0.54,
+    sym: bool = True,
+    dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
+) -> Tensor:
+    return general_cosine(
+        M,
+        a=[alpha, 1.0 - alpha],
+        sym=sym,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        requires_grad=requires_grad,
+    )
 
 
 @_add_docstr(
@@ -749,7 +831,7 @@ Computes the minimum 4-term Blackman-Harris window according to Nuttall.
 .. math::
     w_n = 1 - 0.36358 \cos{(z_n)} + 0.48917 \cos{(2z_n)} - 0.13659 \cos{(3z_n)} + 0.01064 \cos{(4z_n)}
 
-where ``z_n = 2 \u03c0 n/ M``.
+where :math:`z_n = \frac{2 \pi n}{M}`.
     """,
     """
 
@@ -789,18 +871,20 @@ Examples::
     ),
 )
 def nuttall(
-        M: int,
-        *,
-        sym: bool = True,
-        dtype: Optional[torch.dtype] = None,
-        layout: torch.layout = torch.strided,
-        device: Optional[torch.device] = None,
-        requires_grad: bool = False
+    M: int,
+    *,
+    sym: bool = True,
+    dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
 ) -> Tensor:
-    return general_cosine(M,
-                          a=[0.3635819, 0.4891775, 0.1365995, 0.0106411],
-                          sym=sym,
-                          dtype=dtype,
-                          layout=layout,
-                          device=device,
-                          requires_grad=requires_grad)
+    return general_cosine(
+        M,
+        a=[0.3635819, 0.4891775, 0.1365995, 0.0106411],
+        sym=sym,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        requires_grad=requires_grad,
+    )

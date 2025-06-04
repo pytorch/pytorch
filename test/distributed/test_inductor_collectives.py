@@ -1,6 +1,9 @@
 # Owner(s): ["module: dynamo"]
+import datetime
 import functools
 import unittest
+from collections import defaultdict
+from typing import Optional
 from unittest.mock import patch
 
 import torch
@@ -13,7 +16,12 @@ import torch.distributed._functional_collectives as _functional_collectives
 from torch._C import FileCheck
 from torch._dynamo.testing import CompileCounter
 from torch._dynamo.utils import same
+from torch._inductor.comms import (
+    _reorder_communication_preserving_peak_memory_internal,
+    ReorderInfo,
+)
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
+from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import run_and_get_triton_code
 from torch.distributed.distributed_c10d import GroupMember
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -28,8 +36,10 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     requires_cuda,
+    skipIfRocm,
 )
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 def _tolist_with_constrain_as_size(tensor):
@@ -40,6 +50,7 @@ def _tolist_with_constrain_as_size(tensor):
 
 
 @requires_nccl()
+@instantiate_parametrized_tests
 class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     """
     Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
@@ -58,7 +69,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
         # works around issue with skipif<2 and workers with unpredictable #s gpu
         return 2
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_broadcast_inductor(self):
         """
@@ -90,7 +101,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_out = compiled_func(*inputs)
             self.assertTrue(same(eager_out, compiled_out))
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_allreduce_inductor(self):
         """
@@ -123,7 +134,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inductor_out = compiled_matmul_cat_col(*inputs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_allreduce_inductor_cudagraph_trees(self):
         """
@@ -156,7 +167,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             )
 
             for nelem in [1024, 2048, 4096]:
-                x = torch.randn(nelem, device="cuda", dtype=torch.bfloat16)
+                # CI (Tesla T4) does not support bfloat16 compilation natively,
+                # using float
+                x = torch.randn(nelem, device="cuda", dtype=torch.float)
                 golden_out = eager_func(x)
 
                 for _ in range(3):
@@ -169,7 +182,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
         op = torch.ops.c10d_functional.all_reduce.default
         self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_eager_allreduce_inductor_wait(self):
         def eager_func(a, b, c, d, *, tag, ranks, group_size):
@@ -208,7 +221,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             print(f"inductor_out, {inductor_out}")
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_inductor_allreduce_eager_wait(self):
         def inductor_func(a, b, c, d, *, tag, ranks, group_size):
@@ -243,7 +256,91 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             )
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    @skipIfRocm
+    def test_eager_async_allreduce_inductor_wait(self):
+        import torch.distributed as dist
+        from torch._inductor.utils import run_and_get_code
+
+        def all_reduce_non_functional_eager(x):
+            y = x * x
+            work = dist.all_reduce(y, op=dist.ReduceOp.SUM, async_op=True)
+            assert isinstance(work, torch.distributed.Work)
+            return work, y
+
+        def all_reduce_wait(work, y):  # potentially compiled
+            if torch.compiler.is_dynamo_compiling():
+                torch.ops.c10d_functional.wait_tensor(y)
+            else:
+                work.wait(datetime.timedelta(seconds=10))
+            # Under compile, if `wait_tensor(y)` above is correctly executed,
+            # `y`'s data is in its final form and the output of this function will match eager;
+            # otherwise, `y * y` will run in parallel with `all_reduce(y)` and the output of this function
+            # will not match eager.
+            return y * y
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            x = torch.ones(12800, 12800, device="cuda") + self.rank
+            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+
+            # NOTE: We run for 10 iterations each, to ensure that the GPU execution is way behind CPU
+            # and that `y * y` on CPU side will be issued before `all_reduce(y)` on GPU side is done,
+            # thus guaranteeing that in the bad case `y * y` on GPU side will run in parallel with `all_reduce(y)`
+            # thus will produce the wrong result that fails the unit test.
+
+            def _run_loop_collective_wait(x, wait_fn, expected_registry_size):
+                for _ in range(10):
+                    self.assertEqual(
+                        torch._C._distributed_c10d._get_work_registry_size(), 0
+                    )
+                    work, y = all_reduce_non_functional_eager(x)
+                    self.assertEqual(
+                        torch._C._distributed_c10d._get_work_registry_size(),
+                        expected_registry_size,
+                    )
+                    out = wait_fn(work, y)
+                    self.assertEqual(
+                        torch._C._distributed_c10d._get_work_registry_size(), 0
+                    )
+                return work, y, out
+
+            # Test: Pure-eager
+            all_reduce_wait_eager = all_reduce_wait
+            work, y, out_ref = _run_loop_collective_wait(
+                x,
+                wait_fn=all_reduce_wait_eager,
+                expected_registry_size=0,
+            )
+
+            all_reduce_wait_compiled = torch.compile(
+                all_reduce_wait,
+                backend="inductor",
+                fullgraph=True,
+            )
+
+            # Test: Issue comm in eager -> wait for comm in compile. Use the context manager.
+            with _functional_collectives.allow_inflight_collective_as_graph_input_ctx():
+                work, y, out_compiled = _run_loop_collective_wait(
+                    x, wait_fn=all_reduce_wait_compiled, expected_registry_size=1
+                )
+            self.assertEqual(out_ref, out_compiled)
+
+            # Check that `wait_tensor()` is in the Inductor generated code
+            _, triton_codes = run_and_get_code(all_reduce_wait_compiled, work, y)
+            FileCheck().check("torch.ops._c10d_functional.wait_tensor.default(").run(
+                triton_codes[0]
+            )
+
+            # Failure Case: Issue comm in eager -> wait for comm in compile. Doesn't use the context manager.
+            _, _, out_compiled = _run_loop_collective_wait(
+                x, wait_fn=all_reduce_wait_compiled, expected_registry_size=0
+            )
+            # In this case `.wait_tensor(y)` in compiled region will not be able to find the corresponding work object
+            # to invoke the wait, thus the result will not match eager.
+            self.assertNotEqual(out_ref, out_compiled)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     def test_allreduce_input_buffer_reuse(self):
@@ -261,7 +358,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_permute_tensor(self):
         def func(tensor, src_dst_pairs, *, tag, ranks, group_size):
@@ -287,7 +384,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertEqual(out, expected)
             self.assertEqual(correct, expected)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     def test_allgather_output_buffer_reuse(self):
@@ -311,7 +408,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             correct = model(inp, self.world_size, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_allgather_contiguous_input(self):
         class Model(torch.nn.Module):
@@ -323,7 +420,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 y = self.emb(x)
                 last_dim = y.dim() - 1
                 y = y.transpose_(0, last_dim).contiguous()
-                res = _functional_collectives.all_gather_tensor(y, 0, ranks, tag)
+                _functional_collectives.all_gather_tensor(y, 0, ranks, tag)
                 out = y.transpose_(0, last_dim).contiguous()
                 return out
 
@@ -335,7 +432,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             correct = model(inp, self.world_size, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_allgather_into_tensor_inductor(self):
         """
@@ -366,7 +463,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inductor_out = compiled_matmul_cat_col(*inputs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_reduce_scatter_tensor_inductor(self):
         def example(a, b, *, tag, ranks, group_size):
@@ -393,7 +490,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inductor_out = compiled_fn(*inputs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_all_to_all_single_inductor(self):
@@ -462,7 +559,198 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inductor_out = compiled_fn(*inputs, **trs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    # The goal of this test is that when `unsafe_allow_recompute_of_collectives=False`,
+    # The partitioner will *never* recompute collectives in the backward, even
+    # if the activation_memory_budget partitioner is being used,
+    # unless there is a manual user checkpoint() region (which we know makes it safe
+    # to recompute the collective, since we assume that the user applied the AC
+    # region consistently across all ranks)
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    @patch.object(torch._functorch.config, "activation_memory_budget", 0.01)
+    @parametrize("override_with_ac", [False, True])
+    def test_all_to_all_recompute_is_always_banned(self, override_with_ac):
+        @torch.library.custom_op("custom_ns::foo", mutates_args=())
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x + 1
+
+        @foo.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        def setup_context(ctx, inputs, output):
+            ctx.save_for_backward(inputs[0])
+            return
+
+        def backward(ctx, grad):
+            (x,) = ctx.saved_tensors
+            return grad * x
+
+        foo.register_autograd(backward, setup_context=setup_context)
+
+        class AllToAllSingle(torch.autograd.Function):
+            @staticmethod
+            def forward(
+                ctx,
+                input: torch.Tensor,
+                output_split_sizes,
+                input_split_sizes,
+                tag,
+                ranks,
+                group_size: int,
+            ) -> torch.Tensor:
+                ctx.output_split_sizes = input_split_sizes
+                ctx.input_split_sizes = output_split_sizes
+                ctx.group_size = group_size
+                a2a = torch.ops._c10d_functional.all_to_all_single.default(
+                    input,
+                    output_split_sizes,
+                    input_split_sizes,
+                    "0",
+                )
+                a2a = torch.ops.c10d_functional.wait_tensor(a2a)
+                return a2a
+
+            @staticmethod
+            def backward(ctx, grad):
+                grad = torch.ops._c10d_functional.all_to_all_single.default(
+                    grad,
+                    ctx.output_split_sizes,
+                    ctx.input_split_sizes,
+                    "0",
+                )
+
+                return (
+                    torch.ops.c10d_functional.wait_tensor(grad),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+
+        def alltoall_autograd(
+            inp,
+            output_split_sizes,
+            input_split_sizes,
+            tag,
+            ranks,
+            group_size,
+        ):
+            out = AllToAllSingle.apply(
+                inp, output_split_sizes, input_split_sizes, tag, ranks, group_size
+            )
+            return out
+
+        # simple mode to track how many collective ops we saw in the backward
+        class TrackingMode(TorchDispatchMode):
+            def __init__(self):
+                super().__init__()
+                self.ops_counter = defaultdict(int)
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                rs = func(*args, **kwargs)
+                self.ops_counter[func] += 1
+                return rs
+
+        def example(
+            inp,
+            input_split_sizes_tensor,
+            output_split_sizes_tensor,
+            *,
+            tag,
+            ranks,
+            group_size,
+        ):
+            input_split_sizes = _tolist_with_constrain_as_size(input_split_sizes_tensor)
+            output_split_sizes = _tolist_with_constrain_as_size(
+                output_split_sizes_tensor
+            )
+            a2a = torch.ops.custom_ns.alltoall_autograd.default(
+                inp,
+                output_split_sizes,
+                input_split_sizes,
+                tag,
+                ranks,
+                group_size,
+            )
+
+            return torch.ops.custom_ns.foo(a2a)
+
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size
+        ), torch._dynamo.config.patch(
+            dynamic_shapes=True,
+            capture_dynamic_output_shape_ops=True,
+            capture_scalar_outputs=True,
+        ), torch.library._scoped_library(
+            "custom_ns", "FRAGMENT"
+        ) as lib:
+            lib.define(
+                "alltoall_autograd(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor"  # noqa: B950
+            )
+            lib.impl("alltoall_autograd", alltoall_autograd, "Autograd")
+            lib.impl("alltoall_autograd", alltoall_autograd, "Meta")
+
+            row = self.world_size * (self.rank + 1) * (self.world_size + 1) / 2
+            input_split_sizes_tensor = torch.tensor(
+                [(i + 1) * (self.rank + 1) for i in range(self.world_size)],
+                dtype=torch.int64,
+            )
+            output_split_sizes_tensor = torch.tensor(
+                [(i + 1) * (self.rank + 1) for i in range(self.world_size)],
+                dtype=torch.int64,
+            )
+            inputs = (
+                torch.ones(int(row), 5, device="cuda", requires_grad=True)
+                * (self.rank + 1),
+                input_split_sizes_tensor,
+                output_split_sizes_tensor,
+            )
+            trs = self.get_world_trs()
+
+            compiled_fn = torch.compile(
+                example,
+                fullgraph=True,
+                dynamic=True,
+                backend="aot_eager_decomp_partition",
+            )
+
+            if override_with_ac:
+
+                def compiled_fn_wrapper(*args):
+                    return example(*inputs, **trs)
+
+                out = torch.utils.checkpoint.checkpoint(
+                    compiled_fn_wrapper, *inputs, use_reentrant=False
+                )
+            else:
+                out = compiled_fn(*inputs, **trs)
+
+            # track how many all_to_alls we saw in the backward
+            with TrackingMode() as m:
+                out.sum().backward()
+            if override_with_ac:
+                # We wrapped our test in AC, which overrides the partitioner decision
+                # of never recomputing collectives.
+                # So we should properly see the all2all be recomputed in the backward
+                self.assertEqual(
+                    m.ops_counter[torch.ops._c10d_functional.all_to_all_single.default],
+                    2,
+                )
+            else:
+                # there is 1 all2all in the fw, and 1 all2all in the backward.
+                # notably: even though activation_memory_budget == 0 ("recompute_everything"),
+                # we are still choosing *not* to recompute the all2all from the fw
+                self.assertEqual(
+                    m.ops_counter[torch.ops._c10d_functional.all_to_all_single.default],
+                    1,
+                )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_all_to_all_single_inductor_split_sizes_none(self):
         def example(inp, *, tag, ranks, group_size):
@@ -492,8 +780,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 .check_regex(
                     "torch.ops._c10d_functional.all_to_all_single.default\\("
                     "arg\\d+_\\d+, "
-                    "\\[\\(s\\d+ // \\d\\), \\(s\\d+ // \\d\\)\\], "
-                    "\\[\\(s\\d+ // \\d\\), \\(s\\d+ // \\d\\)\\]"
+                    "\\[s\\d+ // \\d, s\\d+ // \\d\\], "
+                    "\\[s\\d+ // \\d, s\\d+ // \\d\\]"
                 )
                 .run(code)
             )
@@ -518,7 +806,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             "group_size": world_size,
         }
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(debug=True)
     def test_inductor_single_op(self):
         def func(inp, *, tag, ranks, group_size):
@@ -547,7 +835,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         correct = func(inputs, **self.get_world_trs())
         self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(debug=True)
     def test_inductor_steal_buffer(self):
         """
@@ -582,9 +870,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         correct = func(inputs, **self.get_world_trs())
         self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
-    def test_inductor_doesnt_mutate_shared(self):
+    def _test_inductor_doesnt_mutate_shared(self):
         """
         make sure that an intermediate that's going to be reuse isn't mutated unless copied
         """
@@ -607,18 +893,32 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         (
             FileCheck()
             .check("buf0 = empty_strided")
-            .check("buf5 = empty_strided")
-            .check(".run(arg0_1, buf0, buf5, 16")
-            .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check("buf1 = buf0")
             .check("buf6 = empty_strided")
-            .check(".run(buf6, 16")
-            .check("return (buf0, buf5, buf6")
+            .check(".run(buf1, arg0_1, buf6, 16")
+            .check("torch.ops._c10d_functional.all_reduce_.default(buf1")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf1")
+            .check("buf7 = empty_strided")
+            .check(".run(buf7, 16")
+            .check("return (buf1, buf6, buf7")
             .run(code)
         )
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
         self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
+    def test_inductor_doesnt_mutate_shared(self):
+        self._test_inductor_doesnt_mutate_shared()
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_inductor_doesnt_mutate_shared_graph_partition(self):
+        # checks graph partition reorder does not change relative order of ops
+        # when all ops are on cuda
+        self._test_inductor_doesnt_mutate_shared()
 
     def test_dynamo_trace_allreduce(self):
         def func(inp):
@@ -1013,29 +1313,24 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             return ar
 
         input = torch.ones(4, 4, device="cuda", requires_grad=True)
-        # TODO implement backwards
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "element 0 of tensors does not require grad and does not have a grad_fn",
-        ):
-            compiled = torch.compile(
-                func, backend="aot_eager"
-            )  # inductor bug with single-op allreduce graph
-            out = compiled(input)
-            out.sum().backward()
+        compiled = torch.compile(
+            func, backend="aot_eager"
+        )  # inductor bug with single-op allreduce graph
+        out = compiled(input)
+        out.sum().backward()
 
-            correct_input = input.clone().detach().requires_grad_()
-            correct = func(correct_input)
-            correct.sum().backward()
-            self.assertTrue(same(out, correct))
-            self.assertTrue(same(input.grad, correct_input.grad))
+        correct_input = input.detach().clone().requires_grad_()
+        correct = func(correct_input)
+        correct.sum().backward()
+        self.assertTrue(same(out, correct))
+        self.assertTrue(same(input.grad, correct_input.grad))
 
     def test_meta(self):
         x = torch.rand((2, 3, 4), device="meta")
         out = torch.ops.c10d_functional.all_reduce(x, "sum", **self.get_world_trs())
         self.assertEqual(x.size(), out.size())
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
     def test_inductor_all_gather_coalesced(self):
         """
@@ -1081,7 +1376,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         correct = func(inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
     def test_inductor_reduce_scatter_coalesced(self):
         """
@@ -1126,6 +1421,86 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_reorder_peak_memory(self):
+        """
+        TODO(whc)
+        - check each of the `limiting_factor` cases
+        - confirm peak memory is respected in some adversarial case
+        - check whether it is expected / correct that the "buf7 = buf0; del buf0  # reuse" statement materially changes
+        """
+
+        def func(inp, *, tag, ranks, group_size):
+            x = inp + 1
+            tensor_list = torch.ops.c10d_functional.reduce_scatter_tensor_coalesced(
+                [x, inp], "sum", tag, ranks, group_size
+            )
+            y = x + 2
+            ar0 = torch.ops.c10d_functional.wait_tensor(tensor_list[0])
+            ar1 = torch.ops.c10d_functional.wait_tensor(tensor_list[1])
+            # ensure other is not incorrectly aliasing ar's buffer
+            other = torch.ones_like(inp) + 22
+            return ar0, y, other, ar1
+
+        inputs = torch.ones(4, 4, device="cuda")
+
+        # get stats directly from the internal helper without affecting the real pass's signature
+        node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
+
+        def _reorder_communication_preserving_peak_memory(
+            snodes: list[BaseSchedulerNode],
+        ) -> list[BaseSchedulerNode]:
+            nonlocal node_stats
+            (
+                reordered_snodes,
+                node_stats,
+            ) = _reorder_communication_preserving_peak_memory_internal(snodes)
+            return reordered_snodes
+
+        with torch._inductor.config.patch(
+            {
+                "reorder_for_compute_comm_overlap": True,
+                "reorder_for_compute_comm_overlap_passes": [
+                    "sink_waits",
+                    # same as reorder_communication_preserving_peak_memory but returns debug info structures directly
+                    _reorder_communication_preserving_peak_memory,
+                ],
+            }
+        ):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+        # NOTE: The first return value should be the output of the first wait_tensor.
+        # We want to make sure no unneccessary copy is made.
+        (
+            FileCheck()
+            .check("buf0 = empty_strided")
+            .check("buf6 = empty_strided")
+            .check(".run(arg0_1, buf0, buf6, 16")
+            .check(
+                "buf1 = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced.default([buf0, arg0_1]"
+            )
+            # .check("buf2 = buf1[0]")
+            # .check("buf3 = buf1[1]")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
+            # .check("buf7 = buf0; del buf0  # reuse")
+            # .check(".run(buf7, 16")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
+            .check("return (buf2, buf6, buf7, buf3")
+            .run(code)
+        )
+        out = compiled(inputs, **self.get_world_trs())
+        correct = func(inputs, **self.get_world_trs())
+        assert same(out, correct), f"{out} va {correct}"
+
+        # TODO make the test case more interesting and validate the actual desired behavior
+        assert node_stats is not None
+        self.assertTrue(isinstance(node_stats, dict))
+        self.assertEqual(len(node_stats), 1)
+        for stats in node_stats.values():
+            self.assertEqual(stats.initial_exposed, 0)
+            self.assertEqual(stats.limiting_factor, "data dependency")
+            self.assertEqual(stats.moves, 0)
 
 
 if __name__ == "__main__":

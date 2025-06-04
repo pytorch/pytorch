@@ -349,10 +349,10 @@ class DispatchKeySet final {
   }
   // Add a DispatchKey to the DispatchKey set.  Does NOT mutate,
   // returns the extended DispatchKeySet!
-  C10_NODISCARD constexpr DispatchKeySet add(DispatchKey t) const {
+  [[nodiscard]] constexpr DispatchKeySet add(DispatchKey t) const {
     return *this | DispatchKeySet(t);
   }
-  C10_NODISCARD constexpr DispatchKeySet add(DispatchKeySet ks) const {
+  [[nodiscard]] constexpr DispatchKeySet add(DispatchKeySet ks) const {
     return *this | ks;
   }
 
@@ -380,7 +380,7 @@ class DispatchKeySet final {
   //
   // Instead, remove(DispatchKey.AutogradCPU) will only remove the "Autograd"
   // bit from the bitset.
-  C10_NODISCARD constexpr DispatchKeySet remove(DispatchKey t) const {
+  [[nodiscard]] constexpr DispatchKeySet remove(DispatchKey t) const {
     return DispatchKeySet(
         repr_ & ~(DispatchKeySet(t).repr_ & ~full_backend_mask));
   }
@@ -394,8 +394,12 @@ class DispatchKeySet final {
   bool empty() const {
     return repr_ == 0;
   }
-  uint64_t raw_repr() {
+  uint64_t raw_repr() const {
     return repr_;
+  }
+
+  static DispatchKeySet from_raw_repr(uint64_t x) {
+    return DispatchKeySet(RAW, x);
   }
 
   DispatchKey highestFunctionalityKey() const {
@@ -655,12 +659,15 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
 
 constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutocastCPU,
+    DispatchKey::AutocastMPS,
     DispatchKey::AutocastCUDA,
     DispatchKey::AutocastXPU,
     DispatchKey::AutocastIPU,
     DispatchKey::AutocastHPU,
     DispatchKey::AutocastXLA,
     DispatchKey::AutocastPrivateUse1,
+    DispatchKey::AutocastMTIA,
+    DispatchKey::AutocastMAIA,
 });
 
 // See Note [TLS Initialization]
@@ -671,12 +678,15 @@ constexpr DispatchKeySet default_included_set = DispatchKeySet({
 
 constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
     DispatchKey::AutocastCPU,
+    DispatchKey::AutocastMPS,
     DispatchKey::AutocastCUDA,
     DispatchKey::AutocastXPU,
     DispatchKey::AutocastIPU,
     DispatchKey::AutocastHPU,
     DispatchKey::AutocastXLA,
     DispatchKey::AutocastPrivateUse1,
+    DispatchKey::AutocastMTIA,
+    DispatchKey::AutocastMAIA,
 });
 
 constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
@@ -702,7 +712,6 @@ constexpr DispatchKeySet autogradother_backends =
         // Technically, HIP will now redispatch to its own custom AutogradHIP
         // slot in the runtime table.
         {DispatchKey::FPGA,
-         DispatchKey::MAIA,
          DispatchKey::Vulkan,
          DispatchKey::Metal,
          DispatchKey::CustomRNGKeyId,
@@ -751,6 +760,8 @@ constexpr auto inplace_or_view_ks =
     DispatchKeySet(DispatchKey::ADInplaceOrView);
 constexpr auto autograd_cpu_ks = DispatchKeySet(DispatchKey::AutogradCPU);
 constexpr auto autograd_ipu_ks = DispatchKeySet(DispatchKey::AutogradIPU);
+constexpr auto autograd_mtia_ks = DispatchKeySet(DispatchKey::AutogradMTIA);
+constexpr auto autograd_maia_ks = DispatchKeySet(DispatchKey::AutogradMAIA);
 constexpr auto autograd_xpu_ks = DispatchKeySet(DispatchKey::AutogradXPU);
 constexpr auto autograd_cuda_ks = DispatchKeySet(DispatchKey::AutogradCUDA);
 constexpr auto autograd_xla_ks = DispatchKeySet(DispatchKey::AutogradXLA);
@@ -819,7 +830,7 @@ C10_API DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t);
 // for a given backend key, use the associated autograd key.
 // for non-backend keys, use AutogradOther as a default.
 // Note: it's convenient and fast to return a default here rather than (say)
-// returning an optional<DispatchKey>, or throwing. But it makes callers
+// returning an std::optional<DispatchKey>, or throwing. But it makes callers
 // responsible for either a) enforcing the invariant that only backend keys
 // be passed as arguments, or b) interpreting our return value carefully.
 inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendComponent t) {
@@ -828,6 +839,10 @@ inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendComponent t) {
       return inplace_or_view_ks | autograd_cpu_ks;
     case BackendComponent::IPUBit:
       return inplace_or_view_ks | autograd_ipu_ks;
+    case BackendComponent::MTIABit:
+      return inplace_or_view_ks | autograd_mtia_ks;
+    case BackendComponent::MAIABit:
+      return inplace_or_view_ks | autograd_maia_ks;
     case BackendComponent::XPUBit:
       return inplace_or_view_ks | autograd_xpu_ks;
     case BackendComponent::CUDABit:
@@ -856,6 +871,8 @@ inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendComponent t) {
 // Returns a DispatchKeySet of autocast related keys mapped to backend.
 inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
   constexpr auto autocast_cpu_ks = DispatchKeySet(DispatchKey::AutocastCPU);
+  constexpr auto autocast_mtia_ks = DispatchKeySet(DispatchKey::AutocastMTIA);
+  constexpr auto autocast_maia_ks = DispatchKeySet(DispatchKey::AutocastMAIA);
   constexpr auto autocast_xpu_ks = DispatchKeySet(DispatchKey::AutocastXPU);
   constexpr auto autocast_ipu_ks = DispatchKeySet(DispatchKey::AutocastIPU);
   constexpr auto autocast_hpu_ks = DispatchKeySet(DispatchKey::AutocastHPU);
@@ -863,9 +880,14 @@ inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
   constexpr auto autocast_xla_ks = DispatchKeySet(DispatchKey::AutocastXLA);
   constexpr auto autocast_privateuse1_ks =
       DispatchKeySet(DispatchKey::AutocastPrivateUse1);
+  constexpr auto autocast_mps_ks = DispatchKeySet(DispatchKey::AutocastMPS);
   switch (t) {
     case BackendComponent::CPUBit:
       return autocast_cpu_ks;
+    case BackendComponent::MTIABit:
+      return autocast_mtia_ks;
+    case BackendComponent::MAIABit:
+      return autocast_maia_ks;
     case BackendComponent::XPUBit:
       return autocast_xpu_ks;
     case BackendComponent::IPUBit:
@@ -878,6 +900,8 @@ inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
       return autocast_xla_ks;
     case BackendComponent::PrivateUse1Bit:
       return autocast_privateuse1_ks;
+    case BackendComponent::MPSBit:
+      return autocast_mps_ks;
     default:
       return DispatchKeySet();
   }
@@ -911,6 +935,9 @@ inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
           DispatchKeySet(
               {DispatchKey::Functionalize,
                DispatchKey::PythonTLSSnapshot,
+               DispatchKey::FuncTorchGradWrapper,
+               DispatchKey::FuncTorchVmapMode,
+               DispatchKey::FuncTorchBatched,
                DispatchKey::Python}))
       .highestPriorityTypeId();
 }

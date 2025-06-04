@@ -1,12 +1,15 @@
 #pragma once
 
 #include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
+#include <ATen/cpu/vec/vec_base.h>
 namespace at {
 namespace vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
+
+template <>
+struct is_vec_specialized_for<int32_t> : std::bool_constant<true> {};
 
 template <>
 class Vectorized<int32_t> {
@@ -35,7 +38,8 @@ class Vectorized<int32_t> {
   C10_ALWAYS_INLINE Vectorized(vint32 v) : _vec0{v}, _vec1{v} {}
   C10_ALWAYS_INLINE Vectorized(vbool32 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
   C10_ALWAYS_INLINE Vectorized(vint32 v1, vint32 v2) : _vec0{v1}, _vec1{v2} {}
-  C10_ALWAYS_INLINE Vectorized(vbool32 v1, vbool32 v2) : _vecb0{v1}, _vecb1{v2} {}
+  C10_ALWAYS_INLINE Vectorized(vbool32 v1, vbool32 v2)
+      : _vecb0{v1}, _vecb1{v2} {}
   C10_ALWAYS_INLINE Vectorized(int32_t scalar)
       : _vec0{vec_splats(scalar)}, _vec1{vec_splats(scalar)} {}
   C10_ALWAYS_INLINE Vectorized(
@@ -63,8 +67,9 @@ class Vectorized<int32_t> {
   }
 
   template <uint64_t mask>
-  static std::enable_if_t<(mask & 255) == 255, Vectorized<int32_t>> C10_ALWAYS_INLINE
-  blend(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+  static std::enable_if_t<(mask & 255) == 255, Vectorized<int32_t>>
+      C10_ALWAYS_INLINE
+      blend(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
     return b;
   }
 
@@ -76,7 +81,8 @@ class Vectorized<int32_t> {
 
   template <uint64_t mask>
   static std::enable_if_t<(mask > 0 && mask < 15), Vectorized<int32_t>>
-      C10_ALWAYS_INLINE blend(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+      C10_ALWAYS_INLINE
+      blend(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
     constexpr uint32_t g0 = (mask & 1) * 0xffffffff;
     constexpr uint32_t g1 = ((mask & 2) >> 1) * 0xffffffff;
     constexpr uint32_t g2 = ((mask & 4) >> 2) * 0xffffffff;
@@ -90,7 +96,8 @@ class Vectorized<int32_t> {
   static std::enable_if_t<
       (mask > 15 && (mask & 255) != 255 && ((mask & 15) == 15)),
       Vectorized<int32_t>>
-      C10_ALWAYS_INLINE blend(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+      C10_ALWAYS_INLINE
+      blend(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
     constexpr uint32_t mask2 = (mask & 255) >> 4;
     constexpr uint32_t g0_2 = (mask2 & 1) * 0xffffffff;
     constexpr uint32_t g1_2 = ((mask2 & 2) >> 1) * 0xffffffff;
@@ -106,7 +113,8 @@ class Vectorized<int32_t> {
   static std::enable_if_t<
       (mask > 15 && ((mask & 255) != 255) && ((mask & 15) == 0)),
       Vectorized<int32_t>>
-      C10_ALWAYS_INLINE blend(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+      C10_ALWAYS_INLINE
+      blend(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
     constexpr uint32_t mask2 = (mask & 255) >> 4;
     constexpr uint32_t g0_2 = (mask2 & 1) * 0xffffffff;
     constexpr uint32_t g1_2 = ((mask2 & 2) >> 1) * 0xffffffff;
@@ -123,7 +131,8 @@ class Vectorized<int32_t> {
       (mask > 15 && ((mask & 255) != 255) && ((mask & 15) != 0) &&
        ((mask & 15) != 15)),
       Vectorized<int32_t>>
-      C10_ALWAYS_INLINE blend(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+      C10_ALWAYS_INLINE
+      blend(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
     constexpr uint32_t g0 = (mask & 1) * 0xffffffff;
     constexpr uint32_t g1 = ((mask & 2) >> 1) * 0xffffffff;
     constexpr uint32_t g2 = ((mask & 4) >> 2) * 0xffffffff;
@@ -155,7 +164,9 @@ class Vectorized<int32_t> {
   }
 
   template <typename step_t>
-  static Vectorized<int32_t> arange(int32_t base = 0.f, step_t step = static_cast<step_t>(1)) {
+  static Vectorized<int32_t> arange(
+      int32_t base = 0.f,
+      step_t step = static_cast<step_t>(1)) {
     return Vectorized<int32_t>(
         base,
         base + step,
@@ -221,7 +232,9 @@ class Vectorized<int32_t> {
 
   Vectorized<int32_t> angle() const {
     return blendv(
-      Vectorized<int32_t>(0), Vectorized<int32_t>(c10::pi<int32_t>), *this < Vectorized<int32_t>(0));
+        Vectorized<int32_t>(0),
+        Vectorized<int32_t>(c10::pi<int32_t>),
+        *this < Vectorized<int32_t>(0));
   }
   Vectorized<int32_t> real() const {
     return *this;
@@ -266,17 +279,23 @@ class Vectorized<int32_t> {
 };
 
 template <>
-Vectorized<int32_t> inline operator<<(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
-                vuint32 shift_vec0 = reinterpret_cast<vuint32>(b.vec0());
-                vuint32 shift_vec1 = reinterpret_cast<vuint32>(b.vec1()) ;
-          return Vectorized<int32_t>{vec_sl(a.vec0(), shift_vec0), vec_sl(a.vec1(), shift_vec1)};
+Vectorized<int32_t> inline operator<<(
+    const Vectorized<int32_t>& a,
+    const Vectorized<int32_t>& b) {
+  vuint32 shift_vec0 = reinterpret_cast<vuint32>(b.vec0());
+  vuint32 shift_vec1 = reinterpret_cast<vuint32>(b.vec1());
+  return Vectorized<int32_t>{
+      vec_sl(a.vec0(), shift_vec0), vec_sl(a.vec1(), shift_vec1)};
 }
 
 template <>
-Vectorized<int32_t> inline operator>>(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
-                vuint32 shift_vec0 = reinterpret_cast<vuint32>(b.vec0());
-                vuint32 shift_vec1 = reinterpret_cast<vuint32>(b.vec1()) ;
-          return Vectorized<int32_t>{vec_sr(a.vec0(), shift_vec0), vec_sr(a.vec1(), shift_vec1)};
+Vectorized<int32_t> inline operator>>(
+    const Vectorized<int32_t>& a,
+    const Vectorized<int32_t>& b) {
+  vuint32 shift_vec0 = reinterpret_cast<vuint32>(b.vec0());
+  vuint32 shift_vec1 = reinterpret_cast<vuint32>(b.vec1());
+  return Vectorized<int32_t>{
+      vec_sr(a.vec0(), shift_vec0), vec_sr(a.vec1(), shift_vec1)};
 }
 
 template <>
@@ -293,6 +312,54 @@ Vectorized<int32_t> inline minimum(
   return a.minimum(b);
 }
 
-} // namespace
+template <>
+Vectorized<int32_t> C10_ALWAYS_INLINE
+operator+(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+  return Vectorized<int32_t>{
+      vec_add(a.vec0(), b.vec0()), vec_add(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<int32_t> C10_ALWAYS_INLINE
+operator-(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+  return Vectorized<int32_t>{
+      vec_sub(a.vec0(), b.vec0()), vec_sub(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<int32_t> C10_ALWAYS_INLINE
+operator*(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+  return Vectorized<int32_t>{
+      vec_mul(a.vec0(), b.vec0()), vec_mul(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<int32_t> C10_ALWAYS_INLINE
+operator/(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+  return Vectorized<int32_t>{a.vec0() / b.vec0(), a.vec1() / b.vec1()};
+}
+
+template <>
+Vectorized<int32_t> C10_ALWAYS_INLINE
+operator&(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+  return Vectorized<int32_t>{
+      vec_and(a.vec0(), b.vec0()), vec_and(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<int32_t> C10_ALWAYS_INLINE
+operator|(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+  return Vectorized<int32_t>{
+      vec_or(a.vec0(), b.vec0()), vec_or(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<int32_t> C10_ALWAYS_INLINE
+operator^(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+  return Vectorized<int32_t>{
+      vec_xor(a.vec0(), b.vec0()), vec_xor(a.vec1(), b.vec1())};
+}
+
+} // namespace CPU_CAPABILITY
 } // namespace vec
 } // namespace at

@@ -127,9 +127,7 @@ TEST_F(ModulesTest, Conv2dSameStrided) {
       [&] { Conv2d model_invalid(options.stride(2)); }(),
       "padding='same' is not supported for strided convolutions");
   ASSERT_THROWS_WITH(
-      [&] {
-        Conv2d model_invalid(options.stride({1, 2}));
-      }(),
+      [&] { Conv2d model_invalid(options.stride({1, 2})); }(),
       "padding='same' is not supported for strided convolutions");
 }
 
@@ -181,9 +179,7 @@ TEST_F(ModulesTest, Conv3dSameStrided) {
       [&] { Conv3d model_invalid(options.stride(2)); }(),
       "padding='same' is not supported for strided convolutions");
   ASSERT_THROWS_WITH(
-      [&] {
-        Conv3d model_invalid(options.stride({1, 2, 1}));
-      }(),
+      [&] { Conv3d model_invalid(options.stride({1, 2, 1})); }(),
       "padding='same' is not supported for strided convolutions");
 }
 
@@ -314,8 +310,7 @@ TEST_F(ModulesTest, MaxPool1d) {
 TEST_F(ModulesTest, MaxPool1dReturnIndices) {
   MaxPool1d model(MaxPool1dOptions(3).stride(2));
   auto x = torch::ones({1, 1, 5}, torch::requires_grad());
-  torch::Tensor y, indices;
-  std::tie(y, indices) = model->forward_with_indices(x);
+  auto [y, indices] = model->forward_with_indices(x);
 
   ASSERT_EQ(y.dim(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::ones({1, 1, 2})));
@@ -355,8 +350,7 @@ TEST_F(ModulesTest, MaxPool2dUneven) {
 TEST_F(ModulesTest, MaxPool2dReturnIndices) {
   MaxPool2d model(MaxPool2dOptions(3).stride(2));
   auto x = torch::ones({2, 5, 5}, torch::requires_grad());
-  torch::Tensor y, indices;
-  std::tie(y, indices) = model->forward_with_indices(x);
+  auto [y, indices] = model->forward_with_indices(x);
 
   ASSERT_EQ(y.dim(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2})));
@@ -383,8 +377,7 @@ TEST_F(ModulesTest, MaxPool3d) {
 TEST_F(ModulesTest, MaxPool3dReturnIndices) {
   MaxPool3d model(MaxPool3dOptions(3).stride(2));
   auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
-  torch::Tensor y, indices;
-  std::tie(y, indices) = model->forward_with_indices(x);
+  auto [y, indices] = model->forward_with_indices(x);
 
   ASSERT_EQ(y.dim(), 4);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
@@ -467,8 +460,7 @@ TEST_F(ModulesTest, FractionalMaxPool2d) {
 TEST_F(ModulesTest, FractionalMaxPool2dReturnIndices) {
   FractionalMaxPool2d model(FractionalMaxPool2dOptions(3).output_size(2));
   auto x = torch::ones({2, 5, 5}, torch::requires_grad());
-  torch::Tensor y, indices;
-  std::tie(y, indices) = model->forward_with_indices(x);
+  auto [y, indices] = model->forward_with_indices(x);
 
   ASSERT_EQ(y.dim(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2})));
@@ -494,8 +486,7 @@ TEST_F(ModulesTest, FractionalMaxPool3d) {
 TEST_F(ModulesTest, FractionalMaxPool3dReturnIndices) {
   FractionalMaxPool3d model(FractionalMaxPool3dOptions(3).output_size(2));
   auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
-  torch::Tensor y, indices;
-  std::tie(y, indices) = model->forward_with_indices(x);
+  auto [y, indices] = model->forward_with_indices(x);
 
   ASSERT_EQ(y.dim(), 4);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
@@ -655,8 +646,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool1dReturnIndices) {
   AdaptiveMaxPool1d model(3);
   auto x = torch::tensor(
       {{{1, 2, 3, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
-  torch::Tensor y, indices;
-  std::tie(y, indices) = model->forward_with_indices(x);
+  auto [y, indices] = model->forward_with_indices(x);
 
   ASSERT_EQ(y.dim(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::tensor({{{2, 4, 5}}}, torch::kFloat)));
@@ -712,8 +702,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool2dReturnIndicesEven) {
   AdaptiveMaxPool2d model(3);
   auto x = torch::arange(0., 50);
   x.resize_({2, 5, 5}).set_requires_grad(true);
-  torch::Tensor y, indices;
-  std::tie(y, indices) = model->forward_with_indices(x);
+  auto [y, indices] = model->forward_with_indices(x);
   torch::Tensor s = y.sum();
 
   s.backward();
@@ -746,8 +735,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool2dReturnIndicesUneven) {
   AdaptiveMaxPool2d model(AdaptiveMaxPool2dOptions({3, 2}));
   auto x = torch::arange(0., 40);
   x.resize_({2, 5, 4}).set_requires_grad(true);
-  torch::Tensor y, indices;
-  std::tie(y, indices) = model->forward_with_indices(x);
+  auto [y, indices] = model->forward_with_indices(x);
   torch::Tensor s = y.sum();
 
   s.backward();
@@ -803,8 +791,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool3dReturnIndices) {
   AdaptiveMaxPool3d model(3);
   auto x = torch::arange(0., 64);
   x.resize_({1, 4, 4, 4}).set_requires_grad(true);
-  torch::Tensor y, indices;
-  std::tie(y, indices) = model->forward_with_indices(x);
+  auto [y, indices] = model->forward_with_indices(x);
   torch::Tensor s = y.sum();
 
   s.backward();
@@ -946,8 +933,7 @@ TEST_F(ModulesTest, MaxPool1d_MaxUnpool1d) {
   MaxPool1d pool{MaxPool1dOptions(2).stride(2)};
   MaxUnpool1d unpool{MaxUnpool1dOptions(2).stride(2)};
   auto input = torch::tensor({{{1, 2, 3, 4, 5, 6, 7, 8}}}, torch::kFloat);
-  torch::Tensor output, indices;
-  std::tie(output, indices) = pool->forward_with_indices(input);
+  auto [output, indices] = pool->forward_with_indices(input);
   ASSERT_TRUE(torch::allclose(
       unpool(output, indices),
       torch::tensor({{{0, 2, 0, 4, 0, 6, 0, 8}}}, torch::kFloat)));
@@ -999,8 +985,7 @@ TEST_F(ModulesTest, MaxPool2d_MaxUnpool2d) {
   auto input = torch::tensor(
       {{{{1, 2, 3, 4}, {5, 6, 7, 8}, {9, 10, 11, 12}, {13, 14, 15, 16}}}},
       torch::kFloat);
-  torch::Tensor output, indices;
-  std::tie(output, indices) = pool->forward_with_indices(input);
+  auto [output, indices] = pool->forward_with_indices(input);
   ASSERT_TRUE(torch::allclose(
       unpool(output, indices),
       torch::tensor(
@@ -1061,8 +1046,7 @@ TEST_F(ModulesTest, MaxPool3d_MaxUnpool3d) {
   MaxPool3d pool{MaxPool3dOptions(3).stride(2)};
   MaxUnpool3d unpool{MaxUnpool3dOptions(3).stride(2)};
   auto input = torch::randn({20, 16, 51, 33, 15});
-  torch::Tensor output, indices;
-  std::tie(output, indices) = pool->forward_with_indices(input);
+  auto [output, indices] = pool->forward_with_indices(input);
   auto unpooled_output = unpool(output, indices);
   ASSERT_EQ(
       unpooled_output.sizes(), std::vector<int64_t>({20, 16, 51, 33, 15}));
@@ -2444,8 +2428,7 @@ TEST_F(ModulesTest, ELU) {
       ASSERT_EQ(y.ndimension(), 3);
       ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
       auto y_exp = torch::max(torch::zeros_like(x_orig), x_orig) +
-          torch::min(torch::zeros_like(x_orig),
-                     alpha * (torch::exp(x_orig) - 1.0));
+          torch::min(torch::zeros_like(x_orig), alpha * (torch::expm1(x_orig)));
       ASSERT_TRUE(torch::allclose(y, y_exp));
       if (inplace) {
         ASSERT_TRUE(torch::allclose(x, y_exp));
@@ -2470,7 +2453,7 @@ TEST_F(ModulesTest, SELU) {
     auto zero = torch::zeros_like(input);
     auto expected = scale *
         (torch::max(zero, input_orig) +
-         torch::min(zero, alpha * (torch::exp(input_orig) - 1)));
+         torch::min(zero, alpha * (torch::expm1(input_orig))));
     auto s = output.sum();
 
     ASSERT_EQ(s.ndimension(), 0);
@@ -2860,7 +2843,7 @@ TEST_F(ModulesTest, CELU) {
       ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
       auto y_exp = torch::max(torch::zeros_like(x_orig), x_orig) +
           torch::min(torch::zeros_like(x_orig),
-                     alpha * (torch::exp(x_orig / alpha) - 1.0));
+                     alpha * (torch::expm1(x_orig / alpha)));
       ASSERT_TRUE(torch::allclose(y, y_exp));
       if (inplace) {
         ASSERT_TRUE(torch::allclose(x, y_exp));
@@ -3523,8 +3506,7 @@ void _multihead_attn_test_helper(
   std::uniform_int_distribution<int> d_2_10(2, 10);
   std::uniform_int_distribution<int> d_3_10(3, 10);
   bool registration_checked = false;
-  for (const auto i : c10::irange(100)) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(100)) {
     const auto batch_sz = d_2_10(generator);
     const auto seq_len = d_2_10(generator);
     const auto d_head = d_3_10(generator);
@@ -3755,9 +3737,7 @@ void _multihead_attn_test_helper(
             /*dim=*/1);
       }
     }
-    torch::Tensor attn_heads;
-    torch::Tensor ref_attn_weight;
-    std::tie(attn_heads, ref_attn_weight) = _scaled_dot_attn_ref(
+    auto [attn_heads, ref_attn_weight] = _scaled_dot_attn_ref(
         Q_split,
         K_split,
         V_split,
@@ -4607,6 +4587,15 @@ TEST_F(ModulesTest, PrettyPrintConv) {
   ASSERT_EQ(
       c10::str(Conv1d(3, 4, 5)),
       "torch::nn::Conv1d(3, 4, kernel_size=5, stride=1)");
+  {
+    auto options = Conv1dOptions(3, 4, 5);
+    ASSERT_EQ(
+        c10::str(Conv1d(options.padding(torch::kSame))),
+        "torch::nn::Conv1d(3, 4, kernel_size=5, stride=1, padding='same')");
+    ASSERT_EQ(
+        c10::str(Conv1d(options.padding(torch::kValid))),
+        "torch::nn::Conv1d(3, 4, kernel_size=5, stride=1, padding='valid')");
+  }
 
   ASSERT_EQ(
       c10::str(Conv2d(3, 4, 5)),
@@ -4620,6 +4609,15 @@ TEST_F(ModulesTest, PrettyPrintConv) {
     ASSERT_EQ(
         c10::str(Conv2d(options)),
         "torch::nn::Conv2d(3, 4, kernel_size=[5, 6], stride=[1, 2])");
+  }
+  {
+    auto options = Conv2dOptions(3, 4, std::vector<int64_t>{5, 6});
+    ASSERT_EQ(
+        c10::str(Conv2d(options.padding(torch::kSame))),
+        "torch::nn::Conv2d(3, 4, kernel_size=[5, 6], stride=[1, 1], padding='same')");
+    ASSERT_EQ(
+        c10::str(Conv2d(options.padding(torch::kValid))),
+        "torch::nn::Conv2d(3, 4, kernel_size=[5, 6], stride=[1, 1], padding='valid')");
   }
 
   ASSERT_EQ(
@@ -4645,6 +4643,15 @@ TEST_F(ModulesTest, PrettyPrintConv) {
         "groups=2, "
         "bias=false, "
         "padding_mode=kCircular)");
+  }
+  {
+    auto options = Conv3dOptions(3, 4, std::vector<int64_t>{5, 6, 7});
+    ASSERT_EQ(
+        c10::str(Conv3d(options.padding(torch::kSame))),
+        "torch::nn::Conv3d(3, 4, kernel_size=[5, 6, 7], stride=[1, 1, 1], padding='same')");
+    ASSERT_EQ(
+        c10::str(Conv3d(options.padding(torch::kValid))),
+        "torch::nn::Conv3d(3, 4, kernel_size=[5, 6, 7], stride=[1, 1, 1], padding='valid')");
   }
 }
 
@@ -4827,11 +4834,11 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveMaxPool) {
       c10::str(AdaptiveMaxPool2d(AdaptiveMaxPool2dOptions({5, 6}))),
       "torch::nn::AdaptiveMaxPool2d(output_size=[5, 6])");
   ASSERT_EQ(
-      c10::str(AdaptiveMaxPool2d(AdaptiveMaxPool2dOptions({5, c10::nullopt}))),
+      c10::str(AdaptiveMaxPool2d(AdaptiveMaxPool2dOptions({5, std::nullopt}))),
       "torch::nn::AdaptiveMaxPool2d(output_size=[5, None])");
   ASSERT_EQ(
       c10::str(AdaptiveMaxPool2d(
-          AdaptiveMaxPool2dOptions({c10::nullopt, c10::nullopt}))),
+          AdaptiveMaxPool2dOptions({std::nullopt, std::nullopt}))),
       "torch::nn::AdaptiveMaxPool2d(output_size=[None, None])");
 
   ASSERT_EQ(
@@ -4842,11 +4849,11 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveMaxPool) {
       "torch::nn::AdaptiveMaxPool3d(output_size=[5, 6, 7])");
   ASSERT_EQ(
       c10::str(
-          AdaptiveMaxPool3d(AdaptiveMaxPool3dOptions({5, c10::nullopt, 7}))),
+          AdaptiveMaxPool3d(AdaptiveMaxPool3dOptions({5, std::nullopt, 7}))),
       "torch::nn::AdaptiveMaxPool3d(output_size=[5, None, 7])");
   ASSERT_EQ(
       c10::str(AdaptiveMaxPool3d(AdaptiveMaxPool3dOptions(
-          {c10::nullopt, c10::nullopt, c10::nullopt}))),
+          {std::nullopt, std::nullopt, std::nullopt}))),
       "torch::nn::AdaptiveMaxPool3d(output_size=[None, None, None])");
 }
 
@@ -4862,11 +4869,11 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveAvgPool) {
       c10::str(AdaptiveAvgPool2d(AdaptiveAvgPool2dOptions({5, 6}))),
       "torch::nn::AdaptiveAvgPool2d(output_size=[5, 6])");
   ASSERT_EQ(
-      c10::str(AdaptiveAvgPool2d(AdaptiveAvgPool2dOptions({5, c10::nullopt}))),
+      c10::str(AdaptiveAvgPool2d(AdaptiveAvgPool2dOptions({5, std::nullopt}))),
       "torch::nn::AdaptiveAvgPool2d(output_size=[5, None])");
   ASSERT_EQ(
       c10::str(AdaptiveAvgPool2d(
-          AdaptiveAvgPool2dOptions({c10::nullopt, c10::nullopt}))),
+          AdaptiveAvgPool2dOptions({std::nullopt, std::nullopt}))),
       "torch::nn::AdaptiveAvgPool2d(output_size=[None, None])");
 
   ASSERT_EQ(
@@ -4877,11 +4884,11 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveAvgPool) {
       "torch::nn::AdaptiveAvgPool3d(output_size=[5, 6, 7])");
   ASSERT_EQ(
       c10::str(
-          AdaptiveAvgPool3d(AdaptiveAvgPool3dOptions({5, c10::nullopt, 7}))),
+          AdaptiveAvgPool3d(AdaptiveAvgPool3dOptions({5, std::nullopt, 7}))),
       "torch::nn::AdaptiveAvgPool3d(output_size=[5, None, 7])");
   ASSERT_EQ(
       c10::str(AdaptiveAvgPool3d(AdaptiveAvgPool3dOptions(
-          {c10::nullopt, c10::nullopt, c10::nullopt}))),
+          {std::nullopt, std::nullopt, std::nullopt}))),
       "torch::nn::AdaptiveAvgPool3d(output_size=[None, None, None])");
 }
 

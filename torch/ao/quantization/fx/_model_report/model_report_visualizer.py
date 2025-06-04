@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs
+from collections import OrderedDict, OrderedDict as OrdDict
+from typing import Any
+
 import torch
-from typing import Any, Set, Dict, List, Tuple, OrderedDict
-from collections import OrderedDict as OrdDict
+
 
 # try to import tablate
 got_tabulate = True
@@ -17,6 +19,7 @@ try:
     import matplotlib.pyplot as plt
 except ImportError:
     got_matplotlib = False
+
 
 class ModelReportVisualizer:
     r"""
@@ -89,7 +92,7 @@ class ModelReportVisualizer:
         """
         self.generated_reports = generated_reports
 
-    def get_all_unique_module_fqns(self) -> Set[str]:
+    def get_all_unique_module_fqns(self) -> set[str]:
         r"""
         The purpose of this method is to provide a user the set of all module_fqns so that if
         they wish to use some of the filtering capabilities of the ModelReportVisualizer class,
@@ -101,7 +104,9 @@ class ModelReportVisualizer:
         # returns the keys of the ordered dict
         return set(self.generated_reports.keys())
 
-    def get_all_unique_feature_names(self, plottable_features_only: bool = True) -> Set[str]:
+    def get_all_unique_feature_names(
+        self, plottable_features_only: bool = True
+    ) -> set[str]:
         r"""
         The purpose of this method is to provide a user the set of all feature names so that if
         they wish to use the filtering capabilities of the generate_table_view(), or use either of
@@ -120,18 +125,23 @@ class ModelReportVisualizer:
         unique_feature_names = set()
         for module_fqn in self.generated_reports:
             # get dict of the features
-            feature_dict: Dict[str, Any] = self.generated_reports[module_fqn]
+            feature_dict: dict[str, Any] = self.generated_reports[module_fqn]
 
             # loop through features
             for feature_name in feature_dict:
                 # if we need plottable, ensure type of val is tensor
-                if not plottable_features_only or type(feature_dict[feature_name]) == torch.Tensor:
+                if (
+                    not plottable_features_only
+                    or type(feature_dict[feature_name]) == torch.Tensor
+                ):
                     unique_feature_names.add(feature_name)
 
         # return our compiled set of unique feature names
         return unique_feature_names
 
-    def _get_filtered_data(self, feature_filter: str, module_fqn_filter: str) -> OrderedDict[str, Any]:
+    def _get_filtered_data(
+        self, feature_filter: str, module_fqn_filter: str
+    ) -> OrderedDict[str, Any]:
         r"""
         Filters the data and returns it in the same ordered dictionary format so the relevant views can be displayed.
 
@@ -159,7 +169,9 @@ class ModelReportVisualizer:
                 for feature_name in module_reports:
                     # check if filtering on features and do so if desired
                     if feature_filter == "" or feature_filter in feature_name:
-                        filtered_dict[module_fqn][feature_name] = module_reports[feature_name]
+                        filtered_dict[module_fqn][feature_name] = module_reports[
+                            feature_name
+                        ]
 
         # we have populated the filtered dict, and must return it
 
@@ -167,9 +179,9 @@ class ModelReportVisualizer:
 
     def _generate_tensor_table(
         self,
-        filtered_data: OrderedDict[str, Dict[str, Any]],
-        tensor_features: List[str]
-    ) -> Tuple[List, List]:
+        filtered_data: OrderedDict[str, dict[str, Any]],
+        tensor_features: list[str],
+    ) -> tuple[list, list]:
         r"""
         Takes in the filtered data and features list and generates the tensor headers and table
 
@@ -187,8 +199,8 @@ class ModelReportVisualizer:
             The rest of the rows will contain data
         """
         # now we compose the tensor information table
-        tensor_table: List[List[Any]] = []
-        tensor_headers: List[str] = []
+        tensor_table: list[list[Any]] = []
+        tensor_headers: list[str] = []
 
         # append the table row to the table only if we have features
         if len(tensor_features) > 0:
@@ -224,9 +236,9 @@ class ModelReportVisualizer:
     def _generate_channels_table(
         self,
         filtered_data: OrderedDict[str, Any],
-        channel_features: List[str],
-        num_channels: int
-    ) -> Tuple[List, List]:
+        channel_features: list[str],
+        num_channels: int,
+    ) -> tuple[list, list]:
         r"""
         Takes in the filtered data and features list and generates the channels headers and table
 
@@ -245,8 +257,8 @@ class ModelReportVisualizer:
             The rest of the rows will contain data
         """
         # now we compose the table for the channel information table
-        channel_table: List[List[Any]] = []
-        channel_headers: List[str] = []
+        channel_table: list[list[Any]] = []
+        channel_headers: list[str] = []
 
         # counter to keep track of number of entries in
         channel_table_entry_counter: int = 0
@@ -283,7 +295,9 @@ class ModelReportVisualizer:
 
         return (channel_headers, channel_table)
 
-    def generate_filtered_tables(self, feature_filter: str = "", module_fqn_filter: str = "") -> Dict[str, Tuple[List, List]]:
+    def generate_filtered_tables(
+        self, feature_filter: str = "", module_fqn_filter: str = ""
+    ) -> dict[str, tuple[list, list]]:
         r"""
         Takes in optional filter values and generates two tables with desired information.
 
@@ -329,11 +343,13 @@ class ModelReportVisualizer:
             ... ) # generates table with per_channel_min info for all modules in block 1 of the model
         """
         # first get the filtered data
-        filtered_data: OrderedDict[str, Any] = self._get_filtered_data(feature_filter, module_fqn_filter)
+        filtered_data: OrderedDict[str, Any] = self._get_filtered_data(
+            feature_filter, module_fqn_filter
+        )
 
         # now we split into tensor and per-channel data
-        tensor_features: Set[str] = set()
-        channel_features: Set[str] = set()
+        tensor_features: set[str] = set()
+        channel_features: set[str] = set()
 
         # keep track of the number of channels we have
         num_channels: int = 0
@@ -356,11 +372,13 @@ class ModelReportVisualizer:
                     tensor_features.add(feature_name)
 
         # we make them lists for iteration purposes
-        tensor_features_list: List[str] = sorted(tensor_features)
-        channel_features_list: List[str] = sorted(channel_features)
+        tensor_features_list: list[str] = sorted(tensor_features)
+        channel_features_list: list[str] = sorted(channel_features)
 
         # get the tensor info
-        tensor_headers, tensor_table = self._generate_tensor_table(filtered_data, tensor_features_list)
+        tensor_headers, tensor_table = self._generate_tensor_table(
+            filtered_data, tensor_features_list
+        )
 
         # get the channel info
         channel_headers, channel_table = self._generate_channels_table(
@@ -369,14 +387,16 @@ class ModelReportVisualizer:
 
         # let's now create the dictionary to return
         table_dict = {
-            self.TABLE_TENSOR_KEY : (tensor_headers, tensor_table),
-            self.TABLE_CHANNEL_KEY : (channel_headers, channel_table)
+            self.TABLE_TENSOR_KEY: (tensor_headers, tensor_table),
+            self.TABLE_CHANNEL_KEY: (channel_headers, channel_table),
         }
 
         # return the two tables
         return table_dict
 
-    def generate_table_visualization(self, feature_filter: str = "", module_fqn_filter: str = ""):
+    def generate_table_visualization(
+        self, feature_filter: str = "", module_fqn_filter: str = ""
+    ):
         r"""
         Takes in optional filter values and prints out formatted tables of the information.
 
@@ -445,7 +465,9 @@ class ModelReportVisualizer:
 
         print(table_str)
 
-    def _get_plottable_data(self, feature_filter: str, module_fqn_filter: str) -> Tuple[List, List[List], bool]:
+    def _get_plottable_data(
+        self, feature_filter: str, module_fqn_filter: str
+    ) -> tuple[list, list[list], bool]:
         r"""
         Takes in the feature filters and module filters and outputs the x and y data for plotting
 
@@ -466,8 +488,12 @@ class ModelReportVisualizer:
 
         # make sure it is only 1 feature that is being plotted
         # get the number of features in each of these
-        tensor_info_features_count = len(tensor_headers) - ModelReportVisualizer.NUM_NON_FEATURE_TENSOR_HEADERS
-        channel_info_features_count = len(channel_headers) - ModelReportVisualizer.NUM_NON_FEATURE_CHANNEL_HEADERS
+        tensor_info_features_count = (
+            len(tensor_headers) - ModelReportVisualizer.NUM_NON_FEATURE_TENSOR_HEADERS
+        )
+        channel_info_features_count = (
+            len(channel_headers) - ModelReportVisualizer.NUM_NON_FEATURE_CHANNEL_HEADERS
+        )
 
         # see if valid tensor or channel plot
         is_valid_per_tensor_plot: bool = tensor_info_features_count == 1
@@ -479,11 +505,13 @@ class ModelReportVisualizer:
 
         # if a per_channel plot, we have different offset and table
         if is_valid_per_channel_plot:
-            feature_column_offset = ModelReportVisualizer.NUM_NON_FEATURE_CHANNEL_HEADERS
+            feature_column_offset = (
+                ModelReportVisualizer.NUM_NON_FEATURE_CHANNEL_HEADERS
+            )
             table = channel_table
 
-        x_data: List = []
-        y_data: List[List] = []
+        x_data: list = []
+        y_data: list[list] = []
         # the feature will either be a tensor feature or channel feature
         if is_valid_per_tensor_plot:
             for table_row_num, row in enumerate(table):
@@ -499,13 +527,16 @@ class ModelReportVisualizer:
             # gather the x_data and multiple y_data
             # calculate the number of channels
             num_channels: int = max(row[self.CHANNEL_NUM_INDEX] for row in table) + 1
-            for channel in range(num_channels):
-                y_data.append([])  # separate data list per channel
+
+            # separate data list per channel
+            y_data.extend([] for _ in range(num_channels))
 
             for table_row_num, row in enumerate(table):
                 # get x_value to append
                 x_val_to_append = table_row_num
-                current_channel = row[self.CHANNEL_NUM_INDEX]  # initially chose current channel
+                current_channel = row[
+                    self.CHANNEL_NUM_INDEX
+                ]  # initially chose current channel
                 new_module_index: int = table_row_num // num_channels
                 x_val_to_append = new_module_index
 
@@ -529,7 +560,9 @@ class ModelReportVisualizer:
         # return x, y values, and if data is per-channel
         return (x_data, y_data, is_valid_per_channel_plot)
 
-    def generate_plot_visualization(self, feature_filter: str, module_fqn_filter: str = ""):
+    def generate_plot_visualization(
+        self, feature_filter: str, module_fqn_filter: str = ""
+    ):
         r"""
         Takes in a feature and optional module_filter and plots of the desired data.
 
@@ -570,7 +603,9 @@ class ModelReportVisualizer:
             return None
 
         # get the x and y data and if per channel
-        x_data, y_data, data_per_channel = self._get_plottable_data(feature_filter, module_fqn_filter)
+        x_data, y_data, data_per_channel = self._get_plottable_data(
+            feature_filter, module_fqn_filter
+        )
 
         # plot based on whether data is per channel or not
         ax = plt.subplot()
@@ -582,14 +617,22 @@ class ModelReportVisualizer:
             ax.set_xlabel("First idx of module")
             # set the legend as well
             # plot a single line that is average of the channel values
-            num_modules = len(y_data[0])  # all y_data have same length, so get num modules
-            num_channels = len(y_data)  # we want num channels to be able to calculate average later
+            num_modules = len(
+                y_data[0]
+            )  # all y_data have same length, so get num modules
+            num_channels = len(
+                y_data
+            )  # we want num channels to be able to calculate average later
 
-            avg_vals = [sum(y_data[:][index]) / num_channels for index in range(num_modules)]
+            avg_vals = [
+                sum(y_data[:][index]) / num_channels for index in range(num_modules)
+            ]
 
             # plot the three things we measured
-            ax.plot(x_data, avg_vals, label=f"Average Value Across {num_channels} Channels")
-            ax.legend(loc='upper right')
+            ax.plot(
+                x_data, avg_vals, label=f"Average Value Across {num_channels} Channels"
+            )
+            ax.legend(loc="upper right")
         else:
             ax.set_xlabel("idx")
             ax.plot(x_data, y_data)
@@ -597,7 +640,9 @@ class ModelReportVisualizer:
         # actually show the plot
         plt.show()
 
-    def generate_histogram_visualization(self, feature_filter: str, module_fqn_filter: str = "", num_bins: int = 10):
+    def generate_histogram_visualization(
+        self, feature_filter: str, module_fqn_filter: str = "", num_bins: int = 10
+    ):
         r"""
         Takes in a feature and optional module_filter and plots the histogram of desired data.
 
@@ -632,7 +677,9 @@ class ModelReportVisualizer:
             return None
 
         # get the x and y data and if per channel
-        x_data, y_data, data_per_channel = self._get_plottable_data(feature_filter, module_fqn_filter)
+        _x_data, y_data, data_per_channel = self._get_plottable_data(
+            feature_filter, module_fqn_filter
+        )
 
         # for histogram, we just care about plotting the y data
         # plot based on whether data is per channel or not
@@ -648,7 +695,7 @@ class ModelReportVisualizer:
             for channel_info in y_data:
                 all_data.extend(channel_info)
 
-            val, bins, _ = plt.hist(
+            _val, bins, _ = plt.hist(
                 all_data,
                 bins=num_bins,
                 stacked=True,
@@ -656,7 +703,7 @@ class ModelReportVisualizer:
             )
             plt.xticks(bins)
         else:
-            val, bins, _ = plt.hist(
+            _val, bins, _ = plt.hist(
                 y_data,
                 bins=num_bins,
                 stacked=False,

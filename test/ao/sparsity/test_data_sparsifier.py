@@ -5,11 +5,8 @@ import itertools
 import logging
 import math
 
-from typing import Tuple
-
 import torch
 from torch import nn
-
 from torch.ao.pruning._experimental.data_sparsifier import (
     BaseDataSparsifier,
     DataNormSparsifier,
@@ -19,6 +16,7 @@ from torch.ao.pruning._experimental.data_sparsifier.quantization_utils import (
 )
 from torch.nn.utils.parametrize import is_parametrized
 from torch.testing._internal.common_utils import TestCase
+
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
@@ -55,7 +53,7 @@ class _BaseDataSparsiferTestCase(TestCase):
 
     @staticmethod
     def _get_name_data_config(some_data, defaults=None):
-        if isinstance(some_data, Tuple):
+        if isinstance(some_data, tuple):
             # dealing with data_list
             name, data = some_data
             config = defaults
@@ -483,8 +481,9 @@ class TestBaseDataSparsifier(_BaseDataSparsiferTestCase):
             nn.Parameter(torch.randn(4, 4)),
             nn.Parameter(torch.randn(5, 5)),
         )
-        param4, param5 = nn.Parameter(torch.randn(1, 1)), nn.Parameter(
-            torch.randn(4, 4)
+        param4, param5 = (
+            nn.Parameter(torch.randn(1, 1)),
+            nn.Parameter(torch.randn(4, 4)),
         )
         data_list = [("param1", param1), ("param2", param2), ("param3", param3)]
         defaults = {"test": 3}
@@ -586,8 +585,9 @@ class TestNormDataSparsifiers(_NormDataSparsifierTestCase):
             nn.Parameter(torch.randn(4, 4)),
             nn.Parameter(torch.randn(5, 5)),
         )
-        param4, param5 = nn.Parameter(torch.randn(10, 10)), nn.Parameter(
-            torch.randn(4, 4)
+        param4, param5 = (
+            nn.Parameter(torch.randn(10, 10)),
+            nn.Parameter(torch.randn(4, 4)),
         )
         data_list = [("param1", param1), ("param2", param2), ("param3", param3)]
         defaults = {
@@ -687,7 +687,7 @@ class TestNormDataSparsifiers(_NormDataSparsifierTestCase):
 
 
 class Model(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.emb1 = nn.Embedding(100, 3)
         self.embbag1 = nn.EmbeddingBag(200, 32)

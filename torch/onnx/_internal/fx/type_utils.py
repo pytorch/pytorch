@@ -1,29 +1,19 @@
 # mypy: allow-untyped-defs
 """Utilities for converting and operating on ONNX, JIT and torch types."""
+
 from __future__ import annotations
 
-from typing import (
-    Any,
-    Dict,
-    List,
-    Optional,
-    Protocol,
-    runtime_checkable,
-    Set,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-    Union,
-)
+from collections.abc import Mapping, Sequence
+from typing import Any, Optional, Protocol, runtime_checkable, TYPE_CHECKING, Union
 
-import numpy
 import onnx
 
 import torch
 from torch._subclasses import fake_tensor
 
+
 if TYPE_CHECKING:
-    import onnx.defs.OpSchema.AttrType  # type: ignore[import]  # noqa: TCH004
+    import onnx.defs  # noqa: TCH004
 
 
 # Enable both TorchScriptTensor and torch.Tensor to be tested
@@ -31,8 +21,7 @@ if TYPE_CHECKING:
 @runtime_checkable
 class TensorLike(Protocol):
     @property
-    def dtype(self) -> Optional[torch.dtype]:
-        ...
+    def dtype(self) -> torch.dtype | None: ...
 
 
 def is_torch_complex_dtype(tensor_dtype: torch.dtype) -> bool:
@@ -52,13 +41,13 @@ def is_optional_onnx_dtype_str(onnx_type_str: str) -> bool:
     return onnx_type_str in _OPTIONAL_ONNX_DTYPE_STR
 
 
-def from_torch_dtype_to_onnx_dtype_str(dtype: Union[torch.dtype, type]) -> Set[str]:
+def from_torch_dtype_to_onnx_dtype_str(dtype: torch.dtype | type) -> set[str]:
     return _TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS[dtype]
 
 
 def from_python_type_to_onnx_attribute_type(
     dtype: type, is_sequence: bool = False
-) -> Optional[onnx.defs.OpSchema.AttrType]:
+) -> onnx.defs.OpSchema.AttrType | None:
     import onnx.defs  # type: ignore[import]
 
     _PYTHON_TYPE_TO_ONNX_ATTRIBUTE_TYPE = {
@@ -80,46 +69,23 @@ def from_python_type_to_onnx_attribute_type(
     return _PYTHON_TYPE_TO_ONNX_ATTRIBUTE_TYPE.get(dtype)
 
 
-def from_python_type_to_onnx_tensor_element_type(type: type):
-    """
-    Converts a Python type to the corresponding ONNX tensor element type.
-    For example, `from_python_type_to_onnx_tensor_element_type(float)` returns
-    `onnx.TensorProto.FLOAT`.
-
-    Args:
-      type (type): The Python type to convert.
-
-    Returns:
-      int: The corresponding ONNX tensor element type.
-
-    """
-    _PYTHON_TYPE_TO_ONNX_TENSOR_ELEMENT_TYPE = {
-        float: onnx.TensorProto.FLOAT,  # type: ignore[attr-defined]
-        int: onnx.TensorProto.INT64,  # type: ignore[attr-defined]
-        bool: onnx.TensorProto.BOOL,  # type: ignore[attr-defined]
-    }
-    return _PYTHON_TYPE_TO_ONNX_TENSOR_ELEMENT_TYPE.get(type)
-
-
 def is_torch_symbolic_type(value: Any) -> bool:
     return isinstance(value, (torch.SymBool, torch.SymInt, torch.SymFloat))
 
 
-def from_torch_dtype_to_abbr(dtype: Optional[torch.dtype]) -> str:
+def from_torch_dtype_to_abbr(dtype: torch.dtype | None) -> str:
     if dtype is None:
         return ""
     return _TORCH_DTYPE_TO_ABBREVIATION.get(dtype, "")
 
 
-def from_scalar_type_to_torch_dtype(scalar_type: type) -> Optional[torch.dtype]:
+def from_scalar_type_to_torch_dtype(scalar_type: type) -> torch.dtype | None:
     return _SCALAR_TYPE_TO_TORCH_DTYPE.get(scalar_type)
 
 
 # NOTE: this is a mapping from torch dtype to a set of compatible onnx types
 # It's used in dispatcher to find the best match overload for the input dtypes
-_TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS: Dict[
-    Union[torch.dtype, type], Set[str]
-] = {
+_TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS: dict[torch.dtype | type, set[str]] = {
     torch.bfloat16: {"tensor(bfloat16)"},
     torch.bool: {"tensor(bool)"},
     torch.float64: {"tensor(double)"},
@@ -144,7 +110,7 @@ _TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS: Dict[
     torch.complex128: {"tensor(double)"},
 }
 
-_OPTIONAL_ONNX_DTYPE_STR: Set[str] = {
+_OPTIONAL_ONNX_DTYPE_STR: set[str] = {
     f"optional({value})"
     for value_set in _TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS.values()
     for value in value_set
@@ -157,7 +123,7 @@ _PYTHON_TYPE_TO_TORCH_DTYPE = {
     complex: torch.complex64,
 }
 
-_COMPLEX_TO_FLOAT: Dict[torch.dtype, torch.dtype] = {
+_COMPLEX_TO_FLOAT: dict[torch.dtype, torch.dtype] = {
     torch.complex32: torch.float16,
     torch.complex64: torch.float32,
     torch.complex128: torch.float64,  # NOTE: ORT doesn't support torch.float64
@@ -169,9 +135,9 @@ _SYM_TYPE_TO_TORCH_DTYPE = {
     torch.SymBool: torch.bool,
 }
 
-_SCALAR_TYPE_TO_TORCH_DTYPE: Dict[Type, torch.dtype] = {
+_SCALAR_TYPE_TO_TORCH_DTYPE: dict[type, torch.dtype] = {
     **_PYTHON_TYPE_TO_TORCH_DTYPE,
-    **_SYM_TYPE_TO_TORCH_DTYPE,
+    **_SYM_TYPE_TO_TORCH_DTYPE,  # type: ignore[dict-item]
 }
 
 _TORCH_DTYPE_TO_ABBREVIATION = {
@@ -194,37 +160,6 @@ _TORCH_DTYPE_TO_ABBREVIATION = {
     torch.uint8: "u8",
 }
 
-_TORCH_DTYPE_TO_NUMPY_DTYPE = {
-    torch.float16: numpy.float16,
-    torch.float32: numpy.float32,
-    torch.float64: numpy.float64,
-    torch.uint8: numpy.uint8,
-    torch.int8: numpy.int8,
-    torch.int16: numpy.int16,
-    torch.int32: numpy.int32,
-    torch.int64: numpy.longlong,
-    torch.bool: numpy.bool_,
-}
-
-_ONNX_TENSOR_ELEMENT_TYPE_TO_TORCH_DTYPE = {
-    onnx.TensorProto.FLOAT: torch.float32,  # type: ignore[attr-defined]
-    onnx.TensorProto.FLOAT16: torch.float16,  # type: ignore[attr-defined]
-    onnx.TensorProto.FLOAT8E5M2: torch.float8_e5m2,  # type: ignore[attr-defined]
-    onnx.TensorProto.FLOAT8E5M2FNUZ: torch.float8_e5m2fnuz,  # type: ignore[attr-defined]
-    onnx.TensorProto.FLOAT8E4M3FN: torch.float8_e4m3fn,  # type: ignore[attr-defined]
-    onnx.TensorProto.FLOAT8E4M3FNUZ: torch.float8_e4m3fnuz,  # type: ignore[attr-defined]
-    onnx.TensorProto.DOUBLE: torch.float64,  # type: ignore[attr-defined]
-    onnx.TensorProto.BOOL: torch.bool,  # type: ignore[attr-defined]
-    onnx.TensorProto.UINT8: torch.uint8,  # type: ignore[attr-defined]
-    onnx.TensorProto.INT8: torch.int8,  # type: ignore[attr-defined]
-    onnx.TensorProto.INT16: torch.int16,  # type: ignore[attr-defined]
-    onnx.TensorProto.INT32: torch.int32,  # type: ignore[attr-defined]
-    onnx.TensorProto.INT64: torch.int64,  # type: ignore[attr-defined]
-}
-
-_TORCH_DTYPE_TO_ONNX_TENSOR_ELEMENT_TYPE = {
-    value: key for key, value in _ONNX_TENSOR_ELEMENT_TYPE_TO_TORCH_DTYPE.items()
-}
 
 SYM_VALUE_TYPE = Union[torch.SymInt, torch.SymFloat, torch.SymBool]
 META_VALUE_TYPE = Union[fake_tensor.FakeTensor, SYM_VALUE_TYPE, int, float, bool]
@@ -241,12 +176,15 @@ BaseArgumentTypes = Union[
     torch.memory_format,
     torch.layout,
     torch._ops.OpOverload,
+    torch.SymInt,
+    torch.SymFloat,
+    torch.SymBool,
 ]
 Argument = Optional[
     Union[
-        Tuple[Any, ...],  # actually Argument, but mypy can't represent recursive types
-        List[Any],  # actually Argument
-        Dict[str, Any],  # actually Argument
+        tuple["Argument", ...],
+        Sequence["Argument"],
+        Mapping[str, "Argument"],
         slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
         range,
         "torch.fx.Node",

@@ -9,14 +9,14 @@
 #include <ATen/core/function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/env.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 class JitLoggingConfig {
  public:
@@ -32,11 +32,12 @@ class JitLoggingConfig {
   std::unordered_map<std::string, size_t> files_to_levels;
   std::ostream* out;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  JitLoggingConfig() {
-    const char* jit_log_level = std::getenv("PYTORCH_JIT_LOG_LEVEL");
-    logging_levels.assign(jit_log_level == nullptr ? "" : jit_log_level);
-    out = &std::cerr;
+  JitLoggingConfig() : out(&std::cerr) {
+    const auto jit_log_level = c10::utils::get_env("PYTORCH_JIT_LOG_LEVEL");
+    if (jit_log_level.has_value()) {
+      logging_levels = jit_log_level.value();
+    }
+
     parse();
   }
   void parse();
@@ -146,7 +147,7 @@ std::string jit_log_prefix(
   std::stringstream out_ss;
   std::string line;
   while (std::getline(in_ss, line)) {
-    out_ss << prefix << line << std::endl;
+    out_ss << prefix << line << '\n';
   }
 
   return out_ss.str();
@@ -185,5 +186,4 @@ std::ostream& operator<<(std::ostream& out, JitLoggingLevels level) {
   return out;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

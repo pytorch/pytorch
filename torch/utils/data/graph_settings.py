@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import inspect
 import warnings
-from typing import Any, List, Optional, Set
+from typing import Any, Optional
 from typing_extensions import deprecated
 
 import torch
@@ -21,14 +21,14 @@ __all__ = [
 ]
 
 
-def get_all_graph_pipes(graph: DataPipeGraph) -> List[DataPipe]:
+def get_all_graph_pipes(graph: DataPipeGraph) -> list[DataPipe]:
     return _get_all_graph_pipes_helper(graph, set())
 
 
 def _get_all_graph_pipes_helper(
-    graph: DataPipeGraph, id_cache: Set[int]
-) -> List[DataPipe]:
-    results: List[DataPipe] = []
+    graph: DataPipeGraph, id_cache: set[int]
+) -> list[DataPipe]:
+    results: list[DataPipe] = []
     for dp_id, (datapipe, sub_graph) in graph.items():
         if dp_id in id_cache:
             continue
@@ -39,13 +39,10 @@ def _get_all_graph_pipes_helper(
 
 
 def _is_sharding_datapipe(datapipe: DataPipe) -> bool:
-    if isinstance(datapipe, _ShardingIterDataPipe):
-        return True
-    if hasattr(datapipe, "apply_sharding") and inspect.ismethod(
-        datapipe.apply_sharding
-    ):
-        return True
-    return False
+    return isinstance(datapipe, _ShardingIterDataPipe) or (
+        hasattr(datapipe, "apply_sharding")
+        and inspect.ismethod(datapipe.apply_sharding)
+    )
 
 
 def apply_sharding(
@@ -89,13 +86,12 @@ def apply_sharding(
 
 
 def _is_shuffle_datapipe(datapipe: DataPipe) -> bool:
-    if not hasattr(datapipe, "set_shuffle") or not hasattr(datapipe, "set_seed"):
-        return False
-    if not inspect.ismethod(datapipe.set_shuffle) or not inspect.ismethod(
-        datapipe.set_seed
-    ):
-        return False
-    return True
+    return (
+        hasattr(datapipe, "set_shuffle")
+        and hasattr(datapipe, "set_seed")
+        and inspect.ismethod(datapipe.set_shuffle)
+        and inspect.ismethod(datapipe.set_seed)
+    )
 
 
 def apply_shuffle_settings(
@@ -125,7 +121,7 @@ def apply_shuffle_settings(
         datapipe = datapipe.shuffle()
         shufflers = [
             datapipe,
-        ]  # type: ignore[list-item]
+        ]
 
     for shuffler in shufflers:
         shuffler.set_shuffle(shuffle)
@@ -143,9 +139,7 @@ def apply_shuffle_seed(datapipe: DataPipe, rng: Any) -> DataPipe:
 
 
 def _is_random_datapipe(datapipe: DataPipe) -> bool:
-    if hasattr(datapipe, "set_seed") and inspect.ismethod(datapipe.set_seed):
-        return True
-    return False
+    return hasattr(datapipe, "set_seed") and inspect.ismethod(datapipe.set_seed)
 
 
 def apply_random_seed(datapipe: DataPipe, rng: torch.Generator) -> DataPipe:

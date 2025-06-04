@@ -2,29 +2,46 @@
 
 import unittest
 from collections import OrderedDict
-from typing import Dict, List, Tuple, Union
+from typing import Any, Optional
 
 import torch
-
 import torch.utils._pytree as pytree
-
 from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
 from torch.export import ExportedProgram
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_quantized import override_quantized_engine
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, xfailIfS390X
+from torch.testing._internal.torchbind_impls import (
+    _empty_tensor_queue,
+    init_torchbind_implementations,
+)
+
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 
 class TestConverter(TestCase):
+    def setUp(self):
+        init_torchbind_implementations()
+
+        self.torch_bind_ops = [
+            torch.ops._TorchScriptTesting.queue_pop,
+            torch.ops._TorchScriptTesting.queue_push,
+            torch.ops._TorchScriptTesting.queue_size,
+        ]
+
+    def tearDown(self):
+        return
+
     def _check_equal_ts_ep_converter(
         self,
         M,
-        inp,
-        option: Union[List[str]] = None,
+        tracing_inputs,
+        option: Optional[list[str]] = None,
         check_persistent=False,
         lifted_tensor_constants=None,
-    ) -> ExportedProgram:
+        runtime_inputs: Optional[list[Any]] = None,
+    ) -> list[ExportedProgram]:
         # By default, it tests both jit.trace and jit.script.
         if option is None:
             option = ["trace", "script"]
@@ -48,39 +65,44 @@ class TestConverter(TestCase):
                     eager_model = M
             elif opt == "trace":
                 if check_persistent:
-                    original_ts_model = torch.jit.trace(M(), inp)
-                    ts_model = torch.jit.trace(M(), inp)
+                    original_ts_model = torch.jit.trace(M(), tracing_inputs)
+                    ts_model = torch.jit.trace(M(), tracing_inputs)
                     eager_model = M()
                 else:
-                    original_ts_model = torch.jit.trace(M, inp)
-                    ts_model = torch.jit.trace(M, inp)
+                    original_ts_model = torch.jit.trace(M, tracing_inputs)
+                    ts_model = torch.jit.trace(M, tracing_inputs)
                     eager_model = M
             else:
                 raise RuntimeError(f"Unrecognized mode for torch.jit: {opt}")
 
-            ep = TS2EPConverter(ts_model, inp).convert()
+            converter = TS2EPConverter(ts_model, tracing_inputs)
+            ep = converter.convert()
             ep_list.append(ep)
 
-            for _ in range(num_iterations):
-                orig_out, _ = pytree.tree_flatten(original_ts_model(*inp))
-                ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
+            if runtime_inputs is None:
+                runtime_inputs = []
 
-                # Check module.
-                if isinstance(eager_model, torch.nn.Module):
-                    expected_state_dict = OrderedDict()
-                    expected_state_dict.update(ts_model.state_dict())
-                    if lifted_tensor_constants:
-                        expected_state_dict.update(lifted_tensor_constants)
-                    self.assertEqual(
-                        ep.state_dict.keys(),
-                        expected_state_dict.keys(),
-                    )
+            for inp in [tracing_inputs] + runtime_inputs:
+                for _ in range(num_iterations):
+                    orig_out, _ = pytree.tree_flatten(original_ts_model(*inp))
+                    ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
 
-                # Check results
-                self._check_tensor_list_equal(ep_out, orig_out)
+                    # Check module.
+                    if isinstance(eager_model, torch.nn.Module):
+                        expected_state_dict = OrderedDict()
+                        expected_state_dict.update(ts_model.state_dict())
+                        if lifted_tensor_constants:
+                            expected_state_dict.update(lifted_tensor_constants)
+                        self.assertEqual(
+                            ep.state_dict.keys(),
+                            expected_state_dict.keys(),
+                        )
+
+                    # Check results
+                    self._check_tensor_list_equal(ep_out, orig_out)
         return ep_list
 
-    def _check_tensor_list_equal(self, xs: List[torch.Tensor], ys: List[torch.Tensor]):
+    def _check_tensor_list_equal(self, xs: list[torch.Tensor], ys: list[torch.Tensor]):
         self.assertEqual(len(xs), len(ys))
         for x, y in zip(xs, ys):
             if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
@@ -102,8 +124,12 @@ class TestConverter(TestCase):
                 return x, y
 
         inp = (torch.ones(1, 3), torch.ones(1, 3))
-        self._check_equal_ts_ep_converter(MSingle(), inp)
-        self._check_equal_ts_ep_converter(MMulti(), inp)
+        runtime_inps = [
+            (torch.ones(1, 4), torch.ones(1, 4)),
+            (torch.ones(1, 5), torch.ones(1, 5)),
+        ]
+        self._check_equal_ts_ep_converter(MSingle(), inp, runtime_inputs=runtime_inps)
+        self._check_equal_ts_ep_converter(MMulti(), inp, runtime_inputs=runtime_inps)
 
     def test_ts2ep_converter_container_output(self):
         # Output is a List.
@@ -128,11 +154,20 @@ class TestConverter(TestCase):
                 return {"data": {"mul": a, "add": b}}
 
         inp = (torch.tensor(4), torch.tensor(4))
-
+        runtime_inputs = [
+            (torch.tensor(5), torch.tensor(5)),
+            (torch.tensor(1), torch.tensor(1)),
+        ]
         # Traced function must use immutable structure as output.
-        self._check_equal_ts_ep_converter(MOutputList(), inp, ["script"])
-        self._check_equal_ts_ep_converter(MOutputTuple(), inp)
-        self._check_equal_ts_ep_converter(MOutputDict(), inp, ["script"])
+        self._check_equal_ts_ep_converter(
+            MOutputList(), inp, ["script"], runtime_inputs=runtime_inputs
+        )
+        self._check_equal_ts_ep_converter(
+            MOutputTuple(), inp, runtime_inputs=runtime_inputs
+        )
+        self._check_equal_ts_ep_converter(
+            MOutputDict(), inp, ["script"], runtime_inputs=runtime_inputs
+        )
 
     def test_aten_dim(self):
         class Module(torch.nn.Module):
@@ -141,7 +176,9 @@ class TestConverter(TestCase):
                 return torch.ones(num_dim)
 
         inp = (torch.ones(1, 3),)
-        self._check_equal_ts_ep_converter(Module(), inp)
+        self._check_equal_ts_ep_converter(
+            Module(), inp, runtime_inputs=[(torch.ones(1, 5),)]
+        )
 
     def test_aten_len(self):
         class Module(torch.nn.Module):
@@ -154,7 +191,7 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(Module(), inp)
 
         class Module(torch.nn.Module):
-            def forward(self, x: List[int]):
+            def forward(self, x: list[int]):
                 length = len(x)
                 return torch.ones(length)
 
@@ -163,7 +200,7 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
         class Module(torch.nn.Module):
-            def forward(self, x: Dict[int, str]):
+            def forward(self, x: dict[int, str]):
                 length = len(x)
                 return torch.ones(length)
 
@@ -172,7 +209,7 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
         class Module(torch.nn.Module):
-            def forward(self, x: Dict[bool, str]):
+            def forward(self, x: dict[bool, str]):
                 length = len(x)
                 return torch.ones(length)
 
@@ -181,7 +218,7 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
         class Module(torch.nn.Module):
-            def forward(self, x: Dict[float, str]):
+            def forward(self, x: dict[float, str]):
                 length = len(x)
                 return torch.ones(length)
 
@@ -190,7 +227,7 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
         class Module(torch.nn.Module):
-            def forward(self, x: Dict[torch.Tensor, str]):
+            def forward(self, x: dict[torch.Tensor, str]):
                 length = len(x)
                 return torch.ones(length)
 
@@ -204,6 +241,36 @@ class TestConverter(TestCase):
         # self._check_equal_ts_ep_converter(Module(), inp)
         # inp = ({"a": 1, "b": 2},)
         # self._check_equal_ts_ep_converter(Module(), inp)
+
+    def test_aten_add_t(self):
+        # python list append
+        class Module(torch.nn.Module):
+            def forward(self, x: list[torch.Tensor]):
+                out = []
+                out = out + x
+                a = torch.cat(out)
+                out = out + x
+                b = torch.cat(out)
+                return a, b
+
+        inp = ([torch.ones(2, 3), torch.ones(2, 3)],)
+        runtime_inputs = [
+            ([torch.ones(4, 6), torch.ones(8, 6)],),
+            ([torch.ones(4, 4), torch.ones(4, 4)],),
+        ]
+        self._check_equal_ts_ep_converter(
+            Module(), inp, ["script"], runtime_inputs=runtime_inputs
+        )
+
+    def test_aten_to_dtype_with_mutating_storage(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: torch.Tensor):
+                x = x.to(y.dtype)
+                torch.ops.aten.index_put_(x, [torch.tensor([0])], y)
+                return x
+
+        inp = (torch.ones(2, 3), torch.tensor([0, 0, 0]))
+        self._check_equal_ts_ep_converter(Module(), inp)
 
     def test_prim_min(self):
         class Module(torch.nn.Module):
@@ -241,6 +308,42 @@ class TestConverter(TestCase):
         inp = (torch.randn(10, 2), torch.randn(5))
         self._check_equal_ts_ep_converter(Module(), inp)
 
+    def test_prim_max(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                x_len = len(x)
+                y_len = len(y)
+
+                # prim::max.int
+                len_int = max(x_len, y_len)
+
+                # prim::max.float
+                len_float = int(max(x_len * 2.0, y_len * 2.0))
+
+                # prim::max.self_int
+                len_self_int = max([x_len, y_len])
+
+                # prim::max.self_float
+                len_self_float = int(max([x_len * 2.0, y_len * 2.0]))
+
+                # prim::max.float_int
+                len_float_int = int(max(x_len * 2.0, y_len))
+
+                # prim::max.int_float
+                len_int_float = int(max(x_len, y_len * 2.0))
+
+                return torch.ones(
+                    len_int
+                    + len_float
+                    + len_self_int
+                    + len_self_float
+                    + len_float_int
+                    + len_int_float
+                )
+
+        inp = (torch.randn(10, 2), torch.randn(5))
+        self._check_equal_ts_ep_converter(Module(), inp)
+
     def test_aten___getitem___list(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -248,7 +351,8 @@ class TestConverter(TestCase):
                 return y[0]
 
         inp = (torch.rand((3, 2)),)
-        self._check_equal_ts_ep_converter(Module(), inp)
+        runtime_inps = [(torch.rand((3, 8)),)]
+        self._check_equal_ts_ep_converter(Module(), inp, runtime_inputs=runtime_inps)
 
     def test_aten___getitem___dict(self):
         class Module(torch.nn.Module):
@@ -320,7 +424,7 @@ class TestConverter(TestCase):
                 M()(torch.tensor(False), torch.tensor(4)),
             )
 
-    def test_convert_if_multiple_out(self):
+    def test_convert_if_tuple_out(self):
         class M(torch.nn.Module):
             def true_fn(self, y, z):
                 return (z * z, z + z)
@@ -337,6 +441,35 @@ class TestConverter(TestCase):
                     res = self.false_fn(y, z)
 
                 return res[0] + res[1]
+
+        inp = (torch.tensor(True), torch.tensor(4))
+        ep_list = self._check_equal_ts_ep_converter(M(), inp)
+
+        for ep in ep_list[1:]:
+            torch.testing.assert_close(
+                ep.module()(torch.tensor(False), torch.tensor(4)),
+                M()(torch.tensor(False), torch.tensor(4)),
+            )
+
+    def test_convert_if_multiple_out(self):
+        class M(torch.nn.Module):
+            def true_fn(self, y, z):
+                return z * z
+
+            def false_fn(self, y, z):
+                return y * y * y
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor):
+                z = y * y
+
+                if x:
+                    res1 = self.true_fn(y, z)
+                    res2 = y
+                else:
+                    res1 = z
+                    res2 = self.false_fn(y, z)
+
+                return res1 + res2
 
         inp = (torch.tensor(True), torch.tensor(4))
         ep_list = self._check_equal_ts_ep_converter(M(), inp)
@@ -370,19 +503,22 @@ class TestConverter(TestCase):
         class Module(torch.nn.Module):
             def forward(
                 self, x: torch.Tensor, y: torch.Tensor
-            ) -> Tuple[bool, torch.Tensor]:
+            ) -> tuple[bool, torch.Tensor]:
                 z = x + 1
                 return x is y, z
 
         # Traced function must return output that has tensors.
         inp = (torch.randn(10, 10), torch.rand(10, 10))
-        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
+        runtime_inps = [(torch.randn(20, 2), torch.rand(20, 2))]
+        self._check_equal_ts_ep_converter(
+            Module(), inp, ["script"], runtime_inputs=runtime_inps
+        )
 
     def test_aten___isnot__(self):
         class Module(torch.nn.Module):
             def forward(
                 self, x: torch.Tensor, y: torch.Tensor
-            ) -> Tuple[bool, torch.Tensor]:
+            ) -> tuple[bool, torch.Tensor]:
                 z = x + 1
                 return x is not y, z
 
@@ -394,7 +530,7 @@ class TestConverter(TestCase):
         class Module(torch.nn.Module):
             def forward(
                 self, x: torch.Tensor, y: torch.Tensor
-            ) -> Tuple[bool, torch.Tensor]:
+            ) -> tuple[bool, torch.Tensor]:
                 z = x + 1
                 return not (x is not y), z
 
@@ -409,7 +545,7 @@ class TestConverter(TestCase):
                 return x + y
 
         class MUnpackTuple(torch.nn.Module):
-            def forward(self, x_tuple: Tuple[torch.Tensor, torch.Tensor]):
+            def forward(self, x_tuple: tuple[torch.Tensor, torch.Tensor]):
                 x, y = x_tuple
                 x = x.cos()
                 return x + y
@@ -418,6 +554,62 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(MUnpackList(), inp)
         inp = ((torch.zeros(1, 4), torch.ones(1, 4)),)
         self._check_equal_ts_ep_converter(MUnpackTuple(), inp)
+
+    @unittest.skipIf(
+        IS_WINDOWS,
+        "torch.cond doesn't go through torch.compile on windows"
+        "causing output not normalized as list",
+    )
+    def test_convert_retrace_nested_scripted_modules(self):
+        class Wrapper(torch.nn.Module):
+            def __init__(self, mod) -> None:
+                super().__init__()
+                self.mod = mod
+
+            def forward(self, x, y):
+                return self.mod(x, y)
+
+        class LinearM(torch.nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(dim, dim)
+
+            def forward(self, x, y):
+                return self.linear(y)
+
+        class M(torch.nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                m = LinearM(dim)
+                m = torch.jit.script(m)
+                self.mod1 = m
+                self.mod2 = Wrapper(m)
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor):
+                if x:
+                    return -self.mod1(x, y) - self.mod2(x, y)
+                else:
+                    return -self.mod1(x, y) + self.mod2(x, y)
+
+        class NestedM(torch.nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                m = M(dim)
+                m = torch.jit.script(m)
+                self.mod1 = m
+                self.mod2 = Wrapper(m)
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor):
+                if x:
+                    return self.mod1(x, y) + self.mod2(x, y)
+                else:
+                    return self.mod1(x, y) - self.mod2(x, y)
+
+        inp = (
+            torch.tensor(True),
+            torch.randn([3, 3]),
+        )
+        self._check_equal_ts_ep_converter(NestedM(3), inp)
 
     def test_convert_nn_module_with_nested_param(self):
         class M(torch.nn.Module):
@@ -449,7 +641,6 @@ class TestConverter(TestCase):
         inp = (torch.ones(3),)
         orig_m = NestedM(3)
         self._check_equal_ts_ep_converter(orig_m, inp)
-
         orig_m = SuperNestedM(3)
         self._check_equal_ts_ep_converter(orig_m, inp)
 
@@ -457,7 +648,7 @@ class TestConverter(TestCase):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("w", torch.randn(1))
+                self.w = torch.nn.Buffer(torch.randn(1))
 
             def forward(self, x: torch.Tensor):
                 return self.w + x
@@ -466,7 +657,7 @@ class TestConverter(TestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self.m = M()
-                self.register_buffer("w", torch.randn(1))
+                self.w = torch.nn.Buffer(torch.randn(1))
 
             def forward(self, x: torch.Tensor):
                 return self.w + self.m(x)
@@ -475,7 +666,7 @@ class TestConverter(TestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self.m = NestedM()
-                self.register_buffer("w", torch.randn(1))
+                self.w = torch.nn.Buffer(torch.randn(1))
 
             def forward(self, x: torch.Tensor):
                 return self.w + self.m(x)
@@ -490,7 +681,7 @@ class TestConverter(TestCase):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("w", torch.randn(1))
+                self.w = torch.nn.Buffer(torch.randn(1))
                 self.count = 1
 
             def forward(self, x: torch.Tensor):
@@ -501,7 +692,7 @@ class TestConverter(TestCase):
                 super().__init__()
                 self.m1 = M()
                 self.m2 = M()
-                self.register_buffer("w", torch.randn(1))
+                self.w = torch.nn.Buffer(torch.randn(1))
 
             def forward(self, x: torch.Tensor):
                 if torch.sum(x) > 1:
@@ -516,7 +707,7 @@ class TestConverter(TestCase):
                 super().__init__()
                 self.m1 = NestedM()
                 self.m2 = NestedM()
-                self.register_buffer("w", torch.randn(1))
+                self.w = torch.nn.Buffer(torch.randn(1))
 
             def forward(self, x: torch.Tensor):
                 if torch.max(x) > 1:
@@ -527,8 +718,7 @@ class TestConverter(TestCase):
         # Super nested module testing.
         inp = (torch.ones(1),)
         orig_m = SuperNestedM()
-        # TODO: fix trace: state_dict is not equal.
-        ep_list = self._check_equal_ts_ep_converter(orig_m, inp, ["script"])
+        ep_list = self._check_equal_ts_ep_converter(orig_m, inp)
 
         t = inp[0]
         t -= 1
@@ -538,6 +728,11 @@ class TestConverter(TestCase):
                 orig_m(*inp),
             )
 
+    @unittest.skipIf(
+        IS_WINDOWS,
+        "torch.cond doesn't go through torch.compile on windows"
+        "causing output not normalized as list",
+    )
     def test_convert_nn_module_with_nested_if_and_param(self):
         class M(torch.nn.Module):
             def __init__(self, dim: int) -> None:
@@ -606,12 +801,12 @@ class TestConverter(TestCase):
         # Nested module testing.
         inp = (torch.ones(3),)
         orig_m = NestedM(3)
-        # TODO: fix trace: state_dict is not equal.
-        ep_list = self._check_equal_ts_ep_converter(orig_m, inp, ["script"])
+        ep_list = self._check_equal_ts_ep_converter(orig_m, inp)
 
         t = inp[0]
         t -= 0.8
-        for ep in ep_list:
+        # Skip jit.traced because it specializes on one path.
+        for ep in ep_list[1:]:
             torch.testing.assert_close(
                 ep.module()(*inp),
                 orig_m(*inp),
@@ -620,28 +815,56 @@ class TestConverter(TestCase):
         # Super nested module testing.
         inp = (torch.ones(3),)
         orig_m = SuperNestedM1(3)
-        # TODO: fix trace: state_dict is not equal.
-        ep_list = self._check_equal_ts_ep_converter(orig_m, inp, ["script"])
+        ep_list = self._check_equal_ts_ep_converter(orig_m, inp)
 
         t = inp[0]
         t -= 0.8
-        for ep in ep_list:
+        # Skip jit.traced because it specializes on one path.
+        for ep in ep_list[1:]:
             torch.testing.assert_close(
                 ep.module()(*inp),
                 orig_m(*inp),
             )
 
-        # # Super nested module testing.
-        # inp = (torch.ones(3),)
-        # orig_m = SuperNestedM2(3)
-        # ep = self._check_equal_ts_ep_converter(orig_m, inp)
+        # Super nested module testing.
+        inp = (torch.ones(3),)
+        orig_m = SuperNestedM2(3)
+        ep_list = self._check_equal_ts_ep_converter(orig_m, inp)
 
-        # t = inp[0]
-        # t -= 0.8
-        # torch.testing.assert_close(
-        #     ep.module()(*inp),
-        #     orig_m(*inp),
-        # )
+        t = inp[0]
+        t -= 0.8
+        # Skip jit.traced because it specializes on one path.
+        for ep in ep_list[1:]:
+            torch.testing.assert_close(
+                ep.module()(*inp),
+                orig_m(*inp),
+            )
+
+    def test_convert_if_duplicate_attr_names(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.w = 1
+                self.h = 2
+
+            def forward(self, x: torch.Tensor, y: int):
+                self.w = self.w * 10
+                self.h = self.h * 20
+
+                if y > 10:
+                    res = self.w + x
+                else:
+                    res = self.h + x
+
+                if y < 10:
+                    res = self.w + res
+                else:
+                    res = self.h + res
+
+                return res
+
+        inp = (torch.ones(3), 5)
+        self._check_equal_ts_ep_converter(M(), inp, option=["script"])
 
     def test_ts2ep_converter_contains(self):
         class MIn(torch.nn.Module):
@@ -653,7 +876,7 @@ class TestConverter(TestCase):
                 return x.dtype in [torch.int8]
 
         class MTensorIn(torch.nn.Module):
-            def forward(self, x: torch.Tensor, x_dict: Dict[torch.Tensor, str]):
+            def forward(self, x: torch.Tensor, x_dict: dict[torch.Tensor, str]):
                 return x in x_dict
 
         # Traced function must return output that has tensors.
@@ -798,16 +1021,83 @@ class TestConverter(TestCase):
         )
         self._check_equal_ts_ep_converter(func6, inp)
 
+        # TODO: Additional check once dynamic shape is supported.
+        # for ep in ep_list:
+        #     self.assertEqual(
+        #         ep.module()(
+        #             torch.randn([1, 1, 1]).to(torch.int8),
+        #             torch.randn([1, 1, 1]).to(torch.int32),
+        #             torch.randn([1, 1, 1]).to(torch.float32),
+        #             torch.randn([1, 1, 1]).to(torch.float64),
+        #         )[0], 1
+        #     )
+
+    def test_aten_tensor_dtype_int(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = torch.tensor(1, dtype=torch.int32)
+                return y + x
+
+        ep_list = self._check_equal_ts_ep_converter(M(), (torch.tensor(1),))
+        for ep in ep_list:
+            self.assertEqual(len(ep.constants), 1)
+
+    def test_aten_tensor_prim_dtype(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = torch.tensor(1, dtype=x.dtype)
+                return y + x
+
+        ep_list = self._check_equal_ts_ep_converter(M(), (torch.tensor(1),))
+        for ep in ep_list:
+            self.assertEqual(len(ep.constants), 1)
+
+    def test_aten_tensor_dynamic(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                s = x.shape[0]
+                y = torch.tensor(s)
+                return y
+
+        ep_list = self._check_equal_ts_ep_converter(M(), (torch.ones(3),))
+        for ep in ep_list:
+            self.assertEqual(len(ep.constants), 0)
+
+        # TODO: Additional check once dynamic shape is supported.
+        # for ep in ep_list:
+        #     torch.testing.assert_close(
+        #         ep.module()(torch.ones(4)),
+        #         M()(torch.ones(4)),
+        #     )
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                s = x.shape[0]
+                y = torch.tensor([s, s * 2, 1])
+                return y
+
+        ep_list = self._check_equal_ts_ep_converter(M(), (torch.ones(3),))
+        # Trace directly inline a tensor constant.
+        for ep in ep_list[1:]:
+            self.assertEqual(len(ep.constants), 0)
+
+        # TODO: Additional check once dynamic shape is supported.
+        # for ep in ep_list:
+        #     torch.testing.assert_close(
+        #         ep.module()(torch.ones(4)),
+        #         M()(torch.ones(4)),
+        #     )
+
     def test_prim_tolist(self):
         class Module(torch.nn.Module):
-            def forward(self, x: torch.Tensor) -> List[int]:
+            def forward(self, x: torch.Tensor) -> list[int]:
                 return x.tolist()
 
         inp = (torch.tensor([1, 2, 3]),)
         self._check_equal_ts_ep_converter(Module(), inp, ["script"])
 
         class Module(torch.nn.Module):
-            def forward(self, x: torch.Tensor) -> List[List[int]]:
+            def forward(self, x: torch.Tensor) -> list[list[int]]:
                 return x.tolist()
 
         inp = (torch.tensor([[1, 2, 3], [4, 5, 6]]),)
@@ -817,7 +1107,7 @@ class TestConverter(TestCase):
         # Since self.data is only read but not written, it is lifted as
         # constant tensors.
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.data = torch.randn(3, 2)
 
@@ -825,7 +1115,7 @@ class TestConverter(TestCase):
                 return x + self.data
 
         class Goo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.data = torch.randn(3, 2)
                 self.foo = Foo()
@@ -839,9 +1129,9 @@ class TestConverter(TestCase):
 
     def test_prim_SetAttr(self):
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("data", torch.ones(3, 2))
+                self.data = torch.nn.Buffer(torch.ones(3, 2))
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 self.data = self.data + x
@@ -853,9 +1143,9 @@ class TestConverter(TestCase):
         )
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("data", torch.ones(3, 2))
+                self.data = torch.nn.Buffer(torch.ones(3, 2))
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 self.data = self.data + x
@@ -871,7 +1161,7 @@ class TestConverter(TestCase):
         # In converter, we change tensor constants that are assigned as a buffer automatically,
         # since it might be hard to manually register them as buffers.
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.data = torch.ones(3, 2)
 
@@ -889,7 +1179,7 @@ class TestConverter(TestCase):
         )
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.count = 0
 
@@ -922,7 +1212,7 @@ class TestConverter(TestCase):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("w2", torch.ones(1))
+                self.w2 = torch.nn.Buffer(torch.ones(1))
 
             def forward(self, x: torch.Tensor):
                 self.w2 += 1
@@ -930,6 +1220,272 @@ class TestConverter(TestCase):
 
         inp = (torch.ones(1),)
         self._check_equal_ts_ep_converter(M, inp, ["script"], check_persistent=True)
+
+    def test_raise_exception(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: int) -> torch.Tensor:
+                if y > 0:
+                    raise RuntimeError("test")
+                return x + y
+
+        # match non-strict export behavior that errors when the given input leads to
+        # RaiseException.
+        with self.assertRaisesRegex(torch.jit.Error, "builtins.RuntimeError"):
+            inp = (torch.randn(3, 2), 1)
+            self._check_equal_ts_ep_converter(Module(), inp, ["script"])
+
+        # Matching non-strict export behavior that only executes 1 if-branch according
+        # to the given input.
+        inp = (torch.randn(3, 2), 0)
+        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
+
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: int) -> torch.Tensor:
+                z = x
+                if y > 0:
+                    raise RuntimeError("test")
+                    # z = x
+                else:
+                    z = x + y
+                return x + y + z
+
+        # match non-strict export behavior that errors when the given input leads to
+        # RaiseException.
+        with self.assertRaisesRegex(torch.jit.Error, "builtins.RuntimeError"):
+            inp = (torch.randn(3, 2), 1)
+            self._check_equal_ts_ep_converter(Module(), inp, ["script"])
+
+        # Matching non-strict export behavior that only executes 1 if-branch according
+        # to the given input.
+        inp = (torch.randn(3, 2), 0)
+        self._check_equal_ts_ep_converter(Module(), inp, ["script"])
+
+    def test_context_manager(self):
+        class ContextManager:
+            def __init__(self) -> None:
+                self.count = 0
+                return
+
+            def __enter__(self):
+                self.count += 1
+                return
+
+            def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+                self.count -= 1
+                return
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                with ContextManager():
+                    res = x + y
+                return res
+
+        inp = (torch.ones(3, 3), torch.ones(3, 3))
+        self._check_equal_ts_ep_converter(M(), inp)
+
+    def test_hidden_input_name(self):
+        @torch.jit.script
+        def func1(x):
+            return x + 1
+
+        def func2(*args):
+            v = torch.cat(args, dim=1)
+            return v * v
+
+        inp = (torch.randn([1, 1]),)
+        self._check_equal_ts_ep_converter(func1, inp)
+
+        inp = (torch.ones(5, 5),)
+        # Cannot script again.
+        self._check_equal_ts_ep_converter(torch.ops.aten.relu, inp, ["trace"])
+
+        M = 2
+        Ns = [4, 2, 1]
+        empty = torch.tensor([], dtype=torch.double)
+        values = [empty] + [torch.randn(M, N) for N in Ns]
+        # Cannot script variable length inputs.
+        self._check_equal_ts_ep_converter(func2, tuple(values), ["trace"])
+
+    def test_ts2ep_multi_outputs_on_call_ops(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.pool = torch.nn.AdaptiveMaxPool2d((2, 2), return_indices=True)
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor):
+                return (
+                    torch.max(x, dim=0),
+                    torch.topk(x, 3),
+                    torch.sort(x, dim=0),
+                    self.pool(y),
+                )
+
+        inp = (torch.randn([4, 4]), torch.randn([1, 1, 10, 10]))
+        self._check_equal_ts_ep_converter(M(), inp)
+
+    def test_aten_append_t(self):
+        class M(torch.nn.Module):
+            def forward(self, x: list[torch.Tensor]):
+                out = []
+                out.append(x[0] + x[1])
+                out.append(x[0] - x[1])
+                out1 = torch.cat(out)
+                out.append(x[0] * x[1])
+                out2 = torch.cat(out)
+                return out, out1, out2
+
+        inp = ([torch.ones(2, 3), torch.ones(2, 3)],)
+        # Trace already unrolls the list.
+        self._check_equal_ts_ep_converter(M(), inp, ["script"])
+
+    def test_convert_script_object(self):
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tq = _empty_tensor_queue()
+
+            def forward(self, x: torch.Tensor):
+                self.tq.push(x)
+                torch.ops._TorchScriptTesting.queue_push(self.tq, x.cos())
+                return torch.ops._TorchScriptTesting.queue_pop(self.tq), self.tq.pop()
+
+        inp = (torch.randn(2, 3),)
+        self._check_equal_ts_ep_converter(M1(), inp, ["script"])
+
+    def test_ts2ep_with_loop(self):
+        def func1(x, x_list: list[torch.Tensor]):
+            a, b, c = x, x, x
+            for _ in range(1, 5, 2):
+                for k in range(5):
+                    a = a + a + k
+                    b = b + b - k
+                    x_list.append(x_list[k] + x_list[k + 1])
+                for k in range(5):
+                    b = b + b - k
+                    c = c + c * k
+                    x_list.append(x_list[k] + x_list[k + 1] - x_list[k + 2])
+            return x, x_list
+
+        def func2(x):  # noqa: F841
+            for i in range(x.size(0)):
+                x = x * x * i
+            return x
+
+        def func3(x):  # noqa: F841
+            while x.sum() < 10:
+                x += x.sin()
+            return x
+
+        inp = (
+            torch.tensor(1),
+            [torch.ones([2, 2]), torch.ones([2, 2]) * 2],
+        )
+        runtime_inps = [
+            (
+                torch.tensor(1),
+                [torch.ones([8, 8]), torch.ones([8, 8]) * 2],
+            )
+        ]
+        # Trace unrolls the loop.
+        self._check_equal_ts_ep_converter(
+            func1, inp, ["script"], runtime_inputs=runtime_inps
+        )
+
+        # TODO: (2/N)
+        # Trace unrolls the loop.
+        # self._check_equal_ts_ep_converter(func2, inp, ["script"])
+
+        # TODO: (3/N)
+        # Trace unrolls the loop.
+        # self._check_equal_ts_ep_converter(func3, inp, ["script"])
+
+    @unittest.skipIf(
+        IS_WINDOWS,
+        "Windows does not support qnnpack",
+    )
+    # qnnpack not supported on s390x
+    @xfailIfS390X
+    def test_ts2ep_convert_quantized_model(self):
+        class Standalone(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = torch.ao.quantization.QuantStub()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1)
+                self.conv2 = torch.nn.Conv2d(1, 1, 1)
+                self.relu = torch.nn.ReLU()
+                self.dequant = torch.ao.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv1(x)
+                x = self.conv2(x)
+                x = self.relu(x)
+                x = self.dequant(x)
+                return x
+
+            def fuse_model(self):
+                torch.ao.quantization.fuse_modules(
+                    self, [["conv2", "relu"]], inplace=True
+                )
+
+        with override_quantized_engine("qnnpack"):
+            model = Standalone()
+            model.qconfig = torch.ao.quantization.get_default_qconfig("qnnpack")
+            model.fuse_model()
+            torch.ao.quantization.prepare(model, inplace=True)
+            model(torch.randn(4, 1, 4, 4))
+            torch.ao.quantization.convert(model, inplace=True)
+
+            # Use customized checking here, because state_dict of quantization will be
+            # modified by the quantization pass.
+            inp = (torch.randn(4, 1, 4, 4),)
+            original_ts_model = torch.jit.script(model)
+            ts_model = torch.jit.script(model)
+            converter = TS2EPConverter(ts_model, inp)
+            ep = converter.convert()
+
+            orig_out, _ = pytree.tree_flatten(original_ts_model(*inp))
+            ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
+            self._check_tensor_list_equal(orig_out, ep_out)
+
+    # qnnpack not supported on s390x
+    @xfailIfS390X
+    def test_ts2ep_convert_quantized_model_with_opcontext(self):
+        class M(torch.nn.Module):
+            def __init__(self, linear_op):
+                super().__init__()
+                self.linear_op = linear_op
+
+            def forward(self, x):
+                x = torch.ops.prepacked.linear_clamp_run(x, self.linear_op)
+                return x
+
+        linear_op = torch.ops.prepacked.linear_clamp_prepack(
+            torch.randn(10, 10), torch.randn(10)
+        )
+        m = M(linear_op)
+        inp = (torch.randn(1, 10),)
+        self._check_equal_ts_ep_converter(m, inp, ["script"])
+
+    def test_ts2ep_convert_quantized_model_with_opcontext_and_constant(self):
+        class M(torch.nn.Module):
+            def __init__(self, linear_op):
+                super().__init__()
+                self.linear_op = linear_op
+
+            def forward(self, x):
+                x = torch.ops.prepacked.linear_clamp_run(
+                    x + torch.ones(1), self.linear_op
+                )
+                return x
+
+        linear_op = torch.ops.prepacked.linear_clamp_prepack(
+            torch.randn(10, 10), torch.randn(10)
+        )
+
+        m = M(linear_op)
+        inp = (torch.randn(1, 10),)
+        self._check_equal_ts_ep_converter(m, inp, ["script"])
 
 
 if __name__ == "__main__":

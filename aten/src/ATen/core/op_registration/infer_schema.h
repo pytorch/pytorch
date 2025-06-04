@@ -9,9 +9,7 @@
 #include <c10/util/Metaprogramming.h>
 
 namespace c10 {
-namespace detail {
-
-namespace infer_schema {
+namespace detail::infer_schema {
 
 /// The templated inference code creates `ArgumentDef` instead of `Argument`,
 /// because that can be constructed at compile time and has a much smaller
@@ -36,12 +34,12 @@ template <class... Types>
 constexpr int checkStaticTypes() {
  // Give nice error messages for some of the common error cases.
  // Use a LOUD ERROR MESSAGE SO USERS SEE THE STATIC_ASSERT
- static_assert(std::conjunction<
-     bool_t<!std::is_integral<Types>::value || std::is_same<Types, int8_t>::value || std::is_same<Types, int64_t>::value || std::is_same<Types, bool>::value>...
-   >::value, "INVALID TYPE: Only int8_t, int64_t and bool are supported as an integral argument type");
- static_assert(std::conjunction<
-     bool_t<!std::is_same<Types, float>::value>...
-   >::value, "INVALID TYPE: float is not supported as an argument type, use double instead");
+ static_assert(std::conjunction_v<
+     bool_t<!std::is_integral_v<Types> || std::is_same_v<Types, int8_t> || std::is_same_v<Types, int64_t> || std::is_same_v<Types, bool>>...
+   >, "INVALID TYPE: Only int8_t, int64_t and bool are supported as an integral argument type");
+ static_assert(std::conjunction_v<
+     bool_t<!std::is_same_v<Types, float>>...
+   >, "INVALID TYPE: float is not supported as an argument type, use double instead");
  return 0;
 }
 
@@ -87,7 +85,7 @@ struct createReturns<std::tuple<ReturnTypes...>, void> final {
 };
 
 template<class ReturnType>
-struct createReturns<ReturnType, std::enable_if_t<!std::is_same<void, ReturnType>::value && !guts::is_instantiation_of<std::tuple, ReturnType>::value>> final {
+struct createReturns<ReturnType, std::enable_if_t<!std::is_same_v<void, ReturnType> && !guts::is_instantiation_of<std::tuple, ReturnType>::value>> final {
   static constexpr std::array<ArgumentDef, 1> call() {
     return createReturns<std::tuple<ReturnType>>::call();
   }
@@ -142,7 +140,6 @@ FunctionSchema createFunctionSchemaFromTraitsSingleReturn(std::string&& name, st
  return make_function_schema(std::move(name), std::move(overload_name), arguments, returns);
 }
 
-}
 }
 
 template<class FuncType>

@@ -1,11 +1,15 @@
 # mypy: allow-untyped-defs
 import math
+from typing import Optional
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.multivariate_normal import _batch_mahalanobis, _batch_mv
 from torch.distributions.utils import _standard_normal, lazy_property
+from torch.types import _size
+
 
 __all__ = ["LowRankMultivariateNormal"]
 
@@ -58,7 +62,9 @@ class LowRankMultivariateNormal(Distribution):
     Example:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
-        >>> m = LowRankMultivariateNormal(torch.zeros(2), torch.tensor([[1.], [0.]]), torch.ones(2))
+        >>> m = LowRankMultivariateNormal(
+        ...     torch.zeros(2), torch.tensor([[1.0], [0.0]]), torch.ones(2)
+        ... )
         >>> m.sample()  # normally distributed with mean=`[0,0]`, cov_factor=`[[1],[0]]`, cov_diag=`[1,1]`
         tensor([-0.2102, -0.5429])
 
@@ -79,6 +85,7 @@ class LowRankMultivariateNormal(Distribution):
 
             capacitance = I + cov_factor.T @ inv(cov_diag) @ cov_factor
     """
+
     arg_constraints = {
         "loc": constraints.real_vector,
         "cov_factor": constraints.independent(constraints.real, 2),
@@ -87,7 +94,13 @@ class LowRankMultivariateNormal(Distribution):
     support = constraints.real_vector
     has_rsample = True
 
-    def __init__(self, loc, cov_factor, cov_diag, validate_args=None):
+    def __init__(
+        self,
+        loc: Tensor,
+        cov_factor: Tensor,
+        cov_diag: Tensor,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if loc.dim() < 1:
             raise ValueError("loc must be at least one-dimensional.")
         event_shape = loc.shape[-1:]
@@ -141,21 +154,21 @@ class LowRankMultivariateNormal(Distribution):
         return new
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.loc
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return self.loc
 
     @lazy_property
-    def variance(self):
+    def variance(self) -> Tensor:  # type: ignore[override]
         return (
             self._unbroadcasted_cov_factor.pow(2).sum(-1) + self._unbroadcasted_cov_diag
         ).expand(self._batch_shape + self._event_shape)
 
     @lazy_property
-    def scale_tril(self):
+    def scale_tril(self) -> Tensor:
         # The following identity is used to increase the numerically computation stability
         # for Cholesky decomposition (see http://www.gaussianprocess.org/gpml/, Section 3.4.3):
         #     W @ W.T + D = D1/2 @ (I + D-1/2 @ W @ W.T @ D-1/2) @ D1/2
@@ -172,7 +185,7 @@ class LowRankMultivariateNormal(Distribution):
         )
 
     @lazy_property
-    def covariance_matrix(self):
+    def covariance_matrix(self) -> Tensor:
         covariance_matrix = torch.matmul(
             self._unbroadcasted_cov_factor, self._unbroadcasted_cov_factor.mT
         ) + torch.diag_embed(self._unbroadcasted_cov_diag)
@@ -181,7 +194,7 @@ class LowRankMultivariateNormal(Distribution):
         )
 
     @lazy_property
-    def precision_matrix(self):
+    def precision_matrix(self) -> Tensor:
         # We use "Woodbury matrix identity" to take advantage of low rank form::
         #     inv(W @ W.T + D) = inv(D) - inv(D) @ W @ inv(C) @ W.T @ inv(D)
         # where :math:`C` is the capacitance matrix.
@@ -197,7 +210,7 @@ class LowRankMultivariateNormal(Distribution):
             self._batch_shape + self._event_shape + self._event_shape
         )
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         W_shape = shape[:-1] + self.cov_factor.shape[-1:]
         eps_W = _standard_normal(W_shape, dtype=self.loc.dtype, device=self.loc.device)

@@ -1,32 +1,34 @@
 # mypy: allow-untyped-defs
 
-from torch.ao.pruning import BaseSparsifier
-
-from functools import wraps
 import warnings
 import weakref
+from functools import wraps
+
+from torch.ao.pruning.sparsifier.base_sparsifier import BaseSparsifier
+
 
 __all__ = ["BaseScheduler"]
 
+
 class BaseScheduler:
-
     def __init__(self, sparsifier, last_epoch=-1, verbose=False):
-
         # Attach sparsifier
         if not isinstance(sparsifier, BaseSparsifier):
-            raise TypeError(f'{type(sparsifier).__name__} is not an instance of torch.ao.pruning.BaseSparsifier')
+            raise TypeError(
+                f"{type(sparsifier).__name__} is not an instance of torch.ao.pruning.BaseSparsifier"
+            )
         self.sparsifier = sparsifier
 
         # Initialize epoch and base sparsity levels
 
-        self.base_sl = [group['sparsity_level'] for group in sparsifier.groups]
+        self.base_sl = [group["sparsity_level"] for group in sparsifier.groups]
         self.last_epoch = last_epoch
 
         # Following https://github.com/pytorch/pytorch/issues/20124
         # We would like to ensure that `scheduler.step()` is called after
         # `sparsifier.step()`
         def with_counter(method):
-            if getattr(method, '_with_counter', False):
+            if getattr(method, "_with_counter", False):
                 # `sparsifier.step()` has already been replaced, return.
                 return method
 
@@ -66,7 +68,9 @@ class BaseScheduler:
         It contains an entry for every variable in self.__dict__ which
         is not the sparsifier.
         """
-        return {key: value for key, value in self.__dict__.items() if key != 'sparsifier'}
+        return {
+            key: value for key, value in self.__dict__.items() if key != "sparsifier"
+        }
 
     def load_state_dict(self, state_dict):
         """Loads the schedulers state.
@@ -78,8 +82,7 @@ class BaseScheduler:
         self.__dict__.update(state_dict)
 
     def get_last_sl(self):
-        """ Return last computed sparsity level by current scheduler.
-        """
+        """Return last computed sparsity level by current scheduler."""
         return self._last_sl
 
     def get_sl(self):
@@ -89,24 +92,26 @@ class BaseScheduler:
         if not self._get_sl_called_within_step:
             warnings.warn(
                 "To get the last sparsity level computed by the scheduler, "
-                "please use `get_last_sl()`.")
+                "please use `get_last_sl()`."
+            )
         raise NotImplementedError
 
     def print_sl(self, is_verbose, group, sl, epoch=None):
-        """Display the current sparsity level.
-        """
+        """Display the current sparsity level."""
         if is_verbose:
             if epoch is None:
-                print(f'Adjusting sparsity level of group {group} to {sl:.4e}.')
+                print(f"Adjusting sparsity level of group {group} to {sl:.4e}.")
             else:
-                print(f'Epoch {epoch:5d}: adjusting sparsity level of group {group} to {sl:.4e}.')
+                print(
+                    f"Epoch {epoch:5d}: adjusting sparsity level of group {group} to {sl:.4e}."
+                )
 
     def __repr__(self):
-        format_string = self.__class__.__name__ + ' ('
-        format_string += '\n'
-        format_string += f'Sparsifier {self.sparsifier}\n'
-        format_string += f'    base_sl: {self.base_sl}\n'
-        format_string += ')'
+        format_string = self.__class__.__name__ + " ("
+        format_string += "\n"
+        format_string += f"Sparsifier {self.sparsifier}\n"
+        format_string += f"    base_sl: {self.base_sl}\n"
+        format_string += ")"
         return format_string
 
     def step(self, epoch=None):
@@ -114,19 +119,24 @@ class BaseScheduler:
         # https://github.com/pytorch/pytorch/issues/20124
         if self._step_count == 1:
             if not hasattr(self.sparsifier.step, "_with_counter"):
-                warnings.warn("Seems like `sparsifier.step()` has been overridden after sparsity scheduler "
-                              "initialization. Please, make sure to call `sparsifier.step()` before "
-                              "`scheduler.step()`.", UserWarning)
+                warnings.warn(
+                    "Seems like `sparsifier.step()` has been overridden after sparsity scheduler "
+                    "initialization. Please, make sure to call `sparsifier.step()` before "
+                    "`scheduler.step()`.",
+                    UserWarning,
+                )
 
             # Just check if there were two first scheduler.step() calls before sparsifier.step()
             elif self.sparsifier._step_count < 1:  # type: ignore[attr-defined]
-                warnings.warn("Detected call of `scheduler.step()` before `sparsifier.step()`. "
-                              "You have to make sure you run the sparsifier.step() BEFORE any "
-                              "calls to the scheduler.step().", UserWarning)
+                warnings.warn(
+                    "Detected call of `scheduler.step()` before `sparsifier.step()`. "
+                    "You have to make sure you run the sparsifier.step() BEFORE any "
+                    "calls to the scheduler.step().",
+                    UserWarning,
+                )
         self._step_count += 1
 
         class _enable_get_sl_call:
-
             def __init__(self, o):
                 self.o = o
 
@@ -143,10 +153,10 @@ class BaseScheduler:
 
         for i, data in enumerate(zip(self.sparsifier.groups, values)):
             param_group, sl = data
-            param_group['sparsity_level'] = sl
+            param_group["sparsity_level"] = sl
             self.print_sl(self.verbose, i, sl, epoch)
 
-        self._last_sl = [group['sparsity_level'] for group in self.sparsifier.groups]
+        self._last_sl = [group["sparsity_level"] for group in self.sparsifier.groups]
         self.sparsifier.enable_mask_update = True
 
     def _make_sure_a_list(self, var):

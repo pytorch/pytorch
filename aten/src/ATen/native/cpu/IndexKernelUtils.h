@@ -2,11 +2,9 @@
 #include <ATen/native/TensorIterator.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
-namespace {
-static bool is_constant_index(int ntensor, const int64_t* strides) {
+inline bool is_constant_index(int ntensor, const int64_t* strides) {
   AT_ASSERT(ntensor >= 3);
   for (const auto arg : c10::irange(2, ntensor)) {
     if (strides[arg] != 0) {
@@ -50,7 +48,6 @@ struct Indexer {
     return offset;
   }
 };
-} // anonymous namespace
 
 template <typename scalar_t, typename func_t>
 void cpu_index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride,
@@ -85,4 +82,4 @@ void cpu_index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArray
   }
 }
 } // at
-} // native
+// native

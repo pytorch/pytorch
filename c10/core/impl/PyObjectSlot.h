@@ -2,8 +2,8 @@
 
 #include <c10/core/impl/HermeticPyObjectTLS.h>
 #include <c10/core/impl/PyInterpreter.h>
-#include <c10/util/Optional.h>
 #include <c10/util/python_stub.h>
+#include <optional>
 
 #include <atomic>
 
@@ -106,13 +106,13 @@ struct C10_API PyObjectSlot {
       // after we query here.  The only time when we can conclude a tensor
       // is definitely uninitialized is when we have just allocated it and
       // it cannot have escaped to other threads yet
-      return c10::nullopt;
+      return std::nullopt;
     } else if (interpreter == self_interpreter) {
       // NB: pyobj_ could still be null!
       if (!ignore_hermetic_tls && c10::impl::HermeticPyObjectTLS::get_state()) {
-        return c10::nullopt;
+        return std::nullopt;
       } else {
-        return c10::make_optional(_unchecked_untagged_pyobj());
+        return _unchecked_untagged_pyobj();
       }
     } else {
       TORCH_CHECK(

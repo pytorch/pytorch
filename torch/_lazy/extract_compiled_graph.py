@@ -3,7 +3,7 @@ import copy
 import dataclasses
 import itertools
 import os
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable
 
 import torch
 import torch._lazy as lazy
@@ -11,6 +11,7 @@ import torch._lazy.metrics as metrics
 from torch import fx
 from torch._lazy import computation, debug as lazy_debug
 from torch._lazy.tensor_factory_functions import tensor_factory_functions
+
 
 debug = os.environ.get("debug_extract_compiled_graph") is not None
 
@@ -27,14 +28,14 @@ class GraphInputMatcher:
     TS/XLA graph inputs.
     """
 
-    tensor_id_to_arg_idx: Dict[int, int]
-    graph_input_tensor_ids: List[int]
+    tensor_id_to_arg_idx: dict[int, int]
+    graph_input_tensor_ids: list[int]
     # there are 2 categories of graph_input_tensors.
     # Category 1: those whose id are not found in tensor_id_to_arg_idx. These are
     # most likely const tensors and we can get its content from graph_input_tensors
     # Category 2: those whose id are found in tensor_id_to_arg_idx. We should get
     #  the tensor from method arguments
-    graph_input_ivalues: List[Any]
+    graph_input_ivalues: list[Any]
 
     # get the real graph input tensors
     def __call__(self, args):
@@ -70,10 +71,10 @@ class ReturnValueHandler:
     """
 
     def __init__(self, lazy_out_list):
-        self.index: List[List[int]] = []
+        self.index: list[list[int]] = []
         self.total_count = len(lazy_out_list)
 
-        tensor_id_to_idx: Dict[int, int] = {}
+        tensor_id_to_idx: dict[int, int] = {}
         for dup_idx, lazy_tensor in enumerate(lazy_out_list):
             uniq_idx = tensor_id_to_idx.get(id(lazy_tensor), None)
             if uniq_idx is not None:

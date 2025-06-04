@@ -3,13 +3,17 @@
 import shutil
 import tempfile
 from functools import wraps
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Optional
 
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
-from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
+from torch.distributed.checkpoint._fsspec_filesystem import (
+    FileSystem,
+    FsspecReader,
+    FsspecWriter,
+)
 from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_dict
 from torch.distributed.checkpoint.utils import CheckpointException
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -31,9 +35,9 @@ def with_temp_dir(
     assert func is not None
 
     @wraps(func)
-    def wrapper(self, *args: Tuple[object], **kwargs: Dict[str, Any]) -> None:
-        # Only create temp_dir when rank is 0
-        if dist.get_rank() == 0:
+    def wrapper(self, *args: tuple[object], **kwargs: dict[str, Any]) -> None:
+        # Only create temp_dir when rank is 0 (or no pg)
+        if not dist.is_initialized() or dist.get_rank() == 0:
             temp_dir = tempfile.mkdtemp()
             print(f"Using temp directory: {temp_dir}")
         else:
@@ -41,20 +45,21 @@ def with_temp_dir(
         object_list = [temp_dir]
 
         # Broadcast temp_dir to all the other ranks
-        dist.broadcast_object_list(object_list)
+        if dist.is_initialized():
+            dist.broadcast_object_list(object_list)
         self.temp_dir = object_list[0]
 
         try:
             func(self, *args, **kwargs)
         finally:
-            if dist.get_rank() == 0:
+            if not dist.is_initialized() or dist.get_rank() == 0:
                 shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     return wrapper
 
 
 class MyTestModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
         self.net2 = nn.Sequential(nn.Linear(16, 32), nn.ReLU())
@@ -65,40 +70,7 @@ class MyTestModule(torch.nn.Module):
         return self.net4(self.net3(self.net2(self.net1(x))))
 
 
-class TestFSSpecNoDist(TestCase):
-    def test_fsspec_no_dist(self) -> None:
-        with tempfile.TemporaryDirectory() as path:
-            state_dict_to_save = MyTestModule().state_dict()
-
-            dcp.save_state_dict(
-                state_dict=state_dict_to_save,
-                storage_writer=FsspecWriter(path),
-                no_dist=True,
-            )
-
-            state_dict_to_load_to = MyTestModule().state_dict()
-
-            for p1, p2 in zip(
-                state_dict_to_save.items(),
-                state_dict_to_load_to.items(),
-            ):
-                self.assertNotEqual(p1, p2)
-
-            # Load from file without any resharding
-            dcp.load_state_dict(
-                state_dict=state_dict_to_load_to,
-                storage_reader=FsspecReader(path),
-                no_dist=True,
-            )
-
-            for p1, p2 in zip(
-                state_dict_to_save.items(),
-                state_dict_to_load_to.items(),
-            ):
-                self.assertEqual(p1, p2)
-
-
-class TestFSSpecWithDist(ShardedTensorTestBase):
+class TestFSSpec(ShardedTensorTestBase):
     @property
     def world_size(self) -> int:
         return 2
@@ -107,7 +79,7 @@ class TestFSSpecWithDist(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
     @with_temp_dir
-    def test_fsspec_with_dist(self):
+    def test_fsspec(self):
         CHECKPOINT_DIR = self.temp_dir
 
         model = FSDP(MyTestModule().cuda())
@@ -121,7 +93,7 @@ class TestFSSpecWithDist(ShardedTensorTestBase):
                 "optim": FSDP.optim_state_dict(model, optim),
             }
 
-            dcp.save_state_dict(
+            dcp.save(
                 state_dict=state_dict,
                 storage_writer=FsspecWriter(CHECKPOINT_DIR),
                 planner=dcp.DefaultSavePlanner(),
@@ -143,7 +115,7 @@ class TestFSSpecWithDist(ShardedTensorTestBase):
                 "model": model_2.state_dict(),
             }
 
-            dcp.load_state_dict(
+            dcp.load(
                 state_dict=state_dict,
                 storage_reader=FsspecReader(CHECKPOINT_DIR),
                 planner=dcp.DefaultLoadPlanner(),
@@ -202,6 +174,30 @@ class TestFSSpecWithDist(ShardedTensorTestBase):
                 {"random": t2},
                 storage_writer=FsspecWriter(self.temp_dir, overwrite=False),
             )
+
+
+class TestFileSystem(TestCase):
+    @with_temp_dir
+    def test_remove_on_fail(self):
+        fs = FileSystem()
+        path = fs.init_path(self.temp_dir)
+
+        write_file = fs.concat_path(path, "writeable")
+        with self.assertRaises(OSError):
+            with fs.create_stream(write_file, "w") as s:
+                s.write("aaa")
+                raise OSError("fail")
+        self.assertFalse(fs.exists(write_file))
+
+        read_file = fs.concat_path(path, "readable")
+        with fs.create_stream(read_file, "w") as s:
+            s.write("bbb")
+        self.assertTrue(fs.exists(read_file))
+
+        with self.assertRaises(OSError):
+            with fs.create_stream(read_file, "r") as s:
+                raise OSError("fail")
+        self.assertTrue(fs.exists(read_file))
 
 
 if __name__ == "__main__":

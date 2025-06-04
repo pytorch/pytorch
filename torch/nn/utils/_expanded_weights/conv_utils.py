@@ -1,7 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import List, Optional
-
-import numpy as np
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -68,7 +66,7 @@ def int_padding_for_string_padding(func, padding_style, dilation, kernel_size):
         return dilation[i] if isinstance(dilation, tuple) else dilation
 
     if padding_style == "same":
-        padding: List[int] = []
+        padding: list[int] = []
         # F.pad needs the padding in reverse order from what conv expects
         for i in range(conv_picker(func, 0, 1, 2), -1, -1):
             padding += conv_padding_for_same(get_dilation(i), kernel_size[i])
@@ -142,12 +140,10 @@ def conv_backward(func, ctx, grad_output):
         ctx.groups,
     )
 
-    kernel_size = []
-    for i in range(2, conv_picker(func, 3, 4, 5)):
-        kernel_size.append(weight_shape[i])
+    kernel_size = [weight_shape[i] for i in range(2, conv_picker(func, 3, 4, 5))]
 
     batch_size = ctx.batch_size
-    results: List[Optional[torch.Tensor]] = []
+    results: list[Optional[torch.Tensor]] = []
     results.append(None)  # for kwarg names
     results.append(None)  # for op reference
 
@@ -215,6 +211,8 @@ def conv_unfold_weight_grad_sample(
     groups,
     func,
 ):
+    import numpy as np
+
     n = input.shape[0]
     in_channels = input.shape[1]
 
@@ -320,6 +318,9 @@ def unfold3d(
         >>> unfold3d(tensor, kernel_size=2, padding=0, stride=1).shape
         torch.Size([3, 32, 120])
     """
+
+    import numpy as np
+
     if len(tensor.shape) != 5:
         raise ValueError(
             f"Input tensor must be of the shape [B, C, D, H, W]. Got{tensor.shape}"

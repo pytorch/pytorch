@@ -45,7 +45,7 @@ std::shared_ptr<TaskThreadPoolBase> create_c10_threadpool(
 
 } // namespace
 
-C10_REGISTER_CREATOR(ThreadPoolRegistry, C10, create_c10_threadpool);
+C10_REGISTER_CREATOR(ThreadPoolRegistry, C10, create_c10_threadpool)
 
 void set_num_interop_threads(int nthreads) {
   TORCH_CHECK(nthreads > 0, "Expected positive number of threads");
@@ -56,7 +56,7 @@ void set_num_interop_threads(int nthreads) {
       "has started or set_num_interop_threads called");
 }
 
-int get_num_interop_threads() {
+size_t get_num_interop_threads() {
   at::internal::lazy_init_num_threads();
   int nthreads = num_interop_threads.load();
   if (nthreads > 0) {
@@ -82,8 +82,8 @@ void launch_no_thread_state(std::function<void()> fn) {
 void launch(std::function<void()> func) {
   // NOLINTNEXTLINE(modernize-avoid-bind)
   internal::launch_no_thread_state(std::bind([](
-    std::function<void()> f, ThreadLocalState thread_locals) {
-      ThreadLocalStateGuard guard(std::move(thread_locals));
+    const std::function<void()>& f, const ThreadLocalState& thread_locals) {
+      ThreadLocalStateGuard guard(thread_locals);
       f();
     },
     std::move(func),

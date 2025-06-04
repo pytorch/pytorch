@@ -11,10 +11,12 @@ file(GLOB common_srcs *.cc)
 file(GLOB avx_srcs *_avx.cc)
 file(GLOB avx2_srcs *_avx2.cc)
 file(GLOB avx512_srcs *_avx512.cc)
-# exclude avx, avx2, and avx512 srcs from common_srcs
+file(GLOB sve_srcs *_sve.cc)
+# exclude avx, avx2, avx512, and sve srcs from common_srcs
 exclude(common_srcs "${common_srcs}" ${avx_srcs})
 exclude(common_srcs "${common_srcs}" ${avx2_srcs})
 exclude(common_srcs "${common_srcs}" ${avx512_srcs})
+exclude(common_srcs "${common_srcs}" ${sve_srcs})
 
 # We will always build common srcs.
 set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${common_srcs})
@@ -42,6 +44,22 @@ if(CXX_AVX2_FOUND)
   list(APPEND
        Caffe2_DEPENDENCY_WHOLE_LINK_LIBS
        "Caffe2_perfkernels_avx2_interface")
+endif()
+
+# We will only build the SVE perfkernel files if the compiler supports SVE
+# extensions.
+if(CXX_SVE_FOUND)
+  add_library(Caffe2_perfkernels_sve STATIC ${sve_srcs})
+  target_link_libraries(Caffe2_perfkernels_sve PRIVATE c10)
+  install(TARGETS Caffe2_perfkernels_sve
+      ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+
+  target_compile_options(Caffe2_perfkernels_sve PRIVATE "-march=armv8-a+sve")
+
+  caffe2_interface_library(
+      Caffe2_perfkernels_sve Caffe2_perfkernels_sve_interface)
+  list(APPEND
+       Caffe2_DEPENDENCY_WHOLE_LINK_LIBS "Caffe2_perfkernels_sve_interface")
 endif()
 
 # TODO(jiayq): currently, we only implement the very base files for the

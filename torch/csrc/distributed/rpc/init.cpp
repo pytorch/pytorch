@@ -6,6 +6,7 @@
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
+#include <torch/csrc/distributed/rpc/rpc.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
@@ -19,9 +20,7 @@
 #include <pybind11/chrono.h>
 #include <pybind11/operators.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 namespace {
 
@@ -31,6 +30,7 @@ template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
   auto rpc_module =
       THPObjectPtr(PyImport_ImportModule("torch.distributed.rpc"));
   if (!rpc_module) {
@@ -123,7 +123,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                 return py::make_tuple(workerInfo.name_, workerInfo.id_);
               },
               /* __setstate__ */
-              [](py::tuple t) {
+              [](const py::tuple& t) {
                 TORCH_CHECK(t.size() == 2, "Invalid WorkerInfo state.");
 
                 WorkerInfo info(
@@ -537,15 +537,15 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       .def(
           py::init<
               int,
-              optional<std::vector<std::string>>,
-              optional<std::vector<std::string>>,
+              std::optional<std::vector<std::string>>,
+              std::optional<std::vector<std::string>>,
               float,
               std::string,
               std::unordered_map<std::string, DeviceMap>,
               std::vector<c10::Device>>(),
           py::arg("num_worker_threads") = kDefaultNumWorkerThreads,
-          py::arg("_transports") = optional<std::vector<std::string>>(),
-          py::arg("_channels") = optional<std::vector<std::string>>(),
+          py::arg("_transports") = std::optional<std::vector<std::string>>(),
+          py::arg("_channels") = std::optional<std::vector<std::string>>(),
           py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
           py::arg("init_method") = kDefaultInitMethod,
           py::arg("device_maps") = std::unordered_map<std::string, DeviceMap>(),
@@ -577,7 +577,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               [](const c10::intrusive_ptr<::c10d::Store>& store,
                  std::string selfName,
                  worker_id_t selfId,
-                 optional<int> worldSize,
+                 std::optional<int> worldSize,
                  TensorPipeRpcBackendOptions opts,
                  std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
                  std::vector<c10::Device> devices) {
@@ -632,8 +632,8 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_get_device_map",
-          (DeviceMap(TensorPipeAgent::*)(const WorkerInfo& dst) const) &
-              TensorPipeAgent::getDeviceMap,
+          (DeviceMap(TensorPipeAgent::*)(const WorkerInfo& dst)
+               const)&TensorPipeAgent::getDeviceMap,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_get_backend_options",
@@ -766,7 +766,8 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
   module.def(
       "get_rpc_timeout",
       []() {
-        return RpcAgent::getCurrentRpcAgent()->getRpcTimeout().count() /
+        return static_cast<float>(
+                   RpcAgent::getCurrentRpcAgent()->getRpcTimeout().count()) /
             kSecToMsConversion;
       },
       R"(
@@ -845,6 +846,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
   module.def("_disable_jit_rref_pickle", &disableJitRRefPickle);
 
   Py_RETURN_TRUE;
+  END_HANDLE_TH_ERRORS
 }
 
 } // namespace
@@ -857,6 +859,4 @@ PyMethodDef* python_functions() {
   return methods;
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

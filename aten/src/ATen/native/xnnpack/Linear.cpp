@@ -129,6 +129,7 @@ Tensor run(
 
   const IntArrayRef input_size = padded_input.sizes();
   std::vector<int64_t> output_size(input_size.cbegin(), input_size.cend());
+  // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
   output_size.back() = context.output_channels;
 
   Tensor output = mobile::empty_with_tail_padding(
@@ -193,7 +194,7 @@ unpack_prepacked_sizes_linear(const IValue& ivalue) {
   const auto& bias = std::get<1>(tuple);
   return IValue(std::make_tuple(
       std::get<0>(tuple).sizes(),
-      (bias && bias->defined()) ? at::OptionalIntArrayRef(bias->sizes()) : c10::nullopt));
+      (bias && bias->defined()) ? at::OptionalIntArrayRef(bias->sizes()) : std::nullopt));
 }
 
 } // namespace internal::linear
@@ -208,7 +209,6 @@ bool use_linear(
             ContextLinear::kMin,
             ContextLinear::kMax) &&
          internal::linear::usable(input);
-      internal::linear::usable(input);
 }
 
 Tensor linear(

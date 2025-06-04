@@ -2,7 +2,7 @@
 
 import math
 import unittest
-from typing import List, Tuple, Union
+from typing import Union
 
 import torch
 from torch._inductor import config
@@ -11,6 +11,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import IS_WINDOWS, parametrize, run_tests
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+
 
 default_atol = {
     torch.float16: 1e-3,
@@ -25,7 +26,7 @@ default_rtol = {
 
 
 def rand_math_tensor(
-    shape: Tuple[Union[int, List[int]]],
+    shape: tuple[Union[int, list[int]]],
     device: str,
     dtype: torch.dtype,
     requires_grad: bool = False,

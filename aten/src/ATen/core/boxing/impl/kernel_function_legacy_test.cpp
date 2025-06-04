@@ -519,7 +519,7 @@ TEST(OperatorRegistrationTestLegacyFunctionBasedKernel, givenKernelWithDictInput
   EXPECT_EQ(2, captured_dict_size);
 }
 
-string kernelWithDictInputWithOutput(Dict<string, string> input1) {
+std::string kernelWithDictInputWithOutput(Dict<string, string> input1) {
   return input1.at("key2");
 }
 
@@ -581,7 +581,7 @@ TEST(OperatorRegistrationTestLegacyFunctionBasedKernel, givenKernelWithUnordered
   EXPECT_EQ(2, captured_dict_size);
 }
 
-string kernelWithUnorderedMapInputWithOutput(std::unordered_map<string, string> input1) {
+std::string kernelWithUnorderedMapInputWithOutput(std::unordered_map<string, string> input1) {
   return input1.at("key2");
 }
 
@@ -793,9 +793,9 @@ TEST(OperatorRegistrationTestLegacyFunctionBasedKernel, givenFallbackKernelWitho
   EXPECT_EQ(4, outputs[0].toInt());
 }
 
-std::optional<Tensor> called_arg2 = c10::nullopt;
-std::optional<int64_t> called_arg3 = c10::nullopt;
-std::optional<std::string> called_arg4 = c10::nullopt;
+std::optional<Tensor> called_arg2 = std::nullopt;
+std::optional<int64_t> called_arg3 = std::nullopt;
+std::optional<std::string> called_arg4 = std::nullopt;
 
 void kernelWithOptInputWithoutOutput(Tensor arg1, const std::optional<Tensor>& arg2, std::optional<int64_t> arg3, std::optional<std::string> arg4) {
   called = true;

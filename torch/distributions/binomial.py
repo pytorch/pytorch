@@ -1,5 +1,8 @@
 # mypy: allow-untyped-defs
+from typing import Optional, Union
+
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import (
@@ -8,6 +11,7 @@ from torch.distributions.utils import (
     logits_to_probs,
     probs_to_logits,
 )
+
 
 __all__ = ["Binomial"]
 
@@ -40,6 +44,7 @@ class Binomial(Distribution):
         probs (Tensor): Event probabilities
         logits (Tensor): Event log-odds
     """
+
     arg_constraints = {
         "total_count": constraints.nonnegative_integer,
         "probs": constraints.unit_interval,
@@ -47,7 +52,13 @@ class Binomial(Distribution):
     }
     has_enumerate_support = True
 
-    def __init__(self, total_count=1, probs=None, logits=None, validate_args=None):
+    def __init__(
+        self,
+        total_count: Union[Tensor, int] = 1,
+        probs: Optional[Tensor] = None,
+        logits: Optional[Tensor] = None,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if (probs is None) == (logits is None):
             raise ValueError(
                 "Either `probs` or `logits` must be specified, but not both."
@@ -59,6 +70,7 @@ class Binomial(Distribution):
             ) = broadcast_all(total_count, probs)
             self.total_count = self.total_count.type_as(self.probs)
         else:
+            assert logits is not None  # helps mypy
             (
                 self.total_count,
                 self.logits,
@@ -91,27 +103,27 @@ class Binomial(Distribution):
         return constraints.integer_interval(0, self.total_count)
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.total_count * self.probs
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return ((self.total_count + 1) * self.probs).floor().clamp(max=self.total_count)
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return self.total_count * self.probs * (1 - self.probs)
 
     @lazy_property
-    def logits(self):
+    def logits(self) -> Tensor:
         return probs_to_logits(self.probs, is_binary=True)
 
     @lazy_property
-    def probs(self):
+    def probs(self) -> Tensor:
         return logits_to_probs(self.logits, is_binary=True)
 
     @property
-    def param_shape(self):
+    def param_shape(self) -> torch.Size:
         return self._param.size()
 
     def sample(self, sample_shape=torch.Size()):

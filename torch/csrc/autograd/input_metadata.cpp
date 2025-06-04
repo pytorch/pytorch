@@ -3,8 +3,7 @@
 // TODO: we may be able to move some imports from input_metadata.h to here, but
 // it seems that function.h transitively depends on some of them.
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 namespace {
 
@@ -92,10 +91,10 @@ at::Tensor InputMetadata::maybe_reduce(
     const auto& target = desired[target_dim - i - 1];
     // The conditions here are written carefully so that we are able to
     // infer deferred runtime asserts
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(size.sym_eq(1))) {
+    if (TORCH_GUARD_OR_FALSE(size.sym_eq(1))) {
       // NB: we could short circuit this once needs_reduce is true but there's
       // no point since the reduction function will guard on this anyway
-      if (!c10::definitely_true(size.sym_eq(target), __FILE__, __LINE__)) {
+      if (!c10::guard_or_false(size.sym_eq(target), __FILE__, __LINE__)) {
         needs_reduce = true;
       }
     } else {
@@ -158,7 +157,6 @@ std::stringstream InputMetadata::incompatible_shape_error_message(
 }
 
 bool InputMetadata::is_cpp_nested_tensor() const {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool ret = std::holds_alternative<at::Tensor>(shape_);
   TORCH_INTERNAL_ASSERT(ret == (is_nested_ && !is_tensor_subclass_))
   return ret;
@@ -203,5 +201,4 @@ bool InputMetadata::maybe_expandable_to(const at::Tensor& grad) const {
   }
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

@@ -6,7 +6,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorCompare.h>
 
-constexpr int MAX_BLOCK_SIZE = AT_ROCM_ENABLED() ? 256 : 1024;
+constexpr int64_t MAX_BLOCK_SIZE = AT_ROCM_ENABLED() ? 256 : 1024;
 
 // Maximum size per grid dimension that we assume (compute capability >= 2.0)
 constexpr int64_t MAX_GRID_SIZE = 65535LL;
@@ -98,5 +98,5 @@ void mode_kernel_impl(
   }
 }
 
-REGISTER_CUDA_DISPATCH(mode_stub, &mode_kernel_impl);
+REGISTER_CUDA_DISPATCH(mode_stub, &mode_kernel_impl)
 } // namespace at::native

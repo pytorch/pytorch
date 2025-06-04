@@ -4,18 +4,18 @@ import torch.distributed as dist
 from torch import nn
 
 
-def _quantize_per_tensor_cuda(x, scale, zero_point):
+def _quantize_per_tensor_backend(x, scale, zero_point):
     y = torch.round(x / scale) + zero_point
     y = torch.clamp(y, 0, 255).to(torch.uint8)
     return y
 
 
-def _dequantize_per_tensor_cuda(y, scale, zero_point):
+def _dequantize_per_tensor_backend(y, scale, zero_point):
     x = scale * (y.to(torch.float32) - zero_point)
     return x
 
 
-def _quantize_per_channel_cuda(x, scale, zero_point):
+def _quantize_per_channel_backend(x, scale, zero_point):
     y = torch.zeros(x.size(), device=x.device)
     for i in range(x.size()[0]):
         y[i, :] = torch.round(x[i, :] / scale[i]) + zero_point[i]
@@ -23,8 +23,8 @@ def _quantize_per_channel_cuda(x, scale, zero_point):
     return y
 
 
-def _dequantize_per_channel_cuda(y, scale, zero_point):
-    y = y.to(torch.float32).cuda(y.device)
+def _dequantize_per_channel_backend(y, scale, zero_point):
+    y = y.to(torch.float32).to(y.device)
     x = torch.zeros_like(y, device=y.device)
     for i in range(x.size()[0]):
         x[i, :] = scale[i] * (y[i, :] - zero_point[i])
@@ -70,11 +70,11 @@ def quantization_pertensor_hook(
 
     tensor = bucket.buffer()
 
-    myObserver = torch.ao.quantization.MinMaxObserver().cuda(tensor.device)
+    myObserver = torch.ao.quantization.MinMaxObserver().to(tensor.device)
     myObserver(tensor)
 
     s, z = myObserver.calculate_qparams()
-    s_and_z = torch.FloatTensor([s, z]).cuda(tensor.device)
+    s_and_z = torch.FloatTensor([s, z]).to(tensor.device)
 
     all_ranks_s_and_z = _get_allgather_out_list(s_and_z, world_size)
 
@@ -87,7 +87,7 @@ def quantization_pertensor_hook(
         # Store scale and zeros across all workers.
         all_ranks_s_and_z = fut.wait()[0]
         # All workers quantize their own ``GradBucket`` tensors.
-        quantized_tensor = _quantize_per_tensor_cuda(
+        quantized_tensor = _quantize_per_tensor_backend(
             tensor, all_ranks_s_and_z[rank][0], all_ranks_s_and_z[rank][1]
         )
         # Allgather quantized tensors.
@@ -109,7 +109,7 @@ def quantization_pertensor_hook(
         # Using previously allgathered scales and zeros, dequantize gradient tensors
         # locally and then aggregate them.
         for r, quantized_tensor in enumerate(all_ranks_quantized_tensor):
-            aggregated_dequantized_tensor += _dequantize_per_tensor_cuda(
+            aggregated_dequantized_tensor += _dequantize_per_tensor_backend(
                 quantized_tensor, all_ranks_s_and_z[r][0], all_ranks_s_and_z[r][1]
             )
 
@@ -159,16 +159,16 @@ def quantization_perchannel_hook(
             value=0,
         )
         .view(-1, bucket_size)
-        .cuda(tensor.device)
+        .to(tensor.device)
     )
 
-    myPerChannelObserver = torch.ao.quantization.PerChannelMinMaxObserver().cuda(
+    myPerChannelObserver = torch.ao.quantization.PerChannelMinMaxObserver().to(
         tensor.device
     )
     myPerChannelObserver(tensor_in_channels)
 
     s_ch, z_ch = myPerChannelObserver.calculate_qparams()
-    s_and_z = torch.stack((s_ch, z_ch)).cuda(tensor.device)
+    s_and_z = torch.stack((s_ch, z_ch)).to(tensor.device)
 
     all_ranks_s_and_z = _get_allgather_out_list(s_and_z, world_size)
     # First, allgather scale and zeros.
@@ -180,7 +180,7 @@ def quantization_perchannel_hook(
         # Store scale and zeros across all workers.
         all_ranks_s_and_z = fut.wait()[0]
         # All workers quantize their corresponding ``GradBucket`` tensors.
-        quantized_tensor = _quantize_per_channel_cuda(
+        quantized_tensor = _quantize_per_channel_backend(
             tensor_in_channels,
             all_ranks_s_and_z[rank, 0, :],
             all_ranks_s_and_z[rank, 1, :],
@@ -204,12 +204,12 @@ def quantization_perchannel_hook(
         # Using previously allgathered scales and zeros, dequantize gradient tensors
         # locally and then aggregate them.
         for r, quantized_tensor in enumerate(all_ranks_quantized_tensor):
-            aggregated_dequantized_tensor += _dequantize_per_channel_cuda(
+            aggregated_dequantized_tensor += _dequantize_per_channel_backend(
                 quantized_tensor, all_ranks_s_and_z[r][0], all_ranks_s_and_z[r][1]
             )
 
         return (
-            torch.flatten(aggregated_dequantized_tensor).cuda(tensor.device)[
+            torch.flatten(aggregated_dequantized_tensor).to(tensor.device)[
                 : tensor.size()[0]
             ]
             / world_size

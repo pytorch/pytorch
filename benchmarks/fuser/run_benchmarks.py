@@ -7,6 +7,7 @@ import click
 
 import torch
 
+
 torch.set_num_threads(1)
 torch._C._debug_set_fusion_group_inlining(False)
 
@@ -283,7 +284,6 @@ def run_benchmarks(operators, shapes):
         shapes = [globals()[k] for k in shapes.split(",")]
 
     print("fuser,device,operator,shape,time")
-    results = []
     for shape, operator in itertools.product(shapes, operators):
         nargs = len(inspect.signature(operator).parameters)
         args = shape()

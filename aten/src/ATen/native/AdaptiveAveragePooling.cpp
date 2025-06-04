@@ -63,20 +63,16 @@ namespace {
     const Tensor& grad_output,
     const Tensor& input)
   {
-    int64_t ndim = grad_output.ndimension();
-    for (const auto i : c10::irange(1, ndim)) {
-      TORCH_CHECK(grad_output.size(i) > 0,
-        "adaptive_avg_pool2d_backward(): Expected grad_output to have non-zero size for non-batch dimensions, "
-        "but grad_output has sizes ", grad_output.sizes(), " with dimension ", i, " being "
-        "empty");
-    }
-
+    adaptive_pool_empty_output_check(grad_output, "adaptive_avg_pool2d_backward");
+    int64_t ndim = grad_output.dim();
+    TORCH_CHECK(input.dim() == ndim,
+      __func__, ": Expected dimensions ", input.dim(), " for `grad_output` but got dimensions ", ndim);
     TORCH_CHECK((ndim == 3 || ndim == 4),
-      "adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor, but got ", input.sizes());
+      __func__, ": Expected 3D or 4D tensor, but got ", input.sizes());
     TORCH_CHECK(input.dtype() == grad_output.dtype(),
-      "expected dtype ", input.dtype(), " for `grad_output` but got dtype ", grad_output.dtype());
+      __func__, ": Expected dtype ", input.dtype(), " for `grad_output` but got dtype ", grad_output.dtype());
     TORCH_CHECK(input.dtype() == grad_input.dtype(),
-      "expected dtype ", input.dtype(), " for `grad_input` but got dtype ", grad_input.dtype());
+      __func__, ": Expected dtype ", input.dtype(), " for `grad_input` but got dtype ", grad_input.dtype());
 
     grad_input.resize_(input.sizes(), input.suggest_memory_format());
     grad_input.zero_();
@@ -117,7 +113,7 @@ namespace {
       return at::mkldnn_adaptive_avg_pool2d(input, C10_AS_INTARRAYREF_SLOW(output_size));
     }
 
-    if (!input.is_quantized() && output_size[0] == 1 && output_size[1] == 1 && !input.is_xpu()) {
+    if (!input.is_quantized() && output_size[0] == 1 && output_size[1] == 1) {
       // in this case, adaptive pooling is just computing mean over hw
       // dimensions, which can be done more efficiently
       #if defined(C10_MOBILE) && defined(USE_XNNPACK)

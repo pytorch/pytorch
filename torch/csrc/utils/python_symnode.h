@@ -35,7 +35,7 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   PythonSymNodeImpl(py::object pyobj) : c10::SymNodeImpl() {
     pyobj_ = std::make_shared<c10::SafePyObject>(
         pyobj.release().ptr(), getPyInterpreter());
-  };
+  }
 
   c10::SymNode wrap_int(int64_t num) override {
     py::gil_scoped_acquire acquire;
@@ -135,6 +135,21 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("guard_size_oblivious")(file, line).cast<bool>();
   }
 
+  bool guard_or_false(const char* file, int64_t line) override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("guard_or_false")(file, line).cast<bool>();
+  }
+
+  bool statically_known_true(const char* file, int64_t line) override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("statically_known_true")(file, line).cast<bool>();
+  }
+
+  bool guard_or_true(const char* file, int64_t line) override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("guard_or_true")(file, line).cast<bool>();
+  }
+
   int64_t int_() override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("int_")().cast<int64_t>();
@@ -144,7 +159,7 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     py::gil_scoped_acquire acquire;
     const auto& r = getPyObj().attr("maybe_as_int")();
     if (r.is_none()) {
-      return c10::nullopt;
+      return std::nullopt;
     } else {
       return r.cast<int64_t>();
     }
@@ -153,6 +168,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   std::string str() override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("str")().cast<std::string>();
+  }
+
+  std::string _graph_repr() override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("_graph_repr")().cast<std::string>();
   }
 
   c10::SymNode dispatch_sym_ite_(

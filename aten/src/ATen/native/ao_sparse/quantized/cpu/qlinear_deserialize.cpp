@@ -7,22 +7,21 @@
 #include <ATen/native/ao_sparse/quantized/cpu/qnnpack_utils.h>
 #endif
 
-namespace ao {
-namespace sparse {
+namespace ao::sparse {
 
 namespace {
-constexpr int64_t serialization_version_index = 0;
-constexpr int64_t bias_index = 1;
-constexpr int64_t out_features_block_size_index = 2;
-constexpr int64_t in_features_block_size_index = 3;
-constexpr int64_t weight_scales_index = 4;
-constexpr int64_t weight_zero_point_index = 5;
-constexpr int64_t quantization_scheme_index = 6;
-constexpr int64_t row_block_indices_index = 7;
-constexpr int64_t col_block_indices_index = 8;
-constexpr int64_t weight_values_index = 9;
-constexpr int64_t num_output_channels_index = 10;
-constexpr int64_t num_input_channels_index = 11;
+constexpr int64_t serialization_version_index [[maybe_unused]] = 0;
+constexpr int64_t bias_index [[maybe_unused]] = 1;
+constexpr int64_t out_features_block_size_index [[maybe_unused]] = 2;
+constexpr int64_t in_features_block_size_index [[maybe_unused]] = 3;
+constexpr int64_t weight_scales_index [[maybe_unused]] = 4;
+constexpr int64_t weight_zero_point_index [[maybe_unused]] = 5;
+constexpr int64_t quantization_scheme_index [[maybe_unused]] = 6;
+constexpr int64_t row_block_indices_index [[maybe_unused]] = 7;
+constexpr int64_t col_block_indices_index [[maybe_unused]] = 8;
+constexpr int64_t weight_values_index [[maybe_unused]] = 9;
+constexpr int64_t num_output_channels_index [[maybe_unused]] = 10;
+constexpr int64_t num_input_channels_index [[maybe_unused]] = 11;
 
 template <typename TENSOR_DTYPE, typename VEC_DTYPE>
 std::vector<VEC_DTYPE> unwrap_vector(at::Tensor tensor) {
@@ -56,9 +55,7 @@ void unpack_bcsr(
       memset(dst + i * C, zero_points[i], C * sizeof(int8_t));
     }
   }
-  const std::vector<int8_t>& weight_values = std::get<0>(bcsr);
-  const std::vector<int32_t>& row_indices = std::get<1>(bcsr);
-  const std::vector<int32_t>& col_indices = std::get<2>(bcsr);
+  const auto& [weight_values, row_indices, col_indices] = bcsr;
   int64_t rowBlocks = (R + RB - 1) / RB;
   for (int64_t i = 0; i < rowBlocks; ++i) {
     // For the current tile, rowBPtr starts from currentTileIdx
@@ -109,7 +106,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::deserialize(
         std::get<weight_scales_index>(serialized),
         weight_zero_points,
         0, // The output channel axis is 0
-        device(c10::kCPU).dtype(c10::kQInt8));
+        at::device(c10::kCPU).dtype(c10::kQInt8));
   }
 
   const at::Tensor loaded_weight_values =
@@ -192,7 +189,6 @@ struct UnsignedIndicesTypeTrait<int8_t> {
   using t = uint8_t;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 PackedLinearWeightQnnp::PackedLinearWeightQnnp(
     const BCSRSerializationType& serialized)
     : LinearPackedParamsBase(
@@ -317,5 +313,4 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
 }
 #endif // USE_PYTORCH_QNNPACK
 
-} // namespace sparse
-} // namespace ao
+} // namespace ao::sparse

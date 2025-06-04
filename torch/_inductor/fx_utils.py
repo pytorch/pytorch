@@ -1,12 +1,14 @@
 # mypy: allow-untyped-defs
 import operator
 from collections import defaultdict
-from typing import Any, Callable, DefaultDict, Dict, Optional, Tuple, Type
+from typing import Any, Callable, Optional
 
 import sympy
 
 import torch
 import torch.fx
+from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     rebind_unbacked,
@@ -14,16 +16,19 @@ from torch.fx.experimental.symbolic_shapes import (
     sym_eq,
 )
 from torch.utils import _pytree as pytree
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
+from torch.utils.flop_counter import flop_registry
+
 from .virtualized import V
 
 
 # Check the pattern: (nn.module, F.function/torch.Tensor.method) matched.
 # Works for length 2 patterns with 1 module and 1 function/method.
 def matches_module_function_pattern(
-    pattern: Tuple[Type[torch.nn.modules.Module], Callable[..., Any]],
+    pattern: tuple[type[torch.nn.modules.Module], Callable[..., Any]],
     node: torch.fx.node.Node,
-    modules: Dict[str, torch.nn.modules.Module],
+    modules: dict[str, torch.nn.modules.Module],
 ) -> bool:
     if len(node.args) == 0:
         return False
@@ -71,8 +76,8 @@ class FakeTensorUpdater:
     fake tensors stop changing.
     """
 
-    def __init__(self, graph: torch.fx.Graph):
-        self.processed_hashes = set()
+    def __init__(self, graph: torch.fx.Graph) -> None:
+        self.processed_hashes = OrderedSet[Any]()
         self.graph = graph
 
         for node in self.graph.nodes:
@@ -83,8 +88,7 @@ class FakeTensorUpdater:
         return (node, node.target, id(node.args), id(node.kwargs))
 
     def incremental_update(self):
-        processed = set()
-        existing_storages: DefaultDict[Optional[int], int] = defaultdict(int)
+        existing_storages: defaultdict[Optional[int], int] = defaultdict(int)
         for node in self.graph.nodes:
             existing_storages[get_node_storage(node)] += 1
 
@@ -103,9 +107,9 @@ class FakeTensorUpdater:
             if new is None:
                 return old is None
             if not isinstance(new, torch.Tensor):
-                assert isinstance(
-                    new, (torch.SymInt, torch.SymBool, torch.SymFloat)
-                ), f"Unknown type {type(new)} in {self.graph}"
+                assert isinstance(new, (torch.SymInt, torch.SymBool, torch.SymFloat)), (
+                    f"Unknown type {type(new)} in {self.graph}"
+                )
                 return (
                     new.node.shape_env._maybe_evaluate_static(
                         sympy.Eq(new.node.expr, old.node.expr)
@@ -147,7 +151,7 @@ class FakeTensorUpdater:
                 or node.target == operator.getitem
             )
 
-        to_process = set()
+        to_process = OrderedSet[int]()
         for node in self.graph.nodes:
             if (
                 self.hash_node(node) in self.processed_hashes
@@ -161,7 +165,7 @@ class FakeTensorUpdater:
             is_valid, args, kwargs = get_fake_args_kwargs(node)
             if not is_valid:
                 continue
-            with V.fake_mode:
+            with V.fake_mode, enable_python_dispatcher():
                 new_fake_tensor = node.target(*args, **kwargs)
             if "val" in node.meta and is_fake_tensor_same(
                 new_fake_tensor, node.meta["val"]
@@ -206,7 +210,7 @@ def get_fake(x):
     return x
 
 
-def get_fake_args_kwargs(x: torch.fx.Node) -> Tuple[bool, Tuple[Any], Dict[str, Any]]:
+def get_fake_args_kwargs(x: torch.fx.Node) -> tuple[bool, tuple[Any], dict[str, Any]]:
     """
     First value returns a boolean if any of the input nodes don't have a faketensor.
     """
@@ -248,3 +252,34 @@ def is_node_realized(node: torch.fx.Node) -> bool:
 
     # Otherwise, assume node isn't realized
     return False
+
+
+def count_flops_fx(node: torch.fx.Node) -> Optional[int]:
+    if isinstance(node.target, str):
+        return None
+    with FakeTensorMode(allow_non_fake_inputs=True):
+        success, args, kwargs = get_fake_args_kwargs(node)
+
+        if success:
+            with torch.utils.flop_counter.FlopCounterMode(
+                display=False
+            ) as flop_counter_mode:
+                node.target(*args, **kwargs)
+
+            counted_flops = flop_counter_mode.get_total_flops()
+            return counted_flops
+    return None
+
+
+def countable_fx(node: torch.fx.Node) -> bool:
+    """
+    Whether or not we can count the flops of an FX node.
+    """
+    assert isinstance(node, torch.fx.Node)
+    if not hasattr(node, "target"):
+        return False
+    target = node.target
+    if not hasattr(target, "overloadpacket"):
+        return target in flop_registry
+    packet = target.overloadpacket
+    return packet in flop_registry

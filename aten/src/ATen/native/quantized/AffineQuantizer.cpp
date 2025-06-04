@@ -1,15 +1,7 @@
 #include <ATen/native/quantized/AffineQuantizer.h>
-#include <cfenv>
 
-#ifdef USE_FBGEMM
-#include <fbgemm/QuantUtils.h>
-#endif
-#ifdef __ARM_NEON__
-#include <arm_neon.h>
-#endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(quantize_tensor_per_tensor_affine_stub);
 DEFINE_DISPATCH(quantize_tensor_per_channel_affine_stub);
@@ -126,7 +118,6 @@ Tensor& quantize_tensor_per_tensor_affine(
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
     checkZeroPoint<underlying_t>(fn_name, zero_point);
@@ -147,7 +138,7 @@ Tensor& quantize_tensor_per_tensor_affine(
 Tensor& quantize_tensor_per_channel_affine(
     const Tensor& rtensor,
     Tensor& qtensor,
-    Tensor scales,
+    const Tensor& scales,
     Tensor zero_points,
     int64_t axis) {
   static constexpr auto fn_name = "quantize_tensor_per_channel_affine";
@@ -160,6 +151,7 @@ Tensor& quantize_tensor_per_channel_affine(
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
     if (qtensor.device().type() != c10::DeviceType::CUDA &&
+        qtensor.device().type() != c10::DeviceType::XPU &&
         qtensor.device().type() != c10::DeviceType::PrivateUse1) {
       checkZeroPoints<underlying_t>(fn_name, zero_points);
     }  // for cuda and privateuse1, this check will occur in the actual device function
@@ -182,8 +174,8 @@ Tensor& quantize_tensor_per_channel_affine(
 Tensor& quantize_tensor_per_channel_float_qparams(
     const Tensor& rtensor,
     Tensor& qtensor,
-    Tensor scales,
-    Tensor zero_points,
+    const Tensor& scales,
+    const Tensor& zero_points,
     int64_t axis) {
   static constexpr auto fn_name =
       "quantize_tensor_per_channel_float_qparams";
@@ -193,7 +185,6 @@ Tensor& quantize_tensor_per_channel_float_qparams(
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
   });
@@ -222,7 +213,6 @@ Tensor& dequantize_tensor_per_tensor_affine(
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
     checkZeroPoint<underlying_t>(fn_name, zero_point);
@@ -241,7 +231,7 @@ Tensor& dequantize_tensor_per_tensor_affine(
 Tensor& dequantize_tensor_per_channel_affine(
     const Tensor& qtensor,
     Tensor& rtensor,
-    Tensor scales,
+    const Tensor& scales,
     Tensor zero_points,
     int64_t axis) {
   static constexpr auto fn_name = "dequantize_tensor_per_channel_affine";
@@ -253,6 +243,7 @@ Tensor& dequantize_tensor_per_channel_affine(
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
     if(qtensor.device().type() != c10::DeviceType::CUDA &&
+       qtensor.device().type() != c10::DeviceType::XPU &&
        qtensor.device().type() != c10::DeviceType::PrivateUse1){
       checkZeroPoints<underlying_t>(fn_name, zero_points);
     }  // for cuda and privateuse1, this check will occur in the actual device function
@@ -275,8 +266,8 @@ Tensor& dequantize_tensor_per_channel_affine(
 Tensor& dequantize_tensor_per_channel_float_qparams(
     const Tensor& qtensor,
     Tensor& rtensor,
-    Tensor scales,
-    Tensor zero_points,
+    const Tensor& scales,
+    const Tensor& zero_points,
     int64_t axis) {
   static constexpr auto fn_name = "dequantize_tensor_per_channel_affine";
 
@@ -284,7 +275,6 @@ Tensor& dequantize_tensor_per_channel_float_qparams(
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
   });
@@ -303,5 +293,4 @@ Tensor& dequantize_tensor_per_channel_float_qparams(
   return rtensor;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

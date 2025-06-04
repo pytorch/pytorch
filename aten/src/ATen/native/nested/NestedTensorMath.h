@@ -4,8 +4,7 @@
 #include <ATen/NestedTensorImpl.h>
 #include <c10/macros/Macros.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 TORCH_API Tensor NestedTensor_to_padded_tensor_generic(
     const Tensor& t,
@@ -58,11 +57,11 @@ C10_ALWAYS_INLINE std::pair<int64_t, int64_t> _check_nested_layer_norm_inputs(
   int64_t N = 1;
   for (const auto i: c10::irange(normalized_ndim)) {
     TORCH_CHECK(
-      input.opt_size(-normalized_ndim + i) != c10::nullopt,
+      input.opt_size(-normalized_ndim + i).has_value(),
       "normalized_shape extends into irregular dimensions for the nested tensor"
     );
     TORCH_CHECK(
-      normalized_shape[i] == *input.opt_size(-normalized_ndim + i),
+      normalized_shape[i] == input.opt_size(-normalized_ndim + i),
       "The shape at dimension ",
       i,
       "of normalized_shape doesn't match the input"
@@ -77,5 +76,4 @@ C10_ALWAYS_INLINE std::pair<int64_t, int64_t> _check_nested_layer_norm_inputs(
 
 Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

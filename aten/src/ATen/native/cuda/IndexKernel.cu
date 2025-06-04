@@ -2,11 +2,11 @@
 #include <ATen/native/cuda/IndexKernel.h>
 #include <ATen/native/IndexKernel.h>
 
+#include <array>
 #include <type_traits>
 #include <ATen/core/TensorBase.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
-#include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/cub.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
@@ -14,6 +14,8 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/native/quantized/IndexKernel.h>
+#include <ATen/native/cuda/MemoryAccess.cuh>
+#include <ATen/native/cuda/IndexKernelUtils.h>
 
 #include <c10/core/Scalar.h>
 
@@ -52,7 +54,7 @@ static void launch_kernel(const int64_t N, const func_t& f) {
 }
 
 template <typename func_t>
-void gpu_index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, const IntArrayRef index_stride, const func_t& f) {
+void gpu_index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, const IntArrayRef index_stride, const func_t& f, const bool is_gather_like) {
   const auto num_indices = index_size.size();
   AT_ASSERT(num_indices == index_stride.size());
   AT_ASSERT(static_cast<int64_t>(num_indices) == iter.ntensors() - 2);
@@ -63,22 +65,40 @@ void gpu_index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, co
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      gpu_index_kernel(sub_iter, index_size, index_stride, f);
+      gpu_index_kernel(sub_iter, index_size, index_stride, f, is_gather_like);
     }
     return;
   }
 
-  auto sizes = at::detail::Array<int64_t, MAX_DIMS>(0);
-  auto strides = at::detail::Array<int64_t, MAX_DIMS>(0);
-  auto index_ptrs = at::detail::Array<char*, MAX_DIMS>(nullptr);
+
+  char* const out_ptr = static_cast<char*>(iter.data_ptr(0));
+  char* const in_ptr = static_cast<char*>(iter.data_ptr(1));
+
+  if (is_gather_like && num_indices==1) {
+      const size_t element_size = iter.element_size(0);
+      constexpr size_t alignment = 16;
+      if (at::native::fast_gather_kernel_eligible<alignment>(iter, out_ptr, in_ptr, index_stride[0], element_size)) {
+        auto slice_size = iter.shape()[0] * element_size;
+        auto num_ind = iter.shape()[1];
+        auto ind_dim_size = index_size[0];
+        auto inp_stride_bytes = index_stride[0];
+        auto out_stride_bytes = iter.strides(0)[1];
+        if (iter.numel() == 0) return;
+        at::native::vectorized_gather_kernel_launch<alignment, int64_t>(out_ptr, in_ptr, (int64_t*)iter.data_ptr(2), num_ind,
+        slice_size, ind_dim_size, inp_stride_bytes, out_stride_bytes, /*allow_neg_indices*/true);
+        return;
+      }
+  }
+
+  auto sizes = std::array<int64_t, MAX_DIMS>{};
+  auto strides = std::array<int64_t, MAX_DIMS>{};
+  auto index_ptrs = std::array<char*, MAX_DIMS>{};
   for (unsigned i = 0; i < num_indices; i++) {
     sizes[i] = index_size[i];
     strides[i] = index_stride[i];
     index_ptrs[i] = (char*)iter.data_ptr(i + 2);
   }
 
-  char* const out_ptr = static_cast<char*>(iter.data_ptr(0));
-  char* const in_ptr = static_cast<char*>(iter.data_ptr(1));
 
   auto offset_calc = make_offset_calculator<3>(iter);
   launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), [=]__device__(int idx) {
@@ -183,21 +203,33 @@ template <typename scalar_t>
 void index_kernel_impl(TensorIteratorBase& iter, const IntArrayRef index_size, const IntArrayRef index_stride) {
   gpu_index_kernel(iter, index_size, index_stride, []C10_DEVICE(char* const out_data, const char* const in_data, const int64_t offset) {
     *reinterpret_cast<scalar_t*>(out_data) = *reinterpret_cast<const scalar_t*>(in_data + offset);
-  });
+  }, true);
 }
 
 template <typename scalar_t>
 void index_put_kernel_impl(TensorIterator& iter, const IntArrayRef index_size, const IntArrayRef index_stride) {
   gpu_index_kernel(iter, index_size, index_stride, []C10_DEVICE(char* const out_data, const char* const in_data, const int64_t offset) {
     *reinterpret_cast<scalar_t*>(out_data + offset) = *reinterpret_cast<const scalar_t*>(in_data);
-  });
+  }, false);
 }
 
-static void index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, const IntArrayRef index_stride) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16, iter.dtype(), "index_cuda", [&] {
-    using dtype = OpaqueType<sizeof(scalar_t)>;
-    index_kernel_impl<dtype>(iter, index_size, index_stride);
-  });
+static void index_kernel(
+    TensorIteratorBase& iter,
+    const IntArrayRef index_size,
+    const IntArrayRef index_stride) {
+  AT_DISPATCH_V2(
+      iter.dtype(),
+      "index_cuda",
+      AT_WRAP([&] {
+        using dtype = OpaqueType<sizeof(scalar_t)>;
+        index_kernel_impl<dtype>(iter, index_size, index_stride);
+      }),
+      AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+      AT_EXPAND(AT_FLOAT8_TYPES),
+      kComplexHalf,
+      kHalf,
+      kBool,
+      kBFloat16);
 }
 
 static void index_fill_kernel(
@@ -259,9 +291,16 @@ void index_put_kernel_quantized_cuda(TensorIterator& iter, const IntArrayRef ind
 
     gpu_index_kernel(iter, index_size, index_stride, [inv_scale, zero_point, qmin, qmax]C10_DEVICE(char* const out_data, const char* const in_data, const int64_t offset) {
       int64_t qvalue = static_cast<int64_t>(zero_point + nearbyintf(*(float*)in_data * inv_scale));
-      qvalue = std::clamp(qvalue, qmin, qmax);
+      // See https://github.com/pytorch/pytorch/issues/127666
+      // and https://github.com/pytorch/pytorch/issues/128253.
+      // hip-clang std::clamp __glibcxx_assert_fail host function when building on Fedora40/gcc14.
+      // The following replaces std::clamp(qvalue, qmin, qmax) and is a viable solution for
+      // both CUDA and ROCm since std::clamp and this replacement generates the same PTX.
+      // Using #ifdef USE_ROCM to differentiate caused Windows build failures.
+      // The replacement should generate the same PTX as std::clamp. See https://godbolt.org/z/Wde9KW3v4
+      qvalue = (qvalue < qmin) ? qmin : (qmax < qvalue) ? qmax : qvalue;
       *(scalar_t*)(out_data + offset) = static_cast<scalar_t>(qvalue);
-    });
+    }, false);
   });
 }
 
@@ -450,24 +489,32 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
       flip_kernel_impl<dtype>(iter);
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
-                                           iter.dtype(), "flip_cuda",
-    [&] {
-      using dtype = OpaqueType<sizeof(scalar_t)>;
-      flip_kernel_impl<dtype>(iter);
-    });
+    AT_DISPATCH_V2(
+      iter.dtype(),
+      "flip_cuda",
+      AT_WRAP([&] {
+        using dtype = OpaqueType<sizeof(scalar_t)>;
+        flip_kernel_impl<dtype>(iter);
+      }),
+      AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+      AT_EXPAND(AT_FLOAT8_TYPES),
+      AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
+      kComplexHalf,
+      kHalf,
+      kBool,
+      kBFloat16);
   }
 }
 
 
-REGISTER_DISPATCH(index_stub, &index_kernel);
-REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
-REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel);
-REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
-REGISTER_DISPATCH(put_stub, &put_kernel);
-REGISTER_DISPATCH(take_stub, &take_kernel);
-REGISTER_DISPATCH(flip_stub, &flip_kernel);
+REGISTER_DISPATCH(index_stub, &index_kernel)
+REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel)
+REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel)
+REGISTER_DISPATCH(index_put_stub, &index_put_kernel)
+REGISTER_DISPATCH(put_stub, &put_kernel)
+REGISTER_DISPATCH(take_stub, &take_kernel)
+REGISTER_DISPATCH(flip_stub, &flip_kernel)
 
-REGISTER_CUDA_DISPATCH(index_put_kernel_quantized_stub, &index_put_kernel_quantized_cuda);
+REGISTER_CUDA_DISPATCH(index_put_kernel_quantized_stub, &index_put_kernel_quantized_cuda)
 
 } // namespace at::native

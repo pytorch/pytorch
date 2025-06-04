@@ -220,7 +220,7 @@ static SparseTensor& coalesce_(SparseTensor& tensor) {
 // div(SparseTensor, Scalar)
 // --------------------------------------------------------------------
 
-SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value, std::optional<c10::string_view> rounding_mode, SparseTensor& r) {
+SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value, std::optional<std::string_view> rounding_mode, SparseTensor& r) {
   TORCH_CHECK(value.dim() == 0, "Sparse division requires a scalar or ",
     "zero-dim dense tensor divisor (got shape ", value.sizes(), " for divisor)");
   TORCH_CHECK(!value.is_sparse(), "Sparse division requires a scalar or ",
@@ -254,7 +254,7 @@ SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value,
 }
 
 SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value, SparseTensor& r) {
-  return div_out_sparse_zerodim(t, value, /*rounding_mode=*/c10::nullopt, r);
+  return div_out_sparse_zerodim(t, value, /*rounding_mode=*/std::nullopt, r);
 }
 
 Tensor div_sparse(const Tensor& self, const Tensor& value) {
@@ -270,7 +270,7 @@ Tensor& div_sparse_(Tensor& self, const Tensor& value) {
   return div_out_sparse_zerodim(self, value, self);
 }
 
-Tensor div_sparse(const Tensor& self, const Tensor& value, std::optional<c10::string_view> rounding_mode) {
+Tensor div_sparse(const Tensor& self, const Tensor& value, std::optional<std::string_view> rounding_mode) {
   auto commonDtype = at::result_type(self, value);
   if (c10::isIntegralType(commonDtype, /*includeBool=*/true) && !rounding_mode.has_value()) {
     commonDtype = typeMetaToScalarType(at::get_default_dtype());
@@ -279,7 +279,7 @@ Tensor div_sparse(const Tensor& self, const Tensor& value, std::optional<c10::st
   return div_out_sparse_zerodim(self, value, std::move(rounding_mode), result);
 }
 
-Tensor& div_sparse_(Tensor& self, const Tensor& value, std::optional<c10::string_view> rounding_mode) {
+Tensor& div_sparse_(Tensor& self, const Tensor& value, std::optional<std::string_view> rounding_mode) {
   return div_out_sparse_zerodim(self, value, std::move(rounding_mode), self);
 }
 
@@ -349,10 +349,10 @@ Tensor& floor_divide_sparse_(Tensor& self, const Tensor& value) {
 // Only supports floating point, FYI
 Tensor norm_sparse(const SparseTensor& self, const Scalar& p) {
   AT_ASSERT(self.is_sparse());
-  return norm_sparse(self, p, IntArrayRef{}, false, c10::nullopt);
+  return norm_sparse(self, p, IntArrayRef{}, false, std::nullopt);
 }
 
-Tensor norm_sparse(const SparseTensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
+Tensor norm_sparse(const SparseTensor& self, const std::optional<Scalar>& p, IntArrayRef dim, bool keepdim, std::optional<ScalarType> dtype) {
   AT_ASSERT(self.is_sparse());
   if (!dim.empty()) {
     // Only full reductions are supported, so check if that is the case
@@ -551,7 +551,7 @@ static SparseTensor& add_out_sparse_non_contiguous(SparseTensor& r, const Sparse
     return r;
 }
 
-Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTensor& sparse_, const Scalar& value);
+static Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTensor& sparse_, const Scalar& value);
 
 SparseTensor& add_out_sparse_cpu(const SparseTensor& t, const SparseTensor& src, const Scalar& value, SparseTensor& r) {
   if (!t.is_sparse()) {
@@ -593,7 +593,7 @@ SparseTensor& add_out_sparse_cpu(const SparseTensor& t, const SparseTensor& src,
 //    formerly known as spcadd
 // --------------------------------------------------------------------
 template <typename scalar_t>
-void add_dense_sparse_worker_non_hybrid_cpu(Tensor& r, const Scalar& value, const SparseTensor& sparse, const Tensor& indices, const Tensor& values) {
+static void add_dense_sparse_worker_non_hybrid_cpu(Tensor& r, const Scalar& value, const SparseTensor& sparse, const Tensor& indices, const Tensor& values) {
   auto indices_accessor = indices.accessor<int64_t, 2>();
   auto values_accessor = values.accessor<scalar_t, 1>();
 
@@ -616,7 +616,7 @@ void add_dense_sparse_worker_non_hybrid_cpu(Tensor& r, const Scalar& value, cons
 }
 
 template <typename scalar_t>
-inline void add_dense_sparse_worker_hybrid_cpu(Tensor& r, const Scalar& value, const SparseTensor& sparse, const Tensor& indices, const Tensor& values) {
+static inline void add_dense_sparse_worker_hybrid_cpu(Tensor& r, const Scalar& value, const SparseTensor& sparse, const Tensor& indices, const Tensor& values) {
 
   // Get the dense dimension element numbers of hybrid sparse tensor
   int64_t values_dense_size = values.stride(0);
@@ -647,7 +647,7 @@ inline void add_dense_sparse_worker_hybrid_cpu(Tensor& r, const Scalar& value, c
 }
 
 template <typename scalar_t>
-inline void add_dense_sparse_worker_non_coalesced_cpu(Tensor& r, const Scalar& value,
+static inline void add_dense_sparse_worker_non_coalesced_cpu(Tensor& r, const Scalar& value,
     const SparseTensor& sparse, const Tensor& indices, const Tensor& values) {
 
   // Get the dense dimension element numbers of hybrid sparse tensor
@@ -829,7 +829,7 @@ Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
 // so it is up to the user to supply right implementations for non-commutative
 // operations.
 template <typename binary_func_t>
-Tensor& intersection_binary_op_sparse_dense_out(
+static Tensor& intersection_binary_op_sparse_dense_out(
     const Tensor& d,
     const SparseTensor& s_,
     Tensor& res,
@@ -1183,7 +1183,7 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r
 // --------------------------------------------------------------------
 
 template <typename scalar_t>
-void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, int64_t dim_k, Tensor& r, const Scalar& beta, const Tensor& t, const Scalar& alpha, const Tensor& indices, const Tensor& values, const Tensor& dense) {
+static void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, int64_t dim_k, Tensor& r, const Scalar& beta, const Tensor& t, const Scalar& alpha, const Tensor& indices, const Tensor& values, const Tensor& dense) {
 
   // r_ = alpha * sparse * dense
   scalar_t cast_alpha = alpha.to<scalar_t>();
@@ -1224,13 +1224,13 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
             r_ptr + row * r_stride0, r_stride1);
     } else {
       if (col < 0 || col >= dim_j) {
-        AT_ERROR("addmm: index out of column bound: ", col, " not between 1 and ", dim_j);
+        TORCH_CHECK(false, "addmm: index out of column bound: ", col, " not between 1 and ", dim_j);
       } else {
-        AT_ERROR("addmm: index out of row bound: ", row, " not between 1 and ", dim_i);
+        TORCH_CHECK(false, "addmm: index out of row bound: ", row, " not between 1 and ", dim_i);
       }
     }
   }
-};
+}
 
 static Tensor& s_addmm_out_sparse_dense_cpu(
     Tensor& r,
@@ -1393,7 +1393,7 @@ SparseTensor& _sparse_mm_out(const SparseTensor& sparse,
   return at::addmm_out(result, t, sparse, dense, 0, 1);  // redispatch!
 }
 
-Tensor _sparse_mm(const Tensor& mat1, const Tensor& mat2, const c10::string_view reduce) {
+Tensor _sparse_mm(const Tensor& mat1, const Tensor& mat2, const std::string_view reduce) {
   // result: out, arg_out
   auto result = at::_sparse_mm_reduce_impl(mat1, mat2, reduce);
   return std::get<0>(result);
@@ -1577,7 +1577,7 @@ SparseTensor& _sspaddmm_out_cpu(
                   dense_ptr + col * dense_stride0, dense_stride1,
                   newv_ptr + p * newv_stride0, 1);
             } else {
-              AT_ERROR("index out of bound. sspmm: ", col, " not between 1 and ", dim_j);
+              TORCH_CHECK(false, "index out of bound. sspmm: ", col, " not between 1 and ", dim_j);
             }
           }
           // Fill up the indices with the right values
@@ -1602,7 +1602,7 @@ SparseTensor& _sspaddmm_out_cpu(
 // sparse, sparse, sparse, dense, real, real -> sparse
 Tensor& _sspaddmm_out_only_sparse(const Tensor& self,
     const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Tensor& result) {
-  AT_ERROR("tensor.sspaddmm(...) can only be called on sparse tensors");
+  TORCH_CHECK(false, "tensor.sspaddmm(...) can only be called on sparse tensors");
 }
 
 // sparse, dense -> sparse
@@ -1905,7 +1905,7 @@ Tensor bmm_sparse_cpu(const SparseTensor& self, const Tensor& mat2) {
 // Returns the index of the found element.
 // Returns by reference `found`, true if search value was found, false otherwise
 template<typename scalar_t>
-scalar_t binary_search_strided_rightmost(scalar_t search_val, TensorAccessor<scalar_t, 1>& sorted_arr_accessor, int64_t sorted_arr_begin_idx, int64_t length, bool* found) {
+static scalar_t binary_search_strided_rightmost(scalar_t search_val, TensorAccessor<scalar_t, 1>& sorted_arr_accessor, int64_t sorted_arr_begin_idx, int64_t length, bool* found) {
   if (length == 0) {
     *found = false;
     return -1;

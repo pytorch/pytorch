@@ -4,11 +4,11 @@ import operator
 import re
 from collections import deque
 from dataclasses import dataclass
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from torch.autograd.profiler import profile
-
 from torch.profiler import DeviceType
+
 
 if TYPE_CHECKING:
     from torch.autograd import _KinetoEvent
@@ -64,7 +64,7 @@ class EventKey:
     def __repr__(self):
         return f"{self.event.name}"
 
-    def intervals_overlap(self, intervals: List[Interval]):
+    def intervals_overlap(self, intervals: list[Interval]):
         overlap_time = 0
         intervals = sorted(intervals, key=lambda x: x.start)
 
@@ -100,13 +100,13 @@ class EventKey:
 class BasicEvaluation:
     def __init__(self, prof: profile):
         self.profile = prof
-        self.metrics: Dict[EventKey, EventMetrics] = {}
+        self.metrics: dict[EventKey, EventMetrics] = {}
         self.compute_self_time()
         self.event_keys = sorted(
             (e for e in self.metrics.keys()), key=lambda x: x.event.start_time_ns
         )
         self.events = [e.event for e in self.event_keys]
-        self.cuda_events: List[_KinetoEvent] = []
+        self.cuda_events: list[_KinetoEvent] = []
         self.queue_depth_list = self.compute_queue_depth()
         self.compute_idle_time()
 
@@ -162,7 +162,7 @@ class BasicEvaluation:
             cuda_launch_events + cuda_kernel_events, key=lambda x: x.start_ns()
         )
 
-        kernel_mapping: Dict[_KinetoEvent, int] = {}
+        kernel_mapping: dict[_KinetoEvent, int] = {}
         last_mapped_kernel = 0
         for cuda_launch_event in cuda_launch_events:
             index = index_of_first_match(
@@ -188,7 +188,7 @@ class BasicEvaluation:
                 return event.start_time_ns
             raise Exception("Unknown Event Type")  # noqa: TRY002
 
-        queue_depth_list: List[Interval] = []
+        queue_depth_list: list[Interval] = []
         all_events.sort(key=new_old_event_comparator)
         for event in all_events:
             # Find latest cuda kernel event
@@ -233,7 +233,7 @@ class BasicEvaluation:
         # Based on queue_depth_list, we can calculate idle time for all the events
         idle = False
         idle_start = 0
-        idle_intervals: List[Interval] = []
+        idle_intervals: list[Interval] = []
         if self.queue_depth_list and self.events:
             idle_intervals += [
                 Interval(self.events[0].start_time_ns, self.queue_depth_list[0].start),
@@ -335,11 +335,11 @@ class BasicEvaluation:
 
         output += "\n".join(
             [
-                f"""{'-'*80}
+                f"""{'-' * 80}
 Event:                {event}
 Source code location: {source_code_location(event.event)}
 Percentage idle time: {self.metrics[event].fraction_idle_time * 100:.2f}%
-{'-'*80}"""
+{'-' * 80}"""
                 for event in event_list
             ]
         )

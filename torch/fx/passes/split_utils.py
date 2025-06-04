@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Type, Union
+from typing import Optional, Union
 
 import torch.fx
 from torch.fx._compatibility import compatibility
@@ -9,6 +9,7 @@ from torch.fx.graph import map_arg
 from torch.fx.passes.utils import HolderModule, lift_subgraph_as_module
 
 from .tools_common import NodeList
+
 
 __all__ = ["getattr_recursive", "setattr_recursive", "Component", "split_by_tags"]
 
@@ -44,28 +45,28 @@ class Component:
     name: str
 
     # Stores the placeholder nodes in `graph`.
-    input_placeholders: List = field(default_factory=list)
+    input_placeholders: list = field(default_factory=list)
 
     # Store the nodes in original graph that are placeholder in `graph`.
-    orig_inputs: List = field(default_factory=list)
+    orig_inputs: list = field(default_factory=list)
 
     # Store the nodes in original graph that are outputs in `graph`.
-    orig_outputs: List = field(default_factory=list)
+    orig_outputs: list = field(default_factory=list)
 
     # Mapping from get_attr node in original graph to get_attr node in `graph`.
-    getattr_maps: Dict[torch.fx.Node, torch.fx.Node] = field(default_factory=dict)
-    constructor_args: List[str] = field(default_factory=list)
+    getattr_maps: dict[torch.fx.Node, torch.fx.Node] = field(default_factory=dict)
+    constructor_args: list[str] = field(default_factory=list)
     gm: Optional[torch.fx.GraphModule] = None
 
 
 @compatibility(is_backward_compatible=False)
 def split_by_tags(
     gm: torch.fx.GraphModule,
-    tags: List[str],
+    tags: list[str],
     return_fqn_mapping: bool = False,
     return_tuple: bool = False,
-    GraphModuleCls: Type[torch.fx.GraphModule] = torch.fx.GraphModule,
-) -> Union[torch.fx.GraphModule, Tuple[torch.fx.GraphModule, Dict[str, str]]]:
+    GraphModuleCls: type[torch.fx.GraphModule] = torch.fx.GraphModule,
+) -> Union[torch.fx.GraphModule, tuple[torch.fx.GraphModule, dict[str, str]]]:
     """
     Splits a GraphModule using tags on its graph nodes. We honor the order of
     tags. For example, we have tags = ["a", "b", "c"], the function will create
@@ -82,7 +83,7 @@ def split_by_tags(
     Given the following module def:
 
     class SimpleModule(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.linear1 = torch.nn.Linear(...)
             self.linear2 = torch.nn.Linear(...)
@@ -132,26 +133,26 @@ def split_by_tags(
         return r
 
     # Mapping from node in original module to node in created submodule.
-    node_remapping: Dict[torch.fx.Node, torch.fx.Node] = {}
+    node_remapping: dict[torch.fx.Node, torch.fx.Node] = {}
 
     # Mapping from node in original module or created submodules to
     # corresponding component.
-    node_to_component: Dict[torch.fx.Node, Component] = {}
+    node_to_component: dict[torch.fx.Node, Component] = {}
 
     # Mapping from tag to the corresponding component.
-    tag_to_component: Dict[str, Component] = {}
+    tag_to_component: dict[str, Component] = {}
 
     # Stores all components.
-    all_components: List[Component] = []
+    all_components: list[Component] = []
 
     # Stores nodes that will be used in main graph.
-    used_in_main: Dict[torch.fx.Node, None] = {}
+    used_in_main: dict[torch.fx.Node, None] = {}
 
     # Main graph after split.
     main_g = torch.fx.Graph()
 
     # Mapping from node in original module to node in main graph after split.
-    main_remapping: Dict[torch.fx.Node, torch.fx.Node] = {}
+    main_remapping: dict[torch.fx.Node, torch.fx.Node] = {}
 
     # Output node of original module.
     output_node: Optional[torch.fx.Node] = None
@@ -183,7 +184,7 @@ def split_by_tags(
 
         # Now we process callable nodes which are nodes with op of call_module,
         # call_function or call_method. Every callable nodes should be tagged.
-        assert hasattr(node, "tag")
+        assert hasattr(node, "tag"), f"Node does not have tag: {node.format_node()}"
 
         upstream_components = [
             node_to_component[x]
@@ -198,7 +199,9 @@ def split_by_tags(
         mx = max((c.order for c in upstream_components), default=0)
 
         # Expect the component for `node` has higher order then its upstream components.
-        assert comp.order >= mx
+        assert (
+            comp.order >= mx
+        ), f"Component {comp.name} order must be >= max of its upstream components, order={comp.order} and max={mx}"
 
         # Map a input of `node` to nodes in the component's graph.
         def remap_func(x):
@@ -209,6 +212,7 @@ def split_by_tags(
                     comp.getattr_maps[x] = comp.graph.get_attr(
                         x.target, type_expr=x.type
                     )
+                    comp.getattr_maps[x].meta = copy.copy(x.meta)
                 return comp.getattr_maps[x]
 
             # If input is not a placeholder, it should have been put into a component
@@ -254,7 +258,7 @@ def split_by_tags(
             node_to_component[n].orig_outputs.append(n)
 
     # Now we create a graphmodule for each component.
-    orig_to_split_fqn_mapping: Dict[str, str] = {}
+    orig_to_split_fqn_mapping: dict[str, str] = {}
     for comp in all_components:
         outs = tuple(map(node_remapping.__getitem__, comp.orig_outputs))
 

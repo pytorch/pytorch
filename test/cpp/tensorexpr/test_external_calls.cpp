@@ -644,13 +644,14 @@ TEST(ExternalCall, BinaryFloat) {
   tests.push_back(
       Test{{100, 200}, {200, 300}, {100, 300}, at::matmul, "nnc_aten_matmul"});
   tests.push_back(Test{{100, 300}, {300}, {100}, at::mv, "nnc_aten_mv"});
-  tests.push_back(
-      Test{{100, 200}, {200, 300}, {100, 300}, at::mm, "nnc_aten_mm"});
+  tests.push_back(Test{
+      {100, 200},
+      {200, 300},
+      {100, 300},
+      [&](const at::Tensor& a, const at::Tensor& b) { return at::mm(a, b); },
+      "nnc_aten_mm"});
   for (auto curTest : tests) {
-    std::vector<int64_t> aShape, bShape, resShape;
-    TensorFunc torchFunc;
-    std::string externCallName;
-    std::tie(aShape, bShape, resShape, torchFunc, externCallName) = curTest;
+    auto [aShape, bShape, resShape, torchFunc, externCallName] = curTest;
     auto toExprHandleVec = [](std::vector<int64_t> v) {
       auto intV = std::vector<int>(v.begin(), v.end());
       return std::vector<ExprHandle>(intV.begin(), intV.end());
@@ -715,14 +716,13 @@ TEST(ExternalCall, UnaryFloat) {
       std::string,
       std::vector<ExprHandle>>;
   std::vector<Test> tests = {};
-  tests.push_back(Test{// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-                       {1, 64, 8, 9},
-                       {1, 64, 5, 7},
-                       [](at::Tensor x) {
-                         return at::adaptive_avg_pool2d(x, {5, 7});
-                       },
-                       "nnc_aten_adaptive_avg_pool2d",
-                       toExprHandleVec({5, 7})});
+  tests.push_back(Test{
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {1, 64, 8, 9},
+      {1, 64, 5, 7},
+      [](at::Tensor x) { return at::adaptive_avg_pool2d(x, {5, 7}); },
+      "nnc_aten_adaptive_avg_pool2d",
+      toExprHandleVec({5, 7})});
   tests.push_back(Test{// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                        {100, 200},
                        {100},
@@ -730,11 +730,7 @@ TEST(ExternalCall, UnaryFloat) {
                        "nnc_aten_mean",
                        toExprHandleVec({1, /*keepdim=*/0})});
   for (auto curTest : tests) {
-    std::vector<int64_t> aShape, resShape;
-    TensorFunc torchFunc;
-    std::string externCallName;
-    std::vector<ExprHandle> externCallArgs;
-    std::tie(aShape, resShape, torchFunc, externCallName, externCallArgs) =
+    auto [aShape, resShape, torchFunc, externCallName, externCallArgs] =
         curTest;
     BufHandle A("A", toExprHandleVec(aShape), kFloat);
     BufHandle ResultBuf("Result", toExprHandleVec(resShape), kFloat);

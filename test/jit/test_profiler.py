@@ -6,10 +6,12 @@ import sys
 import torch
 from torch.testing._internal.common_utils import skipIfTorchDynamo
 
+
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import FileCheck, JitTestCase, warmup_backward
+
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -149,7 +151,7 @@ class TestProfiler(JitTestCase):
         x = torch.ones(1)
         y = torch.ones(1)
         foo(x, y)
-        b = foo(x, y)
+        b = foo(x, y)  # noqa: F841
         g = torch.jit.last_executed_optimized_graph()
         self.assertEqual(len(list(g.findAllNodes("prim::TypeCheck"))), 2)
         FileCheck().check("TensorExpr").check("aten::add_").check("TensorExpr").run(g)

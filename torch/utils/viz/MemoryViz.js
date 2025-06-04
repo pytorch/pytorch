@@ -113,7 +113,7 @@ function formatSize(num) {
   return `${num.toFixed(1)}YiB`;
 }
 function formatAddr(event) {
-  const prefix = event.action.startsWith('segment') ? 's' : 'b';
+  const prefix = event.action.startsWith('segment') ? 's\'' : 'b\'';
   return `${prefix}${event.addr.toString(16)}_${event.version}`;
 }
 function formatEvent(event) {
@@ -980,8 +980,14 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
       text = `${text}, Total memory used after allocation: ${formatSize(
         elem.max_allocated_mem,
       )}`;
+      const context = elem?.compile_context ?? 'None';
+      text = `${text}, Compile context: ${context}`;
       if (elem.stream !== null) {
         text = `${text}, stream ${elem.stream}`;
+      }
+      if (elem.timestamp !== null) {
+        var d = new Date(elem.time_us / 1000);
+        text = `${text}, timestamp ${d}`;
       }
       if (!elem.action.includes('alloc')) {
         text = `${text}\nalloc not recorded, stack trace for free:`;
@@ -1222,6 +1228,7 @@ function create_trace_view(
   dst.selectAll('svg').remove();
   dst.selectAll('div').remove();
 
+  max_entries = Math.min(max_entries, data.elements_length);
   const d = dst.append('div');
   d.append('input')
     .attr('type', 'range')
@@ -1231,7 +1238,9 @@ function create_trace_view(
     .on('change', function () {
       create_trace_view(dst, snapshot, device, plot_segments, this.value);
     });
-  d.append('label').text('Detail');
+  d.append('label').text(
+    `Detail: ${max_entries} of ${data.elements_length} entries`,
+  );
 
   const grid_container = dst
     .append('div')
@@ -1271,7 +1280,36 @@ function create_trace_view(
   plot.set_delegate(delegate);
 }
 
+function create_settings_view(dst, snapshot, device) {
+  dst.selectAll('svg').remove();
+  dst.selectAll('div').remove();
+  const settings_div = dst.append('div');
+  settings_div.append('p').text('CUDA Caching Allocator Settings:');
+
+  // Check if allocator_settings exists in snapshot
+  if ('allocator_settings' in snapshot) {
+    settings_div
+      .append('pre')
+      .text(JSON.stringify(snapshot.allocator_settings, null, 2));
+  } else {
+    settings_div.append('p').text('No allocator settings found.');
+  }
+}
+
 function unpickle(buffer) {
+  try {
+    const decoder = new TextDecoder();
+    const jsonString = decoder.decode(new Uint8Array(buffer));
+    const data = JSON.parse(jsonString);
+
+    return data;
+  } catch (e) {
+    console.log('Failed to decode the data as JSON, fall back to pickle', e);
+  }
+  return unpickleData(buffer);
+}
+
+function unpickleData(buffer) {
   const bytebuffer = new Uint8Array(buffer);
   const decoder = new TextDecoder();
 
@@ -1564,6 +1602,7 @@ const kinds = {
   'Allocator State History': create_segment_view,
   'Active Cached Segment Timeline': (dst, snapshot, device) =>
     create_trace_view(dst, snapshot, device, true),
+  'Allocator Settings': create_settings_view,
 };
 
 const snapshot_cache = {};
@@ -1599,6 +1638,7 @@ function unpickle_and_annotate(data) {
 
 function snapshot_change(f) {
   const view_value = view.node().value;
+  let no_starting_gpu = gpu.node().value == '';
   let device = Number(gpu.node().value);
   const snapshot = snapshot_cache[f];
   gpu.selectAll('option').remove();
@@ -1607,9 +1647,15 @@ function snapshot_change(f) {
     has_segments[s.device] = true;
   }
   let device_valid = false;
+  let maxTraceLength = -1;
+  let defaultDevice = null;
   for (const [i, trace] of snapshot.device_traces.entries()) {
     if (trace.length > 0 || i in has_segments) {
       gpu.append('option').text(i);
+      if (trace.length > maxTraceLength) {
+        maxTraceLength = trace.length;
+        defaultDevice = i;
+      }
       if (i === device) {
         device_valid = true;
         gpu.node().selectedIndex = gpu.node().children.length - 1;
@@ -1619,6 +1665,12 @@ function snapshot_change(f) {
   if (!device_valid) {
     device = Number(gpu.node().value);
   }
+
+  if (no_starting_gpu) {
+    device = defaultDevice;
+    gpu.node().value = device;
+  }
+
   const key = [f, view_value, device];
   if (!(key in selection_to_div)) {
     selection_to_div[key] = d3.select('body').append('div');

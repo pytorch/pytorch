@@ -1,8 +1,8 @@
 #pragma once
 
 #include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
+#include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
 
 #include <sleef.h>
@@ -12,6 +12,8 @@ namespace vec {
 
 inline namespace CPU_CAPABILITY {
 
+template <>
+struct is_vec_specialized_for<double> : std::bool_constant<true> {};
 
 template <>
 class Vectorized<double> {
@@ -39,8 +41,10 @@ class Vectorized<double> {
   Vectorized() {}
   C10_ALWAYS_INLINE Vectorized(vfloat64 v) : _vec0{v}, _vec1{v} {}
   C10_ALWAYS_INLINE Vectorized(vbool64 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
-  C10_ALWAYS_INLINE Vectorized(vfloat64 v1, vfloat64 v2) : _vec0{v1}, _vec1{v2} {}
-  C10_ALWAYS_INLINE Vectorized(vbool64 v1, vbool64 v2) : _vecb0{v1}, _vecb1{v2} {}
+  C10_ALWAYS_INLINE Vectorized(vfloat64 v1, vfloat64 v2)
+      : _vec0{v1}, _vec1{v2} {}
+  C10_ALWAYS_INLINE Vectorized(vbool64 v1, vbool64 v2)
+      : _vecb0{v1}, _vecb1{v2} {}
   C10_ALWAYS_INLINE Vectorized(double scalar)
       : _vec0{vec_splats(scalar)}, _vec1{vec_splats(scalar)} {}
   C10_ALWAYS_INLINE Vectorized(
@@ -63,75 +67,77 @@ class Vectorized<double> {
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoiceDbl(mask) == 0, Vectorized<double>> C10_ALWAYS_INLINE
+  static std::enable_if_t<blendChoiceDbl(mask) == 0, Vectorized<double>>
+      C10_ALWAYS_INLINE
       blend(const Vectorized<double>& a, const Vectorized<double>& b) {
-      return a;
+    return a;
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoiceDbl(mask) == 1, Vectorized<double>> C10_ALWAYS_INLINE
+  static std::enable_if_t<blendChoiceDbl(mask) == 1, Vectorized<double>>
+      C10_ALWAYS_INLINE
       blend(const Vectorized<double>& a, const Vectorized<double>& b) {
-      return b;
+    return b;
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoiceDbl(mask) == 2, Vectorized<double>> C10_ALWAYS_INLINE
+  static std::enable_if_t<blendChoiceDbl(mask) == 2, Vectorized<double>>
+      C10_ALWAYS_INLINE
       blend(const Vectorized<double>& a, const Vectorized<double>& b) {
-      return { b._vec0, a._vec1 };
+    return {b._vec0, a._vec1};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoiceDbl(mask) == 3, Vectorized<double>> C10_ALWAYS_INLINE
+  static std::enable_if_t<blendChoiceDbl(mask) == 3, Vectorized<double>>
+      C10_ALWAYS_INLINE
       blend(const Vectorized<double>& a, const Vectorized<double>& b) {
-      return { a._vec0, b._vec1 };
+    return {a._vec0, b._vec1};
   }
 
-
   template <int64_t mask>
-  static std::enable_if_t<blendChoiceDbl(mask) == 4, Vectorized<double>> C10_ALWAYS_INLINE
+  static std::enable_if_t<blendChoiceDbl(mask) == 4, Vectorized<double>>
+      C10_ALWAYS_INLINE
       blend(const Vectorized<double>& a, const Vectorized<double>& b) {
-      const vbool64 mask_1st = VsxDblMask1(mask);
-      return { (vfloat64)vec_sel(a._vec0, b._vec0, mask_1st), a._vec1 };
+    const vbool64 mask_1st = VsxDblMask1(mask);
+    return {(vfloat64)vec_sel(a._vec0, b._vec0, mask_1st), a._vec1};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoiceDbl(mask) == 5, Vectorized<double>> C10_ALWAYS_INLINE
+  static std::enable_if_t<blendChoiceDbl(mask) == 5, Vectorized<double>>
+      C10_ALWAYS_INLINE
       blend(const Vectorized<double>& a, const Vectorized<double>& b) {
-      const vbool64 mask_1st = VsxDblMask1(mask);
-      return { (vfloat64)vec_sel(a._vec0, b._vec0, mask_1st), b._vec1 };
-  }
-
-
-  template <int64_t mask>
-  static std::enable_if_t<blendChoiceDbl(mask) == 6,
-      Vectorized<double>>
-      C10_ALWAYS_INLINE blend(const Vectorized<double>& a, const Vectorized<double>& b) {
-      const vbool64 mask_2nd = VsxDblMask2(mask);
-      // generated masks
-      return { a._vec0,
-          (vfloat64)vec_sel(a._vec1, b._vec1, mask_2nd) };
+    const vbool64 mask_1st = VsxDblMask1(mask);
+    return {(vfloat64)vec_sel(a._vec0, b._vec0, mask_1st), b._vec1};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoiceDbl(mask) == 7,
-      Vectorized<double>>
-      C10_ALWAYS_INLINE blend(const Vectorized<double>& a, const Vectorized<double>& b) {
-      const vbool64 mask_2nd = VsxDblMask2(mask);
-      // generated masks
-      return { b._vec0,
-          (vfloat64)vec_sel(a._vec1, b._vec1, mask_2nd) };
+  static std::enable_if_t<blendChoiceDbl(mask) == 6, Vectorized<double>>
+      C10_ALWAYS_INLINE
+      blend(const Vectorized<double>& a, const Vectorized<double>& b) {
+    const vbool64 mask_2nd = VsxDblMask2(mask);
+    // generated masks
+    return {a._vec0, (vfloat64)vec_sel(a._vec1, b._vec1, mask_2nd)};
+  }
+
+  template <int64_t mask>
+  static std::enable_if_t<blendChoiceDbl(mask) == 7, Vectorized<double>>
+      C10_ALWAYS_INLINE
+      blend(const Vectorized<double>& a, const Vectorized<double>& b) {
+    const vbool64 mask_2nd = VsxDblMask2(mask);
+    // generated masks
+    return {b._vec0, (vfloat64)vec_sel(a._vec1, b._vec1, mask_2nd)};
   }
 
   template <int64_t mask>
   static std::enable_if_t<blendChoiceDbl(mask) == 8, Vectorized<double>>
-      C10_ALWAYS_INLINE blend(const Vectorized<double>& a, const Vectorized<double>& b) {
-      const vbool64 mask_1st = VsxDblMask1(mask);
-      const vbool64 mask_2nd = VsxDblMask2(mask);
-      return {
-          (vfloat64)vec_sel(a._vec0, b._vec0, mask_1st),
-          (vfloat64)vec_sel(a._vec1, b._vec1, mask_2nd) };
+      C10_ALWAYS_INLINE
+      blend(const Vectorized<double>& a, const Vectorized<double>& b) {
+    const vbool64 mask_1st = VsxDblMask1(mask);
+    const vbool64 mask_2nd = VsxDblMask2(mask);
+    return {
+        (vfloat64)vec_sel(a._vec0, b._vec0, mask_1st),
+        (vfloat64)vec_sel(a._vec1, b._vec1, mask_2nd)};
   }
-
 
   static Vectorized<double> C10_ALWAYS_INLINE blendv(
       const Vectorized<double>& a,
@@ -144,12 +150,17 @@ class Vectorized<double> {
         vec_sel(a._vec1, b._vec1, mask._vecb1)};
   }
   template <typename step_t>
-  static Vectorized<double> arange(double base = 0., step_t step = static_cast<step_t>(1)) {
-    return Vectorized<double>(base, base + step, base + 2 * step, base + 3 * step);
+  static Vectorized<double> arange(
+      double base = 0.,
+      step_t step = static_cast<step_t>(1)) {
+    return Vectorized<double>(
+        base, base + step, base + 2 * step, base + 3 * step);
   }
 
   static Vectorized<double> C10_ALWAYS_INLINE
-  set(const Vectorized<double>& a, const Vectorized<double>& b, size_t count = size()) {
+  set(const Vectorized<double>& a,
+      const Vectorized<double>& b,
+      size_t count = size()) {
     switch (count) {
       case 0:
         return a;
@@ -192,23 +203,24 @@ class Vectorized<double> {
   double& operator[](int idx) = delete;
   Vectorized<double> map(double (*const f)(double)) const {
     Vectorized<double> ret;
-    for (const auto i : c10::irange(size()/2)) {
-        ret._vec0[i] = f(_vec0[i]);
+    for (const auto i : c10::irange(size() / 2)) {
+      ret._vec0[i] = f(_vec0[i]);
     }
-    for (const auto i : c10::irange(size()/2)) {
-        ret._vec1[i] = f(_vec1[i]);
+    for (const auto i : c10::irange(size() / 2)) {
+      ret._vec1[i] = f(_vec1[i]);
     }
     return ret;
   }
 
-  Vectorized<double> mapbi(double (*const f)(double, double), const Vectorized<double>& other)
-      const {
+  Vectorized<double> mapbi(
+      double (*const f)(double, double),
+      const Vectorized<double>& other) const {
     Vectorized<double> ret;
-    for (const auto i : c10::irange(size()/2)) {
-        ret._vec0[i] = f(_vec0[i], other._vec0[i]);
+    for (const auto i : c10::irange(size() / 2)) {
+      ret._vec0[i] = f(_vec0[i], other._vec0[i]);
     }
-    for (const auto i : c10::irange(size()/2)) {
-        ret._vec1[i] = f(_vec1[i], other._vec1[i]);
+    for (const auto i : c10::irange(size() / 2)) {
+      ret._vec1[i] = f(_vec1[i], other._vec1[i]);
     }
     return ret;
   }
@@ -217,44 +229,53 @@ class Vectorized<double> {
   }
 
   Vectorized<double> C10_ALWAYS_INLINE acos() const {
-     return {Sleef_acosd2_u10(_vec0), Sleef_acosd2_u10(_vec1)};
+    return {Sleef_acosd2_u10(_vec0), Sleef_acosd2_u10(_vec1)};
+  }
+  Vectorized<double> C10_ALWAYS_INLINE acosh() const {
+    return {Sleef_acoshd2_u10(_vec0), Sleef_acoshd2_u10(_vec1)};
   }
   Vectorized<double> C10_ALWAYS_INLINE asin() const {
-     return {Sleef_asind2_u10(_vec0), Sleef_asind2_u10(_vec1)};
+    return {Sleef_asind2_u10(_vec0), Sleef_asind2_u10(_vec1)};
+  }
+  Vectorized<double> C10_ALWAYS_INLINE asinh() const {
+    return {Sleef_asinhd2_u10(_vec0), Sleef_asinhd2_u10(_vec1)};
   }
   Vectorized<double> atan() const {
-     return {Sleef_atand2_u10(_vec0), Sleef_atand2_u10(_vec1)};
+    return {Sleef_atand2_u10(_vec0), Sleef_atand2_u10(_vec1)};
   }
   Vectorized<double> atanh() const {
-     return {Sleef_atanhd2_u10(_vec0), Sleef_atanhd2_u10(_vec1)};
+    return {Sleef_atanhd2_u10(_vec0), Sleef_atanhd2_u10(_vec1)};
   }
   Vectorized<double> atan2(const Vectorized<double>& b) const {
-     return {Sleef_atan2d2_u10(_vec0, b._vec0), Sleef_atan2d2_u10(_vec1, b._vec1)};
+    return {
+        Sleef_atan2d2_u10(_vec0, b._vec0), Sleef_atan2d2_u10(_vec1, b._vec1)};
   }
-  Vectorized<double> copysign(const Vectorized<double> &sign) const {
-    return {Sleef_copysignd2(_vec0, sign._vec0), Sleef_copysignd2(_vec1, sign._vec1)};
+  Vectorized<double> copysign(const Vectorized<double>& sign) const {
+    return {
+        Sleef_copysignd2(_vec0, sign._vec0),
+        Sleef_copysignd2(_vec1, sign._vec1)};
   }
   Vectorized<double> erf() const {
-     return {Sleef_erfd2_u10(_vec0), Sleef_erfd2_u10(_vec1)};
+    return {Sleef_erfd2_u10(_vec0), Sleef_erfd2_u10(_vec1)};
   }
   Vectorized<double> erfc() const {
-     return {Sleef_erfcd2_u15(_vec0), Sleef_erfcd2_u15(_vec1)};
+    return {Sleef_erfcd2_u15(_vec0), Sleef_erfcd2_u15(_vec1)};
   }
   Vectorized<double> C10_ALWAYS_INLINE exp() const {
-     return {Sleef_expd2_u10(_vec0), Sleef_expd2_u10(_vec1)};
+    return {Sleef_expd2_u10(_vec0), Sleef_expd2_u10(_vec1)};
   }
   Vectorized<double> C10_ALWAYS_INLINE exp2() const {
     return {Sleef_exp2d2_u10(_vec0), Sleef_exp2d2_u10(_vec1)};
   }
   Vectorized<double> expm1() const {
-     return {Sleef_expm1d2_u10(_vec0), Sleef_expm1d2_u10(_vec1)};
+    return {Sleef_expm1d2_u10(_vec0), Sleef_expm1d2_u10(_vec1)};
   }
   Vectorized<double> C10_ALWAYS_INLINE exp_u20() const {
-     return exp();
+    return exp();
   }
 
   Vectorized<double> lgamma() const __ubsan_ignore_undefined__ {
-     return {Sleef_lgammad2_u10(_vec0), Sleef_lgammad2_u10(_vec1)};
+    return {Sleef_lgammad2_u10(_vec0), Sleef_lgammad2_u10(_vec1)};
   }
 
   Vectorized<double> erfinv() const {
@@ -263,7 +284,9 @@ class Vectorized<double> {
 
   Vectorized<double> angle() const {
     auto tmp = blendv(
-      Vectorized<double>(0), Vectorized<double>(c10::pi<double>), *this < Vectorized<double>(0));
+        Vectorized<double>(0),
+        Vectorized<double>(c10::pi<double>),
+        *this < Vectorized<double>(0));
     return blendv(tmp, *this, isnan());
   }
   Vectorized<double> real() const {
@@ -277,25 +300,25 @@ class Vectorized<double> {
   }
 
   Vectorized<double> C10_ALWAYS_INLINE log() const {
-     return {Sleef_logd2_u10(_vec0), Sleef_logd2_u10(_vec1)};
+    return {Sleef_logd2_u10(_vec0), Sleef_logd2_u10(_vec1)};
   }
   Vectorized<double> C10_ALWAYS_INLINE log10() const {
-     return {Sleef_log10d2_u10(_vec0), Sleef_log10d2_u10(_vec1)};
+    return {Sleef_log10d2_u10(_vec0), Sleef_log10d2_u10(_vec1)};
   }
   Vectorized<double> C10_ALWAYS_INLINE log1p() const {
-     return {Sleef_log1pd2_u10(_vec0), Sleef_log1pd2_u10(_vec1)};
+    return {Sleef_log1pd2_u10(_vec0), Sleef_log1pd2_u10(_vec1)};
   }
   Vectorized<double> C10_ALWAYS_INLINE log2() const {
-     return {Sleef_log2d2_u10(_vec0), Sleef_log2d2_u10(_vec1)};
+    return {Sleef_log2d2_u10(_vec0), Sleef_log2d2_u10(_vec1)};
   }
   Vectorized<double> C10_ALWAYS_INLINE ceil() const {
     return {vec_ceil(_vec0), vec_ceil(_vec1)};
   }
   Vectorized<double> C10_ALWAYS_INLINE cos() const {
-     return {Sleef_cosd2_u10(_vec0), Sleef_cosd2_u10(_vec1)};
+    return {Sleef_cosd2_u10(_vec0), Sleef_cosd2_u10(_vec1)};
   }
   Vectorized<double> C10_ALWAYS_INLINE cosh() const {
-     return {Sleef_coshd2_u10(_vec0), Sleef_coshd2_u10(_vec1)};
+    return {Sleef_coshd2_u10(_vec0), Sleef_coshd2_u10(_vec1)};
   }
   Vectorized<double> C10_ALWAYS_INLINE floor() const {
     return {vec_floor(_vec0), vec_floor(_vec1)};
@@ -307,16 +330,16 @@ class Vectorized<double> {
     return {vec_rint(_vec0), vec_rint(_vec1)};
   }
   Vectorized<double> C10_ALWAYS_INLINE sin() const {
-     return {Sleef_sind2_u10(_vec0), Sleef_sind2_u10(_vec1)};
+    return {Sleef_sind2_u10(_vec0), Sleef_sind2_u10(_vec1)};
   }
   Vectorized<double> C10_ALWAYS_INLINE sinh() const {
-     return {Sleef_sinhd2_u10(_vec0), Sleef_sinhd2_u10(_vec1)};
+    return {Sleef_sinhd2_u10(_vec0), Sleef_sinhd2_u10(_vec1)};
   }
   Vectorized<double> C10_ALWAYS_INLINE tan() const {
-     return {Sleef_tand2_u10(_vec0), Sleef_tand2_u10(_vec1)};
+    return {Sleef_tand2_u10(_vec0), Sleef_tand2_u10(_vec1)};
   }
   Vectorized<double> C10_ALWAYS_INLINE tanh() const {
-     return {Sleef_tanhd2_u10(_vec0), Sleef_tanhd2_u10(_vec1)};
+    return {Sleef_tanhd2_u10(_vec0), Sleef_tanhd2_u10(_vec1)};
   }
   Vectorized<double> C10_ALWAYS_INLINE trunc() const {
     return {vec_trunc(_vec0), vec_trunc(_vec1)};
@@ -339,18 +362,20 @@ class Vectorized<double> {
   }
 
   Vectorized<double> C10_ALWAYS_INLINE pow(const Vectorized<double>& b) const {
-     return {Sleef_powd2_u10(_vec0, b._vec0), Sleef_powd2_u10(_vec1, b._vec1)};
+    return {Sleef_powd2_u10(_vec0, b._vec0), Sleef_powd2_u10(_vec1, b._vec1)};
   }
   Vectorized<double> C10_ALWAYS_INLINE fmod(const Vectorized<double>& b) const {
-     return {Sleef_fmodd2(_vec0, b._vec0),Sleef_fmodd2(_vec1, b._vec1)};
+    return {Sleef_fmodd2(_vec0, b._vec0), Sleef_fmodd2(_vec1, b._vec1)};
   }
 
   Vectorized<double> hypot(const Vectorized<double>& b) const {
-     return {Sleef_hypotd2_u05(_vec0, b._vec0), Sleef_hypotd2_u05(_vec1, b._vec1)};
+    return {
+        Sleef_hypotd2_u05(_vec0, b._vec0), Sleef_hypotd2_u05(_vec1, b._vec1)};
   }
 
   Vectorized<double> nextafter(const Vectorized<double>& b) const {
-     return {Sleef_nextafterd2(_vec0, b._vec0), Sleef_nextafterd2(_vec1, b._vec1)};
+    return {
+        Sleef_nextafterd2(_vec0, b._vec0), Sleef_nextafterd2(_vec1, b._vec1)};
   }
 
   Vectorized<double> igamma(const Vectorized<double>& x) const {
@@ -360,7 +385,6 @@ class Vectorized<double> {
   Vectorized<double> igammac(const Vectorized<double>& x) const {
     return mapbi(calc_igammac, x);
   }
-
 
   Vectorized<double> i0() const {
     return map(calc_i0);
@@ -384,13 +408,13 @@ class Vectorized<double> {
     return ret._nor();
   }
   bool has_inf_nan() const {
-    for (const auto i : c10::irange(size()/2)) {
-      if(_isnan(_vec0[i]) || _isinf(_vec0[i])) {
+    for (const auto i : c10::irange(size() / 2)) {
+      if (_isnan(_vec0[i]) || _isinf(_vec0[i])) {
         return true;
       }
     }
-    for (const auto i : c10::irange(size()/2)) {
-      if(_isnan(_vec1[i]) || _isinf(_vec1[i])) {
+    for (const auto i : c10::irange(size() / 2)) {
+      if (_isnan(_vec1[i]) || _isinf(_vec1[i])) {
         return true;
       }
     }
@@ -433,6 +457,56 @@ Vectorized<double> inline minimum(
     const Vectorized<double>& b) {
   return a.minimum(b);
 }
-} // namespace
+
+template <>
+Vectorized<double> C10_ALWAYS_INLINE
+operator+(const Vectorized<double>& a, const Vectorized<double>& b) {
+  return Vectorized<double>{
+      vec_add(a.vec0(), b.vec0()), vec_add(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<double> C10_ALWAYS_INLINE
+operator-(const Vectorized<double>& a, const Vectorized<double>& b) {
+  return Vectorized<double>{
+      vec_sub(a.vec0(), b.vec0()), vec_sub(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<double> C10_ALWAYS_INLINE
+operator*(const Vectorized<double>& a, const Vectorized<double>& b) {
+  return Vectorized<double>{
+      vec_mul(a.vec0(), b.vec0()), vec_mul(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<double> C10_ALWAYS_INLINE
+operator/(const Vectorized<double>& a, const Vectorized<double>& b) {
+  return Vectorized<double>{
+      vec_div(a.vec0(), b.vec0()), vec_div(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<double> C10_ALWAYS_INLINE
+operator&(const Vectorized<double>& a, const Vectorized<double>& b) {
+  return Vectorized<double>{
+      vec_and(a.vec0(), b.vec0()), vec_and(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<double> C10_ALWAYS_INLINE
+operator|(const Vectorized<double>& a, const Vectorized<double>& b) {
+  return Vectorized<double>{
+      vec_or(a.vec0(), b.vec0()), vec_or(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<double> C10_ALWAYS_INLINE
+operator^(const Vectorized<double>& a, const Vectorized<double>& b) {
+  return Vectorized<double>{
+      vec_xor(a.vec0(), b.vec0()), vec_xor(a.vec1(), b.vec1())};
+}
+
+} // namespace CPU_CAPABILITY
 } // namespace vec
 } // namespace at

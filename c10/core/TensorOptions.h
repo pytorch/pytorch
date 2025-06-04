@@ -13,7 +13,7 @@
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <cstdint>
 #include <iosfwd>
@@ -23,18 +23,13 @@
 
 namespace c10 {
 
-DispatchKey computeDispatchKey(
-    std::optional<ScalarType> dtype,
-    std::optional<Layout> layout,
-    std::optional<Device> device);
-
 inline ScalarType dtype_or_default(std::optional<ScalarType> dtype) {
-  return value_or_else(dtype, [] { return get_default_dtype_as_scalartype(); });
+  return dtype.value_or(get_default_dtype_as_scalartype());
 }
 
 inline caffe2::TypeMeta dtype_or_default(
     std::optional<caffe2::TypeMeta> dtype) {
-  return value_or_else(dtype, [] { return get_default_dtype(); });
+  return dtype.value_or(get_default_dtype());
 }
 
 inline Layout layout_or_default(std::optional<Layout> layout) {
@@ -42,7 +37,7 @@ inline Layout layout_or_default(std::optional<Layout> layout) {
 }
 
 inline Device device_or_default(std::optional<Device> device) {
-  return value_or_else(device, [] { return Device(kCPU); });
+  return device.value_or(Device(kCPU));
 }
 
 inline bool pinned_memory_or_default(std::optional<bool> pinned_memory) {
@@ -132,9 +127,9 @@ inline bool pinned_memory_or_default(std::optional<bool> pinned_memory) {
 /// resolution is done before template resolution, our problem is solved.
 
 DispatchKey computeDispatchKey(
-    optional<ScalarType> dtype,
-    optional<Layout> layout,
-    optional<Device> device);
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device);
 
 struct C10_API TensorOptions {
   TensorOptions()
@@ -192,8 +187,8 @@ struct C10_API TensorOptions {
 
   /// Return a copy of `TensorOptions` with `device` set to the given one, or
   /// cleared if `device` is `nullopt`.
-  C10_NODISCARD TensorOptions
-  device(std::optional<Device> device) const noexcept {
+  [[nodiscard]] TensorOptions device(
+      std::optional<Device> device) const noexcept {
     TensorOptions r = *this;
     r.set_device(device);
     return r;
@@ -203,7 +198,7 @@ struct C10_API TensorOptions {
   /// (This overload ensures that variadic template std::optional constructor
   /// for Device work correctly.)
   template <typename... Args>
-  C10_NODISCARD TensorOptions device(Args&&... args) const noexcept {
+  [[nodiscard]] TensorOptions device(Args&&... args) const noexcept {
     return device(
         std::optional<Device>(std::in_place, std::forward<Args>(args)...));
   }
@@ -213,22 +208,22 @@ struct C10_API TensorOptions {
   ///
   /// TODO: This function encourages bad behavior (assuming CUDA is
   /// the only device that matters).  Get rid of it / rename it.
-  C10_NODISCARD TensorOptions
-  device_index(c10::DeviceIndex device_index) const noexcept {
+  [[nodiscard]] TensorOptions device_index(
+      c10::DeviceIndex device_index) const noexcept {
     return device(Device::Type::CUDA, device_index);
   }
 
   /// Return a copy of `TensorOptions` with `dtype` set to the given one.
-  C10_NODISCARD TensorOptions
-  dtype(std::optional<caffe2::TypeMeta> dtype) const noexcept {
+  [[nodiscard]] TensorOptions dtype(
+      std::optional<caffe2::TypeMeta> dtype) const noexcept {
     TensorOptions r = *this;
     r.set_dtype(dtype);
     return r;
   }
 
   // legacy function to support ScalarType
-  C10_NODISCARD TensorOptions
-  dtype(std::optional<ScalarType> dtype) const noexcept {
+  [[nodiscard]] TensorOptions dtype(
+      std::optional<ScalarType> dtype) const noexcept {
     TensorOptions r = *this;
     r.set_dtype(dtype);
     return r;
@@ -243,32 +238,32 @@ struct C10_API TensorOptions {
   }
 
   /// Sets the layout of the `TensorOptions`.
-  C10_NODISCARD TensorOptions
-  layout(std::optional<Layout> layout) const noexcept {
+  [[nodiscard]] TensorOptions layout(
+      std::optional<Layout> layout) const noexcept {
     TensorOptions r = *this;
     r.set_layout(layout);
     return r;
   }
 
   /// Sets the `requires_grad` property of the `TensorOptions`.
-  C10_NODISCARD TensorOptions
-  requires_grad(std::optional<bool> requires_grad) const noexcept {
+  [[nodiscard]] TensorOptions requires_grad(
+      std::optional<bool> requires_grad) const noexcept {
     TensorOptions r = *this;
     r.set_requires_grad(requires_grad);
     return r;
   }
 
   /// Sets the `pinned_memory` property on the `TensorOptions`.
-  C10_NODISCARD TensorOptions
-  pinned_memory(std::optional<bool> pinned_memory) const noexcept {
+  [[nodiscard]] TensorOptions pinned_memory(
+      std::optional<bool> pinned_memory) const noexcept {
     TensorOptions r = *this;
     r.set_pinned_memory(pinned_memory);
     return r;
   }
 
   /// Sets the `memory_format` property on `TensorOptions`.
-  C10_NODISCARD TensorOptions
-  memory_format(std::optional<MemoryFormat> memory_format) const noexcept {
+  [[nodiscard]] TensorOptions memory_format(
+      std::optional<MemoryFormat> memory_format) const noexcept {
     TensorOptions r = *this;
     r.set_memory_format(memory_format);
     return r;
@@ -284,10 +279,10 @@ struct C10_API TensorOptions {
     return has_device_;
   }
 
-  /// Returns the device of the `TensorOptions`, or `c10::nullopt` if
+  /// Returns the device of the `TensorOptions`, or `std::nullopt` if
   /// device is not specified.
   std::optional<Device> device_opt() const noexcept {
-    return has_device_ ? c10::make_optional(device_) : c10::nullopt;
+    return has_device_ ? std::make_optional(device_) : std::nullopt;
   }
 
   /// Returns the device index of the `TensorOptions`.
@@ -305,10 +300,10 @@ struct C10_API TensorOptions {
     return has_dtype_;
   }
 
-  /// Returns the dtype of the `TensorOptions`, or `c10::nullopt` if
+  /// Returns the dtype of the `TensorOptions`, or `std::nullopt` if
   /// device is not specified.
   std::optional<caffe2::TypeMeta> dtype_opt() const noexcept {
-    return has_dtype_ ? c10::make_optional(dtype_) : c10::nullopt;
+    return has_dtype_ ? std::make_optional(dtype_) : std::nullopt;
   }
 
   /// Returns the layout of the `TensorOptions`.
@@ -321,10 +316,10 @@ struct C10_API TensorOptions {
     return has_layout_;
   }
 
-  /// Returns the layout of the `TensorOptions`, or `c10::nullopt` if
+  /// Returns the layout of the `TensorOptions`, or `std::nullopt` if
   /// layout is not specified.
   std::optional<Layout> layout_opt() const noexcept {
-    return has_layout_ ? c10::make_optional(layout_) : c10::nullopt;
+    return has_layout_ ? std::make_optional(layout_) : std::nullopt;
   }
 
   /// Returns the `requires_grad` property of the `TensorOptions`.
@@ -338,10 +333,10 @@ struct C10_API TensorOptions {
   }
 
   /// Returns the `requires_grad` property of the `TensorOptions`, or
-  /// `c10::nullopt` if `requires_grad` is not specified.
+  /// `std::nullopt` if `requires_grad` is not specified.
   std::optional<bool> requires_grad_opt() const noexcept {
-    return has_requires_grad_ ? c10::make_optional(requires_grad_)
-                              : c10::nullopt;
+    return has_requires_grad_ ? std::make_optional(requires_grad_)
+                              : std::nullopt;
   }
 
   /// Returns the `pinned_memory` property of the `TensorOptions`.
@@ -378,10 +373,10 @@ struct C10_API TensorOptions {
   }
 
   /// Returns the `pinned_memory` property of the `TensorOptions`, or
-  /// `c10::nullopt` if `pinned_memory` is not specified.
+  /// `std::nullopt` if `pinned_memory` is not specified.
   std::optional<bool> pinned_memory_opt() const noexcept {
-    return has_pinned_memory_ ? c10::make_optional(pinned_memory_)
-                              : c10::nullopt;
+    return has_pinned_memory_ ? std::make_optional(pinned_memory_)
+                              : std::nullopt;
   }
 
   /// Returns whether the `memory_layout` is specified
@@ -393,10 +388,10 @@ struct C10_API TensorOptions {
   // behavior of memory_format varies from function to function.
 
   /// Returns the `memory_layout` property of `TensorOptions, or
-  /// `c10::nullopt` if `memory_format` is not specified.
+  /// `std::nullopt` if `memory_format` is not specified.
   std::optional<MemoryFormat> memory_format_opt() const noexcept {
-    return has_memory_format_ ? c10::make_optional(memory_format_)
-                              : c10::nullopt;
+    return has_memory_format_ ? std::make_optional(memory_format_)
+                              : std::nullopt;
   }
 
   // Resolves the ATen backend specified by the current construction axes.
@@ -438,7 +433,7 @@ struct C10_API TensorOptions {
       std::optional<MemoryFormat> optional_memory_format) const noexcept {
     TensorOptions merged = *this;
     if (optional_memory_format.has_value()) {
-      merged.set_memory_format(*optional_memory_format);
+      merged.set_memory_format(optional_memory_format);
     }
     return merged;
   }

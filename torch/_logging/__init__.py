@@ -5,9 +5,12 @@
 # 2. register any artifacts (<artifact_name> below) in torch._logging._registrations
 #   a. call getArtifactLogger(__name__, <artifact_name>) at your logging site instead of the standard logger to log your artifact
 import torch._logging._registrations
+
 from ._internal import (
     _init_logs,
     DEFAULT_LOGGING,
+    dtrace_structured,
+    get_structured_logging_overhead,
     getArtifactLogger,
     LazyString,
     set_logs,

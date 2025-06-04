@@ -2,11 +2,11 @@ name: Auto Request Review
 
 on:
   pull_request:
-    types: [opened, ready_for_review, reopened]
+    types: [opened, ready_for_review]
 jobs:
   auto-request-review:
     # Don't run on forked repos
-    if: ${{ !github.event.pull_request.head.repo.fork }}
+    if: ${{ !github.event.pull_request.head.repo.fork && github.repository_owner == 'pytorch' }}
     permissions:
       contents: read
       pull-requests: write
@@ -15,7 +15,7 @@ jobs:
     steps:
       - name: Request review based on files changes and/or groups the author belongs to
         # v0.7.0
-        uses: necojackarc/auto-request-review@e08cdffa277d50854744de3f76230260e61c67f4
+        uses: necojackarc/auto-request-review@e08cdffa277d50854744de3f76230260e61c67f4 # v0.7.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 

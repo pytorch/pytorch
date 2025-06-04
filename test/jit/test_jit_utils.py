@@ -5,13 +5,14 @@ import sys
 from textwrap import dedent
 
 import torch
-
 from torch.testing._internal import jit_utils
+
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
+
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -112,6 +113,6 @@ class TestJitUtils(JitTestCase):
 
     def test_no_tracer_warn_context_manager(self):
         torch._C._jit_set_tracer_state_warn(True)
-        with jit_utils.NoTracerWarnContextManager() as no_warn:
+        with jit_utils.NoTracerWarnContextManager():
             self.assertEqual(False, torch._C._jit_get_tracer_state_warn())
         self.assertEqual(True, torch._C._jit_get_tracer_state_warn())

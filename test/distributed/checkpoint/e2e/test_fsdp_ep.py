@@ -2,10 +2,10 @@
 
 import torch
 import torch.nn as nn
-from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.state_dict import get_state_dict
 from torch.distributed.device_mesh import _mesh_resources, init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.tensor import DTensor
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -17,7 +17,7 @@ from torch.testing._internal.distributed.common_state_dict import VerifyStateDic
 
 
 class Dummymodel(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def forward(self, x):

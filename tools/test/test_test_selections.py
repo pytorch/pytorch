@@ -7,7 +7,8 @@ import unittest
 from collections import defaultdict
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))
@@ -473,7 +474,8 @@ class TestCalculateShards(unittest.TestCase):
                 else:
                     # x.time is not None because of the above check
                     self.assertAlmostEqual(
-                        random_times[test], sum(x.time for x in sharded_tests)  # type: ignore[misc]
+                        random_times[test],
+                        sum(x.time for x in sharded_tests),  # type: ignore[misc]
                     )
                 self.assertListEqual(
                     list(range(sharded_tests[0].num_shards)),

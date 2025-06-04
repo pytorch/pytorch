@@ -239,7 +239,8 @@ class TestModule(TestCase):
                 with tempfile.TemporaryFile() as f:
                     torch.save(m, f)
                     f.seek(0)
-                    m_copy = torch.load(f)
+                    # weights_only=False as this is legacy code that saves the model
+                    m_copy = torch.load(f, weights_only=False)
                     output_from_copy = m_copy(*args, **kwargs)
                     self.assertEqual(output, output_from_copy)
 
@@ -365,9 +366,7 @@ class TestModule(TestCase):
             elif isinstance(obj, dict):
                 return any(_can_be_noncontiguous(o) for o in obj.values())
             # scalar tensors can not be non-contiguous
-            if not isinstance(obj, torch.Tensor) or obj.dim() == 0:
-                return False
-            return True
+            return isinstance(obj, torch.Tensor) and obj.dim() != 0
 
         for module_input in module_inputs:
             if module_input.forward_input is None:
@@ -483,11 +482,19 @@ class TestModule(TestCase):
                     output_flattened = torch.utils._pytree.tree_leaves(output)
                     return output_flattened
 
+            def do_check(flat_input):
+                self.assertTrue(
+                    check(
+                        fn_to_gradcheck,
+                        flat_input,
+                        nondet_tol=gradcheck_nondet_tol,
+                        fast_mode=module_info.gradcheck_fast_mode
+                    ))
+
             # check total derivative
             grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
             flat_input, flat_spec = torch.utils._pytree.tree_flatten(grad_input)
-
-            self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
+            do_check(flat_input)
 
             # check partial derivatives
             old_params_requires_grad = [p.requires_grad for p in params]
@@ -502,14 +509,14 @@ class TestModule(TestCase):
                 p.requires_grad = old
                 grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
                 flat_input, flat_spec = torch.utils._pytree.tree_flatten(grad_input)
-                self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
+                do_check(flat_input)
                 p.requires_grad = False
 
             for (_, obj), old in zip(kwarg_tensors, old_kwargs_requires_grad):
                 obj.requires_grad = old
                 grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
                 flat_input, flat_spec = torch.utils._pytree.tree_flatten(grad_input)
-                self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
+                do_check(flat_input)
                 obj.requires_grad = False
 
     @modules(module_db, allowed_dtypes=[torch.double])
@@ -653,7 +660,7 @@ class TestModule(TestCase):
                 d = obj.dim()
                 if ((mem_format == torch.channels_last and d != 4)
                    or (mem_format == torch.channels_last_3d and d != 5)):
-                    return obj.clone().detach().requires_grad_(obj.requires_grad)
+                    return obj.detach().clone().requires_grad_(obj.requires_grad)
                 return obj.clone().to(memory_format=mem_format).detach().requires_grad_(obj.requires_grad)
 
             return self._traverse_obj(obj, inner_to_mem_format)
@@ -916,7 +923,6 @@ class TestModule(TestCase):
                 # parameters will be wrapped in an nn.Parameter before swapping
                 # which will cause the ._cdata to change
                 g_no_swap = device_ == prev_device and dtype_ == prev_dtype
-                prev_prev_device, prev_prev_dtype = prev_device, prev_dtype
                 prev_device, prev_dtype = device_, dtype_
 
                 p_ids_before = [id(p) for p in m.parameters()]

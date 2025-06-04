@@ -9,14 +9,17 @@ Global flags for aot autograd
 """
 import os
 import sys
-from typing import TYPE_CHECKING
+from typing import Literal, Optional, TYPE_CHECKING
+
+from torch.utils._config_module import Config, install_config_module
+
 
 # Converts torch rng ops to their functional philox rng equivalents. Note that
 # we functionalize only CUDA rng ops today.
 functionalize_rng_ops = False
 
 # can be useful for debugging if we are incorrectly creating meta fake tensors
-fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", True)
+fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", "1") != "0"
 
 # Enables optional asserts in hotpath code to check for errors.  If
 # you are seeing weird accuracy problems, try turning this on.
@@ -24,25 +27,53 @@ fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", True)
 # but it is on by default for aot_eager.
 debug_assert = False
 
-debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", False)
+debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", "0") != "0"
 
-# Today, if you are in a situation where there is "false aliasing"
-# (e.g. you have a bunch of model parameters that all alias the same underlying buffer),
-# our checks for this situation are very slow if these inputs have dynamic shapes.
-# This config is set to ensure that there aren't too many aliased inputs in this situation,
-# so that we error loudly instead of compiling forever.
-# Eventually, we should make these checks faster.
-# For now, however, you can simply turn off dynamic shapes by marking your inputs static
-# when you run into this situation.
-_max_aliased_inputs_with_dynamic_shapes_enabled = 5
+# See # NOTE [Export custom triton op]
+decompose_custom_triton_ops = True
 
 static_weight_shapes = True
+
+# See https://github.com/pytorch/pytorch/issues/141881
+# Tells partitioner that parameters are free to save for backward.
+treat_parameters_as_free_to_save = True
 
 # Applies CSE to the graph before partitioning
 cse = True
 
+from torch._environment import is_fbcode
+
+
+enable_autograd_cache: bool = Config(
+    justknob="pytorch/remote_cache:enable_local_autograd_cache",
+    env_name_force="TORCHINDUCTOR_AUTOGRAD_CACHE",
+    default=True,
+)
+
+autograd_cache_allow_custom_autograd_functions: bool = Config(
+    env_name_force="TORCHINDUCTOR_AUTOGRAD_CACHE_ALLOW_CUSTOM_AUTOGRAD", default=False
+)
+
+# For now, this is just for enabling unit testing in test_aot_autograd_cache.py
+# We will either make this the default with AOTAutogradCache, or
+# we'll just use it in the precompile flow. So there's no
+# need to add env vars or make it configurable
+bundled_autograd_cache: bool = False
+
+
+def remote_autograd_cache_default() -> Optional[bool]:
+    if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "1":
+        return True
+    if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "0":
+        return False
+    return None
+
+
+enable_remote_autograd_cache = remote_autograd_cache_default()
+
+
 # When AOTAutograd regenerates aliased graph outputs,
-# attempte to use functionalization's view-replay logic
+# attempt to use functionalization's view-replay logic
 # before falling back to the autograd engine's view replay or as_strided.
 # This can have some perf implications
 # (although for many models this will not matter).
@@ -57,8 +88,11 @@ cse = True
 # eventually: either default this config to false completely
 # once XLA pin update works,
 # or default config to true and fix relevant bugs
-from torch._inductor.config import is_fbcode
 
+
+# View replay is currently not compatible with AOTAutogradCache, since
+# FunctionalTensors are not serializable. We'll need to make them
+# serializable before enabling warm cache with this config turned on.
 view_replay_for_aliased_outputs = not is_fbcode()
 
 # Restricts the amount of computation AOTAutograd can do.
@@ -117,13 +151,17 @@ activation_memory_budget_runtime_estimator = "flops"
 # (which has a scipy dependency).
 activation_memory_budget_solver = "dp"
 
-# This dumps out a png visualization of the expected runtime vs. activation
+# This dumps out a SVG visualization of the expected runtime vs. activation
 # memory tradeoffs for all memory budget values from 0 to 1 in increments of
 # 0.5. See an example here:
 # https://github.com/pytorch/pytorch/pull/126320#discussion_r1625104015
 visualize_memory_budget_pareto = (
     os.environ.get("PARTITIONER_MEMORY_BUDGET_PARETO", "0") == "1"
 )
+
+# This controls the directory in which to dump the SVG plot with the pareto
+# frontier of the activation checkpointing memory-vs-runtime tradeoffs.
+memory_budget_pareto_dir = os.environ.get("PARTITIONER_MEMORY_BUDGET_PARETO_DIR")
 
 # Sets all of the ban_recompute heuristics to False except ban_recompute_reductions
 # Generally, this will probably result in some memory improvement, but at the
@@ -141,6 +179,25 @@ fake_tensor_allow_unsafe_data_ptr_access = True
 # which may lead to silent errors unless the backend knows how to handle the
 # tokens.
 unlift_effect_tokens = False
+
+# NOTE: [The default layout constraint for custom operators.]
+# This must be the name of one of the layout constraint tags
+# (that is, one of {"needs_fixed_stride_order", "flexible_layout"}),
+# If the custom op does not have a layout constraint tag already
+# then we assume the following applies.
+#
+# This config is respected by Inductor and we recommend other backends also
+# respect it.
+# This config is in torch._functorch and not torch._inductor because it affects
+# ProxyTensor tracing.
+custom_op_default_layout_constraint: Literal[
+    "needs_exact_strides", "needs_fixed_stride_order", "flexible_layout"
+] = "needs_exact_strides"
+
+
+# Run aot eager decomp partition with CrossRefFakeMode
+# options = False, "all", "custom_ops"
+fake_tensor_crossref = False
 
 # This mode specifies that we should also keep track of the real
 # tensor along with the fake tensor, and do real compute.  While
@@ -172,20 +229,83 @@ unlift_effect_tokens = False
 # of tensors in question.
 fake_tensor_propagate_real_tensors = False
 
+# This controls whether we collect donated buffer. This flag must be set
+# False if a user wants to retain_graph=True for backward.
+donated_buffer = False if is_fbcode() else True
+
 # Controls the default graph output format used by draw_graph
 # Supported formats are defined here https://graphviz.org/docs/outputs/
 torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
 
-enable_autograd_cache = os.environ.get("ENABLE_AOT_AUTOGRAD_CACHE", "0") == "1"
+# Valid only if fake_tensor_propagate_real_tensors = True; if a fake-real
+# kernel mismatch is detected, bypasses by making a fake kernel from the
+# real tensor outputs.
+generate_fake_kernels_from_real_mismatches = False
+
+# CUDAGraph save run_with_rng functionalization.
+# TODO: turn on by default
+graphsafe_rng_functionalization = True
+
 
 # Error on BypassAOTAutogradCache instead of just a warning
 # Used for tests
 strict_autograd_cache = False
 
+# Note [Recomputing collectives in the partitioner]
+# The purpose of this config is as follows:
+# - We have many passes in the compiler (min-cut partitioning, DCE, etc)
+#   which can reorder or ,delete duplicate nodes in the graph
+# - If any of these passes reorder/delete/duplicate a collective
+#   in a setting where the compiler is being run independently on multiple
+#   ranks, we run the risk that the compiler will make a different decison on
+#   different ranks, resulting in a NCCL hang when using torch.compile
+# To handle this, we will (by default) ensure that collectives are not modified
+# by the compiler.
+#
+# A few examples:
+# - don't dead-code-eliminate collectives
+#   (in case they are dead on rank i but not rank j)
+# - don't recompute collectives in partitioning
+#   (in case we recompute on rank i but not rank j)
+#
+# Today this flag **must** be set to false, but eventually
+# we want the option to set it to true.
+# In order to potentially optimize collectives, we'll need the compiler
+# to broadcast information across ranks at compile time to ensure
+# that any decisions on collectives are made consistently.
+unsafe_allow_optimization_of_collectives = False
+
+# See Note [AOTAutograd Tangent Subclassness for mutated inputs]
+# TODO(ivankobzarev): Remove this config, being able to deduce it compile time.
+disable_guess_zero_tangent_for_mutated_input_subclass = False
+
+# See Note [Tangents memory format]
+# By default tangents strideness is guessed to be contiguous,
+# At runtime non contiguous tangents will be coerced to be contiguous.
+# This config changes this guess for tangents strides to be the same as outputs.
+# TODO(ivankobzarev): Remove this config once extra memory usage is investigated.
+guess_tangent_strides_as_outputs = False
+
+# This is a temporary config to ensure all ranks take the same decision in the partitioner
+# it will untimately be removed once we share size_hints across ranks through compiler collectives
+_broadcast_rank0_decision = False
+
+# By default apply inlined saved_tensors_hooks only for "donated" buffers.
+# "donated" buffers are invisible to the user, they are intermediates of the forward graph.
+# Applying saved tensors hooks for memory optimizations only for intermediates
+# guarantees that original saved tensors could be deallocated.
+# This config enables saved_tensors_hooks are applied for **all** saved tensors,
+# that could include inputs, parameters, outputs.
+# "donated" - applied only to saved intermediates of the graph
+# "no_static" - applied to all saved but not "static"
+# (this includes parameters and user marked as static)
+# "all" - no filtering, everything saved for backward.
+saved_tensors_hooks_filtering_mode = "donated"
+
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
-from torch.utils._config_module import install_config_module
 
 # adds patch, save_config, invalid config checks, etc
 install_config_module(sys.modules[__name__])

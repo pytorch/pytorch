@@ -29,46 +29,6 @@
 #include <library_types.h>
 #endif
 
-#if !defined(CUSPARSE_VERSION) || (CUSPARSE_VERSION < 10100)
-const char* cusparseGetErrorString(cusparseStatus_t status) {
-  switch(status)
-  {
-    case CUSPARSE_STATUS_SUCCESS:
-      return "success";
-
-    case CUSPARSE_STATUS_NOT_INITIALIZED:
-      return "library not initialized";
-
-    case CUSPARSE_STATUS_ALLOC_FAILED:
-      return "resource allocation failed";
-
-    case CUSPARSE_STATUS_INVALID_VALUE:
-      return "an invalid numeric value was used as an argument";
-
-    case CUSPARSE_STATUS_ARCH_MISMATCH:
-      return "an absent device architectural feature is required";
-
-    case CUSPARSE_STATUS_MAPPING_ERROR:
-      return "an access to GPU memory space failed";
-
-    case CUSPARSE_STATUS_EXECUTION_FAILED:
-      return "the GPU program failed to execute";
-
-    case CUSPARSE_STATUS_INTERNAL_ERROR:
-      return "an internal operation failed";
-
-    case CUSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED:
-      return "the matrix type is not supported by this function";
-
-    case CUSPARSE_STATUS_ZERO_PIVOT:
-      return "an entry of the matrix is either structural zero or numerical zero (singular block)";
-
-    default:
-      return "unknown error";
-  }
-}
-#endif
-
 namespace at::native::sparse::cuda {
 
 void Xcoo2csr(const int *coorowind, int64_t nnz, int64_t m, int *csrrowptr) {
@@ -88,7 +48,7 @@ cusparseOperation_t convertTransToCusparseOperation(char trans) {
   else if (trans == 'n') return CUSPARSE_OPERATION_NON_TRANSPOSE;
   else if (trans == 'c') return CUSPARSE_OPERATION_CONJUGATE_TRANSPOSE;
   else {
-    AT_ERROR("trans must be one of: t, n, c");
+    TORCH_CHECK(false, "trans must be one of: t, n, c");
   }
 }
 
@@ -154,9 +114,9 @@ void _csrmm2(
 
 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
-  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   // ALG1 is broken on SM89 as of CUDA 11.8+
 #if !defined(USE_ROCM)
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   auto default_alg = prop->major == 8 && prop->minor == 9 ? CUSPARSE_SPMM_CSR_ALG2 : CUSPARSE_SPMM_CSR_ALG1;
 #else
   auto default_alg = CUSPARSE_SPMM_CSR_ALG1;

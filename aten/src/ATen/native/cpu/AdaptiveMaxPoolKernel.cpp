@@ -276,8 +276,7 @@ cpu_adaptive_max_pool2d_channels_last(
           for (; d2 < len; d2 += bVec::size()) {
             iVec index_ivec = iVec(ih * input_width + iw);
             bVec val_bvec = bVec::loadu(in + d2);
-            fVec val_fvec0, val_fvec1;
-            std::tie(val_fvec0, val_fvec1) = convert_to_float<scalar_t>(val_bvec);
+            auto [val_fvec0, val_fvec1] = convert_to_float<scalar_t>(val_bvec);
 
             iVec maxindex_ivec0 = iVec::loadu(index_buffer.get() + d2);
             iVec maxindex_ivec1 = iVec::loadu(index_buffer.get() + d2 + iVec::size());
@@ -586,7 +585,7 @@ cpu_adaptive_max_pool3d_channels_last(
   using Vec = vec::Vectorized<scalar_t>;
   using integer_t = vec::int_same_size_t<scalar_t>;
   using iVec = vec::Vectorized<integer_t>;
-  // for the convience of vectorization, use integer of the same size of scalar_t,
+  // for the convenience of vectorization, use integer of the same size of scalar_t,
   //   e.g. int32_t for float, int64_t for double
   // need to make sure doesn't overflow
   TORCH_CHECK(input_height * input_width <= std::numeric_limits<integer_t>::max());
@@ -766,8 +765,7 @@ cpu_adaptive_max_pool3d_channels_last(
             for (; d2 < len; d2 += bVec::size()) {
               iVec index_ivec = iVec(id * input_height * input_width + ih * input_width + iw);
               bVec val_bvec = bVec::loadu(in + d2);
-              fVec val_fvec0, val_fvec1;
-              std::tie(val_fvec0, val_fvec1) = convert_bfloat16_float(val_bvec);
+              auto [val_fvec0, val_fvec1] = convert_bfloat16_float(val_bvec);
 
               iVec maxindex_ivec0 = iVec::loadu(index_buffer.get() + d2);
               iVec maxindex_ivec1 = iVec::loadu(index_buffer.get() + d2 + iVec::size());
@@ -982,9 +980,9 @@ void adaptive_max_pool3d_backward_kernel_impl(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(adaptive_max_pool2d_kernel, &adaptive_max_pool2d_kernel_impl);
-REGISTER_DISPATCH(adaptive_max_pool2d_backward_kernel, &adaptive_max_pool2d_backward_kernel_impl);
-REGISTER_DISPATCH(adaptive_max_pool3d_kernel, &adaptive_max_pool3d_kernel_impl);
-REGISTER_DISPATCH(adaptive_max_pool3d_backward_kernel, &adaptive_max_pool3d_backward_kernel_impl);
+REGISTER_DISPATCH(adaptive_max_pool2d_kernel, &adaptive_max_pool2d_kernel_impl)
+REGISTER_DISPATCH(adaptive_max_pool2d_backward_kernel, &adaptive_max_pool2d_backward_kernel_impl)
+REGISTER_DISPATCH(adaptive_max_pool3d_kernel, &adaptive_max_pool3d_kernel_impl)
+REGISTER_DISPATCH(adaptive_max_pool3d_backward_kernel, &adaptive_max_pool3d_backward_kernel_impl)
 
 } // at::native

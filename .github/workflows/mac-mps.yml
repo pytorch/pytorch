@@ -14,6 +14,7 @@ permissions: read-all
 
 jobs:
   macos-py3-arm64-build:
+    if: github.repository_owner == 'pytorch'
     name: macos-py3-arm64
     uses: ./.github/workflows/_mac-build.yml
     with:
@@ -22,22 +23,26 @@ jobs:
       runner-type: macos-m1-stable
       build-generates-artifacts: true
       # To match the one pre-installed in the m1 runners
-      python-version: 3.9.12
+      python-version: 3.12.7
       # The runner macos-m2-14 is not a typo, it's a custom runner that is different
       # than our AWS macos-m1-14 runners
       test-matrix: |
         { include: [
-          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-13" },
-          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m2-14" },
+          { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m1-13" },
+          { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m1-14" },
+          { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m2-15" },
         ]}
+    secrets: inherit
 
   macos-py3-arm64-mps-test:
     name: macos-py3-arm64-mps
-    uses: ./.github/workflows/_mac-test-mps.yml
+    uses: ./.github/workflows/_mac-test.yml
     needs: macos-py3-arm64-build
     with:
       sync-tag: macos-py3-arm64-mps-test
       build-environment: macos-py3-arm64
       # Same as the build job
-      python-version: 3.9.12
+      python-version: 3.12.7
       test-matrix: ${{ needs.macos-py3-arm64-build.outputs.test-matrix }}
+      disable-monitor: false
+    secrets: inherit

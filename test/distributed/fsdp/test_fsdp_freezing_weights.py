@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
 )
 
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -181,7 +182,7 @@ class TestFreezingWeights(FSDPTest):
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
 
-        for iteration in range(3):
+        for _ in range(3):
             out = model(batch)
             fake_loss = criterion(out, target)
             optimizer.zero_grad()

@@ -1,25 +1,30 @@
-# mypy: allow-untyped-defs
-import numbers
-from typing import Optional, Tuple
-import warnings
-
-import torch
-from torch import Tensor
-
 """
 We will recreate all the RNN modules as we require the modules to be decomposed
 into its building blocks to be able to observe.
 """
 
-__all__ = [
-    "LSTMCell",
-    "LSTM"
-]
+# mypy: allow-untyped-defs
+
+import numbers
+import warnings
+from typing import Optional
+
+import torch
+from torch import Tensor
+
+
+__all__ = ["LSTMCell", "LSTM"]
+
 
 class LSTMCell(torch.nn.Module):
     r"""A quantizable long short-term memory (LSTM) cell.
 
     For the description and the argument types, please, refer to :class:`~torch.nn.LSTMCell`
+
+    `split_gates`: specify True to compute the input/forget/cell/output gates separately
+    to avoid an intermediate tensor which is subsequently chunk'd. This optimization can
+    be beneficial for on-device inference latency. This flag is cascaded down from the
+    parent classes.
 
     Examples::
 
@@ -34,18 +39,49 @@ class LSTMCell(torch.nn.Module):
         ...     output.append(hx)
     """
     _FLOAT_MODULE = torch.nn.LSTMCell
+    __constants__ = ["split_gates"]  # for jit.script
 
-    def __init__(self, input_dim: int, hidden_dim: int, bias: bool = True,
-                 device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int,
+        bias: bool = True,
+        device=None,
+        dtype=None,
+        *,
+        split_gates=False,
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.input_size = input_dim
         self.hidden_size = hidden_dim
         self.bias = bias
+        self.split_gates = split_gates
 
-        self.igates = torch.nn.Linear(input_dim, 4 * hidden_dim, bias=bias, **factory_kwargs)
-        self.hgates = torch.nn.Linear(hidden_dim, 4 * hidden_dim, bias=bias, **factory_kwargs)
-        self.gates = torch.ao.nn.quantized.FloatFunctional()
+        if not split_gates:
+            self.igates: torch.nn.Module = torch.nn.Linear(
+                input_dim, 4 * hidden_dim, bias=bias, **factory_kwargs
+            )
+            self.hgates: torch.nn.Module = torch.nn.Linear(
+                hidden_dim, 4 * hidden_dim, bias=bias, **factory_kwargs
+            )
+            self.gates: torch.nn.Module = torch.ao.nn.quantized.FloatFunctional()
+        else:
+            # keep separate Linear layers for each gate
+            self.igates = torch.nn.ModuleDict()
+            self.hgates = torch.nn.ModuleDict()
+            self.gates = torch.nn.ModuleDict()
+            for g in ["input", "forget", "cell", "output"]:
+                # pyre-fixme[29]: `Union[torch._tensor.Tensor, torch.nn.modules.module.Module]`
+                self.igates[g] = torch.nn.Linear(
+                    input_dim, hidden_dim, bias=bias, **factory_kwargs
+                )
+                # pyre-fixme[29]: `Union[torch._tensor.Tensor, torch.nn.modules.module.Module]`
+                self.hgates[g] = torch.nn.Linear(
+                    hidden_dim, hidden_dim, bias=bias, **factory_kwargs
+                )
+                # pyre-fixme[29]: `Union[torch._tensor.Tensor, torch.nn.modules.module.Module]`
+                self.gates[g] = torch.ao.nn.quantized.FloatFunctional()
 
         self.input_gate = torch.nn.Sigmoid()
         self.forget_gate = torch.nn.Sigmoid()
@@ -58,26 +94,43 @@ class LSTMCell(torch.nn.Module):
 
         self.ogate_cy = torch.ao.nn.quantized.FloatFunctional()
 
-        self.initial_hidden_state_qparams: Tuple[float, int] = (1.0, 0)
-        self.initial_cell_state_qparams: Tuple[float, int] = (1.0, 0)
+        self.initial_hidden_state_qparams: tuple[float, int] = (1.0, 0)
+        self.initial_cell_state_qparams: tuple[float, int] = (1.0, 0)
         self.hidden_state_dtype: torch.dtype = torch.quint8
         self.cell_state_dtype: torch.dtype = torch.quint8
 
-    def forward(self, x: Tensor, hidden: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
+    def forward(
+        self, x: Tensor, hidden: Optional[tuple[Tensor, Tensor]] = None
+    ) -> tuple[Tensor, Tensor]:
         if hidden is None or hidden[0] is None or hidden[1] is None:
             hidden = self.initialize_hidden(x.shape[0], x.is_quantized)
         hx, cx = hidden
 
-        igates = self.igates(x)
-        hgates = self.hgates(hx)
-        gates = self.gates.add(igates, hgates)
+        if not self.split_gates:
+            igates = self.igates(x)
+            hgates = self.hgates(hx)
+            gates = self.gates.add(igates, hgates)  # type: ignore[operator]
 
-        input_gate, forget_gate, cell_gate, out_gate = gates.chunk(4, 1)
+            input_gate, forget_gate, cell_gate, out_gate = gates.chunk(4, 1)
 
-        input_gate = self.input_gate(input_gate)
-        forget_gate = self.forget_gate(forget_gate)
-        cell_gate = self.cell_gate(cell_gate)
-        out_gate = self.output_gate(out_gate)
+            input_gate = self.input_gate(input_gate)
+            forget_gate = self.forget_gate(forget_gate)
+            cell_gate = self.cell_gate(cell_gate)
+            out_gate = self.output_gate(out_gate)
+        else:
+            # apply each input + hidden projection and add together
+            gate = {}
+            for (key, gates), igates, hgates in zip(
+                self.gates.items(),  # type: ignore[operator]
+                self.igates.values(),  # type: ignore[operator]
+                self.hgates.values(),  # type: ignore[operator]
+            ):
+                gate[key] = gates.add(igates(x), hgates(hx))
+
+            input_gate = self.input_gate(gate["input"])
+            forget_gate = self.forget_gate(gate["forget"])
+            cell_gate = self.cell_gate(gate["cell"])
+            out_gate = self.output_gate(gate["output"])
 
         fgate_cx = self.fgate_cx.mul(forget_gate, cx)
         igate_cgate = self.igate_cgate.mul(input_gate, cell_gate)
@@ -89,20 +142,28 @@ class LSTMCell(torch.nn.Module):
         hy = self.ogate_cy.mul(out_gate, tanh_cy)
         return hy, cy
 
-    def initialize_hidden(self, batch_size: int, is_quantized: bool = False) -> Tuple[Tensor, Tensor]:
-        h, c = torch.zeros((batch_size, self.hidden_size)), torch.zeros((batch_size, self.hidden_size))
+    def initialize_hidden(
+        self, batch_size: int, is_quantized: bool = False
+    ) -> tuple[Tensor, Tensor]:
+        h, c = torch.zeros((batch_size, self.hidden_size)), torch.zeros(
+            (batch_size, self.hidden_size)
+        )
         if is_quantized:
             (h_scale, h_zp) = self.initial_hidden_state_qparams
             (c_scale, c_zp) = self.initial_cell_state_qparams
-            h = torch.quantize_per_tensor(h, scale=h_scale, zero_point=h_zp, dtype=self.hidden_state_dtype)
-            c = torch.quantize_per_tensor(c, scale=c_scale, zero_point=c_zp, dtype=self.cell_state_dtype)
+            h = torch.quantize_per_tensor(
+                h, scale=h_scale, zero_point=h_zp, dtype=self.hidden_state_dtype
+            )
+            c = torch.quantize_per_tensor(
+                c, scale=c_scale, zero_point=c_zp, dtype=self.cell_state_dtype
+            )
         return h, c
 
     def _get_name(self):
-        return 'QuantizableLSTMCell'
+        return "QuantizableLSTMCell"
 
     @classmethod
-    def from_params(cls, wi, wh, bi=None, bh=None):
+    def from_params(cls, wi, wh, bi=None, bh=None, split_gates=False):
         """Uses the weights and biases to create a new LSTM cell.
 
         Args:
@@ -112,25 +173,52 @@ class LSTMCell(torch.nn.Module):
         assert (bi is None) == (bh is None)  # Either both None or both have values
         input_size = wi.shape[1]
         hidden_size = wh.shape[1]
-        cell = cls(input_dim=input_size, hidden_dim=hidden_size,
-                   bias=(bi is not None))
-        cell.igates.weight = torch.nn.Parameter(wi)
-        if bi is not None:
-            cell.igates.bias = torch.nn.Parameter(bi)
-        cell.hgates.weight = torch.nn.Parameter(wh)
-        if bh is not None:
-            cell.hgates.bias = torch.nn.Parameter(bh)
+        cell = cls(
+            input_dim=input_size,
+            hidden_dim=hidden_size,
+            bias=(bi is not None),
+            split_gates=split_gates,
+        )
+
+        if not split_gates:
+            cell.igates.weight = torch.nn.Parameter(wi)
+            if bi is not None:
+                cell.igates.bias = torch.nn.Parameter(bi)
+            cell.hgates.weight = torch.nn.Parameter(wh)
+            if bh is not None:
+                cell.hgates.bias = torch.nn.Parameter(bh)
+        else:
+            # split weight/bias
+            for w, b, gates in zip([wi, wh], [bi, bh], [cell.igates, cell.hgates]):
+                for w_chunk, gate in zip(w.chunk(4, dim=0), gates.values()):  # type: ignore[operator]
+                    gate.weight = torch.nn.Parameter(w_chunk)
+
+                if b is not None:
+                    for b_chunk, gate in zip(b.chunk(4, dim=0), gates.values()):  # type: ignore[operator]
+                        gate.bias = torch.nn.Parameter(b_chunk)
+
         return cell
 
     @classmethod
-    def from_float(cls, other, use_precomputed_fake_quant=False):
+    def from_float(cls, other, use_precomputed_fake_quant=False, split_gates=False):
         assert type(other) == cls._FLOAT_MODULE
-        assert hasattr(other, 'qconfig'), "The float module must have 'qconfig'"
-        observed = cls.from_params(other.weight_ih, other.weight_hh,
-                                   other.bias_ih, other.bias_hh)
+        assert hasattr(other, "qconfig"), "The float module must have 'qconfig'"
+        observed = cls.from_params(
+            other.weight_ih,
+            other.weight_hh,
+            other.bias_ih,
+            other.bias_hh,
+            split_gates=split_gates,
+        )
         observed.qconfig = other.qconfig
         observed.igates.qconfig = other.qconfig
         observed.hgates.qconfig = other.qconfig
+        if split_gates:
+            # also apply qconfig directly to Linear modules
+            for g in observed.igates.values():
+                g.qconfig = other.qconfig
+            for g in observed.hgates.values():
+                g.qconfig = other.qconfig
         return observed
 
 
@@ -140,13 +228,24 @@ class _LSTMSingleLayer(torch.nn.Module):
     The difference between a layer and a cell is that the layer can process a
     sequence, while the cell only expects an instantaneous value.
     """
-    def __init__(self, input_dim: int, hidden_dim: int, bias: bool = True,
-                 device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
-        super().__init__()
-        self.cell = LSTMCell(input_dim, hidden_dim, bias=bias, **factory_kwargs)
 
-    def forward(self, x: Tensor, hidden: Optional[Tuple[Tensor, Tensor]] = None):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int,
+        bias: bool = True,
+        device=None,
+        dtype=None,
+        *,
+        split_gates=False,
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
+        super().__init__()
+        self.cell = LSTMCell(
+            input_dim, hidden_dim, bias=bias, split_gates=split_gates, **factory_kwargs
+        )
+
+    def forward(self, x: Tensor, hidden: Optional[tuple[Tensor, Tensor]] = None):
         result = []
         seq_len = x.shape[0]
         for i in range(seq_len):
@@ -158,32 +257,52 @@ class _LSTMSingleLayer(torch.nn.Module):
     @classmethod
     def from_params(cls, *args, **kwargs):
         cell = LSTMCell.from_params(*args, **kwargs)
-        layer = cls(cell.input_size, cell.hidden_size, cell.bias)
+        layer = cls(
+            cell.input_size, cell.hidden_size, cell.bias, split_gates=cell.split_gates
+        )
         layer.cell = cell
         return layer
 
 
 class _LSTMLayer(torch.nn.Module):
     r"""A single bi-directional LSTM layer."""
-    def __init__(self, input_dim: int, hidden_dim: int, bias: bool = True,
-                 batch_first: bool = False, bidirectional: bool = False,
-                 device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int,
+        bias: bool = True,
+        batch_first: bool = False,
+        bidirectional: bool = False,
+        device=None,
+        dtype=None,
+        *,
+        split_gates=False,
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.batch_first = batch_first
         self.bidirectional = bidirectional
-        self.layer_fw = _LSTMSingleLayer(input_dim, hidden_dim, bias=bias, **factory_kwargs)
+        self.layer_fw = _LSTMSingleLayer(
+            input_dim, hidden_dim, bias=bias, split_gates=split_gates, **factory_kwargs
+        )
         if self.bidirectional:
-            self.layer_bw = _LSTMSingleLayer(input_dim, hidden_dim, bias=bias, **factory_kwargs)
+            self.layer_bw = _LSTMSingleLayer(
+                input_dim,
+                hidden_dim,
+                bias=bias,
+                split_gates=split_gates,
+                **factory_kwargs,
+            )
 
-    def forward(self, x: Tensor, hidden: Optional[Tuple[Tensor, Tensor]] = None):
+    def forward(self, x: Tensor, hidden: Optional[tuple[Tensor, Tensor]] = None):
         if self.batch_first:
             x = x.transpose(0, 1)
         if hidden is None:
             hx_fw, cx_fw = (None, None)
         else:
             hx_fw, cx_fw = hidden
-        hidden_bw: Optional[Tuple[Tensor, Tensor]] = None
+        hidden_bw: Optional[tuple[Tensor, Tensor]] = None
         if self.bidirectional:
             if hx_fw is None:
                 hx_bw = None
@@ -200,10 +319,12 @@ class _LSTMLayer(torch.nn.Module):
         if hx_fw is None and cx_fw is None:
             hidden_fw = None
         else:
-            hidden_fw = torch.jit._unwrap_optional(hx_fw), torch.jit._unwrap_optional(cx_fw)
+            hidden_fw = torch.jit._unwrap_optional(hx_fw), torch.jit._unwrap_optional(
+                cx_fw
+            )
         result_fw, hidden_fw = self.layer_fw(x, hidden_fw)
 
-        if hasattr(self, 'layer_bw') and self.bidirectional:
+        if hasattr(self, "layer_bw") and self.bidirectional:
             x_reversed = x.flip(0)
             result_bw, hidden_bw = self.layer_bw(x_reversed, hidden_bw)
             result_bw = result_bw.flip(0)
@@ -235,29 +356,41 @@ class _LSTMLayer(torch.nn.Module):
         mimic the behavior of the `prepare` within the `torch.ao.quantization`
         flow.
         """
-        assert hasattr(other, 'qconfig') or (qconfig is not None)
+        assert hasattr(other, "qconfig") or (qconfig is not None)
 
-        input_size = kwargs.get('input_size', other.input_size)
-        hidden_size = kwargs.get('hidden_size', other.hidden_size)
-        bias = kwargs.get('bias', other.bias)
-        batch_first = kwargs.get('batch_first', other.batch_first)
-        bidirectional = kwargs.get('bidirectional', other.bidirectional)
+        input_size = kwargs.get("input_size", other.input_size)
+        hidden_size = kwargs.get("hidden_size", other.hidden_size)
+        bias = kwargs.get("bias", other.bias)
+        batch_first = kwargs.get("batch_first", other.batch_first)
+        bidirectional = kwargs.get("bidirectional", other.bidirectional)
+        split_gates = kwargs.get("split_gates", False)
 
-        layer = cls(input_size, hidden_size, bias, batch_first, bidirectional)
-        layer.qconfig = getattr(other, 'qconfig', qconfig)
-        wi = getattr(other, f'weight_ih_l{layer_idx}')
-        wh = getattr(other, f'weight_hh_l{layer_idx}')
-        bi = getattr(other, f'bias_ih_l{layer_idx}', None)
-        bh = getattr(other, f'bias_hh_l{layer_idx}', None)
+        layer = cls(
+            input_size,
+            hidden_size,
+            bias,
+            batch_first,
+            bidirectional,
+            split_gates=split_gates,
+        )
+        layer.qconfig = getattr(other, "qconfig", qconfig)
+        wi = getattr(other, f"weight_ih_l{layer_idx}")
+        wh = getattr(other, f"weight_hh_l{layer_idx}")
+        bi = getattr(other, f"bias_ih_l{layer_idx}", None)
+        bh = getattr(other, f"bias_hh_l{layer_idx}", None)
 
-        layer.layer_fw = _LSTMSingleLayer.from_params(wi, wh, bi, bh)
+        layer.layer_fw = _LSTMSingleLayer.from_params(
+            wi, wh, bi, bh, split_gates=split_gates
+        )
 
         if other.bidirectional:
-            wi = getattr(other, f'weight_ih_l{layer_idx}_reverse')
-            wh = getattr(other, f'weight_hh_l{layer_idx}_reverse')
-            bi = getattr(other, f'bias_ih_l{layer_idx}_reverse', None)
-            bh = getattr(other, f'bias_hh_l{layer_idx}_reverse', None)
-            layer.layer_bw = _LSTMSingleLayer.from_params(wi, wh, bi, bh)
+            wi = getattr(other, f"weight_ih_l{layer_idx}_reverse")
+            wh = getattr(other, f"weight_hh_l{layer_idx}_reverse")
+            bi = getattr(other, f"bias_ih_l{layer_idx}_reverse", None)
+            bh = getattr(other, f"bias_hh_l{layer_idx}_reverse", None)
+            layer.layer_bw = _LSTMSingleLayer.from_params(
+                wi, wh, bi, bh, split_gates=split_gates
+            )
         return layer
 
 
@@ -290,12 +423,21 @@ class LSTM(torch.nn.Module):
     """
     _FLOAT_MODULE = torch.nn.LSTM
 
-    def __init__(self, input_size: int, hidden_size: int,
-                 num_layers: int = 1, bias: bool = True,
-                 batch_first: bool = False, dropout: float = 0.,
-                 bidirectional: bool = False,
-                 device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int,
+        num_layers: int = 1,
+        bias: bool = True,
+        batch_first: bool = False,
+        dropout: float = 0.0,
+        bidirectional: bool = False,
+        device=None,
+        dtype=None,
+        *,
+        split_gates: bool = False,
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -305,58 +447,89 @@ class LSTM(torch.nn.Module):
         self.dropout = float(dropout)
         self.bidirectional = bidirectional
         self.training = False  # Default to eval mode. If we want to train, we will explicitly set to training.
-        num_directions = 2 if bidirectional else 1
 
-        if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
-                isinstance(dropout, bool):
-            raise ValueError("dropout should be a number in range [0, 1] "
-                             "representing the probability of an element being "
-                             "zeroed")
+        if (
+            not isinstance(dropout, numbers.Number)
+            or not 0 <= dropout <= 1
+            or isinstance(dropout, bool)
+        ):
+            raise ValueError(
+                "dropout should be a number in range [0, 1] "
+                "representing the probability of an element being "
+                "zeroed"
+            )
         if dropout > 0:
-            warnings.warn("dropout option for quantizable LSTM is ignored. "
-                          "If you are training, please, use nn.LSTM version "
-                          "followed by `prepare` step.")
+            warnings.warn(
+                "dropout option for quantizable LSTM is ignored. "
+                "If you are training, please, use nn.LSTM version "
+                "followed by `prepare` step."
+            )
             if num_layers == 1:
-                warnings.warn("dropout option adds dropout after all but last "
-                              "recurrent layer, so non-zero dropout expects "
-                              f"num_layers greater than 1, but got dropout={dropout} "
-                              f"and num_layers={num_layers}")
+                warnings.warn(
+                    "dropout option adds dropout after all but last "
+                    "recurrent layer, so non-zero dropout expects "
+                    f"num_layers greater than 1, but got dropout={dropout} "
+                    f"and num_layers={num_layers}"
+                )
 
-        layers = [_LSTMLayer(self.input_size, self.hidden_size,
-                             self.bias, batch_first=False,
-                             bidirectional=self.bidirectional, **factory_kwargs)]
-        for layer in range(1, num_layers):
-            layers.append(_LSTMLayer(self.hidden_size, self.hidden_size,
-                                     self.bias, batch_first=False,
-                                     bidirectional=self.bidirectional,
-                                     **factory_kwargs))
+        layers = [
+            _LSTMLayer(
+                self.input_size,
+                self.hidden_size,
+                self.bias,
+                batch_first=False,
+                bidirectional=self.bidirectional,
+                split_gates=split_gates,
+                **factory_kwargs,
+            )
+        ]
+        layers.extend(
+            _LSTMLayer(
+                self.hidden_size,
+                self.hidden_size,
+                self.bias,
+                batch_first=False,
+                bidirectional=self.bidirectional,
+                split_gates=split_gates,
+                **factory_kwargs,
+            )
+            for _ in range(1, num_layers)
+        )
         self.layers = torch.nn.ModuleList(layers)
 
-    def forward(self, x: Tensor, hidden: Optional[Tuple[Tensor, Tensor]] = None):
+    def forward(self, x: Tensor, hidden: Optional[tuple[Tensor, Tensor]] = None):
         if self.batch_first:
             x = x.transpose(0, 1)
 
         max_batch_size = x.size(1)
         num_directions = 2 if self.bidirectional else 1
         if hidden is None:
-            zeros = torch.zeros(num_directions, max_batch_size,
-                                self.hidden_size, dtype=torch.float,
-                                device=x.device)
+            zeros = torch.zeros(
+                num_directions,
+                max_batch_size,
+                self.hidden_size,
+                dtype=torch.float,
+                device=x.device,
+            )
             zeros.squeeze_(0)
             if x.is_quantized:
-                zeros = torch.quantize_per_tensor(zeros, scale=1.0,
-                                                  zero_point=0, dtype=x.dtype)
+                zeros = torch.quantize_per_tensor(
+                    zeros, scale=1.0, zero_point=0, dtype=x.dtype
+                )
             hxcx = [(zeros, zeros) for _ in range(self.num_layers)]
         else:
             hidden_non_opt = torch.jit._unwrap_optional(hidden)
             if isinstance(hidden_non_opt[0], Tensor):
-                hx = hidden_non_opt[0].reshape(self.num_layers, num_directions,
-                                               max_batch_size,
-                                               self.hidden_size)
-                cx = hidden_non_opt[1].reshape(self.num_layers, num_directions,
-                                               max_batch_size,
-                                               self.hidden_size)
-                hxcx = [(hx[idx].squeeze(0), cx[idx].squeeze(0)) for idx in range(self.num_layers)]
+                hx = hidden_non_opt[0].reshape(
+                    self.num_layers, num_directions, max_batch_size, self.hidden_size
+                )
+                cx = hidden_non_opt[1].reshape(
+                    self.num_layers, num_directions, max_batch_size, self.hidden_size
+                )
+                hxcx = [
+                    (hx[idx].squeeze(0), cx[idx].squeeze(0))
+                    for idx in range(self.num_layers)
+                ]
             else:
                 hxcx = hidden_non_opt
 
@@ -380,19 +553,27 @@ class LSTM(torch.nn.Module):
         return x, (hx_tensor, cx_tensor)
 
     def _get_name(self):
-        return 'QuantizableLSTM'
+        return "QuantizableLSTM"
 
     @classmethod
-    def from_float(cls, other, qconfig=None):
+    def from_float(cls, other, qconfig=None, split_gates=False):
         assert isinstance(other, cls._FLOAT_MODULE)
-        assert (hasattr(other, 'qconfig') or qconfig)
-        observed = cls(other.input_size, other.hidden_size, other.num_layers,
-                       other.bias, other.batch_first, other.dropout,
-                       other.bidirectional)
-        observed.qconfig = getattr(other, 'qconfig', qconfig)
+        assert hasattr(other, "qconfig") or qconfig
+        observed = cls(
+            other.input_size,
+            other.hidden_size,
+            other.num_layers,
+            other.bias,
+            other.batch_first,
+            other.dropout,
+            other.bidirectional,
+            split_gates=split_gates,
+        )
+        observed.qconfig = getattr(other, "qconfig", qconfig)
         for idx in range(other.num_layers):
-            observed.layers[idx] = _LSTMLayer.from_float(other, idx, qconfig,
-                                                         batch_first=False)
+            observed.layers[idx] = _LSTMLayer.from_float(
+                other, idx, qconfig, batch_first=False, split_gates=split_gates
+            )
 
         # Prepare the model
         if other.training:
@@ -407,6 +588,8 @@ class LSTM(torch.nn.Module):
     def from_observed(cls, other):
         # The whole flow is float -> observed -> quantized
         # This class does float -> observed only
-        raise NotImplementedError("It looks like you are trying to convert a "
-                                  "non-quantizable LSTM module. Please, see "
-                                  "the examples on quantizable LSTMs.")
+        raise NotImplementedError(
+            "It looks like you are trying to convert a "
+            "non-quantizable LSTM module. Please, see "
+            "the examples on quantizable LSTMs."
+        )

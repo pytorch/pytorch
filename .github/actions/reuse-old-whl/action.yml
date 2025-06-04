@@ -1,0 +1,38 @@
+name: Reuse old wheel if possible
+
+description:
+  Reuse old wheel if possible
+
+inputs:
+  build-environment:
+    description: Build environment
+    required: true
+  run-id:
+    description: Workflow run ID
+    required: true
+  github-token:
+    description: GitHub token
+    required: true
+
+outputs:
+  reuse:
+    description: Whether the wheel is reused or not
+    value: ${{ steps.check-file-changes.outputs.reuse }}
+
+runs:
+  using: composite
+
+  steps:
+    # Check out pytorch with fetch depth 0
+    - name: Check file changes
+      id: check-file-changes
+      shell: bash
+      continue-on-error: true
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -x
+        python3 ${GITHUB_ACTION_PATH}/reuse_old_whl.py \
+          --build-environment "${{ inputs.build-environment }}" \
+          --run-id "${{ inputs.run-id }}" \
+          --github-ref "${{ github.ref }}"

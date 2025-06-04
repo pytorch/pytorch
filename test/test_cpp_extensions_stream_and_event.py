@@ -1,8 +1,6 @@
 # Owner(s): ["module: mtia"]
 
 import os
-import shutil
-import sys
 import tempfile
 import unittest
 
@@ -14,6 +12,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     skipIfTorchDynamo,
     TEST_CUDA,
+    TEST_MPS,
     TEST_PRIVATEUSE1,
     TEST_XPU,
 )
@@ -25,19 +24,16 @@ TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not Non
 TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 
 
-def remove_build_path():
-    if sys.platform == "win32":
-        # Not wiping extensions build folder because Windows
-        return
-    default_build_root = torch.utils.cpp_extension.get_default_build_root()
-    if os.path.exists(default_build_root):
-        shutil.rmtree(default_build_root, ignore_errors=True)
-
-
 # Since we use a fake MTIA device backend to test generic Stream/Event, device backends are mutual exclusive to each other.
 # The test will be skipped if any of the following conditions are met:
 @unittest.skipIf(
-    IS_ARM64 or not IS_LINUX or TEST_CUDA or TEST_XPU or TEST_PRIVATEUSE1 or TEST_ROCM,
+    IS_ARM64
+    or not IS_LINUX
+    or TEST_CUDA
+    or TEST_XPU
+    or TEST_MPS
+    or TEST_PRIVATEUSE1
+    or TEST_ROCM,
     "Only on linux platform and mutual exclusive to other backends",
 )
 @torch.testing._internal.common_utils.markDynamoStrictTest
@@ -60,11 +56,11 @@ class TestCppExtensionStreamAndEvent(common.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
 
     @classmethod
     def setUpClass(cls):
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
         build_dir = tempfile.mkdtemp()
         # Load the fake device guard impl.
         src = f"{os.path.abspath(os.path.dirname(__file__))}/cpp_extensions/mtia_extension.cpp"
@@ -85,21 +81,30 @@ class TestCppExtensionStreamAndEvent(common.TestCase):
     def test_stream_event(self):
         s = torch.Stream()
         self.assertTrue(s.device_type, int(torch._C._autograd.DeviceType.MTIA))
-        e = torch.Event()
+        e = torch.Event(enable_timing=True)
+        e1 = torch.Event(enable_timing=True)
+        e1.record()
         self.assertTrue(e.device.type, "mtia")
         # Should be nullptr by default
         self.assertTrue(e.event_id == 0)
         s.record_event(event=e)
         print(f"recorded event 1: {e}")
         self.assertTrue(e.event_id != 0)
+        # The enable_timing of event created by record_event() is false
         e2 = s.record_event()
         print(f"recorded event 2: {e2}")
         self.assertTrue(e2.event_id != 0)
         self.assertTrue(e2.event_id != e.event_id)
         e.synchronize()
+        e1.synchronize()
         e2.synchronize()
-        time_elapsed = e.elapsed_time(e2)
-        print(f"time elapsed between e1 and e2: {time_elapsed}")
+        time_elapsed = e.elapsed_time(e1)
+        print(f"time elapsed between e and e1: {time_elapsed}")
+        with self.assertRaisesRegex(
+            ValueError,
+            "Both events must be created with argument 'enable_timing=True'",
+        ):
+            time_elapsed = e.elapsed_time(e2)
         old_event_id = e.event_id
         e.record(stream=s)
         print(f"recorded event 1: {e}")

@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <c10/util/irange.h>
@@ -14,13 +15,10 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/interpreter/preprocess_graph.h>
 
-C10_DECLARE_bool(torch_jit_enable_expanded_stacks);
+TORCH_DECLARE_bool(torch_jit_enable_expanded_stacks);
+TORCH_DECLARE_bool(torch_jit_expanded_stacks_mangled);
 
-namespace torch::jit {
-
-std::ostream& operator<<(std::ostream& out, Instruction inst);
-
-namespace interpreter {
+namespace torch::jit::interpreter {
 
 template <class Ttarget, class Tsource>
 Ttarget safe_narrow_cast(Tsource v) {
@@ -61,10 +59,10 @@ struct WithCurrentNode {
 };
 
 struct NodeSourceInfo {
-  const char* func_name_;
-  const char* file_name_;
-  size_t line_;
-  NodeSourceInfo() : func_name_(nullptr), file_name_(nullptr), line_(0) {}
+  const char* func_name_{nullptr};
+  const char* file_name_{nullptr};
+  size_t line_{0};
+  NodeSourceInfo() = default;
 };
 
 struct CodeImpl {
@@ -228,7 +226,7 @@ struct CodeImpl {
   NodeSourceInfo getSourceInfoFromSourceRange(const SourceRange& range) {
     NodeSourceInfo nodeSource;
     SourceRange r = range;
-    if (range.source()) {
+    if (!FLAGS_torch_jit_expanded_stacks_mangled && range.source()) {
       if (auto orig = range.source()->findSourceRangeThatGenerated(r)) {
         r = *orig;
       }
@@ -340,8 +338,7 @@ struct CodeImpl {
       int reg = registerFor(input);
       bool moved = input->uses().size() == ++use_count_[input];
 
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      OpCode op;
+      OpCode op{};
       if (input->node()->kind() == prim::Constant) {
         op = LOADC;
       } else if (moved) {
@@ -946,7 +943,11 @@ struct MobileCodeImpl : CodeImpl {
       bool support_default_args_before_out,
       bool emit_promoted_ops,
       size_t remaining_bailout_depth)
-      : CodeImpl(graph, function_name, remaining_bailout_depth, false),
+      : CodeImpl(
+            graph,
+            std::move(function_name),
+            remaining_bailout_depth,
+            false),
         emit_default_input_instructions_(emit_default_input_instructions),
         support_default_args_before_out_(support_default_args_before_out),
         emit_promoted_ops_(emit_promoted_ops) {
@@ -1057,5 +1058,4 @@ struct MobileCodeImpl : CodeImpl {
   bool emit_promoted_ops_;
 };
 
-} // namespace interpreter
-} // namespace torch::jit
+} // namespace torch::jit::interpreter

@@ -1,13 +1,15 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/impl/PyInterpreter.h>
-
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace c10::impl {
 
 struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   std::string name() const override {
     return "<unloaded interpreter>";
   }
+
+  void incref(PyObject* pyobj) const override {} // do nothing
 
   void decref(PyObject* pyobj, bool has_pyobj_slot) const override {
   } // do nothing
@@ -36,7 +38,8 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       c10::DispatchKey,
       c10::DispatchKeySet keyset,
       torch::jit::Stack* stack,
-      bool with_keyset) const override {
+      bool with_keyset,
+      bool with_op) const override {
     PANIC(python_op_registration_trampoline);
   }
 
@@ -125,7 +128,7 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
 
   void reset_backward_hooks(const TensorImpl* self) const override {
     PANIC(reset_backward_hooks);
-  };
+  }
 };
 
 // Construct this in Global scope instead of within `disarm`
@@ -142,3 +145,4 @@ void PyInterpreter::disarm() noexcept {
 }
 
 } // namespace c10::impl
+C10_DIAGNOSTIC_POP()

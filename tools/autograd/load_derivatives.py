@@ -6,8 +6,8 @@
 from __future__ import annotations
 
 import re
-from collections import defaultdict
-from typing import Any, Counter, Dict, Sequence, Set, Tuple
+from collections import Counter, defaultdict
+from typing import Any, TYPE_CHECKING
 
 import yaml
 
@@ -53,7 +53,11 @@ from torchgen.utils import concatMap, IDENT_REGEX, split_name_params
 from torchgen.yaml_utils import YamlLoader
 
 
-DerivativeRet = Tuple[Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]], Set[str]]
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+
+DerivativeRet = tuple[dict[FunctionSchema, dict[str, DifferentiabilityInfo]], set[str]]
 
 _GLOBAL_LOAD_DERIVATIVE_CACHE: dict[tuple[str, str], DerivativeRet] = {}
 
@@ -128,9 +132,9 @@ def load_derivatives(
         # function schema is the complete declaration including mutability annotation / default value and etc.
         # signature is the canonical schema for a group of functions (in-place/out/functional variants)
         # that are semantically related.
-        functions_by_signature: dict[
-            FunctionSchema, list[NativeFunction]
-        ] = defaultdict(list)
+        functions_by_signature: dict[FunctionSchema, list[NativeFunction]] = (
+            defaultdict(list)
+        )
         functions_by_schema: dict[str, NativeFunction] = {}
         for function in native_functions:
             functions_by_signature[function.func.signature()].append(function)
@@ -240,7 +244,7 @@ def create_forward_derivative(
     for r in f.func.returns:
         if r.name in var_names:
             if var_types is None:
-                var_types = tuple()
+                var_types = ()
             var_types = var_types + (r.type,)
 
     # Handle default return names
@@ -253,7 +257,7 @@ def create_forward_derivative(
                 res = re.findall(r"^result(\d+)$", var_name)
                 if len(res) == 1:
                     if var_types is None:
-                        var_types = tuple()
+                        var_types = ()
                     arg_idx = int(res[0])
                     var_types = var_types + (f.func.returns[arg_idx].type,)
 
@@ -309,9 +313,9 @@ def postprocess_forward_derivatives(
         formula = defn.formula
         required_inputs_tangent = find_required_inputs(formula, "_t")
         if formula == "auto_element_wise":
-            assert (
-                f.func.kind() != SchemaKind.inplace
-            ), f"Cannot use auto_element_wise with {f.func.name} because it is an in-place variant"
+            assert f.func.kind() != SchemaKind.inplace, (
+                f"Cannot use auto_element_wise with {f.func.name} because it is an in-place variant"
+            )
             if (
                 (not len(args_with_derivatives) == 1)
                 or len(forward_derivatives) > 1
@@ -436,10 +440,7 @@ def is_forward_derivative_definition(
     all_arg_names: list[str], names: tuple[str, ...]
 ) -> bool:
     for name in names:
-        if name not in all_arg_names:
-            return True
-        else:
-            return False
+        return name not in all_arg_names
     raise RuntimeError("Expected `names` to be non-empty")
 
 
@@ -634,7 +635,7 @@ def create_differentiability_info(
             raise RuntimeError(
                 f"Not supported: for {specification},"
                 f"output_differentiability must either be "
-                f"List[bool] or a List[str] where each str is a "
+                f"list[bool] or a list[str] where each str is a "
                 f"condition. In the case where it is a condition, "
                 f"we only support single-output functions. "
                 f"Please file us an issue. "
@@ -780,7 +781,7 @@ def saved_variables(
                 "nctype": lambda name: NamedCType(
                     name, OptionalCType(BaseCType(symIntArrayRefT))
                 ),
-                "expr": lambda name: f"{name}.has_value() ? c10::optional<c10::SymIntArrayRef>({name}->sym_sizes()) : c10::nullopt",
+                "expr": lambda name: f"{name}.has_value() ? std::optional<c10::SymIntArrayRef>({name}->sym_sizes()) : std::nullopt",
             },
         ),
         # replace self.sym_blocksize() with self_sym_blocksize_opt
@@ -962,13 +963,13 @@ def saved_variables(
 
             formula = re.sub(regex.format(name), repl, formula)
 
-        # c10::optional<std::string> types stored in Backward nodes must be
-        # converted to c10::optional<c10::string_view> before being passed into
+        # std::optional<std::string> types stored in Backward nodes must be
+        # converted to std::optional<std::string_view> before being passed into
         # the backward function
         if nctype.type == OptionalCType(BaseCType(stringT)):
             formula = re.sub(
                 rf"\b{name}\b",
-                f"{name}.has_value() ? c10::optional<c10::string_view>({name}.value()) : c10::nullopt",
+                f"{name}.has_value() ? std::optional<std::string_view>({name}.value()) : std::nullopt",
                 formula,
             )
 
@@ -985,7 +986,7 @@ def saved_variables(
 
 
 def _create_op_prefix(name: str) -> str:
-    """Takes a native function name converts to a op prefix name.
+    r"""Takes a native function name converts to an op prefix name.
 
     Note that the "name" parameter must be the native function name
     without the optional variant suffix, so "add" instead of
@@ -994,8 +995,9 @@ def _create_op_prefix(name: str) -> str:
     OP names correspond to classes, hence the change to title case.
 
     Example::
-    >>> _create_op_prefix('add')
-    'AddBackward'
+
+        >>> _create_op_prefix("add")
+        'AddBackward'
     """
     camel_case = "".join([p.title() for p in name.split("_")])
     return (camel_case + "Backward").replace("ForwardBackward", "Backward")

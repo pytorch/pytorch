@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing_extensions import assert_never
+
 from torchgen.api import cpp
 from torchgen.api.types import (
     ArgName,
@@ -30,7 +32,6 @@ from torchgen.model import (
     TensorOptionsArguments,
     Type,
 )
-from torchgen.utils import assert_never
 
 
 # This file describes the translation of JIT schema to the structured functions API.
@@ -48,7 +49,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
     # CompositeExplicitAutograd and the meta function (which could
     # hypothetically be SymInt), but for simplicity we plan for these to just
     # be handled in Python
-    r = cpp.valuetype_type(t, symint=False, binds=binds)
+    r = cpp.valuetype_type(t, symint=False, binds=binds, mutable=mutable)
     if r is not None:
         return r
 

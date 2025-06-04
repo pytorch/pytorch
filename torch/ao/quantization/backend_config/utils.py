@@ -1,19 +1,14 @@
 # mypy: allow-untyped-defs
-from typing import Dict, Any, List, Callable, Union, Tuple, Type
+from typing import Any, Callable, Union
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .backend_config import (
-    BackendConfig,
-    BackendPatternConfig,
-    DTypeConfig,
-)
-from ..utils import Pattern
-from ..fuser_method_mappings import (
-    _reverse2,
-    _reverse3,
-)
+from torch.ao.quantization.fuser_method_mappings import _reverse2, _reverse3
+from torch.ao.quantization.utils import Pattern
+
+from .backend_config import BackendConfig, BackendPatternConfig, DTypeConfig
+
 
 __all__ = [
     "get_pattern_to_dtype_configs",
@@ -30,42 +25,60 @@ __all__ = [
     "entry_to_pretty_str",
 ]
 
-def get_pattern_to_dtype_configs(backend_config: BackendConfig) -> Dict[Pattern, List[DTypeConfig]]:
-    pattern_to_dtype_configs: Dict[Pattern, List[DTypeConfig]] = {}
+
+def get_pattern_to_dtype_configs(
+    backend_config: BackendConfig,
+) -> dict[Pattern, list[DTypeConfig]]:
+    pattern_to_dtype_configs: dict[Pattern, list[DTypeConfig]] = {}
     for pattern, config in backend_config._pattern_complex_format_to_config.items():
         pattern_to_dtype_configs[pattern] = config.dtype_configs
     return pattern_to_dtype_configs
 
-def get_qat_module_classes(backend_config: BackendConfig) -> Tuple[type, ...]:
-    qat_module_classes = []
-    for config in backend_config.configs:
-        if config.qat_module is not None:
-            qat_module_classes.append(config.qat_module)
+
+def get_qat_module_classes(backend_config: BackendConfig) -> tuple[type, ...]:
+    qat_module_classes = [
+        config.qat_module
+        for config in backend_config.configs
+        if config.qat_module is not None
+    ]
     return tuple(set(qat_module_classes))
 
-def get_fused_module_classes(backend_config: BackendConfig) -> Tuple[type, ...]:
-    fused_module_classes = []
-    for config in backend_config.configs:
-        if config.fused_module is not None:
-            fused_module_classes.append(config.fused_module)
+
+def get_fused_module_classes(backend_config: BackendConfig) -> tuple[type, ...]:
+    fused_module_classes = [
+        config.fused_module
+        for config in backend_config.configs
+        if config.fused_module is not None
+    ]
     return tuple(set(fused_module_classes))
 
-def get_pattern_to_input_type_to_index(backend_config: BackendConfig) -> Dict[Pattern, Dict[str, int]]:
-    pattern_to_input_type_to_index: Dict[Pattern, Dict[str, int]] = {}
+
+def get_pattern_to_input_type_to_index(
+    backend_config: BackendConfig,
+) -> dict[Pattern, dict[str, int]]:
+    pattern_to_input_type_to_index: dict[Pattern, dict[str, int]] = {}
     for pattern, config in backend_config._pattern_complex_format_to_config.items():
         pattern_to_input_type_to_index[pattern] = config._input_type_to_index
     return pattern_to_input_type_to_index
 
+
 def get_root_module_to_quantized_reference_module(
-        backend_config: BackendConfig) -> Dict[Type[torch.nn.Module], Type[torch.nn.Module]]:
-    mapping: Dict[Type[torch.nn.Module], Type[torch.nn.Module]] = {}
+    backend_config: BackendConfig,
+) -> dict[type[torch.nn.Module], type[torch.nn.Module]]:
+    mapping: dict[type[torch.nn.Module], type[torch.nn.Module]] = {}
     for config in backend_config.configs:
-        if config.root_module is not None and config.reference_quantized_module is not None:
+        if (
+            config.root_module is not None
+            and config.reference_quantized_module is not None
+        ):
             mapping[config.root_module] = config.reference_quantized_module
     return mapping
 
-def get_fuser_method_mapping(backend_config: BackendConfig) -> Dict[Pattern, Union[nn.Sequential, Callable]]:
-    fuser_method_mapping : Dict[Pattern, Union[nn.Sequential, Callable]] = {}
+
+def get_fuser_method_mapping(
+    backend_config: BackendConfig,
+) -> dict[Pattern, Union[nn.Sequential, Callable]]:
+    fuser_method_mapping: dict[Pattern, Union[nn.Sequential, Callable]] = {}
     for pattern, config in backend_config._pattern_complex_format_to_config.items():
         if config.fuser_method is not None:
             # Note: both the fuser method and the pattern are specified in forward order in the
@@ -75,15 +88,21 @@ def get_fuser_method_mapping(backend_config: BackendConfig) -> Dict[Pattern, Uni
             fuser_method_mapping[pattern] = fuser_method
     return fuser_method_mapping
 
-def get_module_to_qat_module(backend_config: BackendConfig) -> Dict[Pattern, Type[torch.nn.Module]]:
-    module_to_qat_module: Dict[Pattern, Type[torch.nn.Module]] = {}
+
+def get_module_to_qat_module(
+    backend_config: BackendConfig,
+) -> dict[Pattern, type[torch.nn.Module]]:
+    module_to_qat_module: dict[Pattern, type[torch.nn.Module]] = {}
     for pattern, config in backend_config._pattern_complex_format_to_config.items():
         if config.qat_module is not None:
             module_to_qat_module[pattern] = config.qat_module
     return module_to_qat_module
 
-def get_fusion_pattern_to_root_node_getter(backend_config: BackendConfig) -> Dict[Pattern, Callable]:
-    """ Get a map from fusion pattern to a function that returns the root node
+
+def get_fusion_pattern_to_root_node_getter(
+    backend_config: BackendConfig,
+) -> dict[Pattern, Callable]:
+    """Get a map from fusion pattern to a function that returns the root node
     from the fusion pattern, e.g. the most common one is:
     def get_root_node(node_pattern):
         while not isinstance(node_pattern[-1], Node):
@@ -92,14 +111,17 @@ def get_fusion_pattern_to_root_node_getter(backend_config: BackendConfig) -> Dic
     This can work for all patterns whose root node is the "last node" in the pattern,
     e.g. (torch.add, MatchAllNode, (torch.ReLU, torch.Conv2d))
     """
-    root_node_getter_mapping: Dict[Pattern, Callable] = {}
+    root_node_getter_mapping: dict[Pattern, Callable] = {}
     for pattern, config in backend_config._pattern_complex_format_to_config.items():
         if config._root_node_getter is not None:
             root_node_getter_mapping[pattern] = config._root_node_getter
     return root_node_getter_mapping
 
-def get_fusion_pattern_to_extra_inputs_getter(backend_config: BackendConfig) -> Dict[Pattern, Callable]:
-    """ Get a map from fusion pattern to a function that returns extra input nodes
+
+def get_fusion_pattern_to_extra_inputs_getter(
+    backend_config: BackendConfig,
+) -> dict[Pattern, Callable]:
+    """Get a map from fusion pattern to a function that returns extra input nodes
     from the fusion pattern, in the order required by the root node. This is optional,
     if not specified, we will not copy over any extra inputs for the root node.
     Example:
@@ -112,11 +134,12 @@ def get_fusion_pattern_to_extra_inputs_getter(backend_config: BackendConfig) -> 
         add, extra_input, conv_pattern = pattern
         return [extra_input]
     """
-    extra_inputs_getter_mapping: Dict[Pattern, Callable] = {}
+    extra_inputs_getter_mapping: dict[Pattern, Callable] = {}
     for pattern, config in backend_config._pattern_complex_format_to_config.items():
         if config._extra_inputs_getter is not None:
             extra_inputs_getter_mapping[pattern] = config._extra_inputs_getter
     return extra_inputs_getter_mapping
+
 
 def remove_boolean_dispatch_from_name(p) -> Any:
     """
@@ -140,10 +163,12 @@ def remove_boolean_dispatch_from_name(p) -> Any:
         return "torch.nn.functional.adaptive_max_pool2d"
     elif p is F.adaptive_max_pool3d:
         return "torch.nn.functional.adaptive_max_pool3d"
-    assert "boolean_dispatch" not in str(p), \
-        f"{p} does not have a human readable representation in " + \
-        "quantization documentation"
+    assert "boolean_dispatch" not in str(p), (
+        f"{p} does not have a human readable representation in "
+        + "quantization documentation"
+    )
     return p
+
 
 def pattern_to_human_readable(p) -> Any:
     if isinstance(p, tuple):
@@ -155,6 +180,7 @@ def pattern_to_human_readable(p) -> Any:
     else:
         p = remove_boolean_dispatch_from_name(p)
         return p
+
 
 # TODO(future PR): move backend_config_dict to use dataclass and move this logic to
 # the corresponding __str__ function
@@ -202,7 +228,10 @@ def entry_to_pretty_str(entry) -> str:
     s += "}"
     return s
 
-def _get_pattern_in_reversed_nested_tuple_format(config: BackendPatternConfig) -> Pattern:
+
+def _get_pattern_in_reversed_nested_tuple_format(
+    config: BackendPatternConfig,
+) -> Pattern:
     """
     Return the pattern specified in the given config in the reversed nested tuple format
     used internally in the quantization pattern matching code.
@@ -235,7 +264,9 @@ def _get_pattern_in_reversed_nested_tuple_format(config: BackendPatternConfig) -
     if config._pattern_complex_format is not None:
         return config._pattern_complex_format
     if config.pattern is None:
-        raise ValueError("Either 'pattern' or 'pattern_complex_format' must be specified")
+        raise ValueError(
+            "Either 'pattern' or 'pattern_complex_format' must be specified"
+        )
     if not isinstance(config.pattern, tuple):
         return config.pattern
 
@@ -249,7 +280,10 @@ def _get_pattern_in_reversed_nested_tuple_format(config: BackendPatternConfig) -
     else:
         raise ValueError("Expected a tuple with 2 or 3 elements, got: ", config.pattern)
 
-def _get_fuser_method_in_reversed_nested_tuple_format(config: BackendPatternConfig) -> Callable:
+
+def _get_fuser_method_in_reversed_nested_tuple_format(
+    config: BackendPatternConfig,
+) -> Callable:
     """
     Return the fuser method specified in the given config in the reversed nested
     tuple format used internally in the quantization pattern matching code.

@@ -9,8 +9,8 @@
 #include <ATen/native/cudnn/RNNUtils.h>
 #endif
 
-namespace at {
-namespace autocast {
+
+namespace at::autocast {
 
 /********************************************************************************
 Autocast wrapper for CuDNN RNNs (the weight reflattening needs special attention)
@@ -18,7 +18,7 @@ Autocast wrapper for CuDNN RNNs (the weight reflattening needs special attention
 
 // To be registered for the "_cudnn_rnn(...)" schema.
 // _cudnn_rnn is autograd-exposed (test_autocast_cudnn_rnn in test_cuda.py includes a test to confirm)
-std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>
+static std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>
 _cudnn_rnn_cast_reflatten(const Tensor & input,
                           TensorList weight,
                           int64_t weight_stride0,
@@ -113,7 +113,7 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
       batch_sizes,
       dropout_state);
 #else // AT_CUDNN_ENABLED()
-  AT_ERROR("autocast::_cudnn_rnn_cast_reflatten: ATen not compiled with cuDNN support");
+  TORCH_CHECK(false, "autocast::_cudnn_rnn_cast_reflatten: ATen not compiled with cuDNN support");
   return {Tensor{}, Tensor{}, Tensor{}, Tensor{}, Tensor{}}; // never reached, placates the compiler
 #endif // AT_CUDNN_ENABLED()
 }
@@ -125,5 +125,4 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
 }
 } // anonymous namespace
 
-} // namespace autocast
-} // namespace at
+} // namespace at::autocast

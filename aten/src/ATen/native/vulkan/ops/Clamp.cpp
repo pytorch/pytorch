@@ -295,22 +295,22 @@ Tensor relu(const Tensor& self) {
   return (
       (self.scalar_type() == at::kQUInt8)
           ? ops::_clamp(
-                self, 0, c10::nullopt, VK_KERNEL(quantized_clamp_quint8))
+                self, 0, std::nullopt, VK_KERNEL(quantized_clamp_quint8))
           : ((self.scalar_type() == at::kQInt8)
                  ? ops::_clamp(
-                       self, 0, c10::nullopt, VK_KERNEL(quantized_clamp_qint8))
-                 : ops::_clamp(self, 0, c10::nullopt, VK_KERNEL(clamp))));
+                       self, 0, std::nullopt, VK_KERNEL(quantized_clamp_qint8))
+                 : ops::_clamp(self, 0, std::nullopt, VK_KERNEL(clamp))));
 }
 
 Tensor& relu_(Tensor& self) {
   return (
       (self.scalar_type() == at::kQUInt8)
           ? ops::_clamp_(
-                self, 0, c10::nullopt, VK_KERNEL(quantized_clamp_quint8_))
+                self, 0, std::nullopt, VK_KERNEL(quantized_clamp_quint8_))
           : ((self.scalar_type() == at::kQInt8)
                  ? ops::_clamp_(
-                       self, 0, c10::nullopt, VK_KERNEL(quantized_clamp_qint8_))
-                 : ops::_clamp_(self, 0, c10::nullopt, VK_KERNEL(clamp_))));
+                       self, 0, std::nullopt, VK_KERNEL(quantized_clamp_qint8_))
+                 : ops::_clamp_(self, 0, std::nullopt, VK_KERNEL(clamp_))));
 }
 
 Tensor hardswish(const Tensor& self) {
@@ -501,7 +501,7 @@ Tensor& activation_scalar_(
   return self_arg;
 }
 
-Tensor gelu(const Tensor& self, c10::string_view approximate) {
+Tensor gelu(const Tensor& self, std::string_view approximate) {
   TORCH_CHECK(
       approximate == "tanh", "Vulkan: gelu only supported for tanh type");
   Scalar kBetaVec = M_SQRT2 * M_2_SQRTPI * 0.5;
@@ -521,7 +521,7 @@ Tensor gelu(const Tensor& self, c10::string_view approximate) {
   return ops::activation_scalar(self, scalar, VK_KERNEL(gelu_tanh));
 }
 
-Tensor& gelu_(Tensor& self, c10::string_view approximate) {
+Tensor& gelu_(Tensor& self, std::string_view approximate) {
   TORCH_CHECK(
       approximate == "tanh", "Vulkan: gelu only supported for tanh type");
   Scalar kBetaVec = M_SQRT2 * M_2_SQRTPI * 0.5;

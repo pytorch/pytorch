@@ -9,17 +9,20 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/resize_as_native.h>
+#include <ATen/ops/resize_as_sparse_native.h>
 #include <ATen/ops/resize_native.h>
 #include <ATen/ops/resize.h>
 #include <ATen/ops/_resize_output.h>
 #include <ATen/ops/_resize_output_native.h>
 #endif
 
+#include <c10/util/overflows.h>
+
 namespace at::native {
 
 // Returns true if resize is necessary
 template <typename T>
-bool _resize_output_check(const Tensor& output, ArrayRef<T> shape) {
+static bool _resize_output_check(const Tensor& output, ArrayRef<T> shape) {
   // Tests for resizing of tensors with one or more elements
   if (at::symint::sizes<T>(output).equals(shape)) {
     return false;
@@ -54,7 +57,7 @@ static void native_resize_(const Tensor& output, SymIntArrayRef shape) {
 }
 
 template <typename T>
-bool _resize_output(const Tensor& output, ArrayRef<T> shape) {
+static bool _resize_output(const Tensor& output, ArrayRef<T> shape) {
   if (_resize_output_check<T>(output, shape)) {
     // avoid a redispatch for cpu and cuda.
     // TODO: when resize_cuda_ is re-written to be unified with resize_,
@@ -194,7 +197,7 @@ static void _maybe_resize_storage(TensorImpl* self, c10::SymInt new_size_bytes) 
 }
 
 template <typename T>
-TensorImpl* _resize_impl_(
+static TensorImpl* _resize_impl_(
     TensorImpl* self,
     ArrayRef<T> size,
     at::OptionalArrayRef<T> stride,
@@ -232,14 +235,13 @@ TensorImpl* resize_impl_cpu_(
 }
 
 template <typename T>
-const Tensor& _resize_(
+static const Tensor& _resize_(
     const Tensor& self,
     ArrayRef<T> size,
     std::optional<MemoryFormat> optional_memory_format) {
   auto* self_ = self.unsafeGetTensorImpl();
   int64_t old_storage_nbytes = self_->unsafe_storage() ? self_->unsafe_storage().sym_nbytes().maybe_as_int().value_or(-1) : 0;
-  // NOLINTNEXTLINE(bugprone-argument-comment)
-  _resize_impl_<T>(self_, size, /*strides=*/c10::nullopt, true);
+  _resize_impl_<T>(self_, size, /*stride=*/std::nullopt, true);
   if (optional_memory_format.has_value()) {
     auto memory_format =
         optional_memory_format.value();
@@ -274,7 +276,7 @@ const Tensor& resize__symint(
   return _resize_(self, size, optional_memory_format);
 }
 
-void resize_bytes_nocuda(const Storage& storage, c10::SymInt newsize) {
+void resize_bytes_nocuda(const Storage& storage, const c10::SymInt& newsize) {
   // handles all devices except cuda (which needs to be in a different .so)
   c10::DeviceType device_type = storage.device_type();
   if (device_type == at::kCPU) {
@@ -282,9 +284,9 @@ void resize_bytes_nocuda(const Storage& storage, c10::SymInt newsize) {
   } else if (device_type == at::kMeta) {
     at::native::resize_bytes_meta(storage.unsafeGetStorageImpl(), newsize);
   } else if (device_type == at::kPrivateUse1) {
-    at::GetPrivateUse1HooksInterface()->resizePrivateUse1Bytes(
+    at::detail::getPrivateUse1Hooks().resizePrivateUse1Bytes(
         storage, newsize.expect_int());
-  } else if (device_type == at::kXPU || device_type == at::kHPU) {
+  } else if (device_type == at::kXPU || device_type == at::kHPU || device_type == at::kMTIA) {
     ptrdiff_t size_bytes_i = newsize.expect_int();
     TORCH_CHECK(
         !c10::overflows<int64_t>(size_bytes_i),

@@ -3,6 +3,7 @@ import subprocess
 
 from torch.testing._internal.common_methods_invocations import op_db
 
+
 if __name__ == "__main__":
     i = 0
     while i < len(op_db):

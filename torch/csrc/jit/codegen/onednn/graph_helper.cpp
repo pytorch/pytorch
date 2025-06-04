@@ -5,10 +5,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace onednn {
+namespace torch::jit::fuser::onednn {
 
 using opkind = dnnl::graph::op::kind;
 
@@ -26,7 +23,7 @@ static std::optional<size_t> getDimensions(Value* v) {
   if (v->type()->isSubtypeOf(TensorType::get())) {
     return v->type()->cast<TensorType>()->sizes().size();
   } else {
-    return c10::nullopt;
+    return std::nullopt;
   }
 }
 
@@ -615,7 +612,4 @@ bool LlgaNodeWrapper::useOpaqueLayout(size_t offset) const {
   return n->is(attr::output_layouts)[offset] == OPAQUE_LAYOUT;
 }
 
-} // namespace onednn
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::onednn

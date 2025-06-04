@@ -1,8 +1,26 @@
+"""
+This module provides functionality for caching and looking up fully qualified function
+and class names from Python source files by line number.
+
+It uses Python's tokenize module to parse source files and tracks function/class
+definitions along with their nesting to build fully qualified names (e.g. 'class.method'
+or 'module.function'). The results are cached in a two-level dictionary mapping:
+
+    filename -> (line_number -> fully_qualified_name)
+
+Example usage:
+    name = get_funcname("myfile.py", 42)  # Returns name of function/class at line 42
+    clearcache()  # Clear the cache if file contents have changed
+
+The parsing is done lazily when a file is first accessed. Invalid Python files or
+IO errors are handled gracefully by returning empty cache entries.
+"""
+
 import tokenize
+from typing import Optional
 
-from typing import Dict, List, Optional
 
-cache: Dict[str, Dict[int, str]] = {}
+cache: dict[str, dict[int, str]] = {}
 
 
 def clearcache() -> None:
@@ -13,17 +31,17 @@ def _add_file(filename: str) -> None:
     try:
         with tokenize.open(filename) as f:
             tokens = list(tokenize.generate_tokens(f.readline))
-    except OSError:
+    except (OSError, tokenize.TokenError):
         cache[filename] = {}
         return
 
     # NOTE: undefined behavior if file is not valid Python source,
     # since tokenize will have undefined behavior.
-    result: Dict[int, str] = {}
+    result: dict[int, str] = {}
     # current full funcname, e.g. xxx.yyy.zzz
     cur_name = ""
     cur_indent = 0
-    significant_indents: List[int] = []
+    significant_indents: list[int] = []
 
     for i, token in enumerate(tokens):
         if token.type == tokenize.INDENT:

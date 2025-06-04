@@ -134,9 +134,9 @@ void initScriptListBindings(PyObject* module) {
 
             auto seq = std::make_shared<ScriptList>(self->type());
 
-            for (const auto i : c10::irange(slicelength)) {
-              (void)i; // Suppress unused variable warning
-              seq->append(self->getItem(start));
+            for ([[maybe_unused]] const auto i [[maybe_unused]] :
+                 c10::irange(slicelength)) {
+              seq->append(self->getItem(static_cast<ptrdiff_t>(start)));
               start += step;
             }
 
@@ -177,7 +177,8 @@ void initScriptListBindings(PyObject* module) {
             for (const auto i : c10::irange(slicelength)) {
               try {
                 self->setItem(
-                    start, toIValue(value[i], self->type()->getElementType()));
+                    static_cast<ptrdiff_t>(start),
+                    toIValue(value[i], self->type()->getElementType()));
               } catch (const py::cast_error& e) {
                 throw py::type_error();
               }

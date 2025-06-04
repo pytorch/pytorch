@@ -137,6 +137,8 @@ class TORCH_API ManagedTensorRanges {
   // type are mutable)
   std::vector<const Value*> collectValuesWithTrackedLifetimes(
       at::ArrayRef<const Value*> values);
+  void extendLifetime(Value* input, size_t new_end);
+  void extendInputLifetime(Node* node, size_t new_end);
 
   // Maps Node* to the set of managed tensors that are now available
   // for re-use after this node.
@@ -405,7 +407,7 @@ class BlockInfo {
 class TORCH_API StaticModule {
  public:
   explicit StaticModule(
-      std::shared_ptr<torch::jit::Graph> g,
+      const std::shared_ptr<torch::jit::Graph>& g,
       const StaticModuleOptions& opts = StaticModuleOptions(),
       std::vector<IValue> sample_inputs = {});
 
@@ -456,7 +458,7 @@ class TORCH_API StaticModule {
     return num_inputs() + num_constants() + num_intermediate_values();
   }
 
-  C10_NODISCARD const std::vector<uint16_t>& output_indices() const {
+  [[nodiscard]] const std::vector<uint16_t>& output_indices() const {
     return output_indices_;
   }
 
@@ -488,7 +490,7 @@ class TORCH_API StaticModule {
         });
   }
 
-  C10_NODISCARD Node* findNodeWithKindForTesting(const std::string& kind) const;
+  [[nodiscard]] Node* findNodeWithKindForTesting(const std::string& kind) const;
 
   const std::optional<c10::FunctionSchema>& schema() const {
     return schema_;
@@ -556,7 +558,7 @@ class TORCH_API StaticModule {
 
   size_t num_intermediate_values_ = 0;
 
-  // Includes self if module_ != nullopt.
+  // Includes self if module_ != std::nullopt.
   // Note that we might have num_inputs_ == 0 even if the schema has a `self`
   // argument. In this case, `self` isn't used in the graph, but the schema
   // includes it anyways to be consistent with the JIT interpreter.
@@ -644,7 +646,7 @@ class TORCH_API BlockRunner {
   }
 
   // Output is readonly. The writing process happens inside ProcessedNodes
-  C10_NODISCARD const IValue& Output(uint32_t i) const {
+  [[nodiscard]] const IValue& Output(uint32_t i) const {
     DCHECK(i < outputs_.size());
     return *outputs_[i];
   }
@@ -813,10 +815,8 @@ class TORCH_API BlockRunner {
   std::vector<ProcessedNode> nodes_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_API StaticNodeInfo {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   StaticNodeInfo(
       Node* n,
       ProcessedFunction* fn,
@@ -871,6 +871,9 @@ class TORCH_API ProcessedNodeMetadata {
   // if the contained type (BlockRunner) is not copyable
   ProcessedNodeMetadata(const ProcessedNodeMetadata&) = delete;
   ProcessedNodeMetadata& operator=(const ProcessedNodeMetadata&) = delete;
+  ProcessedNodeMetadata(ProcessedNodeMetadata&&) = delete;
+  ProcessedNodeMetadata&& operator=(ProcessedNodeMetadata&&) = delete;
+  ~ProcessedNodeMetadata() = default;
 
   std::vector<BlockRunner>& block_runners() {
     return block_runners_;
@@ -893,10 +896,8 @@ class TORCH_API ProcessedNodeMetadata {
   torch::jit::TaskLauncher* launcher_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_API ProcessedNode {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ProcessedNode() = default;
 
   ProcessedNode(const StaticNodeInfo& other, IValue* values)
@@ -915,6 +916,7 @@ class TORCH_API ProcessedNode {
   ProcessedNode(const ProcessedNode&) = delete;
   ProcessedNode& operator=(const ProcessedNode& other) = delete;
   ProcessedNode& operator=(ProcessedNode&&) = default;
+  ~ProcessedNode() = default;
 
   void run();
 
@@ -923,7 +925,7 @@ class TORCH_API ProcessedNode {
   }
 
   // Input is readonly
-  C10_NODISCARD const IValue& Input(uint32_t i) const {
+  [[nodiscard]] const IValue& Input(uint32_t i) const {
     return values_[inputs_[i]];
   }
 
@@ -933,7 +935,7 @@ class TORCH_API ProcessedNode {
     return values_[outputs_offset_ + i];
   }
 
-  C10_NODISCARD const IValue& Output(uint32_t i) const {
+  [[nodiscard]] const IValue& Output(uint32_t i) const {
     DCHECK(i < num_outputs());
     return values_[outputs_offset_ + i];
   }
@@ -943,12 +945,12 @@ class TORCH_API ProcessedNode {
     return static_cast<uint32_t>(fn_->num_outputs());
   }
 
-  C10_NODISCARD c10::ArrayRef<const IValue> outputs() const {
+  [[nodiscard]] c10::ArrayRef<const IValue> outputs() const {
     return c10::ArrayRef<const IValue>(
         values_ + outputs_offset_, num_outputs());
   }
 
-  C10_NODISCARD uint16_t num_inputs() const {
+  [[nodiscard]] uint16_t num_inputs() const {
     return inputs_.size();
   }
 
@@ -990,7 +992,7 @@ class TORCH_API ProcessedNode {
     values_ = values;
   }
 
-  C10_NODISCARD uint16_t output_ivalue_index(uint16_t i) const {
+  [[nodiscard]] uint16_t output_ivalue_index(uint16_t i) const {
     DCHECK(i < num_outputs());
     return outputs_offset_ + i;
   }
@@ -1019,14 +1021,14 @@ class TORCH_API ProcessedNode {
   }
 
  private:
-  C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
+  [[nodiscard]] bool verify_outputs_dont_overlap_each_other() const;
 
-  C10_NODISCARD bool verify_inputs_dont_overlap_outputs(bool force_check) const;
+  [[nodiscard]] bool verify_inputs_dont_overlap_outputs(bool force_check) const;
 
-  Node* node_;
-  const ProcessedFunction* fn_;
+  Node* node_{nullptr};
+  const ProcessedFunction* fn_{nullptr};
   ProcessedNodeInputs inputs_;
-  uint16_t outputs_offset_;
+  uint16_t outputs_offset_{0};
   bool overlap_detected_{false};
   IValue* values_ = nullptr; // unowned
   // Metadata for ProcessedNode.
@@ -1143,3 +1145,4 @@ class TORCH_API StaticRuntime {
 };
 
 } // namespace torch::jit
+C10_DECLARE_bool(static_runtime_disable_debug_memory_overlap_check);

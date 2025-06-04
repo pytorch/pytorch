@@ -1,15 +1,14 @@
-# mypy: ignore-errors
+# mypy: allow-untyped-defs
 
 import os
 import sys
 import unittest
-from typing import Dict, List, Type
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
     find_free_port,
     IS_SANDCASTLE,
+    TEST_WITH_DEV_DBG_ASAN,
 )
 from torch.testing._internal.distributed.ddp_under_dist_autograd_test import (
     CudaDdpComparisonTest,
@@ -22,14 +21,23 @@ from torch.testing._internal.distributed.nn.api.remote_module_test import (
     ThreeWorkersRemoteModuleTest,
 )
 from torch.testing._internal.distributed.rpc.dist_autograd_test import (
-    DistAutogradTest,
     CudaDistAutogradTest,
+    DistAutogradTest,
     FaultyAgentDistAutogradTest,
     TensorPipeAgentDistAutogradTest,
-    TensorPipeCudaDistAutogradTest
+    TensorPipeCudaDistAutogradTest,
 )
 from torch.testing._internal.distributed.rpc.dist_optimizer_test import (
     DistOptimizerTest,
+)
+from torch.testing._internal.distributed.rpc.examples.parameter_server_test import (
+    ParameterServerTest,
+)
+from torch.testing._internal.distributed.rpc.examples.reinforcement_learning_rpc_test import (
+    ReinforcementLearningRpcTest,
+)
+from torch.testing._internal.distributed.rpc.faulty_agent_rpc_test import (
+    FaultyAgentRpcTest,
 )
 from torch.testing._internal.distributed.rpc.jit.dist_autograd_test import (
     JitDistAutogradTest,
@@ -41,18 +49,11 @@ from torch.testing._internal.distributed.rpc.jit.rpc_test_faulty import (
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
-from torch.testing._internal.distributed.rpc.faulty_agent_rpc_test import (
-    FaultyAgentRpcTest,
-)
 from torch.testing._internal.distributed.rpc.rpc_test import (
     CudaRpcTest,
     RpcTest,
-    TensorPipeAgentRpcTest,
     TensorPipeAgentCudaRpcTest,
-)
-from torch.testing._internal.distributed.rpc.examples.parameter_server_test import ParameterServerTest
-from torch.testing._internal.distributed.rpc.examples.reinforcement_learning_rpc_test import (
-    ReinforcementLearningRpcTest,
+    TensorPipeAgentRpcTest,
 )
 
 
@@ -62,14 +63,16 @@ def _check_and_set_tcp_init():
     # different ports.
     use_tcp_init = os.environ.get("RPC_INIT_WITH_TCP", None)
     if use_tcp_init == "1":
-        os.environ["MASTER_ADDR"] = '127.0.0.1'
+        os.environ["MASTER_ADDR"] = "127.0.0.1"
         os.environ["MASTER_PORT"] = str(find_free_port())
+
 
 def _check_and_unset_tcp_init():
     use_tcp_init = os.environ.get("RPC_INIT_WITH_TCP", None)
     if use_tcp_init == "1":
         del os.environ["MASTER_ADDR"]
         del os.environ["MASTER_PORT"]
+
 
 # The tests for the RPC module need to cover multiple possible combinations:
 # - different aspects of the API, each one having its own suite of tests;
@@ -81,8 +84,10 @@ def _check_and_unset_tcp_init():
 # we call the generate_tests function of this file, passing to it a fixture for
 # the agent, which then gets mixed-in with each test suite.
 
+
 @unittest.skipIf(
-    TEST_WITH_DEV_DBG_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
+    TEST_WITH_DEV_DBG_ASAN,
+    "Skip ASAN as torch + multiprocessing spawn have known issues",
 )
 class SpawnHelper(MultiProcessTestCase):
     def setUp(self):
@@ -148,10 +153,10 @@ FAULTY_AGENT_TESTS = [
 
 def generate_tests(
     prefix: str,
-    mixin: Type[RpcAgentTestFixture],
-    tests: List[Type[RpcAgentTestFixture]],
+    mixin: type[RpcAgentTestFixture],
+    tests: list[type[RpcAgentTestFixture]],
     module_name: str,
-) -> Dict[str, Type[RpcAgentTestFixture]]:
+) -> dict[str, type[RpcAgentTestFixture]]:
     """Mix in the classes needed to autogenerate the tests based on the params.
 
     Takes a series of test suites, each written against a "generic" agent (i.e.,
@@ -166,12 +171,14 @@ def generate_tests(
     that the classes can be fixed to make it look like they belong to it, which
     is necessary for pickling to work on them.
     """
-    ret: Dict[str, Type[RpcAgentTestFixture]] = {}
+    ret: dict[str, type[RpcAgentTestFixture]] = {}
     for test_class in tests:
         if IS_SANDCASTLE and TEST_WITH_DEV_DBG_ASAN:
             print(
-                f'Skipping test {test_class} on sandcastle for the following reason: '
-                'Skip dev-asan as torch + multiprocessing spawn have known issues', file=sys.stderr)
+                f"Skipping test {test_class} on sandcastle for the following reason: "
+                "Skip dev-asan as torch + multiprocessing spawn have known issues",
+                file=sys.stderr,
+            )
             continue
 
         name = f"{prefix}{test_class.__name__}"

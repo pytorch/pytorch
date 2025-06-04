@@ -24,6 +24,6 @@ void renorm_scale_factor_impl(TensorIteratorBase& iter, double maxnorm) {
 
 }  // namespace (anonymous)
 
-REGISTER_DISPATCH(renorm_scale_factor_stub, &renorm_scale_factor_impl);
+REGISTER_DISPATCH(renorm_scale_factor_stub, &renorm_scale_factor_impl)
 
 }  // namespace at::native

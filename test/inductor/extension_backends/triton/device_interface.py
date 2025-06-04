@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 
+import torch
 from torch._dynamo import device_interface  # noqa: PLC2701 import-private-name
 
 
@@ -13,9 +14,7 @@ class DeviceProperties:
 
 
 class DeviceInterface(device_interface.DeviceInterface):
-    class Event(
-        device_interface._EventBase
-    ):  # pyright: ignore [reportPrivateImportUsage]
+    class Event(torch.Event):
         def __init__(
             self,
             enable_timing: bool = False,
@@ -77,7 +76,7 @@ class DeviceInterface(device_interface.DeviceInterface):
 
     @staticmethod
     def device_count() -> int:
-        raise NotImplementedError
+        return 1
 
     @staticmethod
     def maybe_exchange_device(device: int) -> int:
@@ -94,24 +93,12 @@ class DeviceInterface(device_interface.DeviceInterface):
         return 0  # previous device is always 0
 
     @staticmethod
-    def current_stream():
-        raise NotImplementedError
-
-    @staticmethod
-    def set_stream(stream) -> None:
-        raise NotImplementedError
-
-    @staticmethod
     def get_raw_stream(device_index: int):
         return None
 
     @staticmethod
     def synchronize(device) -> None:
         pass
-
-    @staticmethod
-    def get_device_properties(device) -> DeviceProperties:
-        raise NotImplementedError
 
     # Can be mock patched by @patch decorator.
     @staticmethod

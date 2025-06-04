@@ -1,8 +1,8 @@
 #pragma once
 
 #include <algorithm>
+#include <condition_variable>
 #include <deque>
-#include <future>
 #include <mutex>
 #include <shared_mutex>
 
@@ -12,19 +12,40 @@
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_runtime/model.h>
 
-namespace torch {
-namespace aot_inductor {
+namespace torch::aot_inductor {
+// The state transition is done by:
+// (1) NONE state: The default state when created. This state should only exist
+// when model_container is created and no constants are being loaded or updated.
+// (2) INITIALIZED state: This state get set whenever we load the constants into
+// the buffer. This could be done by load_constants or update_constants_buffer.
+// (3) FOLDED state: This state should transition from INITIALILZED after
+// const_fold is being invoked.
+enum class ConstantState : uint8_t { NONE, INITIALIZED, FOLDED, UNKNOWN };
+
+inline std::string toStringConstantState(ConstantState state) {
+  switch (state) {
+    case ConstantState::NONE:
+      return "ConstantState::NONE";
+    case ConstantState::INITIALIZED:
+      return "ConstantState::INITIALIZED";
+    case ConstantState::FOLDED:
+      return "ConstantState::FOLDED";
+    case ConstantState::UNKNOWN:
+      return "ConstantState::UNKNOWN";
+    default:
+      return "Unknown enum class state for ConstantState";
+  }
+}
 
 class AOTInductorModelContainer {
  public:
   AOTInductorModelContainer(
       size_t num_models,
       const std::string& device_str,
-      std::optional<std::string> cubin_dir = std::nullopt) {
+      const std::optional<std::string>& cubin_dir = std::nullopt) {
     constants_map_ = std::make_shared<ConstantMap>();
     constants_array_ = std::make_shared<std::vector<ConstantHandle>>();
-    use_secondary_ = false;
-    constant_folded_ = false;
+
     models_.reserve(num_models);
     available_models_.reserve(num_models);
     for (size_t i = 0; i < num_models; ++i) {
@@ -45,21 +66,20 @@ class AOTInductorModelContainer {
     size_t num_inputs = model->num_inputs();
     input_names_.reserve(num_inputs);
     for (size_t i = 0; i < num_inputs; i++) {
-      input_names_.push_back(model->input_name(i));
+      input_names_.emplace_back(model->input_name(static_cast<int64_t>(i)));
     }
 
     size_t num_outputs = model->num_outputs();
     output_names_.reserve(num_outputs);
     for (size_t i = 0; i < num_outputs; i++) {
-      output_names_.push_back(model->output_name(i));
+      output_names_.emplace_back(model->output_name(static_cast<int64_t>(i)));
     }
-
     model->load_constants();
-#ifdef USE_CUDA
     constant_blob_ = model->release_constant_blob();
-    constants_internal_offset_.resize(model->num_constants());
-    model->compute_cuda_constant_blob(blob_size_, constants_internal_offset_);
-#endif
+    constants_internal_offset_.resize(
+        model->num_constants() - model->num_folded_constants());
+    model->compute_constant_blob(blob_size_, constants_internal_offset_);
+    constant_folded_ = ConstantState::INITIALIZED;
 
     for (auto& model : models_) {
       model->update_constants_map(constants_map_);
@@ -82,24 +102,29 @@ class AOTInductorModelContainer {
     std::shared_lock model_lk(model_exec_mutex_);
     auto* model = get_available_model();
 
-    if (!constant_folded_) {
+    ConstantState& const_folded =
+        use_secondary_ ? constant_folded_secondary_ : constant_folded_;
+    if (const_folded == ConstantState::INITIALIZED) {
       // At this point, constant is not ready yet. We need to call constant
       // folding before we execute the model. We obtain a unique lock at this
       // point to make sure constant is ready for all.
       model_lk.unlock();
       std::unique_lock constants_folding_lk(model_exec_mutex_);
       // Double locking to make sure constant folding is only ran once.
-      if (!constant_folded_) {
+      if (const_folded == ConstantState::INITIALIZED) {
         auto folded_const_map = model->run_const_fold(
             stream, proxy_executor, /* initialization = */ true);
         update_constant_buffer(
-            folded_const_map,
+            std::move(folded_const_map),
             /* use_inactive = */ false,
             /* validate_full_update = */ false);
-        constant_folded_ = true;
+        const_folded = ConstantState::FOLDED;
       }
       constants_folding_lk.unlock();
       model_lk.lock();
+    } else if (const_folded != ConstantState::FOLDED) {
+      throw std::runtime_error(
+          "Unknown constant state: " + toStringConstantState(constant_folded_));
     }
 
     try {
@@ -117,6 +142,65 @@ class AOTInductorModelContainer {
     pending_models_available_.notify_one();
   }
 
+  // Non-thread-aware variant of run(). Obviously unsafe to use in a threaded
+  // environment :)
+  void run_single_threaded(
+      AtenTensorHandle*
+          input_handles, // array of input AtenTensorHandle; handles
+                         // are stolen; the array itself is borrowed
+      AtenTensorHandle*
+          output_handles, // array for writing output AtenTensorHandle; handles
+                          // will be stolen by the caller; the array itself is
+                          // borrowed
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor) {
+    auto* model = available_models_[0];
+
+    ConstantState& const_folded =
+        use_secondary_ ? constant_folded_secondary_ : constant_folded_;
+    if (const_folded == ConstantState::INITIALIZED) {
+      auto folded_const_map = model->run_const_fold(
+          stream, proxy_executor, /* initialization = */ true);
+      update_constant_buffer(
+          std::move(folded_const_map),
+          /* use_inactive = */ false,
+          /* validate_full_update = */ false);
+      const_folded = ConstantState::FOLDED;
+    } else if (constant_folded_ != ConstantState::FOLDED) {
+      throw std::runtime_error(
+          "Unknown constant state: " + toStringConstantState(constant_folded_));
+    }
+
+    model->run_single_threaded(
+        input_handles, output_handles, stream, proxy_executor);
+  }
+
+  const std::unordered_map<std::string, AtenTensorHandle> extract_constants_map(
+      bool use_inactive) const {
+    size_t n_consts = this->num_constants();
+    std::unordered_map<std::string, AtenTensorHandle> ret;
+    ret.reserve(n_consts);
+
+    std::shared_ptr<ConstantMap> extract_map = constants_map_;
+    // Essentially a XOR
+    if (use_inactive != use_secondary_) {
+      extract_map = constants_map_secondary_;
+    }
+    for (size_t idx = 0; idx < n_consts; idx++) {
+      if (this->constant_from_folded(idx)) {
+        continue;
+      }
+
+      auto it = extract_map->find(this->constant_name(idx));
+      if (it != extract_map->end()) {
+        ret.emplace(this->constant_original_fqn(idx), it->second);
+        continue;
+      }
+    }
+
+    return ret;
+  }
+
   size_t num_constants() const {
     if (this->num_models() == 0) {
       throw std::runtime_error("No available models in container!");
@@ -129,7 +213,7 @@ class AOTInductorModelContainer {
     if (this->num_models() == 0) {
       throw std::runtime_error("No available models in container!");
     }
-    return models_[0]->constant_name(idx);
+    return models_[0]->constant_name(static_cast<int64_t>(idx));
   }
 
   // retrieve original FQN of constants_info_[idx]
@@ -137,7 +221,7 @@ class AOTInductorModelContainer {
     if (this->num_models() == 0) {
       throw std::runtime_error("No available models in container!");
     }
-    return models_[0]->constant_original_fqn(idx);
+    return models_[0]->constant_original_fqn(static_cast<int64_t>(idx));
   }
 
   // retrieve whether constant is from folded of constants_info_[idx]
@@ -145,7 +229,22 @@ class AOTInductorModelContainer {
     if (this->num_models() == 0) {
       throw std::runtime_error("No available models in container!");
     }
-    return models_[0]->constant_from_folded(idx);
+    return models_[0]->constant_from_folded(static_cast<int64_t>(idx));
+  }
+
+  size_t constant_data_size(size_t idx) const {
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
+    return models_[0]->constant_data_size(static_cast<int64_t>(idx));
+  }
+
+  // retrieve type of constants_info_[idx]
+  int32_t constant_type(size_t idx) const {
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
+    return models_[0]->constant_type(static_cast<int64_t>(idx));
   }
 
   // retrieve dtype of constants_info_[idx]
@@ -153,35 +252,38 @@ class AOTInductorModelContainer {
     if (this->num_models() == 0) {
       throw std::runtime_error("No available models in container!");
     }
-    return models_[0]->constant_dtype(idx);
+    return models_[0]->constant_dtype(static_cast<int64_t>(idx));
   }
 
   void run_const_fold(
       bool inactive_buffer,
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
-    std::shared_lock model_lk(model_exec_mutex_);
-    auto* model = get_available_model();
-
+    AOTInductorModel* model;
+    ConstantState& const_folded = inactive_buffer == use_secondary_
+        ? constant_folded_
+        : constant_folded_secondary_;
     if (!inactive_buffer) {
       // We would need to acquire a unique lock if we want to run constant
       // folding on the active buffer.
-      model_lk.unlock();
       std::unique_lock constants_folding_lk(model_exec_mutex_);
+      model = get_available_model();
       try {
         auto folded_const_map = model->run_const_fold(stream, proxy_executor);
         update_constant_buffer(
-            folded_const_map,
+            std::move(folded_const_map),
             /* use_inactive = */ false,
             /* validate_full_update = */ false);
+        const_folded = ConstantState::FOLDED;
       } catch (...) {
         std::lock_guard lk(models_mutex_);
         available_models_.push_back(model);
         throw;
       }
-      constants_folding_lk.unlock();
-      model_lk.lock();
     } else {
+      std::shared_lock model_lk(model_exec_mutex_);
+      model = get_available_model();
+
       // We swap the constant mapping to the inactive buffer in the model to run
       // const run.
       auto constants_map = get_constants_map(/* get_inactive= */ true);
@@ -194,7 +296,7 @@ class AOTInductorModelContainer {
 
         auto folded_const_map = model->run_const_fold(stream, proxy_executor);
         update_constant_buffer(
-            folded_const_map,
+            std::move(folded_const_map),
             /* use_inactive = */ true,
             /* validate_full_update = */ false);
 
@@ -204,6 +306,7 @@ class AOTInductorModelContainer {
         model->update_constants_map(
             constants_map, /* remap_constants_array= */ false);
         model->update_constants_array(constants_array);
+        const_folded = ConstantState::FOLDED;
       } catch (...) {
         std::lock_guard lk(models_mutex_);
         available_models_.push_back(model);
@@ -218,61 +321,144 @@ class AOTInductorModelContainer {
     pending_models_available_.notify_one();
   }
 
-  bool _is_tensor_constant(const std::string& constant_name) const {
-    return constant_name.rfind("_tensor_constant", 0) == 0;
+  bool _is_tensor_constant_type(const size_t idx) const {
+    auto constant_type = models_[0]->constant_type(static_cast<int64_t>(idx));
+    // We should skip constants
+    return constant_type == ConstantType::TensorConstant;
   }
-  // This function updates the buffer for storing constants.
-  // It will update the buffer, the mapping and the array mapping.
+
+  bool _is_buffer_type(const size_t idx) const {
+    auto constant_type = models_[0]->constant_type(static_cast<int64_t>(idx));
+    // Buffer can be optionally skipped, so if it not provided by upstream
+    // services, it is OK to relax the check.
+    return constant_type == ConstantType::Buffer;
+  }
+
+  bool _is_tensor_constant_or_buffer_type(const size_t idx) const {
+    return _is_tensor_constant_type(idx) || _is_buffer_type(idx);
+  }
+
+  void assert_all_constants(
+      const std::unordered_map<std::string, AtenTensorHandle>& constants_map) {
+    auto num_constants = models_[0]->num_constants();
+    for (size_t idx = 0; idx < num_constants; idx++) {
+      if (models_[0]->constant_from_folded(static_cast<int64_t>(idx))) {
+        continue;
+      }
+
+      auto constant_name =
+          std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
+      auto it = constants_map.find(constant_name);
+      if (it == constants_map.end()) {
+        if (_is_tensor_constant_or_buffer_type(idx)) {
+          // tracing sometimes creates tensors that are non-existent in
+          // original graph. We could skip those and do a direct copy.
+          std::cerr << "[WARNING] Found constant or module state buffer "
+                    << constant_name
+                    << " in model, but not provided by user!\n";
+          continue;
+        }
+        throw std::runtime_error(
+            std::string("Cannot find constants ") + constant_name +
+            std::string(" in constants_map!"));
+      }
+    }
+  }
+
+  // We directly take ownership from AtenTensorHandle if constants are moved.
   void update_constant_buffer(
-      const std::unordered_map<std::string, AtenTensorHandle>& constants_map,
+      std::unordered_map<std::string, AtenTensorHandle>&& constants_map,
       bool use_inactive,
       bool validate_full_update) {
     if (this->num_models() == 0) {
       throw std::runtime_error("No model available in container!");
     }
-    auto num_constants = models_[0]->num_constants();
-
     if (validate_full_update) {
-      for (size_t idx = 0; idx < num_constants; idx++) {
-        if (models_[0]->constant_from_folded(idx)) {
-          continue;
-        }
-
-        auto constant_name = std::string(models_[0]->constant_name(idx));
-        auto it = constants_map.find(constant_name);
-        if (it == constants_map.end()) {
-          if (_is_tensor_constant(constant_name)) {
-            // tracing sometimes creates tensors that are non-existent in
-            // original graph. We could skip those and do a direct copy.
-            std::cerr << "[WARNING] Found constant " << constant_name
-                      << " in model, but not provided by user!\n";
-            continue;
-          }
-          throw std::runtime_error(
-              std::string("Cannot find constants ") + constant_name +
-              std::string(" in constants_map!"));
-        }
-      }
+      assert_all_constants(constants_map);
     }
+
+    ConstantState& const_folded = use_inactive == use_secondary_
+        ? constant_folded_
+        : constant_folded_secondary_;
+    const_folded = ConstantState::INITIALIZED;
 
     auto original_constants_map = get_constants_map(!use_inactive);
     auto constants_map_to_update = get_constants_map(use_inactive);
 
+    auto num_constants = models_[0]->num_constants();
     for (size_t idx = 0; idx < num_constants; idx++) {
-      auto constant_name = std::string(models_[0]->constant_name(idx));
+      auto constant_name =
+          std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
       auto it = constants_map.find(constant_name);
       if (it == constants_map.end() &&
-          !(_is_tensor_constant(constant_name) && use_inactive)) {
+          !(use_inactive && _is_tensor_constant_type(idx))) {
         continue;
       }
 
-#ifdef USE_CUDA
       AtenTensorHandle tensor;
-      if (_is_tensor_constant(constant_name) && use_inactive) {
+      if (it == constants_map.end()) {
+        aoti_torch_clone(
+            original_constants_map->find(constant_name)->second.get(), &tensor);
+      } else {
+        tensor = it->second;
+      }
+
+      constants_map_to_update->insert_or_assign(
+          constant_name, RAIIAtenTensorHandle(tensor));
+    }
+    // Update the inactive constant array.
+    update_array_from_map(
+        get_constants_array(use_inactive), constants_map_to_update);
+  }
+
+  // This function updates the buffer for storing constants.
+  // It will update the buffer, the mapping and the array mapping.
+  void update_constant_buffer(
+      const std::unordered_map<std::string, AtenTensorHandle>& constants_map,
+      bool use_inactive,
+      bool validate_full_update,
+      bool user_managed = false) {
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No model available in container!");
+    }
+    if (validate_full_update) {
+      assert_all_constants(constants_map);
+    }
+
+    ConstantState& const_folded = use_inactive == use_secondary_
+        ? constant_folded_
+        : constant_folded_secondary_;
+    const_folded = ConstantState::INITIALIZED;
+
+    auto original_constants_map = get_constants_map(!use_inactive);
+    auto constants_map_to_update = get_constants_map(use_inactive);
+
+    auto num_constants = models_[0]->num_constants();
+    for (size_t idx = 0; idx < num_constants; idx++) {
+      auto constant_name =
+          std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
+      auto it = constants_map.find(constant_name);
+      if (it == constants_map.end() &&
+          !(use_inactive && _is_tensor_constant_or_buffer_type(idx))) {
+        continue;
+      }
+
+      AtenTensorHandle tensor;
+      if (it == constants_map.end()) {
         tensor = original_constants_map->find(constant_name)->second.get();
       } else {
         tensor = it->second;
       }
+
+      if (user_managed) {
+        // If user managed, we pass in the pointer directly, and skip the
+        // copy.
+        constants_map_to_update->insert_or_assign(
+            constant_name,
+            MaybeOwningAtenTensorHandle(tensor, /* user_managed = */ true));
+        continue;
+      }
+
       auto* constants_blob_ptr =
           static_cast<uint8_t*>(get_constant_blob_ptr(use_inactive));
 
@@ -283,19 +469,28 @@ class AOTInductorModelContainer {
       int64_t constant_size;
       aoti_torch_get_data_ptr(tensor, &user_constant_ptr);
       aoti_torch_get_storage_size(tensor, &constant_size);
-
+#ifdef USE_XPU
+      sycl::queue* queue_ptr = nullptr;
+      aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
+      queue_ptr
+          ->memcpy(internal_constants_ptr, user_constant_ptr, constant_size)
+          .wait();
+#elif USE_CUDA
       AOTI_RUNTIME_DEVICE_CHECK(cudaMemcpy(
           internal_constants_ptr,
           user_constant_ptr,
           constant_size,
           cudaMemcpyDefault));
-
+#else
+      memcpy(internal_constants_ptr, user_constant_ptr, constant_size);
+#endif
       // Generate Tensor from container handled blob.
       // We extract stride and offset from provided Tensor since we do not
       // guarantee that the tensor is contiguous.
       AtenTensorHandle tensor_handle;
       int64_t* stride;
       int64_t offset;
+      int device_type = models_[0]->get_device_type();
       int device_idx = models_[0]->get_device_idx();
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(tensor, &stride));
       AOTI_TORCH_ERROR_CODE_CHECK(
@@ -307,16 +502,14 @@ class AOTInductorModelContainer {
           stride,
           offset,
           models_[0]->constant_dtype(idx),
-          aoti_torch_device_type_cuda(),
+          device_type,
           device_idx,
           &tensor_handle));
-#else // USE_CUDA
-      AtenTensorHandle tensor_handle = it->second;
-#endif // USE_CUDA
 
-      // Now place the tensor to constants_map. Note at this point the ownership
-      // of the tensor_handle will be taken over.
-      constants_map_to_update->emplace(constant_name, tensor_handle);
+      // Now place the tensor to constants_map. Note at this point the
+      // ownership of the tensor_handle will be taken over.
+      constants_map_to_update->insert_or_assign(
+          constant_name, RAIIAtenTensorHandle(tensor_handle));
     }
     // Update the inactive constant array.
     update_array_from_map(
@@ -324,14 +517,16 @@ class AOTInductorModelContainer {
   }
 
   void update_array_from_map(
-      std::shared_ptr<std::vector<ConstantHandle>> constants_array,
-      std::shared_ptr<ConstantMap> constants_map) {
+      const std::shared_ptr<std::vector<ConstantHandle>>& constants_array,
+      const std::shared_ptr<ConstantMap>& constants_map) {
     auto num_constants = models_[0]->num_constants();
     for (size_t idx = 0; idx < num_constants; idx++) {
-      if (constants_map->find(models_[0]->constant_name(idx)) !=
-          constants_map->end()) {
+      if (constants_map->find(models_[0]->constant_name(
+              static_cast<int64_t>(idx))) != constants_map->end()) {
         constants_array->at(idx) = ConstantHandle(
-            constants_map->find(models_[0]->constant_name(idx))->second);
+            constants_map
+                ->find(models_[0]->constant_name(static_cast<int64_t>(idx)))
+                ->second);
       }
     }
   }
@@ -349,6 +544,29 @@ class AOTInductorModelContainer {
     }
 
     use_secondary_ = !use_secondary_;
+  }
+
+  void free_inactive_constant_buffer() {
+    if (use_secondary_) {
+      constant_folded_ = ConstantState::NONE;
+      constant_blob_.reset();
+    } else {
+      constant_folded_secondary_ = ConstantState::NONE;
+      constant_blob_secondary_.reset();
+    }
+    // Free the internally held constants
+    int num_constants = static_cast<int>(models_[0]->num_constants());
+    std::shared_ptr<ConstantMap> to_free_map =
+        use_secondary_ ? constants_map_ : constants_map_secondary_;
+
+    for (int i = 0; i < num_constants; i++) {
+      if (models_[0]->constant_from_folded(i)) {
+        auto it = to_free_map->find(models_[0]->constant_name(i));
+        if (it != to_free_map->end()) {
+          it->second.reset();
+        }
+      }
+    }
   }
 
   size_t num_inputs() const {
@@ -385,25 +603,23 @@ class AOTInductorModelContainer {
   const char* in_spec_;
   const char* out_spec_;
 
-#ifdef USE_CUDA
-  // Holds the blob storage for constants' at::Tensor for CUDA.
-  CUDAPtr constant_blob_;
-  CUDAPtr constant_blob_secondary_;
+  // Holds the blob storage for constants' at::Tensor within the container.
+  // This blob of memory will be managed by the container.
+  RAIIDataPtr constant_blob_;
+  RAIIDataPtr constant_blob_secondary_;
 
-  // Let's place this within USE_CUDA at the moment before we fully support
-  // update for CPU cases.
   size_t blob_size_;
   std::vector<size_t> constants_internal_offset_;
-#endif // USE_CUDA
 
   // Determine which constants is being used for the model.
   // If true,
   // constants_map_secondary/constant_blob_secondary/constants_array_secondary
   // is being used.
-  bool use_secondary_;
+  bool use_secondary_{false};
 
   // Determine whether we have ran constant folding
-  bool constant_folded_;
+  ConstantState constant_folded_{ConstantState::NONE};
+  ConstantState constant_folded_secondary_{ConstantState::NONE};
 
   // Holds the mapping of constants to at::Tensor.
   // The underlying data of at::Tensor is in either constant_blob_ (for CUDA).
@@ -449,19 +665,28 @@ class AOTInductorModelContainer {
   // make sure no one is executing the model.
   std::shared_mutex model_exec_mutex_;
 
-#ifdef USE_CUDA
+  RAIIDataPtr allocate_constant_blob() {
+#if defined(USE_CUDA) || defined(USE_XPU)
+    return RAII_gpuMalloc(blob_size_);
+#else
+    return RAII_cpuMalloc(blob_size_);
+#endif // USE_CUDA
+  }
+
   void* get_constant_blob_ptr(bool get_inactive) {
     if ((get_inactive && use_secondary_) ||
         (!get_inactive && !use_secondary_)) {
+      if (!constant_blob_) {
+        constant_blob_ = allocate_constant_blob();
+      }
       return constant_blob_.get();
     } else {
       if (!constant_blob_secondary_) {
-        constant_blob_secondary_ = RAII_cudaMalloc(blob_size_);
+        constant_blob_secondary_ = allocate_constant_blob();
       }
       return constant_blob_secondary_.get();
     }
   }
-#endif // USE_CUDA
 
   std::shared_ptr<ConstantMap> get_constants_map(bool get_inactive) {
     if ((get_inactive && use_secondary_) ||
@@ -491,11 +716,19 @@ class AOTInductorModelContainer {
   }
 
   void reclaim_finished_models(std::unique_lock<std::mutex>& lk) {
+#ifdef __aarch64__
+    // push finished model instances to the end of pending_models_
+    auto it = std::partition(
+        pending_models_.begin(),
+        pending_models_.end(),
+        [](AOTInductorModel* m) { return !m->is_finished(); });
+#else
     // push finished model instances to the end of pending_models_
     auto it = std::stable_partition(
         pending_models_.begin(),
         pending_models_.end(),
         [](AOTInductorModel* m) { return !m->is_finished(); });
+#endif
 
     if (it != pending_models_.end()) {
       // We have finished model instances that can be pushed into
@@ -526,5 +759,4 @@ class AOTInductorModelContainer {
   }
 };
 
-} // namespace aot_inductor
-} // namespace torch
+} // namespace torch::aot_inductor

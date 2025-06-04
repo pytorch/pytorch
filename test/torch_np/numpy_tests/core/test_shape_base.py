@@ -1,11 +1,9 @@
 # Owner(s): ["module: dynamo"]
 
 import functools
-
 from unittest import expectedFailure as xfail, skipIf as skipif
 
 import numpy
-
 import pytest
 from pytest import raises as assert_raises
 
@@ -15,8 +13,9 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
+
 
 # If we are going to trace through these, we should use NumPy
 # If testing on eager mode, we use torch._numpy
@@ -27,13 +26,18 @@ if TEST_WITH_TORCHDYNAMO:
         atleast_1d,
         atleast_2d,
         atleast_3d,
-        AxisError,
         concatenate,
         hstack,
         newaxis,
         stack,
         vstack,
     )
+
+    if int(numpy.__version__[0]) >= 2:
+        from numpy.exceptions import AxisError
+    else:
+        from numpy import AxisError
+
     from numpy.testing import assert_, assert_array_equal, assert_equal
 else:
     import torch._numpy as np
@@ -318,7 +322,7 @@ class TestConcatenate(TestCase):
         a = np.ones((1, 2, 3))
         b = np.ones((2, 2, 3))
         axis = list(range(3))
-        for i in range(3):
+        for _ in range(3):
             np.concatenate((a, b), axis=axis[0])  # OK
             #            assert_raises_regex(
             assert_raises(
@@ -359,7 +363,7 @@ class TestConcatenate(TestCase):
         assert out is rout
         assert np.all(r == rout)
 
-    @xpassIfTorchDynamo  # (reason="concatenate(x, axis=None) relies on x being a sequence")
+    @xpassIfTorchDynamo_np  # (reason="concatenate(x, axis=None) relies on x being a sequence")
     def test_large_concatenate_axis_None(self):
         # When no axis is given, concatenate uses flattened versions.
         # This also had a bug with many arrays (see gh-5979).
@@ -423,7 +427,6 @@ class TestConcatenate(TestCase):
         a = array([1, 2])
         b = array([3, 4])
         n = [1, 2]
-        res = array([1, 2, 3, 4])
         assert_raises(TypeError, operator.concat, a, b)
         assert_raises(TypeError, operator.concat, a, n)
         assert_raises(TypeError, operator.concat, n, a)

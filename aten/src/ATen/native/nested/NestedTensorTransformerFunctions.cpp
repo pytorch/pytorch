@@ -5,18 +5,17 @@
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-#include <c10/util/string_view.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
+#include <optional>
+#include <string_view>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 inline void check_nested_tensor_matrix_constraints(
     const Tensor& nested_tensor,
     const Tensor& dense_matrix,
-    c10::string_view caller) {
+    std::string_view caller) {
   auto* nt_input = get_nested_tensor_impl(nested_tensor);
   TORCH_INTERNAL_ASSERT(nt_input != nullptr);
   TORCH_CHECK(
@@ -60,7 +59,7 @@ Tensor nested_linear(
     const Tensor& input,
     const Tensor& weight,
     const std::optional<Tensor>& bias_opt) {
-  check_nested_tensor_matrix_constraints(input, weight, c10::string_view{"Linear"});
+  check_nested_tensor_matrix_constraints(input, weight, std::string_view{"Linear"});
   auto* nt_input = get_nested_tensor_impl(input);
   const Tensor& input_buffer = nt_input->get_buffer();
   Tensor result_buffer =
@@ -74,7 +73,7 @@ Tensor nested_linear(
 }
 
 Tensor NestedTensor_matmul(const Tensor& self, const Tensor& other) {
-  check_nested_tensor_matrix_constraints(self, other, c10::string_view{"Matmul"});
+  check_nested_tensor_matrix_constraints(self, other, std::string_view{"Matmul"});
   auto* nt_self = get_nested_tensor_impl_or_null(self);
   const Tensor& self_buffer = nt_self->get_buffer();
   Tensor result_buffer =
@@ -205,7 +204,7 @@ Tensor NestedTensor_batch_offsets_from_size_tensor(
     for (const auto j : c10::irange(sizes_size_1)) {
       prod *= sizes_ptr[i * sizes_size_1 + j];
     }
-    offsets_ptr[i + 1] = offsets_ptr[i] + prod;
+    offsets_ptr[i + 1] = offsets_ptr[i] + static_cast<int32_t>(prod);
   }
   return offsets;
 }
@@ -257,7 +256,7 @@ Tensor _jagged_to_padded_dense_forward_cpu(
       "_jagged_to_padded_dense_forward(): only a single jagged dim is supported for now");
 
   // allocate appropriately-sized padded tensor
-  auto offsets = offsets_list[0];
+  const auto& offsets = offsets_list[0];
   TORCH_CHECK(
       offsets.dim() == 1,
       "_jagged_to_padded_dense_forward(): expected 1D offsets, but got offsets.dim() == ",
@@ -291,14 +290,14 @@ Tensor _jagged_to_padded_dense_forward_cpu(
 Tensor _padded_dense_to_jagged_forward_cpu(
     const Tensor& padded,
     TensorList offsets_list,
-    c10::optional<int64_t> total_L) {
+    std::optional<int64_t> total_L) {
   // TODO: Make this kernel more efficient using TensorIterator or something.
   TORCH_INTERNAL_ASSERT(
       offsets_list.size() == 1,
       "_padded_dense_to_jagged_forward(): only a single jagged dim is supported for now");
 
   // allocate appropriately-sized values tensor
-  auto offsets = offsets_list[0];
+  const auto& offsets = offsets_list[0];
   TORCH_CHECK(
       offsets.dim() == 1,
       "_padded_dense_to_jagged_forward(): expected 1D offsets, but got offsets.dim() == ",
@@ -345,5 +344,4 @@ Tensor _padded_dense_to_jagged_forward_cpu(
   return values;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

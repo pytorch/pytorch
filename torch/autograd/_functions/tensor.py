@@ -5,7 +5,7 @@ from typing_extensions import deprecated
 
 import torch
 import torch._utils
-from ..function import Function
+from torch.autograd.function import Function
 
 
 class Type(Function):
@@ -25,7 +25,7 @@ class Type(Function):
         if ctx.input_device == -1:
             return grad_output.type(ctx.input_type), None
         else:
-            with torch.cuda.device(ctx.input_device):
+            with torch.accelerator.device_index(ctx.input_device):
                 return grad_output.type(ctx.input_type), None
 
 

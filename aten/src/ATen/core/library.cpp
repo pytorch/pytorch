@@ -1,6 +1,7 @@
 #include <torch/library.h>
 
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <fmt/format.h>
 
 namespace torch {
 
@@ -11,7 +12,7 @@ namespace {
 #ifdef STRIP_ERROR_MESSAGES
     return std::string();
 #else
-    return c10::str("registered at ", file, ":", line);
+    return fmt::format("registered at {}:{}", file, line);
 #endif
   }
 
@@ -48,7 +49,6 @@ CppFunction::CppFunction(c10::KernelFunction func, std::optional<c10::impl::CppS
   : func_(std::move(func))
   , cpp_signature_(cpp_signature)
   , schema_(std::move(schema))
-  , debug_()
   {}
 
 CppFunction::~CppFunction() = default;
@@ -59,9 +59,29 @@ void Library::reset() {
 
 #define ERROR_CONTEXT "(Error occurred while processing ", toString(kind_), " block at ", file_, ":", line_, ")"
 
+#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
+namespace detail {
+  // Insertion of library initializers into torch_library_initializers is not
+  // thread-safe as we expect this to be handled by the applications dynamic
+  // library loader, which would guarantee that only one thread is inserting
+  // libraries into the vector. We do require thread safety when calling
+  // initialize_torch_libraries however, as this can be called from any
+  // thread, and potentially race and corrupt the library initializer vector.
+  std::mutex torch_library_initializer_mutex;
+  std::vector<TorchLibraryInit*> torch_library_initializers;
+} // namespace detail
+void initialize_torch_libraries() {
+  const std::lock_guard<std::mutex> lock(detail::torch_library_initializer_mutex);
+  for (auto* initializer : detail::torch_library_initializers) {
+    initializer->initialize();
+  }
+  detail::torch_library_initializers.clear();
+}
+#endif
+
 Library::Library(Kind kind, std::string ns, std::optional<c10::DispatchKey> k, const char* file, uint32_t line)
   : kind_(kind)
-  , ns_(ns == "_" ? c10::nullopt : c10::make_optional(std::move(ns)))
+  , ns_(ns == "_" ? std::nullopt : std::make_optional(std::move(ns)))
   , dispatch_key_(k.value_or(CatchAll) == CatchAll ? std::optional<c10::DispatchKey>() : k)
   , file_(file)
   , line_(line)
@@ -73,7 +93,7 @@ Library::Library(Kind kind, std::string ns, std::optional<c10::DispatchKey> k, c
         registrars_.emplace_back(
           c10::Dispatcher::singleton().registerLibrary(
             // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-            *ns_, debugString(file_, line_)
+            ns_.value(), debugString(file_, line_)
           )
         );
         [[fallthrough]];
@@ -135,6 +155,9 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
   }
   switch (rv) {
     case _RegisterOrVerify::REGISTER:
+// Workaround for https://github.com/pytorch/pytorch/issues/140272 on mobile.
+// Since Python isn't available at all we can noop registerPythonModule
+#ifndef C10_MOBILE
       if (python_module_.has_value()) {
         registrars_.emplace_back(
           c10::Dispatcher::singleton().registerPythonModule(
@@ -143,6 +166,7 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
             python_module_->second)
         );
       }
+#endif
       registrars_.emplace_back(
         c10::Dispatcher::singleton().registerDef(
           std::move(schema),
@@ -203,12 +227,10 @@ at::OperatorName Library::_parseNameForLib(const char* name_str) const {
   // This is a copy paste of Library::_impl
   if (ns_opt.has_value()) {
     // See Note [Redundancy in registration code is OK]
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    TORCH_CHECK(*ns_opt == *ns_,
+    TORCH_CHECK(ns_opt == ns_,
       IMPL_PRELUDE,
-      "Explicitly provided namespace (", *ns_opt, ") in operator name "
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      "does not match namespace of enclosing ", toString(kind_), " block (", *ns_, ").  "
+      "Explicitly provided namespace (", ns_opt, ") in operator name "
+      "does not match namespace of enclosing ", toString(kind_), " block (", ns_, ").  "
       "Move this definition to the ", toString(kind_), " block corresponding to this namespace "
       "(and consider deleting the namespace from your schema string.)  ",
       ERROR_CONTEXT

@@ -171,7 +171,7 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
 
 } // namespace
 
-std::vector<c10::intrusive_ptr<LinearPackedContext>>
+static std::vector<c10::intrusive_ptr<LinearPackedContext>>
 pack_lstm_linear_op_contexts(
     const std::vector<Tensor>& params_cpu,
     int64_t num_layers) {
@@ -282,7 +282,7 @@ const c10::impl::GenericList LstmPackedContext::unpack() const {
         packed_linear_context.toCustomClass<LinearPackedContext>()->unpack();
 
     TORCH_CHECK(
-        unpacked_linear_context.size() > 0u,
+        !unpacked_linear_context.empty(),
         "unpacked_linear_context does not have any elements!");
 
     params_cpu.emplace_back(

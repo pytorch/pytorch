@@ -6,14 +6,12 @@
 #include <memory>
 #include <string>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 std::shared_ptr<CompilationUnit> compile(const std::string& source) {
   auto module = std::make_shared<CompilationUnit>();
-  module->define(c10::nullopt, source, nativeResolver(), nullptr);
+  module->define(std::nullopt, source, nativeResolver(), nullptr);
   return module;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

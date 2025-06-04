@@ -1,8 +1,16 @@
-# mypy: allow-untyped-defs
+from __future__ import annotations
+
+from typing import TypeVar
+
 import torch
 
 
-def convert_conv2d_weight_memory_format(module, memory_format):
+_M = TypeVar("_M", bound="torch.nn.Module")
+
+
+def convert_conv2d_weight_memory_format(
+    module: _M, memory_format: torch.memory_format
+) -> _M:
     r"""Convert ``memory_format`` of ``nn.Conv2d.weight`` to ``memory_format``.
 
     The conversion recursively applies to nested ``nn.Module``, including ``module``.
@@ -16,13 +24,13 @@ def convert_conv2d_weight_memory_format(module, memory_format):
         layer with 4d weight will be affected by ``model.to``, which does not
         necessarily benefit from conversion to specified ``memory_format``.
         One place we are confident in is that NHWC(channels_last) conversion for
-        convolution in cuDNN, As it is beneficial to run convolution in NHWC,
+        convolution in cuDNN, as it is beneficial to run convolution in NHWC,
         even in cases where we have to apply permutation to input tensors.
 
         Hence our strategy here is to convert only the weight of convolution to
         channels_last. This ensures that;
         1. Fast convolution kernels will be used, the benefit of which could
-        outweigh overhead of permutation (if input is not in the same format)
+        outweigh overhead of permutation (if input is not in the same format).
         2. No unnecessary permutations are applied on layers that do not benefit
         from memory_format conversion.
 
@@ -66,9 +74,7 @@ def convert_conv2d_weight_memory_format(module, memory_format):
     # TODO: expand this to `_ConvNd` when channels_last support is extended
     # beyond only 4d tensors.
     if isinstance(module, (torch.nn.Conv2d, torch.nn.ConvTranspose2d)):
-        weight_data = (
-            module.weight.detach().clone().contiguous(memory_format=memory_format)
-        )
+        weight_data = module.weight.detach().clone(memory_format=memory_format)
         module.weight.data = weight_data.resize_(
             weight_data.size(), memory_format=memory_format
         )
@@ -77,7 +83,9 @@ def convert_conv2d_weight_memory_format(module, memory_format):
     return module
 
 
-def convert_conv3d_weight_memory_format(module, memory_format):
+def convert_conv3d_weight_memory_format(
+    module: _M, memory_format: torch.memory_format
+) -> _M:
     r"""Convert ``memory_format`` of ``nn.Conv3d.weight`` to ``memory_format``
     The conversion recursively applies to nested ``nn.Module``, including ``module``.
     Note that it only changes the memory_format, but not the semantics of each dimensions.
@@ -85,18 +93,18 @@ def convert_conv3d_weight_memory_format(module, memory_format):
     provides considerable speed up for fp16 data on CUDA devices with compute capability >= 7.0
 
     .. note::
-        Calling ``model.to(memory_format=torch.channels_last)`` is more aggressive
+        Calling ``model.to(memory_format=torch.channels_last_3d)`` is more aggressive
         than the utility function ``convert_conv3d_weight_memory_format``. Any
         layer with 4d weight will be affected by ``model.to``, which does not
         necessarily benefit from conversion to specified ``memory_format``.
-        One place we are confident in is that NHWC(channels_last) conversion for
-        convolution in cuDNN, As it is beneficial to run convolution in NHWC,
+        One place we are confident in is that NDHWC(channels_last_3d) conversion for
+        convolution in cuDNN, as it is beneficial to run convolution in NDHWC,
         even in cases where we have to apply permutation to input tensors.
 
         Hence our strategy here is to convert only the weight of convolution to
-        channels_last. This ensures that;
+        channels_last_3d. This ensures that;
         1. Fast convolution kernels will be used, the benefit of which could
-        outweigh overhead of permutation (if input is not in the same format)
+        outweigh overhead of permutation (if input is not in the same format).
         2. No unnecessary permutations are applied on layers that do not benefit
         from memory_format conversion.
 
@@ -133,20 +141,24 @@ def convert_conv3d_weight_memory_format(module, memory_format):
         >>> model = nn.Sequential(
         >>>     nn.Conv3d(8, 4, 3)).cuda().half()
         >>> # This is identical to:
-        >>> # nn.utils.convert_conv3d_weight_memory_format(model, torch.channels_last)
-        >>> model = nn.utils.convert_conv3d_weight_memory_format(model, torch.channels_last)
+        >>> # nn.utils.convert_conv3d_weight_memory_format(model, torch.channels_last_3d)
+        >>> model = nn.utils.convert_conv3d_weight_memory_format(model, torch.channels_last_3d)
         >>> out = model(input)
     """
 
     # TODO: expand this to `_ConvNd` when channels_last support is extended
     # beyond only 4d tensors.
     if isinstance(module, (torch.nn.Conv3d, torch.nn.ConvTranspose3d)):
-        weight_data = (
-            module.weight.detach().clone().contiguous(memory_format=memory_format)
-        )
+        weight_data = module.weight.detach().clone(memory_format=memory_format)
         module.weight.data = weight_data.resize_(
             weight_data.size(), memory_format=memory_format
         )
     for child in module.children():
         convert_conv3d_weight_memory_format(child, memory_format)
     return module
+
+
+__all__ = [
+    "convert_conv2d_weight_memory_format",
+    "convert_conv3d_weight_memory_format",
+]

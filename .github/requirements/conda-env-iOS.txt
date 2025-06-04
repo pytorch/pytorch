@@ -1,7 +1,0 @@
-blas=1.0
-cmake=3.22.1
-ninja=1.10.2
-numpy=1.23.3
-pyyaml=6.0
-setuptools=68.2.2
-typing-extensions=4.9.0

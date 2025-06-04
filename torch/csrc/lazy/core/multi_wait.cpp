@@ -4,8 +4,7 @@
 #include <exception>
 #include <stdexcept>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 void MultiWait::Done() {
   bool notify = false;
@@ -70,5 +69,4 @@ void MultiWait::Complete(const std::function<void()>& func) {
   Done();
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

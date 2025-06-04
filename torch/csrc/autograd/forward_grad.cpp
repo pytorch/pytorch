@@ -1,7 +1,6 @@
 #include <torch/csrc/autograd/forward_grad.h>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 namespace {
 // See discussion in forward_grad.h for why these are global variables and not
@@ -31,7 +30,7 @@ void ForwardADLevel::release_idx(uint64_t idx) {
       "order they were created.");
   TORCH_INTERNAL_ASSERT(!all_forward_levels_.empty());
   // Keep the level alive until we have released the lock
-  auto lvl = all_forward_levels_.back();
+  auto lvl = std::move(all_forward_levels_.back());
   all_forward_levels_.pop_back();
   lock.unlock();
 }
@@ -76,5 +75,4 @@ const at::Tensor& ForwardGrad::undef_grad() {
   return singleton_undefined_tensor;
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

@@ -6,10 +6,8 @@ import sys
 import textwrap
 import types
 import warnings
-from typing import Dict, List, Set, Type
 
 import torch
-
 import torch._jit_internal as _jit_internal
 from torch._sources import fake_range
 from torch.jit._builtins import _find_builtin
@@ -103,7 +101,7 @@ def make_stubs_from_exported_methods(mod):
 
 def jit_ignored_properties(module):
     user_annotated_ignored_attributes = getattr(
-        module, "__jit_ignored_attributes__", list()
+        module, "__jit_ignored_attributes__", []
     )
 
     def get_properties_names(module):
@@ -131,6 +129,7 @@ _constant_types = (
     torch.device,
     torch.layout,
     torch.dtype,
+    torch.qscheme,
 )
 
 
@@ -206,7 +205,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
     # Get user-annotated ignored attributes.
     user_annotated_ignored_attributes = getattr(
-        nn_module, "__jit_ignored_attributes__", list()
+        nn_module, "__jit_ignored_attributes__", []
     )
     concrete_type_builder.add_ignored_attributes(user_annotated_ignored_attributes)
     ignored_properties = jit_ignored_properties(nn_module)
@@ -375,7 +374,6 @@ def infer_concrete_type_builder(nn_module, share_types=True):
                     f"\nThe error stack is reproduced here:\n{e}"
                 )
                 concrete_type_builder.add_failed_attribute(name, hint)
-                pass
 
             continue
 
@@ -423,10 +421,10 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
 
 class ConcreteTypeStore:
-    type_store: Dict[Type[Module], List[torch._C.ConcreteModuleType]]
-    methods_compiled: Set[torch._C.ConcreteModuleType]
+    type_store: dict[type[Module], list[torch._C.ConcreteModuleType]]
+    methods_compiled: set[torch._C.ConcreteModuleType]
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Python module type => List[ConcreteModuleType)]
         self.type_store = {}
         # ConcreteTypes that have had their methods already compiled
@@ -572,10 +570,6 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     method_stubs = stubs_fn(nn_module)
     property_stubs = get_property_stubs(nn_module)
     hook_stubs, pre_hook_stubs = get_hook_stubs(nn_module)
-
-    user_annotated_ignored_attributes = getattr(
-        nn_module, "__jit_ignored_attributes__", list()
-    )
     ignored_properties = jit_ignored_properties(nn_module)
 
     def init_fn(script_module):
@@ -772,7 +766,7 @@ def get_overload_annotations(mod, jit_ignored_properties):
 def get_overload_name_mapping(overload_info):
     # Same format as __overloads__
     # original function => [overload names]
-    overload_name_mappings: Dict[str, List[str]] = {}
+    overload_name_mappings: dict[str, list[str]] = {}
     for orig_fn, overloads in overload_info.items():
         original_name = orig_fn.__name__
         if original_name not in overload_name_mappings:
@@ -840,12 +834,9 @@ def infer_methods_to_compile(nn_module):
     (TODO add a link when the rules are published).
     """
     check_module_initialized(nn_module)
-    user_annotated_ignored_attributes = getattr(
-        nn_module, "__jit_ignored_attributes__", list()
-    )
     ignored_properties = jit_ignored_properties(nn_module)
 
-    methods: List[str] = []
+    methods: list[str] = []
     if hasattr(nn_module, "forward") and not _jit_internal.is_ignored_fn(
         nn_module.forward
     ):
@@ -882,7 +873,7 @@ def infer_methods_to_compile(nn_module):
 
     # Unique the methods. We don't want to use a set to store the methods because it
     # introduces non-determinism to compile order.
-    uniquer: Set[str] = set()
+    uniquer: set[str] = set()
     uniqued_methods = []
     for name in filtered_methods:
         if name in uniquer:
@@ -890,16 +881,14 @@ def infer_methods_to_compile(nn_module):
         uniqued_methods.append(name)
         uniquer.add(name)
 
-    stubs = []
-    for method in uniqued_methods:
-        stubs.append(make_stub_from_method(nn_module, method))
+    stubs = [make_stub_from_method(nn_module, method) for method in uniqued_methods]
     return overload_stubs + stubs
 
 
 def get_hook_stubs(nn_module):
     """Return forward hook and pre_hook ScriptModuleStubs."""
     check_module_initialized(nn_module)
-    hook_map: Dict = {}
+    hook_map: dict = {}
 
     hook_stubs = []
     for hook in nn_module._forward_hooks.values():
@@ -968,9 +957,10 @@ def interface_script(mod_interface, nn_module):
 
         It is used to know which methods need to act as starting points for compilation.
         """
-        stubs = []
-        for method in mod_interface.getMethodNames():
-            stubs.append(make_stub_from_method(nn_module, method))
+        stubs = [
+            make_stub_from_method(nn_module, method)
+            for method in mod_interface.getMethodNames()
+        ]
         return stubs
 
     return create_script_module(nn_module, infer_interface_methods_to_compile)

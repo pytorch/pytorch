@@ -4,29 +4,50 @@ This package enables an interface for accessing MTIA backend in python
 """
 
 import threading
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+import warnings
+from typing import Any, Callable, Optional, Union
 
 import torch
-
+from torch import device as _device, Tensor
+from torch._utils import _dummy_type, _LazySeedTracker, classproperty
 from torch.types import Device
 
-from .. import device as _device, Tensor
-from .._utils import _dummy_type, _LazySeedTracker, classproperty
 from ._utils import _get_device_index
 
-_device_t = Union[_device, str, int, None]
+
+_device_t = Union[_device, str, int]
 
 # torch.mtia.Event/Stream is alias of torch.Event/Stream
 Event = torch.Event
 Stream = torch.Stream
 
 _initialized = False
-_queued_calls: List[
-    Tuple[Callable[[], None], List[str]]
+_queued_calls: list[
+    tuple[Callable[[], None], list[str]]
 ] = []  # don't invoke these until initialization occurs
 _tls = threading.local()
 _initialization_lock = threading.Lock()
 _lazy_seed_tracker = _LazySeedTracker()
+
+
+if hasattr(torch._C, "_mtia_exchangeDevice"):
+    _exchange_device = torch._C._mtia_exchangeDevice
+else:
+
+    def _exchange_device(device: int) -> int:
+        if device < 0:
+            return -1
+        raise RuntimeError("PyTorch was compiled without MTIA support")
+
+
+if hasattr(torch._C, "_mtia_maybeExchangeDevice"):
+    _maybe_exchange_device = torch._C._mtia_maybeExchangeDevice
+else:
+
+    def _maybe_exchange_device(device: int) -> int:
+        if device < 0:
+            return -1
+        raise RuntimeError("PyTorch was compiled without MTIA support")
 
 
 def init():
@@ -47,8 +68,8 @@ def _lazy_init() -> None:
     if is_initialized() or hasattr(_tls, "is_initializing"):
         return
     with _initialization_lock:
-        # We be double-checked locking, boys!  This is OK because
-        # the above test was GIL protected anyway.  The inner test
+        # We be double-checking locking, boys! This is OK because
+        # the above test was GIL protected anyway. The inner test
         # is for when a thread blocked on some other thread which was
         # doing the initialization; when they get the lock, they will
         # find there is nothing left to do.
@@ -63,7 +84,12 @@ def _lazy_init() -> None:
                 "multiprocessing, you must use the 'spawn' start method"
             )
         if not _is_compiled():
-            raise AssertionError("Torch not compiled with MTIA enabled")
+            raise AssertionError(
+                "Torch not compiled with MTIA enabled. "
+                "Ensure you have `import mtia.host_runtime.torch_mtia.dynamic_library` in your python "
+                "src file and include `//mtia/host_runtime/torch_mtia:torch_mtia` as "
+                "your target dependency!"
+            )
 
         torch._C._mtia_init()
         # Some of the queued calls may reentrantly call _lazy_init();
@@ -71,9 +97,7 @@ def _lazy_init() -> None:
         # However, we must not let any *other* threads in!
         _tls.is_initializing = True
 
-        for calls in _lazy_seed_tracker.get_calls():
-            if calls:
-                _queued_calls.append(calls)
+        _queued_calls.extend(calls for calls in _lazy_seed_tracker.get_calls() if calls)
 
         try:
             for queued_call, orig_traceback in _queued_calls:
@@ -115,7 +139,8 @@ def synchronize(device: Optional[_device_t] = None) -> None:
 
 def device_count() -> int:
     r"""Return the number of MTIA devices available."""
-    return torch._C._accelerator_hooks_device_count()
+    # TODO: Update _accelerator_hooks_device_count to abstract a MTIA device count API
+    return torch._C._mtia_getDeviceCount()
 
 
 def current_device() -> int:
@@ -147,6 +172,54 @@ def default_stream(device: Optional[_device_t] = None) -> Stream:
     return torch._C._mtia_getDefaultStream(_get_device_index(device, optional=True))
 
 
+def record_memory_history(
+    enabled: Optional[str] = "all", stacks: str = "python", max_entries: int = 0
+) -> None:
+    r"""Enable/Disable the memory profiler on MTIA allocator
+
+    Args:
+        enabled (all or state, optional) selected device. Returns
+            statistics for the current device, given by current_device(),
+            if device is None (default).
+
+        stacks ("python" or "cpp", optional). Select the stack trace to record.
+
+        max_entries (int, optional). Maximum number of entries to record.
+    """
+    if not is_initialized():
+        return
+    torch._C._mtia_recordMemoryHistory(enabled, stacks, max_entries)
+
+
+def snapshot() -> dict[str, Any]:
+    r"""Return a dictionary of MTIA memory allocator history"""
+
+    return torch._C._mtia_memorySnapshot()
+
+
+def attach_out_of_memory_observer(
+    observer: Callable[[int, int, int, int], None]
+) -> None:
+    r"""Attach an out-of-memory observer to MTIA memory allocator"""
+    torch._C._mtia_attachOutOfMemoryObserver(observer)
+
+
+def get_device_capability(device: Optional[_device_t] = None) -> tuple[int, int]:
+    r"""Return capability of a given device as a tuple of (major version, minor version).
+
+    Args:
+        device (torch.device or int, optional) selected device. Returns
+            statistics for the current device, given by current_device(),
+            if device is None (default).
+    """
+    return torch._C._mtia_getDeviceCapability(_get_device_index(device, optional=True))
+
+
+def empty_cache() -> None:
+    r"""Empty the MTIA device cache."""
+    return torch._C._mtia_emptyCache()
+
+
 def set_stream(stream: Stream):
     r"""Set the current stream.This is a wrapper API to set the stream.
         Usage of this function is discouraged in favor of the ``stream``
@@ -171,6 +244,17 @@ def set_device(device: _device_t) -> None:
     device = _get_device_index(device)
     if device >= 0:
         torch._C._accelerator_hooks_set_current_device(device)
+
+
+def get_device_properties(device: Optional[_device_t] = None) -> dict[str, Any]:
+    r"""Return a dictionary of MTIA device properties
+
+    Args:
+        device (torch.device or int, optional) selected device. Returns
+            statistics for the current device, given by current_device(),
+            if device is None (default).
+    """
+    return torch._C._mtia_getDeviceProperties(_get_device_index(device, optional=True))
 
 
 class device:
@@ -208,6 +292,7 @@ class StreamContext:
     cur_stream: Optional["torch.mtia.Stream"]
 
     def __init__(self, stream: Optional["torch.mtia.Stream"]):
+        self.cur_stream = None
         self.stream = stream
         self.idx = _get_device_index(None, True)
         if not torch.jit.is_scripting():
@@ -256,9 +341,44 @@ def stream(stream: Optional["torch.mtia.Stream"]) -> StreamContext:
     Arguments:
         stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
-    ..Note:: In eager mode stream is of type Stream class while in JIT it doesn't support torch.mtia.stream
+    .. note:: In eager mode stream is of type Stream class while in JIT it doesn't support torch.mtia.stream
     """
     return StreamContext(stream)
+
+
+def get_rng_state(device: Union[int, str, torch.device] = "mtia") -> Tensor:
+    r"""Returns the random number generator state as a ByteTensor.
+
+    Args:
+        device (torch.device or int, optional): The device to return the RNG state of.
+            Default: ``'mtia'`` (i.e., ``torch.device('mtia')``, the current mtia device).
+    """
+    warnings.warn(
+        "get_rng_state is not implemented in torch.mtia",
+        UserWarning,
+        stacklevel=2,
+    )
+    return torch.zeros([1], dtype=torch.uint8, device=device)
+
+
+def set_rng_state(
+    new_state: Tensor, device: Union[int, str, torch.device] = "mtia"
+) -> None:
+    r"""Sets the random number generator state.
+
+    Args:
+        new_state (torch.ByteTensor): The desired state
+        device (torch.device or int, optional): The device to set the RNG state.
+            Default: ``'mtia'`` (i.e., ``torch.device('mtia')``, the current mtia device).
+    """
+    warnings.warn(
+        "set_rng_state is not implemented in torch.mtia",
+        UserWarning,
+        stacklevel=2,
+    )
+
+
+from .memory import *  # noqa: F403
 
 
 __all__ = [
@@ -270,8 +390,19 @@ __all__ = [
     "current_device",
     "current_stream",
     "default_stream",
+    "memory_stats",
+    "max_memory_allocated",
+    "reset_peak_memory_stats",
+    "get_device_capability",
+    "get_device_properties",
+    "record_memory_history",
+    "snapshot",
+    "attach_out_of_memory_observer",
+    "empty_cache",
     "set_device",
     "set_stream",
     "stream",
     "device",
+    "set_rng_state",
+    "get_rng_state",
 ]

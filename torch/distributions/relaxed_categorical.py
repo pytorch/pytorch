@@ -1,11 +1,16 @@
 # mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
 from torch.distributions.distribution import Distribution
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import ExpTransform
 from torch.distributions.utils import broadcast_all, clamp_probs
+from torch.types import _size
+
 
 __all__ = ["ExpRelaxedCategorical", "RelaxedOneHotCategorical"]
 
@@ -32,13 +37,20 @@ class ExpRelaxedCategorical(Distribution):
     [2] Categorical Reparametrization with Gumbel-Softmax
     (Jang et al., 2017)
     """
+
     arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
     support = (
         constraints.real_vector
     )  # The true support is actually a submanifold of this.
     has_rsample = True
 
-    def __init__(self, temperature, probs=None, logits=None, validate_args=None):
+    def __init__(
+        self,
+        temperature: Tensor,
+        probs: Optional[Tensor] = None,
+        logits: Optional[Tensor] = None,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         self._categorical = Categorical(probs, logits)
         self.temperature = temperature
         batch_shape = self._categorical.batch_shape
@@ -60,18 +72,18 @@ class ExpRelaxedCategorical(Distribution):
         return self._categorical._new(*args, **kwargs)
 
     @property
-    def param_shape(self):
+    def param_shape(self) -> torch.Size:
         return self._categorical.param_shape
 
     @property
-    def logits(self):
+    def logits(self) -> Tensor:
         return self._categorical.logits
 
     @property
-    def probs(self):
+    def probs(self) -> Tensor:
         return self._categorical.probs
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         uniforms = clamp_probs(
             torch.rand(shape, dtype=self.logits.dtype, device=self.logits.device)
@@ -113,11 +125,19 @@ class RelaxedOneHotCategorical(TransformedDistribution):
         probs (Tensor): event probabilities
         logits (Tensor): unnormalized log probability for each event
     """
+
     arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
     support = constraints.simplex
     has_rsample = True
+    base_dist: ExpRelaxedCategorical
 
-    def __init__(self, temperature, probs=None, logits=None, validate_args=None):
+    def __init__(
+        self,
+        temperature: Tensor,
+        probs: Optional[Tensor] = None,
+        logits: Optional[Tensor] = None,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         base_dist = ExpRelaxedCategorical(
             temperature, probs, logits, validate_args=validate_args
         )
@@ -128,13 +148,13 @@ class RelaxedOneHotCategorical(TransformedDistribution):
         return super().expand(batch_shape, _instance=new)
 
     @property
-    def temperature(self):
+    def temperature(self) -> Tensor:
         return self.base_dist.temperature
 
     @property
-    def logits(self):
+    def logits(self) -> Tensor:
         return self.base_dist.logits
 
     @property
-    def probs(self):
+    def probs(self) -> Tensor:
         return self.base_dist.probs

@@ -3,7 +3,6 @@
 import functools
 import itertools
 import sys
-
 from unittest import skipIf as skipif
 
 from pytest import raises as assert_raises
@@ -15,8 +14,9 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
+
 
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
@@ -29,7 +29,7 @@ else:
 skip = functools.partial(skipif, True)
 
 
-@xpassIfTorchDynamo  # (
+@xpassIfTorchDynamo_np  # (
 #    reason="We do not disctinguish between scalar and array types."
 #    " Thus, scalars can upcast arrays."
 # )
@@ -111,7 +111,7 @@ class TestIsSubDType(TestCase):
         assert np.issubdtype(np.float32, "f")
 
 
-@xpassIfTorchDynamo  # (
+@xpassIfTorchDynamo_np  # (
 #    reason="We do not have (or need) np.core.numerictypes."
 #    " Our type aliases are in _dtypes.py."
 # )

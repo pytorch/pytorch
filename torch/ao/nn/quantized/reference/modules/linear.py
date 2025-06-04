@@ -1,34 +1,39 @@
-# mypy: allow-untyped-defs
+from typing import Any, Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional, Dict, Any
+
 from .utils import ReferenceQuantizedModule
 
-__all__ = ['Linear']
+
+__all__ = ["Linear"]
+
 
 class Linear(nn.Linear, ReferenceQuantizedModule):
-    """ A reference quantized linear module that fits into the FX
+    """A reference quantized linear module that fits into the FX
     Graph Mode Quantization workflow
     activation will be floating point Tensor, we will store floating
     point weight as well in the module, but in forward we'll quantize
     and dequantize the weight before running the floating point functional
     linear operator.
     """
+
     _IS_REFERENCE = True
 
     def __init__(
-            self,
-            in_features: int,
-            out_features: int,
-            bias_: bool = True,
-            device: Optional[torch.device] = None,
-            dtype: Optional[torch.dtype] = None,
-            weight_qparams: Optional[Dict[str, Any]] = None):
+        self,
+        in_features: int,
+        out_features: int,
+        bias_: bool = True,
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+        weight_qparams: Optional[dict[str, Any]] = None,
+    ) -> None:
         super().__init__(in_features, out_features, bias_, device, dtype)
         self._init_weight_qparams(weight_qparams, device)
 
-    def _get_name(self):
+    def _get_name(self) -> str:
         return "QuantizedLinear(Reference)"
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -47,11 +52,17 @@ class Linear(nn.Linear, ReferenceQuantizedModule):
         return result
 
     @classmethod
-    def from_float(cls, float_linear, weight_qparams):
+    def from_float(
+        cls, float_linear: nn.Linear, weight_qparams: dict[str, Any]
+    ) -> "Linear":
         qref_linear = Linear(
-            float_linear.in_features, float_linear.out_features,
-            float_linear.bias is not None, device=float_linear.weight.device,
-            dtype=float_linear.weight.dtype, weight_qparams=weight_qparams)
+            float_linear.in_features,
+            float_linear.out_features,
+            float_linear.bias is not None,
+            device=float_linear.weight.device,
+            dtype=float_linear.weight.dtype,
+            weight_qparams=weight_qparams,
+        )
         qref_linear.weight = torch.nn.Parameter(float_linear.weight.detach())
         if float_linear.bias is not None:
             qref_linear.bias = torch.nn.Parameter(float_linear.bias.detach())

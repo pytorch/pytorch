@@ -6,9 +6,10 @@ This module stores various pieces of Python-global state relating to the JIT.
 This is not intended to be imported directly; please the exposed
 functionalities in `torch.jit`.
 """
+
 import os
 import weakref
-from typing import Any, Dict, Type
+from typing import Any
 
 import torch
 
@@ -19,7 +20,7 @@ class EnabledProxy:
     This is just a wrapper for a bool, so that we get reference semantics
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.enabled = self.parse_env(
             "PYTORCH_JIT", True, "> Using PyTorch JIT", "> PyTorch JIT DISABLED"
         )
@@ -62,8 +63,8 @@ _python_cu = torch._C.CompilationUnit()
 
 
 # python class => ScriptClass mapping
-_script_classes: Dict[Type[Any], Type[Any]] = {}
-_name_to_pyclass: Dict[str, Type[Any]] = {}
+_script_classes: dict[type[Any], type[Any]] = {}
+_name_to_pyclass: dict[str, type[Any]] = {}
 
 
 def _add_script_class(python_class, script_class):

@@ -5,6 +5,7 @@ import torch._dynamo
 from torch._dynamo.test_minifier_common import MinifierTestBase
 from torch.testing._internal.common_utils import skipIfNNModuleInlined
 
+
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 
@@ -12,7 +13,7 @@ class MinifierTests(MinifierTestBase):
     # Test that compile, runtime, and accuracy errors after dynamo can be repro'd (both CPU and CUDA)
     def _test_after_dynamo(self, device, backend, expected_error):
         run_code = f"""\
-@torch._dynamo.optimize({backend!r})
+@torch.compile(backend={backend!r})
 def inner(x):
     for _ in range(10):
         x = torch.sin(x)
@@ -60,7 +61,7 @@ inner(torch.randn(20, 20).to("{device}"))
 
     def test_after_dynamo_non_leaf_compile_error(self):
         run_code = """\
-@torch._dynamo.optimize("non_leaf_compile_error_TESTING_ONLY")
+@torch.compile(backend="non_leaf_compile_error_TESTING_ONLY")
 def inner(x):
     return x + 1
 
@@ -72,7 +73,7 @@ inner(torch.randn(20, 20, requires_grad=True) + 1)
 
     # Ensure that the testing backends pass when relu is not present.
     def _test_after_dynamo_backend_passes(self, device, backend):
-        @torch._dynamo.optimize(backend)
+        @torch.compile(backend=backend)
         def inner(x):
             for _ in range(10):
                 x = torch.sin(x)
@@ -118,21 +119,21 @@ inner(torch.randn(20, 20, requires_grad=True) + 1)
         backend_name = "relu_compile_error_TESTING_ONLY"
         run_code = f"""\
 class CpuCudaModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.m_x = torch.nn.Linear(20, 20).cuda()
         self.m_y = torch.nn.Linear(20, 20)
         self.p_x = torch.nn.Parameter(torch.randn(20, 20).cuda())
         self.p_y = torch.nn.Parameter(torch.randn(20, 20))
-        self.register_buffer("b_x", torch.ones(20, 20).cuda())
-        self.register_buffer("b_y", torch.ones(20, 20))
+        self.b_x = torch.nn.Buffer(torch.ones(20, 20).cuda())
+        self.b_y = torch.nn.Buffer(torch.ones(20, 20))
 
     def forward(self, x, y):
         return self.m_x(x) + self.p_x + self.b_x, self.m_y(y) + self.p_y + self.b_y
 
 mod = CpuCudaModule()
 
-@torch._dynamo.optimize({backend_name!r})
+@torch.compile(backend={backend_name!r})
 def inner(x1, y1):
     x2 = torch.randn(20, 20).cuda()
     y2 = torch.randn(20, 20)
@@ -148,7 +149,7 @@ inner(torch.randn(20, 20).cuda(), torch.randn(20, 20))
             res.minifier_module(),
             """\
 class Repro(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.G__mod___m_x = Linear(in_features=20, out_features=20, bias=True).cuda()
         self.G__mod___m_y = Linear(in_features=20, out_features=20, bias=True)
@@ -185,7 +186,7 @@ class Repro(torch.nn.Module):
     def test_if_graph_minified(self):
         backend_name = "relu_compile_error_TESTING_ONLY"
         run_code = f"""\
-@torch._dynamo.optimize({backend_name!r})
+@torch.compile(backend={backend_name!r})
 def inner(x):
     for _ in range(20):
         x = torch.sin(x)
@@ -203,7 +204,7 @@ inner(torch.randn(20, 20))
             res.repro_module(),
             """\
 class Repro(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def forward(self, x_19):

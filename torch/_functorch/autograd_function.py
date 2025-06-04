@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, NamedTuple, Tuple
+from typing import NamedTuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -30,7 +30,7 @@ from torch.autograd.forward_ad import _set_fwd_grad_enabled
 # We do this by using creating a custom HigherOrderOperator that only functorch
 # dispatches specially.
 class CustomFunctionHigherOrderOperator(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("custom_function_call")
 
     def __call__(self, autograd_function, *args, **kwargs):
@@ -274,7 +274,17 @@ def validate_vmap_returns_tuple_of_two_elements(result):
 
 
 @custom_function_call.py_impl(TransformType.Vmap)
-def custom_function_call_vmap(interpreter, autograd_function, *operands):
+def custom_function_call_vmap(interpreter, autograd_function, *operands, **kwargs):
+    if any(
+        isinstance(val, torch.Tensor)
+        for val in torch.utils._pytree.tree_flatten(kwargs)[0]
+    ):
+        raise NotImplementedError(
+            f"Run vmap on autograd.Function with kwarg-only Tensor args. "
+            f"Please do not pass kwarg-only Tensors to autograd.Function. "
+            f"Got: {kwargs}"
+        )
+
     if autograd_function.generate_vmap_rule:
         if has_overriden_vmap_rule(autograd_function):
             # TODO: Update link to stable once that's out
@@ -302,22 +312,44 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands):
             f"https://pytorch.org/docs/main/notes/extending.func.html"
         )
 
+    return custom_function_call_vmap_helper(
+        interpreter, autograd_function.vmap, autograd_function, *operands, **kwargs
+    )
+
+
+def custom_function_call_vmap_helper(
+    interpreter, vmap_function, op, *operands, **kwargs
+):
     current_level = interpreter.level()
     info = VmapInfo(
         batch_size=interpreter.batch_size(),
         randomness=interpreter.randomness(),
     )
-    unwrapped_operands, in_dims = unwrap_batched(operands, current_level)
+    # We're either in the autograd.Function case (vmap staticmethod)
+    # or the torch.library.register_vmap case.
+    autograd_function_case = isinstance(op, torch.autograd.function.FunctionMeta)
 
+    def lower_to_next():
+        if autograd_function_case:
+            return interpreter.lower()
+        else:
+            return torch._C._ExcludeDispatchKeyGuard(
+                torch._C.DispatchKeySet(torch._C.DispatchKey.FuncTorchBatched)
+            )
+
+    unwrapped_operands, in_dims = unwrap_batched(operands, current_level)
     # If none of the tensors are batched at the current level, then we skip the
     # current level. This saves the user from needing to handle this case in
     # their vmap staticmethod (and is consistent with our C++ batching rule API)
     if pytree.tree_all(lambda dim: dim is None, in_dims):
-        with interpreter.lower():
-            return custom_function_call(autograd_function, *operands)
+        with lower_to_next():
+            if autograd_function_case:
+                return custom_function_call(op, *operands)
+            else:
+                return op(*operands, **kwargs)
 
-    with interpreter.lower():
-        result = autograd_function.vmap(info, in_dims, *unwrapped_operands)
+    with lower_to_next():
+        result = vmap_function(info, in_dims, *unwrapped_operands, **kwargs)
     validate_vmap_returns_tuple_of_two_elements(result)
     unwrapped_output, out_dims = result
 
@@ -334,17 +366,26 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands):
     )
 
 
+def unpack_outputs(outputs):
+    out_dims = outputs[-1]
+    if isinstance(out_dims, tuple):
+        outputs = outputs[:-1]
+    else:
+        outputs = outputs[0]
+    return outputs, out_dims
+
+
 def custom_function_call_vmap_generate_rule(interpreter, autograd_function, *operands):
     unwrapped_operands, in_dims = unwrap_batched(operands, interpreter.level())
-    vmapped_function, get_out_dims = vmapify_autograd_function(
+    vmapped_function = vmapify_autograd_function(
         autograd_function, in_dims, interpreter.batch_size(), interpreter.randomness()
     )
-
     with interpreter.lower():
-        output = custom_function_call(vmapped_function, *unwrapped_operands)
+        outputs = custom_function_call(vmapped_function, *unwrapped_operands)
 
-    out_dims = get_out_dims()
-    return wrap_batched(output, out_dims, interpreter.level())
+    assert isinstance(outputs, tuple)
+    outputs, out_dims = unpack_outputs(outputs)
+    return wrap_batched(outputs, out_dims, interpreter.level())
 
 
 @custom_function_call.py_impl(TransformType.Functionalize)
@@ -355,29 +396,18 @@ def custom_function_call_functionalize(
 
 
 def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness):
-    # The following values are saved from the forward() and setup_context()
-    # and used in backward().
-    # Why do we save the values out here instead of on the ctx object?
-    # - out_dims: There's no way to retrieve this from forward()
-    # - input_shapes, saved_tensors_bdims: I'm a bit scared of nesting
-    #   vmap(vmap( but not completely sure if it is a problem. If we
-    #   assigned those fields to the ctx object, the worry is that they
-    #   get overwritten.
-    init_val = "not populated"
-    out_dims = init_val
-    input_shapes: Any = init_val
-    saved_tensors_bdims: Any = init_val
-
     def forward(*operands):
-        nonlocal out_dims
         outputs, out_dims = restore_vmap(
             autograd_function.forward, in_dims, batch_size, randomness
         )(*operands)
-        return outputs
+        if isinstance(outputs, torch.Tensor):
+            return outputs, out_dims
+        else:
+            return *outputs, out_dims
 
     def setup_context(ctx, inputs, outputs):
-        input_shapes_ = None
-        saved_tensors_bdims_ = None
+        outputs, out_dims = unpack_outputs(outputs)
+        key = id(Generated)
 
         def inner(inputs, outputs):
             # wrapped_ctx.save_for_backward will:
@@ -391,12 +421,18 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
             # to the correct shape.
             # See NOTE: [Why can't we rely on autograd to reduce expanded gradients?]
             # for more details
-            nonlocal input_shapes_
-            input_shapes_ = tuple(
+            input_shapes = tuple(
                 inp.shape if isinstance(inp, torch.Tensor) else None for inp in inputs
             )
-            nonlocal saved_tensors_bdims_
-            saved_tensors_bdims_ = wrapped_ctx._pt_saved_tensors_bdims
+            if not hasattr(ctx, "_pt_input_shapes"):
+                ctx._pt_input_shapes = {}
+            ctx._pt_input_shapes.update({key: input_shapes})
+
+            if not hasattr(ctx, "_pt_saved_tensors_bdims_stack"):
+                ctx._pt_saved_tensors_bdims_stack = {}
+            ctx._pt_saved_tensors_bdims_stack.update(
+                {key: (wrapped_ctx._pt_saved_tensors_bdims)}
+            )
 
         # See NOTE: [Why do we need to run setup_context under a vmap?]
         restore_vmap(
@@ -406,14 +442,12 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
             randomness,
         )(inputs, outputs)
 
-        nonlocal input_shapes
-        input_shapes = input_shapes_
-        nonlocal saved_tensors_bdims
-        saved_tensors_bdims = saved_tensors_bdims_
+        if not hasattr(ctx, "_pt_out_dims"):
+            ctx._pt_out_dims = {}
+        ctx._pt_out_dims.update({key: out_dims})
 
     def jvp(ctx, *tangents):
-        assert out_dims != init_val
-        assert saved_tensors_bdims != init_val
+        key = id(Generated)
 
         def jvp_no_context(saved_tensors, tangents):
             wrapped_ctx = CtxWithSavedTensors(ctx, saved_tensors)
@@ -422,18 +456,31 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
         tangent_in_dims = get_tangents_in_dims(in_dims, tangents)
         out_tangents, out_tangents_dims = restore_vmap(
             jvp_no_context,
-            (saved_tensors_bdims, tangent_in_dims),
+            (ctx._pt_saved_tensors_bdims_stack[key], tangent_in_dims),
             batch_size,
             randomness,
         )(ctx.saved_tensors, tangents)
 
-        result = reductify(out_tangents, out_tangents_dims, out_dims, batch_size)
-        return result
+        result = reductify(
+            out_tangents, out_tangents_dims, ctx._pt_out_dims[key], batch_size
+        )
+        if isinstance(result, torch.Tensor):
+            return result, None
+        else:
+            return *result, None
 
     def backward(ctx, *grad_outputs):
-        assert out_dims != init_val
-        assert input_shapes != init_val
-        assert saved_tensors_bdims != init_val
+        key = id(Generated)
+        grad_outputs_ = grad_outputs[:-1]
+        grad_outputs_in_dims = ctx._pt_out_dims[key]
+
+        if not isinstance(grad_outputs_in_dims, tuple):
+            grad_outputs_in_dims = (grad_outputs_in_dims,)
+
+        grad_outputs_in_dims = tuple(
+            in_dim if grad_output is not None else None
+            for grad_output, in_dim in zip(grad_outputs_, grad_outputs_in_dims)
+        )
 
         def backward_no_context(inputs):
             saved_tensors, grad_outputs = inputs
@@ -442,11 +489,13 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
 
         grad_ins, grad_ins_dims = restore_vmap(
             backward_no_context,
-            ((saved_tensors_bdims, out_dims),),
+            ((ctx._pt_saved_tensors_bdims_stack[key], grad_outputs_in_dims),),
             batch_size,
             randomness,
-        )((ctx.saved_tensors, grad_outputs))
-        result = reductify(grad_ins, grad_ins_dims, in_dims, batch_size, input_shapes)
+        )((ctx.saved_tensors, grad_outputs_))
+        result = reductify(
+            grad_ins, grad_ins_dims, in_dims, batch_size, ctx._pt_input_shapes[key]
+        )
         return result
 
     name = f"Vmapped{autograd_function.__name__}"
@@ -462,11 +511,7 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
         },
     )
 
-    def get_out_dims():
-        assert out_dims != init_val
-        return out_dims
-
-    return Generated, get_out_dims
+    return Generated
 
 
 # tangents might be None, so we need to replace
@@ -535,7 +580,7 @@ def get_tangents_in_dims(input_dims, tangents):
 # Wraps a ctx object. Forwards all attr accesses to the underlying object
 # except for the attrs in _pt_attrs
 class WrappedCtx:
-    _pt_reserved_attrs: Tuple[str, ...] = ("_pt_reserved_attrs", "_pt_inner_ctx")
+    _pt_reserved_attrs: tuple[str, ...] = ("_pt_reserved_attrs", "_pt_inner_ctx")
 
     def __init__(self, ctx):
         if not isinstance(ctx, WrappedCtx):
@@ -693,12 +738,13 @@ def autograd_function_forward_rewritten(original_forward, original_setup_context
 
 
 class AutogradFunctionApply(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("autograd_function_apply")
 
     def __call__(self, fwd, bwd, *fwd_args, **fwd_kwargs):
         saved_values = None
         args_tensor_mask = fwd_kwargs["args_tensor_mask"]
+        non_differentiable_idx = fwd_kwargs["non_differentiable_idx"]
         length_of_tensor_args = sum(args_tensor_mask)
         # Filter out the original tensor args from fwd_args,
         # lifted freevars should not be args of ApplyTemplate.apply
@@ -710,6 +756,15 @@ class AutogradFunctionApply(HigherOrderOperator):
             def forward(ctx, *args):
                 nonlocal saved_values
                 output, saved_values = fwd(None, *fwd_args)
+
+                # If users call ctx.mark_non_differentiable() in the original fwd function.
+                if len(non_differentiable_idx) > 0:
+                    non_differentiable_output = []
+                    for i, x in enumerate(output):
+                        if i in non_differentiable_idx:
+                            non_differentiable_output.append(x)
+                    ctx.mark_non_differentiable(*non_differentiable_output)
+
                 return output
 
             @staticmethod

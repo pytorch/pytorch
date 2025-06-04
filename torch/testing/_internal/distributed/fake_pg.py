@@ -1,10 +1,7 @@
-# mypy: ignore-errors
+# mypy: allow-untyped-defs
 
 import torch.distributed as dist
-
-from torch._C._distributed_c10d import (
-    FakeProcessGroup,
-)
+from torch._C._distributed_c10d import FakeProcessGroup
 
 
 class FakeStore(dist.Store):
@@ -12,7 +9,6 @@ class FakeStore(dist.Store):
     A fake store is a fake Key-Value store simply for initialization usage
     the of fake process group, one can either use FakeStore or HashStore.
     """
-    pass
 
 
 def _create_fake_pg(prefix_store, rank, world_size, timeout):
@@ -29,4 +25,4 @@ def _create_fake_pg(prefix_store, rank, world_size, timeout):
     return FakeProcessGroup(rank, world_size)
 
 
-dist.Backend.register_backend("fake", _create_fake_pg, devices=['cpu', 'cuda'])
+dist.Backend.register_backend("fake", _create_fake_pg, devices=["cpu", "cuda"])
