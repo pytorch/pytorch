@@ -1,35 +1,54 @@
 r"""
-The following constraints are implemented:
+The following constraints are implemented. For parameter-free constraints,
+a canonical instance is provided, otherwise a lower cased alias.
 
-- ``constraints.boolean``
-- ``constraints.cat``
-- ``constraints.corr_cholesky``
-- ``constraints.dependent``
-- ``constraints.greater_than(lower_bound)``
-- ``constraints.greater_than_eq(lower_bound)``
-- ``constraints.independent(constraint, reinterpreted_batch_ndims)``
-- ``constraints.integer_interval(lower_bound, upper_bound)``
-- ``constraints.interval(lower_bound, upper_bound)``
-- ``constraints.less_than(upper_bound)``
-- ``constraints.lower_cholesky``
-- ``constraints.lower_triangular``
-- ``constraints.MixtureSameFamilyConstraint(base_constraint)``
-- ``constraints.multinomial``
-- ``constraints.nonnegative``
-- ``constraints.nonnegative_integer``
-- ``constraints.one_hot``
-- ``constraints.positive_integer``
-- ``constraints.positive``
-- ``constraints.positive_semidefinite``
-- ``constraints.positive_definite``
-- ``constraints.real_vector``
-- ``constraints.real``
-- ``constraints.simplex``
-- ``constraints.symmetric``
-- ``constraints.stack``
-- ``constraints.square``
-- ``constraints.symmetric``
-- ``constraints.unit_interval``
+- value constraints
+    - :class:`Boolean`, with canonical instance :data:`boolean`
+    - :class:`Real`, with canonical instance :data:`real`
+
+- continuous interval constraints
+    - :class:`Interval`, with alias :meth:`interval`
+    - :class:`HalfOpenInterval`, with alias :meth:`half_open_interval`
+    - :class:`GreaterThan`, with alias :meth:`greater_than`
+    - :class:`GreaterThanEq`, with alias :meth:`greater_than_eq`
+    - :class:`LessThan`, with alias :meth:`less_than`
+    - :class:`UnitInterval`, with canonical instance :data:`unit_interval`
+    - :class:`Positive`, with canonical instance :data:`positive`
+    - :class:`Negative`, with canonical instance :data:`negative`
+    - :class:`NonNegative`, with canonical instance :data:`nonnegative`
+
+- discrete interval constraints
+    - :class:`IntegerInterval`, with alias :meth:`integer_interval`
+    - :class:`IntegerGreaterThan`, with alias :meth:`greater_than`
+    - :class:`IntegerLessThan`, with alias :meth:`less_than`
+    - :class:`PositiveInteger`, with canonical instance :data:`positive_integer`
+    - :class:`NonNegativeInteger`, with canonical instance :data:`nonnegative_integer`
+
+- vector constraints (``event_dim=1``)
+    - :class:`Multinomial`, with alias :meth:`multinomial`
+    - :class:`OneHot`, with canonical instance :data:`one_hot`
+    - :class:`RealVector`, with canonical instance :data:`real_vector`
+    - :class:`Simplex`, with canonical instance :data:`simplex`
+
+- matrix constraints (``event_dim=2``)
+    - :class:`Square`, with canonical instance :data:`square`
+    - :class:`Symmetric`, with canonical instance :data:`symmetric`
+    - :class:`PositiveDefinite`, with canonical instance :data:`positive_definite`
+    - :class:`PositiveSemidefinite`, with canonical instance :data:`positive_semidefinite`
+    - :class:`LowerCholesky`, with canonical instance :data:`lower_cholesky`
+    - :class:`LowerTriangular`, with canonical instance :data:`lower_triangular`
+    - :class:`CorrCholesky`,  canonical instance :data:`corr_cholesky`
+
+- generic constraints
+    - :class:`Independent`, with alias :meth:`independent`
+    - :class:`Cat`, with alias :meth:`cat`
+    - :class:`Stack`, with alias :meth:`stack`
+    - :class:`MixtureSameFamilyConstraint`, with alias :meth:`mixture_same_family`
+
+- dependent constraints
+    - :class:`Dependent`, with canonical instance :data:`dependent`
+    - :class:`DependentProperty`, with alias :meth:`dependent_property`
+
 """
 
 from abc import abstractmethod
@@ -54,12 +73,14 @@ from torch import Tensor
 __all__ = [
     # Base Classes
     "Constraint",
+    # Dependent Constraints
+    "Dependent",
+    "DependentProperty",
+    "is_dependent",
     # Classes
     "Boolean",
     "Cat",
     "CorrCholesky",
-    "Dependent",
-    "DependentProperty",
     "GreaterThan",
     "GreaterThanEq",
     "HalfOpenInterval",
@@ -107,8 +128,6 @@ __all__ = [
     "square",
     "symmetric",
     "unit_interval",
-    # functions
-    "is_dependent",
     # aliases
     "cat",
     "dependent_property",
