@@ -1665,7 +1665,7 @@ class GuardBuilder(GuardBuilderBase):
             metadata_checker, get_verbose_code_parts(global_name, guard)
         )
 
-    def EQUALS_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None):
+    def EQUALS_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         if np:
@@ -1762,14 +1762,9 @@ class GuardBuilder(GuardBuilderBase):
             # is immutable. For a few corner cases like sets and lists, we make a deepcopy to purposefully fail the
             # pointer equality check.
             val = deepcopy(val)
-
-        verbose_code_parts = get_verbose_code_parts(code, guard)
-        if recompile_hint:
-            verbose_code_parts = [
-                f"{part} (HINT: {recompile_hint})" for part in verbose_code_parts
-            ]
-
-        self.get_guard_manager(guard).add_equals_match_guard(val, verbose_code_parts)
+        self.get_guard_manager(guard).add_equals_match_guard(
+            val, get_verbose_code_parts(code, guard)
+        )
         self._set_guard_export_info(guard, code)
         return
 
@@ -2105,11 +2100,17 @@ class GuardBuilder(GuardBuilderBase):
             assert maybe_cpp_code_parts is None or isinstance(
                 maybe_cpp_code_parts, _CppShapeGuardsHelper
             )
+            maybe_shape_env_sources = (
+                []
+                if maybe_cpp_code_parts is None
+                else list(maybe_cpp_code_parts.source_to_symbol.keys())
+            )
             self.check_fn_manager.shape_code_parts = ShapeCodeParts(
                 python_code_parts=python_code_parts,
                 verbose_code_parts=verbose_code_parts,
                 cpp_code_parts=maybe_cpp_code_parts,
                 python_fallback=python_fallback,
+                shape_env_sources=maybe_shape_env_sources,
             )
 
         for code in python_code_parts.exprs:
@@ -2581,6 +2582,7 @@ class ShapeCodeParts:
     verbose_code_parts: _ShapeGuardsHelper
     cpp_code_parts: Optional[_CppShapeGuardsHelper]
     python_fallback: bool
+    shape_env_sources: list[Source]
 
 
 @dataclasses.dataclass
@@ -2893,7 +2895,13 @@ class CheckFunctionManager:
             output_graph_guards_state = self.output_graph.dump_guards_state()
             # Only serialize the global variables that are actually used in guards.
             for guard in sorted_guards:
-                prune_variable(guard.originating_source)
+                if isinstance(guard.originating_source, ShapeEnvSource):
+                    assert self.shape_code_parts
+                    for source in self.shape_code_parts.shape_env_sources:
+                        prune_variable(source)
+                else:
+                    prune_variable(guard.originating_source)
+
             for source in self.output_graph.guard_on_key_order:
                 prune_variable(source)
 
