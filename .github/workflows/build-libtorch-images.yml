@@ -50,7 +50,6 @@ jobs:
         include: [
           { tag: "cuda12.8" },
           { tag: "cuda12.6" },
-          { tag: "cuda12.4" },
           { tag: "cuda11.8" },
           { tag: "rocm6.3"  },
           { tag: "rocm6.4"  },
