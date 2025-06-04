@@ -3322,6 +3322,42 @@ class AOTInductorTestsTemplate:
         x = torch.randn(16, 16, device=self.device)
         self.check_model(Model(), (x,))
 
+    def test_triton_kernel_dynamic_grid(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        import math
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, y, n_elements_tensor):
+                output = torch.zeros_like(x)
+                n_elements_symint = n_elements_tensor.item()
+                n_elements = x.numel()
+
+                def grid(meta):
+                    n_elements_complicated = n_elements_symint // 1.0
+                    return (math.trunc(n_elements_complicated / meta["BLOCK_SIZE"]),)
+
+                add_kernel_autotuned[grid](
+                    x,
+                    y,
+                    output,
+                    n_elements,
+                )
+
+                return output
+
+        x = torch.randn(128, device=self.device)
+        y = torch.randn(128, device=self.device)
+        n_elem = torch.tensor(128)
+        dim0_x = Dim("dim0_x", min=8, max=256)
+        dim0_y = Dim("dim0_y", min=8, max=256)
+        dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_y}, "n_elements_tensor": {}}
+        self.check_model(Model(), (x, y, n_elem), dynamic_shapes=dynamic_shapes)
+
     def test_shifted_constraint_ranges(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
