@@ -63,7 +63,7 @@ if try_import_cutlass():
     def create_example_tensors(
         var_name_to_buffer_name: dict[str, str],
         name_to_buffer: dict[str, Buffer],
-        size_hint_fn: Callable[[Expr | int], int],
+        size_hint_fn: Callable[[Union[Expr, int]], int],
     ) -> dict[str, CutlassTensor]:
         def cutlass_tensor_from_buffer(buffer: Buffer) -> CutlassTensor:
             shape = buffer.get_layout().size
