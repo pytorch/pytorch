@@ -12,9 +12,6 @@ try:
 except ImportError:
     from common import BenchmarkRunner, main
 
-from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
-from torch._dynamo.utils import clone_inputs
-
 
 try:
     from .torchbench_output_processors import PROCESS_TRAIN_MODEL_OUTPUT
@@ -36,6 +33,11 @@ try:
 except ImportError:
     from torchbench_model_loader import TorchBenchModelLoader
 
+try:
+    from .torchbench_runner import TorchBenchModelRunner
+except ImportError:
+    from torchbench_runner import TorchBenchModelRunner
+
 
 # We are primarily interested in tf32 datatype
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -56,12 +58,20 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         self.optimizer = None
         self._tb_config = TorchBenchConfig()
         self._model_loader = None
+        self._model_runner = None
 
     def _ensure_config_setup(self):
         """Ensure config is setup with args if not already done."""
         if hasattr(self, "args") and not hasattr(self._tb_config, "args"):
             self._tb_config.set_args(self.args)
             self._model_loader = TorchBenchModelLoader(self._tb_config, self.args)
+            # Setup model runner with autocast settings
+            self._model_runner = TorchBenchModelRunner(
+                self.autocast, self.autocast_arg, self.grad_scaler
+            )
+            self._model_runner.set_optimizer_methods(
+                self.optimizer_zero_grad, self.optimizer_step
+            )
 
     # Delegate configuration properties to the config object
     @property
@@ -187,10 +197,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._model_loader.iter_model_names()
 
     def pick_grad(self, name, is_training):
-        if is_training or name in ("maml",):
-            return torch.enable_grad()
-        else:
-            return torch.no_grad()
+        self._ensure_config_setup()
+        return self._model_runner.pick_grad(name, is_training)
 
     def use_larger_multiplier_for_smaller_tensor(self, name):
         return self._tb_config.use_larger_multiplier_for_smaller_tensor(name)
@@ -202,29 +210,18 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         )
 
     def compute_loss(self, pred):
-        return reduce_to_scalar_loss(pred)
+        self._ensure_config_setup()
+        return self._model_runner.compute_loss(pred)
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
-        with self.autocast(**self.autocast_arg):
-            if isinstance(inputs, dict):
-                return mod(**inputs)
-            else:
-                return mod(*inputs)
+        self._ensure_config_setup()
+        return self._model_runner.forward_pass(mod, inputs, collect_outputs)
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
-        cloned_inputs = clone_inputs(inputs)
-        self.optimizer_zero_grad(mod)
-        with self.autocast(**self.autocast_arg):
-            if isinstance(cloned_inputs, dict):
-                pred = mod(**cloned_inputs)
-            else:
-                pred = mod(*cloned_inputs)
-            loss = self.compute_loss(pred)
-        self.grad_scaler.scale(loss).backward()
-        self.optimizer_step()
-        if collect_outputs:
-            return collect_results(mod, None, loss, cloned_inputs)
-        return None
+        self._ensure_config_setup()
+        return self._model_runner.forward_and_backward_pass(
+            mod, inputs, collect_outputs
+        )
 
 
 def torchbench_main():

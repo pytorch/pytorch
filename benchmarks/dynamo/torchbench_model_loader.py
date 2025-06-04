@@ -10,6 +10,7 @@ from collections import namedtuple
 
 import torch
 
+
 try:
     from .torchbench_utils import _reassign_parameters
 except ImportError:
@@ -18,11 +19,11 @@ except ImportError:
 
 class TorchBenchModelLoader:
     """Handles loading and setup of TorchBench models."""
-    
+
     def __init__(self, config, args):
         self.config = config
         self.args = args
-    
+
     def load_model(
         self,
         device,
@@ -32,14 +33,14 @@ class TorchBenchModelLoader:
         extra_args=None,
     ):
         """Load and setup a TorchBench model.
-        
+
         Args:
             device: Device to load model on
             model_name: Name of the model to load
             batch_size: Batch size to use
             part: Model part (if applicable)
             extra_args: Extra arguments for model initialization
-            
+
         Returns:
             tuple: (device, model_name, model, example_inputs, batch_size)
         """
@@ -49,13 +50,15 @@ class TorchBenchModelLoader:
             )
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
-        
+
         # Load model class
         benchmark_cls = self._load_model_class(model_name)
-        
+
         # Setup batch size
-        batch_size = self._setup_batch_size(benchmark_cls, model_name, batch_size, is_training)
-        
+        batch_size = self._setup_batch_size(
+            benchmark_cls, model_name, batch_size, is_training
+        )
+
         # workaround "RuntimeError: not allowed to set torch.backends.cudnn flags"
         torch.backends.__allow_nonbracketed_mutation_flag = True
         if extra_args is None:
@@ -70,12 +73,18 @@ class TorchBenchModelLoader:
 
         # Create benchmark instance
         benchmark = self._create_benchmark_instance(
-            benchmark_cls, model_name, device, batch_size, extra_args, is_training, use_eval_mode
+            benchmark_cls,
+            model_name,
+            device,
+            batch_size,
+            extra_args,
+            is_training,
+            use_eval_mode,
         )
-        
+
         # Get model and example inputs
         model, example_inputs = benchmark.get_module()
-        
+
         # Handle special model parameter setup
         if model_name in [
             "basic_gnn_edgecnn",
@@ -92,21 +101,21 @@ class TorchBenchModelLoader:
             model.train()
         else:
             model.eval()
-        
+
         gc.collect()
         batch_size = benchmark.batch_size
-        
+
         # Handle special input formats
         example_inputs = self._handle_special_input_formats(
             model_name, example_inputs, batch_size, device
         )
-        
+
         if self.args.trace_on_xla:
             # work around for: https://github.com/pytorch/xla/issues/4174
             import torch_xla  # noqa: F401
-        
+
         return device, benchmark.name, model, example_inputs, batch_size
-    
+
     def iter_model_names(self):
         """Iterate over available model names based on filters."""
         from torchbenchmark import _list_canary_model_paths, _list_model_paths
@@ -134,7 +143,7 @@ class TorchBenchModelLoader:
                 continue
 
             yield model_name
-    
+
     def _load_model_class(self, model_name):
         """Load the model class from TorchBench."""
         candidates = [
@@ -151,16 +160,16 @@ class TorchBenchModelLoader:
                     raise
         else:
             raise ImportError(f"could not import any of {candidates}")
-        
+
         benchmark_cls = getattr(module, "Model", None)
         if benchmark_cls is None:
             raise NotImplementedError(f"{model_name}.Model is None")
 
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
-        
+
         return benchmark_cls
-    
+
     def _setup_batch_size(self, benchmark_cls, model_name, batch_size, is_training):
         """Setup appropriate batch size for the model."""
         cant_change_batch_size = (
@@ -169,16 +178,26 @@ class TorchBenchModelLoader:
         )
         if cant_change_batch_size:
             batch_size = None
-        
-        batch_size = self.config.get_batch_size_for_model(model_name, is_training, batch_size)
-        
+
+        batch_size = self.config.get_batch_size_for_model(
+            model_name, is_training, batch_size
+        )
+
         # Control the memory footprint for few models
         batch_size = self.config.limit_batch_size_for_accuracy(model_name, batch_size)
-        
+
         return batch_size
-    
-    def _create_benchmark_instance(self, benchmark_cls, model_name, device, batch_size, 
-                                 extra_args, is_training, use_eval_mode):
+
+    def _create_benchmark_instance(
+        self,
+        benchmark_cls,
+        model_name,
+        device,
+        batch_size,
+        extra_args,
+        is_training,
+        use_eval_mode,
+    ):
         """Create benchmark instance with appropriate configuration."""
         if model_name == "vision_maskrcnn" and is_training:
             # Output of vision_maskrcnn model is a list of bounding boxes,
@@ -210,10 +229,12 @@ class TorchBenchModelLoader:
                 batch_size=batch_size,
                 extra_args=extra_args,
             )
-        
+
         return benchmark
-    
-    def _handle_special_input_formats(self, model_name, example_inputs, batch_size, device):
+
+    def _handle_special_input_formats(
+        self, model_name, example_inputs, batch_size, device
+    ):
         """Handle special input formats for specific models."""
         if model_name == "torchrec_dlrm":
             batch_namedtuple = namedtuple(
@@ -235,9 +256,9 @@ class TorchBenchModelLoader:
         elif model_name == "maml_omniglot":
             # batch_size is updated to 5 for this model
             assert example_inputs[0].shape[0] == 5
-        
+
         return example_inputs
-    
+
     def _get_benchmark_indices(self, total_models):
         """Get start and end indices for benchmark models."""
         # This would normally be implemented in the runner
