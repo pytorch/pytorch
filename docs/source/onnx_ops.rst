@@ -91,6 +91,7 @@ You can use :func:`torch.onnx.ops.aten_decompositions` to obtain a decomposition
 to decompose ONNX operators defined above to ATen operators.
 
 ::
+
     class Model(torch.nn.Module):
         def forward(
             self, input_data, cos_cache_data, sin_cache_data, position_ids_data
