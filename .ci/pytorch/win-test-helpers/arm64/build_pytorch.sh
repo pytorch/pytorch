@@ -55,11 +55,14 @@ source ./.venv/Scripts/activate
 which python
 
 # Remove Git's usr/bin from PATH (fix for fake link.exe)
-CLEANED_PATH=$(echo "$PATH" | tr ':' '\n' | grep -v 'Git/usr/bin' | paste -sd ':' -)
+CLEANED_PATH=$(echo "$PATH" | tr ':' '\n' | grep -v '/usr/bin' | grep -v 'Git/usr/bin' | paste -sd ':' -)
 
 # Add link.exe to PATH
 where link.exe
 export PATH="C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Tools/MSVC/14.43.34808/bin/Hostarm64/arm64;$PATH"
+echo "Linker check:"
+which link
+ls -l "$(which link)"
 
 # Install Python dependencies
 python -m pip install --upgrade pip
