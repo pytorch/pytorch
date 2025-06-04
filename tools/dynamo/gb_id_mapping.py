@@ -4,6 +4,7 @@ import argparse
 import ast
 import json
 import re
+import sys
 from pathlib import Path
 
 
@@ -40,18 +41,12 @@ def clean_string(s):
         s = re.sub(r'["\'] f["\']', " ", s)
         # Remove surrounding quotes, keeping only the content (e.g., "hello" -> hello)
         s = re.sub(r'^["\'](.*)["\']$', r"\1", s)
-        # Replace any whitespace around newlines with a single space for consistent formatting
-        s = re.sub(r"\s*\n\s*", " ", s)
-        # Replace escaped quotes with their unescaped versions (e.g., \" -> ", \' -> ')
-        s = s.replace('\\"', '"').replace("\\'", "'")
-        # Remove any remaining backslashes used for escaping
-        s = s.replace("\\", "")
+        # Replace any whitespace
+        s = " ".join(s.splitlines())
+        # Replace escaped quotes with their unescaped versions
+        s = s.encode().decode("unicode_escape")
         # Replace adjacent quoted strings with a space (e.g., " "" -> " ")
         s = re.sub(r'" "', " ", s)
-        # Remove any curly brace expressions used in f-strings (e.g., {variable})
-        s = re.sub(r"\{[^}]*\}", "", s)
-        # Remove backticks used in docstrings or code examples
-        s = re.sub(r"``", "", s)
     return s
 
 
@@ -158,10 +153,18 @@ def find_unimplemented_v2_calls(path):
 
 
 def cmd_add_new_gb_type(gb_type, file_path, registry_path):
+    """
+    Add a new graph break type to the registry.
+
+    Args:
+        gb_type: The graph break type to add
+        file_path: Path to the file containing the unimplemented_v2 call
+        registry_path: Path to the registry JSON file
+    """
     registry_path = Path(registry_path)
     reg = load_registry(registry_path)
 
-    existing_gb_types = {entry["Gb_type"] for entry in reg.values()}
+    existing_gb_types = {entry[0]["Gb_type"] for entry in reg.values()}
     if gb_type in existing_gb_types:
         print(
             f"Error: gb_type '{gb_type}' already exists in registry. Please rename the gb_type so it can be unique."
@@ -178,30 +181,35 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path):
         return False
 
     gb_id = next_gb_id(reg)
-    reg[gb_id] = {
-        "Gb_type": gb_type,
-        "Context": matching_call["context"],
-        "Explanation": matching_call["explanation"],
-        "Hints": matching_call["hints"] or [],
-    }
+    reg[gb_id] = [
+        {
+            "Gb_type": gb_type,
+            "Context": matching_call["context"],
+            "Explanation": matching_call["explanation"],
+            "Hints": matching_call["hints"] or [],
+        }
+    ]
 
     save_registry(reg, registry_path)
     print(f"Added {gb_type} to registry with ID {gb_id}")
+    return True
 
 
 def cmd_update_gb_type(old_gb_type, file_path, registry_path, new_gb_type=None):
     """
-    Update an existing graph break type in the registry by appending the new version
-    while preserving the original.
+    Update an existing graph break type in the registry by adding a new version
+    to the version history list.
 
-    Additionally, if a new unique gb_type is provided, it will be used to update the gb_type as well.
+    Args:
+        old_gb_type: The current graph break type to update
+        file_path: Path to the file containing the updated unimplemented_v2 call
+        registry_path: Path to the registry JSON file
+        new_gb_type: Optional new gb_type name to replace the old one
     """
     registry_path = Path(registry_path)
     reg = load_registry(registry_path)
 
-    gb_id_map = {
-        entry.get("Gb_type"): id for id, entry in reg.items() if isinstance(entry, dict)
-    }
+    gb_id_map = {entry[0]["Gb_type"]: id for id, entry in reg.items()}
     gb_id = gb_id_map.get(old_gb_type)
 
     if gb_id is None:
@@ -229,18 +237,20 @@ def cmd_update_gb_type(old_gb_type, file_path, registry_path, new_gb_type=None):
         )
         return False
 
-    reg[gb_id] = {
+    new_entry = {
         "Gb_type": matching_call["gb_type"],
         "Context": matching_call["context"],
         "Explanation": matching_call["explanation"],
         "Hints": matching_call["hints"] or [],
-        "previous_version": reg[gb_id],
     }
+
+    reg[gb_id].insert(0, new_entry)
 
     save_registry(reg, registry_path)
     print(
         f"Updated {old_gb_type} to {matching_call['gb_type']} in registry with ID {gb_id}"
     )
+    return True
 
 
 def create_registry(dynamo_dir, registry_path):
@@ -253,26 +263,34 @@ def create_registry(dynamo_dir, registry_path):
 
     GB_ID_INDEX = 0000
     for i, (gb_type, info) in enumerate(sorted(gb_types.items()), GB_ID_INDEX):
-        gb_id = f"GB{i}"
+        gb_id = f"GB{i:04d}"
         hints = info["hints"]
 
-        registry[gb_id] = {
-            "Gb_type": gb_type,
-            "Context": info["context"],
-            "Explanation": info["explanation"],
-            "Hints": hints if hints else [],
-        }
+        registry[gb_id] = [
+            {
+                "Gb_type": gb_type,
+                "Context": info["context"],
+                "Explanation": info["explanation"],
+                "Hints": hints if hints else [],
+            }
+        ]
 
     with open(registry_path, "w") as f:
         json.dump(registry, f, indent=2)
+    return True
 
 
 def main():
     script_dir = Path(__file__).resolve().parent
-
     repo_root = script_dir.parent.parent
-    dynamo_dir = repo_root / "torch" / "_dynamo"
     registry_path = script_dir / "graph_break_registry.json"
+
+    try:
+        import torch._dynamo
+
+        default_dynamo_dir = str(Path(torch._dynamo.__file__).parent)
+    except ImportError:
+        default_dynamo_dir = str(repo_root / "torch" / "_dynamo")
 
     parser = argparse.ArgumentParser(description="Manage graph break registry.")
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
@@ -281,7 +299,7 @@ def main():
     create_parser.add_argument(
         "--dynamo_dir",
         type=str,
-        default=None,
+        default=default_dynamo_dir,
         help="Directory to search for unimplemented_v2 calls.",
     )
 
@@ -313,20 +331,19 @@ def main():
     args = parser.parse_args()
 
     if args.command == "create":
-        if getattr(args, "dynamo_dir", None) is None:
-            try:
-                import torch._dynamo
-
-                args.dynamo_dir = str(Path(torch._dynamo.__file__).parent)
-            except ImportError:
-                args.dynamo_dir = str(dynamo_dir)
-        create_registry(args.dynamo_dir, args.registry_path)
+        success = create_registry(args.dynamo_dir, args.registry_path)
+        if not success:
+            sys.exit(1)
     elif args.command == "add":
-        cmd_add_new_gb_type(args.gb_type, args.file_path, args.registry_path)
+        success = cmd_add_new_gb_type(args.gb_type, args.file_path, args.registry_path)
+        if not success:
+            sys.exit(1)
     elif args.command == "update":
-        cmd_update_gb_type(
+        success = cmd_update_gb_type(
             args.gb_type, args.file_path, args.registry_path, args.new_gb_type
         )
+        if not success:
+            sys.exit(1)
     else:
         parser.print_help()
 
