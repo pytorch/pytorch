@@ -207,7 +207,6 @@ def create_registry(dynamo_dir, registry_path):
 
     with open(registry_path, "w") as f:
         json.dump(registry, f, indent=2)
-    return True
 
 
 def main():
@@ -243,7 +242,7 @@ def main():
         "--registry-path",
         type=str,
         default=str(registry_path),
-        help="Path to save the registry JSON file.",
+        help="Path to save the registry JSON file",
     )
 
     args = parser.parse_args()
