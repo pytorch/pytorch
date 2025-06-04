@@ -4312,15 +4312,27 @@ class NCCLTraceTest(NCCLTraceTestBase):
         else:
             self.assertTrue("entries" not in t)
 
+    def load_libpthread_or_libc(self):
+        import ctypes.util
+
+        for base in ("pthread", "c"):
+            path = ctypes.util.find_library(base)
+            if path:
+                try:
+                    return ctypes.CDLL(path)
+                except OSError:
+                    continue
+        raise RuntimeError("Could not load pthread or libc")
+
     # Directly set thread name using threading.current_thread().name does not work
     # because we use pthread_getname_np to get the thread’s OS-level name in C++
     def set_thread_name(self, name):
         import ctypes
 
-        libc = ctypes.cdll.LoadLibrary("libc.so.6")
-        pthread_self = libc.pthread_self
+        lib = self.load_libpthread_or_libc()
+        pthread_self = lib.pthread_self
         pthread_self.restype = ctypes.c_void_p
-        pthread_setname_np = libc.pthread_setname_np
+        pthread_setname_np = lib.pthread_setname_np
         pthread_setname_np.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
 
         # Get current pthread handle
