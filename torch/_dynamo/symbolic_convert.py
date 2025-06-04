@@ -40,6 +40,7 @@ import operator
 import re
 import sys
 import threading
+import time
 import traceback
 import types
 import typing
@@ -71,6 +72,7 @@ from .bytecode_analysis import (
 )
 from .bytecode_transformation import (
     cleaned_instructions,
+    _cached_cleaned_instructions,
     create_call_function,
     create_instruction,
     create_jump_absolute,
@@ -1234,6 +1236,7 @@ class InstructionTranslatorBase(
 
     def step(self):
         """Process exactly one instruction, return False we should exit"""
+        t0 = time.perf_counter()
         ip = self.instruction_pointer
         if ip is None:
             return False
@@ -1258,9 +1261,17 @@ class InstructionTranslatorBase(
             )
 
         self.update_block_stack(inst)
+        op_name = inst.opname
+        fn_vt = None
+        if op_name == "CALL":
+            fn_vt = self.stack[-1 - inst.arg]
 
         try:
             self.dispatch_table[inst.opcode](self, inst)
+            if not isinstance(fn_vt, variables.TorchInGraphFunctionVariable):
+                t1 = time.perf_counter()
+                self.output.op_latency[op_name] += t1 - t0
+                self.output.op_freq[op_name] += 1
             return not self.output.should_exit
         except TensorifyScalarRestartAnalysis:
             raise
@@ -1387,6 +1398,10 @@ class InstructionTranslatorBase(
                 # there was an exception.
                 if isinstance(self, InstructionTranslator):
                     self.output.cleanup()
+                    # Note that this call maybe redundant if compile_subgraph is
+                    # called. This is ok, because calling exit stack close()
+                    # twice is not an issue (second stop is a no op).
+                    self.output.mark_bytecode_tracing_stop()
 
                     # Note that this call maybe redundant if compile_subgraph is
                     # called. This is ok, because calling exit stack close()
@@ -3630,6 +3645,8 @@ class InstructionTranslator(InstructionTranslatorBase):
             f"torchdynamo done tracing {self.f_code.co_name} ({inst.opname})",
         )
         log.debug("%s triggered compile", inst.opname)
+        self.output.op_freq["RETURN_VALUE"] += 1
+        self.output.op_latency["RETURN_VALUE"] += 0
         all_stack_locals_metadata = self.output.compile_subgraph(
             self,
             reason=GraphCompileReason(
@@ -3674,7 +3691,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     @classmethod
     def inline_call(cls, parent, func, args, kwargs):
         with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
+            t0 = time.perf_counter()
             tracer = cls.build_inline_tracer(parent, func, args, kwargs)
+            t1 = time.perf_counter()
+            parent.output.op_freq["___build_inline_tracer"] += 1
+            parent.output.op_latency["___build_inline_tracer"] += t1 - t0
             return tracer.inline_call_()
 
     @staticmethod
@@ -3785,7 +3806,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 tracing_ctx.previously_inlined_functions[code] = result
 
         try:
+            # t0 = time.perf_counter()
             sub_locals = func.bind_args(parent, args, kwargs)
+            # t1 = time.perf_counter()
+            # parent.output.op_freq["___BIND"] += 1
+            # parent.output.op_latency["___BIND"] += t1 - t0
         except TypeError as e:
             # Wrap the general TypeError during bind_args() to the internal ArgsMismatchError with detailed info
             raise ArgsMismatchError(  # noqa: B904
@@ -3859,6 +3884,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         else:
             # need the line below to make MyPy happy
             assert not isinstance(func, LocalGeneratorObjectVariable)
+            t0 = time.perf_counter()
             tracer = InliningInstructionTranslator(
                 parent,
                 code,
@@ -3867,6 +3893,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 parent.symbolic_torch_function_state,
                 func,
             )
+            t1 = time.perf_counter()
+            parent.output.op_freq["___MAKE_TX"] += 1
+            parent.output.op_latency["___MAKE_TX"] += t1 - t0
         return tracer
 
     def inline_call_(self):

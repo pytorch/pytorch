@@ -45,6 +45,8 @@ from typing import Any, Callable, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
+from tabulate import tabulate
+
 import torch
 import torch._logging
 from torch._C._dynamo.guards import GlobalStateGuard
@@ -739,6 +741,8 @@ def _compile(
 
         try:
             tracer.output.mark_bytecode_tracing_start()
+            t0 = time.perf_counter()
+
             with tracing(tracer.output.tracing_context), tracer.set_current_tx():
                 tracer.run()
         except exc.UnspecializeRestartAnalysis:
@@ -756,6 +760,38 @@ def _compile(
             raise
         finally:
             tracer.output.call_cleanup_hooks()
+            # Note that this call maybe redundant if compile_subgraph is
+            # called. This is ok, because calling exit stack close()
+            # twice is not an issue (second stop is a no op).
+            t1 = time.perf_counter()
+            op_latency = tracer.output.op_latency
+            op_freq = tracer.output.op_freq
+
+            print("TOtal time = ", t1 - t0)
+            # Combine and sort by latency descending
+            entries = sorted(op_latency.items(), key=lambda x: -x[1])
+            remaining_latency = sum(op_latency.values())
+
+            # Compute table rows
+            rows = []
+            for i, (op, latency) in enumerate(entries):
+                freq = op_freq.get(op, 0)
+                # remaining_latency = sum(op_latency[o] * op_freq.get(o, 0) for o, _ in entries[i+1:])
+                rows.append([op, latency, freq, remaining_latency])
+                remaining_latency -= latency
+
+            # Print
+            print(
+                tabulate(
+                    rows,
+                    headers=[
+                        "Operation",
+                        "Latency",
+                        "Frequency",
+                        "Accumulated Latency (Rest)",
+                    ],
+                )
+            )
 
         output = tracer.output
         assert output is not None

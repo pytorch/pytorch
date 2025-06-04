@@ -69,7 +69,7 @@ class BenchmarkBase(ABC):
     _enable_compile_time_instruction_count = False
 
     # number of iterations used to run when collecting instruction_count or compile_time_instruction_count.
-    _num_iterations = 5
+    _num_iterations = 2
 
     def __init__(
         self,

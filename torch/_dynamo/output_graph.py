@@ -535,6 +535,21 @@ class OutputGraph(OutputGraphGuardsState):
         self.name_of_builtins_dict_key_in_fglobals: str = (
             self.install_builtins_dict_in_fglobals()
         )
+        self.op_latency = collections.defaultdict(lambda: 0)  # type: ignore[var-annotated]
+        self.op_freq = collections.defaultdict(lambda: 0)  # type: ignore[var-annotated]
+
+        self.compiler_trace_stack = contextlib.ExitStack()
+
+    def mark_bytecode_tracing_start(self):
+        self.compiler_trace_stack.enter_context(
+            dynamo_timed(
+                "bytecode_tracing",
+                log_pt2_compile_event=True,
+            )
+        )
+
+    def mark_bytecode_tracing_stop(self):
+        self.compiler_trace_stack.close()
 
         self.compiler_trace_stack = contextlib.ExitStack()
 

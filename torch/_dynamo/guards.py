@@ -2771,13 +2771,14 @@ class CheckFunctionManager:
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
 
         sorted_guards = sorted(guards or (), key=Guard.sort_key)
-        builder, guard_manager = self.build_guards(
-            sorted_guards,
-            existing_diff_guard_sources,
-            f_code,
-            output_graph,
-            None if guard_filter_fn else self.guards_serialization_mode,
-        )
+        with torch._dynamo.utils.dynamo_timed("build_guards"):
+            builder, guard_manager = self.build_guards(
+                sorted_guards,
+                existing_diff_guard_sources,
+                f_code,
+                output_graph,
+                None if guard_filter_fn else self.guards_serialization_mode,
+            )
 
         if guard_filter_fn:
 

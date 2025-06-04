@@ -8,7 +8,7 @@ from torch._inductor.utils import fresh_inductor_cache
 
 
 class NestedModule(nn.Module):
-    def __init__(self, depth=3, width=4):
+    def __init__(self, depth=5, width=3):
         super().__init__()
         self.depth = depth
         self.width = width

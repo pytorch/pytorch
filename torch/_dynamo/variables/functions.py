@@ -28,6 +28,7 @@ import functools
 import inspect
 import itertools
 import sys
+import time
 import types
 import warnings
 from collections.abc import Sequence
@@ -288,7 +289,12 @@ class BaseUserFunctionVariable(VariableTracker):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
+        t0 = time.perf_counter()
+        out = tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
+        t1 = time.perf_counter()
+        tx.output.op_freq["___USER_CALL_FUNCTION"] += 1
+        tx.output.op_latency["___USER_CALL_FUNCTION"] += t1 - t0
+        return out
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str

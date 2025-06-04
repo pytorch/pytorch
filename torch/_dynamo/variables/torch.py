@@ -1076,6 +1076,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        import time
+
+        t0 = time.perf_counter()
         from . import ConstantVariable, SymNodeVariable, TensorVariable
         from .builder import wrap_fx_proxy
 
@@ -1386,6 +1389,9 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             else:
                 unimplemented(f"out variant of {type(kwargs['out'])}")
 
+        t1 = time.perf_counter()
+        tx.output.op_freq["__TORCH"] += 1
+        tx.output.op_latency["__TORCH"] += t1 - t0
         return tensor_variable
 
     def _call_ntuple(self, tx: "InstructionTranslator", args, kwargs):
