@@ -1390,7 +1390,6 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         examples = create_example_tensors(
             var_name_to_buffer_name,
             name_to_buffer,  # type: ignore[arg-type]
-            V.graph.sizevars.size_hint,
         )
         evt_name, evt_args, evt_code = trace(
             evt_py_code,
@@ -1400,7 +1399,6 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             op.tile_description,  # type: ignore[attr-defined]
             op.epilogue_schedule,  # type: ignore[attr-defined]
             {k: name_to_buffer[v] for k, v in var_name_to_buffer_name.items()},  # type: ignore[arg-type,misc]
-            V.graph.sizevars.size_hint,
         )
 
         return (
