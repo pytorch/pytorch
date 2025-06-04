@@ -11386,7 +11386,8 @@ class TestAutogradForwardMode(TestCase):
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
-    def test_min_max_median_backprops_to_all_values(self, device):
+    def test_min_max_aminmax_median_backprops_to_all_values(self, device):
+        # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
         for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
             x1 = torch.tensor(
                 [1.0, 0.0, 1.0, 0.0, 1.0, 0.0], device=device, requires_grad=True
@@ -11401,6 +11402,30 @@ class TestAutogradDeviceType(TestCase):
                 y.backward()
                 self.assertEqual(x.grad.sum(), 1.0)
                 self.assertEqual((x.grad == 1 / 3).sum(), 3)
+        
+        # 2) Test torch.amin and torch.amax only on the non NaN input:
+        for f in [torch.amin, torch.amax]:
+            x1 = torch.tensor(
+                [1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
+                device=device,
+                requires_grad=True,
+            )
+            y = f(x1)   # scalar Tensor
+            y.backward()
+            self.assertEqual(x1.grad.sum(), 1.0)
+            self.assertEqual((x1.grad == 1.0 / 3.0).sum(), 3)
+
+        # 3) Test torch.aminmax (component 0 = min, component 1 = max) on non NaN:
+        for component in (0, 1):
+            x1 = torch.tensor(
+                [1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
+                device=device,
+                requires_grad=True,
+            )
+            y = torch.aminmax(x1)[component]  # grab either the "min" or the "max" output
+            y.backward()
+            self.assertEqual(x1.grad.sum(), 1.0)
+            self.assertEqual((x1.grad == 1.0 / 3.0).sum(), 3)
 
     def test_scatter_index_reduce_amin_amax_aminmax_backprops_to_all_values(
         self, device
@@ -11421,32 +11446,7 @@ class TestAutogradDeviceType(TestCase):
 
             gradcheck(fn, (input, 0, idx, src, reduction), check_batched_grad=False)
 
-        # Additional test for torch.aminmax:
-        # Verify that when there are multiple occurrences of the min (or max) value,
-        # the backward distribution is (approximately) as expected.
-        for aminmax_component in (0, 1):
-            # Create an input where 0 is the min and 1 is the max; each repeated three times.
-            x = torch.tensor(
-                [1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
-                dtype=torch.float64,
-                device=device,
-                requires_grad=True,
-            )
 
-            # Define a function instead of a lambda to avoid lint warnings (E731)
-            def fn(input, comp=aminmax_component):
-                return torch.aminmax(input)[comp]
-
-            # The expected analytical gradient (from autograd) is 1/3 at positions holding the min (or max)
-            # However, the numerical approximation (slow mode) gives gradients of ~0.5.
-            # Here, we relax the tolerance to account for this discrepancy.
-            gradcheck(
-                fn,
-                (x,),
-                check_batched_grad=False,
-                rtol=0.6,
-                atol=1e-5,
-            )
 
     def test_scatter_index_reduce_prod_gradgrad_error(self, device):
         # test that double backward raises an error for the case where 2 zeros in src

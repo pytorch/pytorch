@@ -226,16 +226,17 @@ Tensor aminmax_backward(
     const Tensor& grad_max,
     const Tensor& min,
     const Tensor& max) {
+
   auto dims = dim.has_value() ? IntArrayRef{*dim} : IntArrayRef{};
-
-  auto min_reduced = restore_reduced_dims(min, dims, keepdim);
-  auto max_reduced = restore_reduced_dims(max, dims, keepdim);
-
-  auto min_mask = self == min_reduced;
-  auto max_mask = self == max_reduced;
-
   Tensor result;
+  Tensor max_mask;
+  if (grad_max.defined()) {
+    auto max_reduced = restore_reduced_dims(max, dims, keepdim);
+    max_mask = (self == max_reduced);
+  }
   if (grad_min.defined()) {
+    auto min_reduced = restore_reduced_dims(min, dims, keepdim);
+    auto min_mask = self == min_reduced;
     result = scale_grad_by_count(grad_min, min_mask, dims);
 
     if (grad_max.defined()) {
@@ -249,7 +250,7 @@ Tensor aminmax_backward(
   } else if (grad_max.defined()) {
     result = scale_grad_by_count(grad_max, max_mask, dims);
   } else {
-    result = at::zeros_symint(self.sym_sizes(), self.options());
+    result = Tensor();
   }
 
   return result;
