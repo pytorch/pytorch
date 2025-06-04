@@ -366,53 +366,84 @@ class FSDPParam:
                 f"FSDP does not support uneven sharding on dim {shard_dim}: "
                 f"{param_data.size()} (world size: {shard_world_size})"
             )
+
         chunks = _chunk_with_empty(param_data, shard_world_size, dim=shard_dim)
         sharded_param = chunks[shard_rank]
         self.sharded_size = _get_dim_chunked_size(
             sharded_param, param_data.size(), dim=shard_dim
         )
         self.contiguous_sharded_stride = make_contiguous_strides_for(self.sharded_size)
+
+        replicate_rank = self.mesh_info.replicate_mesh_rank
+        replicate_world_size = self.mesh_info.replicate_mesh_size
+        chunks = _chunk_with_empty(
+            param_data, shard_world_size * replicate_world_size, dim=shard_dim
+        )
+        fully_sharded_param = chunks[shard_rank + replicate_rank * shard_world_size]
+
         padded_sharded_size = chunks[0].size()  # 0th always padded
         self.padded_sharded_param_size = padded_sharded_size
         # Pre-pad the sharded parameter to avoid padding before all-gather
         padded_sharded_param = param_data.new_zeros(padded_sharded_size)
-        if sharded_param.numel() > 0:
+        if fully_sharded_param.numel() > 0:
             padded_sharded_param.narrow(
-                dim=shard_dim, start=0, length=sharded_param.size(shard_dim)
-            ).copy_(sharded_param)
+                dim=shard_dim, start=0, length=fully_sharded_param.size(shard_dim)
+            ).copy_(fully_sharded_param)
         if self.offload_to_cpu and not padded_sharded_param.is_meta:
             padded_sharded_param = padded_sharded_param.cpu()
             if self.pin_memory:
                 padded_sharded_param = padded_sharded_param.pin_memory(
                     device=self.device
                 )
-        length = sharded_param.size(shard_dim) if sharded_param.numel() > 0 else 0
-        sharded_param = padded_sharded_param.narrow(
+        length = (
+            fully_sharded_param.size(shard_dim)
+            if fully_sharded_param.numel() > 0
+            else 0
+        )
+        fully_sharded_param = padded_sharded_param.narrow(
             dim=shard_dim, start=0, length=length
         )
-        assert sharded_param.is_contiguous(), f"{self.fsdp_placement=}"
+        assert fully_sharded_param.is_contiguous(), f"{self.fsdp_placement=}"
         self.sharded_param_fully_shard = nn.Parameter(
             _from_local_no_grad(
-                torch.split(
-                    sharded_param,
-                    length // second_shard_dim,
-                    dim=0,
-                )[0]
-                .detach()
-                .clone(),
+                fully_sharded_param.detach().clone(),
                 self._sharding_spec,
             )
         )
         self.sharded_param_fully_shard.requires_grad_(param.requires_grad)
 
-        padded_sharded_param = padded_sharded_param.to(self.mp_policy.param_dtype)
+        sharded_param = torch.cat(
+            chunks[replicate_rank::replicate_world_size],
+            dim=0,
+        )
+        padded_sharded_param_size = torch.cat(
+            chunks[::replicate_world_size],
+            dim=0,
+        ).size()
+        padded_sharded_param = param_data.new_zeros(padded_sharded_param_size).to(
+            self.mp_policy.param_dtype
+        )
+        length = sharded_param.size(shard_dim)
+        padded_sharded_param.narrow(dim=shard_dim, start=0, length=length).copy_(
+            sharded_param
+        )
         self._sharded_param_data = padded_sharded_param.view(-1)
         sharded_param = padded_sharded_param.narrow(
             dim=shard_dim, start=0, length=length
         )
         assert sharded_param.is_contiguous(), f"{self.fsdp_placement=}"
-
-        self.sharded_param = nn.Parameter(self.to_sharded_dtensor(sharded_param))
+        self.sharded_param = nn.Parameter(
+            _from_local_no_grad(
+                sharded_param,
+                self._sharding_spec,
+            )
+        )
+        print(
+            "each rank sharded param",
+            torch.distributed.get_rank(),
+            self.sharded_param,
+            sharded_param,
+        )
         self.sharded_param.requires_grad_(param.requires_grad)
         # Let `param_data` be freed normally when its ref count reaches 0 when
         # the `fully_shard` call returns to allow provided parameters to alias
