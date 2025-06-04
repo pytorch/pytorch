@@ -60,6 +60,7 @@ where.exe python
 
 # Python install dependencies
 python -m pip install --upgrade pip
+pip install setuptools
 pip install -r requirements.txt
 
 # Set after installing psutil
