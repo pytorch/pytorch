@@ -3,14 +3,14 @@ import dataclasses
 import os
 import pprint
 import sys
-from unittest import mock
+from unittest import mock, skipIf
 
 import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 from torch._dynamo import utils
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import xfailIfS390X
+from torch.testing._internal.common_utils import S390X
 
 
 class TestUtils(TestCase):
@@ -536,7 +536,7 @@ class TestDynamoTimed(TestCase):
  'triton_version': None}""",  # noqa: B950
         )
 
-    @xfailIfS390X
+    @skipIf(IS_S390X, "Fails on s390x under some circumstances")
     @dynamo_config.patch(
         {
             "log_compilation_metrics": True,
