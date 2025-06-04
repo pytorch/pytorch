@@ -6,6 +6,8 @@ import json
 import os
 import timeit
 from collections import namedtuple
+from dataclasses import asdict, dataclass
+from typing import Any, Optional
 
 import benchmark_utils
 
@@ -191,9 +193,8 @@ class BenchmarkRunner:
         self.use_jit = args.use_jit
         self.num_runs = args.num_runs
         self.print_per_iter = False
-        self.output_dir = args.output_dir
+        self.output_csv = args.output_csv
         self.operator_range = benchmark_utils.get_operator_range(args.operator_range)
-        self.disable_output = args.disable_output
         # 100 is the default warmup iterations
         if self.args.warmup_iterations == -1:
             self.args.warmup_iterations = 100
@@ -457,8 +458,6 @@ class BenchmarkRunner:
         return False
 
     def _output_csv(self, filename, headers, row):
-        if self.args.disable_output is True:
-            return
         if os.path.exists(filename):
             with open(filename) as fd:
                 lines = list(csv.reader(fd)) or [[]]
@@ -475,9 +474,91 @@ class BenchmarkRunner:
             for line in lines:
                 writer.writerow(list(line) + ["0"] * (len(headers) - len(line)))
 
+    def _output_json(
+        self,
+        perf_list,
+        output_file,
+    ):
+        """
+        Write the result into JSON format, so that it can be uploaded to the benchmark database
+        to be displayed on OSS dashboard. The JSON format is defined at
+        https://github.com/pytorch/pytorch/wiki/How-to-integrate-with-PyTorch-OSS-benchmark-database
+        """
+        if not perf_list:
+            return
+
+        # Prepare headers and records for JSON output
+        records = []
+        for perf_item in perf_list:
+            # Extract data from perf_item
+            test_name = perf_item.get("test_name", "unknown")
+            input_config = perf_item.get("input_config", "")
+            run_type = perf_item.get("run")
+            latency = perf_item.get("latency", 0)
+
+            dtype = "float32"  # default
+
+            # Extract mode based on run_type
+            mode = None
+            if run_type == "Forward":
+                mode = "inference"
+            elif run_type == "Backward":
+                mode = "training"
+
+            # Create the record
+            @dataclass
+            class BenchmarkInfo:
+                name: str
+                mode: Optional[str]
+                dtype: str
+                extra_info: dict[str, Any]
+
+            @dataclass
+            class ModelInfo:
+                name: str
+                type: str
+                origins: list[str]
+
+            @dataclass
+            class MetricInfo:
+                name: str
+                unit: str
+                benchmark_values: list[float]
+                target_value: Optional[float]
+
+            @dataclass
+            class BenchmarkRecord:
+                benchmark: BenchmarkInfo
+                model: ModelInfo
+                metric: MetricInfo
+
+            record = BenchmarkRecord(
+                benchmark=BenchmarkInfo(
+                    name="PyTorch operator benchmark",
+                    mode=mode,
+                    dtype=dtype,
+                    extra_info={"input_config": input_config},
+                ),
+                model=ModelInfo(
+                    name=test_name, type="micro-benchmark", origins=["pytorch"]
+                ),
+                metric=MetricInfo(
+                    name="latency",
+                    unit="us",
+                    benchmark_values=[latency],
+                    target_value=None,
+                ),
+            )
+
+            records.append(asdict(record))
+
+        # Write all records to the output file
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(records, f, indent=2)
+
     def run(self):
         self._print_header()
-        output_filename = self.args.output_dir
+        output_csv_filename = self.args.output_csv
         headers = [
             "Benchmarking Framework",
             "Benchamrking Module Name",
@@ -487,7 +568,7 @@ class BenchmarkRunner:
             "Execution Time",
         ]
 
-        if self.args.output_json:
+        if self.args.output_json or self.args.output_json_for_dashboard:
             perf_list = []
 
         for test_metainfo in BENCHMARK_TESTER:
@@ -532,7 +613,7 @@ class BenchmarkRunner:
 
                 # output results to csv
                 self._output_csv(
-                    output_filename,
+                    output_csv_filename,
                     headers,
                     [
                         test_case.framework,
@@ -547,10 +628,13 @@ class BenchmarkRunner:
                         reported_time[0],
                     ],
                 )
-                if self.args.output_json:
+                if self.args.output_json or self.args.output_json_for_dashboard:
                     perf_list.append(
                         self._perf_result_to_dict(reported_time, test_case)
                     )
+
+        if self.args.output_json_for_dashboard:
+            self._output_json(perf_list, self.args.output_json_for_dashboard)
 
         if self.args.output_json:
             with open(self.args.output_json, "w") as f:

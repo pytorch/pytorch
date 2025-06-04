@@ -696,7 +696,7 @@ class AvgPool2d(_AvgPoolNd):
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding` can either be:
 
-        - a single ``int`` -- in which case the same value is used for the height and width dimension
+        - a single ``int`` or a single-element tuple -- in which case the same value is used for the height and width dimension
         - a ``tuple`` of two ints -- in which case, the first `int` is used for the height dimension,
           and the second `int` for the width dimension
 
