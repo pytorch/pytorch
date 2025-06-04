@@ -4023,11 +4023,11 @@ class TestSDPAXpuOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
-    def test_onednn_attention_fail_d256(self, device):
-        # Test that onednn graph attention dispatching correctly bails out on d > 256
+    def test_onednn_attention_fail_d576(self, device):
+        # Test that onednn graph attention dispatching correctly bails out on d > 576
         b, h = 1, 2
         s_q, s_kv = 128, 128
-        d_qk, d_v = 512, 512
+        d_qk, d_v = 1024, 1024
 
         q = torch.randn(b, h, s_q, d_qk, device=device, dtype=torch.bfloat16)
         k = torch.randn(b, h, s_kv, d_qk, device=device, dtype=torch.bfloat16)
