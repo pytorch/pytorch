@@ -14,10 +14,10 @@ from typing import Any, Callable, Optional
 
 from tabulate import tabulate
 from tqdm import tqdm
+from triton.testing import do_bench
 
 import torch
 from torch._inductor import config as inductor_config
-from torch._inductor.utils import do_bench_using_profiling
 
 
 log: logging.Logger = logging.getLogger(__name__)
@@ -77,10 +77,7 @@ CUTLASS_INSTANTIATION_LEVELS = [
 
 
 def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:
-    return (
-        do_bench_using_profiling(lambda: func(*args, **kwargs), warmup=100, rep=10000)
-        * 1e3
-    )
+    return do_bench(lambda: func(*args, **kwargs), warmup=100, rep=10000) * 1e3
 
 
 @dataclass(frozen=True, kw_only=True)

@@ -103,15 +103,10 @@ def reset():
 
 class TestCompiledAutograd(TestCase):
     def setUp(self) -> None:
-        self.exit_stack = contextlib.ExitStack()
-        self.exit_stack.enter_context(
-            config.patch("record_pre_graph_bytecode_in_traces", False)
-        )
         super().setUp()
         reset()
 
     def tearDown(self) -> None:
-        self.exit_stack.close()
         super().tearDown()
         reset()
 
