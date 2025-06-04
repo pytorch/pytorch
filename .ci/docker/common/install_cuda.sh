@@ -54,20 +54,6 @@ function install_118 {
     ldconfig
 }
 
-function install_124 {
-  CUDNN_VERSION=9.1.0.70
-  echo "Installing CUDA 12.4.1 and cuDNN ${CUDNN_VERSION} and NCCL and cuSparseLt-0.6.2"
-  install_cuda 12.4.1 cuda_12.4.1_550.54.15_linux
-
-  install_cudnn 12 $CUDNN_VERSION
-
-  CUDA_VERSION=12.4 bash install_nccl.sh
-
-  CUDA_VERSION=12.4 bash install_cusparselt.sh
-
-  ldconfig
-}
-
 function install_126 {
   CUDNN_VERSION=9.5.1.17
   echo "Installing CUDA 12.6.3 and cuDNN ${CUDNN_VERSION} and NCCL and cuSparseLt-0.6.3"
@@ -111,40 +97,6 @@ function prune_118 {
     #####################################################################################
     export CUDA_BASE="/usr/local/cuda-11.8/"
     rm -rf $CUDA_BASE/libnvvp $CUDA_BASE/nsightee_plugins $CUDA_BASE/nsight-compute-2022.3.0 $CUDA_BASE/nsight-systems-2022.4.2/
-}
-
-function prune_124 {
-  echo "Pruning CUDA 12.4"
-  #####################################################################################
-  # CUDA 12.4 prune static libs
-  #####################################################################################
-  export NVPRUNE="/usr/local/cuda-12.4/bin/nvprune"
-  export CUDA_LIB_DIR="/usr/local/cuda-12.4/lib64"
-
-  export GENCODE="-gencode arch=compute_50,code=sm_50 -gencode arch=compute_60,code=sm_60 -gencode arch=compute_70,code=sm_70 -gencode arch=compute_75,code=sm_75 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90"
-  export GENCODE_CUDNN="-gencode arch=compute_50,code=sm_50 -gencode arch=compute_60,code=sm_60 -gencode arch=compute_61,code=sm_61 -gencode arch=compute_70,code=sm_70 -gencode arch=compute_75,code=sm_75 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90"
-
-  if [[ -n "$OVERRIDE_GENCODE" ]]; then
-      export GENCODE=$OVERRIDE_GENCODE
-  fi
-  if [[ -n "$OVERRIDE_GENCODE_CUDNN" ]]; then
-      export GENCODE_CUDNN=$OVERRIDE_GENCODE_CUDNN
-  fi
-
-  # all CUDA libs except CuDNN and CuBLAS
-  ls $CUDA_LIB_DIR/ | grep "\.a" | grep -v "culibos" | grep -v "cudart" | grep -v "cudnn" | grep -v "cublas" | grep -v "metis"  \
-      | xargs -I {} bash -c \
-                "echo {} && $NVPRUNE $GENCODE $CUDA_LIB_DIR/{} -o $CUDA_LIB_DIR/{}"
-
-  # prune CuDNN and CuBLAS
-  $NVPRUNE $GENCODE_CUDNN $CUDA_LIB_DIR/libcublas_static.a -o $CUDA_LIB_DIR/libcublas_static.a
-  $NVPRUNE $GENCODE_CUDNN $CUDA_LIB_DIR/libcublasLt_static.a -o $CUDA_LIB_DIR/libcublasLt_static.a
-
-  #####################################################################################
-  # CUDA 12.4 prune visual tools
-  #####################################################################################
-  export CUDA_BASE="/usr/local/cuda-12.4/"
-  rm -rf $CUDA_BASE/libnvvp $CUDA_BASE/nsightee_plugins $CUDA_BASE/nsight-compute-2024.1.0 $CUDA_BASE/nsight-systems-2023.4.4/
 }
 
 function prune_126 {
@@ -202,8 +154,6 @@ while test $# -gt 0
 do
     case "$1" in
     11.8) install_118; prune_118
-        ;;
-    12.4) install_124; prune_124
         ;;
     12.6|12.6.*) install_126; prune_126
         ;;
