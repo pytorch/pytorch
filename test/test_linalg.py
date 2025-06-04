@@ -5947,8 +5947,7 @@ class TestLinalg(TestCase):
             batch_C = torch.bmm(batch_A, batch_A)
 
             kernel_count = 0
-            with profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
                 C = torch.mm(A, A)
                 Y = torch.nn.functional.linear(X, A, bias)
                 batch_C = torch.bmm(batch_A, batch_A)
