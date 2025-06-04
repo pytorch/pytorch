@@ -1052,16 +1052,15 @@ class TestIndexing(TestCase):
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
     @onlyCUDA
-    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
-    def test_index_put_accumulate_with_optional_tensors(self, device):
-        # TODO: replace with a better solution.
-        # Currently, here using torchscript to put None into indices.
-        # on C++ it gives indices as a list of 2 optional tensors: first is null and
-        # the second is a valid tensor.
-        @torch.jit.script
+    def test_index_put_deterministic_with_optional_tensors(self, device):
         def func(x, i, v):
-            idx = [None, i]
-            x.index_put_(idx, v, accumulate=True)
+            with DeterministicGuard(True):
+                x[..., i] = v
+            return x
+
+        def func1(x, i, v):
+            with DeterministicGuard(True):
+                x[i] = v
             return x
 
         n = 4
@@ -1071,13 +1070,34 @@ class TestIndexing(TestCase):
         indices_dev = indices.to(device)
         value0d = torch.tensor(10.0)
         value1d = torch.tensor([1.0, 2.0])
+        values2d = torch.randn(n, 1)
 
-        out_cuda = func(t_dev, indices_dev, value0d.cuda())
-        out_cpu = func(t, indices, value0d)
+        for val in (value0d, value1d, values2d):
+            out_cuda = func(t_dev, indices_dev, val.to(device))
+            out_cpu = func(t, indices, val)
+            self.assertEqual(out_cuda.cpu(), out_cpu)
+
+        t = torch.zeros((5, 4))
+        t_dev = t.to(device)
+        indices = torch.tensor([1, 4, 3])
+        indices_dev = indices.to(device)
+        val = torch.randn(4)
+        out_cuda = func1(t_dev, indices_dev, val.cuda())
+        out_cpu = func1(t, indices, val)
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
-        out_cuda = func(t_dev, indices_dev, value1d.cuda())
-        out_cpu = func(t, indices, value1d)
+        t = torch.zeros(2, 3, 4)
+        ind = torch.tensor([0, 1])
+        val = torch.randn(6, 2)
+        with self.assertRaisesRegex(RuntimeError, "shape mismatch"):
+            func(t, ind, val)
+
+        with self.assertRaisesRegex(RuntimeError, "must match"):
+            func(t.to(device), ind.to(device), val.to(device))
+
+        val = torch.randn(2, 3, 1)
+        out_cuda = func1(t.to(device), ind.to(device), val.to(device))
+        out_cpu = func1(t, ind, val)
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
     @onlyNativeDeviceTypes

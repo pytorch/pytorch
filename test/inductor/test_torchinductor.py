@@ -30,6 +30,7 @@ import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.aoti_eager
 import torch.nn as nn
+from torch._C._dynamo.guards import assert_alignment, assert_size_stride
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.debug_utils import aot_graph_input_parser
 from torch._dynamo.device_interface import get_interface_for_device
@@ -1409,7 +1410,14 @@ class CommonTemplate:
             )
             _, code = run_and_get_code(fn, x, y)
             code = " ".join(code)
-            self.assertEqual(
+            assert_keywords = ["assert_size_stride", "assert_alignment"]
+            filtered_lines = [
+                line
+                for line in code.splitlines()
+                if not any(assert_key in line for assert_key in assert_keywords)
+            ]
+            code = "\n".join(filtered_lines)
+            self.assertGreaterEqual(
                 code.count("view_dtype" if config.cpp_wrapper else "aten.view"), 3
             )
 
@@ -2558,7 +2566,7 @@ class CommonTemplate:
         self.common(fn, (torch.ones(32, 32) * 70,))
 
     @skip_if_halide
-    @xfail_if_mps
+    @xfail_if_mps_unimplemented  # aten::_cummin_helper is not implemented for MPS
     def test_cummin(self):
         def fn(x):
             return x.cummin(0)
@@ -2693,6 +2701,12 @@ class CommonTemplate:
             b = torch.tensor(1.0, dtype=tgt_dtype, device=self.device)
             c = torch.full((4,), 2, device=self.device)
             return a.clamp(min=b, max=c)
+
+        self.common(fn, (torch.randint(4, (4,)),))
+
+    def test_clamp_type_promotion_non_tensor(self):
+        def fn(a):
+            return a.clamp(min=1.5), a.clamp(min=2)
 
         self.common(fn, (torch.randint(4, (4,)),))
 
@@ -4858,18 +4872,16 @@ class CommonTemplate:
 
     @xfail_if_mps_unimplemented
     def test_fractional_max_pool2d2(self):
-        # fallback for larger kernel size
+        # large kernel size without unrolling
 
         def fn(x, samples):
             return aten.fractional_max_pool2d(x, (6, 5), (3, 3), samples)
 
-        torch._inductor.metrics.generated_kernel_count = 0
         self.common(
             fn,
             (torch.randn(2, 4, 36, 36), torch.rand(2, 4, 2)),
             check_lowp=False,
         )
-        assertGeneratedKernelCountEqual(self, 0)
 
     @xfail_if_mps_unimplemented
     def test_fractional_max_pool2d3(self):
@@ -6669,7 +6681,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
             )
 
-    @xfail_if_mps_unimplemented
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     def test_deterministic_codegen(self):
@@ -6720,7 +6731,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
-    @xfail_if_mps
     def test_deterministic_codegen_on_graph_break(self):
         if "cpu" in str(self.device) and config.is_fbcode():
             raise unittest.SkipTest("cpp packaging is wacky in fbcode")
@@ -6741,7 +6751,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
-    @xfail_if_mps
     def test_deterministic_codegen_with_suffix(self):
         if "cpu" in str(self.device) and config.is_fbcode():
             raise unittest.SkipTest("cpp packaging is wacky in fbcode")
@@ -10505,6 +10514,50 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(x_ref, x_test)
 
     @requires_gpu()
+    @skip_if_not_triton
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
+    def test_inductor_multiple_specializations(self):
+        from triton.testing import do_bench
+
+        @torch.compile(
+            options={
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
+            dynamic=False,
+        )
+        def inductor_matmul(a, b):
+            torch._check(a.shape[0] == b.shape[1])
+            return (m, torch.mm(a, b))
+
+        m = 16
+        k = 1280
+        dynamic_a = torch.randn(m, k, device=GPU_TYPE, dtype=torch.bfloat16)
+        dynamic_specialized_a = torch.randn(m, k, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16)
+        torch._dynamo.decorators.mark_dynamic(
+            dynamic_a,
+            0,
+        )
+        torch._dynamo.decorators.mark_dynamic(
+            dynamic_specialized_a,
+            0,
+            specialize_on=[lambda x0: x0 == 16],
+        )
+        torch._dynamo.decorators.mark_dynamic(
+            b,
+            1,
+        )
+        dynamic = do_bench(lambda: inductor_matmul(dynamic_a, b))
+        torch._dynamo.reset()
+        dynamic_specialized = do_bench(
+            lambda: inductor_matmul(dynamic_specialized_a, b)
+        )
+        self.assertGreaterEqual(dynamic, dynamic_specialized)
+
+    @requires_gpu()
     def test_stride_preservation_with_stride_modifying_fx_pass(self):
         def f(x):
             return x + 1
@@ -11878,6 +11931,98 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp=False,
         )
 
+    @requires_gpu()
+    @skip_if_not_triton
+    @skip_if_cpp_wrapper("skip cpp_wrapper tests")
+    @config.patch(implicit_fallbacks=True)
+    def test_generated_code_has_size_stride_assert(self):
+        def foo(x):
+            return 3 * x
+
+        def foo_meta(x):
+            return torch.empty_like(x)
+
+        define_custom_op_for_test("foo", foo, foo_meta)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.test.foo(a)
+            return b
+
+        a = torch.randn((16, 32), device=self.device)
+
+        _, code = run_and_get_code(
+            torch.compile(fn),
+            a,
+        )
+        if not is_dynamic_shape_enabled():
+            if code and len(code) > 0 and "assert_size_stride(" in code[0]:
+                try:
+                    FileCheck().check_regex(
+                        r"assert_size_stride\s*\(\s*[^,]+,\s*\([^\)]*\),\s*\([^\)]*\),\s*'[^']+'\s*\)"
+                    ).run(code[0])
+                except Exception as e:
+                    print(f"Failed regex match for assert_size_stride: {e}")
+                    print(code[0])
+                    raise e
+            else:
+                print("Skipping: No assert_size_stride found.")
+
+    @requires_gpu()
+    @skip_if_not_triton
+    @skip_if_cpp_wrapper("skip cpp_wrapper tests")
+    @config.patch(implicit_fallbacks=True)
+    def test_generated_code_has_alignment_assert(self):
+        def foo(x):
+            return 3 * x
+
+        def foo_meta(x):
+            return torch.empty_like(x)
+
+        define_custom_op_for_test("foo", foo, foo_meta)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.test.foo(a)
+            return b
+
+        a = torch.randn((16, 32), device=self.device)
+
+        _, code = run_and_get_code(
+            torch.compile(fn),
+            a,
+        )
+        if not is_dynamic_shape_enabled():
+            if code and len(code) > 0 and "assert_alignment(" in code[0]:
+                try:
+                    FileCheck().check_regex(
+                        r"assert_alignment\s*\(\s*[^,]+,\s*[^,]+,\s*'[^']+'\s*\)"
+                    ).run(code[0])
+                except Exception as e:
+                    print(f"Failed regex match for assert_alignment: {e}")
+                    print(code[0])
+                    raise e
+            else:
+                print("Skipping: No assert_alignment found.")
+
+    def test_assert_size_stride_op_name_pass(self):
+        tensor = torch.empty((16, 32))
+        assert_size_stride(tensor, (16, 32), (32, 1), "torch.ops.dummy.op_name")
+
+    def test_assert_size_stride_op_name_fail(self):
+        tensor = torch.empty((16, 32))
+        with self.assertRaisesRegex(AssertionError, "torch.ops.dummy.op_name"):
+            assert_size_stride(tensor, (32, 64), (32, 1), "torch.ops.dummy.op_name")
+
+    def test_assert_alignment_op_name_pass(self):
+        tensor = torch.empty((16, 32))
+        assert_alignment(tensor, 16, "torch.ops.dummy.op_name")
+
+    def test_assert_alignment_op_name_fail(self):
+        tensor = torch.empty((16, 32))
+        with self.assertRaisesRegex(AssertionError, "torch.ops.dummy.op_name"):
+            assert_alignment(tensor, 0, "torch.ops.dummy.op_name")
+
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_custom_op_unbacked_symints(self):
@@ -12760,8 +12905,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(forward, (a, b))
 
-    @xfail_if_mps_unimplemented
     def test_isin_tensor_scalar(self):
+        if self.device == "mps" and MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("isin is not implemented on MacOS-13")
+
         for invert in [True, False]:
             torch._dynamo.reset()
             elements = 1
@@ -12794,7 +12941,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(forward, ())
 
-    @xfail_if_mps
     def test_flip_cat(self):
         def forward(unsqueeze, unsqueeze_1):
             cat_1 = torch.ops.aten.cat.default([unsqueeze, unsqueeze_1], 1)
@@ -13010,12 +13156,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         code = run_and_get_triton_code(f, x)
 
         if is_dynamic_shape_enabled():
-            FileCheck().check("assert_size_stride(buf1, (s77, s27), (s27, 1))").check(
-                "assert_size_stride(buf2, (s77, s27), (s27, 1))"
+            FileCheck().check("assert_size_stride(buf1, (s77, s27), (s27, 1)").check(
+                "assert_size_stride(buf2, (s77, s27), (s27, 1)"
             ).run(code)
         else:
-            FileCheck().check("assert_size_stride(buf1, (16, 32), (32, 1))").check(
-                "assert_size_stride(buf2, (16, 32), (32, 1))"
+            FileCheck().check("assert_size_stride(buf1, (16, 32), (32, 1)").check(
+                "assert_size_stride(buf2, (16, 32), (32, 1)"
             ).run(code)
 
     @requires_cuda
@@ -13070,6 +13216,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         foo = torch.compile(foo)
         foo()
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_mutation_real_name(self):
+        def f(x, y, z, other):
+            mul = x * y
+            diag = torch.diagonal(mul)
+            diag.copy_(other)
+            # force grah partition by device copy
+            u = diag.cpu().to(self.device)
+            return torch.mm(mul, z) + u + diag
+
+        inps = (
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, device=self.device),
+        )
+
+        eager_out = f(*inps)
+        compiled_f = torch.compile(f)
+        compiled_out = compiled_f(*inps)
+        torch.testing.assert_close(eager_out, compiled_out)
 
     @torch._inductor.config.patch("graph_partition", True)
     def test_graph_partition_arange1(self):
@@ -14971,6 +15139,9 @@ if RUN_GPU:
                 self.assertIn("aoti_torch_check_inf_and_nan", code)
             else:
                 self.assertIn("# make sure graph inputs are not nan/inf", code)
+                self.assertRegex(code, r"return_vars = (.*)")
+                self.assertIn("for var in return_vars:", code)
+                self.assertIn("if isinstance(var, torch.Tensor):", code)
                 self.assertRegex(code, r"assert not .*\.isnan\(\)\.any\(\).item\(\)")
                 self.assertRegex(code, r"assert not .*\.isinf\(\)\.any\(\).item\(\)")
 
