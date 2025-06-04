@@ -111,6 +111,7 @@ def signature_to_meta(
     size_dtype: Optional[str],
     argdefs: list[ArgName],
     indices: Optional[list[int]] = None,
+    is_template: bool = False,
 ) -> dict[str, str]:
     if indices is None:
         indices = list(range(len(signature)))
@@ -123,8 +124,13 @@ def signature_to_meta(
         # Check config.triton.use_block_ptr, since Triton block pointer
         # does not support 64bit indexing:
         # https://gist.github.com/shunting314/6a41c776171720ce4561f202dcde0ad6
+        #
+        # If the triton metadata is for a template, don't use tl.int64 index.
+        # Templates like flex attention/decoding uses block pointers which
+        # does not support 64 bit indexing.
         if (
             not config.triton.use_block_ptr
+            and not is_template
             and isinstance(arg, SizeArg)
             and arg.name.startswith("ks")
         ):
