@@ -474,7 +474,7 @@ def prepare_qat_fx(
         # in the model through qconfig_mapping
         # the following call will get the qconfig_mapping that works best for models
         # that target "fbgemm" backend
-        qconfig_mapping = get_default_qat_qconfig("fbgemm")
+        qconfig_mapping = get_default_qat_qconfig_mapping("fbgemm")
 
         # We can customize qconfig_mapping in different ways, please take a look at
         # the docstring for :func:`~torch.ao.quantization.prepare_fx` for different ways
