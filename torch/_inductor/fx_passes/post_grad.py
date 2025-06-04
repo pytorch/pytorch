@@ -1649,11 +1649,24 @@ class ConstructorMoverPass:
                     gpu_node = graph.call_function(
                         torch.ops.prims.device_put.default, (node, target_device)
                     )
-                    node.replace_all_uses_with(
-                        gpu_node,
-                        lambda x: x != gpu_node
-                        and x.target != torch.ops.aten.copy_.default,
-                    )
+                node.replace_all_uses_with(
+                    gpu_node,
+                    lambda x: x != gpu_node
+                    and x.target != torch.ops.aten.copy_.default,
+                )
+
+                # noop elimination if there are other device_put for gpu_node to
+                # target device. Alternatively, we could just move the other device_put
+                # ealier in the graph, but that is not supported in fx graph yet.
+                noop_device_puts = [
+                    user
+                    for user in gpu_node.users
+                    if user.target == torch.ops.prims.device_put.default
+                    and user.args[1] == target_device
+                ]
+                for noop in noop_device_puts:
+                    noop.replace_all_uses_with(gpu_node)
+                    graph.erase_node(noop)
             else:
                 kwargs = node.kwargs.copy()
                 kwargs["device"] = target_device
