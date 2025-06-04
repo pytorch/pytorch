@@ -30,6 +30,7 @@
 
 #if defined(USE_ROCM)
 #include <rocsolver/rocsolver.h>
+#include <ATen/cuda/tunable/GemmRocblas.h>
 #define PYTORCH_ROCSOLVER_VERSION \
   (ROCSOLVER_VERSION_MAJOR * 10000 + ROCSOLVER_VERSION_MINOR * 100 + ROCSOLVER_VERSION_PATCH)
 #if (PYTORCH_ROCSOLVER_VERSION >= 33000)
@@ -1300,7 +1301,7 @@ static void apply_syevd_batched_rocsolver(const Tensor& values, const Tensor& ve
   auto& allocator = *at::cuda::getCUDADeviceAllocator();
   auto work_data = allocator.allocate(sizeof(scalar_t) * work_size);
 
-  TORCH_CUSOLVER_CHECK(static_cast<hipsolverStatus_t>(_rocsolver_syevd_strided_batched<scalar_t>(
+  TORCH_ROCBLAS_CHECK(_rocsolver_syevd_strided_batched<scalar_t>(
     static_cast<rocblas_handle>(at::cuda::getCurrentCUDABlasHandle()), // getCurrentCUDASolverDnHandle() can't be used
     evect,
     uplo,
@@ -1314,7 +1315,7 @@ static void apply_syevd_batched_rocsolver(const Tensor& values, const Tensor& ve
     work_stride,
     infos_data,
     batch_size
-  )));
+  ));
 }
 #endif // USE_ROCM && ROCSOLVER_SYEVD_BATCHED_ENABLED
 
