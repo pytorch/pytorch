@@ -10,6 +10,7 @@ import importlib.resources
 import io
 import itertools
 import json
+import logging
 import os
 import pickle
 import pkgutil
@@ -151,7 +152,7 @@ _IS_WINDOWS = sys.platform == "win32"
 LOCK_TIMEOUT = 600
 
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
-log = torch._logging.getArtifactLogger(__name__, "codecache")
+log = logging.getLogger(__name__)
 
 
 def use_re_build() -> bool:
@@ -406,7 +407,7 @@ def get_path(
 def get_hash(
     content: Union[str, bytes], extra: str = "", hash_type: str = "code"
 ) -> str:
-    if hash_type in {"amdgcn", "code", "ptx"}:
+    if hash_type in {"amdgcn", "code", "ptx", "spv"}:
         return code_hash(content, extra)
     if hash_type in {"cubin", "hsaco", "spv"}:
         return code_hash(repr(content))
@@ -1575,9 +1576,12 @@ class CudaKernelParamCache:
         basename, _ = get_name_and_dir_from_output_file_path(bin_path)
 
         if config.aot_inductor.emit_multi_arch_kernel:
-            assert bin_type == "cubin", "emit_multi_arch_kernel only supported in CUDA"
+            bin_type_to_ext = {"cubin": ".fatbin", "spv": ".spv"}
+            assert bin_type in bin_type_to_ext.keys(), (
+                "multi_arch_kernel_binary only supported in CUDA/XPU"
+            )
             base_path, _ = os.path.splitext(bin_path)
-            bin_path = base_path + ".fatbin"
+            bin_path = base_path + bin_type_to_ext[bin_type]
 
         asm_path: str = ""
         if (
@@ -2053,7 +2057,7 @@ class AotCodeCompiler:
                     asm_files.append(asm_file)
 
                 cubin_file = value[get_cpp_wrapper_cubin_path_name()]
-                if config.aot_inductor.emit_multi_arch_kernel:
+                if config.aot_inductor.emit_multi_arch_kernel and device_type == "cuda":
                     current_arch = _nvcc_arch_as_compile_option()
                     cmd = (
                         f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "

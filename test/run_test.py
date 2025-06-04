@@ -213,6 +213,7 @@ S390X_BLOCKLIST = [
     "test_unary_ufuncs",
     # these tests fail when cuda is not available
     "inductor/test_aot_inductor",
+    "inductor/test_best_config",
     "inductor/test_cudacodecache",
     "inductor/test_inductor_utils",
     "inductor/test_inplacing_pass",
@@ -422,6 +423,7 @@ TESTS_NOT_USING_GRADCHECK = [
     "test_decomp",
     "test_cpp_extensions_jit",
     "test_jit",
+    "test_matmul_cuda",
     "test_ops",
     "test_ops_jit",
     "dynamo/test_recompile_ux",
