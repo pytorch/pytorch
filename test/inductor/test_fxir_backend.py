@@ -427,13 +427,12 @@ class FxirTestCase(InductorTestCase):
 
         args = [torch.randn(8, device=self.device) for _ in range(2)]
 
-        # Compile and check that the tuner was called.
-
         with config.patch(
             "triton.autotune_at_compile_time", enable_tuning
         ), unittest.mock.patch.object(
             torch._inductor.runtime.triton_heuristics.CachingAutotuner, "run", run
         ):
+            # Compile and check that the tuner was called.
             self.assertFalse(called)
             (gm,) = self._compile_and_check(
                 torch.mul, args, compile_kwargs={"dynamic": use_dynamic_shapes}
