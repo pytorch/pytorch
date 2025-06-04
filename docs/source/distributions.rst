@@ -402,66 +402,173 @@ Probability distributions - torch.distributions
 `Constraints`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
+.. automodule:: torch.distributions.constraints
 .. currentmodule:: torch.distributions.constraints
-
-Classes
-"""""""
 
 .. autoclass:: Constraint
     :members:
     :show-inheritance:
 
 Value Constraints
-'''''''''''''''''
+"""""""""""""""""
 
 .. autoclass:: Boolean
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: Real
+    :members:
+    :undoc-members:
+    :show-inheritance:
 
-Interval Constraints
-''''''''''''''''''''
+Continuous Interval Constraints
+"""""""""""""""""""""""""""""""
 
 .. autoclass:: Interval
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: UnitInterval
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: HalfOpenInterval
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: GreaterThan
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: GreaterThanEq
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: LessThan
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: Positive
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: NonNegative
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: Negative
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+Discrete Interval Constraints
+"""""""""""""""""""""""""""""
 
 .. autoclass:: IntegerInterval
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: IntegerGreaterThan
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: IntegerLessThan
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: PositiveInteger
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: NonNegativeInteger
-
-Generic Constraints
-'''''''''''''''''''
-
-.. autoclass:: Independent
-.. autoclass:: MixtureSameFamilyConstraint
-.. autoclass:: Cat
-.. autoclass:: Stack
+    :members:
+    :undoc-members:
+    :show-inheritance:
 
 Vector Constraints
-''''''''''''''''''
+""""""""""""""""""
 
 .. autoclass:: RealVector
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: Simplex
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: OneHot
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: Multinomial
+    :members:
+    :undoc-members:
+    :show-inheritance:
 
 Matrix Constraints
-''''''''''''''''''
+""""""""""""""""""
 
 .. autoclass:: Square
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: Symmetric
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: PositiveDefinite
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: PositiveSemidefinite
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: CorrCholesky
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: LowerCholesky
+    :members:
+    :undoc-members:
+    :show-inheritance:
 .. autoclass:: LowerTriangular
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+Generic Constraints
+"""""""""""""""""""
+
+.. autoclass:: Independent
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: MixtureSameFamilyConstraint
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: Cat
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: Stack
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+Dependent Constraints
+"""""""""""""""""""""
+
+.. autoclass:: Dependent
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autofunction:: is_dependent
+.. autoclass:: DependentProperty
+    :members:
+    :undoc-members:
+    :show-inheritance:
 
 Canonical Instances
 """""""""""""""""""
@@ -470,6 +577,7 @@ For parameter-free constraints, the following canonical instances are available:
 
 .. autoattribute:: torch.distributions.constraints.boolean
 .. autoattribute:: torch.distributions.constraints.corr_cholesky
+.. autoattribute:: torch.distributions.constraints.dependent
 .. autoattribute:: torch.distributions.constraints.lower_cholesky
 .. autoattribute:: torch.distributions.constraints.lower_triangular
 .. autoattribute:: torch.distributions.constraints.nonnegative
@@ -490,23 +598,17 @@ Aliases
 """""""
 
 .. autoattribute:: torch.distributions.constraints.cat
-.. autoattribute:: torch.distributions.constraints.independent
-.. autoattribute:: torch.distributions.constraints.integer_interval
-.. autoattribute:: torch.distributions.constraints.mixture_same_family
-.. autoattribute:: torch.distributions.constraints.stack
-.. autoattribute:: torch.distributions.constraints.interval
-.. autoattribute:: torch.distributions.constraints.half_open_interval
+.. autoattribute:: torch.distributions.constraints.dependent_property
 .. autoattribute:: torch.distributions.constraints.greater_than
 .. autoattribute:: torch.distributions.constraints.greater_than_eq
+.. autoattribute:: torch.distributions.constraints.half_open_interval
+.. autoattribute:: torch.distributions.constraints.independent
+.. autoattribute:: torch.distributions.constraints.integer_interval
+.. autoattribute:: torch.distributions.constraints.interval
 .. autoattribute:: torch.distributions.constraints.less_than
+.. autoattribute:: torch.distributions.constraints.mixture_same_family
 .. autoattribute:: torch.distributions.constraints.multinomial
-
-Dependent Constraints
-"""""""""""""""""""""
-
-.. autodata:: dependent
-.. autofunction:: is_dependent
-.. autodata:: dependent_property
+.. autoattribute:: torch.distributions.constraints.stack
 
 `Constraint Registry`
 ~~~~~~~~~~~~~~~~~~~~~~~
