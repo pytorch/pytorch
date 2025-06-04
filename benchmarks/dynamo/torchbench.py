@@ -8,18 +8,32 @@ import re
 import sys
 import warnings
 from collections import namedtuple
-from os.path import abspath, exists
 
 import torch
 
 
 try:
-    from .common import BenchmarkRunner, load_yaml_file, main
+    from .common import BenchmarkRunner, main
 except ImportError:
-    from common import BenchmarkRunner, load_yaml_file, main
+    from common import BenchmarkRunner, main
 
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
+
+try:
+    from .torchbench_output_processors import PROCESS_TRAIN_MODEL_OUTPUT
+except ImportError:
+    from torchbench_output_processors import PROCESS_TRAIN_MODEL_OUTPUT
+
+try:
+    from .torchbench_utils import _reassign_parameters, setup_torchbench_cwd
+except ImportError:
+    from torchbench_utils import _reassign_parameters, setup_torchbench_cwd
+
+try:
+    from .torchbench_config import TorchBenchConfig
+except ImportError:
+    from torchbench_config import TorchBenchConfig
 
 
 # We are primarily interested in tf32 datatype
@@ -34,70 +48,8 @@ if "TORCHINDUCTOR_AUTOGRAD_CACHE" not in os.environ:
     torch._functorch.config.enable_autograd_cache = True
 
 
-def _reassign_parameters(model):
-    # torch_geometric models register parameter as tensors due to
-    # https://github.com/pyg-team/pytorch_geometric/blob/master/torch_geometric/nn/dense/linear.py#L158-L168
-    # Since it is unusual thing to do, we just reassign them to parameters
-    def state_dict_hook(module, destination, prefix, local_metadata):
-        for name, param in module.named_parameters():
-            if isinstance(destination[name], torch.Tensor) and not isinstance(
-                destination[name], torch.nn.Parameter
-            ):
-                destination[name] = torch.nn.Parameter(destination[name])
-
-    model._register_state_dict_hook(state_dict_hook)
 
 
-def setup_torchbench_cwd():
-    original_dir = abspath(os.getcwd())
-
-    os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
-    for torchbench_dir in (
-        "./torchbenchmark",
-        "../torchbenchmark",
-        "../torchbench",
-        "../benchmark",
-        "../../torchbenchmark",
-        "../../torchbench",
-        "../../benchmark",
-        "../../../torchbenchmark",
-        "../../../torchbench",
-        "../../../benchmark",
-    ):
-        if exists(torchbench_dir):
-            break
-
-    if exists(torchbench_dir):
-        torchbench_dir = abspath(torchbench_dir)
-        os.chdir(torchbench_dir)
-        sys.path.append(torchbench_dir)
-
-    return original_dir
-
-
-def process_hf_reformer_output(out):
-    assert isinstance(out, list)
-    # second output is unstable
-    return [elem for i, elem in enumerate(out) if i != 1]
-
-
-def process_hf_whisper_output(out):
-    out_ret = []
-    for i, elem in enumerate(out):
-        if i == 0:
-            if elem is not None:
-                assert isinstance(elem, dict)
-                out_ret.append({k: v for k, v in elem.items() if k != "logits"})
-        elif i != 1:
-            out_ret.append(elem)
-
-    return out_ret
-
-
-process_train_model_output = {
-    "hf_Reformer": process_hf_reformer_output,
-    "hf_Whisper": process_hf_whisper_output,
-}
 
 
 class TorchBenchmarkRunner(BenchmarkRunner):
@@ -105,131 +57,99 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         super().__init__()
         self.suite_name = "torchbench"
         self.optimizer = None
+        self._tb_config = TorchBenchConfig()
 
-    @property
-    def _config(self):
-        return load_yaml_file("torchbench.yaml")
+    def _ensure_config_setup(self):
+        """Ensure config is setup with args if not already done."""
+        if hasattr(self, 'args') and not hasattr(self._tb_config, 'args'):
+            self._tb_config.set_args(self.args)
 
-    @property
-    def _skip(self):
-        return self._config["skip"]
-
-    @property
-    def _batch_size(self):
-        return self._config["batch_size"]
-
-    @property
-    def _tolerance(self):
-        return self._config["tolerance"]
-
-    @property
-    def _require_larger_multiplier_for_smaller_tensor(self):
-        return self._config["require_larger_multiplier_for_smaller_tensor"]
-
-    @property
-    def _accuracy(self):
-        return self._config["accuracy"]
-
+    # Delegate configuration properties to the config object
     @property
     def skip_models(self):
-        return self._skip["all"]
+        return self._tb_config.skip_models
 
     @property
     def skip_models_for_cpu(self):
-        return self._skip["device"]["cpu"]
+        return self._tb_config.skip_models_for_cpu
 
     @property
     def skip_models_for_cuda(self):
-        return self._skip["device"]["cuda"]
+        return self._tb_config.skip_models_for_cuda
 
     @property
     def skip_models_for_freezing_cuda(self):
-        return self._skip["freezing"]["cuda"]
+        return self._tb_config.skip_models_for_freezing_cuda
 
     @property
     def disable_cudagraph_models(self):
-        return self._config["disable_cudagraph"]
+        return self._tb_config.disable_cudagraph_models
 
     @property
     def skip_models_for_freezing_cpu(self):
-        return self._skip["freezing"]["cpu"]
+        return self._tb_config.skip_models_for_freezing_cpu
 
     @property
     def slow_models(self):
-        return self._config["slow"]
+        return self._tb_config.slow_models
 
     @property
     def very_slow_models(self):
-        return self._config["very_slow"]
+        return self._tb_config.very_slow_models
 
     @property
     def non_deterministic_models(self):
-        return self._config["non_deterministic"]
+        return self._tb_config.non_deterministic_models
 
     @property
     def get_output_amp_train_process_func(self):
-        return process_train_model_output
+        return PROCESS_TRAIN_MODEL_OUTPUT
 
     @property
     def skip_not_suitable_for_training_models(self):
-        return self._skip["test"]["training"]
+        return self._tb_config.skip_not_suitable_for_training_models
 
     @property
     def failing_fx2trt_models(self):
-        return self._config["trt_not_yet_working"]
+        return self._tb_config.failing_fx2trt_models
 
     @property
     def force_amp_for_fp16_bf16_models(self):
-        return self._config["dtype"]["force_amp_for_fp16_bf16_models"]
+        return self._tb_config.force_amp_for_fp16_bf16_models
 
     @property
     def force_fp16_for_bf16_models(self):
-        return self._config["dtype"]["force_fp16_for_bf16_models"]
+        return self._tb_config.force_fp16_for_bf16_models
 
     @property
     def skip_accuracy_checks_large_models_dashboard(self):
-        if self.args.dashboard or self.args.accuracy:
-            return self._accuracy["skip"]["large_models"]
-        return set()
+        self._ensure_config_setup()
+        return self._tb_config.skip_accuracy_checks_large_models_dashboard
 
     @property
     def skip_accuracy_check_as_eager_non_deterministic(self):
-        if self.args.accuracy and self.args.training:
-            return self._accuracy["skip"]["eager_not_deterministic"]
-        return set()
+        self._ensure_config_setup()
+        return self._tb_config.skip_accuracy_check_as_eager_non_deterministic
 
     @property
     def skip_multiprocess_models(self):
-        return self._skip["multiprocess"]
+        return self._tb_config.skip_multiprocess_models
 
     @property
     def skip_models_due_to_control_flow(self):
-        return self._skip["control_flow"]
+        return self._tb_config.skip_models_due_to_control_flow
 
     @property
     def skip_models_due_to_export_not_supported(self):
-        return self._skip["export_not_supported"]
+        return self._tb_config.skip_models_due_to_export_not_supported
 
     @property
     def guard_on_nn_module_models(self):
-        return {
-            "vision_maskrcnn",
-        }
+        return self._tb_config.guard_on_nn_module_models
 
     @property
     def inline_inbuilt_nn_modules_models(self):
-        return {
-            "basic_gnn_edgecnn",
-            "drq",
-            "hf_Reformer",
-            "DALLE2_pytorch",
-            "hf_BigBird",
-            "detectron2_maskrcnn_r_50_fpn",
-            "detectron2_maskrcnn_r_101_fpn",
-            "vision_maskrcnn",
-            "doctr_reco_predictor",
-            "hf_T5_generate",
-        }
+        return self._tb_config.inline_inbuilt_nn_modules_models
 
     def load_model(
         self,
@@ -268,26 +188,16 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
         cant_change_batch_size = (
             not getattr(benchmark_cls, "ALLOW_CUSTOMIZE_BSIZE", True)
-            or model_name in self._config["dont_change_batch_size"]
+            or model_name in self._tb_config._config["dont_change_batch_size"]
         )
         if cant_change_batch_size:
             batch_size = None
-        if (
-            batch_size is None
-            and is_training
-            and model_name in self._batch_size["training"]
-        ):
-            batch_size = self._batch_size["training"][model_name]
-        elif (
-            batch_size is None
-            and not is_training
-            and model_name in self._batch_size["inference"]
-        ):
-            batch_size = self._batch_size["inference"][model_name]
-
+        
+        self._ensure_config_setup()
+        batch_size = self._tb_config.get_batch_size_for_model(model_name, is_training, batch_size)
+        
         # Control the memory footprint for few models
-        if self.args.accuracy and model_name in self._accuracy["max_batch_size"]:
-            batch_size = min(batch_size, self._accuracy["max_batch_size"][model_name])
+        batch_size = self._tb_config.limit_batch_size_for_accuracy(model_name, batch_size)
 
         # workaround "RuntimeError: not allowed to set torch.backends.cudnn flags"
         torch.backends.__allow_nonbracketed_mutation_flag = True
@@ -342,7 +252,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
         # Models that must be in train mode while training
         if is_training and (
-            not use_eval_mode or model_name in self._config["only_training"]
+            not use_eval_mode or model_name in self._tb_config._config["only_training"]
         ):
             model.train()
         else:
@@ -388,7 +298,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         models += [
             f
             for f in _list_canary_model_paths()
-            if os.path.basename(f) in self._config["canary_models"]
+            if os.path.basename(f) in self._tb_config._config["canary_models"]
         ]
         models.sort()
 
@@ -415,39 +325,11 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             return torch.no_grad()
 
     def use_larger_multiplier_for_smaller_tensor(self, name):
-        return name in self._require_larger_multiplier_for_smaller_tensor
+        return self._tb_config.use_larger_multiplier_for_smaller_tensor(name)
 
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
-        tolerance = 1e-4
-        cosine = self.args.cosine
-        # Increase the tolerance for torch allclose
-        if self.args.float16 or self.args.amp:
-            if self.args.freezing and (freezing := self._tolerance["freezing"]):
-                higher_fp16 = freezing.get("higher_fp16", None)
-                even_higher = freezing.get("even_higher", None)
-                if higher_fp16 and name in higher_fp16:
-                    return 1e-2, cosine
-                elif even_higher and name in even_higher:
-                    return 8 * 1e-2, cosine
-            if name in self._tolerance["higher_fp16"]:
-                return 1e-2, cosine
-            elif name in self._tolerance["even_higher"]:
-                return 8 * 1e-2, cosine
-            return 1e-3, cosine
-
-        if self.args.bfloat16:
-            if name in self._tolerance["higher_bf16"]:
-                return 1e-2, cosine
-
-        if is_training and (current_device == "cuda" or current_device == "xpu"):
-            tolerance = 1e-3
-            if name in self._tolerance["cosine"]:
-                cosine = True
-            elif name in self._tolerance["higher"]:
-                tolerance = 1e-3
-            elif name in self._tolerance["even_higher"]:
-                tolerance = 8 * 1e-2
-        return tolerance, cosine
+        self._ensure_config_setup()
+        return self._tb_config.get_tolerance_and_cosine_flag(is_training, current_device, name, self.args)
 
     def compute_loss(self, pred):
         return reduce_to_scalar_loss(pred)
