@@ -982,13 +982,13 @@ Tensor rms_norm_jvp(
     const Tensor& input_t,
     const Tensor& weight_p,
     const Tensor& weight_t,
-    const Tensor& saved_rstd,
+    const Tensor& saved_rrms,
     IntArrayRef normalized_shape);
 
-Tensor rms_norm_rstd_jvp(
+Tensor rms_norm_rrms_jvp(
     const Tensor& input_p,
     const Tensor& input_t,
-    const Tensor& saved_rstd,
+    const Tensor& saved_rrms,
     IntArrayRef normalized_shape);
 
 Tensor group_norm_jvp(

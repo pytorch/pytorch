@@ -1747,7 +1747,7 @@ def native_rms_norm_backward(
     grad_out: Tensor,
     input: Tensor,
     normalized_shape: list[int],
-    rstd: Tensor,
+    rrms: Tensor,
     weight: Optional[Tensor],
     output_mask: list[bool],
 ) -> tuple[Optional[Tensor], Optional[Tensor]]:
@@ -1787,7 +1787,7 @@ def native_rms_norm_backward(
             input.new_zeros(input_shape[axis:]) if output_mask[1] else None,
         )
 
-    rstd = _unsqueeze_to_dim(rstd, input_cast.dim())  # type: ignore[union-attr]
+    rrms = _unsqueeze_to_dim(rrms, input_cast.dim())  # type: ignore[union-attr]
     if weight_cast is not None:
         grad_x_hat = grad_out_cast * weight_cast
     else:
@@ -1797,17 +1797,17 @@ def native_rms_norm_backward(
     d_weight: Optional[Tensor] = None
 
     if output_mask[0]:
-        # Formula: d_input = rstd * grad_x_hat - (input * rstd^3 / N) * sum(input * grad_x_norm)
+        # Formula: d_input = rrms * grad_x_hat - (input * rrms^3 / N) * sum(input * grad_x_norm)
         sum_input_times_grad_x_norm = torch.sum(
             input_cast * grad_x_hat, dim=inner_dim_indices, keepdim=True
         )
         d_input = (
-            rstd * grad_x_hat
-            - ((input_cast * rstd.pow(3)) / N) * sum_input_times_grad_x_norm
+            rrms * grad_x_hat
+            - ((input_cast * rrms.pow(3)) / N) * sum_input_times_grad_x_norm
         )
 
     if output_mask[1] and weight_cast is not None:
-        x_norm_cast = input_cast * rstd
+        x_norm_cast = input_cast * rrms
         d_weight_full_shape = grad_out_cast * x_norm_cast
 
         if len(outer_dim_indices) > 0:

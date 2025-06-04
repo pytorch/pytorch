@@ -1816,6 +1816,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
+/* RMSNorm is implemented by reusing layer_norm's kernels */
 std::tuple<Tensor, Tensor> rms_norm_cuda(
     const Tensor& input,
     IntArrayRef normalized_shape,
