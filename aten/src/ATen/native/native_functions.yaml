@@ -3558,8 +3558,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: log1p_out
-    MPS: log1p_out_mps
+    CPU, CUDA, MPS: log1p_out
     SparseCPU, SparseCUDA: log1p_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: log1p_sparse_csr_out
   tags: pointwise

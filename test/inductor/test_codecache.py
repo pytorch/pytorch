@@ -1565,7 +1565,10 @@ class TestStandaloneCompile(TestCase):
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("format", ("binary", "unpacked"))
     @parametrize("dynamic", (False, True))
-    def test_basic(self, device: str, format: str, dynamic: bool) -> None:
+    @parametrize("graph_partition", (False, True))
+    def test_basic(
+        self, device: str, format: str, dynamic: bool, graph_partition: bool
+    ) -> None:
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
@@ -1580,7 +1583,9 @@ class TestStandaloneCompile(TestCase):
 
         eager_out = f(x)
 
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory() as temp_dir, config.patch(
+            graph_partition=graph_partition
+        ):
             path = (
                 temp_dir
                 if format == "unpacked"
