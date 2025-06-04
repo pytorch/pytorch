@@ -1453,6 +1453,10 @@ class TestFP8Matmul(TestCase):
 
         device = "cuda"
         M, K, N = mkn
+        if torch.version.hip:
+            if not (M % 32 == 0 and K % 32 == 0 and N % 32 == 0):
+                raise unittest.SkipTest("Matrix dimensions must be multiples of 32 on ROCm, skipping")
+
         if recipe == "nvfp4" and K % 32 != 0:
             return unittest.skip("K must be divisible by 32 for nvfp4 cublas gemm, skipping")
 
@@ -1462,7 +1466,7 @@ class TestFP8Matmul(TestCase):
 
         if test_case_name == "a_eye_b_eye":
             if not ((M == K) and (M == N)):
-                return unittest.skip("this test is only defined for M == K == N, skipping")
+                raise unittest.SkipTest("this test is only defined for M == K == N, skipping")
             A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
             B_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
 
@@ -1601,7 +1605,7 @@ class TestFP8Matmul(TestCase):
 
         elif test_case_name == "data_random_scales_from_data":
             if not K % BLOCK_SIZE == 0:
-                return unittest.skip(f"this test is only defined for K a multiple of {BLOCK_SIZE}, skipping")
+                raise unittest.SkipTest(f"this test is only defined for K a multiple of {BLOCK_SIZE}, skipping")
             require_exact_match = False
             # random data, scales from data
             A_ref = torch.randn((M, K), device=device, dtype=torch.bfloat16) * 1000

@@ -1879,6 +1879,16 @@ void scaled_gemm(
     matmulDescA = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT;
     matmulDescB = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT;
   }
+    else if(mat1_scale_dtype == kFloat8_e8m0fnu && mat2_scale_dtype == kFloat8_e8m0fnu) {
+#if ROCM_VERSION >= 70000
+          if (at::detail::getCUDAHooks().isGPUArch(0, {"gfx950"})) {
+            // Validate matrix dimensions for MX format
+            TORCH_CHECK((m % 32 == 0) && (n % 32 == 0) && (k % 32 == 0),
+                       "Matrix dimensions must be multiples of 32 for MX format. ",
+                       "Got m=", m, ", n=", n, ", k=", k);
+          }
+#endif
+  }
 #else
   // rowwise isn't supported using older hipblaslt
   TORCH_INTERNAL_ASSERT(use_rowwise == false, "rowwise scaled_gemm not supported with older hipblaslt");
@@ -1917,11 +1927,11 @@ void scaled_gemm(
   }
 
   if (mat1_scale_dtype == kFloat8_e8m0fnu && mat2_scale_dtype == kFloat8_e8m0fnu) {
-#if CUDA_VERSION >= 12080
+#if (!defined(USE_ROCM) && CUDA_VERSION >= 12080) || (defined(USE_ROCM) && ROCM_VERSION >= 70000)
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
 #else
-    TORCH_CHECK(false, "scaled_gemm with `torch.float8_e8m0fnu` scales is only supported for CUDA 12.8 and above");
+    TORCH_CHECK(false, "scaled_gemm with `torch.float8_e8m0fnu` scales is only supported for CUDA 12.8 or ROCm 7.0(with gfx950) and above");
 #endif // if CUDA_VERSION >= 12080
   } else if (mat1_scale_dtype == kFloat8_e4m3fn && mat2_scale_dtype == kFloat8_e4m3fn) {
 #if CUDA_VERSION >= 12080
