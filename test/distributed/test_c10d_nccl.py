@@ -285,11 +285,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
 
-        # These tests are expected to throw SIGABRT(6); adding the negative sign
-        # bc the test return code is actually -6
-        # but somehow the 2's complement of -6 (250 in decimal) is the return code
+        # These tests are expected to throw SIGABRT(6);
         # But if we are in Sandcastle, `skip_but_pass_in_sandcastle` would return 0.
-        TEST_NAN_ASSERT_RETURN = 0 if IS_SANDCASTLE else (256-signal.SIGABRT)
+        TEST_NAN_ASSERT_RETURN = 0 if IS_SANDCASTLE else signal.SIGABRT
         self.special_return_code_checks = {
             self.test_nan_assert_float16.__wrapped__: TEST_NAN_ASSERT_RETURN,
             self.test_nan_assert_float32.__wrapped__: TEST_NAN_ASSERT_RETURN,
@@ -547,7 +545,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         try:
             pg._allgather_base(output, nan_tensor)
         except Exception:
-            os._exit(-signal.SIGABRT)  # This will actually give -6
+            sys.exit(signal.SIGABRT)
 
         dist.destroy_process_group()
 
