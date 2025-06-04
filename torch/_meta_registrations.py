@@ -278,11 +278,7 @@ def _compute_stride(old_shape, old_stride, new_shape, size_oblivious=False):
 
 @register_meta(aten.view.default)
 def _view_meta(a, *shape, size_oblivious_enabled=True):
-    from torch.fx.experimental.symbolic_shapes import (
-        has_hint,
-        statically_known_true,
-        sym_eq,
-    )
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, has_hint, sym_eq
 
     # Creates a valid shape
     shape = utils.extract_shape_from_varargs(shape, validate=False)
