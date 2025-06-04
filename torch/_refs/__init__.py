@@ -5721,20 +5721,19 @@ def full(
     return prims.fill(e, fill_value)  # type: ignore[arg-type]
 
 
-def _get_shape_stride_like(
+def _get_shape_permutation_like(
     a: TensorLikeType, layout: torch.layout
 ) -> tuple[ShapeType, StrideType]:
     assert layout == torch.strided
 
     physical_layout = utils.compute_elementwise_output_logical_to_physical_perm(a)
-    shape = a.shape
+    shape = [a.shape[l] for l in physical_layout]
 
-    p_strides = utils.make_contiguous_strides_for([shape[l] for l in physical_layout])
-    strides = [0] * len(shape)
+    permutation = [0] * len(shape)
     for p, l in enumerate(physical_layout):
-        strides[l] = p_strides[p]
+        permutation[l] = p
 
-    return (a.shape, strides)
+    return (shape, permutation)
 
 
 @register_decomposition(aten.full_like)
@@ -5754,30 +5753,43 @@ def full_like(
     layout = a.layout if layout is None else layout
     device = a.device if device is None else device
 
-    if memory_format == torch.preserve_format:
-        for m in (torch.contiguous_format, torch.channels_last, torch.channels_last_3d):
-            if a.is_contiguous(memory_format=m):
-                memory_format = m
-                break
-
-    result = torch.full(
-        a.shape,
-        fill_value,
-        dtype=dtype,
-        layout=layout,
-        device=device,
-        pin_memory=pin_memory,
-        requires_grad=requires_grad,
-    )
-
     if memory_format != torch.preserve_format:
+        result = torch.full(
+            a.shape,
+            fill_value,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+            requires_grad=requires_grad,
+        )
         return result.to(memory_format=memory_format)
 
-    shape, stride = _get_shape_stride_like(a, layout)
-    if stride:
-        return result.as_strided(shape, stride).clone()
+    elif not utils.is_non_overlapping_and_dense(a):
+        return torch.full(
+            a.shape,
+            fill_value,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+            requires_grad=requires_grad,
+        )
+
     else:
-        return result
+        shape, permutation = _get_shape_permutation_like(a, layout)
+        result = torch.full(
+            shape,
+            fill_value,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+            requires_grad=requires_grad,
+        )
+        if permutation == list(range(len(permutation))):
+            return result
+        return result.permute(permutation).clone()
 
 
 @register_decomposition(aten.zeros_like)
