@@ -440,6 +440,14 @@ class BuiltinVariable(VariableTracker):
                 size_add_handler,
             ),
             (
+                (SizeVariable, TupleVariable),
+                size_add_handler,
+            ),
+            (
+                (TupleVariable, SizeVariable),
+                size_add_handler,
+            ),
+            (
                 (TupleVariable, TupleVariable),
                 tuple_add_handler,
             ),
