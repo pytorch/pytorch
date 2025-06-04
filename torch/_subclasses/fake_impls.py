@@ -12,6 +12,7 @@ import torch._logging
 from torch._dispatch.python import no_python_dispatcher
 from torch._ops import OpOverload
 from torch._prims_common import (
+    definitely_contiguous_for_memory_format,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -1024,11 +1025,17 @@ def make_fast_binary_impl(
             for op in operands:
                 if not isinstance(op, torch.Tensor):
                     continue
-                is_contiguous = is_contiguous and op.is_contiguous(
-                    memory_format=torch.contiguous_format
+                is_contiguous = (
+                    is_contiguous
+                    and definitely_contiguous_for_memory_format(
+                        op, memory_format=torch.contiguous_format
+                    )
                 )
-                is_channels_last = is_channels_last and op.is_contiguous(
-                    memory_format=torch.channels_last
+                is_channels_last = (
+                    is_channels_last
+                    and definitely_contiguous_for_memory_format(
+                        op, memory_format=torch.channels_last
+                    )
                 )
         if is_contiguous:
             # do contiguous

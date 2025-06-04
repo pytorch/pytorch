@@ -4551,6 +4551,33 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         pad2 = torch.tensor([-5, 9, 0, 8])
         self.assertEqual(ep.module()(x, pad2).shape, m(x, pad2).shape)
 
+
+    def test_unbacked_layer_norm_input(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(387, 128, bias=True)
+                self.layer_norm = torch.nn.LayerNorm(128)
+
+            def forward(self, x, mask):
+                masked_select = x.masked_select(mask)
+                view = masked_select.view(-1, 387)
+
+                linear = self.linear(view)
+                layer_norm = self.layer_norm(linear)
+                return layer_norm
+
+        model = MyModel()
+        inputs = (
+            torch.randn((256, 387), dtype=torch.float),
+            torch.randint(low=0, high=2, size=(256, 1), dtype=torch.bool),
+        )
+        ep = export(model, inputs)
+
+        ref = model(*inputs)
+        actual = ep.module()(*inputs)
+        self.assertTrue(torch.allclose(ref, actual))
+
     def test_suggested_fixes_for_data_dependent_errors_basic(self):
         # suggested fixes for data-dependent errors only work in non-strict mode
         strict = False

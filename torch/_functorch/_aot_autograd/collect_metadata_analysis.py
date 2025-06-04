@@ -47,6 +47,7 @@ from .schemas import (
     OutputType,
     ViewAndMutationMeta,
 )
+from torch._refs import contiguous
 from .subclass_utils import create_subclass_meta
 from .utils import _get_autocast_states, KNOWN_TYPES, strict_zip
 
@@ -80,7 +81,7 @@ def coerce_tangent_and_suggest_memory_format(x: Tensor):
 
     if memory_format.memory_format is not None:
         was = out
-        out = out.contiguous(memory_format=memory_format.memory_format)
+        out = contiguous(out, memory_format=memory_format.memory_format)
         updated = was is not out
 
     # For subclass we keep memory format of outer strides at the beggining of the list
