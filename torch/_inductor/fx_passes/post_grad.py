@@ -1649,7 +1649,11 @@ class ConstructorMoverPass:
                     gpu_node = graph.call_function(
                         torch.ops.prims.device_put.default, (node, target_device)
                     )
-                    node.replace_all_uses_with(gpu_node, lambda x: x != gpu_node)
+                    node.replace_all_uses_with(
+                        gpu_node,
+                        lambda x: x != gpu_node
+                        and x.target != torch.ops.aten.copy_.default,
+                    )
             else:
                 kwargs = node.kwargs.copy()
                 kwargs["device"] = target_device
